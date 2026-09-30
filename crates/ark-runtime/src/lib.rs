@@ -109,14 +109,15 @@ mod tests {
     // A stub acquisition provider proving the seam is wired: the meta-tools appear only when a
     // provider is supplied, and the harness dispatches to it and emits a Capability event.
     struct StubAcq;
+    #[async_trait::async_trait]
     impl acquire::AcquisitionProvider for StubAcq {
-        fn find(&self, need: &str) -> String {
+        async fn find(&self, need: &str) -> String {
             format!("could serve '{need}' via provider X")
         }
-        fn propose(&self, need: &str) -> String {
+        async fn propose(&self, need: &str) -> String {
             format!("plan for '{need}': install X")
         }
-        fn acquire(&self, need: &str, approved: bool) -> acquire::AcquisitionResult {
+        async fn acquire(&self, need: &str, approved: bool) -> acquire::AcquisitionResult {
             if approved {
                 acquire::AcquisitionResult::changed(format!("acquired X for '{need}'"))
             } else {

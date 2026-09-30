@@ -36,17 +36,22 @@ impl AcquisitionResult {
 /// All three methods take a free-text `need` (a capability slug or a natural-language
 /// description) so the agent can ask in its own words. `find` and `propose` are read-only;
 /// only `acquire` may change the environment, and only when `approved` is true.
+///
+/// The methods are `async` because acquiring a provider is inherently I/O — probing for a
+/// tool, running an installer, connecting a service. Read-only `find`/`propose` may still do
+/// I/O (checking what's already present), so they are async too for symmetry.
+#[async_trait::async_trait]
 pub trait AcquisitionProvider: Send + Sync {
     /// List providers/capabilities that could serve `need` (the `find_capability` meta-tool).
     /// Read-only; returns agent-facing text.
-    fn find(&self, need: &str) -> String;
+    async fn find(&self, need: &str) -> String;
 
     /// Describe the acquisition *plan* for `need` without changing anything (the
     /// `propose_capability` meta-tool). Read-only.
-    fn propose(&self, need: &str) -> String;
+    async fn propose(&self, need: &str) -> String;
 
     /// Attempt to acquire a provider for `need` (the `acquire_capability` meta-tool).
     /// `approved` gates state-changing installs: when false, the implementation must change
     /// nothing and instead return the plan (an [`AcquisitionResult::info`]).
-    fn acquire(&self, need: &str, approved: bool) -> AcquisitionResult;
+    async fn acquire(&self, need: &str, approved: bool) -> AcquisitionResult;
 }

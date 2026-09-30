@@ -454,10 +454,10 @@ impl Harness {
                             return Ok("error: this meta-tool needs a `need` (a capability slug or free-text description).".into());
                         }
                         let (which, out) = match call.name.as_str() {
-                            catalog::FIND_CAPABILITY => ("find_capability", acq.find(&need)),
-                            catalog::PROPOSE_CAPABILITY => ("propose_capability", acq.propose(&need)),
+                            catalog::FIND_CAPABILITY => ("find_capability", acq.find(&need).await),
+                            catalog::PROPOSE_CAPABILITY => ("propose_capability", acq.propose(&need).await),
                             // Acquisition is gated by the same approval as a Mutate action.
-                            _ => ("acquire_capability", acq.acquire(&need, self.allow_mutate).summary),
+                            _ => ("acquire_capability", acq.acquire(&need, self.allow_mutate).await.summary),
                         };
                         on_event(HarnessEvent::Capability { action: which, detail: out.clone() });
                         Ok(out)

@@ -6,7 +6,7 @@ this project adheres to [Semantic Versioning](https://semver.org).
 ## [0.1.1] — unreleased
 
 ### Added
-- **Capability-acquisition seam** (`AcquisitionProvider` trait, `AcquisitionResult`), injected
+- **Capability-acquisition seam** (async `AcquisitionProvider` trait, `AcquisitionResult`), injected
   via `AgentProfile::acquisition`. When a profile supplies one, the runtime enables the
   `find_capability` / `propose_capability` / `acquire_capability` meta-tools and dispatches to
   it (acquisition gated by the same approval as a `Mutate` action). Previously these meta-tools

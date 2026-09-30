@@ -617,10 +617,56 @@ async fn main() -> std::process::ExitCode {
                 .field("folder", ws.display().to_string())
                 .blocks
         });
+    let cli = <Cli as clap::Parser>::parse();
+    if let Some(addr) = cli.serve {
+        // The same app in a browser window.
+        let start = ark_cli::ark_interact::Start {
+            model: cli.ark.model.clone(),
+            project: cli.ark.project.clone(),
+            session: cli.ark.session.clone(),
+            resume: cli.ark.resume,
+        };
+        let ui = ark_ui::ArkUi::new(app)
+            .start(start)
+            .accent("#b0418f")
+            .welcome(
+                "What are we revising?",
+                "The editor reads your chapters before it opines.",
+            )
+            .suggestion(
+                "How long is each chapter?",
+                "How many chapters are there, and how long is each?",
+            )
+            .suggestion(
+                "Where does the locket appear?",
+                "Where does the locket appear across the manuscript?",
+            )
+            .suggestion(
+                "Assess chapter 4",
+                "Read chapter 4 and give me a short developmental assessment.",
+            );
+        return match ui.serve(&addr).await {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("writer: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     ArkCli::new(app)
         .theme(Theme::default().accent(Accent::Magenta).prompt("✎ "))
-        .run()
+        .run_with(cli.ark)
         .await
+}
+
+#[derive(clap::Parser)]
+#[command(name = "writer", about = "Writer · a developmental editor on ARK")]
+struct Cli {
+    #[command(flatten)]
+    ark: ark_cli::ArkArgs,
+    /// Open the workspace in a browser instead of the terminal (e.g. --serve 127.0.0.1:0)
+    #[arg(long, value_name = "ADDR", num_args = 0..=1, default_missing_value = "127.0.0.1:0")]
+    serve: Option<String>,
 }
 
 // ---- helpers ---------------------------------------------------------------

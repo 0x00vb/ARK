@@ -1,0 +1,9 @@
+{
+  "name": "ark-ui-page-tests",
+  "private": true,
+  "description": "Drives the real ark-ui page in WebKit for tests/page.rs. Install with `npm ci` and `npx playwright-core install webkit`.",
+  "type": "module",
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

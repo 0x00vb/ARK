@@ -228,6 +228,14 @@ impl<'a> TurnView<'a> {
                     t.dim(&d)
                 ));
             }
+            // Only replayed turns carry narration as an activity; live, it streams.
+            ActivityKind::Narration => {
+                self.close_stream(out);
+                out.line(&format!(
+                    "  {}",
+                    t.dim(&clip(&a.label, out.width().saturating_sub(4)))
+                ));
+            }
             ActivityKind::Warning => {
                 self.close_stream(out);
                 out.line(&format!(

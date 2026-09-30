@@ -3,7 +3,7 @@
 use ark_sdk::prelude::ark_core::{Invocation, RiskTier};
 
 use crate::command::{Command, Reply};
-use crate::fmt::{clip, millis, tokens};
+use crate::fmt::{clip, count, millis, tokens};
 use crate::interaction::Interaction;
 use crate::report::{Cell, Report, Row, Table, Tone};
 use crate::trace::{decision_word, CallStatus, CallView, EntryKind, Trace};
@@ -145,9 +145,9 @@ pub fn trace_report(t: &Trace) -> Report {
     }
     let approx = if t.measured { "" } else { "~" };
     r.note(format!(
-        "{} total · {} model calls · {approx}{} in / {approx}{} out · /trace <n> for a call's input and output",
+        "{} total · {} · {approx}{} in / {approx}{} out · /trace <n> for a call's input and output",
         millis(t.elapsed_ms),
-        t.model_calls,
+        count(t.model_calls as u64, "model call"),
         tokens(t.prompt_tokens),
         tokens(t.completion_tokens)
     ))

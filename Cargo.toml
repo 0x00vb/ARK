@@ -9,7 +9,7 @@ members = [
     "crates/ark-sdk",
     "crates/ark-interact",
     "crates/ark-cli",
-    # "crates/ark-ui",
+    "crates/ark-ui",
     "examples/minimal-agent",
     "examples/writing-agent",
 ]

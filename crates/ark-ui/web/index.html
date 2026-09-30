@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title><!--ark:title--></title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="app.css" />
+    <!--ark:styles-->
+    <script type="module" src="js/app.js"></script>
+    <!--ark:scripts-->
+  </head>
+  <body>
+    <div id="app" class="app" data-pane="closed" data-sidebar="open">
+      <aside class="sidebar" aria-label="Sessions">
+        <div class="sidebar-top" data-tauri-drag-region>
+          <button class="icon-btn" id="toggle-sidebar" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
+        </div>
+        <div class="brand">
+          <span class="brand-logo" id="brand-logo"></span>
+          <span class="brand-name" id="brand-name"></span>
+        </div>
+        <button class="nav-row new-session" id="new-session">
+          <span class="nav-icon" data-icon="compose"></span>
+          <span class="nav-label">New session</span>
+          <kbd>⌘N</kbd>
+        </button>
+        <nav class="nav-ext" id="nav-ext" aria-label="App"></nav>
+        <div class="section-label">
+          <button class="project-switch" id="project-switch" title="Switch project">
+            <span id="project-name"></span>
+            <span class="chev" data-icon="chevron-down"></span>
+          </button>
+        </div>
+        <div class="session-list" id="session-list" role="list"></div>
+        <div class="sidebar-foot">
+          <div class="status-ext" id="status-ext"></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar" data-tauri-drag-region>
+          <button class="icon-btn reveal-sidebar" id="reveal-sidebar" title="Show sidebar (⌘B)" aria-label="Show sidebar"></button>
+          <div class="title" id="session-title" data-tauri-drag-region></div>
+          <div class="top-actions">
+            <button class="icon-btn" id="toggle-pane" title="Side panel (⌘\\)" aria-label="Side panel"></button>
+          </div>
+        </header>
+
+        <section class="scroller" id="scroller">
+          <div class="thread" id="thread"></div>
+        </section>
+
+        <div class="dock">
+          <div class="queue" id="queue"></div>
+          <div class="palette" id="slash" hidden></div>
+          <form class="composer" id="composer" autocomplete="off">
+            <textarea id="input" rows="1" placeholder="Ask anything" spellcheck="true"></textarea>
+            <div class="composer-bar">
+              <button type="button" class="chip model-chip" id="model-chip" title="Model"></button>
+              <button type="button" class="ctx-meter" id="ctx-ring" title="Context"></button>
+              <button type="submit" class="send" id="send" aria-label="Send"></button>
+            </div>
+          </form>
+        </div>
+      </main>
+
+      <aside class="pane" id="pane" aria-label="Side panel">
+        <div class="pane-head" data-tauri-drag-region>
+          <div class="pane-tabs" id="pane-tabs" role="tablist"></div>
+          <button class="icon-btn" id="close-pane" title="Close (esc)" aria-label="Close"></button>
+        </div>
+        <div class="pane-body" id="pane-body"></div>
+      </aside>
+    </div>
+
+    <div class="overlay" id="overlay" hidden></div>
+    <div class="toast" id="toast" role="status"></div>
+  </body>
+</html>

@@ -108,6 +108,7 @@ const SECTIONS: &[(&str, &str, &str)] = &[
 ];
 
 /// Inputs for [`ContextView`] that live outside the report.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct KeptOut {
     pub transcript_turns: u32,
     pub transcript_chars: usize,
@@ -253,9 +254,7 @@ impl ContextView {
         }
         let mut r = Report::titled(format!("Context · {label}"))
             .table(t)
-            .meter("Used", self.total as u64, self.budget as u64)
-            .field("Used", tokens(self.total as u64))
-            .field("Budget", tokens(self.budget as u64))
+            .meter("of the budget", self.total as u64, self.budget as u64)
             .field_toned(
                 "Tool schemas (extra)",
                 format!(

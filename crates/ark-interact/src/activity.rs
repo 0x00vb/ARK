@@ -39,6 +39,9 @@ pub enum ActivityKind {
     Warning,
     /// The turn was stopped.
     Stopped,
+    /// Text the model wrote before calling tools. Live front-ends stream it as it arrives;
+    /// only a replayed turn (see `Interaction::transcript`) carries it as an activity.
+    Narration,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -63,7 +66,7 @@ pub struct Activity {
 }
 
 impl Activity {
-    fn new(kind: ActivityKind, label: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: ActivityKind, label: impl Into<String>) -> Self {
         Activity {
             kind,
             label: label.into(),
@@ -173,7 +176,11 @@ pub fn describe(
             .detail(body.clone())
             .tone(Tone::Muted),
         HarnessEvent::Present { directive } => {
-            Activity::new(K::Present, format!("Showing {}", directive.headline()))
+            let h = directive.headline();
+            Activity::new(
+                K::Present,
+                format!("Showing {}", h.strip_prefix("show ").unwrap_or(&h)),
+            )
         }
         HarnessEvent::SelfCheck { passed, detail } => {
             if *passed {

@@ -75,7 +75,12 @@ pub fn render(r: &Report, t: &Theme, width: usize) -> Vec<String> {
                     "  {}{} {}",
                     t.accented(&"━".repeat(filled)),
                     t.dim(&"━".repeat(cells - filled)),
-                    t.dim(&format!("{label} {:.0}%", ratio * 100.0))
+                    t.dim(&format!(
+                        "{} / {} {label} ({:.0}%)",
+                        ark_interact::fmt::tokens(*used),
+                        ark_interact::fmt::tokens(*total),
+                        ratio * 100.0
+                    ))
                 ));
             }
             Block::Actions { actions } => {

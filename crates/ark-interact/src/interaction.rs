@@ -12,7 +12,7 @@ use ark_sdk::prelude::ark_core::Focus;
 use ark_sdk::prelude::ark_runtime::{CompactReport, STATE_DIGEST_ITEMS};
 use ark_sdk::prelude::*;
 
-use crate::activity::{self, Activity};
+use crate::activity::{self, Activity, ActivityKind};
 use crate::command::{parse, Command, CommandInfo, Reply};
 use crate::fmt::{ago, clip, count};
 use crate::inspect::{
@@ -737,12 +737,22 @@ impl Interaction {
             .iter()
             .map(|t| {
                 let rec = load_trace(self.engine(), &sid, t.index);
+                // Replay in order: narration (the recorder merges a step's text into one
+                // event) where it was written, steering where it was read.
+                let answer = t.answer.trim();
                 let activity = rec
                     .as_ref()
                     .map(|r| {
                         r.events
                             .iter()
-                            .filter_map(|e| self.describe(&e.event))
+                            .filter_map(|e| match &e.event {
+                                HarnessEvent::TextDelta { text }
+                                    if !text.trim().is_empty() && text.trim() != answer =>
+                                {
+                                    Some(Activity::new(ActivityKind::Narration, text.trim()))
+                                }
+                                ev => self.describe(ev),
+                            })
                             .collect()
                     })
                     .unwrap_or_default();
@@ -758,6 +768,11 @@ impl Interaction {
             Some(r) => (r.clone(), ContextSource::LastRequest, Some(preview.total)),
             None => (preview, ContextSource::Preview, None),
         };
+        Ok(ContextView::build(&report, source, next, &self.kept_out()?))
+    }
+
+    /// The measurements behind the "kept out of the request" list.
+    pub fn kept_out(&self) -> anyhow::Result<KeptOut> {
         let rec = self.session.record();
         let engine = self.engine();
         let pid = &self.project.id;
@@ -803,7 +818,7 @@ impl Interaction {
             artifacts: artifacts.len(),
             state_overflow: StateView::build(state, STATE_DIGEST_ITEMS, &[]).overflow(),
         };
-        Ok(ContextView::build(&report, source, next, &k))
+        Ok(k)
     }
 
     pub fn usage_view(&self) -> UsageView {
@@ -869,7 +884,8 @@ impl Interaction {
     }
 }
 
-fn load_trace(engine: &Engine, session: &str, index: u32) -> Option<TurnRecord> {
+/// A stored turn's record, read straight from the store (no session handle needed).
+pub fn load_trace(engine: &Engine, session: &str, index: u32) -> Option<TurnRecord> {
     engine
         .store
         .get_turn_trace(session, index)

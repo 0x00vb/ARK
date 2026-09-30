@@ -1,0 +1,27 @@
+[package]
+name = "ark-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK graphical agent workspace: a desktop window (Tauri) or a local browser page over the same interaction layer."
+
+[features]
+default = ["desktop"]
+# The native window. Without it, ark-ui still serves the workspace to a local browser.
+desktop = ["dep:tauri"]
+
+[dependencies]
+ark-interact.workspace = true
+ark-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+futures.workspace = true
+uuid.workspace = true
+tauri = { version = "2", optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+async-trait.workspace = true

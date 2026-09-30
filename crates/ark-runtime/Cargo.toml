@@ -1,0 +1,23 @@
+[package]
+name = "ark-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK runtime: the agent loop, context budget, model routing, distillation, and metrics."
+
+[dependencies]
+ark-core.workspace = true
+ark-model.workspace = true
+ark-store.workspace = true
+ark-tools.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

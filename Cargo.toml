@@ -5,6 +5,8 @@ members = [
     "crates/ark-model",
     "crates/ark-store",
     "crates/ark-tools",
+    "crates/ark-runtime",
+    "crates/ark-sdk",
 ]
 
 [workspace.package]

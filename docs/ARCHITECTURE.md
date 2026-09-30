@@ -1,0 +1,93 @@
+# ARK Architecture
+
+ARK is a layered set of Rust crates. Each layer depends only on the ones beneath it, and
+nothing depends on a consumer. The design goal is a **small, stable public API over a headless
+core**, with every domain concern injected rather than baked in.
+
+```
+                      ┌───────────────────────────┐
+   your application → │          ark-sdk           │  Ark::builder(), AgentProfile, prelude
+                      └─────────────┬─────────────┘
+                      ┌─────────────▼─────────────┐
+                      │        ark-runtime         │  Engine, Harness, Agent, budget, router,
+                      │                            │  distill, catalog, capmap, metrics, notebook
+                      └───┬─────────┬─────────┬────┘
+             ┌────────────▼──┐ ┌────▼─────┐ ┌─▼────────────┐
+             │  ark-model    │ │ ark-store│ │  ark-tools   │
+             │ Provider/…    │ │ blobs+db │ │ Adapter/…/MCP│
+             └───────┬───────┘ └────┬─────┘ └──────┬───────┘
+                     └──────────────┼──────────────┘
+                             ┌──────▼──────┐
+                             │  ark-core   │   pure types; no tool/domain name
+                             └─────────────┘
+```
+
+## The layers
+
+### `ark-core` — the domain, made neutral
+Pure data types with one invariant: **no tool name and no domain name appears here.** The
+generalization from the origin workstation was concentrated here — the fixed security
+vocabularies became open, consumer-supplied registries:
+
+- **`Capability` / `CapabilityCatalog`** — "reason about capabilities, not tool names" is the
+  crown-jewel idea; the *taxonomy* is now yours to declare (`drafting`, `citation-lookup`, …).
+- **`ArtifactKind`** — universal kinds (`Text`, `Json`, `Source`, `Image`, `Archive`,
+  `Binary`, `Blob`) plus `Other(String)` and a `Sniffer` seam for domain formats.
+- **`ActionDescriptor` / `RiskTier`** — a typed tool operation and how consequential it is
+  (`Read`/`Observe`/`Mutate`, the approval gate's currency).
+- **`Invocation`** — the reproducibility spine: every tool call becomes one.
+- **`EvidenceCard` / `ResearchState` / `InvestigationGraph`** — the compact memory that keeps
+  context small and answers cited. Generic research methodology, not a domain model.
+- **`WorkspaceContext` / `Focus` / `PresentDirective`** — what the user is looking at, and
+  what the agent asks a UI to show.
+
+### `ark-model` — bring-your-own-model
+One `Provider` trait: `complete(system, messages, tools) -> Completion` with usage. The
+runtime never knows which backend answered. Tool-name mangling papers over providers that
+forbid `.` in tool names.
+
+### `ark-store` — persistence
+Content-addressed blobs (dedup by blake3), a SQLite metadata DB (projects, artifacts,
+invocations, notes, evidence cards, working state, checkpoints — each a JSON blob with a few
+promoted columns), and a Tantivy full-text index. Fully domain-agnostic.
+
+### `ark-tools` — the tool boundary
+`Adapter` (a namespaced set of `ActionDescriptor`s + a `run`), `Registry` (the agent's tool
+list; ships **empty**), `RunCtx`/`BlobResolver` (how a tool reads artifacts and its
+workspace), a `subprocess` helper, and `McpAdapter` — an out-of-process plugin bridge that
+turns any MCP server (any language) into native actions with risk derived from annotations.
+
+### `ark-runtime` — the loop
+- **`Engine`** — ingest + `run_action` + the approval gate; pluggable `Sniffer`s; loads MCP
+  plugins from `plugins.json`.
+- **`Harness`** — the evidence-driven loop (budget, router, distill, dedup, progressive
+  disclosure, working state, self-check, critic, stall guard, metrics).
+- **`Agent`** — a simpler ReAct loop.
+- **`AgentProfile`** — the single injection point: persona, capabilities + inferrer,
+  distillers, knowledge, core actions, investigation markers, prompt fragments.
+
+### `ark-sdk` — the facade
+`Ark::builder()` composes an `Engine`, a `ModelRouter`, and an `AgentProfile` into a
+one-call `.ask()`. A `prelude` re-exports everything a typical consumer names.
+
+## Key design principles (and where they live)
+
+- **Composition over inheritance** — the profile *holds* strategies (distillers, inferrer,
+  knowledge) rather than subclassing the harness.
+- **Interfaces over domain assumptions** — `Provider`, `Adapter`, `Sniffer`,
+  `KnowledgeProvider`, `Distiller`, `CapabilityCatalog` are all injection seams.
+- **Headless core over UI coupling** — the runtime emits structured `HarnessEvent`s; a UI is
+  optional and downstream. `PresentDirective` degrades to a no-op on a CLI.
+- **Explicit state over hidden global state** — no singletons; everything hangs off the
+  `Engine`/`Ark` you construct.
+- **Lazy context over dumping** — progressive tool disclosure and evidence retrieval on
+  demand.
+- **Isolated memory over replay** — the working state is the resume unit, not the transcript.
+
+## Events & observability
+
+The loop is a stream of typed `HarnessEvent`s (tool call/result, duplicate, retrieval,
+needs-approval, state update, note, present, self-check, answer). A UI, a logger, or a test
+consumes them without coupling to the loop's internals. `Metrics` accounts for tokens (in/out/
+peak), model calls by role and model id, tool calls, dedup and retrieval hits, and
+tokens-per-finding.

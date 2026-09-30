@@ -60,6 +60,14 @@ pub struct HarnessOutcome {
     pub state: ResearchState,
 }
 
+impl HarnessOutcome {
+    /// Whether the answer is backed by at least one cited piece of evidence. A convenience
+    /// for consumers that gate on grounding (a CLI badge, an eval scorer).
+    pub fn grounded(&self) -> bool {
+        !self.cited.is_empty()
+    }
+}
+
 pub struct Harness {
     router: ModelRouter,
     allow_mutate: bool,

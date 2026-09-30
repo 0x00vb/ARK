@@ -3,6 +3,12 @@
 All notable changes to ARK are documented here. Format: [Keep a Changelog](https://keepachangelog.com);
 this project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.1.3] — unreleased
+
+### Added
+- `HarnessOutcome::grounded()` — true when the answer cites at least one piece of evidence.
+  A convenience for consumers that gate on grounding.
+
 ## [0.1.2] — unreleased
 
 ### Added

@@ -3,6 +3,19 @@
 All notable changes to ARK are documented here. Format: [Keep a Changelog](https://keepachangelog.com);
 this project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.1.1] — unreleased
+
+### Added
+- **Capability-acquisition seam** (`AcquisitionProvider` trait, `AcquisitionResult`), injected
+  via `AgentProfile::acquisition`. When a profile supplies one, the runtime enables the
+  `find_capability` / `propose_capability` / `acquire_capability` meta-tools and dispatches to
+  it (acquisition gated by the same approval as a `Mutate` action). Previously these meta-tools
+  were stubbed as "not enabled". Mirrors the existing `KnowledgeProvider` seam and stays
+  domain-agnostic (a security agent installs a disassembler; a writing agent could wire a
+  thesaurus). Discovered while migrating the security workbench onto ARK.
+- **`HarnessEvent::Capability { action, detail }`** — emitted when an acquisition meta-tool
+  runs, so a UI can surface it. This is additive; match arms should already carry a `_ =>`.
+
 ## [0.1.0] — unreleased
 
 ### Added

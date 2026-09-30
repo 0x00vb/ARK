@@ -41,6 +41,9 @@ pub enum HarnessEvent<'a> {
     Duplicate { action: &'a str, reused: String },
     Retrieval { what: String },
     NeedsApproval { action: &'a str },
+    /// A capability-acquisition meta-tool ran (find/propose/acquire). `action` is which one;
+    /// `detail` is the agent-facing result.
+    Capability { action: &'a str, detail: String },
     StateUpdate { kind: String, text: String },
     Note { kind: String, body: String },
     Present { directive: ark_core::PresentDirective },
@@ -146,7 +149,7 @@ impl Harness {
         let index = crate::capmap::capability_index(&engine.registry, &profile.capabilities, &profile.inferrer).await;
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
-            acquisition: false,
+            acquisition: profile.acquisition.is_some(),
             present: true,
         };
 
@@ -441,9 +444,25 @@ impl Harness {
                 on_event(HarnessEvent::Present { directive });
                 Ok(format!("presented to the user: {headline}"))
             }
-            // Capability acquisition is an optional module, not enabled in this build.
+            // Capability acquisition — enabled only when the profile supplies a provider.
             catalog::FIND_CAPABILITY | catalog::PROPOSE_CAPABILITY | catalog::ACQUIRE_CAPABILITY => {
-                Ok("capability acquisition is not enabled for this agent.".into())
+                match &profile.acquisition {
+                    None => Ok("capability acquisition is not enabled for this agent.".into()),
+                    Some(acq) => {
+                        let need = sarg("need");
+                        if need.is_empty() {
+                            return Ok("error: this meta-tool needs a `need` (a capability slug or free-text description).".into());
+                        }
+                        let (which, out) = match call.name.as_str() {
+                            catalog::FIND_CAPABILITY => ("find_capability", acq.find(&need)),
+                            catalog::PROPOSE_CAPABILITY => ("propose_capability", acq.propose(&need)),
+                            // Acquisition is gated by the same approval as a Mutate action.
+                            _ => ("acquire_capability", acq.acquire(&need, self.allow_mutate).summary),
+                        };
+                        on_event(HarnessEvent::Capability { action: which, detail: out.clone() });
+                        Ok(out)
+                    }
+                }
             }
             other => Ok(format!("error: unknown meta-tool `{other}`.")),
         }

@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use ark_core::CapabilityCatalog;
 
+use crate::acquire::AcquisitionProvider;
 use crate::capmap::{declared_only, Inferrer};
 use crate::distill::DistillerSet;
 use crate::knowledge::KnowledgeProvider;
@@ -58,6 +59,9 @@ pub struct AgentProfile {
     pub distillers: DistillerSet,
     /// An optional external-knowledge source; enables the `search_knowledge` meta-tool.
     pub knowledge: Option<Arc<dyn KnowledgeProvider>>,
+    /// An optional capability-acquisition source; enables the `find_capability` /
+    /// `propose_capability` / `acquire_capability` meta-tools.
+    pub acquisition: Option<Arc<dyn AcquisitionProvider>>,
     /// Actions kept always-loaded so a simple task needs no discovery turn.
     pub core_actions: Vec<String>,
     /// Phrases that mark a question as a full investigation (vs. trivial single-step). The
@@ -73,6 +77,7 @@ impl Default for AgentProfile {
             inferrer: declared_only(),
             distillers: DistillerSet::default(),
             knowledge: None,
+            acquisition: None,
             core_actions: Vec::new(),
             investigation_markers: default_markers(),
         }
@@ -114,6 +119,10 @@ impl AgentProfileBuilder {
     }
     pub fn knowledge(mut self, k: Arc<dyn KnowledgeProvider>) -> Self {
         self.profile.knowledge = Some(k);
+        self
+    }
+    pub fn acquisition(mut self, a: Arc<dyn AcquisitionProvider>) -> Self {
+        self.profile.acquisition = Some(a);
         self
     }
     pub fn core_actions<S: Into<String>>(mut self, actions: impl IntoIterator<Item = S>) -> Self {

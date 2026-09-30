@@ -14,6 +14,7 @@
 //! capability taxonomy, the result distillers, and an optional external-knowledge source. The
 //! runtime itself names no tool and no domain.
 
+pub mod acquire;
 pub mod agent;
 pub mod budget;
 pub mod capmap;
@@ -30,6 +31,7 @@ pub mod router;
 
 mod blobs;
 
+pub use acquire::{AcquisitionProvider, AcquisitionResult};
 pub use agent::{Agent, AgentEvent, AgentOutcome};
 pub use distill::{call_digest, distill, Distiller, DistillerSet};
 pub use engine::Engine;
@@ -102,5 +104,72 @@ mod tests {
         assert_eq!(engine.store.list_invocations(&project.id).unwrap().len(), 1);
         let md = notebook::render_session_log(&engine.store, &project.id).unwrap();
         assert!(md.contains("text.wordcount"));
+    }
+
+    // A stub acquisition provider proving the seam is wired: the meta-tools appear only when a
+    // provider is supplied, and the harness dispatches to it and emits a Capability event.
+    struct StubAcq;
+    impl acquire::AcquisitionProvider for StubAcq {
+        fn find(&self, need: &str) -> String {
+            format!("could serve '{need}' via provider X")
+        }
+        fn propose(&self, need: &str) -> String {
+            format!("plan for '{need}': install X")
+        }
+        fn acquire(&self, need: &str, approved: bool) -> acquire::AcquisitionResult {
+            if approved {
+                acquire::AcquisitionResult::changed(format!("acquired X for '{need}'"))
+            } else {
+                acquire::AcquisitionResult::info(format!("'{need}' needs approval to acquire"))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn acquisition_seam_dispatches_and_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let project = engine.create_project("t", "unit test").unwrap();
+
+        let find = ToolCall { id: "c1".into(), name: "find_capability".into(), arguments: serde_json::json!({ "need": "disassembly" }) };
+        let script = vec![
+            Completion { content: String::new(), tool_calls: vec![find], usage: Usage::measured(100, 10) },
+            Completion { content: "Understood; provider X could serve it.".into(), tool_calls: vec![], usage: Usage::measured(110, 8) },
+        ];
+        let provider: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new("mock", script.clone()));
+        let harness = Harness::new(ModelRouter::single(provider)).planner(false).critic(false);
+        let profile = AgentProfile::builder().acquisition(Arc::new(StubAcq)).build();
+
+        let mut saw_capability = false;
+        let _ = harness
+            .ask(&engine, &profile, &project.id, "find a disassembler", |e| {
+                if let HarnessEvent::Capability { action, detail } = e {
+                    assert_eq!(action, "find_capability");
+                    assert!(detail.contains("provider X"));
+                    saw_capability = true;
+                }
+            })
+            .await
+            .unwrap();
+        assert!(saw_capability, "a Capability event was emitted");
+
+        // Gating: with a provider the acquisition meta-tools are offered; without one they aren't.
+        let with_acq = Arc::new(MockProvider::new("m", vec![answer_only()]));
+        let dyn_with: Arc<dyn ark_model::Provider> = with_acq.clone();
+        let _ = Harness::new(ModelRouter::single(dyn_with)).planner(false).critic(false)
+            .ask(&engine, &profile, &project.id, "hi", |_| {}).await.unwrap();
+        let offered: Vec<String> = with_acq.recorded()[0].tools.iter().map(|t| t.name.clone()).collect();
+        assert!(offered.iter().any(|n| n == "find_capability"), "acquisition meta-tools offered when wired");
+
+        let no_acq = Arc::new(MockProvider::new("m", vec![answer_only()]));
+        let dyn_no: Arc<dyn ark_model::Provider> = no_acq.clone();
+        let _ = Harness::new(ModelRouter::single(dyn_no)).planner(false).critic(false)
+            .ask(&engine, &AgentProfile::default(), &project.id, "hi", |_| {}).await.unwrap();
+        let plain: Vec<String> = no_acq.recorded()[0].tools.iter().map(|t| t.name.clone()).collect();
+        assert!(!plain.iter().any(|n| n == "find_capability"), "not offered without a provider");
+    }
+
+    fn answer_only() -> Completion {
+        Completion { content: "done. [inv:none] nothing to do; unknown for now.".into(), tool_calls: vec![], usage: Usage::measured(50, 5) }
     }
 }

@@ -13,6 +13,8 @@ pub struct Out {
     /// A status line is drawn on the current line.
     status: bool,
     width: usize,
+    /// Newlines written so far; lets a caller tell whether anything followed its line.
+    lines: u64,
 }
 
 impl Out {
@@ -26,6 +28,7 @@ impl Out {
             mid_line: false,
             status: false,
             width,
+            lines: 0,
         }
     }
 
@@ -37,6 +40,7 @@ impl Out {
             mid_line: false,
             status: false,
             width: 100,
+            lines: 0,
         }
     }
 
@@ -54,6 +58,11 @@ impl Out {
         }
     }
 
+    /// How many lines have been written.
+    pub fn lines_written(&self) -> u64 {
+        self.lines
+    }
+
     pub fn is_mid_line(&self) -> bool {
         self.mid_line
     }
@@ -69,6 +78,7 @@ impl Out {
         }
         // Colour codes end in 'm'; only a real trailing newline puts us at column 0.
         self.mid_line = !s.ends_with('\n');
+        self.lines += s.matches('\n').count() as u64;
     }
 
     /// Write text as-is (streaming). Erases the status line first.

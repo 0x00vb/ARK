@@ -6,7 +6,10 @@ core**, with every domain concern injected rather than baked in.
 
 ```
                       ┌───────────────────────────┐
-   your application → │          ark-sdk           │  Ark::builder(), AgentProfile, prelude
+   your application → │          ark-cli           │  the interactive shell (optional)
+                      └─────────────┬─────────────┘
+                      ┌─────────────▼─────────────┐
+                      │          ark-sdk           │  Ark::builder(), AgentProfile, prelude
                       └─────────────┬─────────────┘
                       ┌─────────────▼─────────────┐
                       │        ark-runtime         │  Engine, Harness, Agent, budget, router,
@@ -64,7 +67,19 @@ turns any MCP server (any language) into native actions with risk derived from a
   disclosure, working state, self-check, critic, stall guard, metrics).
 - **`Agent`** — a simpler ReAct loop.
 - **`AgentProfile`** — the single injection point: persona, capabilities + inferrer,
-  distillers, knowledge, core actions, investigation markers, prompt fragments.
+  distillers, knowledge, core actions, investigation markers, prompt fragments, and the
+  approval classifier.
+- **`Session`**: one continuing conversation. Turns are stored in full; the model gets a
+  bounded carry-over (recent exchanges plus gists), never the transcript.
+- **`ApprovalGate` / `Approver`**: asks a human before `Mutate` actions and remembers
+  session grants by approval class. The front-end only renders the question.
+- **`CancelToken`**: cooperative stop, checked at every await point in a turn.
+- **`ContextReport`**: the token breakdown of each request by source.
+
+### `ark-cli`: the shell
+The terminal front-end. It drives a turn as a future and multiplexes runtime events,
+approval requests, key presses and a spinner tick in one `select!` loop. It depends on the
+runtime; the runtime knows nothing about it. See [`CLI.md`](CLI.md).
 
 ### `ark-sdk` — the facade
 `Ark::builder()` composes an `Engine`, a `ModelRouter`, and an `AgentProfile` into a
@@ -86,8 +101,10 @@ one-call `.ask()`. A `prelude` re-exports everything a typical consumer names.
 
 ## Events & observability
 
-The loop is a stream of typed `HarnessEvent`s (tool call/result, duplicate, retrieval,
-needs-approval, state update, note, present, self-check, answer). A UI, a logger, or a test
+The loop is a stream of typed, owned, serializable `HarnessEvent`s (step, context report,
+text delta, model call, tool call/result, duplicate, retrieval, approval requested/resolved,
+state update, note, present, self-check, cancelled, answer). The terminal shell, the `--events`
+JSON stream and a GUI all consume the same stream. A UI, a logger, or a test
 consumes them without coupling to the loop's internals. `Metrics` accounts for tokens (in/out/
 peak), model calls by role and model id, tool calls, dedup and retrieval hits, and
 tokens-per-finding.

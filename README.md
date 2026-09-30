@@ -37,6 +37,7 @@ small stable interfaces — with the domain (tools, prompts, vocabulary) injecte
 | **`ark-tools`** | The `Adapter`/`Registry` tool boundary, a subprocess helper, and an **MCP plugin bridge** for out-of-process tools in any language. Ships **no** domain tools. |
 | **`ark-runtime`** | The agent loop(s): context **budget**, model **router**, deterministic **distillation**, progressive tool disclosure, a persistent **working state + investigation graph**, self-check + critic, **metrics**, and the approval gate. |
 | **`ark-sdk`** | The small, stable facade — `Ark::builder()`, an `AgentProfile`, and a `prelude`. |
+| **`ark-cli`** | The interactive terminal shell every ARK app opens into: streaming, approvals, cancel, sessions and resume, slash commands, context inspection, and a headless `-p` mode. See [`docs/CLI.md`](docs/CLI.md). |
 
 Two unrelated example consumers ship in-tree to prove generality:
 [`minimal-agent`](examples/minimal-agent) (calculator + clock) and
@@ -90,8 +91,29 @@ Run the examples:
 
 ```bash
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p minimal-agent -- "what is 6 * 7?"
-cargo test   # 67 tests, no live model required (the Mock provider drives the loops)
+ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p writing-agent   # the interactive writer
+cargo test   # 114 tests, no live model required (the Mock provider drives the loops)
 ```
+
+## The interactive shell
+
+An ARK app is something you enter, not a command you call. `ark-cli` gives every app the same
+terminal session: type in plain words, watch what the agent does, approve changes, press esc to
+stop, leave with ctrl+d and come back with `--resume`. The app supplies its name, tools,
+commands, labels and colours:
+
+```rust
+ark_cli::ArkCli::builder()
+    .name("Writer")
+    .ark(ark)
+    .command(std::sync::Arc::new(ChapterCommand))
+    .theme(ark_cli::Theme::default().accent(ark_cli::Accent::Magenta).prompt("✎ "))
+    .run()
+    .await
+```
+
+The terminal transcript is never replayed into the model. A 500-turn session sends the same
+size request on turn 500 as on turn 50. Full guide: [`docs/CLI.md`](docs/CLI.md).
 
 ## Configuration reference
 
@@ -109,7 +131,7 @@ Wire everything through `Ark::builder()`; every knob has a sane default.
 | `.planner(bool)` / `.critic(bool)` | `true` | Toggle the planning and self-critic passes. |
 | `.allow_mutate(bool)` | `false` | Let `Mutate` actions run without a separate approval step. |
 
-**Environment:** `ARK_PROVIDER` (`ollama`|`openai`|`anthropic`), `ARK_MODEL`,
+**Environment:** `ARK_PROVIDER` (`ollama`|`openai`|`anthropic`|`mock` with `ARK_MOCK_SCRIPT`), `ARK_MODEL`,
 `ARK_MODEL_FAST`/`ARK_MODEL_STRONG` (+ `ARK_PROVIDER_*`) for two-tier routing,
 `ARK_CTX_BUDGET`, and the vendor keys `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` /
 `OLLAMA_HOST`.
@@ -164,7 +186,7 @@ Versioning, compatibility guarantees, and the release process are in
 
 ## Status & roadmap
 
-Done and green (67 tests): the headless runtime, the model/tool/store abstractions, the
+Done and green (114 tests): the headless runtime, the model/tool/store abstractions, the
 SDK, the extension model (adapters + MCP plugins + `AgentProfile`), token/context
 optimization, usage accounting, docs, and two unrelated example agents.
 
@@ -173,9 +195,9 @@ the **origin security product migrated onto ARK** as a versioned dependency (its
 duplication deleted; behavior and token efficiency verified unchanged) — ARK's third unrelated
 consumer.
 
-Planned next milestones (tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md)):
-`ark-cli` (a reusable CLI framework consumers extend with their own subcommands) and
-`ark-ui` (an optional, themeable conversation-shell UI built against the runtime).
+v0.2 adds `ark-cli`, the interactive shell, and the runtime seams it needs (streaming,
+approvals, cancellation, sessions, context reports). Next (tracked in
+[`docs/ROADMAP.md`](docs/ROADMAP.md)): `ark-ui`, a themeable GUI shell on the same seams.
 
 ## Contributing
 

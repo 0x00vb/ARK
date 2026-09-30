@@ -273,7 +273,7 @@ impl Default for ArkBuilder {
             router: None,
             provider: None,
             max_steps: 16,
-            budget: 6000,
+            budget: std::env::var("ARK_CTX_BUDGET").ok().and_then(|s| s.parse().ok()).unwrap_or(6000),
             planner: true,
             critic: true,
             allow_mutate: false,

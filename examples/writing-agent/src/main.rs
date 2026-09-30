@@ -295,6 +295,27 @@ fn writing_distiller() -> DistillerSet {
                 ),
                 vec![s("path").unwrap_or_default()],
             )),
+            "craft.continuity" => {
+                let hits: Vec<String> = out["matches"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|m| format!("{}:{}", m["path"].as_str().unwrap_or(""), m["line"]))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let files: std::collections::BTreeSet<&str> =
+                    hits.iter().filter_map(|h| h.split(':').next()).collect();
+                let term = s("query").unwrap_or_default();
+                Some((
+                    format!(
+                        "\"{term}\": {} mention(s) in {}",
+                        hits.len(),
+                        files.into_iter().collect::<Vec<_>>().join(", ")
+                    ),
+                    hits,
+                ))
+            }
             "craft.voice" => Some((
                 format!(
                     "{}-person, {} tense lean, {} words/sentence, {} dialogue lines per paragraph",
@@ -523,10 +544,7 @@ impl Command for StyleCmd {
             "dialogue_per_paragraph",
             "words",
         ] {
-            ctx.row(
-                &key.replace('_', " "),
-                o[key].to_string().trim_matches('"'),
-            );
+            ctx.row(&key.replace('_', " "), o[key].to_string().trim_matches('"'));
         }
         Ok(CommandOutcome::Continue)
     }

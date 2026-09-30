@@ -34,6 +34,8 @@ pub(crate) struct TurnView<'a> {
     events: Vec<(u64, HarnessEvent)>,
     pub last_context: Option<ContextReport>,
     printed_answer: bool,
+    /// (label, repeat count, line counter right after it was printed).
+    last_activity: Option<(String, u32, u64)>,
 }
 
 impl<'a> TurnView<'a> {
@@ -63,6 +65,7 @@ impl<'a> TurnView<'a> {
             events: Vec::new(),
             last_context: None,
             printed_answer: false,
+            last_activity: None,
         }
     }
 
@@ -100,7 +103,22 @@ impl<'a> TurnView<'a> {
     fn activity_line(&mut self, out: &mut Out, label: &str) {
         self.close_stream(out);
         let bullet = self.theme.accented(&self.theme.glyphs.activity);
+        // The same activity again, with nothing printed in between: count it on one line.
+        if let Some((last, n, at)) = self.last_activity.as_mut() {
+            if last == label && *at == out.lines_written() && !out.is_mid_line() {
+                *n += 1;
+                out.clear_status();
+                out.rewind(1);
+                out.line(&format!(
+                    "{bullet} {label} {}",
+                    self.theme.dim(&format!("×{n}"))
+                ));
+                *at = out.lines_written();
+                return;
+            }
+        }
         out.line(&format!("{bullet} {label}"));
+        self.last_activity = Some((label.to_string(), 1, out.lines_written()));
     }
 
     fn detail(&mut self, out: &mut Out, text: &str) {
@@ -437,5 +455,82 @@ impl<'a> TurnView<'a> {
             cancelled,
             error,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Buf(Arc<Mutex<Vec<u8>>>);
+    impl Write for Buf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn render(events: Vec<HarnessEvent>) -> String {
+        let buf = Buf::default();
+        let mut out = Out::sink(Box::new(buf.clone()));
+        let theme = Theme::default().with_color(false);
+        let activity = Activity::default();
+        let mut view = TurnView::new(&theme, &activity, None, false);
+        for e in events {
+            view.event(e, &mut out);
+        }
+        let s = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
+        s
+    }
+
+    #[test]
+    fn repeated_activity_collapses_into_a_count() {
+        let r = || HarnessEvent::Retrieval {
+            what: "get_evidence inv:1".into(),
+        };
+        let s = render(vec![r(), r(), r()]);
+        assert!(s.ends_with("● Recalling evidence ×3\n"), "{s:?}");
+    }
+
+    #[test]
+    fn tool_call_and_result_read_as_activity() {
+        let s = render(vec![
+            HarnessEvent::ToolCall {
+                id: "c1".into(),
+                action: "notes.read".into(),
+                input: serde_json::json!({ "file": "a.md" }),
+            },
+            HarnessEvent::ToolResult {
+                id: "c1".into(),
+                action: "notes.read".into(),
+                ok: true,
+                summary: "read a.md (3 lines)".into(),
+                invocation: "abcdef123456".into(),
+                duration_ms: Some(4),
+                error: None,
+            },
+            HarnessEvent::TextDelta {
+                text: "Done.".into(),
+            },
+            HarnessEvent::Answer {
+                text: "Done.".into(),
+                streamed: true,
+            },
+        ]);
+        assert!(
+            s.contains("● Reading a.md\n  └ read a.md (3 lines)\n"),
+            "{s:?}"
+        );
+        assert!(s.contains("Done."));
+        assert!(
+            !s.contains("abcdef"),
+            "invocation ids only in the debug view"
+        );
     }
 }

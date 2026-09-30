@@ -1,22 +1,29 @@
-# writing-agent
+# writer
 
-A novelist's developmental editor, built on the **same** ARK runtime as the security
-workstation ARK was extracted from — with zero changes to any ARK crate. This is the
-concrete answer to the test ARK holds itself to:
-
-> Could this exact harness power an agent whose only job is helping an author write a novel?
-
-It registers manuscript tools (`manuscript.list/read/wordcount/save`, `continuity.search`),
-a writer's persona, writing-domain capabilities (`structure-analysis`, `continuity-check`,
-`revision`, `drafting`), and a **custom result distiller** that turns tool output into
-writer-facing evidence. The runtime's context budget, model routing, evidence model,
-working-state graph, approval gate (note `manuscript.save` is `Mutate` and needs approval),
-and reproducible notebook all apply unchanged.
+A developmental editor for novelists on ARK. It is the "could this runtime power a novel?"
+proof, and since v0.2 it is an interactive app on the same shell as the security workbench.
+Nothing in ARK knows it is a writing tool.
 
 ```bash
-ARK_PROVIDER=anthropic ARK_MODEL=claude-sonnet-5-5 \
-  cargo run -p writing-agent -- "is chapter 1 too long, and does it mention the locket?"
+cargo run -p writing-agent                  # open the writer's shell
+writer --resume                             # continue the last session
+writer -p "how long is chapter 4?" --json   # one-shot, for scripts
 ```
 
-`cargo test -p writing-agent` runs it end-to-end against a scripted mock model, and asserts
-the approval gate blocks an unapproved save.
+The manuscript is the current directory when it holds `.md` or `.txt` chapters. Otherwise a
+four-chapter sample novel is seeded into the project workspace. The store lives in
+`$WRITER_ROOT` (default `~/.writer`).
+
+What the app adds on top of ARK:
+
+| Piece | What |
+|---|---|
+| Tools | `manuscript.list/read/wordcount/save`, `craft.continuity`, `craft.voice` |
+| Persona | an editor that reads before it judges and keeps the narrator's voice |
+| Distiller | writer-facing summaries (`"locket": 2 mention(s) in chapter-01.md, chapter-02.md`) |
+| Commands | `/manuscript`, `/chapter <n>`, `/style [n]` |
+| Look | magenta accent, `✎` prompt, labels like `Tracing "locket" through the manuscript` |
+| Approvals | `manuscript.save` asks first and shows the file and word count |
+
+`cargo test -p writing-agent` runs it against a scripted mock model, including a gated save
+and an approved save inside a session.

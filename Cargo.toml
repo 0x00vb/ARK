@@ -13,12 +13,12 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.2.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
 repository = "https://github.com/valentino/ark"
-description = "ARK — Agent Runtime Kit: a domain-agnostic runtime, SDK, CLI, and UI foundation for building agents."
+description = "ARK, the Agent Runtime Kit: a domain-agnostic runtime, SDK and interactive shell for building agents."
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -39,13 +39,13 @@ futures = "0.3"
 tempfile = "3"
 
 # internal — the ARK crates
-ark-core = { path = "crates/ark-core", version = "0.1.0" }
-ark-model = { path = "crates/ark-model", version = "0.1.0" }
-ark-store = { path = "crates/ark-store", version = "0.1.0" }
-ark-tools = { path = "crates/ark-tools", version = "0.1.0" }
-ark-runtime = { path = "crates/ark-runtime", version = "0.1.0" }
-ark-sdk = { path = "crates/ark-sdk", version = "0.1.0" }
-ark-cli = { path = "crates/ark-cli", version = "0.1.0" }
+ark-core = { path = "crates/ark-core", version = "0.2.0" }
+ark-model = { path = "crates/ark-model", version = "0.2.0" }
+ark-store = { path = "crates/ark-store", version = "0.2.0" }
+ark-tools = { path = "crates/ark-tools", version = "0.2.0" }
+ark-runtime = { path = "crates/ark-runtime", version = "0.2.0" }
+ark-sdk = { path = "crates/ark-sdk", version = "0.2.0" }
+ark-cli = { path = "crates/ark-cli", version = "0.2.0" }
 
 [profile.dev]
 opt-level = 1

@@ -3,6 +3,50 @@
 All notable changes to ARK are documented here. Format: [Keep a Changelog](https://keepachangelog.com);
 this project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.2.0]
+
+The interactive shell, and what the runtime needed to support it.
+
+### Added
+- **`ark-cli`**: the interactive terminal shell every ARK app opens into. Streaming output,
+  semantic activity lines, an approval menu, esc/ctrl+c to stop, input history and multiline
+  editing (reedline), sessions and `--resume`, generic slash commands (`/context`, `/usage`,
+  `/trace`, `/state`, `/compact`, ...), consumer commands, labels, themes and status sections,
+  and a headless `-p` / `--json` / `--events` mode. See `docs/CLI.md`.
+- `Provider::complete_streaming` with native streaming for Anthropic, OpenAI and Ollama. The
+  default implementation emits the full text once, so every provider works.
+- `ApprovalGate`, `Approver`, `ApprovalRequest`, `ApprovalDecision`, `FixedApprover`, and
+  `AgentProfile::approval_classifier`: ask a human before `Mutate` actions and remember
+  "allow for this session" per approval class.
+- `CancelToken` and `Harness::cancel`: cooperative cancellation; `HarnessOutcome::cancelled`.
+- `ContextReport`, per-request `HarnessEvent::Context`, and `Harness::preview_context`.
+- `Session` (with `CarryPolicy`, `Turn`, `SessionRecord`, `SessionUsage`, `CompactReport`):
+  stored conversations with a bounded carry-over, `Session::compact`, and store tables
+  `sessions` / `session_turns`. `ResearchState::compact`.
+- SDK: `Ark::start_session`, `open_session`, `latest_session`, `ask_session`,
+  `context_preview`, `harness`, `router`, `set_router`, `settings`, `find_or_create_project`,
+  `ArkBuilder::engine`, `TurnOptions`.
+- `ActionDescriptor::reusable`: results that stay valid across turns.
+- `ARK_PROVIDER=mock` with `ARK_MOCK_SCRIPT` (and `ARK_MOCK_DELAY_MS`) replays a scripted model
+  for end-to-end tests of front-ends. `MockProvider::with_fallback`, `with_chunk_delay`.
+
+### Changed (breaking)
+- `HarnessEvent` is owned (`String`/`Value` fields instead of borrows), `Clone` and
+  `Serialize`, and has new variants: `Step`, `Context`, `TextDelta`, `ModelCall`,
+  `ApprovalRequested`, `ApprovalResolved`, `Cancelled`. `ToolCall` gains `id`; `ToolResult`
+  gains `id`, `invocation`, `duration_ms`, `error`; `Answer` gains `streamed`. Match arms that
+  bind fields need `..`.
+- `HarnessOutcome` gains `cancelled`.
+- `ArkBuilder` reads `ARK_CTX_BUDGET` for its default budget, as `Harness::new` already did.
+
+### Fixed
+- Consumer distillers now run before ARK's common distiller, as `docs/EXTENSION.md` always
+  said. Before, a domain `list` or `read` summary was shadowed by the generic one.
+- Evidence is only reused across turns for inputs that cannot change (a content-addressed
+  `artifact`, or a `reusable` action). A workspace file read in an earlier session is no
+  longer served stale. Within a turn, identical reads are still reused. `Mutate` calls are
+  never deduplicated.
+
 ## [0.1.3] — unreleased
 
 ### Added

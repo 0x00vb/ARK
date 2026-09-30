@@ -17,10 +17,17 @@
   token efficiency verified unchanged (its `bench/COMPARISON.md`). ARK now has **three** unrelated
   consumers: minimal-agent, writing-agent, and the security workbench.
 
+## Shipped (v0.2.0)
+- **`ark-cli`**: the interactive shell. Launching an app enters a persistent session with
+  streaming, approvals, cancel, history, resume, slash commands, context and usage inspection,
+  and a headless `-p` mode. Consumers add commands, labels, themes and status sections.
+- Runtime seams it needed: streaming providers, owned serializable events, `ApprovalGate`,
+  `CancelToken`, `ContextReport`, `Session` with bounded carry-over and compaction.
+- Two apps on it with no shell changes: `writer` (in-tree) and `secres`.
+
 ## Next
-1. **`ark-cli`** — a reusable CLI framework (start/resume a session, ask, inspect context/tool-calls/usage, approvals, logs, session management) that consumers extend with their own `clap` subcommands. The generic verbs live in ARK; domain commands stay in the consumer. *(The SecRes migration confirmed the shape: `open_engine` + `security_profile_for` + `Harness::ask` is the repeated boilerplate an `ark-cli` would absorb.)*
-2. **`ark-ui`** — an optional, themeable conversation shell built against the runtime's event stream: streaming responses, tool-call rendering, an approval prompt, an execution timeline, a context/usage inspector. Consumers use it unchanged, theme it, add panels, or ignore it and build their own against the SDK.
-3. **Benchmark harness** — generalize SecRes's `bench/` into a repeatable token/step/tokens-per-finding comparison any consumer can run to show a runtime change didn't regress efficiency.
+1. **`ark-ui`**: an optional, themeable GUI shell on the same seams `ark-cli` uses (events, `ApprovalGate`, `CancelToken`, `Session`). Streaming, tool activity, approval dialogs, a timeline, a context inspector.
+2. **Benchmark harness**: generalize SecRes's `bench/` into a token and step comparison any consumer can run to show a runtime change did not regress efficiency.
 
 ## Non-goals
 - ARK will not grow domain functionality. It stays the machinery; domains are consumers.

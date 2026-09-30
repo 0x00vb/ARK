@@ -95,6 +95,13 @@ Implement it to give the agent an external reference corpus (docs, a vector stor
 the `search_knowledge` meta-tool appears and the agent is told to cite results separately from
 observations.
 
+## 8. The shell: commands, labels, approvals
+
+`ark-cli` is extended from your app, never edited. Add slash commands by implementing
+`ark_cli::Command`, label your tools with `ActivityLabels` or a `ToolRenderer`, class approvals
+with `AgentProfile::builder().approval_classifier(..)`, and mark results that never go stale
+with `ActionDescriptor::reusable()`. Details and examples: [`CLI.md`](CLI.md).
+
 ## What you should *not* do
 
 - Don't add a domain type to `ark-core`. Use `Other(String)`, a capability slug, or a

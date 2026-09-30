@@ -119,6 +119,12 @@ impl<'a> CommandContext<'a> {
         Ok(())
     }
 
+    /// Work in another project from now on, in a fresh session there.
+    pub fn switch_project(&mut self, project: Project) -> anyhow::Result<()> {
+        self.st.project = project;
+        self.new_session()
+    }
+
     /// Switch to another session by id or prefix. Returns false when none matches.
     pub fn resume(&mut self, id: &str) -> anyhow::Result<bool> {
         let Some(s) = self.st.ark.open_session(id)? else {
@@ -558,6 +564,7 @@ impl Command for Tools {
         actions.sort_by(|a, b| a.name.cmp(&b.name));
         let core = ctx.ark().profile().core_actions.clone();
         let theme = ctx.theme().clone();
+        let width = ctx.st.out.width().saturating_sub(48).max(20);
         for d in &actions {
             let risk = match d.risk {
                 ark_core::RiskTier::Read => theme.green("read   "),
@@ -572,7 +579,7 @@ impl Command for Tools {
             ctx.line(format!(
                 "  {risk}  {}{pin}  {}",
                 theme.bold(&format!("{:<24}", d.name)),
-                theme.dim(&d.summary)
+                theme.dim(&clip(&d.summary, width))
             ));
         }
         ctx.line(theme.dim(&format!(

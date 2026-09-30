@@ -11,15 +11,18 @@ use reedline::{
     ReedlineMenu, Signal, Span, Suggestion, ValidationResult, Validator,
 };
 
+use std::collections::VecDeque;
+
+use ark_interact::Effect;
+
 use crate::app::{ShellState, Welcome};
-use crate::commands::{parse, CommandContext, CommandOutcome};
 use crate::driver::run_turn;
-use crate::term::clip;
 
 pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::process::ExitCode {
     print_welcome(&mut st, resumed);
-    if resumed && st.session.turn_count() > 0 {
-        print_recap(&mut st);
+    if resumed && st.ix.session().turn_count() > 0 {
+        let recap = st.ix.recap();
+        st.print(&recap);
     }
 
     let mut editor = build_editor(&st);
@@ -28,12 +31,12 @@ pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::proce
         color: st.cfg.theme.accent.line_editor_color(),
         plain: !st.cfg.theme.color_enabled(),
     };
-    let mut pending: Option<String> = None;
+    let mut pending: VecDeque<String> = VecDeque::new();
     let mut ctrl_c_hint = false;
 
     loop {
-        // Submit typed-ahead text directly, or leave it in the editor for the user to finish.
-        let line = match pending.take() {
+        // Messages set up during the last turn go first, echoed after the prompt.
+        let line = match pending.pop_front() {
             Some(next) => {
                 st.out.line(&format!(
                     "{}{next}",
@@ -71,55 +74,42 @@ pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::proce
             continue;
         }
 
-        let mut submit: Option<String> = None;
-        if let Some((name, args)) = parse(text) {
-            match st.cfg.find_command(name) {
+        let input = if text.starts_with('/') {
+            let reply = st.ix.execute(text).await;
+            st.print(&reply.report);
+            match reply.effect {
+                Some(Effect::Submit(t)) => t,
+                Some(Effect::Exit) => break,
+                Some(Effect::ClearView) => {
+                    st.out.text("\x1b[2J\x1b[3J\x1b[H");
+                    continue;
+                }
                 None => {
-                    st.out.line(
-                        &st.cfg
-                            .theme
-                            .yellow(&format!("Unknown command /{name}. /help lists commands.")),
-                    );
-                }
-                Some(cmd) => {
-                    let args = args.to_string();
-                    let outcome = {
-                        let mut ctx = CommandContext { st: &mut st };
-                        cmd.run(&mut ctx, &args).await
-                    };
-                    match outcome {
-                        Ok(CommandOutcome::Continue) => {}
-                        Ok(CommandOutcome::Submit(t)) => submit = Some(t),
-                        Ok(CommandOutcome::Exit) => break,
-                        Err(e) => st.out.line(&st.cfg.theme.red(&format!("/{name}: {e}"))),
-                    }
+                    st.out.end_line();
+                    continue;
                 }
             }
-            st.out.end_line();
-            if submit.is_none() {
-                continue;
-            }
-        }
+        } else {
+            text.to_string()
+        };
 
-        let input = submit.unwrap_or_else(|| text.to_string());
-        if let Some(ahead) = run_turn(&mut st, &input).await {
-            if ahead.submit {
-                pending = Some(ahead.text.trim().to_string());
-            } else {
-                editor.run_edit_commands(&[EditCommand::InsertString(ahead.text)]);
-            }
+        let next = run_turn(&mut st, &input).await;
+        pending.extend(next.submit);
+        if !next.draft.trim().is_empty() {
+            editor.run_edit_commands(&[EditCommand::InsertString(next.draft)]);
         }
         st.out.line("");
     }
 
-    let s = &st.session;
+    let s = st.ix.session();
     if s.turn_count() > 0 {
-        st.out.line(&st.cfg.theme.dim(&format!(
+        let msg = format!(
             "Session {} saved ({} turns). Continue with `{} --resume`.",
             s.id().short(),
             s.turn_count(),
             st.cfg.bin
-        )));
+        );
+        st.out.line(&st.cfg.theme.dim(&msg));
     }
     std::process::ExitCode::SUCCESS
 }
@@ -155,16 +145,12 @@ fn build_editor(st: &ShellState) -> Reedline {
     }
 
     let commands: Vec<(String, String)> = st
-        .cfg
-        .commands
-        .iter()
+        .ix
+        .commands()
+        .into_iter()
         .flat_map(|c| {
-            let mut v = vec![(c.name().to_string(), c.summary().to_string())];
-            v.extend(
-                c.aliases()
-                    .iter()
-                    .map(|a| (a.to_string(), c.summary().to_string())),
-            );
+            let mut v = vec![(c.name.clone(), c.summary.clone())];
+            v.extend(c.aliases.iter().map(|a| (a.clone(), c.summary.clone())));
             v
         })
         .collect();
@@ -277,14 +263,15 @@ impl Prompt for ShellPrompt {
 
 fn print_welcome(st: &mut ShellState, resumed: bool) {
     let cfg = st.cfg.clone();
+    let sum = st.ix.summary();
     let info = Welcome {
-        name: cfg.name.clone(),
-        tagline: cfg.tagline.clone(),
-        model: st.ark.router().describe(),
-        project: st.project.name.clone(),
-        session: st.session.id().short().to_string(),
+        name: sum.name,
+        tagline: sum.tagline,
+        model: sum.model,
+        project: sum.project.name,
+        session: sum.session.short,
         resumed,
-        turns: st.session.turn_count(),
+        turns: sum.session.turns,
     };
     let text = match &cfg.welcome {
         Some(f) => f(&info, &cfg.theme),
@@ -324,49 +311,6 @@ fn default_welcome(w: &Welcome, t: &crate::theme::Theme) -> String {
         t.dim("/help for commands · esc stops the agent · ctrl+d leaves")
     ));
     s
-}
-
-/// Show where a resumed session left off: the last exchange, clipped.
-pub(crate) fn print_recap(st: &mut ShellState) {
-    let theme = st.cfg.theme.clone();
-    let turns = st
-        .session
-        .transcript(st.ark.engine(), Some(2))
-        .unwrap_or_default();
-    let rec = st.session.record().clone();
-    st.out.line(&format!(
-        "{} {} {}",
-        theme.green(&theme.glyphs.ok),
-        theme.bold(&format!(
-            "Resumed {}",
-            if rec.title.is_empty() {
-                rec.id.short().to_string()
-            } else {
-                clip(&rec.title, 60)
-            }
-        )),
-        theme.dim(&format!(
-            "· {} turns · {}",
-            rec.turn_count,
-            crate::commands::ago(rec.updated_at)
-        ))
-    ));
-    for t in turns {
-        st.out.line(&format!(
-            "  {} {}",
-            theme.accented(theme.prompt.trim()),
-            clip(&t.input, 100)
-        ));
-        let answer = if t.cancelled {
-            theme.dim("(stopped)")
-        } else {
-            theme.dim(&clip(&t.answer, 160))
-        };
-        st.out.line(&format!("    {answer}"));
-    }
-    st.out.line(
-        &theme.dim("  The agent continues from its working state; the transcript is not replayed."),
-    );
 }
 
 #[cfg(test)]

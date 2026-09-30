@@ -1,21 +1,23 @@
-//! Renders one turn's runtime events as terminal activity. This is the only place that decides
-//! how an event looks; the runtime just reports what happened. The normal view shows what the
-//! agent is doing in plain words; the debug view adds arguments, timings and model calls.
+//! Renders one turn as terminal activity. The words come from `ark-interact` (an [`Activity`]
+//! per event); this module decides only how they look: bullets, the `└` detail line, repeats
+//! collapsed into a count, the streamed answer, the status line. The debug view adds the
+//! trace line of steps, context reports and model calls.
 
-use std::collections::HashMap;
 use std::time::Instant;
 
+use ark_interact::fmt::{clip, tokens};
+use ark_interact::trace::entry;
+use ark_interact::{Activity, ActivityKind, TurnEnd};
 use ark_sdk::prelude::*;
 
-use crate::activity::Activity;
-use crate::app::{EventHook, TurnRecord};
+use crate::app::EventHook;
 use crate::markdown::MdStream;
-use crate::term::{clip, tokens, Out};
+use crate::render::toned;
+use crate::term::Out;
 use crate::theme::Theme;
 
 pub(crate) struct TurnView<'a> {
     theme: &'a Theme,
-    activity: &'a Activity,
     hook: Option<&'a EventHook>,
     pub verbose: bool,
     /// Draw the spinner/status line (interactive only).
@@ -24,30 +26,22 @@ pub(crate) struct TurnView<'a> {
     streaming: bool,
     started: Instant,
     step: usize,
-    tools: u32,
     tokens_used: u64,
     frame: usize,
+    /// What the person is typing while the agent works.
     pub typeahead: String,
+    /// A message queued for after the turn.
+    pub queued: Option<String>,
     pub cancelling: bool,
     pub in_menu: bool,
-    artifact_names: HashMap<String, String>,
-    events: Vec<(u64, HarnessEvent)>,
-    pub last_context: Option<ContextReport>,
-    printed_answer: bool,
     /// (label, repeat count, line counter right after it was printed).
     last_activity: Option<(String, u32, u64)>,
 }
 
 impl<'a> TurnView<'a> {
-    pub(crate) fn new(
-        theme: &'a Theme,
-        activity: &'a Activity,
-        hook: Option<&'a EventHook>,
-        verbose: bool,
-    ) -> Self {
+    pub(crate) fn new(theme: &'a Theme, hook: Option<&'a EventHook>, verbose: bool) -> Self {
         TurnView {
             theme,
-            activity,
             hook,
             verbose,
             live: false,
@@ -55,40 +49,14 @@ impl<'a> TurnView<'a> {
             streaming: false,
             started: Instant::now(),
             step: 0,
-            tools: 0,
             tokens_used: 0,
             frame: 0,
             typeahead: String::new(),
+            queued: None,
             cancelling: false,
             in_menu: false,
-            artifact_names: HashMap::new(),
-            events: Vec::new(),
-            last_context: None,
-            printed_answer: false,
             last_activity: None,
         }
-    }
-
-    /// Artifact ids the agent passes as `artifact` are shown by name.
-    pub(crate) fn with_artifacts(mut self, names: HashMap<String, String>) -> Self {
-        self.artifact_names = names;
-        self
-    }
-
-    fn elapsed_ms(&self) -> u64 {
-        self.started.elapsed().as_millis() as u64
-    }
-
-    fn record(&mut self, ev: &HarnessEvent) {
-        let t = self.elapsed_ms();
-        // Merge consecutive text deltas so the trace stays readable.
-        if let HarnessEvent::TextDelta { text } = ev {
-            if let Some((_, HarnessEvent::TextDelta { text: prev })) = self.events.last_mut() {
-                prev.push_str(text);
-                return;
-            }
-        }
-        self.events.push((t, ev.clone()));
     }
 
     fn close_stream(&mut self, out: &mut Out) {
@@ -121,12 +89,21 @@ impl<'a> TurnView<'a> {
         self.last_activity = Some((label.to_string(), 1, out.lines_written()));
     }
 
-    fn detail(&mut self, out: &mut Out, text: &str) {
+    fn detail(&mut self, out: &mut Out, text: &str, tone: ark_interact::Tone) {
         let width = out.width().saturating_sub(6);
+        let glyph = if tone == ark_interact::Tone::Error {
+            self.theme.red(&self.theme.glyphs.result)
+        } else {
+            self.theme.dim(&self.theme.glyphs.result)
+        };
+        let tone = if tone == ark_interact::Tone::Normal {
+            ark_interact::Tone::Muted
+        } else {
+            tone
+        };
         out.line(&format!(
-            "  {} {}",
-            self.theme.dim(&self.theme.glyphs.result),
-            self.theme.dim(&clip(text, width))
+            "  {glyph} {}",
+            toned(self.theme, tone, &clip(text, width))
         ));
     }
 
@@ -138,27 +115,13 @@ impl<'a> TurnView<'a> {
         }
     }
 
-    fn display_input(&self, input: &serde_json::Value) -> serde_json::Value {
-        let mut v = input.clone();
-        if let Some(a) = v
-            .get("artifact")
-            .and_then(|a| a.as_str())
-            .map(str::to_string)
-        {
-            if let Some(name) = self.artifact_names.get(&a).or_else(|| {
-                self.artifact_names
-                    .iter()
-                    .find(|(k, _)| k.starts_with(&a))
-                    .map(|(_, n)| n)
-            }) {
-                v["artifact"] = serde_json::Value::String(name.clone());
-            }
-        }
-        v
+    /// A line printed by the driver (e.g. a message sent mid-turn).
+    pub(crate) fn note(&mut self, out: &mut Out, text: &str) {
+        self.close_stream(out);
+        out.line(&format!("  {}", self.theme.dim(text)));
     }
 
-    pub(crate) fn event(&mut self, ev: HarnessEvent, out: &mut Out) {
-        self.record(&ev);
+    pub(crate) fn event(&mut self, ev: HarnessEvent, act: Option<Activity>, out: &mut Out) {
         if let Some(hook) = self.hook {
             if let Some(line) = hook(&ev, self.theme) {
                 self.close_stream(out);
@@ -166,198 +129,116 @@ impl<'a> TurnView<'a> {
                 return;
             }
         }
+        match &ev {
+            HarnessEvent::TextDelta { text } => {
+                if !self.streaming {
+                    self.streaming = true;
+                    out.end_line();
+                }
+                let styled = self.md.push(text);
+                out.text(&styled);
+                return;
+            }
+            HarnessEvent::Answer { text, streamed } => {
+                self.close_stream(out);
+                if !streamed {
+                    out.end_line();
+                    let t = self.theme;
+                    let mut md = MdStream::new(t.color_enabled(), t.raw_accent_sgr());
+                    let styled = md.push(text) + &md.finish();
+                    out.text(&styled);
+                    out.end_line();
+                }
+                return;
+            }
+            HarnessEvent::Step { index } => self.step = *index,
+            HarnessEvent::ModelCall { usage, .. } => self.tokens_used += usage.total() as u64,
+            _ => {}
+        }
+        if let Some(a) = act {
+            self.activity(out, &a);
+        }
+        // The debug view: the trace line of this event, and a call's arguments.
+        if self.verbose {
+            match &ev {
+                HarnessEvent::ToolCall { action, input, .. } => {
+                    self.debug(out, &format!("{action} {input}"))
+                }
+                HarnessEvent::ToolResult {
+                    duration_ms,
+                    invocation,
+                    context_tokens,
+                    ..
+                } => {
+                    let d = duration_ms.map(|d| format!("{d}ms · ")).unwrap_or_default();
+                    let inv = &invocation[..8.min(invocation.len())];
+                    self.debug(out, &format!("{d}+{context_tokens} tokens · inv:{inv}"));
+                }
+                HarnessEvent::Step { .. }
+                | HarnessEvent::Context { .. }
+                | HarnessEvent::ModelCall { .. }
+                | HarnessEvent::SelfCheck { passed: true, .. }
+                | HarnessEvent::Duplicate { .. }
+                | HarnessEvent::Retrieval { .. } => {
+                    if let Some((_, text, detail, _)) = entry(&ev) {
+                        let d = detail.map(|d| format!(" · {d}")).unwrap_or_default();
+                        self.debug(out, &format!("{text}{d}"));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn activity(&mut self, out: &mut Out, a: &Activity) {
         let t = self.theme;
-        match ev {
-            HarnessEvent::Classified { .. } => {}
-            HarnessEvent::Plan { steps } => {
-                self.activity_line(out, "Planning");
-                for s in steps.iter().take(6) {
+        match a.kind {
+            ActivityKind::Plan => {
+                self.activity_line(out, &a.label);
+                for s in &a.items {
                     out.line(&format!(
                         "    {}",
                         t.dim(&clip(s, out.width().saturating_sub(6)))
                     ));
                 }
             }
-            HarnessEvent::Step { index } => {
-                self.step = index;
-                self.debug(out, &format!("step {index}"));
-            }
-            HarnessEvent::Context { report } => {
-                if self.verbose {
-                    self.debug(
-                        out,
-                        &format!(
-                            "context {} / {} · state {} · conversation {} · tool results {}{}",
-                            tokens(report.total as u64),
-                            tokens(report.budget as u64),
-                            report.working_state,
-                            report.conversation,
-                            report.tool_rounds,
-                            if report.compressed_rounds > 0 {
-                                format!(" · {} rounds compressed", report.compressed_rounds)
-                            } else {
-                                String::new()
-                            }
-                        ),
-                    );
+            ActivityKind::Tool
+            | ActivityKind::Reuse
+            | ActivityKind::Retrieval
+            | ActivityKind::Present => self.activity_line(out, &a.label),
+            ActivityKind::Capability | ActivityKind::Steered => {
+                self.activity_line(out, &a.label);
+                if let Some(d) = &a.detail {
+                    self.detail(out, d, ark_interact::Tone::Muted);
                 }
-                self.last_context = Some(report);
             }
-            HarnessEvent::TextDelta { text } => {
-                if !self.streaming {
-                    self.streaming = true;
-                    out.end_line();
+            ActivityKind::Result | ActivityKind::Approval => {
+                self.close_stream(out);
+                if !a.label.is_empty() {
+                    self.detail(out, &a.label, a.tone);
                 }
-                let styled = self.md.push(&text);
-                out.text(&styled);
             }
-            HarnessEvent::ModelCall {
-                role,
-                model,
-                usage,
-                elapsed_ms,
-            } => {
-                self.tokens_used += usage.total() as u64;
-                self.debug(
-                    out,
-                    &format!(
-                        "model {role} · {model} · {} in / {} out{} · {:.1}s",
-                        usage.prompt_tokens,
-                        usage.completion_tokens,
-                        if usage.measured { "" } else { " (est.)" },
-                        elapsed_ms as f64 / 1000.0
-                    ),
-                );
+            ActivityKind::State | ActivityKind::Note => {
+                self.close_stream(out);
+                let w = out.width().saturating_sub(12);
+                let d = a.detail.as_deref().map(|d| clip(d, w)).unwrap_or_default();
+                out.line(&format!(
+                    "  {} {}",
+                    t.dim(&format!("{}:", a.label)),
+                    t.dim(&d)
+                ));
             }
-            HarnessEvent::ToolCall { action, input, .. } => {
-                let shown = self.display_input(&input);
-                let label = self.activity.call_label(&action, &shown);
-                self.activity_line(out, &label);
-                self.debug(out, &format!("{action} {}", input));
-            }
-            HarnessEvent::ToolResult {
-                action,
-                ok,
-                summary,
-                duration_ms,
-                invocation,
-                error,
-                ..
-            } => {
-                self.tools += 1;
-                if ok {
-                    let d = self.activity.result_detail(&action, ok, &summary);
-                    if !d.is_empty() {
-                        self.detail(out, &d);
-                    }
-                } else {
-                    let msg = error.unwrap_or(summary);
-                    out.line(&format!(
-                        "  {} {}",
-                        t.red(&t.glyphs.result),
-                        t.red(&clip(&msg, out.width().saturating_sub(6)))
-                    ));
-                }
-                let d = duration_ms.map(|d| format!("{d}ms · ")).unwrap_or_default();
-                self.debug(
-                    out,
-                    &format!("{d}inv:{}", &invocation[..8.min(invocation.len())]),
-                );
-            }
-            HarnessEvent::Duplicate { action, reused } => {
-                self.activity_line(out, &format!("Reusing an earlier result · {action}"));
-                self.debug(out, &reused);
-            }
-            HarnessEvent::Retrieval { what } => {
-                let label = if what.starts_with("search_knowledge") {
-                    "Consulting background knowledge"
-                } else if what.starts_with("search_evidence") {
-                    "Searching gathered evidence"
-                } else {
-                    "Recalling evidence"
-                };
-                self.activity_line(out, label);
-                self.debug(out, &what);
-            }
-            HarnessEvent::NeedsApproval { action } => {
+            ActivityKind::Warning => {
                 self.close_stream(out);
                 out.line(&format!(
                     "  {} {}",
                     t.yellow(&t.glyphs.warn),
-                    t.yellow(&format!("{action} needs approval; not run"))
+                    t.yellow(&a.label)
                 ));
             }
-            HarnessEvent::ApprovalRequested { .. } => {}
-            HarnessEvent::ApprovalResolved {
-                decision, class, ..
-            } => {
-                let text = match decision {
-                    ApprovalDecision::AllowOnce => t.dim("allowed once"),
-                    ApprovalDecision::AllowSession => {
-                        t.dim(&format!("allowed for this session ({class})"))
-                    }
-                    ApprovalDecision::Deny => t.yellow("denied"),
-                };
-                out.line(&format!("  {} {text}", t.dim(&t.glyphs.result)));
-            }
-            HarnessEvent::Capability { action, detail } => {
-                let verb = match action.as_str() {
-                    "find_capability" => "Looking for a capability",
-                    "propose_capability" => "Proposing a capability",
-                    _ => "Acquiring a capability",
-                };
-                self.activity_line(out, verb);
-                self.detail(out, detail.lines().next().unwrap_or(""));
-            }
-            HarnessEvent::StateUpdate { kind, text } => {
+            ActivityKind::Stopped => {
                 self.close_stream(out);
-                let w = out.width().saturating_sub(12);
-                out.line(&format!(
-                    "  {} {}",
-                    t.dim(&format!("noted {}:", kind.replace('_', " "))),
-                    t.dim(&clip(&text, w))
-                ));
-            }
-            HarnessEvent::Note { kind, body } => {
-                self.close_stream(out);
-                let w = out.width().saturating_sub(12);
-                out.line(&format!(
-                    "  {} {}",
-                    t.dim(&format!("note ({kind}):")),
-                    t.dim(&clip(&body, w))
-                ));
-            }
-            HarnessEvent::Present { directive } => {
-                self.activity_line(out, &format!("Showing {}", directive.headline()));
-            }
-            HarnessEvent::SelfCheck { passed, detail } => {
-                if !passed {
-                    self.close_stream(out);
-                    out.line(&format!(
-                        "  {} {}",
-                        t.yellow(&t.glyphs.warn),
-                        t.yellow(&detail)
-                    ));
-                } else {
-                    self.debug(out, &format!("self-check: {detail}"));
-                }
-            }
-            HarnessEvent::Cancelled => {
-                self.close_stream(out);
-                out.line(&t.yellow("Stopped."));
-            }
-            HarnessEvent::Answer { text, streamed } => {
-                if streamed {
-                    self.close_stream(out);
-                } else {
-                    self.close_stream(out);
-                    out.end_line();
-                    let mut md = MdStream::new(t.color_enabled(), t.raw_accent_sgr());
-                    let styled = md.push(&text) + &md.finish();
-                    out.text(&styled);
-                    out.end_line();
-                }
-                self.printed_answer = true;
+                out.line(&t.yellow(&a.label));
             }
         }
     }
@@ -371,9 +252,9 @@ impl<'a> TurnView<'a> {
         let spin = self.theme.accented(&self.theme.glyphs.spinner[self.frame]);
         let secs = self.started.elapsed().as_secs();
         let what = if self.cancelling {
-            "Stopping".to_string()
+            "Stopping"
         } else {
-            "Working".to_string()
+            "Working"
         };
         let mut parts = vec![format!("{secs}s")];
         if self.step > 0 {
@@ -384,39 +265,36 @@ impl<'a> TurnView<'a> {
         }
         let hint = if self.cancelling {
             String::new()
-        } else {
+        } else if self.typeahead.is_empty() {
             self.theme.dim("  esc to stop")
+        } else {
+            self.theme
+                .dim("  enter: send now · tab: send after this turn")
         };
-        let queued = if self.typeahead.is_empty() {
+        let typed = if self.typeahead.is_empty() {
             String::new()
         } else {
             format!(
                 "  {} {}",
-                self.theme.dim("next:"),
+                self.theme.accented("›"),
                 clip(&self.typeahead, 40)
             )
         };
+        let queued = match &self.queued {
+            Some(q) => format!("  {} {}", self.theme.dim("next:"), clip(q, 30)),
+            None => String::new(),
+        };
         out.status(&format!(
-            "{spin} {what} {}{hint}{queued}",
+            "{spin} {what} {}{typed}{hint}{queued}",
             self.theme.dim(&format!("· {}", parts.join(" · ")))
         ));
     }
 
-    /// End of turn: close the stream and print the footer.
-    pub(crate) fn finish(
-        mut self,
-        out: &mut Out,
-        input: &str,
-        result: &Result<HarnessOutcome, ArkError>,
-    ) -> TurnRecord {
+    /// End of turn: close the stream and print the footer or the error.
+    pub(crate) fn finish(mut self, out: &mut Out, end: &TurnEnd) {
         self.close_stream(out);
         out.clear_status();
-        let elapsed_ms = self.elapsed_ms();
-        let (cancelled, error) = match result {
-            Ok(o) => (o.cancelled, None),
-            Err(e) => (false, Some(e.to_string())),
-        };
-        match result {
+        match &end.result {
             Err(e) => {
                 out.line(&format!(
                     "{} {}",
@@ -427,33 +305,11 @@ impl<'a> TurnView<'a> {
                     "  The session is intact. Try again, /model to switch, or /trace for details.",
                 ));
             }
-            Ok(o) if !o.cancelled && self.theme.turn_footer => {
-                let m = &o.metrics;
-                let mut parts = Vec::new();
-                if m.tool_calls > 0 {
-                    parts.push(format!(
-                        "{} tool{}",
-                        m.tool_calls,
-                        if m.tool_calls == 1 { "" } else { "s" }
-                    ));
-                }
-                let approx = if m.tokens_measured { "" } else { "~" };
-                parts.push(format!("{approx}{} tokens", tokens(m.total_tokens())));
-                parts.push(format!("{:.1}s", elapsed_ms as f64 / 1000.0));
-                if !o.grounded() && !o.trivial {
-                    parts.push("no evidence cited".into());
-                }
+            Ok(_) if !end.footer.is_empty() && self.theme.turn_footer => {
                 out.line("");
-                out.line(&self.theme.dim(&format!("  {}", parts.join(" · "))));
+                out.line(&self.theme.dim(&format!("  {}", end.footer.join(" · "))));
             }
             _ => {}
-        }
-        TurnRecord {
-            input: input.to_string(),
-            events: self.events,
-            elapsed_ms,
-            cancelled,
-            error,
         }
     }
 }
@@ -461,6 +317,9 @@ impl<'a> TurnView<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_interact::activity::describe;
+    use ark_interact::Labels;
+    use std::collections::HashMap;
     use std::io::Write;
     use std::sync::{Arc, Mutex};
 
@@ -480,10 +339,12 @@ mod tests {
         let buf = Buf::default();
         let mut out = Out::sink(Box::new(buf.clone()));
         let theme = Theme::default().with_color(false);
-        let activity = Activity::default();
-        let mut view = TurnView::new(&theme, &activity, None, false);
+        let labels = Labels::default();
+        let names = HashMap::new();
+        let mut view = TurnView::new(&theme, None, false);
         for e in events {
-            view.event(e, &mut out);
+            let a = describe(&labels, &names, &e);
+            view.event(e, a, &mut out);
         }
         let s = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
         s
@@ -514,6 +375,7 @@ mod tests {
                 invocation: "abcdef123456".into(),
                 duration_ms: Some(4),
                 error: None,
+                context_tokens: 20,
             },
             HarnessEvent::TextDelta {
                 text: "Done.".into(),

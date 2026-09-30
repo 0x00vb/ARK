@@ -4,7 +4,7 @@
 use crate::stream::{for_each_line, sse_data, AnthropicFold};
 use crate::{
     mangle_tool_name, unmangle_tool_name, Completion, Message, Provider, ProviderError, Result,
-    Role, TextSink, ToolCall, ToolDef, Usage,
+    Role, TextSink, ToolCall, ToolDef,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -109,14 +109,7 @@ impl Provider for Anthropic {
                 }
             }
         }
-        let u = &v["usage"];
-        let usage = match (
-            u.get("input_tokens").and_then(|c| c.as_u64()),
-            u.get("output_tokens").and_then(|c| c.as_u64()),
-        ) {
-            (Some(p), Some(c)) => Usage::measured(p as u32, c as u32),
-            _ => Usage::default(),
-        };
+        let usage = crate::stream::anthropic_usage(&v["usage"], None);
         Ok(Completion {
             content,
             tool_calls,

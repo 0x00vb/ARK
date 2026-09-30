@@ -75,7 +75,10 @@ pub async fn run_timeout(tool: &str, args: &[String], secs: u64) -> Result<Run, 
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| AdapterError::ToolUnavailable { tool: tool.to_string(), detail: e.to_string() })?;
+        .map_err(|e| AdapterError::ToolUnavailable {
+            tool: tool.to_string(),
+            detail: e.to_string(),
+        })?;
 
     let dur = std::time::Duration::from_secs(secs);
     let (status, timed_out) = match tokio::time::timeout(dur, child.wait()).await {
@@ -99,7 +102,12 @@ pub async fn run_timeout(tool: &str, args: &[String], secs: u64) -> Result<Run, 
     if timed_out && stderr.is_empty() {
         stderr = format!("(killed after {secs}s timeout)");
     }
-    Ok(Run { command, stdout, stderr, code: status.unwrap_or(if timed_out { 124 } else { -1 }) })
+    Ok(Run {
+        command,
+        stdout,
+        stderr,
+        code: status.unwrap_or(if timed_out { 124 } else { -1 }),
+    })
 }
 
 /// Run and require exit 0, mapping failure into a `ToolFailed` error.
@@ -120,7 +128,13 @@ mod rt_tests {
     use super::*;
     #[tokio::test]
     async fn run_timeout_captures_stdout() {
-        let r = run_timeout("sh", &["-c".into(), "echo hello123 && echo world456".into()], 5).await.unwrap();
+        let r = run_timeout(
+            "sh",
+            &["-c".into(), "echo hello123 && echo world456".into()],
+            5,
+        )
+        .await
+        .unwrap();
         assert!(r.stdout.contains("hello123"), "stdout was: {:?}", r.stdout);
         assert!(r.stdout.contains("world456"));
         assert_eq!(r.code, 0);

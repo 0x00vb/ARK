@@ -84,7 +84,11 @@ pub async fn coverage(
             available.dedup();
             unavailable.sort();
             unavailable.dedup();
-            Coverage { capability, available, unavailable }
+            Coverage {
+                capability,
+                available,
+                unavailable,
+            }
         })
         .collect()
 }
@@ -108,11 +112,18 @@ pub async fn capability_index(
         let cap = &cov.capability;
         let describes = catalog.describe(cap).unwrap_or("");
         if cov.is_available() {
-            s.push_str(&format!("- {} — {}: {}\n", cap.slug(), describes, cov.available.join(", ")));
+            s.push_str(&format!(
+                "- {} — {}: {}\n",
+                cap.slug(),
+                describes,
+                cov.available.join(", ")
+            ));
         } else if !cov.unavailable.is_empty() {
             s.push_str(&format!(
                 "- {} — {}: present but unavailable ({}); acquire or use another approach\n",
-                cap.slug(), describes, cov.unavailable.join(", ")
+                cap.slug(),
+                describes,
+                cov.unavailable.join(", ")
             ));
         } else {
             s.push_str(&format!(
@@ -134,7 +145,10 @@ mod tests {
         let inferrer = declared_only();
         let d = ActionDescriptor::new("mystery.op", "x", RiskTier::Read)
             .with_capabilities([Capability::new("drafting")]);
-        assert_eq!(capabilities_of(&d, &inferrer), vec![Capability::new("drafting")]);
+        assert_eq!(
+            capabilities_of(&d, &inferrer),
+            vec![Capability::new("drafting")]
+        );
     }
 
     #[test]
@@ -146,14 +160,15 @@ mod tests {
 
     #[test]
     fn custom_inferrer_maps_names() {
-        let inferrer: Inferrer = Arc::new(|d: &ActionDescriptor| {
-            match d.adapter_name() {
-                "draft" => vec![Capability::new("drafting")],
-                _ => vec![],
-            }
+        let inferrer: Inferrer = Arc::new(|d: &ActionDescriptor| match d.adapter_name() {
+            "draft" => vec![Capability::new("drafting")],
+            _ => vec![],
         });
         let d = ActionDescriptor::new("draft.expand", "x", RiskTier::Read);
-        assert_eq!(capabilities_of(&d, &inferrer), vec![Capability::new("drafting")]);
+        assert_eq!(
+            capabilities_of(&d, &inferrer),
+            vec![Capability::new("drafting")]
+        );
     }
 
     #[tokio::test]
@@ -165,6 +180,9 @@ mod tests {
         let reg = Registry::new();
         let cov = coverage(&reg, &catalog, &declared_only()).await;
         assert_eq!(cov.len(), 2, "one coverage row per declared capability");
-        assert!(cov.iter().all(|c| !c.is_available()), "empty registry covers nothing");
+        assert!(
+            cov.iter().all(|c| !c.is_available()),
+            "empty registry covers nothing"
+        );
     }
 }

@@ -54,6 +54,11 @@ pub fn is_meta_tool(name: &str) -> bool {
     META_TOOLS.contains(&name)
 }
 
+/// Meta-tools that bring stored evidence or external knowledge back into the context.
+pub fn is_retrieval(name: &str) -> bool {
+    matches!(name, GET_EVIDENCE | SEARCH_EVIDENCE | SEARCH_KNOWLEDGE)
+}
+
 /// Which optional meta-tools to expose, so a bare agent doesn't advertise tools it can't
 /// fulfil.
 #[derive(Clone, Copy, Debug)]
@@ -68,7 +73,11 @@ pub struct MetaToolConfig {
 
 impl Default for MetaToolConfig {
     fn default() -> Self {
-        MetaToolConfig { knowledge: false, acquisition: false, present: true }
+        MetaToolConfig {
+            knowledge: false,
+            acquisition: false,
+            present: true,
+        }
     }
 }
 
@@ -89,12 +98,22 @@ pub fn capability_index(registry: &Registry) -> String {
         let (ns, verb) = split_action(&d.name);
         by_adapter.entry(ns).or_default().push((verb, d.risk));
     }
-    let mut s = String::from("Tools (use load_action(name) to get an action's schema before calling it):\n");
+    let mut s = String::from(
+        "Tools (use load_action(name) to get an action's schema before calling it):\n",
+    );
     for (ns, mut verbs) in by_adapter {
         verbs.sort_by(|a, b| a.0.cmp(&b.0));
-        let highest = verbs.iter().map(|(_, r)| *r).max_by_key(|r| *r as u8).unwrap_or(RiskTier::Read);
+        let highest = verbs
+            .iter()
+            .map(|(_, r)| *r)
+            .max_by_key(|r| *r as u8)
+            .unwrap_or(RiskTier::Read);
         let names: Vec<String> = verbs.iter().map(|(v, _)| format!("{ns}.{v}")).collect();
-        s.push_str(&format!("- {ns} [{}]: {}\n", risk_word(highest), names.join(", ")));
+        s.push_str(&format!(
+            "- {ns} [{}]: {}\n",
+            risk_word(highest),
+            names.join(", ")
+        ));
     }
     s
 }
@@ -269,17 +288,32 @@ mod tests {
 
     #[test]
     fn optional_meta_tools_are_gated() {
-        let base = meta_tool_defs(MetaToolConfig { knowledge: false, acquisition: false, present: false });
+        let base = meta_tool_defs(MetaToolConfig {
+            knowledge: false,
+            acquisition: false,
+            present: false,
+        });
         assert!(base.iter().all(|t| t.name != SEARCH_KNOWLEDGE));
         assert!(base.iter().all(|t| t.name != PRESENT));
         assert!(base.iter().all(|t| t.name != FIND_CAPABILITY));
 
-        let full = meta_tool_defs(MetaToolConfig { knowledge: true, acquisition: true, present: true });
+        let full = meta_tool_defs(MetaToolConfig {
+            knowledge: true,
+            acquisition: true,
+            present: true,
+        });
         assert!(full.iter().any(|t| t.name == SEARCH_KNOWLEDGE));
         assert!(full.iter().any(|t| t.name == PRESENT));
         assert!(full.iter().any(|t| t.name == ACQUIRE_CAPABILITY));
         // The core six are always present.
-        for name in [LIST_ACTIONS, LOAD_ACTION, GET_EVIDENCE, SEARCH_EVIDENCE, RECORD_STATE, RECORD_NOTE] {
+        for name in [
+            LIST_ACTIONS,
+            LOAD_ACTION,
+            GET_EVIDENCE,
+            SEARCH_EVIDENCE,
+            RECORD_STATE,
+            RECORD_NOTE,
+        ] {
             assert!(full.iter().any(|t| t.name == name), "{name} missing");
         }
     }

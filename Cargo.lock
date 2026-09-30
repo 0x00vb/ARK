@@ -108,6 +108,7 @@ name = "ark-cli"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "ark-interact",
  "ark-sdk",
  "async-trait",
  "clap",
@@ -132,6 +133,20 @@ dependencies = [
  "thiserror 2.0.21",
  "time",
  "uuid",
+]
+
+[[package]]
+name = "ark-interact"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "ark-sdk",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
 ]
 
 [[package]]

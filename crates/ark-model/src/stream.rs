@@ -43,15 +43,39 @@ pub(crate) struct AnthropicFold {
     content: String,
     /// Tool-use blocks by content index: (id, name, partial JSON).
     tools: Vec<(usize, String, String, String)>,
-    input_tokens: Option<u64>,
+    start_usage: Value,
     output_tokens: Option<u64>,
+}
+
+/// Anthropic reports uncached input, cache reads and cache writes separately; the prompt is
+/// their sum. `output` overrides the output count (streaming sends it last).
+pub(crate) fn anthropic_usage(u: &Value, output: Option<u64>) -> Usage {
+    let n = |k: &str| u.get(k).and_then(|c| c.as_u64());
+    match (n("input_tokens"), output.or_else(|| n("output_tokens"))) {
+        (Some(input), Some(out)) => {
+            let read = n("cache_read_input_tokens").unwrap_or(0);
+            let write = n("cache_creation_input_tokens").unwrap_or(0);
+            Usage::measured((input + read + write) as u32, out as u32).with_cached(read as u32)
+        }
+        _ => Usage::default(),
+    }
+}
+
+/// OpenAI's `prompt_tokens` already includes the cached part.
+pub(crate) fn openai_usage(u: &Value) -> Option<Usage> {
+    let p = u.get("prompt_tokens")?.as_u64()?;
+    let c = u.get("completion_tokens")?.as_u64()?;
+    let cached = u["prompt_tokens_details"]["cached_tokens"]
+        .as_u64()
+        .unwrap_or(0);
+    Some(Usage::measured(p as u32, c as u32).with_cached(cached as u32))
 }
 
 impl AnthropicFold {
     pub(crate) fn feed(&mut self, ev: &Value, on_text: TextSink<'_>) -> Result<()> {
         match ev["type"].as_str().unwrap_or_default() {
             "message_start" => {
-                self.input_tokens = ev["message"]["usage"]["input_tokens"].as_u64();
+                self.start_usage = ev["message"]["usage"].clone();
             }
             "content_block_start" => {
                 let block = &ev["content_block"];
@@ -114,10 +138,7 @@ impl AnthropicFold {
                 arguments: parse_args(&json_text),
             })
             .collect();
-        let usage = match (self.input_tokens, self.output_tokens) {
-            (Some(p), Some(c)) => Usage::measured(p as u32, c as u32),
-            _ => Usage::default(),
-        };
+        let usage = anthropic_usage(&self.start_usage, self.output_tokens);
         Completion {
             content: self.content,
             tool_calls,
@@ -132,7 +153,7 @@ pub(crate) struct OpenAiFold {
     content: String,
     /// Tool calls by index: (id, name, partial arguments).
     tools: Vec<(u64, String, String, String)>,
-    usage: Option<(u64, u64)>,
+    usage: Option<Usage>,
 }
 
 impl OpenAiFold {
@@ -176,9 +197,8 @@ impl OpenAiFold {
                 }
             }
         }
-        let u = &chunk["usage"];
-        if let (Some(p), Some(c)) = (u["prompt_tokens"].as_u64(), u["completion_tokens"].as_u64()) {
-            self.usage = Some((p, c));
+        if let Some(u) = openai_usage(&chunk["usage"]) {
+            self.usage = Some(u);
         }
         Ok(())
     }
@@ -197,10 +217,7 @@ impl OpenAiFold {
                 arguments: parse_args(&args),
             })
             .collect();
-        let usage = self
-            .usage
-            .map(|(p, c)| Usage::measured(p as u32, c as u32))
-            .unwrap_or_default();
+        let usage = self.usage.unwrap_or_default();
         Completion {
             content: self.content,
             tool_calls,
@@ -324,6 +341,20 @@ mod tests {
         assert_eq!(c.tool_calls[0].name, "fs.read");
         assert_eq!(c.tool_calls[0].arguments["path"], "a.md");
         assert_eq!(c.usage, Usage::measured(120, 17));
+    }
+
+    #[test]
+    fn cached_tokens_are_part_of_the_prompt() {
+        let a = anthropic_usage(
+            &json!({"input_tokens": 20, "cache_read_input_tokens": 900, "cache_creation_input_tokens": 80}),
+            Some(12),
+        );
+        assert_eq!(a, Usage::measured(1000, 12).with_cached(900));
+        let o = openai_usage(
+            &json!({"prompt_tokens": 1500, "completion_tokens": 9, "prompt_tokens_details": {"cached_tokens": 1024}}),
+        );
+        assert_eq!(o, Some(Usage::measured(1500, 9).with_cached(1024)));
+        assert_eq!(openai_usage(&json!({})), None);
     }
 
     #[test]

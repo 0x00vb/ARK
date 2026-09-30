@@ -2,10 +2,10 @@
 //! wrapper lives here (not in wb-adapters or wb-store) so neither of those crates
 //! depends on the other — the engine is where they meet.
 
-use std::path::PathBuf;
-use ark_tools::{AdapterError, BlobResolver};
 use ark_core::ArtifactId;
 use ark_store::Store;
+use ark_tools::{AdapterError, BlobResolver};
+use std::path::PathBuf;
 
 pub struct StoreBlobs<'a>(pub &'a Store);
 

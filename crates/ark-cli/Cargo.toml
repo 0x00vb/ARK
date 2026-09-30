@@ -8,6 +8,7 @@ description = "ARK interactive terminal shell: the reusable agent REPL every ARK
 
 [dependencies]
 ark-sdk.workspace = true
+ark-interact.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true

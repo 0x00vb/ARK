@@ -45,12 +45,18 @@ impl Default for DistillerSet {
 impl DistillerSet {
     /// Empty — only the generic fallback applies.
     pub fn new() -> Self {
-        DistillerSet { distillers: Vec::new(), common: false }
+        DistillerSet {
+            distillers: Vec::new(),
+            common: false,
+        }
     }
 
     /// The default: the domain-neutral common distiller plus the generic fallback.
     pub fn with_common() -> Self {
-        DistillerSet { distillers: Vec::new(), common: true }
+        DistillerSet {
+            distillers: Vec::new(),
+            common: true,
+        }
     }
 
     /// Add a distiller (tried after earlier ones, before the common distiller and the fallback).
@@ -91,10 +97,16 @@ fn canonical(v: &serde_json::Value) -> String {
         serde_json::Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
             keys.sort();
-            let parts: Vec<String> = keys.iter().map(|k| format!("{}:{}", k, canonical(&map[*k]))).collect();
+            let parts: Vec<String> = keys
+                .iter()
+                .map(|k| format!("{}:{}", k, canonical(&map[*k])))
+                .collect();
             format!("{{{}}}", parts.join(","))
         }
-        serde_json::Value::Array(a) => format!("[{}]", a.iter().map(canonical).collect::<Vec<_>>().join(",")),
+        serde_json::Value::Array(a) => format!(
+            "[{}]",
+            a.iter().map(canonical).collect::<Vec<_>>().join(",")
+        ),
         other => other.to_string(),
     }
 }
@@ -107,7 +119,10 @@ pub fn distill(inv: &Invocation, set: &DistillerSet) -> EvidenceCard {
         set.summarize_ok(&inv.action, &inv.output)
     } else {
         (
-            format!("failed: {}", inv.error.clone().unwrap_or_else(|| "unknown error".into())),
+            format!(
+                "failed: {}",
+                inv.error.clone().unwrap_or_else(|| "unknown error".into())
+            ),
             Vec::new(),
         )
     };
@@ -131,7 +146,10 @@ fn get_u64(out: &serde_json::Value, k: &str) -> Option<u64> {
     out.get(k).and_then(|v| v.as_u64())
 }
 fn get_arr(out: &serde_json::Value, k: &str) -> Vec<serde_json::Value> {
-    out.get(k).and_then(|v| v.as_array()).cloned().unwrap_or_default()
+    out.get(k)
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// The universal shapes: file read/list/search, command execution, edits and diffs. These
@@ -143,10 +161,28 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
     let verb = action.split_once('.').map(|(_, v)| v).unwrap_or(action);
 
     Some(match verb {
-        "read" => (format!("read {} ({} lines)", s("path").unwrap_or_default(), n("lines").unwrap_or(0)), vec![s("path").unwrap_or_default()]),
+        "read" => (
+            format!(
+                "read {} ({} lines)",
+                s("path").unwrap_or_default(),
+                n("lines").unwrap_or(0)
+            ),
+            vec![s("path").unwrap_or_default()],
+        ),
         "list" | "ls" => {
-            let ids: Vec<String> = arr("entries").iter().filter_map(|v| v.as_str().map(str::to_string)).take(MAX_IDENTIFIERS).collect();
-            (format!("{} entry(ies) under {}", ids.len(), s("path").unwrap_or_default()), ids)
+            let ids: Vec<String> = arr("entries")
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .take(MAX_IDENTIFIERS)
+                .collect();
+            (
+                format!(
+                    "{} entry(ies) under {}",
+                    ids.len(),
+                    s("path").unwrap_or_default()
+                ),
+                ids,
+            )
         }
         "search" | "grep" => {
             let count = n("count").unwrap_or_else(|| arr("matches").len() as u64);
@@ -155,11 +191,17 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
                 .filter_map(|m| {
                     let p = m.get("path").and_then(|v| v.as_str())?;
                     let l = m.get("line").and_then(|v| v.as_u64());
-                    Some(match l { Some(l) => format!("{p}:{l}"), None => p.to_string() })
+                    Some(match l {
+                        Some(l) => format!("{p}:{l}"),
+                        None => p.to_string(),
+                    })
                 })
                 .take(MAX_IDENTIFIERS)
                 .collect();
-            (format!("{count} match(es) for {}", s("query").unwrap_or_default()), ids)
+            (
+                format!("{count} match(es) for {}", s("query").unwrap_or_default()),
+                ids,
+            )
         }
         "write" | "edit" | "apply" => {
             let path = s("path").unwrap_or_default();
@@ -173,20 +215,43 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
             let cmd = s("command").unwrap_or_default();
             let code = out.get("exit_code").and_then(|v| v.as_i64());
             let ok = code == Some(0);
-            let tail = s("summary").or_else(|| s("stdout_tail")).unwrap_or_default();
+            let tail = s("summary")
+                .or_else(|| s("stdout_tail"))
+                .unwrap_or_default();
             let verdict = match code {
                 Some(0) => "ok".to_string(),
                 Some(c) => format!("exit {c}"),
                 None => "ran".to_string(),
             };
-            let ids = if ok { vec![] } else { vec![format!("exit={}", code.map(|c| c.to_string()).unwrap_or_default())] };
-            (format!("{} — {verdict}{}", short(&cmd, 60), if tail.is_empty() { String::new() } else { format!(": {}", short(&tail, 100)) }), ids)
+            let ids = if ok {
+                vec![]
+            } else {
+                vec![format!(
+                    "exit={}",
+                    code.map(|c| c.to_string()).unwrap_or_default()
+                )]
+            };
+            (
+                format!(
+                    "{} — {verdict}{}",
+                    short(&cmd, 60),
+                    if tail.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {}", short(&tail, 100))
+                    }
+                ),
+                ids,
+            )
         }
         "diff" => {
             let files = n("files").unwrap_or(0);
             let added = n("added").unwrap_or(0);
             let removed = n("removed").unwrap_or(0);
-            (format!("diff: {files} file(s), +{added} -{removed}"), vec![])
+            (
+                format!("diff: {files} file(s), +{added} -{removed}"),
+                vec![],
+            )
         }
         _ => return None,
     })
@@ -201,11 +266,20 @@ pub fn generic_summary(out: &serde_json::Value) -> (String, Vec<String>) {
                 match v {
                     serde_json::Value::Array(a) => parts.push(format!("{k}={} items", a.len())),
                     serde_json::Value::String(s) => parts.push(format!("{k}={}", short(s, 40))),
-                    serde_json::Value::Number(_) | serde_json::Value::Bool(_) => parts.push(format!("{k}={v}")),
+                    serde_json::Value::Number(_) | serde_json::Value::Bool(_) => {
+                        parts.push(format!("{k}={v}"))
+                    }
                     _ => {}
                 }
             }
-            (if parts.is_empty() { "output recorded".into() } else { parts.join(", ") }, Vec::new())
+            (
+                if parts.is_empty() {
+                    "output recorded".into()
+                } else {
+                    parts.join(", ")
+                },
+                Vec::new(),
+            )
         }
         serde_json::Value::Null => ("output recorded".into(), Vec::new()),
         other => (short(&other.to_string(), 200), Vec::new()),
@@ -222,7 +296,10 @@ pub fn looks_interesting(s: &str) -> bool {
     s.contains('/')
         || s.contains('.')
         || s.contains('_')
-        || s.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false)
+        || s.chars()
+            .next()
+            .map(|c| c.is_ascii_uppercase())
+            .unwrap_or(false)
 }
 
 /// Truncate a string to `max` chars with an ellipsis. Exposed for domain distillers.
@@ -272,10 +349,24 @@ mod tests {
 
     #[test]
     fn distills_command_run_verdict() {
-        let ok = distill(&inv("shell.run", json!({}), json!({"command":"cargo build","exit_code":0})), &set());
+        let ok = distill(
+            &inv(
+                "shell.run",
+                json!({}),
+                json!({"command":"cargo build","exit_code":0}),
+            ),
+            &set(),
+        );
         assert!(ok.summary.contains("cargo build — ok"));
         assert!(ok.identifiers.is_empty());
-        let bad = distill(&inv("shell.exec", json!({}), json!({"command":"cargo test","exit_code":1,"summary":"1 failed"})), &set());
+        let bad = distill(
+            &inv(
+                "shell.exec",
+                json!({}),
+                json!({"command":"cargo test","exit_code":1,"summary":"1 failed"}),
+            ),
+            &set(),
+        );
         assert!(bad.summary.contains("exit 1"));
         assert!(bad.summary.contains("1 failed"));
         assert!(bad.identifiers.contains(&"exit=1".to_string()));
@@ -293,7 +384,14 @@ mod tests {
 
     #[test]
     fn unknown_action_uses_generic_summary() {
-        let card = distill(&inv("weird.thing", json!({}), json!({"count": 5, "items": [1,2,3], "name": "abc"})), &set());
+        let card = distill(
+            &inv(
+                "weird.thing",
+                json!({}),
+                json!({"count": 5, "items": [1,2,3], "name": "abc"}),
+            ),
+            &set(),
+        );
         assert!(card.summary.contains("count=5"));
         assert!(card.summary.contains("items=3 items"));
     }
@@ -301,7 +399,8 @@ mod tests {
     #[test]
     fn custom_distiller_wins_over_common_and_fallback() {
         let custom: Distiller = Arc::new(|action, _out| {
-            (action == "note.count").then(|| ("counted words".to_string(), vec!["1200".to_string()]))
+            (action == "note.count")
+                .then(|| ("counted words".to_string(), vec!["1200".to_string()]))
         });
         let set = DistillerSet::with_common().with(custom);
         let card = distill(&inv("note.count", json!({}), json!({"words": 1200})), &set);
@@ -319,6 +418,9 @@ mod tests {
         assert_eq!(set.summarize_ok("book.list", &out).0, "4 chapters");
         // Unclaimed shapes still reach the common distiller.
         let files = serde_json::json!({ "path": ".", "entries": ["a", "b"] });
-        assert!(set.summarize_ok("fs.list", &files).0.contains("2 entry(ies)"));
+        assert!(set
+            .summarize_ok("fs.list", &files)
+            .0
+            .contains("2 entry(ies)"));
     }
 }

@@ -26,6 +26,9 @@ pub struct ContextReport {
     pub task: u32,
     /// This turn's tool calls and distilled results still inside the window.
     pub tool_rounds: u32,
+    /// Evidence and knowledge the agent looked up this turn, still inside the window.
+    #[serde(default)]
+    pub retrieved: u32,
     /// Rounds dropped from the window on this request (their evidence stays retrievable).
     pub compressed_rounds: usize,
     /// Tool schemas sent alongside the prompt (meta-tools plus loaded actions). Reported
@@ -51,6 +54,7 @@ impl ContextReport {
             ("Workspace", self.workspace),
             ("Task", self.task),
             ("Tool results", self.tool_rounds),
+            ("Retrieved context", self.retrieved),
         ]
     }
 }

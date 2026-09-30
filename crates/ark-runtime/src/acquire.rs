@@ -23,11 +23,17 @@ pub struct AcquisitionResult {
 impl AcquisitionResult {
     /// A read-only result — nothing changed (a plan, a listing, a "needs approval").
     pub fn info(summary: impl Into<String>) -> Self {
-        AcquisitionResult { summary: summary.into(), changed: false }
+        AcquisitionResult {
+            summary: summary.into(),
+            changed: false,
+        }
     }
     /// A result that reflects a real environment change (a provider was acquired).
     pub fn changed(summary: impl Into<String>) -> Self {
-        AcquisitionResult { summary: summary.into(), changed: true }
+        AcquisitionResult {
+            summary: summary.into(),
+            changed: true,
+        }
     }
 }
 

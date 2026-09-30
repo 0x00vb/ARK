@@ -15,7 +15,11 @@ pub enum AdapterError {
     ToolUnavailable { tool: String, detail: String },
 
     #[error("tool `{tool}` failed (exit {code}): {stderr}")]
-    ToolFailed { tool: String, code: i32, stderr: String },
+    ToolFailed {
+        tool: String,
+        code: i32,
+        stderr: String,
+    },
 
     #[error("parse error: {0}")]
     Parse(String),
@@ -32,6 +36,9 @@ pub enum AdapterError {
 
 impl AdapterError {
     pub fn bad_input(action: &str, detail: impl Into<String>) -> Self {
-        AdapterError::BadInput { action: action.into(), detail: detail.into() }
+        AdapterError::BadInput {
+            action: action.into(),
+            detail: detail.into(),
+        }
     }
 }

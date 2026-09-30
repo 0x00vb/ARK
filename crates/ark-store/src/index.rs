@@ -50,7 +50,13 @@ impl SearchIndex {
         Ok(SearchIndex {
             index,
             writer: Mutex::new(writer),
-            f: Fields { project_id, artifact_id, name, kind, body },
+            f: Fields {
+                project_id,
+                artifact_id,
+                name,
+                kind,
+                body,
+            },
         })
     }
 

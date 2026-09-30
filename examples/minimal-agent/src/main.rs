@@ -31,11 +31,25 @@ impl Adapter for Calc {
                 "properties": { "expr": { "type": "string", "description": "e.g. '12 + 30' or '6 * 7'" } }
             }))]
     }
-    async fn run(&self, _action: &str, input: serde_json::Value, _ctx: &RunCtx<'_>) -> ark_tools::Result<ActionOutput> {
-        let expr = input.get("expr").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    async fn run(
+        &self,
+        _action: &str,
+        input: serde_json::Value,
+        _ctx: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        let expr = input
+            .get("expr")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
         match eval(&expr) {
-            Some(value) => Ok(ActionOutput::json(serde_json::json!({ "expr": expr, "value": value }))),
-            None => Ok(ActionOutput::json(serde_json::json!({ "expr": expr, "error": "could not parse; use '<number> <+|-|*|/> <number>'" }))),
+            Some(value) => Ok(ActionOutput::json(
+                serde_json::json!({ "expr": expr, "value": value }),
+            )),
+            None => Ok(ActionOutput::json(
+                serde_json::json!({ "expr": expr, "error": "could not parse; use '<number> <+|-|*|/> <number>'" }),
+            )),
         }
     }
 }
@@ -49,10 +63,19 @@ impl Adapter for Clock {
         "clock"
     }
     fn actions(&self) -> Vec<ActionDescriptor> {
-        vec![ActionDescriptor::new("clock.now", "get the current Unix timestamp (seconds)", RiskTier::Read)
-            .with_capabilities([Capability::new("time")])]
+        vec![ActionDescriptor::new(
+            "clock.now",
+            "get the current Unix timestamp (seconds)",
+            RiskTier::Read,
+        )
+        .with_capabilities([Capability::new("time")])]
     }
-    async fn run(&self, _action: &str, _input: serde_json::Value, _ctx: &RunCtx<'_>) -> ark_tools::Result<ActionOutput> {
+    async fn run(
+        &self,
+        _action: &str,
+        _input: serde_json::Value,
+        _ctx: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -80,7 +103,10 @@ fn eval(expr: &str) -> Option<f64> {
 }
 
 /// Build the agent. This is the whole wiring: two tools, a persona, a capability catalog.
-fn build_ark(store_root: impl Into<std::path::PathBuf>, provider: Arc<dyn ark_model::Provider>) -> Result<Ark, ArkError> {
+fn build_ark(
+    store_root: impl Into<std::path::PathBuf>,
+    provider: Arc<dyn ark_model::Provider>,
+) -> Result<Ark, ArkError> {
     let profile = AgentProfile::builder()
         .instructions(
             "You are a precise assistant that answers arithmetic and time questions by calling tools, \
@@ -106,23 +132,42 @@ fn build_ark(store_root: impl Into<std::path::PathBuf>, provider: Arc<dyn ark_mo
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let task = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
-    let task = if task.is_empty() { "what is 6 * 7?".to_string() } else { task };
+    let task = if task.is_empty() {
+        "what is 6 * 7?".to_string()
+    } else {
+        task
+    };
 
     let provider = ark_model::from_env_arc()?;
     let ark = build_ark("./minimal-agent-workspace", provider)?;
     let project = ark.create_project("scratch", "arithmetic and time")?;
 
-    println!("model: {}\n", ark.profile().prompts.instructions.lines().next().unwrap_or(""));
+    println!(
+        "model: {}\n",
+        ark.profile()
+            .prompts
+            .instructions
+            .lines()
+            .next()
+            .unwrap_or("")
+    );
     let outcome = ark
         .ask_with(&project.id, &task, |ev| {
-            if let HarnessEvent::ToolResult { action, summary, .. } = ev {
+            if let HarnessEvent::ToolResult {
+                action, summary, ..
+            } = ev
+            {
                 eprintln!("  · {action}: {summary}");
             }
         })
         .await?;
 
     println!("\n{}", outcome.answer);
-    println!("\n[{} tokens, {} tool call(s)]", outcome.metrics.total_tokens(), outcome.metrics.tool_calls);
+    println!(
+        "\n[{} tokens, {} tool call(s)]",
+        outcome.metrics.total_tokens(),
+        outcome.metrics.tool_calls
+    );
     Ok(())
 }
 
@@ -143,10 +188,22 @@ mod tests {
     async fn agent_uses_the_calculator_end_to_end() {
         let dir = tempfile::tempdir().unwrap();
         // Script the model: call calc.eval(6*7), then answer.
-        let call = ToolCall { id: "c1".into(), name: "calc.eval".into(), arguments: serde_json::json!({ "expr": "6 * 7" }) };
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "calc.eval".into(),
+            arguments: serde_json::json!({ "expr": "6 * 7" }),
+        };
         let script = vec![
-            Completion { content: String::new(), tool_calls: vec![call], usage: Usage::measured(80, 8) },
-            Completion { content: "6 * 7 = 42 [inv:1].".into(), tool_calls: vec![], usage: Usage::measured(90, 9) },
+            Completion {
+                content: String::new(),
+                tool_calls: vec![call],
+                usage: Usage::measured(80, 8),
+            },
+            Completion {
+                content: "6 * 7 = 42 [inv:1].".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(90, 9),
+            },
         ];
         let provider: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new("mock", script));
         let ark = build_ark(dir.path(), provider).unwrap();

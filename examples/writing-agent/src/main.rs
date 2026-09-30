@@ -17,8 +17,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use ark_cli::ark_interact::report::{Cell, Row, Table, Tone};
+use ark_cli::ark_interact::App;
 use ark_cli::{
-    Accent, ActivityLabels, ArkCli, Command, CommandContext, CommandOutcome, Theme, ToolRenderer,
+    Accent, ActivityLabels, ArkCli, Command, Interaction, Reply, Report, Theme, ToolLabeler,
 };
 use ark_sdk::prelude::*;
 
@@ -436,36 +438,31 @@ impl Command for ManuscriptCmd {
     fn group(&self) -> &str {
         "Writing"
     }
-    async fn run(
-        &self,
-        ctx: &mut CommandContext<'_>,
-        _args: &str,
-    ) -> anyhow::Result<CommandOutcome> {
-        let ws = ctx.engine().workspace_dir(&ctx.project().id)?;
+    async fn run(&self, ix: &mut Interaction, _args: &str) -> anyhow::Result<Reply> {
+        let ws = ix.engine().workspace_dir(&ix.project().id)?;
         let files = chapter_files(&ws);
-        ctx.heading(&format!(
-            "{} · {} chapters",
-            ctx.project().name,
-            files.len()
-        ));
+        let mut t = Table::plain(3).right(1);
         let mut total = 0;
         for p in &files {
             let text = std::fs::read_to_string(p).unwrap_or_default();
             let w = word_count(&text);
             total += w;
-            let row = format!(
-                "{:<18}{:>7} words  {}",
-                file_name(p),
-                w,
-                ctx.theme().dim(&title(&text))
-            );
-            ctx.line(format!("  {row}"));
+            t.push(Row {
+                cells: vec![
+                    Cell::new(file_name(p), Tone::Normal),
+                    Cell::new(format!("{w} words"), Tone::Normal),
+                    Cell::new(title(&text), Tone::Muted),
+                ],
+                tone: Tone::Normal,
+                command: Some(format!("/chapter {}", file_name(p))),
+            });
         }
-        ctx.line(
-            ctx.theme()
-                .dim(&format!("  {total} words in {}", ws.display())),
-        );
-        Ok(CommandOutcome::Continue)
+        Ok(
+            Report::titled(format!("{} · {} chapters", ix.project().name, files.len()))
+                .table(t)
+                .note(format!("{total} words in {}", ws.display()))
+                .into(),
+        )
     }
 }
 
@@ -485,20 +482,14 @@ impl Command for ChapterCmd {
     fn group(&self) -> &str {
         "Writing"
     }
-    async fn run(
-        &self,
-        ctx: &mut CommandContext<'_>,
-        args: &str,
-    ) -> anyhow::Result<CommandOutcome> {
-        let ws = ctx.engine().workspace_dir(&ctx.project().id)?;
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let ws = ix.engine().workspace_dir(&ix.project().id)?;
         let Some(file) = find_chapter(&ws, args) else {
-            ctx.line(
-                ctx.theme()
-                    .yellow("Which chapter? e.g. /chapter 4 (see /manuscript)"),
-            );
-            return Ok(CommandOutcome::Continue);
+            return Ok(Report::new()
+                .warning("Which chapter? e.g. /chapter 4 (see /manuscript)")
+                .into());
         };
-        Ok(CommandOutcome::Submit(format!(
+        Ok(Reply::submit(format!(
             "Read {file} and give me a short developmental assessment: what the chapter does, how the pacing and voice work, and the one change that would help most."
         )))
     }
@@ -520,19 +511,16 @@ impl Command for StyleCmd {
     fn group(&self) -> &str {
         "Writing"
     }
-    async fn run(
-        &self,
-        ctx: &mut CommandContext<'_>,
-        args: &str,
-    ) -> anyhow::Result<CommandOutcome> {
-        let ws = ctx.engine().workspace_dir(&ctx.project().id)?;
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let ws = ix.engine().workspace_dir(&ix.project().id)?;
         let input = match find_chapter(&ws, args) {
             Some(f) => serde_json::json!({ "file": f }),
             None => serde_json::json!({}),
         };
-        let inv = ctx.run_action("craft.voice", input, false).await?;
+        // The person typed the command, so this is their call, recorded like any other.
+        let inv = ix.run_action("craft.voice", input, false).await?;
         let o = &inv.output;
-        ctx.heading(if args.is_empty() {
+        let mut r = Report::titled(if args.is_empty() {
             "Voice · whole manuscript"
         } else {
             "Voice"
@@ -544,15 +532,18 @@ impl Command for StyleCmd {
             "dialogue_per_paragraph",
             "words",
         ] {
-            ctx.row(&key.replace('_', " "), o[key].to_string().trim_matches('"'));
+            r = r.field(
+                key.replace('_', " "),
+                o[key].to_string().trim_matches('"').to_string(),
+            );
         }
-        Ok(CommandOutcome::Continue)
+        Ok(r.into())
     }
 }
 
 /// Show a save as the file it touches and how big the new text is.
-struct SaveRenderer;
-impl ToolRenderer for SaveRenderer {
+struct SaveLabels;
+impl ToolLabeler for SaveLabels {
     fn approval(&self, r: &ApprovalRequest) -> Option<String> {
         (r.action == "manuscript.save").then(|| {
             let words = word_count(r.input["text"].as_str().unwrap_or(""));
@@ -604,24 +595,30 @@ async fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
-    ArkCli::builder()
-        .name("Writer")
+    let app = App::new("Writer")
         .tagline("a developmental editor that reads your manuscript before it opines")
         .ark(ark)
         .project(manuscript_project)
-        .theme(Theme::default().accent(Accent::Magenta).prompt("✎ "))
         .help("Ask about your manuscript in plain words: pacing, continuity, voice, a rewrite.\nThe editor reads the chapters first and asks before saving anything.")
         .command(Arc::new(ManuscriptCmd))
         .command(Arc::new(ChapterCmd))
         .command(Arc::new(StyleCmd))
         .labels(labels())
-        .renderer(Arc::new(SaveRenderer))
+        .labeler(Arc::new(SaveLabels))
         .status_section("Manuscript", |ark, project| {
-            let ws = ark.engine().workspace_dir(&project.id).ok()?;
+            let Ok(ws) = ark.engine().workspace_dir(&project.id) else {
+                return Vec::new();
+            };
             let files = chapter_files(&ws);
             let words: u64 = files.iter().filter_map(|p| std::fs::read_to_string(p).ok()).map(|t| word_count(&t)).sum();
-            Some(format!("{} chapters · {words} words · {}", files.len(), ws.display()))
-        })
+            Report::new()
+                .field("chapters", files.len().to_string())
+                .field("words", words.to_string())
+                .field("folder", ws.display().to_string())
+                .blocks
+        });
+    ArkCli::new(app)
+        .theme(Theme::default().accent(Accent::Magenta).prompt("✎ "))
         .run()
         .await
 }

@@ -59,12 +59,18 @@ impl ModelRouter {
     /// A cheap clone that shares the same underlying providers (the `Arc`s are cloned, not the
     /// models). Lets a facade hand a fresh router to each `Harness` run.
     pub fn clone_view(&self) -> ModelRouter {
-        ModelRouter { fast: self.fast.clone(), strong: self.strong.clone() }
+        ModelRouter {
+            fast: self.fast.clone(),
+            strong: self.strong.clone(),
+        }
     }
 
     /// Both tiers share one provider (a single-model setup).
     pub fn single(provider: Arc<dyn Provider>) -> Self {
-        ModelRouter { fast: provider.clone(), strong: provider }
+        ModelRouter {
+            fast: provider.clone(),
+            strong: provider,
+        }
     }
 
     /// Build from the environment. Falls back to the default provider for whichever
@@ -95,7 +101,11 @@ impl ModelRouter {
         if Arc::ptr_eq(&self.fast, &self.strong) {
             format!("{} (single tier)", self.strong.describe())
         } else {
-            format!("fast={} · strong={}", self.fast.describe(), self.strong.describe())
+            format!(
+                "fast={} · strong={}",
+                self.fast.describe(),
+                self.strong.describe()
+            )
         }
     }
 
@@ -112,7 +122,9 @@ fn tier_from_env(suffix: &str) -> Option<Result<Arc<dyn Provider>, ProviderError
     match (provider, model) {
         (None, None) => None,
         (p, m) => {
-            let which = p.unwrap_or_else(|| std::env::var("ARK_PROVIDER").unwrap_or_else(|_| "ollama".into()));
+            let which = p.unwrap_or_else(|| {
+                std::env::var("ARK_PROVIDER").unwrap_or_else(|_| "ollama".into())
+            });
             Some(ark_model::build(&which, m))
         }
     }

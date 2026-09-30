@@ -22,7 +22,7 @@ use ark_core::{
     InvocationStatus, Note, NoteKind, ProjectId, ResearchState, RiskTier, WorkspaceContext,
 };
 use ark_model::{estimate_tokens, Completion, Message, ToolDef, Usage};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::approval::{preview_call, ApprovalDecision, ApprovalGate, ApprovalRequest};
@@ -36,11 +36,12 @@ use crate::error::AgentError;
 use crate::metrics::{role_name, Metrics};
 use crate::profile::AgentProfile;
 use crate::router::{ModelRouter, Role};
+use crate::steer::{self, Steering};
 
 /// Events emitted as the harness works. They describe *what happened*, never how to show it:
 /// a terminal, a GUI, a JSON log and a test all consume the same stream. Every event is owned
 /// and serializable so it can cross a channel or a process boundary.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HarnessEvent {
     Classified {
@@ -82,6 +83,10 @@ pub enum HarnessEvent {
         invocation: String,
         duration_ms: Option<i64>,
         error: Option<String>,
+        /// Estimated tokens this result adds to the model's context: the distilled card, not
+        /// the raw output (which stays in the store).
+        #[serde(default)]
+        context_tokens: u32,
     },
     Duplicate {
         action: String,
@@ -124,6 +129,10 @@ pub enum HarnessEvent {
         passed: bool,
         detail: String,
     },
+    /// A message the user sent while the turn was running reached the model.
+    Steered {
+        text: String,
+    },
     /// The turn was cancelled; no answer follows.
     Cancelled,
     /// The final answer. `streamed` is true when its text already arrived as `TextDelta`s.
@@ -132,6 +141,10 @@ pub enum HarnessEvent {
         streamed: bool,
     },
 }
+
+/// Items per working-state section the model sees on each request. Older items stay stored
+/// and are counted as `(+n more)`.
+pub const STATE_DIGEST_ITEMS: usize = 6;
 
 pub struct HarnessOutcome {
     pub answer: String,
@@ -142,6 +155,8 @@ pub struct HarnessOutcome {
     pub state: ResearchState,
     /// True when the run stopped on a [`CancelToken`]; `answer` is then empty.
     pub cancelled: bool,
+    /// Messages the user sent while the turn ran that reached the model, in order.
+    pub steered: Vec<String>,
 }
 
 impl HarnessOutcome {
@@ -163,6 +178,7 @@ pub struct Harness {
     conversation: Option<String>,
     approvals: Option<Arc<ApprovalGate>>,
     cancel: Option<CancelToken>,
+    steer: Option<Steering>,
 }
 
 /// The pieces of the first user message, kept separate so the context report can attribute
@@ -206,6 +222,7 @@ impl Harness {
             conversation: None,
             approvals: None,
             cancel: None,
+            steer: None,
         }
     }
 
@@ -249,6 +266,11 @@ impl Harness {
     /// Stop cooperatively when this token is cancelled.
     pub fn cancel(mut self, token: Option<CancelToken>) -> Self {
         self.cancel = token;
+        self
+    }
+    /// Take messages the user sends while the turn runs (see [`Steering`]).
+    pub fn steering(mut self, steer: Option<Steering>) -> Self {
+        self.steer = steer;
         self
     }
     pub fn describe(&self) -> String {
@@ -335,6 +357,9 @@ impl Harness {
         let first_tokens = estimate_tokens(&first_text) + 4;
         let mut ws = WorkingSet::new(self.budget);
         ws.push_round(vec![Message::user(first_text)]);
+        // Tokens of retrieval results (evidence lookups, knowledge search) per round, aligned
+        // with the working set's rounds, so the context report can show them apart.
+        let mut retrieved: Vec<u32> = vec![0];
 
         let mut cited: Vec<InvocationId> = Vec::new();
         let mut answer = String::new();
@@ -347,6 +372,7 @@ impl Harness {
         const STALL_STEER: u32 = 3;
         const STALL_MAX: u32 = 5;
         let mut stall: u32 = 0;
+        let mut steered: Vec<String> = Vec::new();
 
         for _ in 0..self.max_steps {
             if cancelled || self.is_cancelled() {
@@ -361,7 +387,7 @@ impl Harness {
                 + metrics.retrievals
                 + loaded.len() as u32;
 
-            let state_digest = state.digest(6);
+            let state_digest = state.digest(STATE_DIGEST_ITEMS);
             let system =
                 format!("{static_system}\n\n{index}\n\n== WORKING STATE ==\n{state_digest}");
             let (messages, est) = ws.assemble(&system);
@@ -376,6 +402,7 @@ impl Harness {
                 &first,
                 first_tokens,
                 &ws,
+                &retrieved,
                 est,
                 &tools,
                 loaded.len(),
@@ -400,12 +427,24 @@ impl Harness {
             };
 
             if completion.tool_calls.is_empty() {
+                // The user said more while this answer was being written: treat the text as
+                // narration and keep going with their message.
+                let late = steer::drain(&self.steer);
+                if !late.is_empty() {
+                    let mut round = vec![Message::assistant(completion.content.clone())];
+                    self.deliver_steering(late, &mut round, &mut steered, &mut on_event);
+                    ws.push_round(round);
+                    retrieved.push(0);
+                    stall = 0;
+                    continue;
+                }
                 answer = completion.content.trim().to_string();
                 streamed = !answer.is_empty();
                 break;
             }
 
             let mut round = vec![Message::assistant_tool_calls(completion.tool_calls.clone())];
+            let mut round_retrieved = 0u32;
 
             for call in &completion.tool_calls {
                 if self.is_cancelled() {
@@ -425,6 +464,9 @@ impl Harness {
                             &mut on_event,
                         )
                         .await?;
+                    if catalog::is_retrieval(&call.name) {
+                        round_retrieved += estimate_tokens(&result) + 4;
+                    }
                     round.push(Message::tool_result(call, result));
                     continue;
                 }
@@ -478,10 +520,19 @@ impl Harness {
                 // state-changing call is never deduplicated: running it again is the point.
                 let digest = call_digest(&call.name, &call.arguments);
                 if desc.risk != RiskTier::Mutate {
-                    let reuse = engine
-                        .store
-                        .find_card_by_digest(project, &digest)?
-                        .filter(|card| card.created_at >= turn_started || reusable_across_turns(engine, project, &desc, &call.arguments));
+                    let reuse =
+                        engine
+                            .store
+                            .find_card_by_digest(project, &digest)?
+                            .filter(|card| {
+                                card.created_at >= turn_started
+                                    || reusable_across_turns(
+                                        engine,
+                                        project,
+                                        &desc,
+                                        &call.arguments,
+                                    )
+                            });
                     if let Some(existing) = reuse {
                         metrics.record_duplicate();
                         let reused = existing.reference_line();
@@ -511,6 +562,7 @@ impl Harness {
                 metrics.record_card_created();
                 cited.push(inv.id.clone());
 
+                let model_text = card_for_model(&card);
                 on_event(HarnessEvent::ToolResult {
                     id: call.id.clone(),
                     action: call.name.clone(),
@@ -519,8 +571,10 @@ impl Harness {
                     invocation: inv.id.as_str().to_string(),
                     duration_ms: inv.duration_ms(),
                     error: inv.error.clone(),
+                    // The same per-message estimate the working set budgets with.
+                    context_tokens: estimate_tokens(&model_text) + 4,
                 });
-                round.push(Message::tool_result(call, card_for_model(&card)));
+                round.push(Message::tool_result(call, model_text));
             }
 
             if cancelled {
@@ -531,7 +585,11 @@ impl Harness {
                 + metrics.state_updates
                 + metrics.retrievals
                 + loaded.len() as u32;
-            if progress_after > progress_before {
+            let late = steer::drain(&self.steer);
+            if !late.is_empty() {
+                self.deliver_steering(late, &mut round, &mut steered, &mut on_event);
+                stall = 0;
+            } else if progress_after > progress_before {
                 stall = 0;
             } else {
                 stall += 1;
@@ -544,6 +602,7 @@ impl Harness {
                 }
             }
             ws.push_round(round);
+            retrieved.push(round_retrieved);
             if stall >= STALL_MAX {
                 break;
             }
@@ -562,6 +621,7 @@ impl Harness {
                 metrics,
                 state,
                 cancelled: true,
+                steered,
             });
         }
 
@@ -593,6 +653,7 @@ impl Harness {
                         metrics,
                         state,
                         cancelled: true,
+                        steered,
                     });
                 }
             }
@@ -648,6 +709,7 @@ impl Harness {
             metrics,
             state,
             cancelled: false,
+            steered,
         })
     }
 
@@ -681,7 +743,7 @@ impl Harness {
         let first_tokens = estimate_tokens(&first_text) + 4;
         let mut ws = WorkingSet::new(self.budget);
         ws.push_round(vec![Message::user(first_text)]);
-        let state_digest = state.digest(6);
+        let state_digest = state.digest(STATE_DIGEST_ITEMS);
         let system = format!("{static_system}\n\n{index}\n\n== WORKING STATE ==\n{state_digest}");
         let (_, est) = ws.assemble(&system);
         let loaded: HashSet<String> = profile
@@ -704,6 +766,7 @@ impl Harness {
             &first,
             first_tokens,
             &ws,
+            &[0],
             est,
             &tools,
             loaded.len(),
@@ -721,6 +784,7 @@ impl Harness {
         first: &FirstTurn,
         first_tokens: u32,
         ws: &WorkingSet,
+        retrieved: &[u32],
         total: u32,
         tools: &[ToolDef],
         loaded: usize,
@@ -750,9 +814,12 @@ impl Harness {
         } else {
             0
         };
+        // Rounds before `last_compressed` were dropped from this request.
+        let retrieved: u32 = retrieved.iter().skip(ws.last_compressed).sum();
         let tool_rounds = total
             .saturating_sub(system_total)
-            .saturating_sub(first_kept);
+            .saturating_sub(first_kept)
+            .saturating_sub(retrieved);
         let tool_schemas = tools
             .iter()
             .map(|t| {
@@ -771,11 +838,29 @@ impl Harness {
             workspace,
             task,
             tool_rounds,
+            retrieved,
             compressed_rounds: ws.last_compressed,
             tool_schemas,
             loaded_actions: loaded,
             total,
             budget: self.budget,
+        }
+    }
+
+    /// Hand the user's mid-turn messages to the model at the end of `round`.
+    fn deliver_steering(
+        &self,
+        texts: Vec<String>,
+        round: &mut Vec<Message>,
+        steered: &mut Vec<String>,
+        on_event: &mut impl FnMut(HarnessEvent),
+    ) {
+        for text in texts {
+            round.push(Message::user(format!(
+                "The user added this while you were working. Take it into account and continue:\n{text}"
+            )));
+            on_event(HarnessEvent::Steered { text: text.clone() });
+            steered.push(text);
         }
     }
 
@@ -1313,12 +1398,22 @@ impl Harness {
 /// Whether evidence from an earlier turn still answers this call. Workspace files and external
 /// systems change between turns, so only calls on fixed data qualify: an action declared
 /// reusable, or one that names a content-addressed artifact (its bytes can never change).
-fn reusable_across_turns(engine: &Engine, project: &ProjectId, desc: &ark_core::ActionDescriptor, input: &serde_json::Value) -> bool {
+fn reusable_across_turns(
+    engine: &Engine,
+    project: &ProjectId,
+    desc: &ark_core::ActionDescriptor,
+    input: &serde_json::Value,
+) -> bool {
     if desc.reusable {
         return true;
     }
     match input.get("artifact").and_then(|a| a.as_str()) {
-        Some(id) => engine.store.resolve_artifact(project, id).ok().flatten().is_some(),
+        Some(id) => engine
+            .store
+            .resolve_artifact(project, id)
+            .ok()
+            .flatten()
+            .is_some(),
         None => false,
     }
 }

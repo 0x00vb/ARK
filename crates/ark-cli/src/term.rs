@@ -172,30 +172,6 @@ impl Drop for RawMode {
     }
 }
 
-/// Clip to `max` characters on one line.
-pub fn clip(s: &str, max: usize) -> String {
-    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() <= max {
-        flat
-    } else {
-        format!(
-            "{}…",
-            flat.chars().take(max.saturating_sub(1)).collect::<String>()
-        )
-    }
-}
-
-/// `12345` → `12.3k`.
-pub fn tokens(n: u64) -> String {
-    if n >= 10_000 {
-        format!("{:.0}k", n as f64 / 1000.0)
-    } else if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1000.0)
-    } else {
-        n.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,12 +210,5 @@ mod tests {
             String::from_utf8(buf.0.lock().unwrap().clone()).unwrap(),
             "partial\nnext\n"
         );
-    }
-
-    #[test]
-    fn token_formatting() {
-        assert_eq!(tokens(950), "950");
-        assert_eq!(tokens(1840), "1.8k");
-        assert_eq!(tokens(64_000), "64k");
     }
 }

@@ -1,27 +1,27 @@
-//! Turning tool calls into human activity lines. The runtime reports `manuscript.read` with a
-//! JSON input; a person wants to read "Reading chapter-04.md". A consumer can label its own
-//! actions; everything else gets a readable default derived from the action name and its
-//! main argument.
+//! Turning tool calls into words a person reads. The runtime reports `manuscript.read` with a
+//! JSON input; a person wants "Reading chapter-04.md". A consumer labels its own actions;
+//! everything else gets a readable default from the action name and its main argument.
+//! Every front-end uses the same labels.
 
 use std::sync::Arc;
 
 use ark_sdk::prelude::ApprovalRequest;
 use serde_json::Value;
 
-use crate::term::clip;
+use crate::fmt::clip;
 
-/// Custom rendering for a consumer's tools. Every method is optional; `None` falls back to the
-/// default rendering.
-pub trait ToolRenderer: Send + Sync {
-    /// The activity line for a call, e.g. `Reading chapter-04.md`.
+/// Custom wording for a consumer's tools. Every method is optional; `None` falls back to the
+/// default.
+pub trait ToolLabeler: Send + Sync {
+    /// The activity label for a call, e.g. `Reading chapter-04.md`.
     fn call(&self, _action: &str, _input: &Value) -> Option<String> {
         None
     }
-    /// The detail line under a finished call. `summary` is the runtime's distilled result.
+    /// The one-line result under a finished call. `summary` is the runtime's distilled result.
     fn result(&self, _action: &str, _ok: bool, _summary: &str) -> Option<String> {
         None
     }
-    /// The one-line call shown in an approval prompt, e.g. `cargo test --workspace`.
+    /// The one-line call shown when asking for approval, e.g. `$ cargo test --workspace`.
     fn approval(&self, _request: &ApprovalRequest) -> Option<String> {
         None
     }
@@ -51,7 +51,7 @@ impl ActivityLabels {
         self
     }
 
-    /// Label every action in a namespace: `.namespace("device", |_| "Talking to the device".into())`.
+    /// Label every action in a namespace: `.namespace("notes", |_| "Reading notes".into())`.
     pub fn namespace(
         mut self,
         ns: impl Into<String>,
@@ -79,42 +79,64 @@ impl ActivityLabels {
     }
 }
 
-impl ToolRenderer for ActivityLabels {
+impl ToolLabeler for ActivityLabels {
     fn call(&self, action: &str, input: &Value) -> Option<String> {
         self.find(action).map(|f| f(input))
     }
 }
 
-/// The renderer chain a shell uses: consumer renderers first, then the default.
+/// The labeler chain an app uses: consumer labelers first, then the defaults.
 #[derive(Clone, Default)]
-pub struct Activity {
-    renderers: Vec<Arc<dyn ToolRenderer>>,
+pub struct Labels {
+    labelers: Vec<Arc<dyn ToolLabeler>>,
 }
 
-impl Activity {
-    pub(crate) fn new(renderers: Vec<Arc<dyn ToolRenderer>>) -> Self {
-        Activity { renderers }
+impl Labels {
+    pub fn new(labelers: Vec<Arc<dyn ToolLabeler>>) -> Self {
+        Labels { labelers }
     }
 
     pub fn call_label(&self, action: &str, input: &Value) -> String {
-        self.renderers
+        self.labelers
             .iter()
             .find_map(|r| r.call(action, input))
             .unwrap_or_else(|| default_label(action, input))
     }
 
     pub fn result_detail(&self, action: &str, ok: bool, summary: &str) -> String {
-        self.renderers
+        self.labelers
             .iter()
             .find_map(|r| r.result(action, ok, summary))
             .unwrap_or_else(|| summary.lines().next().unwrap_or("").to_string())
     }
 
     pub fn approval_line(&self, request: &ApprovalRequest) -> String {
-        self.renderers
+        self.labelers
             .iter()
             .find_map(|r| r.approval(request))
             .unwrap_or_else(|| request.preview.clone())
+    }
+
+    /// A retrieval meta-tool (`search_evidence "x"`, `get_evidence inv:…`) in words.
+    pub fn retrieval_label(&self, what: &str) -> String {
+        if what.starts_with("search_knowledge") {
+            "Consulting background knowledge"
+        } else if what.starts_with("search_evidence") {
+            "Searching gathered evidence"
+        } else {
+            "Recalling evidence"
+        }
+        .to_string()
+    }
+
+    /// A capability meta-tool in words.
+    pub fn capability_label(&self, action: &str) -> String {
+        match action {
+            "find_capability" => "Looking for a capability",
+            "propose_capability" => "Proposing a capability",
+            _ => "Acquiring a capability",
+        }
+        .to_string()
     }
 }
 
@@ -155,15 +177,13 @@ const VERBS: &[(&[&str], &str)] = &[
     (&["delete", "remove", "rm"], "Deleting"),
     (&["create", "new", "make", "init"], "Creating"),
     (&["trace", "watch", "monitor"], "Tracing"),
-    (&["decompile"], "Decompiling"),
-    (&["disassemble", "disasm"], "Disassembling"),
     (
         &["analyze", "analyse", "triage", "check", "scan"],
         "Analyzing",
     ),
     (&["compare", "diff"], "Comparing"),
     (&["summarize", "summary"], "Summarizing"),
-    (&["extract", "strings"], "Extracting"),
+    (&["extract"], "Extracting"),
 ];
 
 /// A readable label from an action name and its input: `continuity.search {"term":"locket"}`
@@ -255,15 +275,15 @@ mod tests {
             .label("manuscript.save", |i| {
                 format!("Saving {}", i["file"].as_str().unwrap_or("?"))
             })
-            .namespace("device", |_| "Talking to the device".into());
-        let a = Activity::new(vec![Arc::new(labels)]);
+            .namespace("notes", |_| "Working in the notes".into());
+        let a = Labels::new(vec![Arc::new(labels)]);
         assert_eq!(
             a.call_label("manuscript.save", &json!({ "file": "ch4.md" })),
             "Saving ch4.md"
         );
         assert_eq!(
-            a.call_label("device.ps", &json!({})),
-            "Talking to the device"
+            a.call_label("notes.tidy", &json!({})),
+            "Working in the notes"
         );
         assert_eq!(
             a.call_label("manuscript.read", &json!({ "file": "x" })),

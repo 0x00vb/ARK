@@ -6,31 +6,32 @@
 //!
 //! ```ignore
 //! use ark_cli::{ArkCli, Accent, Theme};
+//! use ark_interact::App;
 //!
 //! #[tokio::main]
 //! async fn main() -> std::process::ExitCode {
-//!     ArkCli::builder()
-//!         .name("Writer")
+//!     let app = App::new("Writer")
 //!         .tagline("a developmental editor for your novel")
 //!         .ark(build_ark()?)                       // tools + AgentProfile + model
 //!         .project(|ark| ark.find_or_create_project("my-novel", ""))
+//!         .command(std::sync::Arc::new(ChapterCommand));
+//!     ArkCli::new(app)
 //!         .theme(Theme::default().accent(Accent::Magenta).prompt("✎ "))
-//!         .command(std::sync::Arc::new(ChapterCommand))
 //!         .run()
 //!         .await
 //! }
 //! ```
 //!
-//! The runtime never learns about the terminal. The shell hands it a cancel token, an
-//! approval gate and an event callback; everything visual happens here.
+//! The app (agent, commands, labels, status) is an `ark_interact::App`; the same value can
+//! open in `ark-ui` instead. This crate adds only the terminal: line editing, the activity
+//! view, the approval menu, colour. The runtime never learns about the terminal.
 
-mod activity;
 mod app;
 mod approval;
-mod commands;
 mod driver;
 mod headless;
 mod markdown;
+mod render;
 mod shell;
 mod term;
 mod theme;
@@ -40,17 +41,20 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ark_interact::{App, ChannelApprover, Start};
 use ark_sdk::prelude::*;
 
-pub use activity::{default_label, ActivityLabels, ToolRenderer};
-pub use app::{EventHook, TurnRecord, Welcome};
-pub use commands::{Command, CommandContext, CommandOutcome};
+pub use app::{EventHook, Welcome};
 pub use markdown::MdStream;
+pub use render::render;
 pub use term::Out;
 pub use theme::{Accent, Glyphs, Theme};
+// The shared interaction layer, so a CLI app can import everything from here.
+pub use ark_interact::{
+    self, ActivityLabels, Block, Command, Effect, Interaction, Reply, Report, Tone, ToolLabeler,
+};
 
 use app::{Config, ShellState};
-use approval::TerminalApprover;
 
 /// The generic flags every ARK application accepts. Flatten into your own `clap` parser to
 /// add domain subcommands:
@@ -95,49 +99,31 @@ pub struct ArkArgs {
     pub model: Option<String>,
 }
 
-type ProjectFn = Box<dyn Fn(&Ark) -> Result<Project, ArkError> + Send + Sync>;
-
 /// Entry point. See the crate docs.
-pub struct ArkCli;
-
-impl ArkCli {
-    pub fn builder() -> ArkCliBuilder {
-        ArkCliBuilder::default()
-    }
-}
-
-#[derive(Default)]
-pub struct ArkCliBuilder {
-    name: Option<String>,
+pub struct ArkCli {
+    app: App,
     bin: Option<String>,
-    tagline: Option<String>,
     theme: Theme,
     welcome: Option<app::WelcomeFn>,
-    help_intro: Option<String>,
-    ark: Option<Ark>,
-    ark_builder: Option<ArkBuilder>,
-    project: Option<ProjectFn>,
-    commands: Vec<Arc<dyn Command>>,
-    renderers: Vec<Arc<dyn ToolRenderer>>,
     event_hook: Option<EventHook>,
-    status: Vec<(String, app::StatusFn)>,
     history_file: Option<PathBuf>,
 }
 
-impl ArkCliBuilder {
-    /// The application's display name.
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
+impl ArkCli {
+    /// The terminal front-end for `app`.
+    pub fn new(app: App) -> Self {
+        ArkCli {
+            app,
+            bin: None,
+            theme: Theme::default(),
+            welcome: None,
+            event_hook: None,
+            history_file: None,
+        }
     }
     /// The executable name used in hints (`<bin> --resume`). Defaults to the running binary.
     pub fn bin(mut self, bin: impl Into<String>) -> Self {
         self.bin = Some(bin.into());
-        self
-    }
-    /// One line under the name in the welcome banner.
-    pub fn tagline(mut self, t: impl Into<String>) -> Self {
-        self.tagline = Some(t.into());
         self
     }
     pub fn theme(mut self, theme: Theme) -> Self {
@@ -157,73 +143,12 @@ impl ArkCliBuilder {
         self.welcome = Some(Arc::new(f));
         self
     }
-    /// Text shown at the top of `/help`.
-    pub fn help(mut self, intro: impl Into<String>) -> Self {
-        self.help_intro = Some(intro.into());
-        self
-    }
-    /// The fully wired agent (tools, profile, model, store).
-    pub fn ark(mut self, ark: Ark) -> Self {
-        self.ark = Some(ark);
-        self
-    }
-    /// Build the agent here instead: the builder is finished at `run` time, after `--model`.
-    pub fn ark_builder(mut self, b: ArkBuilder) -> Self {
-        self.ark_builder = Some(b);
-        self
-    }
-    /// Shorthand: set the agent profile on the internal builder.
-    pub fn agent(mut self, profile: AgentProfile) -> Self {
-        self.ark_builder = Some(self.ark_builder.take().unwrap_or_default().profile(profile));
-        self
-    }
-    /// Shorthand: register a tool on the internal builder.
-    pub fn tool(mut self, adapter: Arc<dyn Adapter>) -> Self {
-        self.ark_builder = Some(self.ark_builder.take().unwrap_or_default().tool(adapter));
-        self
-    }
-    /// Shorthand: where the store lives.
-    pub fn store_root(mut self, root: impl Into<PathBuf>) -> Self {
-        self.ark_builder = Some(self.ark_builder.take().unwrap_or_default().store_root(root));
-        self
-    }
-    /// Which project the shell works in (default: one named after the app).
-    pub fn project(
-        mut self,
-        f: impl Fn(&Ark) -> Result<Project, ArkError> + Send + Sync + 'static,
-    ) -> Self {
-        self.project = Some(Box::new(f));
-        self
-    }
-    /// Add a domain slash command.
-    pub fn command(mut self, c: Arc<dyn Command>) -> Self {
-        self.commands.push(c);
-        self
-    }
-    /// Custom activity lines for your tools.
-    pub fn renderer(mut self, r: Arc<dyn ToolRenderer>) -> Self {
-        self.renderers.push(r);
-        self
-    }
-    /// Shorthand for `renderer(Arc::new(labels))`.
-    pub fn labels(self, labels: ActivityLabels) -> Self {
-        self.renderer(Arc::new(labels))
-    }
     /// Render selected runtime events yourself.
     pub fn on_event(
         mut self,
         f: impl Fn(&HarnessEvent, &Theme) -> Option<String> + Send + Sync + 'static,
     ) -> Self {
         self.event_hook = Some(Arc::new(f));
-        self
-    }
-    /// Add a titled block to `/status`.
-    pub fn status_section(
-        mut self,
-        title: impl Into<String>,
-        f: impl Fn(&Ark, &Project) -> Option<String> + Send + Sync + 'static,
-    ) -> Self {
-        self.status.push((title.into(), Arc::new(f)));
         self
     }
     /// Where input history is kept (default: `<store>/.history`).
@@ -235,7 +160,7 @@ impl ArkCliBuilder {
     /// Parse the generic flags from the command line and run.
     pub async fn run(self) -> std::process::ExitCode {
         use clap::{Args, FromArgMatches};
-        let name = self.name.clone().unwrap_or_else(|| "ARK".into());
+        let name = self.app.name().to_string();
         let cmd = ArkArgs::augment_args(
             clap::Command::new(clap::builder::Str::from(
                 bin_name(&self.bin).leak() as &'static str
@@ -251,8 +176,8 @@ impl ArkCliBuilder {
 
     /// Run with flags parsed by the caller (when the app has its own subcommands).
     pub async fn run_with(self, args: ArkArgs) -> std::process::ExitCode {
-        let theme_color = theme::want_color(std::io::stdout().is_terminal());
-        match self.start(args, theme_color).await {
+        let color = theme::want_color(std::io::stdout().is_terminal());
+        match self.start(args, color).await {
             Ok(code) => code,
             Err(e) => {
                 let t =
@@ -263,95 +188,51 @@ impl ArkCliBuilder {
         }
     }
 
-    async fn start(mut self, args: ArkArgs, color: bool) -> anyhow::Result<std::process::ExitCode> {
-        let name = self.name.take().unwrap_or_else(|| "ARK".into());
+    async fn start(self, args: ArkArgs, color: bool) -> anyhow::Result<std::process::ExitCode> {
         let bin = bin_name(&self.bin);
-        let mut ark = match (self.ark.take(), self.ark_builder.take()) {
-            (Some(a), _) => a,
-            (None, Some(b)) => b.build()?,
-            (None, None) => Ark::builder().build()?,
+        let start = Start {
+            model: args.model.clone(),
+            project: args.project.clone(),
+            session: args.session.clone(),
+            resume: args.resume,
         };
-        if let Some(spec) = &args.model {
-            let (provider, model) = match spec.split_once(':') {
-                Some((p, m)) if ["ollama", "openai", "anthropic"].contains(&p) => {
-                    (p.to_string(), m.to_string())
-                }
-                _ => (
-                    std::env::var("ARK_PROVIDER").unwrap_or_else(|_| "ollama".into()),
-                    spec.clone(),
+        let (approver, approvals) = ChannelApprover::channel();
+        let opened = self.app.open(&start, Arc::new(approver))?;
+        let mut ix = opened.interaction;
+        ix.set_detail(args.verbose);
+        ix.set_keys(
+            [
+                ("enter", "send"),
+                ("alt+enter, ctrl+j", "new line (or end a line with \\)"),
+                ("↑ / ↓", "input history"),
+                ("tab", "complete a /command"),
+                ("esc, ctrl+c", "stop the agent (while it works)"),
+                (
+                    "enter (while it works)",
+                    "send what you typed to the running turn",
                 ),
-            };
-            ark.set_router(ModelRouter::single(ark_model::build(
-                &provider,
-                Some(model),
-            )?));
-        }
-
-        let project = match &args.project {
-            Some(p) => ark.find_or_create_project(p, "")?,
-            None => match &self.project {
-                Some(f) => f(&ark)?,
-                None => ark.find_or_create_project(&name.to_lowercase(), "")?,
-            },
-        };
-
-        let mut resumed = false;
-        let session = if let Some(id) = &args.session {
-            resumed = true;
-            ark.open_session(id)?
-                .ok_or_else(|| anyhow::anyhow!("no session matches `{id}`"))?
-        } else if args.resume {
-            match ark.latest_session(&project.id)? {
-                Some(s) => {
-                    resumed = true;
-                    s
-                }
-                None => ark.start_session(&project.id)?,
-            }
-        } else {
-            ark.start_session(&project.id)?
-        };
-        // A resumed session may live in another project.
-        let project = if session.project() != &project.id {
-            ark.engine()
-                .store
-                .get_project(session.project())?
-                .unwrap_or(project)
-        } else {
-            project
-        };
-
-        let (approver, approvals) = TerminalApprover::channel();
-        let gate = Arc::new(ApprovalGate::new(Arc::new(approver)));
-        let mut all_commands = self.commands;
-        all_commands.extend(commands::builtins());
+                ("tab (while it works)", "send it after the turn instead"),
+                ("ctrl+d, /exit", "leave (the session is saved)"),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        );
         let history_file = self
             .history_file
-            .or_else(|| Some(ark.settings().store_root.join(".history")));
+            .or_else(|| Some(ix.ark().settings().store_root.join(".history")));
         let cfg = Arc::new(Config {
-            name,
             bin,
-            tagline: self.tagline,
             theme: self.theme.with_color(color),
             welcome: self.welcome,
-            help_intro: self.help_intro,
-            activity: activity::Activity::new(self.renderers),
             event_hook: self.event_hook,
-            status: self.status,
-            commands: all_commands,
             history_file,
         });
         let st = ShellState {
             cfg,
-            ark,
-            project,
-            session,
-            gate,
+            ix,
             approvals,
             out: Out::stdout(),
-            last_turn: None,
-            last_context: None,
-            verbose: args.verbose,
         };
 
         // A prompt from -p, or piped stdin with no terminal: run once.
@@ -372,7 +253,7 @@ impl ArkCliBuilder {
             };
             return Ok(headless::run(st, prompt, mode, args.yes).await);
         }
-        Ok(shell::interactive(st, resumed).await)
+        Ok(shell::interactive(st, opened.resumed).await)
     }
 }
 

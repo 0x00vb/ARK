@@ -32,6 +32,7 @@ pub mod notebook;
 pub mod profile;
 pub mod router;
 pub mod session;
+pub mod steer;
 
 mod blobs;
 
@@ -45,12 +46,13 @@ pub use context_report::ContextReport;
 pub use distill::{call_digest, distill, Distiller, DistillerSet};
 pub use engine::Engine;
 pub use error::AgentError;
-pub use harness::{Harness, HarnessEvent, HarnessOutcome};
+pub use harness::{Harness, HarnessEvent, HarnessOutcome, STATE_DIGEST_ITEMS};
 pub use knowledge::{KnowledgeHit, KnowledgeProvider};
 pub use metrics::{role_name, Metrics};
 pub use profile::{AgentProfile, AgentProfileBuilder, Prompts};
 pub use router::{ModelRouter, Role};
 pub use session::{CarryPolicy, CompactReport, Session, SessionRecord, SessionUsage, Turn};
+pub use steer::Steering;
 
 // Re-export the blob bridge for consumers wiring their own engine.
 pub use blobs::StoreBlobs;

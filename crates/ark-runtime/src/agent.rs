@@ -17,11 +17,25 @@ const RECORD_NOTE: &str = "record_note";
 
 /// Events emitted as the agent works, so a front-end can show live progress.
 pub enum AgentEvent<'a> {
-    ToolCall { action: &'a str, input: &'a serde_json::Value },
-    ToolResult { action: &'a str, ok: bool, summary: String },
-    NeedsApproval { action: &'a str },
-    Note { kind: &'a str, body: &'a str },
-    Answer { text: &'a str },
+    ToolCall {
+        action: &'a str,
+        input: &'a serde_json::Value,
+    },
+    ToolResult {
+        action: &'a str,
+        ok: bool,
+        summary: String,
+    },
+    NeedsApproval {
+        action: &'a str,
+    },
+    Note {
+        kind: &'a str,
+        body: &'a str,
+    },
+    Answer {
+        text: &'a str,
+    },
 }
 
 pub struct AgentOutcome {
@@ -42,7 +56,11 @@ pub struct Agent {
 
 impl Agent {
     pub fn new(provider: Box<dyn Provider>) -> Self {
-        Agent { provider, allow_mutate: false, max_steps: 10 }
+        Agent {
+            provider,
+            allow_mutate: false,
+            max_steps: 10,
+        }
     }
     pub fn allow_mutate(mut self, yes: bool) -> Self {
         self.allow_mutate = yes;
@@ -90,7 +108,15 @@ impl Agent {
                 let answer = completion.content.trim().to_string();
                 on_event(AgentEvent::Answer { text: &answer });
                 self.persist_finding(engine, project, &answer, &cited)?;
-                return Ok(AgentOutcome { answer, cited, notes, steps: step, prompt_tokens, completion_tokens, peak_prompt_tokens });
+                return Ok(AgentOutcome {
+                    answer,
+                    cited,
+                    notes,
+                    steps: step,
+                    prompt_tokens,
+                    completion_tokens,
+                    peak_prompt_tokens,
+                });
             }
 
             messages.push(Message::assistant_tool_calls(completion.tool_calls.clone()));
@@ -98,24 +124,36 @@ impl Agent {
             for call in &completion.tool_calls {
                 if call.name == RECORD_NOTE {
                     let (kind, body) = parse_note(&call.arguments);
-                    on_event(AgentEvent::Note { kind: kind_str(kind), body: &body });
+                    on_event(AgentEvent::Note {
+                        kind: kind_str(kind),
+                        body: &body,
+                    });
                     let mut note = Note::new(kind, &body, Author::Agent);
                     note.cites_invocations = cited.clone();
                     engine.store.put_note(project, &note)?;
                     notes += 1;
-                    messages.push(Message::tool_result(call, format!("recorded {} note", kind_str(kind))));
+                    messages.push(Message::tool_result(
+                        call,
+                        format!("recorded {} note", kind_str(kind)),
+                    ));
                     continue;
                 }
 
                 let Some(desc) = engine.registry.descriptor(&call.name) else {
                     messages.push(Message::tool_result(
                         call,
-                        format!("error: unknown tool `{}`. Use only the provided tools.", call.name),
+                        format!(
+                            "error: unknown tool `{}`. Use only the provided tools.",
+                            call.name
+                        ),
                     ));
                     continue;
                 };
 
-                on_event(AgentEvent::ToolCall { action: &call.name, input: &call.arguments });
+                on_event(AgentEvent::ToolCall {
+                    action: &call.name,
+                    input: &call.arguments,
+                });
 
                 if desc.risk == RiskTier::Mutate && !self.allow_mutate {
                     on_event(AgentEvent::NeedsApproval { action: &call.name });
@@ -127,11 +165,20 @@ impl Agent {
                 }
 
                 let inv = engine
-                    .run_action(project, &call.name, call.arguments.clone(), self.allow_mutate)
+                    .run_action(
+                        project,
+                        &call.name,
+                        call.arguments.clone(),
+                        self.allow_mutate,
+                    )
                     .await?;
                 let ok = matches!(inv.status, InvocationStatus::Ok);
                 let summary = summarize_for_model(&inv);
-                on_event(AgentEvent::ToolResult { action: &call.name, ok, summary: short(&summary, 240) });
+                on_event(AgentEvent::ToolResult {
+                    action: &call.name,
+                    ok,
+                    summary: short(&summary, 240),
+                });
                 cited.push(inv.id.clone());
                 messages.push(Message::tool_result(call, summary));
             }
@@ -149,10 +196,24 @@ impl Agent {
         let answer = final_c.content.trim().to_string();
         on_event(AgentEvent::Answer { text: &answer });
         self.persist_finding(engine, project, &answer, &cited)?;
-        Ok(AgentOutcome { answer, cited, notes, steps: self.max_steps, prompt_tokens, completion_tokens, peak_prompt_tokens })
+        Ok(AgentOutcome {
+            answer,
+            cited,
+            notes,
+            steps: self.max_steps,
+            prompt_tokens,
+            completion_tokens,
+            peak_prompt_tokens,
+        })
     }
 
-    fn persist_finding(&self, engine: &Engine, project: &ProjectId, answer: &str, cited: &[InvocationId]) -> Result<(), AgentError> {
+    fn persist_finding(
+        &self,
+        engine: &Engine,
+        project: &ProjectId,
+        answer: &str,
+        cited: &[InvocationId],
+    ) -> Result<(), AgentError> {
         let mut note = Note::new(NoteKind::Finding, answer, Author::Agent);
         note.cites_invocations = cited.to_vec();
         engine.store.put_note(project, &note)?;
@@ -185,7 +246,12 @@ impl Agent {
         defs
     }
 
-    fn system_prompt(&self, engine: &Engine, profile: &AgentProfile, project: &ProjectId) -> Result<String, AgentError> {
+    fn system_prompt(
+        &self,
+        engine: &Engine,
+        profile: &AgentProfile,
+        project: &ProjectId,
+    ) -> Result<String, AgentError> {
         let p = engine
             .store
             .get_project(project)?
@@ -204,7 +270,13 @@ impl Agent {
             let _ = writeln!(s, "  (none yet — ingest a file or capture one first)");
         }
         for a in &artifacts {
-            let _ = writeln!(s, "  - id={} name={} kind={}", a.id.as_str(), a.name, a.kind.as_tag());
+            let _ = writeln!(
+                s,
+                "  - id={} name={} kind={}",
+                a.id.as_str(),
+                a.name,
+                a.kind.as_tag()
+            );
         }
         if !notes.is_empty() {
             let _ = writeln!(s, "\nRecord so far (build on it, don't repeat it):");
@@ -222,8 +294,16 @@ in this session, so reason from observation instead. Cite the artifact ids and t
 }
 
 fn parse_note(args: &serde_json::Value) -> (NoteKind, String) {
-    let kind = args.get("kind").and_then(|k| k.as_str()).map(note_kind_from_str).unwrap_or(NoteKind::Note);
-    let body = args.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string();
+    let kind = args
+        .get("kind")
+        .and_then(|k| k.as_str())
+        .map(note_kind_from_str)
+        .unwrap_or(NoteKind::Note);
+    let body = args
+        .get("body")
+        .and_then(|b| b.as_str())
+        .unwrap_or("")
+        .to_string();
     (kind, body)
 }
 

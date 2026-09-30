@@ -379,12 +379,190 @@ async fn workspace_reads_are_not_reused_across_turns() {
     let (_d, engine, project) = setup(Arc::default());
     let mut runs = Vec::new();
     for _ in 0..2 {
-        let script = tools_then(vec![call("c1", "notes.read"), call("c2", "notes.read")], "The notes say locket.");
+        let script = tools_then(
+            vec![call("c1", "notes.read"), call("c2", "notes.read")],
+            "The notes say locket.",
+        );
         let p: Arc<dyn Provider> = Arc::new(MockProvider::new("m", script));
-        let out = Harness::new(ModelRouter::single(p)).planner(false).critic(false).ask(&engine, &profile(), &project, "read", |_| {}).await.unwrap();
+        let out = Harness::new(ModelRouter::single(p))
+            .planner(false)
+            .critic(false)
+            .ask(&engine, &profile(), &project, "read", |_| {})
+            .await
+            .unwrap();
         runs.push((out.metrics.tool_calls, out.metrics.duplicate_tool_calls));
     }
     // Each turn runs the read once and reuses it once within the turn; the second turn does not
     // trust the first turn's result, because the notes may have changed in between.
     assert_eq!(runs, vec![(1, 1), (1, 1)]);
+}
+
+#[tokio::test]
+async fn steering_reaches_the_model_at_the_next_step() {
+    let (_d, engine, project) = setup(Arc::default());
+    let mock = Arc::new(MockProvider::new(
+        "m",
+        tools_then(vec![call("c1", "notes.read")], "Checked the door too."),
+    ));
+    let p: Arc<dyn Provider> = mock.clone();
+    let steer = ark_runtime::Steering::new();
+    let s2 = steer.clone();
+    let mut delivered = Vec::new();
+    let mut context_tokens = 0;
+    let out = Harness::new(ModelRouter::single(p))
+        .planner(false)
+        .critic(false)
+        .steering(Some(steer.clone()))
+        .ask(
+            &engine,
+            &profile(),
+            &project,
+            "read the notes",
+            |e| match e {
+                // The user types while the tool runs.
+                HarnessEvent::ToolCall { .. } => s2.push("also check the door"),
+                HarnessEvent::ToolResult {
+                    context_tokens: n, ..
+                } => context_tokens = n,
+                HarnessEvent::Steered { text } => delivered.push(text),
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(delivered, vec!["also check the door"]);
+    assert_eq!(out.steered, delivered);
+    assert!(
+        context_tokens > 0,
+        "a tool result reports what it adds to the context"
+    );
+    let second = &mock.recorded()[1];
+    assert!(second
+        .messages
+        .iter()
+        .any(|m| m.content.contains("also check the door")));
+    assert!(steer.take_undelivered().is_empty());
+}
+
+#[tokio::test]
+async fn steering_during_the_answer_continues_the_turn() {
+    let (_d, engine, project) = setup(Arc::default());
+    let script = vec![
+        Completion {
+            content: "The notes are fine.".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(50, 5),
+        },
+        Completion {
+            content: "The door is locked too.".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(60, 6),
+        },
+    ];
+    let mock = Arc::new(MockProvider::new("m", script));
+    let p: Arc<dyn Provider> = mock.clone();
+    let steer = ark_runtime::Steering::new();
+    let s2 = steer.clone();
+    let mut pushed = false;
+    let out = Harness::new(ModelRouter::single(p))
+        .planner(false)
+        .critic(false)
+        .steering(Some(steer))
+        .ask(&engine, &profile(), &project, "check the notes", |e| {
+            if matches!(e, HarnessEvent::TextDelta { .. }) && !pushed {
+                pushed = true;
+                s2.push("and the door?");
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(out.answer, "The door is locked too.");
+    assert_eq!(out.steered, vec!["and the door?"]);
+    assert_eq!(
+        mock.recorded().len(),
+        2,
+        "the model was asked again with the new message"
+    );
+}
+
+#[tokio::test]
+async fn steering_after_the_turn_is_returned_undelivered() {
+    let (_d, engine, project) = setup(Arc::default());
+    let p: Arc<dyn Provider> = Arc::new(MockProvider::new(
+        "m",
+        vec![Completion {
+            content: "Done.".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(50, 2),
+        }],
+    ));
+    let steer = ark_runtime::Steering::new();
+    let s2 = steer.clone();
+    let out = Harness::new(ModelRouter::single(p))
+        .planner(false)
+        .critic(false)
+        .steering(Some(steer.clone()))
+        .ask(&engine, &profile(), &project, "hi", |e| {
+            if matches!(e, HarnessEvent::Answer { .. }) {
+                s2.push("too late");
+            }
+        })
+        .await
+        .unwrap();
+    assert!(out.steered.is_empty());
+    assert_eq!(steer.take_undelivered(), vec!["too late"]);
+}
+
+#[tokio::test]
+async fn retrieved_context_is_reported_apart_from_tool_results() {
+    let (_d, engine, project) = setup(Arc::default());
+    let search = ToolCall {
+        id: "s1".into(),
+        name: "search_evidence".into(),
+        arguments: serde_json::json!({ "query": "locket" }),
+    };
+    let script = vec![
+        Completion {
+            content: String::new(),
+            tool_calls: vec![call("c1", "notes.read")],
+            usage: Usage::measured(100, 5),
+        },
+        Completion {
+            content: String::new(),
+            tool_calls: vec![search],
+            usage: Usage::measured(110, 5),
+        },
+        Completion {
+            content: "Locket [inv:1].".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(120, 5),
+        },
+    ];
+    let p: Arc<dyn Provider> = Arc::new(MockProvider::new("m", script));
+    let mut reports = Vec::new();
+    Harness::new(ModelRouter::single(p))
+        .planner(false)
+        .critic(false)
+        .ask(&engine, &profile(), &project, "find the locket", |e| {
+            if let HarnessEvent::Context { report } = e {
+                reports.push(report);
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(reports.len(), 3);
+    assert_eq!(reports[1].retrieved, 0, "no lookup yet");
+    assert!(
+        reports[2].retrieved > 0,
+        "the search result is counted as retrieved"
+    );
+    assert!(
+        reports[2].tool_rounds > 0,
+        "the tool result is still counted as a tool result"
+    );
+    let parts: u32 = reports[2].rows().iter().map(|(_, n)| n).sum();
+    assert!(
+        parts.abs_diff(reports[2].total) <= 16,
+        "rows still cover the total"
+    );
 }

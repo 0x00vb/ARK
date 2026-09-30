@@ -74,6 +74,9 @@ impl Store {
                  json TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS session_turns(
                  session_id TEXT NOT NULL, idx INTEGER NOT NULL, json TEXT NOT NULL,
+                 PRIMARY KEY(session_id, idx));
+             CREATE TABLE IF NOT EXISTS turn_traces(
+                 session_id TEXT NOT NULL, idx INTEGER NOT NULL, json TEXT NOT NULL,
                  PRIMARY KEY(session_id, idx));",
         )?;
         let search = match index::SearchIndex::open(&root.join("index")) {
@@ -495,6 +498,51 @@ impl Store {
         )?;
         let rows = stmt.query_map(rusqlite::params![session, limit], |r| r.get::<_, String>(0))?;
         collect(rows)
+    }
+
+    /// Up to `limit` turns with index below `before` (all turns when `None`), oldest first.
+    pub fn list_session_turns_before(
+        &self,
+        session: &str,
+        before: Option<u32>,
+        limit: usize,
+    ) -> Result<Vec<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        let before = before.map(i64::from).unwrap_or(i64::MAX);
+        let mut stmt = db.prepare(
+            "SELECT json FROM (SELECT idx, json FROM session_turns WHERE session_id=?1 AND idx < ?2 ORDER BY idx DESC LIMIT ?3) ORDER BY idx ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![session, before, limit as i64], |r| {
+            r.get::<_, String>(0)
+        })?;
+        collect(rows)
+    }
+
+    // ---- turn traces ----------------------------------------------------------
+
+    /// Store the event trace of one turn (opaque JSON owned by the front-end layer). Traces
+    /// are presentation history for inspecting past turns; the runtime never reads them.
+    pub fn put_turn_trace(
+        &self,
+        session: &str,
+        index: u32,
+        trace: &serde_json::Value,
+    ) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT OR REPLACE INTO turn_traces(session_id, idx, json) VALUES(?1, ?2, ?3)",
+            rusqlite::params![session, index, serde_json::to_string(trace)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_turn_trace(&self, session: &str, index: u32) -> Result<Option<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        one(db.query_row(
+            "SELECT json FROM turn_traces WHERE session_id=?1 AND idx=?2",
+            rusqlite::params![session, index],
+            |r| r.get::<_, String>(0),
+        ))
     }
 }
 

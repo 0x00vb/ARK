@@ -107,7 +107,11 @@ mod tests {
 
     #[test]
     fn action_name_splits_adapter() {
-        let d = ActionDescriptor::new("draft.expand", "expand an outline into prose", RiskTier::Read);
+        let d = ActionDescriptor::new(
+            "draft.expand",
+            "expand an outline into prose",
+            RiskTier::Read,
+        );
         assert_eq!(d.adapter_name(), "draft");
     }
 

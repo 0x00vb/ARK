@@ -116,10 +116,15 @@ pub struct ToolDef {
 /// available; otherwise the runtime falls back to [`estimate_tokens`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
+    /// The whole prompt, cached part included.
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
     /// True when the numbers came from the provider, false when estimated.
     pub measured: bool,
+    /// The part of `prompt_tokens` the provider served from its prompt cache (0 when it
+    /// reports nothing).
+    #[serde(default)]
+    pub cached_tokens: u32,
 }
 
 impl Usage {
@@ -131,7 +136,12 @@ impl Usage {
             prompt_tokens: prompt,
             completion_tokens: completion,
             measured: true,
+            cached_tokens: 0,
         }
+    }
+    pub fn with_cached(mut self, cached: u32) -> Self {
+        self.cached_tokens = cached;
+        self
     }
 }
 
@@ -211,8 +221,11 @@ fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
             model.unwrap_or_else(|| "claude-sonnet-5-5".into()),
         )?)),
         "mock" => {
-            let path = std::env::var("ARK_MOCK_SCRIPT").map_err(|_| ProviderError::MissingCredential("ARK_MOCK_SCRIPT".into()))?;
-            Ok(Box::new(MockProvider::from_script_file(std::path::Path::new(&path))?))
+            let path = std::env::var("ARK_MOCK_SCRIPT")
+                .map_err(|_| ProviderError::MissingCredential("ARK_MOCK_SCRIPT".into()))?;
+            Ok(Box::new(MockProvider::from_script_file(
+                std::path::Path::new(&path),
+            )?))
         }
         other => Err(ProviderError::Api {
             provider: other.into(),

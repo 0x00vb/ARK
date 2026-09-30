@@ -25,7 +25,11 @@ pub struct WorkingSet {
 
 impl WorkingSet {
     pub fn new(budget: u32) -> Self {
-        WorkingSet { rounds: Vec::new(), budget: budget.max(1024), last_compressed: 0 }
+        WorkingSet {
+            rounds: Vec::new(),
+            budget: budget.max(1024),
+            last_compressed: 0,
+        }
     }
 
     /// Append a round (kept together forever, or dropped together).
@@ -99,7 +103,11 @@ mod tests {
     use ark_model::{Message, ToolCall};
 
     fn round(text: &str) -> Vec<Message> {
-        let call = ToolCall { id: "c1".into(), name: "r2.decompile".into(), arguments: serde_json::json!({"artifact":"x"}) };
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "r2.decompile".into(),
+            arguments: serde_json::json!({"artifact":"x"}),
+        };
         vec![
             Message::assistant_tool_calls(vec![call.clone()]),
             Message::tool_result(&call, text),
@@ -126,10 +134,16 @@ mod tests {
         }
         let (msgs, total) = ws.assemble(&"sys ".repeat(50));
         assert!(ws.last_compressed > 0, "older rounds dropped");
-        assert!(msgs[0].content.contains("compressed"), "compression note prepended");
+        assert!(
+            msgs[0].content.contains("compressed"),
+            "compression note prepended"
+        );
         // The most recent round is always retained.
         assert!(msgs.last().unwrap().content.contains("lorem"));
-        assert!(total <= 1024 + 2000, "assembled prompt stays near the budget");
+        assert!(
+            total <= 1024 + 2000,
+            "assembled prompt stays near the budget"
+        );
     }
 
     #[test]
@@ -137,6 +151,9 @@ mod tests {
         let mut ws = WorkingSet::new(1024);
         ws.push_round(round(&"x".repeat(20_000))); // one huge round
         let (msgs, _t) = ws.assemble("sys");
-        assert!(msgs.iter().any(|m| m.content.len() > 10_000), "latest round kept despite size");
+        assert!(
+            msgs.iter().any(|m| m.content.len() > 10_000),
+            "latest round kept despite size"
+        );
     }
 }

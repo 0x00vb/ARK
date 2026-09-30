@@ -72,15 +72,26 @@ impl MockProvider {
                     .tool_calls
                     .into_iter()
                     .enumerate()
-                    .map(|(j, c)| crate::ToolCall { id: format!("mock_{i}_{j}"), name: c.name, arguments: c.arguments })
+                    .map(|(j, c)| crate::ToolCall {
+                        id: format!("mock_{i}_{j}"),
+                        name: c.name,
+                        arguments: c.arguments,
+                    })
                     .collect(),
                 usage: Usage::default(),
             })
             .collect();
-        let delay = std::env::var("ARK_MOCK_DELAY_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(15);
+        let delay = std::env::var("ARK_MOCK_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(15);
         Ok(MockProvider::new("mock-script", script)
             .with_chunk_delay(std::time::Duration::from_millis(delay))
-            .with_fallback(|_| Completion { content: "(the mock script is finished)".into(), tool_calls: vec![], usage: Usage::default() }))
+            .with_fallback(|_| Completion {
+                content: "(the mock script is finished)".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            }))
     }
 
     /// Stream each word with this pause between chunks.

@@ -7,8 +7,8 @@
 //! State-changing actions are refused unless `--yes` is given; nothing can prompt here.
 
 use std::io::{IsTerminal, Write};
-use std::sync::Arc;
 
+use ark_interact::{Interaction, TurnControl, TurnEnd};
 use ark_sdk::prelude::*;
 
 use crate::app::ShellState;
@@ -29,23 +29,26 @@ pub(crate) async fn run(
     mode: Mode,
     yes: bool,
 ) -> std::process::ExitCode {
-    let cancel = CancelToken::new();
-    let c2 = cancel.clone();
+    let ctl = TurnControl {
+        ask: yes,
+        ..TurnControl::new()
+    };
+    let c2 = ctl.cancel.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
             c2.cancel();
         }
     });
-    let approvals = yes.then(|| {
-        Arc::new(ApprovalGate::new(Arc::new(FixedApprover(
-            ApprovalDecision::AllowOnce,
-        ))))
+    // Nobody can answer an approval here. With `--yes` every question gets "allow once";
+    // without it the gate is not consulted and state-changing actions are refused.
+    let decision = ApprovalDecision::AllowOnce;
+    let mut approvals =
+        std::mem::replace(&mut st.approvals, tokio::sync::mpsc::unbounded_channel().1);
+    tokio::spawn(async move {
+        while let Some(p) = approvals.recv().await {
+            p.answer(decision);
+        }
     });
-    let opts = TurnOptions {
-        cancel: Some(cancel),
-        approvals,
-        focus: None,
-    };
 
     let cfg = st.cfg.clone();
     let theme = cfg
@@ -53,77 +56,62 @@ pub(crate) async fn run(
         .clone()
         .with_color(want_color(std::io::stderr().is_terminal()));
     let mut err_out = Out::sink(Box::new(std::io::stderr()));
-    let mut view = TurnView::new(&theme, &cfg.activity, cfg.event_hook.as_ref(), st.verbose);
-    let mut last_context: Option<ContextReport> = None;
+    let mut view = TurnView::new(&theme, cfg.event_hook.as_ref(), st.ix.detail());
     let mut answer_streamed = String::new();
 
-    let ShellState { ark, session, .. } = &mut st;
-    let result = ark
-        .ask_session(session, &prompt, opts, |ev| match mode {
+    let end = st
+        .ix
+        .run_turn(&prompt, &ctl, |ev, a| match mode {
             Mode::Events => {
-                if let Ok(line) = serde_json::to_string(&ev) {
+                if let Ok(line) = serde_json::to_string(ev) {
                     let mut o = std::io::stdout().lock();
                     let _ = writeln!(o, "{line}");
                     let _ = o.flush();
                 }
             }
-            Mode::Json => {
-                if let HarnessEvent::Context { report } = &ev {
-                    last_context = Some(report.clone());
-                }
-            }
+            Mode::Json => {}
             Mode::Text => match ev {
                 // The answer text goes to stdout as it streams; everything else is activity.
                 HarnessEvent::TextDelta { text } => {
-                    answer_streamed.push_str(&text);
+                    answer_streamed.push_str(text);
                     let mut o = std::io::stdout().lock();
                     let _ = o.write_all(text.as_bytes());
                     let _ = o.flush();
                 }
                 HarnessEvent::Answer { text, streamed } => {
+                    let mut o = std::io::stdout().lock();
                     if !streamed || text.trim() != answer_streamed.trim() {
-                        let mut o = std::io::stdout().lock();
-                        let _ = writeln!(
-                            o,
-                            "{}{text}",
-                            if answer_streamed.is_empty() { "" } else { "\n" }
-                        );
+                        let sep = if answer_streamed.is_empty() { "" } else { "\n" };
+                        let _ = writeln!(o, "{sep}{text}");
                     } else {
-                        let _ = writeln!(std::io::stdout());
+                        let _ = writeln!(o);
                     }
                 }
-                HarnessEvent::Context { report } => last_context = Some(report),
-                other => view.event(other, &mut err_out),
+                other => view.event(other.clone(), a.cloned(), &mut err_out),
             },
         })
         .await;
 
-    let code = match &result {
+    let code = match &end.result {
         Ok(o) if o.cancelled => 130,
         Ok(_) => 0,
         Err(_) => 1,
     };
     match mode {
         Mode::Text => {
-            if let Err(e) = &result {
+            if let Err(e) = &end.result {
                 err_out.line(&theme.red(&format!("error: {e}")));
             }
         }
         Mode::Json | Mode::Events => {
-            let obj = result_json(&st, &result, last_context.as_ref(), mode == Mode::Events);
-            println!("{obj}");
+            println!("{}", result_json(&st.ix, &end, mode == Mode::Events));
         }
     }
     std::process::ExitCode::from(code)
 }
 
-fn result_json(
-    st: &ShellState,
-    result: &Result<HarnessOutcome, ArkError>,
-    context: Option<&ContextReport>,
-    tagged: bool,
-) -> serde_json::Value {
-    let mut v = match result {
+fn result_json(ix: &Interaction, end: &TurnEnd, tagged: bool) -> serde_json::Value {
+    let mut v = match &end.result {
         Ok(o) => serde_json::json!({
             "ok": true,
             "answer": o.answer,
@@ -136,9 +124,9 @@ fn result_json(
         }),
         Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
     };
-    v["session"] = serde_json::json!(st.session.id().as_str());
-    v["project"] = serde_json::json!(st.project.name);
-    v["context"] = serde_json::to_value(context).unwrap_or_default();
+    v["session"] = serde_json::json!(ix.session().id().as_str());
+    v["project"] = serde_json::json!(ix.project().name);
+    v["context"] = serde_json::to_value(ix.last_context()).unwrap_or_default();
     if tagged {
         v["type"] = serde_json::json!("result");
     }

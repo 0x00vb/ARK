@@ -169,31 +169,49 @@ mod tests {
         CapabilityCatalog::new([
             CapabilitySpec::new("drafting", "write new prose from an outline or brief")
                 .with_synonyms(["write", "compose", "draft"]),
-            CapabilitySpec::new("continuity-check", "verify facts and timeline consistency across a manuscript")
-                .with_synonyms(["consistency", "continuity"]),
+            CapabilitySpec::new(
+                "continuity-check",
+                "verify facts and timeline consistency across a manuscript",
+            )
+            .with_synonyms(["consistency", "continuity"]),
         ])
     }
 
     #[test]
     fn slugs_normalize_and_resolve() {
         let cat = writing_catalog();
-        assert_eq!(cat.resolve_lenient("Drafting"), Some(Capability::new("drafting")));
-        assert_eq!(cat.resolve_lenient("continuity_check"), Some(Capability::new("continuity-check")));
+        assert_eq!(
+            cat.resolve_lenient("Drafting"),
+            Some(Capability::new("drafting"))
+        );
+        assert_eq!(
+            cat.resolve_lenient("continuity_check"),
+            Some(Capability::new("continuity-check"))
+        );
         assert_eq!(cat.resolve_lenient("nonsense"), None);
     }
 
     #[test]
     fn synonyms_resolve() {
         let cat = writing_catalog();
-        assert_eq!(cat.resolve_lenient("compose"), Some(Capability::new("drafting")));
-        assert_eq!(cat.resolve_lenient("consistency"), Some(Capability::new("continuity-check")));
+        assert_eq!(
+            cat.resolve_lenient("compose"),
+            Some(Capability::new("drafting"))
+        );
+        assert_eq!(
+            cat.resolve_lenient("consistency"),
+            Some(Capability::new("continuity-check"))
+        );
     }
 
     #[test]
     fn describe_and_enumerate() {
         let cat = writing_catalog();
         assert_eq!(cat.all().len(), 2);
-        assert!(cat.describe(&Capability::new("drafting")).unwrap().contains("prose"));
+        assert!(cat
+            .describe(&Capability::new("drafting"))
+            .unwrap()
+            .contains("prose"));
         assert!(cat.contains(&Capability::new("drafting")));
         assert!(!cat.contains(&Capability::new("decompilation")));
     }
@@ -203,6 +221,9 @@ mod tests {
         let mut cat = writing_catalog();
         cat.register(CapabilitySpec::new("drafting", "updated description"));
         assert_eq!(cat.all().len(), 2, "same slug replaces, not appends");
-        assert_eq!(cat.describe(&Capability::new("drafting")).unwrap(), "updated description");
+        assert_eq!(
+            cat.describe(&Capability::new("drafting")).unwrap(),
+            "updated description"
+        );
     }
 }

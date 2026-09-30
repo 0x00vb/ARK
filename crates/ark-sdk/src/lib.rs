@@ -27,7 +27,7 @@ use ark_core::{Focus, Project, ProjectId};
 use ark_model::Provider;
 use ark_runtime::{
     Agent, AgentProfile, ApprovalGate, CancelToken, ContextReport, Engine, Harness, HarnessEvent,
-    HarnessOutcome, ModelRouter, Session,
+    HarnessOutcome, ModelRouter, Session, Steering,
 };
 use ark_tools::{Adapter, Registry};
 
@@ -43,7 +43,7 @@ pub mod prelude {
         AcquisitionProvider, AcquisitionResult, AgentProfile, ApprovalDecision, ApprovalGate,
         ApprovalRequest, Approver, CancelToken, ContextReport, Distiller, DistillerSet, Engine,
         FixedApprover, Harness, HarnessEvent, HarnessOutcome, KnowledgeHit, KnowledgeProvider,
-        ModelRouter, Prompts, Role, Session,
+        ModelRouter, Prompts, Role, Session, Steering,
     };
     pub use ark_tools::{
         ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArtifact, Registry, RunCtx,
@@ -72,6 +72,8 @@ pub struct TurnOptions {
     pub approvals: Option<Arc<ApprovalGate>>,
     /// What the user is looking at, if the front-end knows.
     pub focus: Option<Focus>,
+    /// Messages the user sends while the turn runs.
+    pub steer: Option<Steering>,
 }
 
 /// The effective runtime configuration, for display.
@@ -88,7 +90,7 @@ pub struct Settings {
 /// A fully-wired agent: an [`Engine`] (store + tools), a [`ModelRouter`], and an
 /// [`AgentProfile`]. Build one with [`Ark::builder`].
 pub struct Ark {
-    engine: Engine,
+    engine: Arc<Engine>,
     router: ModelRouter,
     profile: AgentProfile,
     max_steps: usize,
@@ -109,8 +111,16 @@ impl Ark {
         &self.engine
     }
 
+    /// Mutable access, for registering tools or sniffers before the agent runs. Panics once
+    /// the engine has been shared with [`shared_engine`](Ark::shared_engine).
     pub fn engine_mut(&mut self) -> &mut Engine {
-        &mut self.engine
+        Arc::get_mut(&mut self.engine).expect("engine_mut after the engine was shared")
+    }
+
+    /// A handle on the engine that outlives borrows of `self`: a front-end reads the store
+    /// (artifacts, invocations, working state) with it while a turn holds the session.
+    pub fn shared_engine(&self) -> Arc<Engine> {
+        self.engine.clone()
     }
 
     pub fn profile(&self) -> &AgentProfile {
@@ -195,6 +205,7 @@ impl Ark {
             .conversation(session.conversation_digest())
             .approvals(opts.approvals)
             .cancel(opts.cancel)
+            .steering(opts.steer)
             .focus(opts.focus);
         let project = session.project().clone();
         let outcome = harness
@@ -273,7 +284,10 @@ impl Default for ArkBuilder {
             router: None,
             provider: None,
             max_steps: 16,
-            budget: std::env::var("ARK_CTX_BUDGET").ok().and_then(|s| s.parse().ok()).unwrap_or(6000),
+            budget: std::env::var("ARK_CTX_BUDGET")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(6000),
             planner: true,
             critic: true,
             allow_mutate: false,
@@ -353,7 +367,7 @@ impl ArkBuilder {
             None => Engine::open_with(&self.store_root, self.registry)?,
         };
         Ok(Ark {
-            engine,
+            engine: Arc::new(engine),
             router,
             profile: self.profile,
             max_steps: self.max_steps,

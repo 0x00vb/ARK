@@ -28,12 +28,19 @@ pub struct Engine {
 impl Engine {
     /// Construct with a store and a consumer-supplied registry.
     pub fn new(store: Store, registry: Registry) -> Self {
-        Engine { store, registry, sniffers: Vec::new() }
+        Engine {
+            store,
+            registry,
+            sniffers: Vec::new(),
+        }
     }
 
     /// Open a workspace at `root` with the given registry, then append any out-of-process MCP
     /// plugins declared in `<root>/plugins.json`.
-    pub fn open_with(root: impl AsRef<std::path::Path>, mut registry: Registry) -> Result<Self, AgentError> {
+    pub fn open_with(
+        root: impl AsRef<std::path::Path>,
+        mut registry: Registry,
+    ) -> Result<Self, AgentError> {
         let root = root.as_ref().to_path_buf();
         load_plugins(&root, &mut registry);
         Ok(Engine::new(Store::open(root)?, registry))
@@ -108,7 +115,9 @@ impl Engine {
             &name,
             kind,
             &bytes,
-            Provenance::Ingested { path: path.display().to_string() },
+            Provenance::Ingested {
+                path: path.display().to_string(),
+            },
         )
     }
 
@@ -131,7 +140,8 @@ impl Engine {
         let indexable = kind.is_textual() || matches!(kind, ArtifactKind::Other(_));
         if indexable {
             if let Ok(body) = std::str::from_utf8(bytes) {
-                self.store.index_text(project, &art.id, &art.name, &kind.as_tag(), body);
+                self.store
+                    .index_text(project, &art.id, &art.name, &kind.as_tag(), body);
             }
         }
         Ok(art)
@@ -174,16 +184,17 @@ impl Engine {
             Ok(out) => {
                 inv.command = out.command;
                 for prod in out.produced {
-                    let provenance = prod
-                        .provenance
-                        .unwrap_or_else(|| Provenance::Produced { invocation: inv.id.clone() });
+                    let provenance = prod.provenance.unwrap_or_else(|| Provenance::Produced {
+                        invocation: inv.id.clone(),
+                    });
                     // A Blob is re-sniffed so produced bytes land as their real kind.
                     let kind = if prod.kind == ArtifactKind::Blob {
                         self.detect_kind(&prod.name, &prod.bytes)
                     } else {
                         prod.kind
                     };
-                    let art = self.ingest_bytes(project, &prod.name, kind, &prod.bytes, provenance)?;
+                    let art =
+                        self.ingest_bytes(project, &prod.name, kind, &prod.bytes, provenance)?;
                     inv.produced.push(art.id);
                 }
                 inv.mark_ok(out.output);
@@ -214,10 +225,22 @@ fn load_plugins(root: &std::path::Path, registry: &mut Registry) {
             return;
         }
     };
-    let plugins = doc.get("plugins").and_then(|p| p.as_array()).cloned().unwrap_or_default();
+    let plugins = doc
+        .get("plugins")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
     for p in plugins {
-        let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let command = p.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let name = p
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let command = p
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if name.is_empty() || command.is_empty() {
             tracing::warn!("plugin entry missing name/command; skipped");
             continue;
@@ -230,7 +253,9 @@ fn load_plugins(root: &std::path::Path, registry: &mut Registry) {
                     .filter_map(|x| x.as_str())
                     .map(|s| {
                         let pb = std::path::Path::new(s);
-                        if pb.is_relative() && (s.contains('/') || s.ends_with(".py") || s.ends_with(".js")) {
+                        if pb.is_relative()
+                            && (s.contains('/') || s.ends_with(".py") || s.ends_with(".js"))
+                        {
                             root.join(pb).display().to_string()
                         } else {
                             s.to_string()
@@ -242,7 +267,11 @@ fn load_plugins(root: &std::path::Path, registry: &mut Registry) {
         let env: std::collections::HashMap<String, String> = p
             .get("env")
             .and_then(|v| v.as_object())
-            .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
             .unwrap_or_default();
 
         match ark_tools::McpAdapter::connect(&name, &command, &args, &env) {

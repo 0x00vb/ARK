@@ -20,9 +20,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
+use ark_core::{ActionDescriptor, RiskTier};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use ark_core::{ActionDescriptor, RiskTier};
 
 use crate::{ActionOutput, Adapter, AdapterError, AdapterHealth, RunCtx};
 
@@ -52,16 +52,38 @@ pub struct McpClient {
 
 impl McpClient {
     /// Spawn the server and complete the MCP `initialize` handshake.
-    pub fn connect(command: &str, args: &[String], env: &HashMap<String, String>) -> crate::Result<Self> {
+    pub fn connect(
+        command: &str,
+        args: &[String],
+        env: &HashMap<String, String>,
+    ) -> crate::Result<Self> {
         let mut cmd = Command::new(command);
-        cmd.args(args).envs(env).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        cmd.args(args)
+            .envs(env)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
         let mut child = cmd
             .spawn()
             .map_err(|e| AdapterError::Tool(format!("spawn MCP server `{command}`: {e}")))?;
-        let stdin = child.stdin.take().ok_or_else(|| AdapterError::Tool("no stdin".into()))?;
-        let stdout = child.stdout.take().ok_or_else(|| AdapterError::Tool("no stdout".into()))?;
-        let conn = McpConn { child, stdin, reader: BufReader::new(stdout), next_id: 0 };
-        let client = McpClient { conn: Mutex::new(conn), server_info: Mutex::new(String::new()) };
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AdapterError::Tool("no stdin".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| AdapterError::Tool("no stdout".into()))?;
+        let conn = McpConn {
+            child,
+            stdin,
+            reader: BufReader::new(stdout),
+            next_id: 0,
+        };
+        let client = McpClient {
+            conn: Mutex::new(conn),
+            server_info: Mutex::new(String::new()),
+        };
 
         let init = client.request(
             "initialize",
@@ -92,9 +114,14 @@ impl McpClient {
         // Read lines until we see the response for our id (or an error).
         loop {
             let mut line = String::new();
-            let n = c.reader.read_line(&mut line).map_err(|e| AdapterError::Tool(format!("read: {e}")))?;
+            let n = c
+                .reader
+                .read_line(&mut line)
+                .map_err(|e| AdapterError::Tool(format!("read: {e}")))?;
             if n == 0 {
-                return Err(AdapterError::Tool(format!("MCP server closed the stream during `{method}`")));
+                return Err(AdapterError::Tool(format!(
+                    "MCP server closed the stream during `{method}`"
+                )));
             }
             let line = line.trim();
             if line.is_empty() {
@@ -124,7 +151,11 @@ impl McpClient {
 
     pub fn list_tools(&self) -> crate::Result<Vec<McpTool>> {
         let result = self.request("tools/list", json!({}))?;
-        let tools = result.get("tools").and_then(|t| t.as_array()).cloned().unwrap_or_default();
+        let tools = result
+            .get("tools")
+            .and_then(|t| t.as_array())
+            .cloned()
+            .unwrap_or_default();
         Ok(tools.iter().map(parse_tool).collect())
     }
 
@@ -144,14 +175,27 @@ impl McpClient {
 
 /// Map one MCP tool descriptor to our shape, deriving the risk tier.
 fn parse_tool(v: &Value) -> McpTool {
-    let name = v.get("name").and_then(|s| s.as_str()).unwrap_or("tool").to_string();
-    let description = v.get("description").and_then(|s| s.as_str()).unwrap_or("").to_string();
+    let name = v
+        .get("name")
+        .and_then(|s| s.as_str())
+        .unwrap_or("tool")
+        .to_string();
+    let description = v
+        .get("description")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
     let input_schema = v
         .get("inputSchema")
         .cloned()
         .unwrap_or_else(|| json!({ "type": "object", "properties": {} }));
     let ann = v.get("annotations").cloned().unwrap_or(Value::Null);
-    McpTool { name, description, input_schema, risk: risk_from_annotations(&ann) }
+    McpTool {
+        name,
+        description,
+        input_schema,
+        risk: risk_from_annotations(&ann),
+    }
 }
 
 /// Derive a [`RiskTier`] from MCP annotations. An explicit `x-ark-risk` wins;
@@ -172,7 +216,11 @@ fn risk_from_annotations(ann: &Value) -> RiskTier {
         return RiskTier::Mutate;
     }
     if b("readOnlyHint") == Some(true) {
-        return if b("openWorldHint") == Some(true) { RiskTier::Observe } else { RiskTier::Read };
+        return if b("openWorldHint") == Some(true) {
+            RiskTier::Observe
+        } else {
+            RiskTier::Read
+        };
     }
     RiskTier::Mutate
 }
@@ -204,7 +252,12 @@ impl McpAdapter {
                     .with_input_schema(t.input_schema)
             })
             .collect();
-        Ok(McpAdapter { namespace: namespace.to_string(), client, actions, label })
+        Ok(McpAdapter {
+            namespace: namespace.to_string(),
+            client,
+            actions,
+            label,
+        })
     }
 }
 
@@ -220,14 +273,26 @@ impl Adapter for McpAdapter {
 
     async fn health(&self) -> AdapterHealth {
         if self.client.alive() {
-            AdapterHealth::ok_with(format!("MCP plugin {} ({} tools)", self.label, self.actions.len()))
+            AdapterHealth::ok_with(format!(
+                "MCP plugin {} ({} tools)",
+                self.label,
+                self.actions.len()
+            ))
         } else {
             AdapterHealth::missing("MCP server is not running")
         }
     }
 
-    async fn run(&self, action: &str, input: Value, ctx: &RunCtx<'_>) -> crate::Result<ActionOutput> {
-        let tool = action.strip_prefix(&format!("{}.", self.namespace)).unwrap_or(action).to_string();
+    async fn run(
+        &self,
+        action: &str,
+        input: Value,
+        ctx: &RunCtx<'_>,
+    ) -> crate::Result<ActionOutput> {
+        let tool = action
+            .strip_prefix(&format!("{}.", self.namespace))
+            .unwrap_or(action)
+            .to_string();
 
         // Bridge: if the call names a ARK artifact and the tool wants a `path`,
         // resolve the artifact to a real file path so file-oriented tools just work.
@@ -238,7 +303,12 @@ impl Adapter for McpAdapter {
                     .actions
                     .iter()
                     .find(|d| d.name == action)
-                    .map(|d| d.input_schema.get("properties").and_then(|p| p.get("path")).is_some())
+                    .map(|d| {
+                        d.input_schema
+                            .get("properties")
+                            .and_then(|p| p.get("path"))
+                            .is_some()
+                    })
                     .unwrap_or(false);
                 if wants_path && !obj.contains_key("path") {
                     if let Some(p) = ctx.blobs.path(&ark_core::ArtifactId(aid.to_string())) {
@@ -257,7 +327,9 @@ impl Adapter for McpAdapter {
         // MCP result: `content` (array of parts) + optional `structuredContent`, `isError`.
         if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
             let text = collect_text(&result);
-            return Err(AdapterError::Tool(format!("plugin tool `{tool}` reported an error: {text}")));
+            return Err(AdapterError::Tool(format!(
+                "plugin tool `{tool}` reported an error: {text}"
+            )));
         }
         let mut output = json!({ "plugin": self.namespace, "tool": tool });
         if let Some(sc) = result.get("structuredContent") {
@@ -271,7 +343,11 @@ impl Adapter for McpAdapter {
                 _ => output["text"] = json!(text),
             }
         }
-        Ok(ActionOutput::json(output).with_command(vec!["mcp".into(), self.namespace.clone(), tool]))
+        Ok(ActionOutput::json(output).with_command(vec![
+            "mcp".into(),
+            self.namespace.clone(),
+            tool,
+        ]))
     }
 }
 
@@ -296,10 +372,22 @@ mod tests {
 
     #[test]
     fn risk_mapping_from_annotations() {
-        assert_eq!(risk_from_annotations(&json!({ "readOnlyHint": true })), RiskTier::Read);
-        assert_eq!(risk_from_annotations(&json!({ "readOnlyHint": true, "openWorldHint": true })), RiskTier::Observe);
-        assert_eq!(risk_from_annotations(&json!({ "destructiveHint": true })), RiskTier::Mutate);
-        assert_eq!(risk_from_annotations(&json!({ "x-ark-risk": "observe" })), RiskTier::Observe);
+        assert_eq!(
+            risk_from_annotations(&json!({ "readOnlyHint": true })),
+            RiskTier::Read
+        );
+        assert_eq!(
+            risk_from_annotations(&json!({ "readOnlyHint": true, "openWorldHint": true })),
+            RiskTier::Observe
+        );
+        assert_eq!(
+            risk_from_annotations(&json!({ "destructiveHint": true })),
+            RiskTier::Mutate
+        );
+        assert_eq!(
+            risk_from_annotations(&json!({ "x-ark-risk": "observe" })),
+            RiskTier::Observe
+        );
         // Unknown intent defaults to the gated tier, never silent auto-run.
         assert_eq!(risk_from_annotations(&Value::Null), RiskTier::Mutate);
     }

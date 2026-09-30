@@ -1,0 +1,19 @@
+[package]
+name = "ark-interact"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK interaction layer: sessions, commands, structured reports, activity labels and traces, shared by every front-end."
+
+[dependencies]
+ark-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -32,6 +32,9 @@ pub struct Metrics {
     pub calls_by_model: BTreeMap<String, u32>,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
+    /// The part of `prompt_tokens` served from a provider's prompt cache.
+    #[serde(default)]
+    pub cached_tokens: u64,
     /// Whether every usage number so far was measured by the provider (vs estimated).
     pub tokens_measured: bool,
     /// Adapter tool calls actually executed.
@@ -70,6 +73,7 @@ impl Metrics {
         *self.calls_by_model.entry(model_id.into()).or_insert(0) += 1;
         self.prompt_tokens += usage.prompt_tokens as u64;
         self.completion_tokens += usage.completion_tokens as u64;
+        self.cached_tokens += usage.cached_tokens as u64;
         if !usage.measured {
             self.tokens_measured = false;
         }
@@ -198,6 +202,7 @@ mod tests {
                 prompt_tokens: 10,
                 completion_tokens: 2,
                 measured: false,
+                cached_tokens: 0,
             },
         );
         assert!(!m.tokens_measured);

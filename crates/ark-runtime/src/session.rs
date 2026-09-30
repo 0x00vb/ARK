@@ -56,6 +56,9 @@ pub struct SessionUsage {
     pub turns: u32,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
+    /// The part of `prompt_tokens` served from a provider's prompt cache.
+    #[serde(default)]
+    pub cached_tokens: u64,
     pub model_calls: u32,
     pub tool_calls: u32,
     pub duplicate_tool_calls: u32,
@@ -73,6 +76,7 @@ impl SessionUsage {
         self.turns += 1;
         self.prompt_tokens += m.prompt_tokens;
         self.completion_tokens += m.completion_tokens;
+        self.cached_tokens += m.cached_tokens;
         self.model_calls += m.total_model_calls();
         self.tool_calls += m.tool_calls;
         self.duplicate_tool_calls += m.duplicate_tool_calls;
@@ -121,6 +125,9 @@ pub struct Turn {
     pub cited: Vec<String>,
     #[serde(default)]
     pub cancelled: bool,
+    /// Messages the user sent while this turn ran that reached the model.
+    #[serde(default)]
+    pub steered: Vec<String>,
     #[serde(default)]
     pub metrics: Metrics,
     #[serde(with = "time::serde::rfc3339")]
@@ -270,6 +277,42 @@ impl Session {
         self.record.turn_count
     }
 
+    /// Give the session a human title (shown in session lists). Blank titles are ignored.
+    pub fn set_title(&mut self, engine: &Engine, title: &str) -> Result<(), AgentError> {
+        let t = clip(title, 80);
+        if t.is_empty() {
+            return Ok(());
+        }
+        self.record.title = t;
+        self.save(engine)
+    }
+
+    /// Rename a stored session by id or prefix. Returns false when none matches. A live
+    /// [`Session`] handle for the same id keeps its old title until reopened; rename that one
+    /// with [`set_title`](Session::set_title).
+    pub fn rename(engine: &Engine, id: &str, title: &str) -> Result<bool, AgentError> {
+        match Self::open(engine, id)? {
+            None => Ok(false),
+            Some(mut s) => s.set_title(engine, title).map(|_| true),
+        }
+    }
+
+    /// One page of the stored transcript, oldest first: up to `limit` turns before turn
+    /// index `before` (the newest turns when `before` is `None`). For display only.
+    pub fn transcript_page(
+        &self,
+        engine: &Engine,
+        before: Option<u32>,
+        limit: usize,
+    ) -> Result<Vec<Turn>, AgentError> {
+        engine
+            .store
+            .list_session_turns_before(self.record.id.as_str(), before, limit)?
+            .into_iter()
+            .map(|v| serde_json::from_value(v).map_err(AgentError::from))
+            .collect()
+    }
+
     /// The full stored transcript, for display. Never sent to a model.
     pub fn transcript(
         &self,
@@ -303,7 +346,7 @@ impl Session {
         if !self.recent.is_empty() {
             let _ = writeln!(s, "Most recent exchanges:");
             for t in &self.recent {
-                let _ = writeln!(s, "  [user] {}", clip(&t.input, p.input_chars));
+                let _ = writeln!(s, "  [user] {}", clip(&t.user_text(), p.input_chars));
                 let reply = if t.cancelled {
                     "(cancelled before answering)".to_string()
                 } else {
@@ -332,6 +375,7 @@ impl Session {
                 .map(|c| c.short().to_string())
                 .collect(),
             cancelled: outcome.cancelled,
+            steered: outcome.steered.clone(),
             metrics: outcome.metrics.clone(),
             at: OffsetDateTime::now_utc(),
         };
@@ -397,9 +441,9 @@ impl Session {
             .store
             .get_research_state(&self.record.project)?
             .unwrap_or_default();
-        report.state_before = estimate_tokens(&state.digest(6));
+        report.state_before = estimate_tokens(&state.digest(crate::harness::STATE_DIGEST_ITEMS));
         report.state_items_removed = state.compact(6);
-        report.state_after = estimate_tokens(&state.digest(6));
+        report.state_after = estimate_tokens(&state.digest(crate::harness::STATE_DIGEST_ITEMS));
         engine
             .store
             .put_research_state(&self.record.project, &state)?;
@@ -408,6 +452,17 @@ impl Session {
         self.record.updated_at = OffsetDateTime::now_utc();
         self.save(engine)?;
         Ok(report)
+    }
+}
+
+impl Turn {
+    /// What the user said in this turn: the message, plus anything sent while it ran.
+    pub fn user_text(&self) -> String {
+        if self.steered.is_empty() {
+            self.input.clone()
+        } else {
+            format!("{} (then: {})", self.input, self.steered.join("; "))
+        }
     }
 }
 
@@ -431,7 +486,10 @@ fn gist(t: &Turn, max: usize) -> String {
                 .join(",")
         )
     };
-    clip(&format!("{} → {}{}", flat(&t.input), answer, cites), max)
+    clip(
+        &format!("{} → {}{}", flat(&t.user_text()), answer, cites),
+        max,
+    )
 }
 
 fn first_sentence(s: &str) -> String {
@@ -473,6 +531,7 @@ mod tests {
             metrics: Metrics::start(),
             state: ResearchState::default(),
             cancelled: false,
+            steered: vec![],
         }
     }
 
@@ -530,6 +589,42 @@ mod tests {
             resumed.id()
         );
         assert_eq!(resumed.turn_count(), 6);
+    }
+
+    #[test]
+    fn rename_and_page_and_steered_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let p = engine.create_project("p", "").unwrap();
+        let mut s = Session::start(&engine, &p.id).unwrap();
+        for i in 0..5 {
+            let mut o = outcome(&format!("a{i}."));
+            if i == 4 {
+                o.steered = vec!["also check the door".into()];
+            }
+            s.record_turn(&engine, &format!("q{i}"), &o).unwrap();
+        }
+        assert!(s
+            .conversation_digest()
+            .unwrap()
+            .contains("q4 (then: also check the door)"));
+        let page = s.transcript_page(&engine, Some(4), 2).unwrap();
+        assert_eq!(page.iter().map(|t| t.index).collect::<Vec<_>>(), vec![2, 3]);
+        let newest = s.transcript_page(&engine, None, 2).unwrap();
+        assert_eq!(
+            newest.iter().map(|t| t.index).collect::<Vec<_>>(),
+            vec![3, 4]
+        );
+        assert!(Session::rename(&engine, s.id().short(), "The door").unwrap());
+        assert_eq!(
+            Session::open(&engine, s.id().as_str())
+                .unwrap()
+                .unwrap()
+                .record()
+                .title,
+            "The door"
+        );
+        assert!(!Session::rename(&engine, "nope", "x").unwrap());
     }
 
     #[test]

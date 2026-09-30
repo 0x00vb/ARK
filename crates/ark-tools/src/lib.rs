@@ -14,8 +14,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use ark_core::{ActionDescriptor, ArtifactId, ArtifactKind};
+use async_trait::async_trait;
 
 pub mod mcp;
 pub mod subprocess;
@@ -45,7 +45,10 @@ pub struct RunCtx<'a> {
 
 impl<'a> RunCtx<'a> {
     pub fn new(blobs: &'a dyn BlobResolver) -> Self {
-        RunCtx { blobs, workspace: None }
+        RunCtx {
+            blobs,
+            workspace: None,
+        }
     }
     pub fn with_workspace(mut self, workspace: PathBuf) -> Self {
         self.workspace = Some(workspace);
@@ -75,7 +78,12 @@ impl ProducedArtifact {
     }
 
     pub fn bytes(kind: ArtifactKind, name: impl Into<String>, bytes: Vec<u8>) -> Self {
-        ProducedArtifact { kind, name: name.into(), bytes, provenance: None }
+        ProducedArtifact {
+            kind,
+            name: name.into(),
+            bytes,
+            provenance: None,
+        }
     }
 
     pub fn with_provenance(mut self, p: ark_core::Provenance) -> Self {
@@ -99,7 +107,11 @@ pub struct ActionOutput {
 
 impl ActionOutput {
     pub fn json(output: serde_json::Value) -> Self {
-        ActionOutput { output, command: None, produced: Vec::new() }
+        ActionOutput {
+            output,
+            command: None,
+            produced: Vec::new(),
+        }
     }
     pub fn with_command(mut self, cmd: Vec<String>) -> Self {
         self.command = Some(cmd);
@@ -128,8 +140,12 @@ pub trait Adapter: Send + Sync {
     }
 
     /// Run one action. `action` is the full namespaced name.
-    async fn run(&self, action: &str, input: serde_json::Value, ctx: &RunCtx<'_>)
-        -> Result<ActionOutput>;
+    async fn run(
+        &self,
+        action: &str,
+        input: serde_json::Value,
+        ctx: &RunCtx<'_>,
+    ) -> Result<ActionOutput>;
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -140,13 +156,22 @@ pub struct AdapterHealth {
 
 impl AdapterHealth {
     pub fn ok() -> Self {
-        AdapterHealth { available: true, detail: String::new() }
+        AdapterHealth {
+            available: true,
+            detail: String::new(),
+        }
     }
     pub fn ok_with(detail: impl Into<String>) -> Self {
-        AdapterHealth { available: true, detail: detail.into() }
+        AdapterHealth {
+            available: true,
+            detail: detail.into(),
+        }
     }
     pub fn missing(detail: impl Into<String>) -> Self {
-        AdapterHealth { available: false, detail: detail.into() }
+        AdapterHealth {
+            available: false,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -160,12 +185,16 @@ pub struct Registry {
 
 impl Registry {
     pub fn new() -> Self {
-        Registry { adapters: Vec::new() }
+        Registry {
+            adapters: Vec::new(),
+        }
     }
 
     /// Build a registry from a list of adapters.
     pub fn from_adapters(adapters: impl IntoIterator<Item = Arc<dyn Adapter>>) -> Self {
-        Registry { adapters: adapters.into_iter().collect() }
+        Registry {
+            adapters: adapters.into_iter().collect(),
+        }
     }
 
     pub fn register(&mut self, a: Arc<dyn Adapter>) {
@@ -246,13 +275,20 @@ mod tests {
             "echo"
         }
         fn actions(&self) -> Vec<ActionDescriptor> {
-            vec![ActionDescriptor::new("echo.say", "echo the input text", RiskTier::Read)
-                .with_input_schema(serde_json::json!({
-                    "type": "object", "required": ["text"],
-                    "properties": { "text": { "type": "string" } }
-                }))]
+            vec![
+                ActionDescriptor::new("echo.say", "echo the input text", RiskTier::Read)
+                    .with_input_schema(serde_json::json!({
+                        "type": "object", "required": ["text"],
+                        "properties": { "text": { "type": "string" } }
+                    })),
+            ]
         }
-        async fn run(&self, _action: &str, input: serde_json::Value, _ctx: &RunCtx<'_>) -> Result<ActionOutput> {
+        async fn run(
+            &self,
+            _action: &str,
+            input: serde_json::Value,
+            _ctx: &RunCtx<'_>,
+        ) -> Result<ActionOutput> {
             let text = input.get("text").and_then(|v| v.as_str()).unwrap_or("");
             Ok(ActionOutput::json(serde_json::json!({ "echoed": text })))
         }
@@ -275,7 +311,10 @@ mod tests {
         assert!(reg.descriptor("echo.say").is_some());
         let blobs = NoBlobs;
         let ctx = RunCtx::new(&blobs);
-        let out = reg.run("echo.say", serde_json::json!({ "text": "hi" }), &ctx).await.unwrap();
+        let out = reg
+            .run("echo.say", serde_json::json!({ "text": "hi" }), &ctx)
+            .await
+            .unwrap();
         assert_eq!(out.output["echoed"], "hi");
     }
 
@@ -284,7 +323,10 @@ mod tests {
         let reg = Registry::new();
         let blobs = NoBlobs;
         let ctx = RunCtx::new(&blobs);
-        assert!(reg.run("nope.nope", serde_json::json!({}), &ctx).await.is_err());
+        assert!(reg
+            .run("nope.nope", serde_json::json!({}), &ctx)
+            .await
+            .is_err());
     }
 
     #[test]

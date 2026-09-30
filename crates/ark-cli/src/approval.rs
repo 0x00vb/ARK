@@ -1,52 +1,14 @@
-//! The terminal side of ARK's approval gate. The runtime's [`ApprovalGate`] decides *when* to
-//! ask and remembers grants; this module only carries the question to the screen and the
-//! answer back. [`TerminalApprover`] forwards each request over a channel to the turn loop,
-//! which draws a [`Menu`] and replies when the human picks.
+//! The terminal side of an approval. The runtime's [`ApprovalGate`] decides *when* to ask and
+//! remembers grants; `ark-interact`'s channel approver carries the question here. This module
+//! only draws a [`Menu`] and returns the person's pick.
 //!
 //! [`ApprovalGate`]: ark_sdk::prelude::ApprovalGate
 
-use ark_sdk::prelude::{ApprovalDecision, ApprovalRequest, Approver};
+use ark_interact::PendingApproval;
+use ark_sdk::prelude::{ApprovalDecision, ApprovalRequest};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use tokio::sync::{mpsc, oneshot};
 
 use crate::theme::Theme;
-
-/// A request waiting for a human.
-pub(crate) struct Pending {
-    pub request: ApprovalRequest,
-    pub reply: oneshot::Sender<ApprovalDecision>,
-}
-
-/// An [`Approver`] that asks through the interactive shell.
-pub(crate) struct TerminalApprover {
-    tx: mpsc::UnboundedSender<Pending>,
-}
-
-impl TerminalApprover {
-    pub(crate) fn channel() -> (Self, mpsc::UnboundedReceiver<Pending>) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        (TerminalApprover { tx }, rx)
-    }
-}
-
-#[async_trait::async_trait]
-impl Approver for TerminalApprover {
-    async fn decide(&self, request: &ApprovalRequest) -> ApprovalDecision {
-        let (reply, answer) = oneshot::channel();
-        if self
-            .tx
-            .send(Pending {
-                request: request.clone(),
-                reply,
-            })
-            .is_err()
-        {
-            return ApprovalDecision::Deny;
-        }
-        // A dropped reply (turn cancelled, shell gone) is a "no".
-        answer.await.unwrap_or(ApprovalDecision::Deny)
-    }
-}
 
 /// What a key press did to the menu.
 #[derive(Debug, PartialEq, Eq)]
@@ -66,14 +28,14 @@ const CHOICES: [ApprovalDecision; 3] = [
 
 /// The approval prompt: three choices, arrow keys or a shortcut to pick.
 pub(crate) struct Menu {
-    pub pending: Option<Pending>,
+    pub pending: Option<PendingApproval>,
     pub selected: usize,
     pub lines: usize,
     call_line: String,
 }
 
 impl Menu {
-    pub(crate) fn new(pending: Pending, call_line: String) -> Self {
+    pub(crate) fn new(pending: PendingApproval, call_line: String) -> Self {
         Menu {
             pending: Some(pending),
             selected: 0,
@@ -111,7 +73,7 @@ impl Menu {
     /// Send the decision back to the gate.
     pub(crate) fn answer(&mut self, d: ApprovalDecision) {
         if let Some(p) = self.pending.take() {
-            let _ = p.reply.send(d);
+            p.answer(d);
         }
     }
 
@@ -173,30 +135,37 @@ impl Menu {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_interact::ChannelApprover;
     use ark_sdk::prelude::ark_core::RiskTier;
+    use ark_sdk::prelude::Approver;
+    use std::sync::Arc;
 
-    fn menu() -> (Menu, oneshot::Receiver<ApprovalDecision>) {
-        let (reply, rx) = oneshot::channel();
-        let request = ApprovalRequest {
+    fn request() -> ApprovalRequest {
+        ApprovalRequest {
             action: "manuscript.save".into(),
             summary: "write text to a chapter".into(),
             risk: RiskTier::Mutate,
             input: serde_json::json!({ "file": "ch4.md" }),
             class: "manuscript.save".into(),
             preview: "manuscript.save(file=\"ch4.md\")".into(),
-        };
+        }
+    }
+
+    /// A menu wired to a real approver, and the task waiting for its answer.
+    async fn menu() -> (Menu, tokio::task::JoinHandle<ApprovalDecision>) {
+        let (approver, mut rx) = ChannelApprover::channel();
+        let approver = Arc::new(approver);
+        let task = tokio::spawn(async move { approver.decide(&request()).await });
+        let pending = rx.recv().await.unwrap();
         (
-            Menu::new(
-                Pending { request, reply },
-                "manuscript.save(file=\"ch4.md\")".into(),
-            ),
-            rx,
+            Menu::new(pending, "manuscript.save(file=\"ch4.md\")".into()),
+            task,
         )
     }
 
-    #[test]
-    fn arrows_move_and_enter_confirms() {
-        let (mut m, mut rx) = menu();
+    #[tokio::test]
+    async fn arrows_move_and_enter_confirms() {
+        let (mut m, task) = menu().await;
         assert_eq!(
             m.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
             MenuKey::Redraw
@@ -206,12 +175,12 @@ mod tests {
         };
         assert_eq!(d, ApprovalDecision::AllowSession);
         m.answer(d);
-        assert_eq!(rx.try_recv().unwrap(), ApprovalDecision::AllowSession);
+        assert_eq!(task.await.unwrap(), ApprovalDecision::AllowSession);
     }
 
-    #[test]
-    fn shortcuts_and_escape() {
-        let (mut m, _rx) = menu();
+    #[tokio::test]
+    async fn shortcuts_and_escape() {
+        let (mut m, _task) = menu().await;
         assert_eq!(
             m.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
             MenuKey::Decide(ApprovalDecision::AllowOnce)
@@ -231,9 +200,9 @@ mod tests {
         assert_eq!(m.selected, 2, "up from the top wraps to Deny");
     }
 
-    #[test]
-    fn render_shows_call_and_choices() {
-        let (m, _rx) = menu();
+    #[tokio::test]
+    async fn render_shows_call_and_choices() {
+        let (m, _task) = menu().await;
         let theme = Theme::default().with_color(false);
         let text = m.render(&theme).join("\n");
         assert!(text.contains("The agent wants to run:"));
@@ -241,15 +210,5 @@ mod tests {
         assert!(text.contains("› 1. Allow once"));
         assert!(text.contains("Allow for this session"));
         assert!(text.contains("3. Deny"));
-    }
-
-    #[tokio::test]
-    async fn dropped_reply_is_a_deny() {
-        let (approver, mut rx) = TerminalApprover::channel();
-        let req = menu().0.pending.unwrap().request;
-        let task = tokio::spawn(async move { approver.decide(&req).await });
-        let pending = rx.recv().await.unwrap();
-        drop(pending);
-        assert_eq!(task.await.unwrap(), ApprovalDecision::Deny);
     }
 }

@@ -124,8 +124,12 @@ impl Engine {
         let id = self.store.put_blob(bytes)?;
         let art = Artifact::new(id, kind.clone(), name, bytes.len() as u64, provenance);
         self.store.put_artifact(project, &art)?;
-        // Index text-shaped artifacts so their contents become searchable evidence.
-        if kind.is_textual() {
+        // Index text-shaped artifacts so their contents become searchable evidence. Also index
+        // a domain kind (`Other`) when its bytes are valid UTF-8 — a consumer's text-bearing
+        // format (a plist, a JSON trace, an outline) should be searchable without ARK having to
+        // know the format. Truly binary `Other` bytes fail the UTF-8 check and are skipped.
+        let indexable = kind.is_textual() || matches!(kind, ArtifactKind::Other(_));
+        if indexable {
             if let Ok(body) = std::str::from_utf8(bytes) {
                 self.store.index_text(project, &art.id, &art.name, &kind.as_tag(), body);
             }

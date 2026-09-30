@@ -3,6 +3,19 @@
 All notable changes to ARK are documented here. Format: [Keep a Changelog](https://keepachangelog.com);
 this project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.1.2] — unreleased
+
+### Added
+- `ingest_bytes` now also indexes an `ArtifactKind::Other(_)` artifact for full-text search
+  when its bytes are valid UTF-8 (previously only `is_textual()` kinds were indexed). Lets a
+  consumer's text-bearing domain format (a plist, a JSON trace, an outline) be searchable
+  without ARK knowing the format. Binary `Other` bytes fail the UTF-8 guard and are skipped.
+
+### Changed
+- `AcquisitionProvider` is now an **async** trait (`find`/`propose`/`acquire` are `async fn`),
+  since acquiring a provider is inherently I/O (probe, install, connect). Refines the seam
+  introduced in 0.1.1 before it ships in a released consumer.
+
 ## [0.1.1] — unreleased
 
 ### Added

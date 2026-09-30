@@ -38,11 +38,13 @@ pub mod prelude {
         CapabilitySpec, Project, ProjectId, Provenance, RiskTier, Sniffer,
     };
     pub use ark_runtime::{
-        AgentProfile, DistillerSet, Engine, Harness, HarnessEvent, KnowledgeHit,
+        AgentProfile, Distiller, DistillerSet, Engine, Harness, HarnessEvent, KnowledgeHit,
         KnowledgeProvider, ModelRouter, Prompts,
     };
-    pub use ark_tools::{ActionOutput, Adapter, AdapterHealth, ProducedArtifact, Registry, RunCtx};
-    pub use ark_model;
+    pub use ark_tools::{ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArtifact, Registry, RunCtx};
+    // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
+    // with `ark_model::from_env_arc()`, etc., from the prelude alone.
+    pub use {ark_core, ark_model, ark_tools};
 }
 
 #[derive(Debug, thiserror::Error)]

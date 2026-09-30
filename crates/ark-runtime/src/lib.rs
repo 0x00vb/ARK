@@ -31,7 +31,7 @@ pub mod router;
 mod blobs;
 
 pub use agent::{Agent, AgentEvent, AgentOutcome};
-pub use distill::{call_digest, distill, DistillerSet};
+pub use distill::{call_digest, distill, Distiller, DistillerSet};
 pub use engine::Engine;
 pub use error::AgentError;
 pub use harness::{Harness, HarnessEvent, HarnessOutcome};

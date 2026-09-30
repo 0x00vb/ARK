@@ -1,0 +1,20 @@
+[package]
+name = "writing-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "A novelist's assistant built on ARK — the 'could this power a novel?' proof."
+
+[[bin]]
+name = "writing-agent"
+path = "src/main.rs"
+
+[dependencies]
+ark-sdk.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -40,7 +40,9 @@ small stable interfaces — with the domain (tools, prompts, vocabulary) injecte
 
 Two unrelated example consumers ship in-tree to prove generality:
 [`minimal-agent`](examples/minimal-agent) (calculator + clock) and
-[`writing-agent`](examples/writing-agent) (a novelist's editor).
+[`writing-agent`](examples/writing-agent) (a novelist's editor). A third, real consumer — a
+security-research workstation — lives in its own repo and consumes ARK as a version-pinned
+dependency, deleting ~5,300 lines of its own harness in the process.
 
 ## Quick start
 
@@ -166,11 +168,14 @@ Done and green (67 tests): the headless runtime, the model/tool/store abstractio
 SDK, the extension model (adapters + MCP plugins + `AgentProfile`), token/context
 optimization, usage accounting, docs, and two unrelated example agents.
 
+Since v0.1 (see [`CHANGELOG.md`](CHANGELOG.md)): an injectable `AcquisitionProvider` seam, and
+the **origin security product migrated onto ARK** as a versioned dependency (its harness
+duplication deleted; behavior and token efficiency verified unchanged) — ARK's third unrelated
+consumer.
+
 Planned next milestones (tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md)):
-`ark-cli` (a reusable CLI framework consumers extend with their own subcommands),
-`ark-ui` (an optional, themeable conversation-shell UI built against the runtime), a
-capability-*acquisition* module, and the migration of the origin security product to
-consume ARK.
+`ark-cli` (a reusable CLI framework consumers extend with their own subcommands) and
+`ark-ui` (an optional, themeable conversation-shell UI built against the runtime).
 
 ## Contributing
 

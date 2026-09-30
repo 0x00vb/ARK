@@ -6,8 +6,11 @@ ARK improves, publish a new version and consumers update intentionally.
 
 ## Packages
 
-`ark-core`, `ark-model`, `ark-store`, `ark-tools`, `ark-runtime`, `ark-sdk`. Most consumers
-depend only on `ark-sdk` (which pulls the rest at matching versions). A consumer that wants a
+`ark-core`, `ark-model`, `ark-store`, `ark-tools`, `ark-runtime`, `ark-sdk`, and the
+front-end crates `ark-interact`, `ark-cli`, `ark-ui`. Most consumers depend only on `ark-sdk`
+(which pulls the rest at matching versions), plus a front-end if they want one. `ark-ui`'s
+Tauri window is behind its default `desktop` feature; `default-features = false` keeps only
+the browser server. A consumer that wants a
 narrower surface — say, just the model abstraction — can depend on `ark-model` alone.
 
 During `0.x`, all crates move in lockstep on one version (the workspace version). At `1.0`,

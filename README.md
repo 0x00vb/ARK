@@ -37,7 +37,9 @@ small stable interfaces — with the domain (tools, prompts, vocabulary) injecte
 | **`ark-tools`** | The `Adapter`/`Registry` tool boundary, a subprocess helper, and an **MCP plugin bridge** for out-of-process tools in any language. Ships **no** domain tools. |
 | **`ark-runtime`** | The agent loop(s): context **budget**, model **router**, deterministic **distillation**, progressive tool disclosure, a persistent **working state + investigation graph**, self-check + critic, **metrics**, and the approval gate. |
 | **`ark-sdk`** | The small, stable facade — `Ark::builder()`, an `AgentProfile`, and a `prelude`. |
-| **`ark-cli`** | The interactive terminal shell every ARK app opens into: streaming, approvals, cancel, sessions and resume, slash commands, context inspection, and a headless `-p` mode. See [`docs/CLI.md`](docs/CLI.md). |
+| **`ark-interact`** | The interaction layer between the runtime and any front-end: `App`, `Interaction` (sessions, turns, approvals, steering), slash commands that return structured `Report`s, activity labels, traces, and context/usage/state views. Draws nothing. |
+| **`ark-cli`** | The interactive terminal shell every ARK app opens into: streaming, approvals, cancel, steering, sessions and resume, slash commands, and a headless `-p` mode. See [`docs/CLI.md`](docs/CLI.md). |
+| **`ark-ui`** | The same app in a window (Tauri) or a local browser page: conversation-first, approvals, sessions, inline reports, and app panels and viewers. Optional; see [`docs/UI.md`](docs/UI.md). |
 
 Two unrelated example consumers ship in-tree to prove generality:
 [`minimal-agent`](examples/minimal-agent) (calculator + clock) and
@@ -92,7 +94,7 @@ Run the examples:
 ```bash
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p minimal-agent -- "what is 6 * 7?"
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p writing-agent   # the interactive writer
-cargo test   # 114 tests, no live model required (the Mock provider drives the loops)
+cargo test   # 153 tests, no live model required (the Mock provider drives the loops)
 ```
 
 ## The interactive shell
@@ -103,10 +105,10 @@ stop, leave with ctrl+d and come back with `--resume`. The app supplies its name
 commands, labels and colours:
 
 ```rust
-ark_cli::ArkCli::builder()
-    .name("Writer")
+let app = ark_interact::App::new("Writer")
     .ark(ark)
-    .command(std::sync::Arc::new(ChapterCommand))
+    .command(std::sync::Arc::new(ChapterCmd));
+ark_cli::ArkCli::new(app)
     .theme(ark_cli::Theme::default().accent(ark_cli::Accent::Magenta).prompt("✎ "))
     .run()
     .await
@@ -196,8 +198,9 @@ duplication deleted; behavior and token efficiency verified unchanged) — ARK's
 consumer.
 
 v0.2 adds `ark-cli`, the interactive shell, and the runtime seams it needs (streaming,
-approvals, cancellation, sessions, context reports). Next (tracked in
-[`docs/ROADMAP.md`](docs/ROADMAP.md)): `ark-ui`, a themeable GUI shell on the same seams.
+approvals, cancellation, sessions, context reports). v0.3 splits out `ark-interact`, the
+interaction layer both front-ends share, and adds `ark-ui`, the graphical workspace. SecRes's
+desktop app runs on it. Next is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Contributing
 

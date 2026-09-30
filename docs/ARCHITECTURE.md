@@ -5,8 +5,13 @@ nothing depends on a consumer. The design goal is a **small, stable public API o
 core**, with every domain concern injected rather than baked in.
 
 ```
-                      ┌───────────────────────────┐
-   your application → │          ark-cli           │  the interactive shell (optional)
+                   ┌──────────────┐   ┌──────────────────┐
+ your application →│   ark-cli    │   │      ark-ui      │  presentation (optional; neither
+                   │  (terminal)  │   │ (window, browser)│  depends on the other)
+                   └──────┬───────┘   └────────┬─────────┘
+                      ┌───▼────────────────────▼──┐
+                      │       ark-interact         │  interaction: App, Interaction, commands
+                      │                            │  → Report, activity, trace, inspect
                       └─────────────┬─────────────┘
                       ┌─────────────▼─────────────┐
                       │          ark-sdk           │  Ark::builder(), AgentProfile, prelude
@@ -76,10 +81,34 @@ turns any MCP server (any language) into native actions with risk derived from a
 - **`CancelToken`**: cooperative stop, checked at every await point in a turn.
 - **`ContextReport`**: the token breakdown of each request by source.
 
+### Three layers above the SDK
+
+| Layer | Crate | Owns | Knows nothing of |
+|---|---|---|---|
+| Runtime | `ark-runtime` (via `ark-sdk`) | reasoning, tools, context, working state, models, approvals, cancel, steering | front-ends |
+| Interaction | `ark-interact` | sessions, turns, commands and their `Report`s, activity labels, traces, context/usage/state views | terminals, windows, HTML, ANSI |
+| Presentation | `ark-cli`, `ark-ui` | drawing, keys, layout | each other |
+
+### `ark-interact`: the interaction layer
+An app is described once as an `App` and opened as an `Interaction`: project, session,
+approvals (`ChannelApprover`), turns (`run_turn` with a `TurnControl` of cancel, steering and
+a trace recorder). Slash commands return a `Reply` holding a `Report` (title and blocks:
+heading, text, fields, table, code, meter, actions) and an optional `Effect`. `activity`
+turns `HarnessEvent`s into a person's words, `trace::interpret` turns a recorded turn into
+calls with status, approval and context cost, and `inspect` builds the context, usage, state
+and session views. Both front-ends call these; neither recomputes them.
+
 ### `ark-cli`: the shell
 The terminal front-end. It drives a turn as a future and multiplexes runtime events,
-approval requests, key presses and a spinner tick in one `select!` loop. It depends on the
-runtime; the runtime knows nothing about it. See [`CLI.md`](CLI.md).
+approval requests, key presses and a spinner tick in one `select!` loop, and renders
+`Report`s and `Activity` as lines. See [`CLI.md`](CLI.md).
+
+### `ark-ui`: the workspace
+A `Host` wraps one `Interaction` and exposes `call(method, params)` plus an event stream.
+Two transports carry it: a Tauri window (feature `desktop`) and a loopback HTTP server with a
+per-run token. The page in `web/` is plain ES modules; apps add panels, artifact viewers,
+tool renderers, actions and status lines through `window.ark`, and backend methods through
+`ArkUi::handler`. See [`UI.md`](UI.md).
 
 ### `ark-sdk` — the facade
 `Ark::builder()` composes an `Engine`, a `ModelRouter`, and an `AgentProfile` into a
@@ -104,7 +133,7 @@ one-call `.ask()`. A `prelude` re-exports everything a typical consumer names.
 The loop is a stream of typed, owned, serializable `HarnessEvent`s (step, context report,
 text delta, model call, tool call/result, duplicate, retrieval, approval requested/resolved,
 state update, note, present, self-check, cancelled, answer). The terminal shell, the `--events`
-JSON stream and a GUI all consume the same stream. A UI, a logger, or a test
+JSON stream and the `ark-ui` window all consume the same stream. A UI, a logger, or a test
 consumes them without coupling to the loop's internals. `Metrics` accounts for tokens (in/out/
 peak), model calls by role and model id, tool calls, dedup and retrieval hits, and
 tokens-per-finding.

@@ -3,6 +3,60 @@
 All notable changes to ARK are documented here. Format: [Keep a Changelog](https://keepachangelog.com);
 this project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.3.0]
+
+An interaction layer both front-ends share, and a graphical workspace on it.
+
+### Added
+- **`ark-interact`**: the layer between the runtime and any front-end. `App` (an app described
+  once), `Interaction` (project, session, approvals, turns, views), `Command` / `Reply` /
+  `Effect`, structured `Report`s (`Block`, `Table`, `Tone`, ...), `Labels` / `ToolLabeler` /
+  `ActivityLabels`, `Activity`, `trace` (`TurnRecord`, `TurnRecorder`, `interpret`), `inspect`
+  (context, usage with optional `Pricing` / `ARK_PRICE`, working state, sessions) and
+  `ChannelApprover`. Generic commands gain `/rename` and `/project`.
+- **`ark-ui`**: the graphical workspace. `ArkUi` builder (accent, logo, welcome, suggestions,
+  assets, scripts, stylesheets, handlers), `Host` with a `call` protocol and an event stream,
+  a Tauri window (feature `desktop`, default) and a loopback HTTP server with a per-run token.
+  The page's extension API (`window.ark`): panels, artifact viewers, tool renderers, actions,
+  status lines, events. See `docs/UI.md`.
+- Steering: `Steering`, `TurnOptions::steer`, `Harness::steering`. A message sent while the
+  agent works reaches the model at the next step; one that arrives too late is returned in
+  `HarnessOutcome::steered` for the next turn. `HarnessEvent::Steered`, `Turn::steered`.
+- `Usage::cached_tokens` (Anthropic cache reads, OpenAI `cached_tokens`), summed in `Metrics`
+  and `SessionUsage`.
+- `HarnessEvent::ToolResult::context_tokens` and `ContextReport::retrieved`: what a result
+  added to the context, and evidence fetched on demand shown apart from tool results.
+- Sessions: `Session::set_title`, `rename`, `transcript_page`; a `turn_traces` store table
+  (`put_turn_trace`, `get_turn_trace`), so a stored turn replays as it ran.
+- `Ark::shared_engine()`: read-only store access while a turn runs.
+- `HarnessEvent` is `Deserialize`.
+- Page tests (`crates/ark-ui/tests/page.rs`): the real page in WebKit, opt-in with
+  `ARK_UI_PAGE_TESTS=1`. A neutrality test covering the runtime's code as well as the
+  front-end layers.
+
+### Changed (breaking)
+- `ark-cli` renders `ark-interact` and holds no command logic. `ArkCli::new(app)` replaces
+  `ArkCli::builder()`; the agent, commands, labels and status move to `App`. `Command::run`
+  takes `&mut Interaction` and returns `Reply`; `CommandContext` and `CommandOutcome` are gone.
+  `ToolRenderer` is now `ark_interact::ToolLabeler`.
+- `ark-cli` keys: while the agent works, enter steers and tab queues (enter used to queue).
+- New `HarnessEvent` variant `Steered`; `ToolResult` gains `context_tokens`;
+  `HarnessOutcome` gains `steered`. Exhaustive matches need the new arm.
+- `Ark` holds its `Engine` in an `Arc`.
+
+### Fixed
+- A failed result is no longer reused. Dedup served a failed call's card back as "reused
+  prior evidence", so a retry after a timeout or a missing tool never ran again. Only a
+  successful result is reused; a failure runs again, and repeating the same failure counts as
+  no progress for the stall guard.
+- Cancelling a tool call kills its whole process group. Before, a shell's children (for
+  example the `sleep` in `sh -c "sleep 30"`) outlived the cancelled call.
+- An `artifact` argument given as a short id (`art:dc3b0c93c72c`), a prefix or a name is
+  resolved to the full id before the adapter sees it. The model is shown short ids, so its
+  calls used to fail with "artifact not found".
+- Default activity labels no longer carry domain verbs; "Showing show …" and "1 model calls"
+  wording.
+
 ## [0.2.0]
 
 The interactive shell, and what the runtime needed to support it.

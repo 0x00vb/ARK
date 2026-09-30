@@ -25,9 +25,18 @@
   `CancelToken`, `ContextReport`, `Session` with bounded carry-over and compaction.
 - Two apps on it with no shell changes: `writer` (in-tree) and `secres`.
 
+## Shipped (v0.3.0)
+- **`ark-interact`**: the interaction layer. `App`/`Interaction`, commands returning structured
+  `Report`s, activity labels, traces, context/usage/state views. `ark-cli` was rewired onto it.
+- **`ark-ui`**: the graphical workspace (Tauri window or local browser) on the same
+  `Interaction`. SecRes's desktop app runs on it with 14 app-owned surfaces.
+- Runtime seams: steering, persisted turn traces, cached-token accounting, session rename and
+  paging, short artifact ids in tool input, process-group cancellation, and no reuse of a
+  failed result.
+
 ## Next
-1. **`ark-ui`**: an optional, themeable GUI shell on the same seams `ark-cli` uses (events, `ApprovalGate`, `CancelToken`, `Session`). Streaming, tool activity, approval dialogs, a timeline, a context inspector.
-2. **Benchmark harness**: generalize SecRes's `bench/` into a token and step comparison any consumer can run to show a runtime change did not regress efficiency.
+1. **Benchmark harness**: generalize SecRes's `bench/` into a token and step comparison any consumer can run to show a runtime change did not regress efficiency.
+2. **Native window tests**: the page is tested in WebKit; the Tauri shell itself (IPC, window chrome) has no automated test on macOS.
 
 ## Non-goals
 - ARK will not grow domain functionality. It stays the machinery; domains are consumers.

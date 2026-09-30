@@ -60,7 +60,8 @@ for two tiers). `ARK_CTX_BUDGET` sets the per-request token budget.
 | ↑ / ↓ | Input history (kept per store) |
 | tab | Complete a `/command` |
 | esc or ctrl+c (agent working) | Stop the turn. State so far is saved |
-| typing (agent working) | Queued for the next prompt. Press enter to send it when the turn ends |
+| typing, then enter (agent working) | Steer: the message reaches the agent at its next step |
+| typing, then tab (agent working) | Queue: the message becomes the next prompt when the turn ends |
 | ctrl+d or `/exit` | Leave. The session is saved |
 
 ## Slash commands
@@ -73,6 +74,8 @@ Every app has these. Apps add their own (`/device`, `/chapter`, ...), listed fir
 | `/new` | A fresh session. Working state and evidence stay |
 | `/resume [id]` | Continue another session (the latest one if no id) |
 | `/sessions` | Sessions in this project |
+| `/rename <title>` | Give this session a title |
+| `/project [name]` | List projects, or switch (created if new) |
 | `/model [provider] [model]` | Show the model, or switch it for the next turn |
 | `/context` | What the model receives, by source, and what ARK kept out |
 | `/usage` | Tokens, model calls and tool calls for this session |
@@ -139,7 +142,8 @@ Each turn the model receives the carry-over built by `Session::conversation_dige
 - one-line gists of up to 8 older turns;
 - a count of anything older, whose conclusions are in the working state.
 
-`/context` shows the breakdown of a real request:
+`/context` shows the breakdown of a real request (the output below predates the "Retrieved
+context" row, which now separates evidence fetched with `get_evidence` from tool results):
 
 ```text
 Context · last request (step 5)
@@ -204,44 +208,43 @@ Exit codes: 0 answered, 1 error, 130 stopped by Ctrl+C.
 
 ## Building an app on the shell
 
+An app is described once as an `ark_interact::App`: the agent, its commands, labels and
+status. `ArkCli` opens it in the terminal; `ark_ui::ArkUi` opens the same `App` in a window
+(see [`UI.md`](UI.md)). From `examples/writing-agent/src/main.rs`, trimmed:
+
 ```rust
-use std::sync::Arc;
-use ark_cli::{Accent, ActivityLabels, ArkCli, Theme};
+let app = App::new("Writer")
+    .tagline("a developmental editor that reads your manuscript before it opines")
+    .ark(ark)
+    .project(manuscript_project)
+    .command(Arc::new(ManuscriptCmd))
+    .command(Arc::new(ChapterCmd))
+    .labels(labels())
+    .status_section("Manuscript", |ark, project| { /* Vec<Block> */ });
 
-#[tokio::main]
-async fn main() -> std::process::ExitCode {
-    let ark = Ark::builder()
-        .store_root(root)
-        .tool(Arc::new(Manuscript))
-        .profile(writer_profile())
-        .build()
-        .expect("model");
-
-    ArkCli::builder()
-        .name("Writer")
-        .tagline("a developmental editor")
-        .ark(ark)
-        .project(|ark| ark.find_or_create_project("my-novel", ""))
-        .theme(Theme::default().accent(Accent::Magenta).prompt("✎ "))
-        .command(Arc::new(ChapterCommand))
-        .labels(ActivityLabels::new().label("manuscript.read", |i| format!("Reading {}", i["file"])))
-        .run()
-        .await
-}
+ArkCli::new(app)
+    .theme(Theme::default().accent(Accent::Magenta).prompt("✎ "))
+    .run_with(cli.ark)
+    .await
 ```
 
-| Builder method | Purpose |
+| `App` method | Purpose |
 |---|---|
-| `.name`, `.tagline`, `.bin` | Branding and the executable name used in hints |
-| `.ark(ark)` or `.agent(profile)` + `.tool(..)` + `.store_root(..)` | The agent |
+| `new(name)`, `.tagline`, `.help` | Branding and the text at the top of `/help` |
+| `.ark(ark)`, or `.agent(profile)` + `.tool(..)` + `.store_root(..)` | The agent |
 | `.project(f)` | Which project to open (default: one named after the app) |
-| `.theme(Theme)`, `.prompt(symbol)` | Accent colour, prompt, glyphs, turn footer |
-| `.welcome(f)` | Replace the welcome banner |
-| `.help(text)` | Text at the top of `/help` |
 | `.command(Arc<dyn Command>)` | A domain slash command |
-| `.labels(ActivityLabels)`, `.renderer(Arc<dyn ToolRenderer>)` | How your tools read on screen and in approvals |
-| `.on_event(f)` | Render selected runtime events yourself |
+| `.labels(ActivityLabels)`, `.labeler(Arc<dyn ToolLabeler>)` | How your tools read in activity and approvals |
 | `.status_section(title, f)` | A block in `/status` |
+| `.on_project_change(f)` | Called after a project switch |
+| `.pricing(Pricing)` | Cost per million tokens for `/usage` (or `ARK_PRICE`) |
+
+| `ArkCli` method | Purpose |
+|---|---|
+| `.bin(name)` | The executable name used in hints |
+| `.theme(Theme)`, `.prompt(symbol)` | Accent colour, prompt, glyphs |
+| `.welcome(f)` | Replace the welcome banner |
+| `.on_event(f)` | Render selected runtime events yourself |
 | `.history_file(path)` | Where input history lives (default `<store>/.history`) |
 | `.run()` / `.run_with(ArkArgs)` | Parse flags and go, or take flags you parsed |
 
@@ -251,25 +254,32 @@ An app with its own subcommands flattens `ArkArgs` into its clap parser and call
 
 ### Domain commands
 
-```rust
-struct Chapter;
+A command returns a structured `Reply`, never printed text. The shell renders the `Report`
+as terminal lines; the window renders the same `Report` inline in the conversation. From
+the writer:
 
+```rust
 #[async_trait::async_trait]
-impl ark_cli::Command for Chapter {
+impl Command for ChapterCmd {
     fn name(&self) -> &str { "chapter" }
-    fn summary(&self) -> &str { "Have the editor assess a chapter" }
+    fn summary(&self) -> &str { "Have the editor read and assess a chapter" }
     fn usage(&self) -> &str { "<n>" }
     fn group(&self) -> &str { "Writing" }
-    async fn run(&self, ctx: &mut CommandContext<'_>, args: &str) -> anyhow::Result<CommandOutcome> {
-        Ok(CommandOutcome::Submit(format!("Read chapter {args} and assess it.")))
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let ws = ix.engine().workspace_dir(&ix.project().id)?;
+        let Some(file) = find_chapter(&ws, args) else {
+            return Ok(Report::new().warning("Which chapter? e.g. /chapter 4 (see /manuscript)").into());
+        };
+        Ok(Reply::submit(format!("Read {file} and give me a short developmental assessment: ...")))
     }
 }
 ```
 
-`CommandContext` gives the agent (`ark()`, `engine()`, `project()`, `session()`), output
-(`line`, `heading`, `row`), `run_action` for direct tool runs, and `new_session`, `resume`,
-`switch_project`. A command returns `Continue`, `Submit(text)` to hand text to the agent, or
-`Exit`.
+`Interaction` gives the agent (`ark()`, `engine()`, `project()`, `session()`), `run_action`
+for direct tool runs, and `new_session`, `resume`, `switch_project`. A `Report` is a title
+and blocks (`heading`, `text`, `fields`, `table`, `code`, `meter`, `actions`) with a tone
+each. `Reply::submit(text)` hands text to the agent; an `Effect` can also clear the view or
+exit.
 
 ### Activity lines
 
@@ -277,32 +287,34 @@ Tool calls render as a verb and a subject. Without labels ARK derives one from t
 name and its main argument: `manuscript.read {"file":"ch4.md"}` reads as `Reading ch4.md`,
 `continuity.search {"term":"locket"}` as `Searching "locket"`. Artifact ids are shown by name.
 Label your own actions with `ActivityLabels` (exact name or whole namespace), or implement
-`ToolRenderer` to also shape the result line and the approval preview.
+`ToolLabeler` to also shape the result line and the approval preview. The labels live in
+`ark-interact`, so the terminal and the window show the same words.
 
 ## How it fits together
 
 ```text
- ark-runtime  (headless)                     ark-cli  (terminal)
- ┌───────────────────────────┐   events      ┌───────────────────────────┐
- │ Harness::ask              │ ────────────► │ driver: select! over      │
- │  budget, distill, dedup   │               │   events, approvals,      │
- │  ApprovalGate ◄───────────┼── decisions ──│   keys, spinner tick      │
- │  CancelToken ◄────────────┼── esc/ctrl+c ─│ view: events → activity   │
- │ Session (carry-over)      │               │ shell: reedline, /cmds    │
- └───────────────────────────┘               └───────────────────────────┘
+ ark-runtime (headless)      ark-interact (no drawing)        ark-cli (terminal)
+ ┌──────────────────────┐    ┌──────────────────────────┐    ┌──────────────────────┐
+ │ Harness::ask         │ ─► │ Interaction::run_turn    │ ─► │ driver: select! over │
+ │ ApprovalGate ◄───────┼────┼─ ChannelApprover ◄───────┼────┼─ approval menu       │
+ │ CancelToken, Steering│ ◄──┼─ TurnControl ◄───────────┼────┼─ esc, enter, tab     │
+ │ Session (carry-over) │    │ commands → Report        │ ─► │ render: Report→lines │
+ └──────────────────────┘    │ activity, trace, inspect │    │ view: Activity→lines │
+                             └──────────────────────────┘    └──────────────────────┘
 ```
 
 - The agent's turn is a future. The driver polls it together with the event channel, the
   approval channel, the keyboard and a 120 ms tick, so the screen stays live while the agent
   works and nothing blocks.
 - The runtime never sees colours, spinners, prompts, keys or terminal size. It gets an event
-  callback, a `CancelToken` and an `ApprovalGate`. A GUI or a server supplies the same three.
-- `HarnessEvent` is owned and serializable. The terminal view, `--events` JSON and the Tauri
-  desktop app all consume the same stream.
+  callback, a `CancelToken`, a `Steering` queue and an `ApprovalGate`.
+- Commands, labels, traces and the `/context`, `/usage`, `/state` views are computed in
+  `ark-interact`. `ark-cli` only turns them into lines; `ark-ui` turns the same values into
+  a page.
 
-Files in `crates/ark-cli/src`: `lib.rs` (builder, flags), `shell.rs` (input loop),
-`driver.rs` (turn loop), `view.rs` (event rendering), `approval.rs` (menu),
-`commands.rs` (slash commands), `activity.rs` (labels), `markdown.rs` (streaming styling),
+Files in `crates/ark-cli/src`: `lib.rs` (builder, flags), `app.rs` (shell state),
+`shell.rs` (input loop), `driver.rs` (turn loop), `view.rs` (activity rendering),
+`render.rs` (`Report` to lines), `approval.rs` (menu), `markdown.rs` (streaming styling),
 `headless.rs` (`-p`), `term.rs`, `theme.rs`.
 
 ## Testing an app without a model
@@ -321,7 +333,8 @@ resume) in CI or through a pty.
 
 ## Limits
 
-- Type-ahead during a turn is plain text (no cursor movement). It becomes the next prompt.
+- Type-ahead during a turn is plain text (no cursor movement). Enter steers, tab queues.
+- A steer that arrives after the agent's last step is not lost: it becomes the next prompt.
 - The Markdown styling is light: headings, bold, inline code, fences, bullets.
 - Token numbers in `/context` are estimates. Measured provider numbers are in `/trace`.
 - Approval grants are not persisted across processes.

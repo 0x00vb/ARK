@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+.DS_Store
+*.db
+*.db-wal
+*.db-shm
+/scratch

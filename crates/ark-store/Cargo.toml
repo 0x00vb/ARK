@@ -1,0 +1,20 @@
+[package]
+name = "ark-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK persistence: content-addressed blobs, a SQLite metadata db, and full-text search."
+
+[dependencies]
+ark-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+rusqlite.workspace = true
+time.workspace = true
+tantivy = "0.22"
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

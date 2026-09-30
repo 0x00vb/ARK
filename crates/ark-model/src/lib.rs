@@ -1,0 +1,243 @@
+//! # ark-model
+//!
+//! Bring-your-own-model. A single narrow interface — chat completion with tool-calling —
+//! that the runtime talks to, so a local Ollama model and a hosted API are
+//! interchangeable. Providers are kept generic: the runtime never knows which one
+//! answered.
+//!
+//! Auth: the supported paths are local models (no auth) and API keys. Subscription-based
+//! auth is added only by routing through a vendor's official CLI/SDK, never by scraping a
+//! web session.
+
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+
+mod anthropic;
+pub mod mock;
+mod ollama;
+mod openai;
+
+pub use anthropic::Anthropic;
+pub use mock::MockProvider;
+pub use ollama::Ollama;
+pub use openai::OpenAi;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProviderError {
+    #[error("http: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("{provider} error: {detail}")]
+    Api { provider: String, detail: String },
+    #[error("missing credential: {0}")]
+    MissingCredential(String),
+    #[error("serde: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+pub type Result<T> = std::result::Result<T, ProviderError>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+/// A request from the model to run one tool.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// One message in the conversation. Carries tool calls (assistant) or a tool result
+/// (tool), so the transcript round-trips across providers.
+#[derive(Clone, Debug)]
+pub struct Message {
+    pub role: Role,
+    pub content: String,
+    pub tool_calls: Vec<ToolCall>,
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
+}
+
+impl Message {
+    pub fn user(content: impl Into<String>) -> Self {
+        Self::text(Role::User, content)
+    }
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self::text(Role::Assistant, content)
+    }
+    fn text(role: Role, content: impl Into<String>) -> Self {
+        Message { role, content: content.into(), tool_calls: Vec::new(), tool_call_id: None, tool_name: None }
+    }
+    /// An assistant turn that requested tool calls.
+    pub fn assistant_tool_calls(calls: Vec<ToolCall>) -> Self {
+        Message { role: Role::Assistant, content: String::new(), tool_calls: calls, tool_call_id: None, tool_name: None }
+    }
+    /// A tool result to feed back to the model.
+    pub fn tool_result(call: &ToolCall, content: impl Into<String>) -> Self {
+        Message {
+            role: Role::Tool,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(call.id.clone()),
+            tool_name: Some(call.name.clone()),
+        }
+    }
+}
+
+/// A tool the model may call. `parameters` is a JSON Schema object.
+#[derive(Clone, Debug)]
+pub struct ToolDef {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+/// Token usage for one completion. The runtime treats tokens as a managed budget, so
+/// every call reports what it cost. Providers fill this from the API's own accounting when
+/// available; otherwise the runtime falls back to [`estimate_tokens`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    /// True when the numbers came from the provider, false when estimated.
+    pub measured: bool,
+}
+
+impl Usage {
+    pub fn total(&self) -> u32 {
+        self.prompt_tokens + self.completion_tokens
+    }
+    pub fn measured(prompt: u32, completion: u32) -> Self {
+        Usage { prompt_tokens: prompt, completion_tokens: completion, measured: true }
+    }
+}
+
+/// A rough token estimate for text, used when a provider does not report usage.
+/// ~4 characters per token is the usual English approximation; good enough for budgeting,
+/// never used for billing.
+pub fn estimate_tokens(text: &str) -> u32 {
+    ((text.chars().count() as f32) / 4.0).ceil() as u32
+}
+
+/// The model's reply: free text and/or tool calls, plus what it cost.
+#[derive(Clone, Debug, Default)]
+pub struct Completion {
+    pub content: String,
+    pub tool_calls: Vec<ToolCall>,
+    pub usage: Usage,
+}
+
+/// A model backend. One method; everything else is translation inside the impl.
+#[async_trait]
+pub trait Provider: Send + Sync {
+    async fn complete(&self, system: &str, messages: &[Message], tools: &[ToolDef]) -> Result<Completion>;
+    /// Human description, e.g. "ollama qwen3:4b-instruct".
+    fn describe(&self) -> String;
+    /// The model identifier this provider targets (e.g. "qwen3:4b-instruct"). Used by
+    /// metrics and the router; defaults to [`describe`](Provider::describe).
+    fn model_id(&self) -> String {
+        self.describe()
+    }
+}
+
+/// Build a provider from the environment:
+/// - `ARK_PROVIDER` = ollama (default) | openai | anthropic
+/// - `ARK_MODEL` overrides the model
+/// - API keys from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
+pub fn from_env() -> Result<Box<dyn Provider>> {
+    let which = std::env::var("ARK_PROVIDER").unwrap_or_else(|_| "ollama".into());
+    let model = std::env::var("ARK_MODEL").ok();
+    build_box(&which, model)
+}
+
+fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
+    match which {
+        "ollama" => Ok(Box::new(Ollama::new(model.unwrap_or_else(|| "qwen3:4b-instruct".into())))),
+        "openai" => Ok(Box::new(OpenAi::from_env(model.unwrap_or_else(|| "gpt-4o-mini".into()))?)),
+        "anthropic" => Ok(Box::new(Anthropic::from_env(
+            model.unwrap_or_else(|| "claude-sonnet-5-5".into()),
+        )?)),
+        other => Err(ProviderError::Api {
+            provider: other.into(),
+            detail: "unknown provider (use ollama|openai|anthropic)".into(),
+        }),
+    }
+}
+
+/// Build a shared provider by name — the [`std::sync::Arc`] form the model router uses so
+/// several roles can share one backend.
+pub fn build(which: &str, model: Option<String>) -> Result<std::sync::Arc<dyn Provider>> {
+    Ok(std::sync::Arc::from(build_box(which, model)?))
+}
+
+/// The environment default provider as a shared [`std::sync::Arc`].
+pub fn from_env_arc() -> Result<std::sync::Arc<dyn Provider>> {
+    let which = std::env::var("ARK_PROVIDER").unwrap_or_else(|_| "ollama".into());
+    build(&which, std::env::var("ARK_MODEL").ok())
+}
+
+/// Sanitize an action name (`fs.read`) into a tool name providers accept (`fs__read`);
+/// `unmangle` reverses it. Some tool-calling APIs forbid `.` in tool names.
+pub fn mangle_tool_name(action: &str) -> String {
+    action.replace('.', "__")
+}
+pub fn unmangle_tool_name(tool: &str) -> String {
+    tool.replace("__", ".")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_name_mangling_roundtrips() {
+        assert_eq!(mangle_tool_name("fs.read"), "fs__read");
+        assert_eq!(unmangle_tool_name("fs__read"), "fs.read");
+        assert_eq!(unmangle_tool_name(&mangle_tool_name("web.get")), "web.get");
+    }
+
+    #[test]
+    fn tool_result_message_links_call() {
+        let call = ToolCall { id: "call_1".into(), name: "fs.read".into(), arguments: serde_json::json!({}) };
+        let m = Message::tool_result(&call, "{\"lines\":3}");
+        assert!(matches!(m.role, Role::Tool));
+        assert_eq!(m.tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(m.tool_name.as_deref(), Some("fs.read"));
+    }
+
+    #[test]
+    fn token_estimate_is_chars_over_four() {
+        assert_eq!(estimate_tokens(""), 0);
+        assert_eq!(estimate_tokens("abcd"), 1);
+        assert_eq!(estimate_tokens("abcde"), 2);
+        assert_eq!(Usage::measured(10, 3).total(), 13);
+    }
+
+    #[tokio::test]
+    async fn mock_provider_records_and_replays() {
+        use mock::MockProvider;
+        let p = MockProvider::new(
+            "test-model",
+            vec![Completion { content: "hi".into(), tool_calls: vec![], usage: Usage::default() }],
+        );
+        let out = p.complete("sys", &[Message::user("q")], &[]).await.unwrap();
+        assert_eq!(out.content, "hi");
+        assert!(out.usage.measured, "mock fills usage when script leaves it default");
+        assert_eq!(p.call_count(), 1);
+        assert_eq!(p.recorded()[0].system, "sys");
+        assert_eq!(p.model_id(), "test-model");
+    }
+
+    #[test]
+    fn unknown_provider_errors() {
+        std::env::set_var("ARK_PROVIDER", "does-not-exist");
+        assert!(from_env().is_err());
+        std::env::remove_var("ARK_PROVIDER");
+    }
+}

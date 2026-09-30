@@ -372,6 +372,8 @@ impl Harness {
         const STALL_STEER: u32 = 3;
         const STALL_MAX: u32 = 5;
         let mut stall: u32 = 0;
+        // Identical calls that failed again this turn: cards, but not progress.
+        let mut repeated_failures: u32 = 0;
         let mut steered: Vec<String> = Vec::new();
 
         for _ in 0..self.max_steps {
@@ -382,7 +384,7 @@ impl Harness {
             steps_taken += 1;
             metrics.record_step();
             on_event(HarnessEvent::Step { index: steps_taken });
-            let progress_before = metrics.cards_created
+            let progress_before = metrics.cards_created - repeated_failures
                 + metrics.state_updates
                 + metrics.retrievals
                 + loaded.len() as u32;
@@ -518,21 +520,21 @@ impl Harness {
 
                 // Dedup: reuse identical prior evidence instead of re-running the tool. A
                 // state-changing call is never deduplicated: running it again is the point.
+                // Only a successful result is evidence. A failure (an error, a timeout, a
+                // missing tool) may be transient, so the same call runs again; a repeat that
+                // fails again counts as no progress, which keeps the stall guard working.
                 let digest = call_digest(&call.name, &call.arguments);
+                let mut failed_before = false;
                 if desc.risk != RiskTier::Mutate {
-                    let reuse =
-                        engine
-                            .store
-                            .find_card_by_digest(project, &digest)?
-                            .filter(|card| {
-                                card.created_at >= turn_started
-                                    || reusable_across_turns(
-                                        engine,
-                                        project,
-                                        &desc,
-                                        &call.arguments,
-                                    )
-                            });
+                    let prior = engine.store.find_card_by_digest(project, &digest)?;
+                    failed_before = prior
+                        .as_ref()
+                        .is_some_and(|c| !c.ok && c.created_at >= turn_started);
+                    let reuse = prior.filter(|card| {
+                        card.ok
+                            && (card.created_at >= turn_started
+                                || reusable_across_turns(engine, project, &desc, &call.arguments))
+                    });
                     if let Some(existing) = reuse {
                         metrics.record_duplicate();
                         let reused = existing.reference_line();
@@ -560,6 +562,9 @@ impl Harness {
                 let card = distill(&inv, &profile.distillers);
                 engine.store.put_evidence_card(project, &card)?;
                 metrics.record_card_created();
+                if !ok && failed_before {
+                    repeated_failures += 1;
+                }
                 cited.push(inv.id.clone());
 
                 let model_text = card_for_model(&card);
@@ -581,7 +586,7 @@ impl Harness {
                 break;
             }
 
-            let progress_after = metrics.cards_created
+            let progress_after = metrics.cards_created - repeated_failures
                 + metrics.state_updates
                 + metrics.retrievals
                 + loaded.len() as u32;
@@ -1290,7 +1295,11 @@ impl Harness {
         }
         (
             true,
-            format!("answered; {} evidence item(s) cited", cited.len()),
+            format!(
+                "answered; {} evidence {} cited",
+                cited.len(),
+                if cited.len() == 1 { "item" } else { "items" }
+            ),
         )
     }
 
@@ -1434,12 +1443,13 @@ fn normalize_action_name(name: &str) -> String {
 fn selection_terms(focus: Option<&Focus>) -> Vec<String> {
     let mut terms = Vec::new();
     if let Some(sel) = focus.and_then(|f| f.selection.as_ref()) {
-        for t in [&sel.function, &sel.symbol, &sel.address] {
-            if let Some(v) = t {
-                let v = v.trim();
-                if v.len() >= 2 {
-                    terms.push(v.to_ascii_lowercase());
-                }
+        for v in [&sel.function, &sel.symbol, &sel.address]
+            .into_iter()
+            .flatten()
+        {
+            let v = v.trim();
+            if v.len() >= 2 {
+                terms.push(v.to_ascii_lowercase());
             }
         }
     }
@@ -1468,7 +1478,7 @@ fn gather_nearby_evidence(
     }
 
     let mut cards = engine.store.list_evidence_cards(project)?;
-    cards.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    cards.sort_by_key(|c| std::cmp::Reverse(c.created_at));
 
     let relevant = |c: &EvidenceCard| -> bool {
         if touched.contains(c.invocation.as_str()) {

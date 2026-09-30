@@ -164,6 +164,7 @@ impl Engine {
             .descriptor(action)
             .ok_or_else(|| AgentError::UnknownAction(action.to_string()))?;
 
+        let input = self.resolve_artifact_arg(project, input);
         let mut inv = Invocation::new(action, desc.risk, input.clone());
 
         // record which artifact this call reads, if any, for the provenance graph
@@ -204,6 +205,30 @@ impl Engine {
 
         self.store.put_invocation(project, &inv)?;
         Ok(inv)
+    }
+}
+
+impl Engine {
+    /// The model reads artifacts as short ids (`art:dc3b0c93c72c`) and passes them back that
+    /// way; adapters look blobs up by full id. Rewrite an `artifact` argument given as a full
+    /// id, a short prefix (with or without `art:`) or an exact name to the full id. An
+    /// argument that matches nothing is left as it was, so the adapter reports it.
+    fn resolve_artifact_arg(
+        &self,
+        project: &ProjectId,
+        mut input: serde_json::Value,
+    ) -> serde_json::Value {
+        let Some(given) = input.get("artifact").and_then(|v| v.as_str()) else {
+            return input;
+        };
+        let needle = given.trim().trim_start_matches("art:");
+        if needle.is_empty() {
+            return input;
+        }
+        if let Ok(Some(a)) = self.store.resolve_artifact(project, needle) {
+            input["artifact"] = serde_json::Value::String(a.id.as_str().to_string());
+        }
+        input
     }
 }
 

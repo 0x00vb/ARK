@@ -5,6 +5,48 @@
 use crate::AdapterError;
 use tokio::process::Command;
 
+/// A spawned tool in its own process group. Dropping the guard while the tool runs (a
+/// cancelled turn drops the call's future) kills the whole group, so a shell's children die
+/// with it: `kill_on_drop` alone stops `sh -c "sleep 30"` but leaves the `sleep` running.
+struct Group(Option<u32>);
+
+impl Group {
+    fn of(child: &tokio::process::Child) -> Self {
+        Group(child.id())
+    }
+    fn kill(&mut self) {
+        #[cfg(unix)]
+        if let Some(pid) = self.0.take() {
+            // SAFETY: killpg only sends a signal; the group id is the child's own pid.
+            unsafe {
+                libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+            }
+        }
+    }
+    /// The tool finished on its own; leave anything it started deliberately alone.
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+fn tool_command(resolved: &std::path::Path, args: &[String]) -> Command {
+    let mut c = Command::new(resolved);
+    c.args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    c.process_group(0);
+    c
+}
+
 /// The captured result of running an external command.
 pub struct Run {
     pub command: Vec<String>,
@@ -40,14 +82,22 @@ pub async fn run(tool: &str, args: &[String]) -> Result<Run, AdapterError> {
     let mut command = vec![tool.to_string()];
     command.extend(args.iter().cloned());
 
-    let out = Command::new(resolved)
-        .args(args)
-        .output()
+    let child =
+        tool_command(&resolved, args)
+            .spawn()
+            .map_err(|e| AdapterError::ToolUnavailable {
+                tool: tool.to_string(),
+                detail: e.to_string(),
+            })?;
+    let mut group = Group::of(&child);
+    let out = child
+        .wait_with_output()
         .await
         .map_err(|e| AdapterError::ToolUnavailable {
             tool: tool.to_string(),
             detail: e.to_string(),
         })?;
+    group.disarm();
 
     Ok(Run {
         command,
@@ -69,22 +119,24 @@ pub async fn run_timeout(tool: &str, args: &[String], secs: u64) -> Result<Run, 
     command.extend(args.iter().cloned());
 
     use tokio::io::AsyncReadExt;
-    let mut child = Command::new(resolved)
-        .args(args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| AdapterError::ToolUnavailable {
-            tool: tool.to_string(),
-            detail: e.to_string(),
-        })?;
+    let mut child =
+        tool_command(&resolved, args)
+            .spawn()
+            .map_err(|e| AdapterError::ToolUnavailable {
+                tool: tool.to_string(),
+                detail: e.to_string(),
+            })?;
+    let mut group = Group::of(&child);
 
     let dur = std::time::Duration::from_secs(secs);
     let (status, timed_out) = match tokio::time::timeout(dur, child.wait()).await {
-        Ok(Ok(s)) => (s.code(), false),
+        Ok(Ok(s)) => {
+            group.disarm();
+            (s.code(), false)
+        }
         Ok(Err(_)) => (None, false),
         Err(_) => {
+            group.kill();
             let _ = child.kill().await;
             (None, true)
         }
@@ -126,6 +178,36 @@ pub async fn run_ok(tool: &str, args: &[String]) -> Result<Run, AdapterError> {
 #[cfg(test)]
 mod rt_tests {
     use super::*;
+
+    /// A cancelled call (its future dropped) takes the shell's children down with it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dropping_a_call_kills_the_shells_children() {
+        let dir = std::env::temp_dir().join(format!("ark-pg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pidfile = dir.join("pid");
+        let script = format!("sleep 30 & echo $! > {}; wait", pidfile.display());
+        let args = ["-c".to_string(), script];
+        let call = run_timeout("sh", &args, 60);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(800), call)
+                .await
+                .is_err()
+        );
+        let pid: i32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        // SAFETY: signal 0 only checks whether the process exists.
+        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            !alive,
+            "the grandchild sleep {pid} outlived the cancelled call"
+        );
+    }
     #[tokio::test]
     async fn run_timeout_captures_stdout() {
         let r = run_timeout(

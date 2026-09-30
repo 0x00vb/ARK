@@ -105,7 +105,7 @@ mod tests {
     fn round(text: &str) -> Vec<Message> {
         let call = ToolCall {
             id: "c1".into(),
-            name: "r2.decompile".into(),
+            name: "files.read".into(),
             arguments: serde_json::json!({"artifact":"x"}),
         };
         vec![

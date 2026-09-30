@@ -151,7 +151,7 @@ impl CapabilityCatalog {
         }
         self.specs
             .iter()
-            .find(|spec| spec.synonyms.iter().any(|syn| *syn == k))
+            .find(|spec| spec.synonyms.contains(&k))
             .map(|spec| spec.capability())
     }
 }

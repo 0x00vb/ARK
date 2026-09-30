@@ -70,7 +70,10 @@ pub struct SurfaceRef {
 
 impl SurfaceRef {
     pub fn new(kind: SurfaceKind) -> Self {
-        SurfaceRef { kind_tag: kind.as_tag(), ..Default::default() }
+        SurfaceRef {
+            kind_tag: kind.as_tag(),
+            ..Default::default()
+        }
     }
     pub fn with_title(mut self, t: impl Into<String>) -> Self {
         self.title = t.into();
@@ -116,7 +119,12 @@ pub struct Focus {
 
 impl Focus {
     pub fn is_empty(&self) -> bool {
-        self.surface.is_none() && self.selection.as_ref().map(|s| s.is_empty()).unwrap_or(true)
+        self.surface.is_none()
+            && self
+                .selection
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
     }
 
     /// A compact one-to-few-line description for the agent's context, or `None` when
@@ -145,10 +153,18 @@ impl Focus {
         if let Some(sel) = &self.selection {
             if !sel.is_empty() {
                 let mut bits = Vec::new();
-                if let Some(f) = &sel.function { bits.push(format!("function {f}")); }
-                if let Some(sym) = &sel.symbol { bits.push(format!("symbol {sym}")); }
-                if let Some(addr) = &sel.address { bits.push(format!("address {addr}")); }
-                if let Some(l) = &sel.line { bits.push(format!("line {l}")); }
+                if let Some(f) = &sel.function {
+                    bits.push(format!("function {f}"));
+                }
+                if let Some(sym) = &sel.symbol {
+                    bits.push(format!("symbol {sym}"));
+                }
+                if let Some(addr) = &sel.address {
+                    bits.push(format!("address {addr}"));
+                }
+                if let Some(l) = &sel.line {
+                    bits.push(format!("line {l}"));
+                }
                 if let Some(t) = &sel.text {
                     let t = t.replace('\n', " ");
                     let t: String = t.chars().take(120).collect();
@@ -157,7 +173,10 @@ impl Focus {
                 parts.push(format!("selection: {}", bits.join(", ")));
             }
         }
-        Some(format!("The user is currently viewing {}.", parts.join("; ")))
+        Some(format!(
+            "The user is currently viewing {}.",
+            parts.join("; ")
+        ))
     }
 }
 
@@ -229,7 +248,10 @@ mod tests {
                 path: Some("chapter3.md".into()),
                 locator: None,
             }),
-            selection: Some(Selection { line: Some(12), ..Default::default() }),
+            selection: Some(Selection {
+                line: Some(12),
+                ..Default::default()
+            }),
         };
         let d = focus.digest().unwrap();
         assert!(d.contains("editor surface"));
@@ -249,7 +271,8 @@ mod tests {
         let h = d.headline();
         assert!(h.contains("show file"), "{h}");
         assert!(h.contains("chapter3.md") && h.contains("the reveal scene"));
-        let back: PresentDirective = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        let back: PresentDirective =
+            serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert_eq!(back, d);
     }
 

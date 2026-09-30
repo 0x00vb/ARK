@@ -16,6 +16,7 @@ mod anthropic;
 pub mod mock;
 mod ollama;
 mod openai;
+mod stream;
 
 pub use anthropic::Anthropic;
 pub use mock::MockProvider;
@@ -72,11 +73,23 @@ impl Message {
         Self::text(Role::Assistant, content)
     }
     fn text(role: Role, content: impl Into<String>) -> Self {
-        Message { role, content: content.into(), tool_calls: Vec::new(), tool_call_id: None, tool_name: None }
+        Message {
+            role,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+            tool_name: None,
+        }
     }
     /// An assistant turn that requested tool calls.
     pub fn assistant_tool_calls(calls: Vec<ToolCall>) -> Self {
-        Message { role: Role::Assistant, content: String::new(), tool_calls: calls, tool_call_id: None, tool_name: None }
+        Message {
+            role: Role::Assistant,
+            content: String::new(),
+            tool_calls: calls,
+            tool_call_id: None,
+            tool_name: None,
+        }
     }
     /// A tool result to feed back to the model.
     pub fn tool_result(call: &ToolCall, content: impl Into<String>) -> Self {
@@ -114,7 +127,11 @@ impl Usage {
         self.prompt_tokens + self.completion_tokens
     }
     pub fn measured(prompt: u32, completion: u32) -> Self {
-        Usage { prompt_tokens: prompt, completion_tokens: completion, measured: true }
+        Usage {
+            prompt_tokens: prompt,
+            completion_tokens: completion,
+            measured: true,
+        }
     }
 }
 
@@ -133,10 +150,36 @@ pub struct Completion {
     pub usage: Usage,
 }
 
-/// A model backend. One method; everything else is translation inside the impl.
+/// Receives incremental answer text while a streaming completion arrives. It is called from
+/// inside the provider's future, so it must be cheap and must not block.
+pub type TextSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
+
+/// A model backend. One required method; everything else is translation inside the impl.
 #[async_trait]
 pub trait Provider: Send + Sync {
-    async fn complete(&self, system: &str, messages: &[Message], tools: &[ToolDef]) -> Result<Completion>;
+    async fn complete(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+    ) -> Result<Completion>;
+    /// Like [`complete`](Provider::complete), but delivers answer text to `on_text` as it is
+    /// generated. The returned [`Completion`] is the same as a non-streaming call would give.
+    /// The default emits the whole text once, so every provider is usable by a streaming
+    /// front-end; providers with a native streaming API override it.
+    async fn complete_streaming(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+        on_text: TextSink<'_>,
+    ) -> Result<Completion> {
+        let c = self.complete(system, messages, tools).await?;
+        if !c.content.is_empty() {
+            on_text(&c.content);
+        }
+        Ok(c)
+    }
     /// Human description, e.g. "ollama qwen3:4b-instruct".
     fn describe(&self) -> String;
     /// The model identifier this provider targets (e.g. "qwen3:4b-instruct"). Used by
@@ -158,14 +201,22 @@ pub fn from_env() -> Result<Box<dyn Provider>> {
 
 fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
     match which {
-        "ollama" => Ok(Box::new(Ollama::new(model.unwrap_or_else(|| "qwen3:4b-instruct".into())))),
-        "openai" => Ok(Box::new(OpenAi::from_env(model.unwrap_or_else(|| "gpt-4o-mini".into()))?)),
+        "ollama" => Ok(Box::new(Ollama::new(
+            model.unwrap_or_else(|| "qwen3:4b-instruct".into()),
+        ))),
+        "openai" => Ok(Box::new(OpenAi::from_env(
+            model.unwrap_or_else(|| "gpt-4o-mini".into()),
+        )?)),
         "anthropic" => Ok(Box::new(Anthropic::from_env(
             model.unwrap_or_else(|| "claude-sonnet-5-5".into()),
         )?)),
+        "mock" => {
+            let path = std::env::var("ARK_MOCK_SCRIPT").map_err(|_| ProviderError::MissingCredential("ARK_MOCK_SCRIPT".into()))?;
+            Ok(Box::new(MockProvider::from_script_file(std::path::Path::new(&path))?))
+        }
         other => Err(ProviderError::Api {
             provider: other.into(),
-            detail: "unknown provider (use ollama|openai|anthropic)".into(),
+            detail: "unknown provider (use ollama|openai|anthropic|mock)".into(),
         }),
     }
 }
@@ -204,7 +255,11 @@ mod tests {
 
     #[test]
     fn tool_result_message_links_call() {
-        let call = ToolCall { id: "call_1".into(), name: "fs.read".into(), arguments: serde_json::json!({}) };
+        let call = ToolCall {
+            id: "call_1".into(),
+            name: "fs.read".into(),
+            arguments: serde_json::json!({}),
+        };
         let m = Message::tool_result(&call, "{\"lines\":3}");
         assert!(matches!(m.role, Role::Tool));
         assert_eq!(m.tool_call_id.as_deref(), Some("call_1"));
@@ -224,11 +279,18 @@ mod tests {
         use mock::MockProvider;
         let p = MockProvider::new(
             "test-model",
-            vec![Completion { content: "hi".into(), tool_calls: vec![], usage: Usage::default() }],
+            vec![Completion {
+                content: "hi".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            }],
         );
         let out = p.complete("sys", &[Message::user("q")], &[]).await.unwrap();
         assert_eq!(out.content, "hi");
-        assert!(out.usage.measured, "mock fills usage when script leaves it default");
+        assert!(
+            out.usage.measured,
+            "mock fills usage when script leaves it default"
+        );
         assert_eq!(p.call_count(), 1);
         assert_eq!(p.recorded()[0].system, "sys");
         assert_eq!(p.model_id(), "test-model");

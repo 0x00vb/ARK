@@ -78,7 +78,12 @@ pub struct EvidenceCard {
 }
 
 impl EvidenceCard {
-    pub fn new(invocation: InvocationId, action: impl Into<String>, ok: bool, summary: impl Into<String>) -> Self {
+    pub fn new(
+        invocation: InvocationId,
+        action: impl Into<String>,
+        ok: bool,
+        summary: impl Into<String>,
+    ) -> Self {
         EvidenceCard {
             invocation,
             action: action.into(),
@@ -109,8 +114,20 @@ impl EvidenceCard {
     }
     /// A single greppable reference line: `[inv:1a2b3c] search.query — 412 hits…`.
     pub fn reference_line(&self) -> String {
-        let head: String = self.summary.lines().next().unwrap_or("").chars().take(160).collect();
-        format!("[inv:{}] {} — {}", self.invocation.short(), self.action, head)
+        let head: String = self
+            .summary
+            .lines()
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(160)
+            .collect();
+        format!(
+            "[inv:{}] {} — {}",
+            self.invocation.short(),
+            self.action,
+            head
+        )
     }
 }
 
@@ -126,7 +143,11 @@ pub struct Claim {
 
 impl Claim {
     pub fn new(text: impl Into<String>, claim_type: ClaimType) -> Self {
-        Claim { text: text.into(), claim_type, cites: Vec::new() }
+        Claim {
+            text: text.into(),
+            claim_type,
+            cites: Vec::new(),
+        }
     }
     /// Builder helper used in tests and by the runtime.
     pub fn cited(mut self, cites: Vec<String>) -> Self {
@@ -201,14 +222,16 @@ impl EdgeRel {
         }
     }
     pub fn from_str_lenient(s: &str) -> Option<Self> {
-        Some(match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
-            "supports" | "support" => EdgeRel::Supports,
-            "contradicts" | "contradict" => EdgeRel::Contradicts,
-            "derived-from" | "derives-from" | "derived" => EdgeRel::DerivedFrom,
-            "tested-by" | "tests" | "tested" => EdgeRel::TestedBy,
-            "unresolved" | "open" => EdgeRel::Unresolved,
-            _ => return None,
-        })
+        Some(
+            match s.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+                "supports" | "support" => EdgeRel::Supports,
+                "contradicts" | "contradict" => EdgeRel::Contradicts,
+                "derived-from" | "derives-from" | "derived" => EdgeRel::DerivedFrom,
+                "tested-by" | "tests" | "tested" => EdgeRel::TestedBy,
+                "unresolved" | "open" => EdgeRel::Unresolved,
+                _ => return None,
+            },
+        )
     }
 }
 
@@ -245,7 +268,9 @@ impl InvestigationGraph {
     /// Find a node by (kind, label), case-insensitively.
     fn find(&self, kind: NodeKind, label: &str) -> Option<&GraphNode> {
         let l = label.trim().to_ascii_lowercase();
-        self.nodes.iter().find(|n| n.kind == kind && n.label.to_ascii_lowercase() == l)
+        self.nodes
+            .iter()
+            .find(|n| n.kind == kind && n.label.to_ascii_lowercase() == l)
     }
 
     /// Add a node (deduped by kind+label) and return its id.
@@ -256,7 +281,11 @@ impl InvestigationGraph {
         }
         self.seq += 1;
         let id = format!("{}{}", &kind.as_str()[..1], self.seq);
-        self.nodes.push(GraphNode { id: id.clone(), kind, label });
+        self.nodes.push(GraphNode {
+            id: id.clone(),
+            kind,
+            label,
+        });
         id
     }
 
@@ -280,7 +309,11 @@ impl InvestigationGraph {
     pub fn link(&mut self, from: &str, to: &str, rel: EdgeRel) {
         let (fk, tk) = default_kinds(rel);
         let from = self.resolve_or_add(from, fk);
-        let to = if to.trim().is_empty() { from.clone() } else { self.resolve_or_add(to, tk) };
+        let to = if to.trim().is_empty() {
+            from.clone()
+        } else {
+            self.resolve_or_add(to, tk)
+        };
         let edge = GraphEdge { from, to, rel };
         if !self.edges.contains(&edge) {
             self.edges.push(edge);
@@ -308,9 +341,10 @@ impl InvestigationGraph {
             if !matches!(n.kind, NodeKind::Hypothesis | NodeKind::Question) {
                 continue;
             }
-            let settled = self.edges.iter().any(|e| {
-                e.to == n.id && matches!(e.rel, EdgeRel::Supports | EdgeRel::Contradicts)
-            });
+            let settled = self
+                .edges
+                .iter()
+                .any(|e| e.to == n.id && matches!(e.rel, EdgeRel::Supports | EdgeRel::Contradicts));
             if settled {
                 continue;
             }
@@ -322,8 +356,15 @@ impl InvestigationGraph {
                 .map(|e| self.label_of(&e.from).to_string());
             let tag = n.kind.as_str();
             match test {
-                Some(x) => out.push(format!("({tag}) {} — test via: {}", one_line(&n.label, 100), one_line(&x, 80))),
-                None => out.push(format!("({tag}) {} — no experiment yet", one_line(&n.label, 100))),
+                Some(x) => out.push(format!(
+                    "({tag}) {} — test via: {}",
+                    one_line(&n.label, 100),
+                    one_line(&x, 80)
+                )),
+                None => out.push(format!(
+                    "({tag}) {} — no experiment yet",
+                    one_line(&n.label, 100)
+                )),
             }
         }
         out
@@ -388,7 +429,11 @@ pub struct ResearchState {
 
 impl ResearchState {
     pub fn new(goal: impl Into<String>) -> Self {
-        ResearchState { goal: goal.into(), updated_at: Some(OffsetDateTime::now_utc()), ..Default::default() }
+        ResearchState {
+            goal: goal.into(),
+            updated_at: Some(OffsetDateTime::now_utc()),
+            ..Default::default()
+        }
     }
 
     pub fn touch(&mut self) {
@@ -407,6 +452,60 @@ impl ResearchState {
 
     /// A compact, budgeted text digest for a prompt. Sections are capped so the digest
     /// stays roughly bounded no matter how long the task runs.
+    /// Tidy the working state without losing meaning: drop exact duplicates, drop open
+    /// hypotheses that were already rejected, and keep only the most recent `keep_recent`
+    /// next actions and questions (older ones are stale plans). Findings, open hypotheses and
+    /// rejections are never discarded, only de-duplicated: they are the decisions and the
+    /// unresolved work. Returns how many items were removed.
+    pub fn compact(&mut self, keep_recent: usize) -> usize {
+        fn norm(s: &str) -> String {
+            s.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        }
+        fn dedup_strings(v: &mut Vec<String>) -> usize {
+            let before = v.len();
+            let mut seen = std::collections::HashSet::new();
+            v.retain(|x| seen.insert(norm(x)));
+            before - v.len()
+        }
+        fn dedup_claims(v: &mut Vec<Claim>) -> usize {
+            let before = v.len();
+            let mut seen = std::collections::HashSet::new();
+            v.retain(|c| seen.insert(norm(&c.text)));
+            before - v.len()
+        }
+        fn keep_tail(v: &mut Vec<String>, n: usize) -> usize {
+            let drop = v.len().saturating_sub(n);
+            v.drain(..drop);
+            drop
+        }
+        let mut removed = 0;
+        removed += dedup_claims(&mut self.findings);
+        removed += dedup_claims(&mut self.hypotheses);
+        removed += dedup_strings(&mut self.rejected);
+        let rejected: std::collections::HashSet<String> =
+            self.rejected.iter().map(|r| norm(r)).collect();
+        let before = self.hypotheses.len();
+        self.hypotheses
+            .retain(|h| !rejected.contains(&norm(&h.text)));
+        removed += before - self.hypotheses.len();
+        removed += dedup_strings(&mut self.questions);
+        removed += dedup_strings(&mut self.next_actions);
+        removed += keep_tail(&mut self.questions, keep_recent);
+        removed += keep_tail(&mut self.next_actions, keep_recent);
+        let before = self.interesting.len();
+        let mut seen = std::collections::HashSet::new();
+        self.interesting
+            .retain(|i| seen.insert((i.kind.clone(), norm(&i.value))));
+        removed += before - self.interesting.len();
+        if removed > 0 {
+            self.touch();
+        }
+        removed
+    }
+
     pub fn digest(&self, max_per_section: usize) -> String {
         use std::fmt::Write as _;
         let mut s = String::new();
@@ -431,8 +530,18 @@ impl ResearchState {
             }
             let _ = writeln!(s, "{title}:");
             for c in items.iter().take(max_per_section) {
-                let cites = if c.cites.is_empty() { String::new() } else { format!(" [{}]", c.cites.join(", ")) };
-                let _ = writeln!(s, "  - ({}) {}{}", c.claim_type.as_str(), one_line(&c.text, 200), cites);
+                let cites = if c.cites.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", c.cites.join(", "))
+                };
+                let _ = writeln!(
+                    s,
+                    "  - ({}) {}{}",
+                    c.claim_type.as_str(),
+                    one_line(&c.text, 200),
+                    cites
+                );
             }
             if items.len() > max_per_section {
                 let _ = writeln!(s, "  … (+{} more)", items.len() - max_per_section);
@@ -443,7 +552,13 @@ impl ResearchState {
         if !self.interesting.is_empty() {
             let _ = writeln!(s, "INTERESTING:");
             for it in self.interesting.iter().take(max_per_section) {
-                let _ = writeln!(s, "  - {}={} {}", it.kind, one_line(&it.value, 80), one_line(&it.why, 100));
+                let _ = writeln!(
+                    s,
+                    "  - {}={} {}",
+                    it.kind,
+                    one_line(&it.value, 80),
+                    one_line(&it.why, 100)
+                );
             }
         }
         list(&mut s, "OPEN QUESTIONS", &self.questions);
@@ -487,10 +602,18 @@ mod tests {
 
     #[test]
     fn evidence_card_reference_line_is_compact() {
-        let card = EvidenceCard::new(InvocationId("abcdef123456".into()), "search.query", true, "412 hits")
-            .with_identifiers(vec!["term.main".into()]);
+        let card = EvidenceCard::new(
+            InvocationId("abcdef123456".into()),
+            "search.query",
+            true,
+            "412 hits",
+        )
+        .with_identifiers(vec!["term.main".into()]);
         let line = card.reference_line();
-        assert!(line.starts_with("[inv:abcdef12]"), "uses the 8-char short id: {line}");
+        assert!(
+            line.starts_with("[inv:abcdef12]"),
+            "uses the 8-char short id: {line}"
+        );
         assert!(line.contains("search.query"));
         assert!(line.contains("412 hits"));
     }
@@ -498,7 +621,10 @@ mod tests {
     #[test]
     fn graph_links_dedupe_and_surface_frontier() {
         let mut g = InvestigationGraph::default();
-        let h = g.add_node(NodeKind::Hypothesis, "the outage is caused by the cache layer");
+        let h = g.add_node(
+            NodeKind::Hypothesis,
+            "the outage is caused by the cache layer",
+        );
         // An experiment tests it; nothing confirms it yet → it's on the frontier.
         g.link("replay traffic against the cache", &h, EdgeRel::TestedBy);
         g.link("replay traffic against the cache", &h, EdgeRel::TestedBy); // dup ignored
@@ -509,14 +635,20 @@ mod tests {
 
         // Once evidence supports it, it leaves the frontier.
         g.link("inv:abc123", &h, EdgeRel::Supports);
-        assert!(g.frontier().is_empty(), "settled hypotheses drop off the frontier");
+        assert!(
+            g.frontier().is_empty(),
+            "settled hypotheses drop off the frontier"
+        );
     }
 
     #[test]
     fn digest_includes_frontier() {
         let mut st = ResearchState::new("understand the outage");
-        let q = st.graph.add_node(NodeKind::Question, "which subsystem failed first?");
-        st.graph.link("experiment: read the timeline", &q, EdgeRel::TestedBy);
+        let q = st
+            .graph
+            .add_node(NodeKind::Question, "which subsystem failed first?");
+        st.graph
+            .link("experiment: read the timeline", &q, EdgeRel::TestedBy);
         let d = st.digest(6);
         assert!(d.contains("UNCERTAINTY FRONTIER:"), "{d}");
         assert!(d.contains("which subsystem"));
@@ -528,7 +660,9 @@ mod tests {
         for i in 0..10 {
             st.questions.push(format!("q{i}"));
         }
-        st.findings.push(Claim::new("the cache evicted early", ClaimType::Fact).cited(vec!["inv:1".into()]));
+        st.findings.push(
+            Claim::new("the cache evicted early", ClaimType::Fact).cited(vec!["inv:1".into()]),
+        );
         let d = st.digest(3);
         assert!(d.contains("GOAL: understand"));
         assert!(d.contains("FINDINGS:"));
@@ -536,5 +670,33 @@ mod tests {
         assert!(d.contains("(+7 more)"), "questions capped at 3 of 10");
         // findings come before questions in the digest
         assert!(d.find("FINDINGS").unwrap() < d.find("OPEN QUESTIONS").unwrap());
+    }
+
+    #[test]
+    fn compact_dedupes_and_keeps_decisions() {
+        let mut st = ResearchState::new("g");
+        st.findings
+            .push(Claim::new("Chapter 4 is 3,100 words", ClaimType::Fact));
+        st.findings
+            .push(Claim::new("chapter 4 is  3,100 words", ClaimType::Fact));
+        st.hypotheses.push(Claim::new(
+            "the narrator is unreliable",
+            ClaimType::Hypothesis,
+        ));
+        st.hypotheses
+            .push(Claim::new("the pacing drags", ClaimType::Hypothesis));
+        st.rejected.push("the pacing drags".into());
+        for i in 0..10 {
+            st.next_actions.push(format!("step {i}"));
+        }
+        let removed = st.compact(4);
+        assert_eq!(st.findings.len(), 1, "duplicate finding merged");
+        assert_eq!(st.hypotheses.len(), 1, "rejected hypothesis closed");
+        assert_eq!(
+            st.next_actions,
+            vec!["step 6", "step 7", "step 8", "step 9"]
+        );
+        assert_eq!(removed, 1 + 1 + 6);
+        assert_eq!(st.compact(4), 0, "idempotent");
     }
 }

@@ -19,7 +19,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use ark_core::{Artifact, ArtifactId, EvidenceCard, Invocation, Note, Project, ProjectId, ResearchState};
+use ark_core::{
+    Artifact, ArtifactId, EvidenceCard, Invocation, Note, Project, ProjectId, ResearchState,
+};
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
@@ -66,7 +68,13 @@ impl Store {
                  action TEXT NOT NULL, call_digest TEXT NOT NULL, created_at TEXT NOT NULL,
                  json TEXT NOT NULL, PRIMARY KEY(project_id, invocation_id));
              CREATE TABLE IF NOT EXISTS checkpoints(
-                 project_id TEXT PRIMARY KEY, updated_at TEXT NOT NULL, json TEXT NOT NULL);",
+                 project_id TEXT PRIMARY KEY, updated_at TEXT NOT NULL, json TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS sessions(
+                 id TEXT PRIMARY KEY, project_id TEXT NOT NULL, updated_at TEXT NOT NULL,
+                 json TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS session_turns(
+                 session_id TEXT NOT NULL, idx INTEGER NOT NULL, json TEXT NOT NULL,
+                 PRIMARY KEY(session_id, idx));",
         )?;
         let search = match index::SearchIndex::open(&root.join("index")) {
             Ok(s) => Some(s),
@@ -75,14 +83,25 @@ impl Store {
                 None
             }
         };
-        Ok(Store { root, db: Mutex::new(db), search })
+        Ok(Store {
+            root,
+            db: Mutex::new(db),
+            search,
+        })
     }
 
     // ---- search index -----------------------------------------------------
 
     /// Index a text document (artifact body, note) for full-text search. No-op if the
     /// index is unavailable.
-    pub fn index_text(&self, project: &ProjectId, artifact: &ArtifactId, name: &str, kind: &str, body: &str) {
+    pub fn index_text(
+        &self,
+        project: &ProjectId,
+        artifact: &ArtifactId,
+        name: &str,
+        kind: &str,
+        body: &str,
+    ) {
         if let Some(s) = &self.search {
             if let Err(e) = s.add(project.as_str(), artifact.as_str(), name, kind, body) {
                 tracing::warn!("indexing failed: {e}");
@@ -178,8 +197,12 @@ impl Store {
             "INSERT OR REPLACE INTO artifacts(project_id, id, kind, name, created_at, json)
              VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
-                project.as_str(), a.id.as_str(), a.kind.as_tag(), a.name,
-                rfc(a.created_at), serde_json::to_string(a)?
+                project.as_str(),
+                a.id.as_str(),
+                a.kind.as_tag(),
+                a.name,
+                rfc(a.created_at),
+                serde_json::to_string(a)?
             ],
         )?;
         Ok(())
@@ -197,16 +220,15 @@ impl Store {
     /// Resolve an artifact by full id, short id prefix, or exact name. When a name is
     /// ambiguous the most recently ingested match wins (list is newest-first).
     pub fn resolve_artifact(&self, project: &ProjectId, needle: &str) -> Result<Option<Artifact>> {
-        Ok(self
-            .list_artifacts(project)?
-            .into_iter()
-            .find(|a| a.id.as_str() == needle || a.id.as_str().starts_with(needle) || a.name == needle))
+        Ok(self.list_artifacts(project)?.into_iter().find(|a| {
+            a.id.as_str() == needle || a.id.as_str().starts_with(needle) || a.name == needle
+        }))
     }
 
     pub fn list_artifacts(&self, project: &ProjectId) -> Result<Vec<Artifact>> {
         let db = self.db.lock().unwrap();
-        let mut stmt = db
-            .prepare("SELECT json FROM artifacts WHERE project_id=?1 ORDER BY created_at DESC")?;
+        let mut stmt =
+            db.prepare("SELECT json FROM artifacts WHERE project_id=?1 ORDER BY created_at DESC")?;
         let rows = stmt.query_map([project.as_str()], |r| r.get::<_, String>(0))?;
         collect(rows)
     }
@@ -219,9 +241,12 @@ impl Store {
             "INSERT OR REPLACE INTO invocations(project_id, id, action, status, created_at, json)
              VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
-                project.as_str(), inv.id.as_str(), inv.action,
+                project.as_str(),
+                inv.id.as_str(),
+                inv.action,
                 serde_json::to_string(&inv.status)?.trim_matches('"'),
-                rfc(inv.created_at), serde_json::to_string(inv)?
+                rfc(inv.created_at),
+                serde_json::to_string(inv)?
             ],
         )?;
         Ok(())
@@ -229,8 +254,8 @@ impl Store {
 
     pub fn list_invocations(&self, project: &ProjectId) -> Result<Vec<Invocation>> {
         let db = self.db.lock().unwrap();
-        let mut stmt = db
-            .prepare("SELECT json FROM invocations WHERE project_id=?1 ORDER BY created_at ASC")?;
+        let mut stmt =
+            db.prepare("SELECT json FROM invocations WHERE project_id=?1 ORDER BY created_at ASC")?;
         let rows = stmt.query_map([project.as_str()], |r| r.get::<_, String>(0))?;
         collect(rows)
     }
@@ -246,7 +271,11 @@ impl Store {
     }
 
     /// Resolve an invocation by full or short id prefix (as shown in `[inv:1a2b3c]`).
-    pub fn resolve_invocation(&self, project: &ProjectId, needle: &str) -> Result<Option<Invocation>> {
+    pub fn resolve_invocation(
+        &self,
+        project: &ProjectId,
+        needle: &str,
+    ) -> Result<Option<Invocation>> {
         let needle = needle.trim_start_matches("inv:");
         if let Some(inv) = self.get_invocation(project, needle)? {
             return Ok(Some(inv));
@@ -265,9 +294,11 @@ impl Store {
             "INSERT OR REPLACE INTO notes(project_id, id, kind, created_at, json)
              VALUES(?1, ?2, ?3, ?4, ?5)",
             rusqlite::params![
-                project.as_str(), n.id.as_str(),
+                project.as_str(),
+                n.id.as_str(),
                 serde_json::to_string(&n.kind)?.trim_matches('"'),
-                rfc(n.created_at), serde_json::to_string(n)?
+                rfc(n.created_at),
+                serde_json::to_string(n)?
             ],
         )?;
         Ok(())
@@ -323,18 +354,23 @@ impl Store {
 
     pub fn list_evidence_cards(&self, project: &ProjectId) -> Result<Vec<EvidenceCard>> {
         let db = self.db.lock().unwrap();
-        let mut stmt = db
-            .prepare("SELECT json FROM evidence_cards WHERE project_id=?1 ORDER BY created_at ASC")?;
+        let mut stmt = db.prepare(
+            "SELECT json FROM evidence_cards WHERE project_id=?1 ORDER BY created_at ASC",
+        )?;
         let rows = stmt.query_map([project.as_str()], |r| r.get::<_, String>(0))?;
         collect(rows)
     }
 
     /// Find an existing card for the same (action, input) digest — the primitive the
     /// runtime uses to avoid re-running a tool call it already made.
-    pub fn find_card_by_digest(&self, project: &ProjectId, call_digest: &str) -> Result<Option<EvidenceCard>> {
+    pub fn find_card_by_digest(
+        &self,
+        project: &ProjectId,
+        call_digest: &str,
+    ) -> Result<Option<EvidenceCard>> {
         let db = self.db.lock().unwrap();
         one(db.query_row(
-            "SELECT json FROM evidence_cards WHERE project_id=?1 AND call_digest=?2 LIMIT 1",
+            "SELECT json FROM evidence_cards WHERE project_id=?1 AND call_digest=?2 ORDER BY created_at DESC LIMIT 1",
             [project.as_str(), call_digest],
             |r| r.get::<_, String>(0),
         ))
@@ -344,11 +380,19 @@ impl Store {
 
     /// Persist an opaque runtime checkpoint (metrics, plan, cursor) as JSON, one row per
     /// project. Kept generic so the store stays agnostic to the runtime's shape.
-    pub fn put_checkpoint(&self, project: &ProjectId, checkpoint: &serde_json::Value) -> Result<()> {
+    pub fn put_checkpoint(
+        &self,
+        project: &ProjectId,
+        checkpoint: &serde_json::Value,
+    ) -> Result<()> {
         let db = self.db.lock().unwrap();
         db.execute(
             "INSERT OR REPLACE INTO checkpoints(project_id, updated_at, json) VALUES(?1, ?2, ?3)",
-            rusqlite::params![project.as_str(), rfc(OffsetDateTime::now_utc()), serde_json::to_string(checkpoint)?],
+            rusqlite::params![
+                project.as_str(),
+                rfc(OffsetDateTime::now_utc()),
+                serde_json::to_string(checkpoint)?
+            ],
         )?;
         Ok(())
     }
@@ -363,14 +407,103 @@ impl Store {
     }
 }
 
+impl Store {
+    // ---- sessions -----------------------------------------------------------
+
+    /// Persist a conversation session record (opaque JSON owned by the runtime).
+    pub fn put_session(
+        &self,
+        id: &str,
+        project: &ProjectId,
+        record: &serde_json::Value,
+    ) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT OR REPLACE INTO sessions(id, project_id, updated_at, json) VALUES(?1, ?2, ?3, ?4)",
+            rusqlite::params![id, project.as_str(), rfc(OffsetDateTime::now_utc()), serde_json::to_string(record)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_session(&self, id: &str) -> Result<Option<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        one(
+            db.query_row("SELECT json FROM sessions WHERE id=?1", [id], |r| {
+                r.get::<_, String>(0)
+            }),
+        )
+    }
+
+    /// Sessions, most recently updated first; all projects when `project` is `None`.
+    pub fn list_sessions(&self, project: Option<&ProjectId>) -> Result<Vec<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        match project {
+            Some(p) => {
+                let mut stmt = db.prepare("SELECT json FROM sessions WHERE project_id=?1 ORDER BY updated_at DESC, rowid DESC")?;
+                let rows = stmt.query_map([p.as_str()], |r| r.get::<_, String>(0))?;
+                collect(rows)
+            }
+            None => {
+                let mut stmt =
+                    db.prepare("SELECT json FROM sessions ORDER BY updated_at DESC, rowid DESC")?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+                collect(rows)
+            }
+        }
+    }
+
+    /// Resolve a session by full id or unique prefix.
+    pub fn resolve_session(&self, needle: &str) -> Result<Option<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT json FROM sessions WHERE id LIKE ?1 || '%' ORDER BY updated_at DESC LIMIT 2",
+        )?;
+        let rows: Vec<serde_json::Value> =
+            collect(stmt.query_map([needle], |r| r.get::<_, String>(0))?)?;
+        Ok(if rows.len() == 1 {
+            rows.into_iter().next()
+        } else {
+            None
+        })
+    }
+
+    /// Append (or replace) one turn of a session's transcript.
+    pub fn put_session_turn(
+        &self,
+        session: &str,
+        index: u32,
+        turn: &serde_json::Value,
+    ) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT OR REPLACE INTO session_turns(session_id, idx, json) VALUES(?1, ?2, ?3)",
+            rusqlite::params![session, index, serde_json::to_string(turn)?],
+        )?;
+        Ok(())
+    }
+
+    /// A session's turns in order. `last` limits to the most recent N.
+    pub fn list_session_turns(
+        &self,
+        session: &str,
+        last: Option<usize>,
+    ) -> Result<Vec<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        let limit = last.map(|n| n as i64).unwrap_or(-1);
+        let mut stmt = db.prepare(
+            "SELECT json FROM (SELECT idx, json FROM session_turns WHERE session_id=?1 ORDER BY idx DESC LIMIT ?2) ORDER BY idx ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![session, limit], |r| r.get::<_, String>(0))?;
+        collect(rows)
+    }
+}
+
 fn rfc(t: time::OffsetDateTime) -> String {
     t.format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()
 }
 
-fn one<T: for<'de> serde::Deserialize<'de>>(
-    r: rusqlite::Result<String>,
-) -> Result<Option<T>> {
+fn one<T: for<'de> serde::Deserialize<'de>>(r: rusqlite::Result<String>) -> Result<Option<T>> {
     match r {
         Ok(s) => Ok(Some(serde_json::from_str(&s)?)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -397,6 +530,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let s = Store::open(dir.path()).unwrap();
         (dir, s)
+    }
+
+    #[test]
+    fn sessions_and_turns_roundtrip() {
+        let (_d, s) = store();
+        let p = Project::new("p", "");
+        s.put_session("abc123", &p.id, &serde_json::json!({ "id": "abc123" }))
+            .unwrap();
+        s.put_session("abd999", &p.id, &serde_json::json!({ "id": "abd999" }))
+            .unwrap();
+        assert_eq!(s.list_sessions(Some(&p.id)).unwrap().len(), 2);
+        assert!(
+            s.resolve_session("ab").unwrap().is_none(),
+            "ambiguous prefix"
+        );
+        assert_eq!(s.resolve_session("abc").unwrap().unwrap()["id"], "abc123");
+        for i in 0..5 {
+            s.put_session_turn("abc123", i, &serde_json::json!({ "index": i }))
+                .unwrap();
+        }
+        let last2 = s.list_session_turns("abc123", Some(2)).unwrap();
+        assert_eq!(
+            last2
+                .iter()
+                .map(|t| t["index"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![3, 4]
+        );
+        assert_eq!(s.list_session_turns("abc123", None).unwrap().len(), 5);
     }
 
     #[test]
@@ -432,10 +594,15 @@ mod tests {
             ArtifactKind::Text,
             "notes.txt",
             bytes.len() as u64,
-            Provenance::Ingested { path: "/x/notes.txt".into() },
+            Provenance::Ingested {
+                path: "/x/notes.txt".into(),
+            },
         );
         s.put_artifact(&p.id, &art).unwrap();
-        assert_eq!(s.resolve_artifact(&p.id, id.short()).unwrap().unwrap().name, "notes.txt");
+        assert_eq!(
+            s.resolve_artifact(&p.id, id.short()).unwrap().unwrap().name,
+            "notes.txt"
+        );
 
         let mut inv = Invocation::new("fs.read", RiskTier::Read, serde_json::json!({}));
         inv.consumed.push(id.clone());
@@ -445,7 +612,11 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].output["lines"], 1);
 
-        let note = Note::new(NoteKind::Finding, "one line of text", ark_core::Author::Agent);
+        let note = Note::new(
+            NoteKind::Finding,
+            "one line of text",
+            ark_core::Author::Agent,
+        );
         s.put_note(&p.id, &note).unwrap();
         assert_eq!(s.list_notes(&p.id).unwrap().len(), 1);
     }
@@ -460,7 +631,8 @@ mod tests {
         // working state round-trips and replaces in place
         assert!(s.get_research_state(&p.id).unwrap().is_none());
         let mut st = ResearchState::new("find the root cause");
-        st.findings.push(Claim::new("cache evicted early", ClaimType::Fact));
+        st.findings
+            .push(Claim::new("cache evicted early", ClaimType::Fact));
         s.put_research_state(&p.id, &st).unwrap();
         st.questions.push("which key first?".into());
         s.put_research_state(&p.id, &st).unwrap();
@@ -474,12 +646,15 @@ mod tests {
             .with_call_digest("search.query|{\"q\":\"x\"}");
         s.put_evidence_card(&p.id, &card).unwrap();
         assert_eq!(s.list_evidence_cards(&p.id).unwrap().len(), 1);
-        let hit = s.find_card_by_digest(&p.id, "search.query|{\"q\":\"x\"}").unwrap();
+        let hit = s
+            .find_card_by_digest(&p.id, "search.query|{\"q\":\"x\"}")
+            .unwrap();
         assert!(hit.is_some());
         assert!(s.find_card_by_digest(&p.id, "nope").unwrap().is_none());
 
         // checkpoint round-trips as opaque json
-        s.put_checkpoint(&p.id, &serde_json::json!({"steps": 3, "tokens": 1200})).unwrap();
+        s.put_checkpoint(&p.id, &serde_json::json!({"steps": 3, "tokens": 1200}))
+            .unwrap();
         assert_eq!(s.get_checkpoint(&p.id).unwrap().unwrap()["steps"], 3);
     }
 
@@ -492,9 +667,21 @@ mod tests {
         s.put_project(&p2).unwrap();
 
         let id = ArtifactId::of_bytes(b"doc");
-        s.index_text(&p1.id, &id, "notes.txt", "text", "the cache layer evicted entries early under load");
+        s.index_text(
+            &p1.id,
+            &id,
+            "notes.txt",
+            "text",
+            "the cache layer evicted entries early under load",
+        );
         let other = ArtifactId::of_bytes(b"other");
-        s.index_text(&p2.id, &other, "notes.txt", "text", "the cache in another project");
+        s.index_text(
+            &p2.id,
+            &other,
+            "notes.txt",
+            "text",
+            "the cache in another project",
+        );
 
         let hits = s.search(&p1.id, "evicted", 10).unwrap();
         assert_eq!(hits.len(), 1, "match only within p1");

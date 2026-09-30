@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "ARK SDK: the small, stable facade for building an agent — one builder, sane defaults."
 
 [dependencies]
+serde.workspace = true
 ark-core.workspace = true
 ark-model.workspace = true
 ark-store.workspace = true

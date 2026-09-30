@@ -5,12 +5,13 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
 use ark_model::Usage;
+use serde::{Deserialize, Serialize};
 
 use crate::router::Role;
 
-fn role_name(r: Role) -> &'static str {
+/// The stable lowercase name of a role, as used in metrics keys and events.
+pub fn role_name(r: Role) -> &'static str {
     match r {
         Role::Classify => "classify",
         Role::Plan => "plan",
@@ -56,7 +57,11 @@ pub struct Metrics {
 
 impl Metrics {
     pub fn start() -> Self {
-        Metrics { tokens_measured: true, started: Some(std::time::Instant::now()), ..Default::default() }
+        Metrics {
+            tokens_measured: true,
+            started: Some(std::time::Instant::now()),
+            ..Default::default()
+        }
     }
 
     /// Record one model call: its role and the tokens it cost.
@@ -142,7 +147,11 @@ impl Metrics {
             s,
             "model calls: {} ({}), tool calls: {} ({} duplicate avoided)",
             self.total_model_calls(),
-            self.calls_by_model.iter().map(|(m, n)| format!("{m}×{n}")).collect::<Vec<_>>().join(", "),
+            self.calls_by_model
+                .iter()
+                .map(|(m, n)| format!("{m}×{n}"))
+                .collect::<Vec<_>>()
+                .join(", "),
             self.tool_calls,
             self.duplicate_tool_calls
         );
@@ -182,7 +191,15 @@ mod tests {
     #[test]
     fn estimated_usage_marks_unmeasured() {
         let mut m = Metrics::start();
-        m.record_call(Role::Reason, "x", Usage { prompt_tokens: 10, completion_tokens: 2, measured: false });
+        m.record_call(
+            Role::Reason,
+            "x",
+            Usage {
+                prompt_tokens: 10,
+                completion_tokens: 2,
+                measured: false,
+            },
+        );
         assert!(!m.tokens_measured);
         assert!(m.summary(1).contains("~12"));
     }

@@ -1,7 +1,11 @@
 //! Local models via Ollama's `/api/chat` (no auth). The default provider: private,
 //! offline, and the one the agent loop is tested against.
 
-use crate::{mangle_tool_name, Completion, Message, Provider, ProviderError, Result, Role, ToolCall, ToolDef, Usage};
+use crate::stream::{for_each_line, OllamaFold};
+use crate::{
+    mangle_tool_name, Completion, Message, Provider, ProviderError, Result, Role, TextSink,
+    ToolCall, ToolDef, Usage,
+};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -56,26 +60,13 @@ impl Provider for Ollama {
         self.model.clone()
     }
 
-    async fn complete(&self, system: &str, messages: &[Message], tools: &[ToolDef]) -> Result<Completion> {
-        let mut wire: Vec<Value> = vec![json!({ "role": "system", "content": system })];
-        wire.extend(messages.iter().map(to_wire_message));
-
-        let tool_defs: Vec<Value> = tools
-            .iter()
-            .map(|t| json!({
-                "type": "function",
-                "function": { "name": mangle_tool_name(&t.name), "description": t.description, "parameters": t.parameters }
-            }))
-            .collect();
-
-        let body = json!({
-            "model": self.model,
-            "messages": wire,
-            "tools": tool_defs,
-            "stream": false,
-            "options": { "temperature": 0.1 }
-        });
-
+    async fn complete(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+    ) -> Result<Completion> {
+        let body = self.body(system, messages, tools, false);
         let resp = self
             .client
             .post(format!("{}/api/chat", self.host))
@@ -87,12 +78,20 @@ impl Provider for Ollama {
         if !status.is_success() {
             return Err(ProviderError::Api {
                 provider: "ollama".into(),
-                detail: v.get("error").and_then(|e| e.as_str()).unwrap_or("request failed").to_string(),
+                detail: v
+                    .get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("request failed")
+                    .to_string(),
             });
         }
 
         let msg = &v["message"];
-        let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+        let content = msg
+            .get("content")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
         let mut tool_calls = Vec::new();
         if let Some(calls) = msg.get("tool_calls").and_then(|c| c.as_array()) {
             for (i, c) in calls.iter().enumerate() {
@@ -104,13 +103,81 @@ impl Provider for Ollama {
                     Some(other) => other.clone(),
                     None => json!({}),
                 };
-                tool_calls.push(ToolCall { id: format!("call_{i}"), name: crate::unmangle_tool_name(name), arguments });
+                tool_calls.push(ToolCall {
+                    id: format!("call_{i}"),
+                    name: crate::unmangle_tool_name(name),
+                    arguments,
+                });
             }
         }
-        let usage = match (v.get("prompt_eval_count").and_then(|c| c.as_u64()), v.get("eval_count").and_then(|c| c.as_u64())) {
+        let usage = match (
+            v.get("prompt_eval_count").and_then(|c| c.as_u64()),
+            v.get("eval_count").and_then(|c| c.as_u64()),
+        ) {
             (Some(p), Some(c)) => Usage::measured(p as u32, c as u32),
             _ => Usage::default(),
         };
-        Ok(Completion { content, tool_calls, usage })
+        Ok(Completion {
+            content,
+            tool_calls,
+            usage,
+        })
+    }
+
+    async fn complete_streaming(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+        on_text: TextSink<'_>,
+    ) -> Result<Completion> {
+        let body = self.body(system, messages, tools, true);
+        let resp = self
+            .client
+            .post(format!("{}/api/chat", self.host))
+            .json(&body)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let v: Value = resp.json().await.unwrap_or_default();
+            return Err(ProviderError::Api {
+                provider: "ollama".into(),
+                detail: v
+                    .get("error")
+                    .and_then(|e| e.as_str())
+                    .unwrap_or("request failed")
+                    .to_string(),
+            });
+        }
+        let mut fold = OllamaFold::default();
+        for_each_line(resp, |line| {
+            if line.trim().is_empty() {
+                return Ok(());
+            }
+            fold.feed(&serde_json::from_str::<Value>(line)?, on_text)
+        })
+        .await?;
+        Ok(fold.finish())
+    }
+}
+
+impl Ollama {
+    fn body(&self, system: &str, messages: &[Message], tools: &[ToolDef], stream: bool) -> Value {
+        let mut wire: Vec<Value> = vec![json!({ "role": "system", "content": system })];
+        wire.extend(messages.iter().map(to_wire_message));
+        let tool_defs: Vec<Value> = tools
+            .iter()
+            .map(|t| json!({
+                "type": "function",
+                "function": { "name": mangle_tool_name(&t.name), "description": t.description, "parameters": t.parameters }
+            }))
+            .collect();
+        json!({
+            "model": self.model,
+            "messages": wire,
+            "tools": tool_defs,
+            "stream": stream,
+            "options": { "temperature": 0.1 }
+        })
     }
 }

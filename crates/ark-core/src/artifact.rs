@@ -51,7 +51,10 @@ impl ArtifactKind {
 
     /// Whether this kind is text-shaped (worth full-text indexing).
     pub fn is_textual(&self) -> bool {
-        matches!(self, ArtifactKind::Text | ArtifactKind::Json | ArtifactKind::Source)
+        matches!(
+            self,
+            ArtifactKind::Text | ArtifactKind::Json | ArtifactKind::Source
+        )
     }
 }
 

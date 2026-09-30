@@ -27,11 +27,13 @@ const MAX_IDENTIFIERS: usize = 12;
 pub type Distiller =
     Arc<dyn Fn(&str, &serde_json::Value) -> Option<(String, Vec<String>)> + Send + Sync>;
 
-/// An ordered set of distillers, tried in order; the first `Some` wins, and
-/// [`generic_summary`] is the final fallback for anything unrecognized.
+/// An ordered set of distillers, tried in order; the first `Some` wins. The consumer's own
+/// distillers always run before ARK's common one (a domain knows its `list` or `read` better
+/// than a generic shape rule), and [`generic_summary`] is the final fallback.
 #[derive(Clone)]
 pub struct DistillerSet {
     distillers: Vec<Distiller>,
+    common: bool,
 }
 
 impl Default for DistillerSet {
@@ -43,15 +45,15 @@ impl Default for DistillerSet {
 impl DistillerSet {
     /// Empty — only the generic fallback applies.
     pub fn new() -> Self {
-        DistillerSet { distillers: Vec::new() }
+        DistillerSet { distillers: Vec::new(), common: false }
     }
 
     /// The default: the domain-neutral common distiller plus the generic fallback.
     pub fn with_common() -> Self {
-        DistillerSet { distillers: vec![Arc::new(distill_common)] }
+        DistillerSet { distillers: Vec::new(), common: true }
     }
 
-    /// Add a distiller (tried before the generic fallback, after earlier ones).
+    /// Add a distiller (tried after earlier ones, before the common distiller and the fallback).
     pub fn push(&mut self, d: Distiller) {
         self.distillers.push(d);
     }
@@ -66,6 +68,11 @@ impl DistillerSet {
     fn summarize_ok(&self, action: &str, out: &serde_json::Value) -> (String, Vec<String>) {
         for d in &self.distillers {
             if let Some(r) = d(action, out) {
+                return r;
+            }
+        }
+        if self.common {
+            if let Some(r) = distill_common(action, out) {
                 return r;
             }
         }
@@ -300,5 +307,18 @@ mod tests {
         let card = distill(&inv("note.count", json!({}), json!({"words": 1200})), &set);
         assert_eq!(card.summary, "counted words");
         assert_eq!(card.identifiers, vec!["1200"]);
+    }
+
+    #[test]
+    fn consumer_distillers_win_over_the_common_one() {
+        let mine: Distiller = Arc::new(|action: &str, _out: &serde_json::Value| {
+            (action == "book.list").then(|| ("4 chapters".to_string(), vec![]))
+        });
+        let set = DistillerSet::with_common().with(mine);
+        let out = serde_json::json!({ "chapters": [1, 2, 3, 4] });
+        assert_eq!(set.summarize_ok("book.list", &out).0, "4 chapters");
+        // Unclaimed shapes still reach the common distiller.
+        let files = serde_json::json!({ "path": ".", "entries": ["a", "b"] });
+        assert!(set.summarize_ok("fs.list", &files).0.contains("2 entry(ies)"));
     }
 }

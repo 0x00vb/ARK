@@ -23,28 +23,34 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark_core::{Project, ProjectId};
+use ark_core::{Focus, Project, ProjectId};
 use ark_model::Provider;
 use ark_runtime::{
-    Agent, AgentProfile, Engine, Harness, HarnessEvent, HarnessOutcome, ModelRouter,
+    Agent, AgentProfile, ApprovalGate, CancelToken, ContextReport, Engine, Harness, HarnessEvent,
+    HarnessOutcome, ModelRouter, Session,
 };
 use ark_tools::{Adapter, Registry};
 
 /// A convenient, curated prelude for consumers.
 pub mod prelude {
     pub use crate::{Ark, ArkBuilder, ArkError};
+    pub use crate::{Settings, TurnOptions};
     pub use ark_core::{
         ActionDescriptor, Artifact, ArtifactId, ArtifactKind, Capability, CapabilityCatalog,
         CapabilitySpec, Project, ProjectId, Provenance, RiskTier, Sniffer,
     };
     pub use ark_runtime::{
-        AcquisitionProvider, AcquisitionResult, AgentProfile, Distiller, DistillerSet, Engine,
-        Harness, HarnessEvent, KnowledgeHit, KnowledgeProvider, ModelRouter, Prompts,
+        AcquisitionProvider, AcquisitionResult, AgentProfile, ApprovalDecision, ApprovalGate,
+        ApprovalRequest, Approver, CancelToken, ContextReport, Distiller, DistillerSet, Engine,
+        FixedApprover, Harness, HarnessEvent, HarnessOutcome, KnowledgeHit, KnowledgeProvider,
+        ModelRouter, Prompts, Role, Session,
     };
-    pub use ark_tools::{ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArtifact, Registry, RunCtx};
+    pub use ark_tools::{
+        ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArtifact, Registry, RunCtx,
+    };
     // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
     // with `ark_model::from_env_arc()`, etc., from the prelude alone.
-    pub use {ark_core, ark_model, ark_tools};
+    pub use {ark_core, ark_model, ark_runtime, ark_tools};
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +61,28 @@ pub enum ArkError {
     Provider(#[from] ark_model::ProviderError),
     #[error(transparent)]
     Runtime(#[from] ark_runtime::AgentError),
+}
+
+/// Per-turn options for [`Ark::ask_session`]: the interactive seams a front-end supplies.
+#[derive(Clone, Default)]
+pub struct TurnOptions {
+    /// Trip to stop the turn cooperatively.
+    pub cancel: Option<CancelToken>,
+    /// Ask a human before state-changing actions (otherwise they are refused).
+    pub approvals: Option<Arc<ApprovalGate>>,
+    /// What the user is looking at, if the front-end knows.
+    pub focus: Option<Focus>,
+}
+
+/// The effective runtime configuration, for display.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct Settings {
+    pub store_root: PathBuf,
+    pub context_budget: u32,
+    pub max_steps: usize,
+    pub planner: bool,
+    pub critic: bool,
+    pub allow_mutate: bool,
 }
 
 /// A fully-wired agent: an [`Engine`] (store + tools), a [`ModelRouter`], and an
@@ -94,6 +122,97 @@ impl Ark {
         Ok(self.engine.create_project(name, target)?)
     }
 
+    /// The project with this name (or id prefix), created if it does not exist yet.
+    pub fn find_or_create_project(&self, name: &str, target: &str) -> Result<Project, ArkError> {
+        match self
+            .engine
+            .store
+            .resolve_project(name)
+            .map_err(ark_runtime::AgentError::from)?
+        {
+            Some(p) => Ok(p),
+            None => self.create_project(name, target),
+        }
+    }
+
+    pub fn router(&self) -> &ModelRouter {
+        &self.router
+    }
+
+    /// Swap the model(s) used from the next turn on.
+    pub fn set_router(&mut self, router: ModelRouter) {
+        self.router = router;
+    }
+
+    pub fn settings(&self) -> Settings {
+        Settings {
+            store_root: self.engine.store.root().to_path_buf(),
+            context_budget: self.budget,
+            max_steps: self.max_steps,
+            planner: self.planner,
+            critic: self.critic,
+            allow_mutate: self.allow_mutate,
+        }
+    }
+
+    /// A harness configured from this agent's settings. Front-ends that need more control
+    /// than [`ask_session`](Ark::ask_session) start from this.
+    pub fn harness(&self) -> Harness {
+        Harness::new(self.router.clone_view())
+            .max_steps(self.max_steps)
+            .budget(self.budget)
+            .planner(self.planner)
+            .critic(self.critic)
+            .allow_mutate(self.allow_mutate)
+    }
+
+    /// Start a new conversation session in `project`.
+    pub fn start_session(&self, project: &ProjectId) -> Result<Session, ArkError> {
+        Ok(Session::start(&self.engine, project)?)
+    }
+
+    /// Reopen a session by id or unique prefix.
+    pub fn open_session(&self, id: &str) -> Result<Option<Session>, ArkError> {
+        Ok(Session::open(&self.engine, id)?)
+    }
+
+    /// The most recently active session in `project`.
+    pub fn latest_session(&self, project: &ProjectId) -> Result<Option<Session>, ArkError> {
+        Ok(Session::latest(&self.engine, project)?)
+    }
+
+    /// Run one conversational turn: the harness gets the session's bounded carry-over (never
+    /// the transcript), the turn is recorded, and the carry-over window slides.
+    pub async fn ask_session(
+        &self,
+        session: &mut Session,
+        input: &str,
+        opts: TurnOptions,
+        on_event: impl FnMut(HarnessEvent),
+    ) -> Result<HarnessOutcome, ArkError> {
+        let harness = self
+            .harness()
+            .conversation(session.conversation_digest())
+            .approvals(opts.approvals)
+            .cancel(opts.cancel)
+            .focus(opts.focus);
+        let project = session.project().clone();
+        let outcome = harness
+            .ask(&self.engine, &self.profile, &project, input, on_event)
+            .await?;
+        session.record_turn(&self.engine, input, &outcome)?;
+        Ok(outcome)
+    }
+
+    /// What the next turn's first request would contain, by source, without calling a model.
+    pub async fn context_preview(&self, session: &Session) -> Result<ContextReport, ArkError> {
+        Ok(self
+            .harness()
+            .conversation(session.conversation_digest())
+            .preview_context(&self.engine, &self.profile, session.project(), "")
+            .await?)
+    }
+
     /// Run the advanced [`Harness`] loop on a task, discarding progress events.
     pub async fn ask(&self, project: &ProjectId, task: &str) -> Result<HarnessOutcome, ArkError> {
         self.ask_with(project, task, |_| {}).await
@@ -106,26 +225,32 @@ impl Ark {
         task: &str,
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
-        // ModelRouter isn't Clone; build a fresh single-tier view sharing the same providers.
-        let harness = Harness::new(self.router.clone_view())
-            .max_steps(self.max_steps)
-            .budget(self.budget)
-            .planner(self.planner)
-            .critic(self.critic)
-            .allow_mutate(self.allow_mutate);
-        Ok(harness.ask(&self.engine, &self.profile, project, task, on_event).await?)
+        Ok(self
+            .harness()
+            .ask(&self.engine, &self.profile, project, task, on_event)
+            .await?)
     }
 
     /// Run the simpler [`Agent`] loop (no context budget/router/state). Handy for small tasks.
-    pub async fn ask_simple(&self, provider: Box<dyn Provider>, project: &ProjectId, task: &str) -> Result<String, ArkError> {
-        let agent = Agent::new(provider).max_steps(self.max_steps).allow_mutate(self.allow_mutate);
-        let outcome = agent.ask(&self.engine, &self.profile, project, task, |_| {}).await?;
+    pub async fn ask_simple(
+        &self,
+        provider: Box<dyn Provider>,
+        project: &ProjectId,
+        task: &str,
+    ) -> Result<String, ArkError> {
+        let agent = Agent::new(provider)
+            .max_steps(self.max_steps)
+            .allow_mutate(self.allow_mutate);
+        let outcome = agent
+            .ask(&self.engine, &self.profile, project, task, |_| {})
+            .await?;
         Ok(outcome.answer)
     }
 }
 
 /// Builder for [`Ark`]. Sane defaults everywhere; override only what you need.
 pub struct ArkBuilder {
+    engine: Option<Engine>,
     store_root: PathBuf,
     registry: Registry,
     profile: AgentProfile,
@@ -141,6 +266,7 @@ pub struct ArkBuilder {
 impl Default for ArkBuilder {
     fn default() -> Self {
         ArkBuilder {
+            engine: None,
             store_root: PathBuf::from("./ark-workspace"),
             registry: Registry::new(),
             profile: AgentProfile::default(),
@@ -159,6 +285,12 @@ impl ArkBuilder {
     /// Where the store (blobs, metadata, index) lives. Also loads `<root>/plugins.json`.
     pub fn store_root(mut self, path: impl Into<PathBuf>) -> Self {
         self.store_root = path.into();
+        self
+    }
+    /// Use an engine the consumer already opened (its own registry, sniffers, store). Takes
+    /// precedence over `store_root`/`tool`/`registry`.
+    pub fn engine(mut self, engine: Engine) -> Self {
+        self.engine = Some(engine);
         self
     }
     /// Register a tool adapter.
@@ -216,7 +348,10 @@ impl ArkBuilder {
             (None, Some(p)) => ModelRouter::single(p),
             (None, None) => ModelRouter::from_env()?,
         };
-        let engine = Engine::open_with(&self.store_root, self.registry)?;
+        let engine = match self.engine {
+            Some(e) => e,
+            None => Engine::open_with(&self.store_root, self.registry)?,
+        };
         Ok(Ark {
             engine,
             router,
@@ -248,26 +383,50 @@ mod tests {
                     "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } }
                 }))]
         }
-        async fn run(&self, _a: &str, input: serde_json::Value, _c: &RunCtx<'_>) -> ark_tools::Result<ActionOutput> {
+        async fn run(
+            &self,
+            _a: &str,
+            input: serde_json::Value,
+            _c: &RunCtx<'_>,
+        ) -> ark_tools::Result<ActionOutput> {
             let t = input.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            Ok(ActionOutput::json(serde_json::json!({ "reversed": t.chars().rev().collect::<String>() })))
+            Ok(ActionOutput::json(
+                serde_json::json!({ "reversed": t.chars().rev().collect::<String>() }),
+            ))
         }
     }
 
     #[tokio::test]
     async fn builds_and_runs_a_tiny_agent() {
         let dir = tempfile::tempdir().unwrap();
-        let call = ToolCall { id: "c1".into(), name: "str.reverse".into(), arguments: serde_json::json!({ "text": "abc" }) };
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "str.reverse".into(),
+            arguments: serde_json::json!({ "text": "abc" }),
+        };
         let script = vec![
-            Completion { content: String::new(), tool_calls: vec![call], usage: Usage::measured(50, 5) },
-            Completion { content: "Reversed to 'cba' [inv:1].".into(), tool_calls: vec![], usage: Usage::measured(60, 6) },
+            Completion {
+                content: String::new(),
+                tool_calls: vec![call],
+                usage: Usage::measured(50, 5),
+            },
+            Completion {
+                content: "Reversed to 'cba' [inv:1].".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(60, 6),
+            },
         ];
         let provider: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new("mock", script));
 
         let ark = Ark::builder()
             .store_root(dir.path())
             .tool(Arc::new(Reverse))
-            .profile(AgentProfile::builder().instructions("You reverse strings.").core_actions(["str.reverse"]).build())
+            .profile(
+                AgentProfile::builder()
+                    .instructions("You reverse strings.")
+                    .core_actions(["str.reverse"])
+                    .build(),
+            )
             .provider(provider)
             .planner(false)
             .critic(false)

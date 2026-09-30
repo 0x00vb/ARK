@@ -1,0 +1,563 @@
+//! Conversation sessions. A session is one continuing conversation inside a project: a
+//! sequence of turns a human can leave and resume.
+//!
+//! The rule this module exists to enforce: **the transcript is not the context.** Every turn
+//! is stored in full (so a front-end can show history and a human can audit it), but the model
+//! only ever receives a bounded carry-over built by [`Session::conversation_digest`]:
+//!
+//! - the last few exchanges, each clipped;
+//! - one-line gists of older turns, capped in number;
+//! - nothing else. Durable knowledge lives in the project's working state and evidence
+//!   cards, which the harness already feeds the model in bounded form.
+//!
+//! So a session with 500 turns sends about the same number of conversation tokens as one with
+//! 5. [`Session::compact`] tightens the carry-over and the working state on demand, using the
+//! same deterministic rules; it never asks a model to summarize the transcript.
+
+use ark_core::{ProjectId, SessionId};
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+
+use crate::engine::Engine;
+use crate::error::AgentError;
+use crate::harness::HarnessOutcome;
+use crate::metrics::Metrics;
+
+/// How much of the conversation rides along with each new turn.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CarryPolicy {
+    /// Exchanges carried near-verbatim (clipped).
+    pub recent_turns: usize,
+    /// Characters kept from each carried user message.
+    pub input_chars: usize,
+    /// Characters kept from each carried answer.
+    pub answer_chars: usize,
+    /// One-line gists of older turns kept (newest win).
+    pub max_gists: usize,
+    /// Characters per gist.
+    pub gist_chars: usize,
+}
+
+impl Default for CarryPolicy {
+    fn default() -> Self {
+        CarryPolicy {
+            recent_turns: 3,
+            input_chars: 300,
+            answer_chars: 500,
+            max_gists: 8,
+            gist_chars: 160,
+        }
+    }
+}
+
+/// Cumulative accounting for a session.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SessionUsage {
+    pub turns: u32,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub model_calls: u32,
+    pub tool_calls: u32,
+    pub duplicate_tool_calls: u32,
+    pub peak_prompt_tokens: u32,
+    /// False once any call's usage was estimated rather than measured.
+    pub measured: bool,
+    pub elapsed_ms: u64,
+}
+
+impl SessionUsage {
+    fn add(&mut self, m: &Metrics) {
+        if self.turns == 0 {
+            self.measured = true;
+        }
+        self.turns += 1;
+        self.prompt_tokens += m.prompt_tokens;
+        self.completion_tokens += m.completion_tokens;
+        self.model_calls += m.total_model_calls();
+        self.tool_calls += m.tool_calls;
+        self.duplicate_tool_calls += m.duplicate_tool_calls;
+        self.peak_prompt_tokens = self.peak_prompt_tokens.max(m.peak_prompt_tokens);
+        self.measured &= m.tokens_measured || m.total_model_calls() == 0;
+        self.elapsed_ms += m.elapsed_ms;
+    }
+    pub fn total_tokens(&self) -> u64 {
+        self.prompt_tokens + self.completion_tokens
+    }
+}
+
+/// The persisted header of a session.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionRecord {
+    pub id: SessionId,
+    pub project: ProjectId,
+    /// The first message, clipped: a human handle for the session list.
+    pub title: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+    pub turn_count: u32,
+    /// Gists of turns that left the verbatim window, oldest first.
+    #[serde(default)]
+    pub gists: Vec<String>,
+    /// Turns folded out of the gist list too (their conclusions live in the working state).
+    #[serde(default)]
+    pub dropped_turns: u32,
+    #[serde(default)]
+    pub usage: SessionUsage,
+    #[serde(default)]
+    pub compactions: u32,
+    #[serde(default)]
+    pub policy: CarryPolicy,
+}
+
+/// One stored exchange. The full text is kept for the human; the model sees a clip.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Turn {
+    pub index: u32,
+    pub input: String,
+    pub answer: String,
+    #[serde(default)]
+    pub cited: Vec<String>,
+    #[serde(default)]
+    pub cancelled: bool,
+    #[serde(default)]
+    pub metrics: Metrics,
+    #[serde(with = "time::serde::rfc3339")]
+    pub at: OffsetDateTime,
+}
+
+/// What a compaction changed, in estimated tokens.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CompactReport {
+    pub conversation_before: u32,
+    pub conversation_after: u32,
+    pub state_before: u32,
+    pub state_after: u32,
+    /// Turns moved from the verbatim window into gists.
+    pub turns_folded: usize,
+    /// Gists merged away (their turns stay in the transcript and working state).
+    pub gists_dropped: usize,
+    /// Working-state items removed (duplicates, closed hypotheses, stale plans).
+    pub state_items_removed: usize,
+}
+
+/// A live handle on one conversation session.
+pub struct Session {
+    record: SessionRecord,
+    /// The last `policy.recent_turns` turns (the verbatim window), cached.
+    recent: Vec<Turn>,
+}
+
+impl Session {
+    /// Start a new, empty session in `project`.
+    pub fn start(engine: &Engine, project: &ProjectId) -> Result<Session, AgentError> {
+        Self::start_with(engine, project, CarryPolicy::default())
+    }
+
+    pub fn start_with(
+        engine: &Engine,
+        project: &ProjectId,
+        policy: CarryPolicy,
+    ) -> Result<Session, AgentError> {
+        let now = OffsetDateTime::now_utc();
+        let record = SessionRecord {
+            id: SessionId::new(),
+            project: project.clone(),
+            title: String::new(),
+            created_at: now,
+            updated_at: now,
+            turn_count: 0,
+            gists: Vec::new(),
+            dropped_turns: 0,
+            usage: SessionUsage::default(),
+            compactions: 0,
+            policy,
+        };
+        let s = Session {
+            record,
+            recent: Vec::new(),
+        };
+        s.save(engine)?;
+        Ok(s)
+    }
+
+    /// Reopen a session by id or unique id prefix.
+    pub fn open(engine: &Engine, id: &str) -> Result<Option<Session>, AgentError> {
+        let Some(v) = engine.store.resolve_session(id)? else {
+            return Ok(None);
+        };
+        Self::load(engine, serde_json::from_value(v)?).map(Some)
+    }
+
+    /// The most recently active session in `project`, if any.
+    pub fn latest(engine: &Engine, project: &ProjectId) -> Result<Option<Session>, AgentError> {
+        match engine
+            .store
+            .list_sessions(Some(project))?
+            .into_iter()
+            .next()
+        {
+            None => Ok(None),
+            Some(v) => Self::load(engine, serde_json::from_value(v)?).map(Some),
+        }
+    }
+
+    /// Session headers, most recent first.
+    pub fn list(
+        engine: &Engine,
+        project: Option<&ProjectId>,
+    ) -> Result<Vec<SessionRecord>, AgentError> {
+        engine
+            .store
+            .list_sessions(project)?
+            .into_iter()
+            .map(|v| serde_json::from_value(v).map_err(AgentError::from))
+            .collect()
+    }
+
+    fn load(engine: &Engine, record: SessionRecord) -> Result<Session, AgentError> {
+        // Turns already folded into gists are excluded from the window.
+        let start = Self::window_start(&record);
+        let recent = Self::read_turns(engine, &record.id, Some(record.policy.recent_turns))?
+            .into_iter()
+            .filter(|t| t.index as usize >= start)
+            .collect();
+        Ok(Session { record, recent })
+    }
+
+    /// Index of the first turn still in the verbatim window: every folded turn became a gist,
+    /// and every dropped gist was counted.
+    fn window_start(record: &SessionRecord) -> usize {
+        (record.gists.len() + record.dropped_turns as usize).min(record.turn_count as usize)
+    }
+
+    fn read_turns(
+        engine: &Engine,
+        id: &SessionId,
+        last: Option<usize>,
+    ) -> Result<Vec<Turn>, AgentError> {
+        engine
+            .store
+            .list_session_turns(id.as_str(), last)?
+            .into_iter()
+            .map(|v| serde_json::from_value(v).map_err(AgentError::from))
+            .collect()
+    }
+
+    fn save(&self, engine: &Engine) -> Result<(), AgentError> {
+        engine.store.put_session(
+            self.record.id.as_str(),
+            &self.record.project,
+            &serde_json::to_value(&self.record)?,
+        )?;
+        Ok(())
+    }
+
+    pub fn id(&self) -> &SessionId {
+        &self.record.id
+    }
+    pub fn project(&self) -> &ProjectId {
+        &self.record.project
+    }
+    pub fn record(&self) -> &SessionRecord {
+        &self.record
+    }
+    pub fn usage(&self) -> &SessionUsage {
+        &self.record.usage
+    }
+    pub fn turn_count(&self) -> u32 {
+        self.record.turn_count
+    }
+
+    /// The full stored transcript, for display. Never sent to a model.
+    pub fn transcript(
+        &self,
+        engine: &Engine,
+        last: Option<usize>,
+    ) -> Result<Vec<Turn>, AgentError> {
+        Self::read_turns(engine, &self.record.id, last)
+    }
+
+    /// The bounded carry-over for the next turn, or `None` for a fresh session.
+    pub fn conversation_digest(&self) -> Option<String> {
+        use std::fmt::Write as _;
+        let p = &self.record.policy;
+        if self.recent.is_empty() && self.record.gists.is_empty() {
+            return None;
+        }
+        let mut s = String::new();
+        if !self.record.gists.is_empty() || self.record.dropped_turns > 0 {
+            let _ = writeln!(s, "Earlier turns (oldest first):");
+            if self.record.dropped_turns > 0 {
+                let _ = writeln!(
+                    s,
+                    "  (+{} earlier turns; their conclusions are in the working state)",
+                    self.record.dropped_turns
+                );
+            }
+            for g in &self.record.gists {
+                let _ = writeln!(s, "  - {g}");
+            }
+        }
+        if !self.recent.is_empty() {
+            let _ = writeln!(s, "Most recent exchanges:");
+            for t in &self.recent {
+                let _ = writeln!(s, "  [user] {}", clip(&t.input, p.input_chars));
+                let reply = if t.cancelled {
+                    "(cancelled before answering)".to_string()
+                } else {
+                    clip(&t.answer, p.answer_chars)
+                };
+                let _ = writeln!(s, "  [you] {reply}");
+            }
+        }
+        Some(s.trim_end().to_string())
+    }
+
+    /// Store a finished turn and slide the carry-over window.
+    pub fn record_turn(
+        &mut self,
+        engine: &Engine,
+        input: &str,
+        outcome: &HarnessOutcome,
+    ) -> Result<(), AgentError> {
+        let turn = Turn {
+            index: self.record.turn_count,
+            input: input.to_string(),
+            answer: outcome.answer.clone(),
+            cited: outcome
+                .cited
+                .iter()
+                .map(|c| c.short().to_string())
+                .collect(),
+            cancelled: outcome.cancelled,
+            metrics: outcome.metrics.clone(),
+            at: OffsetDateTime::now_utc(),
+        };
+        engine.store.put_session_turn(
+            self.record.id.as_str(),
+            turn.index,
+            &serde_json::to_value(&turn)?,
+        )?;
+        if self.record.title.is_empty() {
+            self.record.title = clip(input, 60);
+        }
+        self.record.turn_count += 1;
+        self.record.usage.add(&outcome.metrics);
+        self.record.updated_at = OffsetDateTime::now_utc();
+        self.recent.push(turn);
+        let keep = self.record.policy.recent_turns;
+        let max_gists = self.record.policy.max_gists;
+        self.slide(keep, max_gists);
+        self.save(engine)
+    }
+
+    /// Fold turns beyond `keep` into gists, and gists beyond `max_gists` into the dropped count.
+    /// Returns (turns folded, gists dropped).
+    fn slide(&mut self, keep: usize, max_gists: usize) -> (usize, usize) {
+        let mut folded = 0;
+        while self.recent.len() > keep {
+            let t = self.recent.remove(0);
+            self.record
+                .gists
+                .push(gist(&t, self.record.policy.gist_chars));
+            folded += 1;
+        }
+        let mut dropped = 0;
+        while self.record.gists.len() > max_gists {
+            self.record.gists.remove(0);
+            self.record.dropped_turns += 1;
+            dropped += 1;
+        }
+        (folded, dropped)
+    }
+
+    /// Tighten the context on demand: keep only the latest exchange verbatim, halve the gist
+    /// list, and tidy the working state. Deterministic; no model call. Nothing is deleted from
+    /// the transcript or the evidence store.
+    pub fn compact(&mut self, engine: &Engine) -> Result<CompactReport, AgentError> {
+        use ark_model::estimate_tokens;
+        let mut report = CompactReport {
+            conversation_before: self
+                .conversation_digest()
+                .map(|d| estimate_tokens(&d))
+                .unwrap_or(0),
+            ..Default::default()
+        };
+        let (folded, dropped) = self.slide(1, (self.record.policy.max_gists / 2).max(1));
+        report.turns_folded = folded;
+        report.gists_dropped = dropped;
+        report.conversation_after = self
+            .conversation_digest()
+            .map(|d| estimate_tokens(&d))
+            .unwrap_or(0);
+
+        let mut state = engine
+            .store
+            .get_research_state(&self.record.project)?
+            .unwrap_or_default();
+        report.state_before = estimate_tokens(&state.digest(6));
+        report.state_items_removed = state.compact(6);
+        report.state_after = estimate_tokens(&state.digest(6));
+        engine
+            .store
+            .put_research_state(&self.record.project, &state)?;
+
+        self.record.compactions += 1;
+        self.record.updated_at = OffsetDateTime::now_utc();
+        self.save(engine)?;
+        Ok(report)
+    }
+}
+
+/// A one-line summary of a turn: the question and the answer's first sentence.
+fn gist(t: &Turn, max: usize) -> String {
+    let answer = if t.cancelled {
+        "(cancelled)".to_string()
+    } else {
+        first_sentence(&t.answer)
+    };
+    let cites = if t.cited.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " [inv:{}]",
+            t.cited
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    clip(&format!("{} → {}{}", flat(&t.input), answer, cites), max)
+}
+
+fn first_sentence(s: &str) -> String {
+    let f = flat(s);
+    match f.find(". ") {
+        Some(i) => f[..=i].to_string(),
+        None => f,
+    }
+}
+
+fn flat(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn clip(s: &str, max: usize) -> String {
+    let f = flat(s);
+    if f.chars().count() <= max {
+        f
+    } else {
+        format!(
+            "{}…",
+            f.chars().take(max.saturating_sub(1)).collect::<String>()
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_core::ResearchState;
+    use ark_tools::Registry;
+
+    fn outcome(answer: &str) -> HarnessOutcome {
+        HarnessOutcome {
+            answer: answer.into(),
+            cited: vec![],
+            steps: 1,
+            trivial: true,
+            metrics: Metrics::start(),
+            state: ResearchState::default(),
+            cancelled: false,
+        }
+    }
+
+    #[test]
+    fn digest_is_bounded_no_matter_how_long_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let p = engine.create_project("p", "").unwrap();
+        let mut s = Session::start(&engine, &p.id).unwrap();
+        let mut sizes = Vec::new();
+        for i in 0..300 {
+            let q = format!("question {i}: {}", "please look at this again ".repeat(20));
+            let a = format!("Answer {i}. {}", "Here is a long explanation. ".repeat(40));
+            s.record_turn(&engine, &q, &outcome(&a)).unwrap();
+            sizes.push(s.conversation_digest().unwrap().len());
+        }
+        let at_20 = sizes[19];
+        let at_300 = sizes[299];
+        assert!(
+            at_300 <= at_20 + 64,
+            "carry-over plateaus: turn 20 = {at_20} chars, turn 300 = {at_300} chars"
+        );
+        assert_eq!(
+            s.transcript(&engine, None).unwrap().len(),
+            300,
+            "the full transcript is still stored"
+        );
+        assert!(s
+            .conversation_digest()
+            .unwrap()
+            .contains("+289 earlier turns"));
+    }
+
+    #[test]
+    fn resume_restores_the_window_without_replaying() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let p = engine.create_project("p", "").unwrap();
+        let mut s = Session::start(&engine, &p.id).unwrap();
+        for i in 0..6 {
+            s.record_turn(&engine, &format!("q{i}"), &outcome(&format!("a{i}.")))
+                .unwrap();
+        }
+        let before = s.conversation_digest();
+        let id = s.id().short().to_string();
+        drop(s);
+        let resumed = Session::open(&engine, &id).unwrap().unwrap();
+        assert_eq!(
+            resumed.conversation_digest(),
+            before,
+            "same carry-over after resume"
+        );
+        assert_eq!(
+            Session::latest(&engine, &p.id).unwrap().unwrap().id(),
+            resumed.id()
+        );
+        assert_eq!(resumed.turn_count(), 6);
+    }
+
+    #[test]
+    fn compact_shrinks_carry_over_and_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let p = engine.create_project("p", "").unwrap();
+        let mut st = ResearchState::new("g");
+        for _ in 0..3 {
+            st.next_actions.push("read chapter 4".into());
+        }
+        engine.store.put_research_state(&p.id, &st).unwrap();
+        let mut s = Session::start(&engine, &p.id).unwrap();
+        for i in 0..12 {
+            s.record_turn(
+                &engine,
+                &format!("question number {i}"),
+                &outcome(&"an answer sentence. ".repeat(20)),
+            )
+            .unwrap();
+        }
+        let r = s.compact(&engine).unwrap();
+        assert!(r.conversation_after < r.conversation_before, "{r:?}");
+        assert_eq!(r.turns_folded, 2);
+        assert_eq!(r.state_items_removed, 2);
+        assert!(s.conversation_digest().unwrap().matches("[user]").count() == 1);
+        // Resumed after compaction, the window stays compacted.
+        let again = Session::open(&engine, s.id().as_str()).unwrap().unwrap();
+        assert_eq!(again.conversation_digest(), s.conversation_digest());
+    }
+}

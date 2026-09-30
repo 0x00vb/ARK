@@ -4,14 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "A novelist's assistant built on ARK — the 'could this power a novel?' proof."
+description = "writer: a novelist's developmental editor on ARK. The 'could this power a novel?' proof, now interactive."
 
 [[bin]]
-name = "writing-agent"
+name = "writer"
 path = "src/main.rs"
 
 [dependencies]
 ark-sdk.workspace = true
+ark-cli.workspace = true
+anyhow.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 tokio.workspace = true

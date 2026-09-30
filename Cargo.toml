@@ -7,6 +7,7 @@ members = [
     "crates/ark-tools",
     "crates/ark-runtime",
     "crates/ark-sdk",
+    "crates/ark-cli",
     "examples/minimal-agent",
     "examples/writing-agent",
 ]
@@ -44,6 +45,7 @@ ark-store = { path = "crates/ark-store", version = "0.1.0" }
 ark-tools = { path = "crates/ark-tools", version = "0.1.0" }
 ark-runtime = { path = "crates/ark-runtime", version = "0.1.0" }
 ark-sdk = { path = "crates/ark-sdk", version = "0.1.0" }
+ark-cli = { path = "crates/ark-cli", version = "0.1.0" }
 
 [profile.dev]
 opt-level = 1

@@ -44,7 +44,10 @@ pub struct WorkspaceContext {
 
 impl WorkspaceContext {
     pub fn new(project: impl Into<String>) -> Self {
-        WorkspaceContext { project: project.into(), ..Default::default() }
+        WorkspaceContext {
+            project: project.into(),
+            ..Default::default()
+        }
     }
 
     pub fn with_focus(mut self, focus: Option<Focus>) -> Self {
@@ -65,9 +68,12 @@ impl WorkspaceContext {
     /// The single most relevant artifact id as a string, for the agent to pass as an
     /// `artifact` argument. Prefers the resolved artifact, then a focus surface's own.
     pub fn active_artifact(&self) -> Option<&ArtifactId> {
-        self.artifact
-            .as_ref()
-            .or_else(|| self.focus.as_ref().and_then(|f| f.surface.as_ref()).and_then(|s| s.artifact.as_ref()))
+        self.artifact.as_ref().or_else(|| {
+            self.focus
+                .as_ref()
+                .and_then(|f| f.surface.as_ref())
+                .and_then(|s| s.artifact.as_ref())
+        })
     }
 
     /// A compact, budgeted digest for the prompt, or `None` when nothing meaningful is in
@@ -79,8 +85,10 @@ impl WorkspaceContext {
         }
         use std::fmt::Write as _;
         let mut s = String::new();
-        s.push_str("The user is working in a live workspace. Resolve on-screen references \
-                    (\"this\", \"here\", \"it\") against what they are looking at:\n");
+        s.push_str(
+            "The user is working in a live workspace. Resolve on-screen references \
+                    (\"this\", \"here\", \"it\") against what they are looking at:\n",
+        );
 
         if let Some(focus) = &self.focus {
             if let Some(d) = focus.digest() {
@@ -98,12 +106,19 @@ impl WorkspaceContext {
             let _ = writeln!(s, "- Active session: {sess}.");
         }
         if !self.nearby_evidence.is_empty() {
-            let _ = writeln!(s, "- Evidence already gathered near this focus (retrieve rows with get_evidence):");
+            let _ = writeln!(
+                s,
+                "- Evidence already gathered near this focus (retrieve rows with get_evidence):"
+            );
             for line in self.nearby_evidence.iter().take(max_evidence) {
                 let _ = writeln!(s, "    {line}");
             }
             if self.nearby_evidence.len() > max_evidence {
-                let _ = writeln!(s, "    … (+{} more — search_evidence to find them)", self.nearby_evidence.len() - max_evidence);
+                let _ = writeln!(
+                    s,
+                    "    … (+{} more — search_evidence to find them)",
+                    self.nearby_evidence.len() - max_evidence
+                );
             }
         }
         Some(s.trim_end().to_string())
@@ -124,20 +139,25 @@ mod tests {
 
     #[test]
     fn digest_resolves_this_to_the_focused_artifact() {
-        let ctx = WorkspaceContext::new("novel")
-            .with_focus(Some(Focus {
-                surface: Some(SurfaceRef {
-                    kind_tag: SurfaceKind::Editor.as_tag(),
-                    title: "chapter3.md".into(),
-                    artifact: Some(ArtifactId("abc123def456".into())),
-                    path: Some("chapter3.md".into()),
-                    locator: None,
-                }),
-                selection: Some(Selection { line: Some(42), ..Default::default() }),
-            }));
+        let ctx = WorkspaceContext::new("novel").with_focus(Some(Focus {
+            surface: Some(SurfaceRef {
+                kind_tag: SurfaceKind::Editor.as_tag(),
+                title: "chapter3.md".into(),
+                artifact: Some(ArtifactId("abc123def456".into())),
+                path: Some("chapter3.md".into()),
+                locator: None,
+            }),
+            selection: Some(Selection {
+                line: Some(42),
+                ..Default::default()
+            }),
+        }));
         let d = ctx.digest(5).unwrap();
         assert!(d.contains("editor surface"), "{d}");
-        assert!(d.contains("abc123def456"), "resolves the artifact id for `this`");
+        assert!(
+            d.contains("abc123def456"),
+            "resolves the artifact id for `this`"
+        );
         assert!(d.contains("line 42"));
         assert_eq!(ctx.active_artifact().unwrap().as_str(), "abc123def456");
     }
@@ -147,7 +167,8 @@ mod tests {
         let mut ctx = WorkspaceContext::new("p");
         ctx.artifact = Some(ArtifactId("deadbeef".into()));
         for i in 0..10 {
-            ctx.nearby_evidence.push(format!("[inv:{i:08x}] search — {i} hits"));
+            ctx.nearby_evidence
+                .push(format!("[inv:{i:08x}] search — {i} hits"));
         }
         let d = ctx.digest(3).unwrap();
         assert!(d.contains("(+7 more"), "evidence capped at 3 of 10:\n{d}");

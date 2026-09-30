@@ -10,6 +10,7 @@ use std::sync::Arc;
 use ark_core::CapabilityCatalog;
 
 use crate::acquire::AcquisitionProvider;
+use crate::approval::ApprovalClassifier;
 use crate::capmap::{declared_only, Inferrer};
 use crate::distill::DistillerSet;
 use crate::knowledge::KnowledgeProvider;
@@ -67,6 +68,9 @@ pub struct AgentProfile {
     /// Phrases that mark a question as a full investigation (vs. trivial single-step). The
     /// defaults are domain-neutral; a domain may add its own (e.g. "vulnerability").
     pub investigation_markers: Vec<String>,
+    /// Maps a state-changing call to its approval class, the key an "allow for this session"
+    /// grant is remembered under. `None` classes by action name.
+    pub approval_classifier: Option<ApprovalClassifier>,
 }
 
 impl Default for AgentProfile {
@@ -80,13 +84,24 @@ impl Default for AgentProfile {
             acquisition: None,
             core_actions: Vec::new(),
             investigation_markers: default_markers(),
+            approval_classifier: None,
         }
     }
 }
 
 impl AgentProfile {
     pub fn builder() -> AgentProfileBuilder {
-        AgentProfileBuilder { profile: AgentProfile::default() }
+        AgentProfileBuilder {
+            profile: AgentProfile::default(),
+        }
+    }
+
+    /// The approval class for a call (see [`AgentProfile::approval_classifier`]).
+    pub fn approval_class(&self, action: &str, input: &serde_json::Value) -> String {
+        match &self.approval_classifier {
+            Some(f) => f(action, input),
+            None => action.to_string(),
+        }
     }
 }
 
@@ -129,8 +144,19 @@ impl AgentProfileBuilder {
         self.profile.core_actions = actions.into_iter().map(Into::into).collect();
         self
     }
-    pub fn investigation_markers<S: Into<String>>(mut self, m: impl IntoIterator<Item = S>) -> Self {
+    pub fn investigation_markers<S: Into<String>>(
+        mut self,
+        m: impl IntoIterator<Item = S>,
+    ) -> Self {
         self.profile.investigation_markers = m.into_iter().map(Into::into).collect();
+        self
+    }
+    /// Class state-changing calls for session grants, e.g. by the first word of a command.
+    pub fn approval_classifier(
+        mut self,
+        f: impl Fn(&str, &serde_json::Value) -> String + Send + Sync + 'static,
+    ) -> Self {
+        self.profile.approval_classifier = Some(Arc::new(f));
         self
     }
     pub fn build(self) -> AgentProfile {
@@ -139,13 +165,24 @@ impl AgentProfileBuilder {
 }
 
 fn default_markers() -> Vec<String> {
-    ["why", "how does", "how is", "compare", " and ", " then ", "explain", "investigate", "analyze"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "why",
+        "how does",
+        "how is",
+        "compare",
+        " and ",
+        " then ",
+        "explain",
+        "investigate",
+        "analyze",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
-pub const DEFAULT_INSTRUCTIONS: &str = "You are a capable agent that gets things done by operating real tools, and you reason like \
+pub const DEFAULT_INSTRUCTIONS: &str =
+    "You are a capable agent that gets things done by operating real tools, and you reason like \
 a careful professional, not a chatbot.\n\n\
 Method:\n\
 - Reason about capabilities, not tool names. First decide what kind of information or action \
@@ -162,15 +199,18 @@ get_evidence(invocation, path). Do not re-run a tool you already ran.\n\
 - When you can answer, stop calling tools and reply: separate facts (cited) from inference \
 and hypothesis, and end with the single most useful next step.";
 
-pub const DEFAULT_PLAN_SYSTEM: &str = "You are planning how to accomplish a task. Given the goal, output a SHORT plan of 3–6 \
+pub const DEFAULT_PLAN_SYSTEM: &str =
+    "You are planning how to accomplish a task. Given the goal, output a SHORT plan of 3–6 \
 concrete steps, one per line, no numbering, phrased as capabilities to use. Let the goal \
 decide the steps — do not assume any particular tool or workflow unless the goal implies it. \
 Output only the steps.";
 
-pub const DEFAULT_CRITIC_INTRO: &str = "You are reviewing a draft answer that failed a check. Revise it to be honest and grounded: \
+pub const DEFAULT_CRITIC_INTRO: &str =
+    "You are reviewing a draft answer that failed a check. Revise it to be honest and grounded: \
 cite evidence for factual claims, and where evidence is missing say so and label the claim a \
 hypothesis or unknown. Output only the revised answer.";
 
-pub const DEFAULT_FORCE_ANSWER: &str = "Stop calling tools. Give your best final answer from the evidence gathered, clearly \
+pub const DEFAULT_FORCE_ANSWER: &str =
+    "Stop calling tools. Give your best final answer from the evidence gathered, clearly \
 separating established facts (with [inv:…] citations) from hypotheses, and end with the \
 single most useful next step.";

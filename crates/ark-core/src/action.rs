@@ -53,6 +53,12 @@ pub struct ActionDescriptor {
     /// the action name. When present, it is authoritative.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<Capability>,
+    /// The result stays true for the same input (it reads fixed data, not a workspace that can
+    /// change). The runtime may then reuse it from an earlier turn instead of running it again.
+    /// Within a single turn every identical read is reused regardless. Calls that name a
+    /// content-addressed `artifact` are treated as reusable automatically.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reusable: bool,
 }
 
 impl ActionDescriptor {
@@ -66,7 +72,14 @@ impl ActionDescriptor {
             input_schema: serde_json::json!({ "type": "object", "properties": {} }),
             output_schema: serde_json::json!({ "type": "object" }),
             capabilities: Vec::new(),
+            reusable: false,
         }
+    }
+
+    /// Mark the result as reusable across turns (see [`ActionDescriptor::reusable`]).
+    pub fn reusable(mut self) -> Self {
+        self.reusable = true;
+        self
     }
 
     pub fn with_input_schema(mut self, schema: serde_json::Value) -> Self {

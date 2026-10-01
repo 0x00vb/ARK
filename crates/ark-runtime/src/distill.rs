@@ -159,9 +159,12 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
     let n = |k: &str| get_u64(out, k);
     let arr = |k: &str| get_arr(out, k);
     let verb = action.split_once('.').map(|(_, v)| v).unwrap_or(action);
+    // A verb only names a shape when the fields of that shape are there: `notes.read` that
+    // returns `{text}` is not a file read, and summarizing it as one loses its content.
+    let has = |k: &str| out.get(k).is_some();
 
     Some(match verb {
-        "read" => (
+        "read" if has("path") || has("lines") => (
             format!(
                 "read {} ({} lines)",
                 s("path").unwrap_or_default(),
@@ -169,7 +172,7 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
             ),
             vec![s("path").unwrap_or_default()],
         ),
-        "list" | "ls" => {
+        "list" | "ls" if has("entries") => {
             let ids: Vec<String> = arr("entries")
                 .iter()
                 .filter_map(|v| v.as_str().map(str::to_string))
@@ -184,7 +187,7 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
                 ids,
             )
         }
-        "search" | "grep" => {
+        "search" | "grep" if has("matches") || has("count") => {
             let count = n("count").unwrap_or_else(|| arr("matches").len() as u64);
             let ids: Vec<String> = arr("matches")
                 .iter()
@@ -203,7 +206,7 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
                 ids,
             )
         }
-        "write" | "edit" | "apply" => {
+        "write" | "edit" | "apply" if has("path") => {
             let path = s("path").unwrap_or_default();
             let delta = match (n("added"), n("removed")) {
                 (Some(a), Some(r)) => format!(" (+{a} -{r})"),
@@ -211,7 +214,7 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
             };
             (format!("edited {path}{delta}"), vec![path])
         }
-        "exec" | "run" => {
+        "exec" | "run" if has("command") || has("exit_code") => {
             let cmd = s("command").unwrap_or_default();
             let code = out.get("exit_code").and_then(|v| v.as_i64());
             let ok = code == Some(0);
@@ -244,7 +247,7 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
                 ids,
             )
         }
-        "diff" => {
+        "diff" if has("files") || has("added") || has("removed") => {
             let files = n("files").unwrap_or(0);
             let added = n("added").unwrap_or(0);
             let removed = n("removed").unwrap_or(0);
@@ -380,6 +383,27 @@ mod tests {
         assert!(!card.ok);
         assert!(card.summary.contains("tool not found"));
         assert!(card.confidence < 0.5);
+    }
+
+    #[test]
+    fn a_verb_without_its_shape_falls_back_to_the_fields() {
+        // `notes.read` returning text, `notes.write` returning a flag: not file operations.
+        let read = distill(
+            &inv("notes.read", json!({}), json!({"text": "the locket"})),
+            &set(),
+        );
+        assert_eq!(read.summary, "text=the locket");
+        let write = distill(
+            &inv("notes.write", json!({}), json!({"saved": true, "chars": 9})),
+            &set(),
+        );
+        assert!(write.summary.contains("saved=true"), "{}", write.summary);
+        // With the fields of the shape, the shape wins.
+        let file = distill(
+            &inv("fs.read", json!({}), json!({"path": "a.md", "lines": 3})),
+            &set(),
+        );
+        assert_eq!(file.summary, "read a.md (3 lines)");
     }
 
     #[test]

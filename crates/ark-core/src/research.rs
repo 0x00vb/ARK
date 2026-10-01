@@ -517,11 +517,13 @@ impl ResearchState {
                 return;
             }
             let _ = writeln!(s, "{title}:");
-            for it in items.iter().take(max_per_section) {
-                let _ = writeln!(s, "  - {}", one_line(it, 200));
+            // The newest items: in a long task the oldest are the least likely to matter.
+            let skip = items.len().saturating_sub(max_per_section);
+            if skip > 0 {
+                let _ = writeln!(s, "  … (+{skip} earlier)");
             }
-            if items.len() > max_per_section {
-                let _ = writeln!(s, "  … (+{} more)", items.len() - max_per_section);
+            for it in items.iter().skip(skip) {
+                let _ = writeln!(s, "  - {}", one_line(it, 200));
             }
         };
         let claims = |s: &mut String, title: &str, items: &[Claim]| {
@@ -529,7 +531,11 @@ impl ResearchState {
                 return;
             }
             let _ = writeln!(s, "{title}:");
-            for c in items.iter().take(max_per_section) {
+            let skip = items.len().saturating_sub(max_per_section);
+            if skip > 0 {
+                let _ = writeln!(s, "  … (+{skip} earlier)");
+            }
+            for c in items.iter().skip(skip) {
                 let cites = if c.cites.is_empty() {
                     String::new()
                 } else {
@@ -543,15 +549,13 @@ impl ResearchState {
                     cites
                 );
             }
-            if items.len() > max_per_section {
-                let _ = writeln!(s, "  … (+{} more)", items.len() - max_per_section);
-            }
         };
         claims(&mut s, "FINDINGS", &self.findings);
         claims(&mut s, "OPEN HYPOTHESES", &self.hypotheses);
         if !self.interesting.is_empty() {
             let _ = writeln!(s, "INTERESTING:");
-            for it in self.interesting.iter().take(max_per_section) {
+            let skip = self.interesting.len().saturating_sub(max_per_section);
+            for it in self.interesting.iter().skip(skip) {
                 let _ = writeln!(
                     s,
                     "  - {}={} {}",
@@ -667,7 +671,8 @@ mod tests {
         assert!(d.contains("GOAL: understand"));
         assert!(d.contains("FINDINGS:"));
         assert!(d.contains("(fact) the cache evicted early [inv:1]"));
-        assert!(d.contains("(+7 more)"), "questions capped at 3 of 10");
+        assert!(d.contains("(+7 earlier)"), "questions capped at 3 of 10");
+        assert!(d.contains("q9") && !d.contains("q0"), "the newest are shown: {d}");
         // findings come before questions in the digest
         assert!(d.find("FINDINGS").unwrap() < d.find("OPEN QUESTIONS").unwrap());
     }

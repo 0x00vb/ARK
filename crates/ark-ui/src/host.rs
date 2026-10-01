@@ -182,6 +182,8 @@ impl Host {
         info: UiInfo,
         handlers: HashMap<String, Handler>,
     ) -> Arc<Host> {
+        // The workspace shows things beside the conversation; offer the model `present`.
+        ix.set_presentation(true);
         ix.set_keys(
             [
                 ("↩", "send"),

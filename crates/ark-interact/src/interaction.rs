@@ -223,6 +223,7 @@ impl App {
             detail: false,
             focus: None,
             names: HashMap::new(),
+            present: false,
         };
         ix.refresh_names();
         Ok(Opened {
@@ -348,9 +349,15 @@ pub struct Interaction {
     detail: bool,
     focus: Option<Focus>,
     names: HashMap<String, String>,
+    present: bool,
 }
 
 impl Interaction {
+    /// The front-end can show things beside the conversation (see `TurnOptions::present`).
+    pub fn set_presentation(&mut self, yes: bool) {
+        self.present = yes;
+    }
+
     // ---- accessors ---------------------------------------------------------------------
 
     pub fn info(&self) -> &AppInfo {
@@ -644,6 +651,7 @@ impl Interaction {
             approvals: ctl.ask.then(|| self.gate.clone()),
             focus: self.focus.clone(),
             steer: Some(ctl.steer.clone()),
+            present: self.present,
         };
         let mut last_context = None;
         let Interaction {
@@ -764,7 +772,10 @@ impl Interaction {
 
     /// What the model receives, by source, and what ARK kept out.
     pub async fn context_view(&self) -> anyhow::Result<ContextView> {
-        let preview = self.ark.context_preview(&self.session).await?;
+        let preview = self
+            .ark
+            .context_preview_for(&self.session, self.present)
+            .await?;
         let (report, source, next) = match &self.last_context {
             Some(r) => (r.clone(), ContextSource::LastRequest, Some(preview.total)),
             None => (preview, ContextSource::Preview, None),

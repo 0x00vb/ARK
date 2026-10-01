@@ -206,6 +206,7 @@ pub struct Harness {
     cancel: Option<CancelToken>,
     steer: Option<Steering>,
     retry: ark_model::RetryPolicy,
+    presentation: bool,
 }
 
 /// The pieces of the first user message, kept separate so the context report can attribute
@@ -251,7 +252,15 @@ impl Harness {
             cancel: None,
             steer: None,
             retry: ark_model::RetryPolicy::default(),
+            presentation: false,
         }
+    }
+
+    /// Offer the `present` tool: the front-end can show things beside the conversation (a
+    /// workspace window). Off by default; a terminal or a headless run cannot.
+    pub fn presentation(mut self, yes: bool) -> Self {
+        self.presentation = yes;
+        self
     }
 
     /// How failed model calls are retried (default: `ARK_MODEL_RETRIES`, 2).
@@ -364,7 +373,7 @@ impl Harness {
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
             acquisition: profile.acquisition.is_some(),
-            present: true,
+            present: self.presentation,
         };
 
         let wsctx = self.build_workspace_context(engine, project)?;
@@ -842,7 +851,7 @@ impl Harness {
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
             acquisition: profile.acquisition.is_some(),
-            present: true,
+            present: self.presentation,
         };
         let tools = self.tool_set(engine, &loaded, meta_cfg);
         Ok(self.report(
@@ -1236,7 +1245,7 @@ impl Harness {
                 });
                 let hits = engine.store.search(project, &query, limit)?;
                 if hits.is_empty() {
-                    return Ok(format!("no matches for \"{query}\"."));
+                    return Ok(format!("no stored file or document matches \"{query}\". This searches stored artifacts only: to get new data, load and call an action from the capability index; to search a result you already have, use get_evidence with match."));
                 }
                 let mut s = format!("{} match(es) for \"{query}\":\n", hits.len());
                 for h in hits {
@@ -1272,6 +1281,18 @@ impl Harness {
                         Ok(s)
                     }
                 }
+            }
+            catalog::RECORD_STATE if sarg("kind") == "note" => {
+                // A free-form note for the notebook; the working state is unchanged.
+                let body = sarg("text");
+                engine
+                    .store
+                    .put_note(project, &Note::new(NoteKind::Note, &body, Author::Agent))?;
+                on_event(HarnessEvent::Note {
+                    kind: "note".into(),
+                    body,
+                });
+                Ok("recorded note.".into())
             }
             catalog::RECORD_STATE => {
                 metrics.record_state_update();
@@ -1791,8 +1812,9 @@ fn card_for_model(card: &EvidenceCard) -> String {
         card.action,
         card.summary
     );
-    if !card.identifiers.is_empty() {
-        let shown: Vec<&String> = card.identifiers.iter().take(12).collect();
+    let ids: Vec<&String> = card.identifiers.iter().filter(|i| !i.is_empty()).collect();
+    if !ids.is_empty() {
+        let shown: Vec<&String> = ids.into_iter().take(12).collect();
         let _ = write!(
             s,
             "\n  identifiers: {}",

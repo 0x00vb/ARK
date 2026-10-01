@@ -143,43 +143,42 @@ pub fn action_tooldef(d: &ActionDescriptor) -> ToolDef {
     }
 }
 
-/// The always-available meta-tools, filtered by [`MetaToolConfig`]. These are handled inside
-/// the runtime loop, never dispatched to an adapter, so they never touch the approval gate.
+/// The meta-tools offered to the model, filtered by [`MetaToolConfig`]. These are handled
+/// inside the runtime loop, never dispatched to an adapter, so they never touch the approval
+/// gate.
+///
+/// The default set is small on purpose: every definition is sent with every request. Live
+/// runs with a small model (bench/m4) showed it choosing a vaguely described runtime tool over
+/// the application's own (`record_note` for "save a note", `search_evidence` for anything).
+/// `list_actions` and `record_note` are no longer offered (the index lists every action, and
+/// `record_state` takes notes); the runtime still answers them if a model calls them.
 pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
     let mut tools = vec![
         ToolDef {
-            name: LIST_ACTIONS.into(),
-            description: "List the actions offered by one adapter (from the capability index), with summaries and risk tiers.".into(),
-            parameters: serde_json::json!({
-                "type": "object", "required": ["adapter"],
-                "properties": { "adapter": { "type": "string", "description": "adapter name from the index" } }
-            }),
-        },
-        ToolDef {
             name: LOAD_ACTION.into(),
-            description: "Load the full input schema for one action so you can call it. Call this before invoking any action you have not loaded yet.".into(),
+            description: "Load an action from the capability index so you can call it. Returns its summary; its input schema is then available.".into(),
             parameters: serde_json::json!({
                 "type": "object", "required": ["name"],
-                "properties": { "name": { "type": "string", "description": "full action name, e.g. fs.read" } }
+                "properties": { "name": { "type": "string", "description": "action name from the index, e.g. fs.read" } }
             }),
         },
         ToolDef {
             name: GET_EVIDENCE.into(),
-            description: "Read exact rows from a past tool result's full output. Use it for details the summary omitted; use `match` to find lines in a large output.".into(),
+            description: "Read the full output of a tool you already ran, by the id in its [inv:...] reference. Use match to find lines in a large output.".into(),
             parameters: serde_json::json!({
                 "type": "object", "required": ["invocation"],
                 "properties": {
-                    "invocation": { "type": "string", "description": "id from a reference like [inv:1a2b3c]" },
+                    "invocation": { "type": "string", "description": "id from [inv:1a2b3c]" },
                     "path": { "type": "string", "description": "dotted key path into the output" },
                     "match": { "type": "string", "description": "keep only items or lines containing this text" },
-                    "offset": { "type": "integer", "description": "skip this many items (to read more)" },
+                    "offset": { "type": "integer", "description": "skip this many items" },
                     "limit": { "type": "integer", "description": "max items (default 40)" }
                 }
             }),
         },
         ToolDef {
             name: SEARCH_EVIDENCE.into(),
-            description: "Full-text search across this project's indexed evidence. Returns matching artifacts you can then retrieve.".into(),
+            description: "Search the text of files and documents stored in this project. It does not search tool results (use get_evidence) and does not run tools.".into(),
             parameters: serde_json::json!({
                 "type": "object", "required": ["query"],
                 "properties": { "query": { "type": "string" }, "limit": { "type": "integer", "description": "max hits (default 10)" } }
@@ -187,33 +186,18 @@ pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
         },
         ToolDef {
             name: RECORD_STATE.into(),
-            description: "Update the persistent working state and its investigation graph. Add a confirmed \
-                finding (cite evidence), propose or reject a hypothesis, flag something interesting, note an \
-                open question, or set the next action. Use kind=experiment to record a test of a \
-                hypothesis/question (name it in `tests`), and kind=link to connect two items \
-                (supports/contradicts/derived-from/tested-by/unresolved).".into(),
+            description: "Update the working state that persists across turns: a finding (cite evidence), a hypothesis, a rejected hypothesis, an open question, the next action, or a note. Optional graph edits: experiment, link.".into(),
             parameters: serde_json::json!({
                 "type": "object", "required": ["kind", "text"],
                 "properties": {
-                    "kind": { "type": "string", "enum": ["finding", "hypothesis", "reject", "interesting", "question", "next_action", "experiment", "link"] },
-                    "text": { "type": "string", "description": "the claim or item, one or two sentences" },
-                    "claim_type": { "type": "string", "enum": ["fact", "inference", "hypothesis", "unknown"], "description": "for a finding: how sure you are" },
-                    "cites": { "type": "array", "items": { "type": "string" }, "description": "evidence references, e.g. inv:1a2b3c" },
-                    "tests": { "type": "string", "description": "for kind=experiment: the hypothesis/question this tests" },
-                    "from": { "type": "string", "description": "for kind=link: the source node (id or text)" },
-                    "to": { "type": "string", "description": "for kind=link: the target node (id or text)" },
-                    "rel": { "type": "string", "enum": ["supports", "contradicts", "derived-from", "tested-by", "unresolved"], "description": "for kind=link: the relationship" }
-                }
-            }),
-        },
-        ToolDef {
-            name: RECORD_NOTE.into(),
-            description: "Preserve a free-form note in the notebook (a fact, contradiction, or observation) for the exported log.".into(),
-            parameters: serde_json::json!({
-                "type": "object", "required": ["kind", "body"],
-                "properties": {
-                    "kind": { "type": "string", "enum": ["hypothesis", "assumption", "fact", "finding", "contradiction", "next_step", "question", "note"] },
-                    "body": { "type": "string" }
+                    "kind": { "type": "string", "enum": ["finding", "hypothesis", "reject", "interesting", "question", "next_action", "note", "experiment", "link"] },
+                    "text": { "type": "string" },
+                    "claim_type": { "type": "string", "enum": ["fact", "inference", "hypothesis", "unknown"] },
+                    "cites": { "type": "array", "items": { "type": "string" }, "description": "e.g. inv:1a2b3c" },
+                    "tests": { "type": "string", "description": "experiment: what it tests" },
+                    "from": { "type": "string", "description": "link: source" },
+                    "to": { "type": "string", "description": "link: target" },
+                    "rel": { "type": "string", "enum": ["supports", "contradicts", "derived-from", "tested-by", "unresolved"] }
                 }
             }),
         },
@@ -222,8 +206,7 @@ pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
     if cfg.present {
         tools.push(ToolDef {
             name: PRESENT.into(),
-            description: "Ask the workspace UI to show the user something — open an artifact, a file, a diff, \
-                a terminal, or split the view. Naming a view and a locator; a UI-less front-end ignores it.".into(),
+            description: "Show the user something in the workspace beside the conversation: an artifact, a file, a diff, a terminal, or a domain view.".into(),
             parameters: serde_json::json!({
                 "type": "object", "required": ["view"],
                 "properties": {
@@ -307,16 +290,13 @@ mod tests {
         assert!(full.iter().any(|t| t.name == SEARCH_KNOWLEDGE));
         assert!(full.iter().any(|t| t.name == PRESENT));
         assert!(full.iter().any(|t| t.name == ACQUIRE_CAPABILITY));
-        // The core six are always present.
-        for name in [
-            LIST_ACTIONS,
-            LOAD_ACTION,
-            GET_EVIDENCE,
-            SEARCH_EVIDENCE,
-            RECORD_STATE,
-            RECORD_NOTE,
-        ] {
+        // The core four are always offered; list_actions and record_note no longer are.
+        for name in [LOAD_ACTION, GET_EVIDENCE, SEARCH_EVIDENCE, RECORD_STATE] {
             assert!(full.iter().any(|t| t.name == name), "{name} missing");
+        }
+        for name in [LIST_ACTIONS, RECORD_NOTE] {
+            assert!(base.iter().all(|t| t.name != name), "{name} offered");
+            assert!(is_meta_tool(name), "{name} is still handled");
         }
     }
 }

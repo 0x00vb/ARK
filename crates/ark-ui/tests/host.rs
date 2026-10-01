@@ -295,6 +295,21 @@ async fn http_transport_checks_token_and_host() {
     );
 }
 
+/// `text` with every `inv:<hex>` id replaced by `inv:_`.
+fn without_ids(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("inv:") {
+        out.push_str(&rest[..i + 4]);
+        rest = &rest[i + 4..];
+        let hex = rest.chars().take_while(|c| c.is_ascii_hexdigit()).count();
+        out.push('_');
+        rest = &rest[hex..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn request_tokens(r: &ark_model::mock::Recorded) -> u32 {
     estimate_tokens(&r.system)
         + r.messages
@@ -371,6 +386,29 @@ async fn gui_and_cli_send_the_same_context_for_500_turns() {
         .max()
         .unwrap();
     assert_eq!(worst, 0, "every request is the same size");
+    // Byte for byte: the same system prompt and messages. The tool lists differ only by
+    // `present`, which a window can act on and a terminal cannot.
+    for (c, g) in cli_model.recorded().iter().zip(gui_model.recorded().iter()) {
+        assert_eq!(c.system, g.system);
+        // Invocation ids are random per run; everything else must match.
+        let text = |r: &ark_model::mock::Recorded| {
+            r.messages
+                .iter()
+                .map(|m| without_ids(&m.content))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(text(c), text(g));
+        let names = |r: &ark_model::mock::Recorded| {
+            r.tools
+                .iter()
+                .map(|t| t.name.clone())
+                .filter(|n| n != "present")
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(c), names(g));
+        assert!(g.tools.iter().any(|t| t.name == "present"));
+        assert!(c.tools.iter().all(|t| t.name != "present"));
+    }
     let (at_50, at_500) = (gui[2 * 49 + 1], gui[2 * 499 + 1]);
     println!("\n| path | requests | turn 50 answer request | turn 500 answer request |");
     println!("|---|---:|---:|---:|");

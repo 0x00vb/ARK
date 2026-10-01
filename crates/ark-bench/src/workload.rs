@@ -359,6 +359,10 @@ fn measure(
         rep,
         success: verdict.success,
         verdict: verdict.reason,
+        answer: turns
+            .last()
+            .map(|t| t.answer.chars().take(400).collect())
+            .unwrap_or_default(),
         turns: turns.len() as u32,
         tokens_measured: true,
         ..Default::default()

@@ -78,6 +78,9 @@ pub struct RunRecord {
     pub rep: u32,
     pub success: bool,
     pub verdict: String,
+    /// The last turn's answer, clipped, for reading failures.
+    #[serde(default)]
+    pub answer: String,
     pub turns: u32,
     pub steps: u32,
     pub model_calls: u32,

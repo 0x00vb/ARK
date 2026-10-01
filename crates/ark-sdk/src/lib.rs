@@ -74,6 +74,9 @@ pub struct TurnOptions {
     pub focus: Option<Focus>,
     /// Messages the user sends while the turn runs.
     pub steer: Option<Steering>,
+    /// The front-end can show things beside the conversation, so the model is offered the
+    /// `present` tool.
+    pub present: bool,
 }
 
 /// The effective runtime configuration, for display.
@@ -206,6 +209,7 @@ impl Ark {
             .approvals(opts.approvals)
             .cancel(opts.cancel)
             .steering(opts.steer)
+            .presentation(opts.present)
             .focus(opts.focus);
         let project = session.project().clone();
         session.begin_turn(&self.engine, input)?;
@@ -227,8 +231,19 @@ impl Ark {
 
     /// What the next turn's first request would contain, by source, without calling a model.
     pub async fn context_preview(&self, session: &Session) -> Result<ContextReport, ArkError> {
+        self.context_preview_for(session, false).await
+    }
+
+    /// [`context_preview`](Ark::context_preview) for a front-end that can present (see
+    /// [`TurnOptions::present`]).
+    pub async fn context_preview_for(
+        &self,
+        session: &Session,
+        present: bool,
+    ) -> Result<ContextReport, ArkError> {
         Ok(self
             .harness()
+            .presentation(present)
             .conversation(session.conversation_digest())
             .preview_context(&self.engine, &self.profile, session.project(), "")
             .await?)

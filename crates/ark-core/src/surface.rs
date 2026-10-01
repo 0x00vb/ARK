@@ -81,29 +81,41 @@ impl SurfaceRef {
     }
 }
 
-/// The current selection within the focused surface (a highlighted range, a clicked line,
-/// an address, a symbol). All optional; the agent uses whatever is present.
+/// The current selection within the focused surface: highlighted text, a line, and whatever
+/// else the view can point at, named in the view's own words (`{"cell": "B4"}`,
+/// `{"address": "0x1000"}`, `{"scene": "12"}`). All optional; the agent uses whatever is
+/// present. The named marks sit at the top level of the JSON, next to `text` and `line`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Selection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub address: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub symbol: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub function: Option<String>,
+    /// Other things the view selects, by name.
+    #[serde(flatten)]
+    pub marks: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 impl Selection {
     pub fn is_empty(&self) -> bool {
-        self.text.is_none()
-            && self.line.is_none()
-            && self.address.is_none()
-            && self.symbol.is_none()
-            && self.function.is_none()
+        self.text.is_none() && self.line.is_none() && self.marks.values().all(|v| v.is_null())
+    }
+
+    /// A named mark as text (`"0x1000"` for `{"address": "0x1000"}`, `"7"` for `{"n": 7}`).
+    pub fn mark(&self, name: &str) -> Option<String> {
+        match self.marks.get(name)? {
+            serde_json::Value::Null => None,
+            serde_json::Value::String(s) => Some(s.clone()),
+            other => Some(other.to_string()),
+        }
+    }
+
+    /// Every named mark as `(name, text)`, in name order.
+    pub fn named(&self) -> Vec<(String, String)> {
+        self.marks
+            .keys()
+            .filter_map(|k| self.mark(k).map(|v| (k.clone(), v)))
+            .collect()
     }
 }
 
@@ -153,14 +165,8 @@ impl Focus {
         if let Some(sel) = &self.selection {
             if !sel.is_empty() {
                 let mut bits = Vec::new();
-                if let Some(f) = &sel.function {
-                    bits.push(format!("function {f}"));
-                }
-                if let Some(sym) = &sel.symbol {
-                    bits.push(format!("symbol {sym}"));
-                }
-                if let Some(addr) = &sel.address {
-                    bits.push(format!("address {addr}"));
+                for (name, value) in sel.named() {
+                    bits.push(format!("{name} {value}"));
                 }
                 if let Some(l) = &sel.line {
                     bits.push(format!("line {l}"));
@@ -280,5 +286,33 @@ mod tests {
     fn domain_surface_kind_via_other() {
         let s = SurfaceKind::Other("decompiler".into());
         assert_eq!(s.as_tag(), "decompiler");
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    #[test]
+    fn named_marks_round_trip_at_the_top_level() {
+        // What a hex view sends, and what a spreadsheet would.
+        let s: Selection =
+            serde_json::from_str(r#"{"line": 3, "address": "0x1000", "cell": "B4", "n": 7}"#)
+                .unwrap();
+        assert_eq!(s.line, Some(3));
+        assert_eq!(s.mark("address").as_deref(), Some("0x1000"));
+        assert_eq!(s.mark("n").as_deref(), Some("7"));
+        let back = serde_json::to_value(&s).unwrap();
+        assert_eq!(back["address"], "0x1000");
+        assert_eq!(back["cell"], "B4");
+        let f = Focus {
+            surface: None,
+            selection: Some(s),
+        };
+        let d = f.digest().unwrap();
+        assert!(
+            d.contains("address 0x1000") && d.contains("cell B4") && d.contains("line 3"),
+            "{d}"
+        );
     }
 }

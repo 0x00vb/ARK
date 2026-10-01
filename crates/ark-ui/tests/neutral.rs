@@ -86,12 +86,46 @@ fn runtime_code_names_no_domain() {
         "ark-tools/src",
         "ark-runtime/src",
         "ark-sdk/src",
+        "ark-bench/src",
     ] {
         scan(&crates.join(dir), true, &mut hits);
     }
     assert!(
         hits.is_empty(),
         "domain words in ARK's runtime code:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// The core model has no field for a concept that only some domains have: an application
+/// that has no source code, processes or binaries should not see them in ARK's types.
+#[test]
+fn core_types_carry_no_code_concepts() {
+    let core = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("ark-core/src");
+    let fields = [
+        "pub address:",
+        "pub symbol:",
+        "pub function:",
+        "pub process:",
+        "pub binary:",
+    ];
+    let mut hits = Vec::new();
+    for e in std::fs::read_dir(&core).unwrap().flatten() {
+        let text = std::fs::read_to_string(e.path()).unwrap();
+        for (n, line) in text.lines().enumerate() {
+            for f in fields {
+                if line.trim_start().starts_with(f) {
+                    hits.push(format!("{}:{}: {}", e.path().display(), n + 1, line.trim()));
+                }
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "code-specific fields in ark-core:\n{}",
         hits.join("\n")
     );
 }

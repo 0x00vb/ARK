@@ -140,10 +140,12 @@ impl Labels {
     }
 }
 
-/// Arguments that usually name the thing an action works on, in priority order.
+/// Arguments that usually name the thing an action works on, in priority order. Only words
+/// any domain uses; an application with its own (a process, a cell, a scene) labels its
+/// actions with a `ToolLabeler`.
 const SUBJECT_KEYS: &[&str] = &[
     "path", "file", "name", "query", "term", "pattern", "command", "cmd", "url", "host", "domain",
-    "target", "process", "function", "symbol", "at", "artifact", "id", "text",
+    "target", "at", "artifact", "id", "text",
 ];
 
 const VERBS: &[(&[&str], &str)] = &[

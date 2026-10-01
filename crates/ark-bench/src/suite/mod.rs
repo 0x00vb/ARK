@@ -551,12 +551,12 @@ pub fn approval() -> Spec {
         name: "approval",
         class: "approval",
         description: "save a note; the write goes through the approval gate",
-        turns: one("Save a note that says: ship the release on Friday."),
+        turns: one("Save a note that says: ship the release on Thursday."),
         policy: competent(
             |_| {
                 vec![Goal::call(
                     "notes.write",
-                    json!({ "text": "ship the release on Friday" }),
+                    json!({ "text": "ship the release on Thursday" }),
                 )]
             },
             answer(|r| match r.result_of("notes.write") {

@@ -672,7 +672,10 @@ mod tests {
         assert!(d.contains("FINDINGS:"));
         assert!(d.contains("(fact) the cache evicted early [inv:1]"));
         assert!(d.contains("(+7 earlier)"), "questions capped at 3 of 10");
-        assert!(d.contains("q9") && !d.contains("q0"), "the newest are shown: {d}");
+        assert!(
+            d.contains("q9") && !d.contains("q0"),
+            "the newest are shown: {d}"
+        );
         // findings come before questions in the digest
         assert!(d.find("FINDINGS").unwrap() < d.find("OPEN QUESTIONS").unwrap());
     }

@@ -1732,10 +1732,7 @@ fn normalize_action_name(name: &str) -> String {
 fn selection_terms(focus: Option<&Focus>) -> Vec<String> {
     let mut terms = Vec::new();
     if let Some(sel) = focus.and_then(|f| f.selection.as_ref()) {
-        for v in [&sel.function, &sel.symbol, &sel.address]
-            .into_iter()
-            .flatten()
-        {
+        for (_, v) in sel.named() {
             let v = v.trim();
             if v.len() >= 2 {
                 terms.push(v.to_ascii_lowercase());

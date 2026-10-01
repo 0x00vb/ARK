@@ -72,9 +72,11 @@ one-line doc fix, is a new version.
 ## Where releases come from
 
 The canonical repository is the remote named `origin` of the maintainer checkout. Consumers
-depend on that URL and a tag. Today it is a bare repository on the maintainer's machine
-(`/Users/valentino/git/ark.git`); moving it to a hosted remote is a `git remote set-url`
-and a URL change in each consumer's `Cargo.toml`. `main` is always releasable: it is what the
+depend on that URL and a tag. The public copy is
+`https://github.com/0x00vb/ARK`; external consumers pin that URL. The maintainer's `origin`
+is still a local bare repository that `main` and every tag are also pushed to; switching
+`origin` to GitHub is a `git remote set-url` and a URL change in each consumer's
+`Cargo.toml`. `main` is always releasable: it is what the
 next tag is cut from.
 
 ## Release process (maintainers)

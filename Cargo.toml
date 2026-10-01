@@ -20,7 +20,7 @@ version = "0.4.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
-repository = "https://github.com/valentino/ark"
+repository = "https://github.com/0x00vb/ARK"
 description = "ARK, the Agent Runtime Kit: a domain-agnostic runtime, SDK and interactive shell for building agents."
 
 [workspace.dependencies]

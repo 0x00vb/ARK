@@ -12,6 +12,8 @@ to any ARK crate.
 
 The runtime is headless. The shell and the workspace are optional front-ends on top of it.
 
+Status: v0.4.1. Not on crates.io; a git tag is the release. Needs Rust 1.90 or newer.
+
 ## Crates
 
 | Crate | Responsibility |
@@ -30,6 +32,23 @@ The runtime is headless. The shell and the workspace are optional front-ends on 
 Consumers: [`minimal-agent`](examples/minimal-agent) (calculator and clock),
 [`writing-agent`](examples/writing-agent) (a novelist's editor), and SecRes, in its own
 repository, which pins ARK by release tag.
+
+## Use it
+
+Pin a release tag in your `Cargo.toml`:
+
+```toml
+[dependencies]
+ark-sdk = { git = "https://github.com/0x00vb/ARK", tag = "v0.4.1" }
+ark-model = { git = "https://github.com/0x00vb/ARK", tag = "v0.4.1" }
+# optional front-ends
+ark-interact = { git = "https://github.com/0x00vb/ARK", tag = "v0.4.1" }
+ark-cli = { git = "https://github.com/0x00vb/ARK", tag = "v0.4.1" }
+```
+
+Models come from the environment: `ARK_PROVIDER` (`ollama` by default, `anthropic`, `openai`, `mock`)
+and `ARK_MODEL`. Keys and other settings are in
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ## Quick start
 
@@ -134,6 +153,20 @@ ark-core -> ark-model, ark-store, ark-tools -> ark-runtime -> ark-sdk -> ark-int
 
 No ARK crate depends on a consumer, and there are no cycles. Details:
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Documentation
+
+| Doc | Covers |
+|---|---|
+| [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | the layers, design principles, events |
+| [`EXTENSION.md`](docs/EXTENSION.md) | tools, profiles, distillers, MCP plugins, providers, knowledge |
+| [`CLI.md`](docs/CLI.md) | the terminal shell, commands, headless `-p` mode |
+| [`UI.md`](docs/UI.md) | the window and browser workspace, app surfaces |
+| [`OPERATIONS.md`](docs/OPERATIONS.md) | settings, failures, loops, logs and traces, long sessions |
+| [`BENCH.md`](docs/BENCH.md) | benchmark and eval harness; results in [`bench/RESULTS.md`](bench/RESULTS.md) |
+| [`VERSIONING.md`](docs/VERSIONING.md) | tags, semver, release process |
+| [`ROADMAP.md`](docs/ROADMAP.md) | what shipped per version, what is next |
+| [`EXTRACTION_MAP.md`](docs/EXTRACTION_MAP.md) | what came from SecRes and how it was generalized |
 
 ## Versions
 

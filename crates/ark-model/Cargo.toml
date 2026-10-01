@@ -14,5 +14,4 @@ async-trait.workspace = true
 reqwest.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["time"] }
-tracing.workspace = true
 

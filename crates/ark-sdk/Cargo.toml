@@ -10,7 +10,6 @@ description = "ARK SDK: the small, stable facade for building an agent — one b
 serde.workspace = true
 ark-core.workspace = true
 ark-model.workspace = true
-ark-store.workspace = true
 ark-tools.workspace = true
 ark-runtime.workspace = true
 serde_json.workspace = true

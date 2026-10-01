@@ -131,17 +131,13 @@ dependencies = [
  "anyhow",
  "ark-interact",
  "ark-sdk",
- "async-trait",
  "clap",
  "crossterm",
  "futures",
  "reedline",
- "serde",
  "serde_json",
  "tempfile",
- "time",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -181,7 +177,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -209,7 +204,6 @@ dependencies = [
  "ark-core",
  "ark-model",
  "ark-runtime",
- "ark-store",
  "ark-tools",
  "async-trait",
  "serde",
@@ -245,7 +239,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -256,7 +249,6 @@ dependencies = [
  "ark-interact",
  "ark-sdk",
  "async-trait",
- "futures",
  "serde",
  "serde_json",
  "tauri",

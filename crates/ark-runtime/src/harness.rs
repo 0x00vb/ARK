@@ -391,6 +391,10 @@ impl Harness {
         let mut stall: u32 = 0;
         // Identical calls that failed again this turn: cards, but not progress.
         let mut repeated_failures: u32 = 0;
+        // Runtime-handled calls (retrievals, state edits, notes) seen this turn. Only a new one
+        // counts as progress: repeating the same search or the same hypothesis is not work.
+        let mut meta_seen: HashSet<String> = HashSet::new();
+        let mut fresh_meta: u32 = 0;
         let mut steered: Vec<String> = Vec::new();
 
         for _ in 0..self.max_steps {
@@ -401,10 +405,8 @@ impl Harness {
             steps_taken += 1;
             metrics.record_step();
             on_event(HarnessEvent::Step { index: steps_taken });
-            let progress_before = metrics.cards_created - repeated_failures
-                + metrics.state_updates
-                + metrics.retrievals
-                + loaded.len() as u32;
+            let progress_before =
+                metrics.cards_created - repeated_failures + fresh_meta + loaded.len() as u32;
 
             let state_digest = state.digest(STATE_DIGEST_ITEMS);
             let system =
@@ -471,6 +473,10 @@ impl Harness {
                     break;
                 }
                 if catalog::is_meta_tool(&call.name) {
+                    let repeat = !meta_seen.insert(call_digest(&call.name, &call.arguments));
+                    if !repeat && counts_as_progress(&call.name) {
+                        fresh_meta += 1;
+                    }
                     let result = self
                         .handle_meta(
                             engine,
@@ -483,6 +489,11 @@ impl Harness {
                             &mut on_event,
                         )
                         .await?;
+                    let result = if repeat && counts_as_progress(&call.name) {
+                        format!("(you already made this exact call in this task; the result has not changed. Try something different or answer.)\n{result}")
+                    } else {
+                        result
+                    };
                     if catalog::is_retrieval(&call.name) {
                         round_retrieved += estimate_tokens(&result) + 4;
                     }
@@ -605,10 +616,8 @@ impl Harness {
                 break;
             }
 
-            let progress_after = metrics.cards_created - repeated_failures
-                + metrics.state_updates
-                + metrics.retrievals
-                + loaded.len() as u32;
+            let progress_after =
+                metrics.cards_created - repeated_failures + fresh_meta + loaded.len() as u32;
             let late = steer::drain(&self.steer);
             if !late.is_empty() {
                 self.deliver_steering(late, &mut round, &mut steered, &mut on_event);
@@ -1433,6 +1442,12 @@ impl Harness {
         let _ = write!(s, "\nActions that change state need explicit human approval; observation and analysis are free — reason from what tools return.");
         Ok(s)
     }
+}
+
+/// Runtime-handled calls whose first use in a turn is progress: they bring information in or
+/// record it. Discovery calls (`list_actions`, `load_action`) count through the loaded set.
+fn counts_as_progress(name: &str) -> bool {
+    catalog::is_retrieval(name) || matches!(name, catalog::RECORD_STATE | catalog::RECORD_NOTE)
 }
 
 /// Whether evidence from an earlier turn still answers this call. Workspace files and external

@@ -203,6 +203,7 @@ dependencies = [
  "ark-store",
  "ark-tools",
  "async-trait",
+ "futures",
  "serde",
  "serde_json",
  "tempfile",

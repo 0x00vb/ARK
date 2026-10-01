@@ -461,12 +461,44 @@ impl Harness {
             let mut round = vec![Message::assistant_tool_calls(completion.tool_calls.clone())];
             let mut round_retrieved = 0u32;
 
+            // Reads and observations of this step that need no approval and were not reused
+            // run together (see `flush`). Anything else first finishes the pending batch, so
+            // results stay in call order.
+            let mut batch: Vec<Pending> = Vec::new();
+            let mut tally = Tally {
+                metrics: &mut metrics,
+                cited: &mut cited,
+                repeated_failures: &mut repeated_failures,
+                changed_at: &mut changed_at,
+            };
+            macro_rules! flush {
+                () => {
+                    if !batch.is_empty()
+                        && !self
+                            .flush(
+                                engine,
+                                profile,
+                                project,
+                                &mut batch,
+                                &mut tally,
+                                &mut round,
+                                &mut on_event,
+                            )
+                            .await?
+                    {
+                        cancelled = true;
+                        break;
+                    }
+                };
+            }
+
             for call in &completion.tool_calls {
                 if self.is_cancelled() {
                     cancelled = true;
                     break;
                 }
                 if catalog::is_meta_tool(&call.name) {
+                    flush!();
                     let repeat = !meta_seen.insert(call_digest(&call.name, &call.arguments));
                     if !repeat && counts_as_progress(&call.name) {
                         fresh_meta += 1;
@@ -479,7 +511,7 @@ impl Harness {
                             call,
                             &mut loaded,
                             &mut state,
-                            &mut metrics,
+                            tally.metrics,
                             &mut on_event,
                         )
                         .await?;
@@ -496,6 +528,7 @@ impl Harness {
                 }
 
                 let Some(desc) = engine.registry.descriptor(&call.name) else {
+                    flush!();
                     round.push(Message::tool_result(
                         call,
                         format!("error: unknown tool `{}`. Call load_action(name) first, or check the capability index.", call.name),
@@ -503,6 +536,10 @@ impl Harness {
                     continue;
                 };
 
+                if desc.risk == RiskTier::Mutate {
+                    // A change waits for the reads before it, and runs alone.
+                    flush!();
+                }
                 on_event(HarnessEvent::ToolCall {
                     id: call.id.clone(),
                     action: call.name.clone(),
@@ -549,6 +586,10 @@ impl Harness {
                 // id name the same call.
                 let canonical = engine.canonical_input(project, call.arguments.clone());
                 let digest = call_digest(&call.name, &canonical);
+                if batch.iter().any(|p| p.digest == digest) {
+                    // The same call is already pending: let it finish so this one can reuse it.
+                    flush!();
+                }
                 let mut failed_before = false;
                 if desc.risk != RiskTier::Mutate && desc.reuse != Reuse::Volatile {
                     let prior = engine.store.find_card_by_digest(project, &digest)?;
@@ -561,19 +602,20 @@ impl Harness {
                                 Reuse::Stable => true,
                                 // Within this turn, and after the last state change.
                                 _ if card.created_at >= turn_started => {
-                                    card.created_at >= changed_at
+                                    card.created_at >= *tally.changed_at
                                 }
                                 _ => reads_stored_artifact(engine, project, &desc, &canonical),
                             }
                     });
                     if let Some(existing) = reuse {
-                        metrics.record_duplicate();
+                        flush!();
+                        tally.metrics.record_duplicate();
                         let reused = existing.reference_line();
                         on_event(HarnessEvent::Duplicate {
                             action: call.name.clone(),
                             reused: reused.clone(),
                         });
-                        cited.push(existing.invocation.clone());
+                        tally.cited.push(existing.invocation.clone());
                         round.push(Message::tool_result(
                             call,
                             format!("(reused prior evidence) {reused}"),
@@ -582,42 +624,32 @@ impl Harness {
                     }
                 }
 
-                let run = engine.run_action(project, &call.name, call.arguments.clone(), approved);
-                let Some(inv) = self.cancellable(run).await else {
-                    cancelled = true;
-                    break;
-                };
-                let inv = inv?;
-                if desc.risk == RiskTier::Mutate && inv.status != InvocationStatus::PendingApproval
-                {
-                    // Something changed: earlier reads this turn may no longer hold.
-                    changed_at = time::OffsetDateTime::now_utc();
-                }
-                metrics.record_tool_call();
-                let ok = matches!(inv.status, InvocationStatus::Ok);
-                let card = distill(&inv, &profile.distillers);
-                engine.store.put_evidence_card(project, &card)?;
-                metrics.record_card_created();
-                if !ok && failed_before {
-                    repeated_failures += 1;
-                }
-                cited.push(inv.id.clone());
-
-                let model_text = card_for_model(&card);
-                let raw_tokens = estimate_tokens(&inv.output.to_string());
-                on_event(HarnessEvent::ToolResult {
-                    id: call.id.clone(),
-                    action: call.name.clone(),
-                    ok,
-                    summary: card.summary.clone(),
-                    invocation: inv.id.as_str().to_string(),
-                    duration_ms: inv.duration_ms(),
-                    error: inv.error.clone(),
-                    // The same per-message estimate the working set budgets with.
-                    context_tokens: estimate_tokens(&model_text) + 4,
-                    raw_tokens,
+                batch.push(Pending {
+                    call: call.clone(),
+                    risk: desc.risk,
+                    approved,
+                    failed_before,
+                    digest,
                 });
-                round.push(Message::tool_result(call, model_text));
+                if desc.risk == RiskTier::Mutate {
+                    flush!();
+                }
+            }
+            if !cancelled
+                && !batch.is_empty()
+                && !self
+                    .flush(
+                        engine,
+                        profile,
+                        project,
+                        &mut batch,
+                        &mut tally,
+                        &mut round,
+                        &mut on_event,
+                    )
+                    .await?
+            {
+                cancelled = true;
             }
 
             if cancelled {
@@ -882,6 +914,71 @@ impl Harness {
             total,
             budget: self.budget,
         }
+    }
+
+    /// Run a batch of pending adapter calls, at most [`MAX_PARALLEL_TOOLS`] at a time, then
+    /// record each result in call order: invocation, evidence card, event, message. Returns
+    /// false when the turn was cancelled while they ran (nothing of the batch is recorded;
+    /// dropping the futures stops their processes).
+    #[allow(clippy::too_many_arguments)]
+    async fn flush(
+        &self,
+        engine: &Engine,
+        profile: &AgentProfile,
+        project: &ProjectId,
+        batch: &mut Vec<Pending>,
+        tally: &mut Tally<'_>,
+        round: &mut Vec<Message>,
+        on_event: &mut impl FnMut(HarnessEvent),
+    ) -> Result<bool, AgentError> {
+        use futures::StreamExt;
+        let pending = std::mem::take(batch);
+        let jobs: Vec<(String, serde_json::Value, bool)> = pending
+            .iter()
+            .map(|p| (p.call.name.clone(), p.call.arguments.clone(), p.approved))
+            .collect();
+        let runs =
+            futures::stream::iter(jobs.into_iter().map(|(name, input, approved)| async move {
+                engine.run_action(project, &name, input, approved).await
+            }))
+            .buffered(MAX_PARALLEL_TOOLS)
+            .collect::<Vec<_>>();
+        let Some(results) = self.cancellable(runs).await else {
+            return Ok(false);
+        };
+        for (p, inv) in pending.iter().zip(results) {
+            let inv = inv?;
+            if p.risk == RiskTier::Mutate && inv.status != InvocationStatus::PendingApproval {
+                // Something changed: earlier reads this turn may no longer hold.
+                *tally.changed_at = time::OffsetDateTime::now_utc();
+            }
+            tally.metrics.record_tool_call();
+            let ok = matches!(inv.status, InvocationStatus::Ok);
+            let card = distill(&inv, &profile.distillers);
+            engine.store.put_evidence_card(project, &card)?;
+            tally.metrics.record_card_created();
+            if !ok && p.failed_before {
+                *tally.repeated_failures += 1;
+            }
+            tally.cited.push(inv.id.clone());
+
+            let model_text = card_for_model(&card);
+            let raw_tokens = estimate_tokens(&inv.output.to_string());
+            on_event(HarnessEvent::ToolResult {
+                id: p.call.id.clone(),
+                action: p.call.name.clone(),
+                ok,
+                summary: card.summary.clone(),
+                invocation: inv.id.as_str().to_string(),
+                duration_ms: inv.duration_ms(),
+                error: inv.error.clone(),
+                // The same per-message estimate the working set budgets with.
+                context_tokens: estimate_tokens(&model_text) + 4,
+                raw_tokens,
+            });
+            round.push(Message::tool_result(&p.call, model_text));
+        }
+        Ok(true)
     }
 
     /// Hand the user's mid-turn messages to the model at the end of `round`.
@@ -1470,6 +1567,26 @@ impl Harness {
             project: project_block.trim_end().to_string(),
         })
     }
+}
+
+/// Independent read-only calls from one model reply that run at the same time.
+pub const MAX_PARALLEL_TOOLS: usize = 4;
+
+/// An adapter call waiting to run in the current batch.
+struct Pending {
+    call: ark_model::ToolCall,
+    risk: RiskTier,
+    approved: bool,
+    failed_before: bool,
+    digest: String,
+}
+
+/// The per-turn tallies a finished call updates.
+struct Tally<'a> {
+    metrics: &'a mut Metrics,
+    cited: &'a mut Vec<InvocationId>,
+    repeated_failures: &'a mut u32,
+    changed_at: &'a mut time::OffsetDateTime,
 }
 
 /// Artifacts named in the system prompt. Older ones stay reachable through search.

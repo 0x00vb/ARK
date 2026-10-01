@@ -182,11 +182,24 @@ impl Command for Model {
     async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
         if args.trim().is_empty() {
             let router = ix.ark().router();
-            return Ok(Report::new()
+            let mut r = Report::new()
                 .field("reasoning", router.provider(Role::Reason).describe())
                 .field("planning", router.provider(Role::Plan).describe())
-                .field("routing", router.describe())
-                .into());
+                .field("routing", router.describe());
+            for b in ark_model::catalog().await {
+                let state = match (&b.ready, &b.fix) {
+                    (true, _) => format!(
+                        "{} · /model {}:{}",
+                        b.detail,
+                        b.provider,
+                        b.models.first().map(String::as_str).unwrap_or("")
+                    ),
+                    (false, Some(fix)) => format!("{} · run `{fix}`", b.detail),
+                    (false, None) => b.detail.clone(),
+                };
+                r = r.field(b.label, state);
+            }
+            return Ok(r.into());
         }
         Ok(match ix.switch_model(args) {
             Ok(d) => Report::new().success(format!("now using {d}")),

@@ -43,7 +43,7 @@ Captured from a real run with a local 4B model. The answer is trimmed, and the f
 | `app --resume` (`-r`) | Continue the most recent session in this project |
 | `app --session <id>` | Continue a specific session (id or unique prefix) |
 | `app --project <name>` | Work in another project (created if missing) |
-| `app --model <m>` | Use another model: `qwen3:4b` or `anthropic:claude-sonnet-5-5` |
+| `app --model <m>` | Use another model: `qwen3:4b`, `anthropic:claude-sonnet-5-5`, or a subscription: `claude:sonnet`, `codex:default` |
 | `app -v` | Start with the debug view on |
 | `app -p "prompt"` | Run one prompt and exit (see [Headless](#headless-runs)) |
 | `echo "prompt" \| app` | Same, prompt from stdin |
@@ -76,7 +76,7 @@ Every app has these. Apps add their own (`/device`, `/chapter`, ...), listed fir
 | `/sessions` | Sessions in this project |
 | `/rename <title>` | Give this session a title |
 | `/project [name]` | List projects, or switch (created if new) |
-| `/model [provider] [model]` | Show the model, or switch it for the next turn |
+| `/model [provider] [model]` | Show the model and the usable backends, or switch for the next turn |
 | `/context` | What the model receives, by source, and what ARK kept out |
 | `/usage` | Tokens, model calls and tool calls for this session |
 | `/tools` | Every action, its risk tier, and whether it is preloaded |

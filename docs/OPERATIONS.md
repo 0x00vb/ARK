@@ -21,12 +21,40 @@ any application on ARK.
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | none, `https://api.anthropic.com/v1` | Anthropic provider |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | none, `https://api.openai.com/v1` | OpenAI and compatible endpoints |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama provider |
+| `ARK_CLAUDE_BIN`, `ARK_CODEX_BIN` | found on `PATH` and the usual install places | the CLI behind the `claude` / `codex` providers |
 | `NO_COLOR` | unset | no colour in the terminal shell |
 
 Development only: `ARK_PROVIDER=mock` with `ARK_MOCK_SCRIPT` and `ARK_MOCK_DELAY_MS`
 ([`CLI.md`](CLI.md#testing-an-app-without-a-model)); `ARK_UI_WEB`, `ARK_UI_ASSETS`
 ([`UI.md`](UI.md#developing-the-page)); `ARK_UI_PAGE_TESTS`, `ARK_STRESS_TURNS`,
 `ARK_STRESS_CONNECTS` for tests ([`CONTRIBUTING.md`](../CONTRIBUTING.md)).
+
+## Subscriptions
+
+`claude` and `codex` use the person's own subscription through the vendor's official CLI.
+ARK never reads their credentials.
+
+| Provider | CLI | Sign in | Default model |
+|---|---|---|---|
+| `claude` | Claude Code (`claude`) | `claude auth login` | `sonnet` (also `opus`, `fable`) |
+| `codex` | Codex (`codex`) | `codex login` | Codex's own default (`-m` when a model is named) |
+
+How a call works: the CLI runs once per completion with its own tools off (`claude --tools ""`;
+`codex exec -s read-only`), in an empty directory, with no user settings or MCP servers. ARK's
+tools and the app prompt go in the system prompt, the transcript goes on stdin, and the reply
+is JSON checked against `ark_model::cli::REPLY_SCHEMA` (`reply` with text, or `call_tools`).
+ARK's loop runs the calls, so approvals, traces and budgets behave as with an API.
+
+Costs, measured with `minimal-agent` on 2026-10-01 (one question, two tool calls):
+
+| Provider | Time | Tokens |
+|---|---:|---:|
+| `claude:sonnet` | 15 s | 8.8k |
+| `codex:default` | 34 s | 38.9k |
+
+Codex adds about 18k tokens of its own instructions to every call. No streaming: the answer
+appears when the call ends. `claude:haiku` often says the host tools do not exist; use
+`sonnet` or larger.
 
 ## When a model call fails
 

@@ -378,6 +378,9 @@ impl Host {
                 Ok(serde_json::to_value(ix.sessions(all)?)?)
             }
             "projects" => Ok(serde_json::to_value(self.idle().await?.projects()?)?),
+            "models" => Ok(serde_json::to_value(
+                ark_interact::ark_sdk::prelude::ark_model::catalog().await,
+            )?),
             "new_session" => self.change(|ix| ix.new_session()).await,
             "open_session" => {
                 let id = s("id");

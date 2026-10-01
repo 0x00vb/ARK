@@ -133,6 +133,26 @@ async fn a_narrow_window_keeps_the_sidebar_reachable() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_model_menu_lists_backends_and_switches() {
+    // Stand-in CLIs: Claude is signed in, Codex is not installed. Nothing here talks to a vendor.
+    let bin = tempfile::tempdir().unwrap();
+    let claude = bin.path().join("claude");
+    std::fs::write(
+        &claude,
+        "#!/bin/sh\necho '{\"loggedIn\": true, \"authMethod\": \"claude.ai\"}'\n",
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::env::set_var("ARK_CLAUDE_BIN", &claude);
+    std::env::set_var("ARK_CODEX_BIN", bin.path().join("no-codex"));
+    drive("models", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn steering_lands_where_it_was_read_and_replays_the_same() {
     let script = vec![
         say(

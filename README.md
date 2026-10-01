@@ -9,7 +9,7 @@ ARK came out of a security research workstation (SecRes) and keeps no trace of t
 The same runtime runs [`examples/writing-agent`](examples/writing-agent), an editor for
 novelists, with no change to any ARK crate.
 
-Latest release: **v0.4.1**. A git tag is the release (not on crates.io). Rust 1.90 or newer.
+Latest release: **v0.5.0**. A git tag is the release (not on crates.io). Rust 1.90 or newer.
 State and next steps: [`ROADMAP.md`](ROADMAP.md).
 
 ## How it is structured
@@ -28,7 +28,7 @@ they behave the same. Layers, crates and one turn step by step:
 | Crate | Responsibility |
 |---|---|
 | `ark-core` | Pure types: artifacts, actions, invocations, capabilities, evidence cards, working state, focus. No tool or domain name. |
-| `ark-model` | One `Provider` trait: Anthropic, OpenAI and compatible endpoints, Ollama, a scriptable mock. Timeouts, retries, prompt caching. |
+| `ark-model` | One `Provider` trait: Anthropic, OpenAI and compatible endpoints, Ollama, Claude and ChatGPT subscriptions through their CLIs, a scriptable mock. Timeouts, retries, prompt caching. |
 | `ark-store` | Content-addressed blobs, SQLite metadata, full-text search. |
 | `ark-tools` | The `Adapter` / `Registry` tool boundary, a subprocess helper, an MCP bridge. Ships no domain tools. |
 | `ark-runtime` | The agent loop: context budget, model router, distillation, tool disclosure, reuse, parallel reads, stall guard, retries, sessions, approvals, cancel, steering, metrics. |
@@ -44,11 +44,11 @@ Pin a release tag:
 
 ```toml
 [dependencies]
-ark-sdk = { git = "https://github.com/0x00vb/ARK", tag = "v0.4.1" }
-ark-model = { git = "https://github.com/0x00vb/ARK", tag = "v0.4.1" }
+ark-sdk = { git = "https://github.com/0x00vb/ARK", tag = "v0.5.0" }
+ark-model = { git = "https://github.com/0x00vb/ARK", tag = "v0.5.0" }
 # optional front-ends, same tag
-ark-interact = { git = "https://github.com/0x00vb/ARK", tag = "v0.4.1" }
-ark-cli = { git = "https://github.com/0x00vb/ARK", tag = "v0.4.1" }
+ark-interact = { git = "https://github.com/0x00vb/ARK", tag = "v0.5.0" }
+ark-cli = { git = "https://github.com/0x00vb/ARK", tag = "v0.5.0" }
 ```
 
 A tool and an agent:
@@ -106,7 +106,7 @@ ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p writing-agent   # i
 cargo test --workspace   # no model needed: a scripted mock drives the loops
 ```
 
-`ARK_PROVIDER` is `ollama` (default), `anthropic`, `openai` or `mock`. Keys and every other
+`ARK_PROVIDER` is `ollama` (default), `anthropic`, `openai`, `claude`, `codex` or `mock`. Keys and every other
 setting: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ## Builder defaults

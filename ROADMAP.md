@@ -8,9 +8,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.4.1** (2026-10-01, `53c7c46`) |
-| `main` | v0.4.1 plus documentation and comment cleanup (`CHANGELOG.md`, Unreleased) |
-| Consumers | SecRes (pins v0.4.1), `examples/minimal-agent`, `examples/writing-agent` |
+| Stable release | **v0.5.0** (2026-10-01) |
+| `main` | v0.5.0 |
+| Consumers | SecRes (pins v0.5.0), `examples/minimal-agent`, `examples/writing-agent` |
 | Benchmark | live qwen3:4b: success 0.85, cost per successful task $0.0298 (v0.4.0, `bench/RESULTS.md`) |
 | Phase | functionally complete for now. No milestone in progress. |
 
@@ -19,6 +19,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Area | Status |
 |---|---|
 | Runtime (`ark-core` to `ark-sdk`) | stable seams, bounded context, retries, crash recovery, flat memory over 2,000 turns |
+| Models (`ark-model`) | Ollama, Anthropic and OpenAI APIs, Claude and ChatGPT subscriptions through their CLIs, mock |
 | Interaction (`ark-interact`) | commands, reports, activity, traces, context and usage views shared by both front-ends |
 | Terminal (`ark-cli`) | interactive shell, approvals, steering, resume, headless `-p` |
 | Workspace (`ark-ui`) | Tauri window and loopback browser page; page tested in WebKit |
@@ -34,6 +35,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Every live benchmark uses one 4B local model (qwen3:4b-instruct through Ollama) | `bench/RESULTS.md` |
 | With qwen3:4b, `tool-lookup` and `approval` fail 3 of 3: the model picks a plausible neighbor tool, or files the note in its own working state | `bench/RESULTS.md` |
 | Time to first token rose 137 to 259 ms (median) with the working state last in the request; cause not proven | `bench/RESULTS.md` |
+| Subscription providers (`claude`, `codex`) start a process per call, do not stream, and resend the whole transcript; Codex adds about 18k tokens per call | `ark-model` |
 | Approval grants are not persisted across processes | CLI, UI |
 | One `Host` serves one live session; two browser tabs share it | `ark-ui` |
 | `/context` token numbers are estimates; provider numbers are in `/trace` | `ark-interact` |

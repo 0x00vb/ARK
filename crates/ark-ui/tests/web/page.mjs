@@ -107,6 +107,24 @@ const scenarios = {
     assert.deepEqual(await state(), { compact: "false", drawer: "", sidebarLeft: 0, hscroll: false });
   },
 
+  // The model chip names the model only. Its menu groups models by backend: a signed-in
+  // subscription offers its models, a missing one shows the command that fixes it.
+  async models(page) {
+    const chip = page.locator("#model-chip");
+    assert.ok(!(await chip.textContent()).includes("single tier"), await chip.textContent());
+    await chip.click();
+    await page.waitForSelector(".model-group .model-name");
+    const menu = await page.locator(".popover").textContent();
+    assert.ok(!menu.includes("Model for the next turn"), menu);
+    const claude = page.locator(".model-group", { hasText: "Claude subscription" });
+    assert.equal(await claude.locator(".model-dot").getAttribute("data-ok"), "true");
+    const codex = page.locator(".model-group", { hasText: "ChatGPT subscription" });
+    assert.equal(await codex.locator(".model-dot").getAttribute("data-ok"), "false");
+    assert.ok((await codex.locator(".model-fix code").textContent()).includes("npm install"));
+    await claude.locator(".model-item", { hasText: "opus" }).click();
+    await page.waitForFunction(() => document.getElementById("model-chip").textContent === "claude opus");
+  },
+
   // A message sent mid-turn waits above the composer, joins the thread where the agent read
   // it, and a reload replays the turn exactly as it was shown live.
   async steer(page) {

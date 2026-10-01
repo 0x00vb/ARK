@@ -13,5 +13,8 @@ thiserror.workspace = true
 async-trait.workspace = true
 reqwest.workspace = true
 futures.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["time", "process", "io-util"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

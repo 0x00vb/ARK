@@ -191,22 +191,58 @@ export class Composer {
 
   // ---- model ---------------------------------------------------------------------------------
 
-  modelMenu() {
-    const input = h("input.menu-input", { placeholder: "provider:model, e.g. ollama:qwen3:4b", "aria-label": "Model" });
-    const menu = this.api.popover(this.model, [
-      h("div.menu-head", "Model for the next turn"),
-      h("div.menu-sub.pad", this.model.textContent),
-      input,
-    ], { above: true });
-    input.focus();
-    input.addEventListener("keydown", async (e) => {
-      if (e.key !== "Enter" || !input.value.trim()) return;
+  /// Models grouped by backend: subscriptions, local Ollama, and APIs that have a key. A backend
+  /// that is not ready shows the command that fixes it. The list is fetched on every open, so
+  /// signing in elsewhere shows up the next time the menu opens.
+  async modelMenu() {
+    const body = h("div.models");
+    const input = h("input.menu-input", { placeholder: "Other model, e.g. ollama:qwen3:4b", "aria-label": "Model" });
+    const menu = this.api.popover(this.model, [body, h("div.menu-sep"), input], { above: true });
+    const pick = async (spec) => {
       menu.close();
       try {
-        await this.api.call("model", { spec: input.value.trim() });
+        await this.api.call("model", { spec });
       } catch (err) {
         this.api.toast(err.message);
       }
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && input.value.trim()) pick(input.value.trim());
     });
+    const paint = (backends) => {
+      clear(body);
+      const current = this.model.textContent;
+      for (const b of backends) {
+        if (b.kind === "api" && !b.ready) continue;
+        const group = h("div.model-group",
+          h("div.model-head",
+            h("span.model-dot", { "data-ok": String(b.ready) }),
+            h("span.model-name", b.label),
+            h("span.menu-sub", b.detail)));
+        if (b.ready) {
+          for (const m of b.models) {
+            const here = current === `${b.provider} ${m}`;
+            group.append(h("button.menu-item.model-item", { "aria-current": here ? "true" : null, onclick: () => !here && pick(`${b.provider}:${m}`) }, h("span", m)));
+          }
+        } else if (b.fix) {
+          group.append(h("div.model-fix",
+            h("code", b.fix),
+            h("button.icon-btn.small", { title: "Copy", "aria-label": "Copy command", onclick: () => navigator.clipboard?.writeText(b.fix).then(() => this.api.toast("Copied. Run it in a terminal, then reopen this menu.")) }, icon("copy"))));
+        }
+        body.append(group);
+      }
+    };
+    if (this.backends) paint(this.backends);
+    else body.append(h("div.menu-sub.pad", "Checking models…"));
+    try {
+      this.backends = await this.api.call("models");
+      paint(this.backends);
+    } catch (err) {
+      if (!this.backends) {
+        clear(body);
+        body.append(h("div.menu-sub.pad", err.message));
+      }
+    }
+    input.focus();
   }
 }

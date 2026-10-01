@@ -242,7 +242,7 @@ pub struct Opened {
 /// Parse `<model>`, `<provider>:<model>` or `<provider> <model>`. A bare model keeps the
 /// current reasoning provider.
 pub fn model_spec(spec: &str, ark: &Ark) -> (String, String) {
-    const PROVIDERS: &[&str] = &["ollama", "openai", "anthropic", "mock"];
+    use ark_model::PROVIDERS;
     let spec = spec.trim();
     if let Some((p, m)) = spec.split_once(':') {
         if PROVIDERS.contains(&p) {
@@ -428,7 +428,7 @@ impl Interaction {
         Summary {
             name: self.info.name.clone(),
             tagline: self.info.tagline.clone(),
-            model: self.ark.router().describe(),
+            model: self.ark.router().label(),
             project: self.project_summary(&self.project),
             session: SessionSummary::of(self.session.record(), &self.project.name, true),
             grants: self.gate.grants(),

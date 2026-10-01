@@ -5,14 +5,16 @@
 //! interchangeable. Providers are kept generic: the runtime never knows which one
 //! answered.
 //!
-//! Auth: the supported paths are local models (no auth) and API keys. Subscription-based
-//! auth is added only by routing through a vendor's official CLI/SDK, never by scraping a
-//! web session.
+//! Auth: local models (no auth), API keys, and subscriptions through the vendor's official
+//! CLI ([`cli`]: Claude Code and Codex sign their own requests). ARK never reads a CLI's
+//! credentials or scrapes a web session. [`catalog`] lists what is usable on this machine.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 mod anthropic;
+mod catalog;
+pub mod cli;
 pub mod mock;
 mod ollama;
 mod openai;
@@ -20,6 +22,8 @@ pub mod resilience;
 mod stream;
 
 pub use anthropic::Anthropic;
+pub use catalog::{catalog, Backend, BackendKind, PROVIDERS};
+pub use cli::{Cli, CliModel, CliStatus};
 pub use mock::MockProvider;
 pub use ollama::Ollama;
 pub use openai::OpenAi;
@@ -265,7 +269,7 @@ pub trait Provider: Send + Sync {
 }
 
 /// Build a provider from the environment:
-/// - `ARK_PROVIDER` = ollama (default) | openai | anthropic
+/// - `ARK_PROVIDER` = ollama (default) | openai | anthropic | claude | codex
 /// - `ARK_MODEL` overrides the model
 /// - API keys from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
 pub fn from_env() -> Result<Box<dyn Provider>> {
@@ -285,6 +289,14 @@ fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
         "anthropic" => Ok(Box::new(Anthropic::from_env(
             model.unwrap_or_else(|| "claude-sonnet-5-5".into()),
         )?)),
+        "claude" => Ok(Box::new(CliModel::new(
+            Cli::Claude,
+            model.unwrap_or_default(),
+        ))),
+        "codex" => Ok(Box::new(CliModel::new(
+            Cli::Codex,
+            model.unwrap_or_default(),
+        ))),
         "mock" => {
             let path = std::env::var("ARK_MOCK_SCRIPT")
                 .map_err(|_| ProviderError::MissingCredential("ARK_MOCK_SCRIPT".into()))?;
@@ -294,7 +306,7 @@ fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
         }
         other => Err(ProviderError::Api {
             provider: other.into(),
-            detail: "unknown provider (use ollama|openai|anthropic|mock)".into(),
+            detail: "unknown provider (use ollama|openai|anthropic|claude|codex|mock)".into(),
         }),
     }
 }

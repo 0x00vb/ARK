@@ -31,7 +31,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Area | Contents |
 |---|---|
 | Conversation | Your messages, streamed answers, and the agent's work as short activity lines ("Reading chapter-04.md"). A work block folds to one line ("Used 3 tools · Reading notes") when the turn ends. A tool row opens on click: arguments, the result the model saw, duration, approval, and what it added to the context. |
-| Composer | Model, and a quiet "24% context" meter that runs `/context` when clicked. |
+| Composer | Model, and a quiet "24% context" meter that runs `/context` when clicked. The model menu lists models by backend (subscriptions, Ollama, APIs with a key); a backend that is not ready shows its sign-in or install command. |
 | Sidebar | New session, the app's navigation, projects and sessions with times. |
 | Side pane | Only domain content the person or the agent asked for: an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
 | Inline reports | `/context`, `/usage`, `/state`, `/trace` and every other command render in the conversation. There is no permanent inspector. |
@@ -151,7 +151,7 @@ front-end uses the same.
 
 | Methods | |
 |---|---|
-| Session | `hello`, `summary`, `sessions`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `model` |
+| Session | `hello`, `summary`, `sessions`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `model`, `models` |
 | Turn | `send`, `steer`, `cancel`, `approve`, `command` |
 | Views | `transcript`, `trace`, `call`, `context`, `usage`, `state` |
 | Store | `artifacts`, `artifact`, `invocation`, `run_action` |

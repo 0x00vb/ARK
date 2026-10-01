@@ -109,6 +109,15 @@ impl ModelRouter {
         }
     }
 
+    /// A short name for a status line or model chip: the model, or both tiers.
+    pub fn label(&self) -> String {
+        if Arc::ptr_eq(&self.fast, &self.strong) {
+            self.strong.describe()
+        } else {
+            format!("{} · {}", self.fast.describe(), self.strong.describe())
+        }
+    }
+
     /// The model id backing a role, for metrics.
     pub fn model_id(&self, role: Role) -> String {
         self.provider(role).model_id()

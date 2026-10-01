@@ -9,7 +9,20 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-01
+
+### Added
+- Subscription models through the vendor's official CLI: providers `claude` (Claude Code,
+  Claude subscription) and `codex` (Codex, ChatGPT plan), e.g. `--model claude:sonnet`. ARK
+  runs the tools; the CLI's own tools are off. See `docs/OPERATIONS.md#subscriptions`.
+- `ark_model::catalog()`: the backends usable on this machine (signed-in subscriptions,
+  Ollama models, APIs with a key) and the command that fixes one that is not ready.
+- Workspace: the model menu lists those backends and switches with one click. New protocol
+  method `models`. `/model` with no argument lists them too.
+
 ### Changed
+- The model chip and `Summary.model` name the model only (`ModelRouter::label`), without
+  "(single tier)". `/model` still shows the routing.
 - Documentation reorganized for maintainers: `AGENTS.md` (rules and change lifecycle; `CLAUDE.md`
   imports it), `ROADMAP.md` at the root (state, limits, next), `docs/RELEASING.md` (release,
   app upgrade, rollback; replaces `docs/VERSIONING.md`), diagrams in `docs/ARCHITECTURE.md`,

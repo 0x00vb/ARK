@@ -94,7 +94,7 @@ Run the examples:
 ```bash
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p minimal-agent -- "what is 6 * 7?"
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p writing-agent   # the interactive writer
-cargo test   # 153 tests, no live model required (the Mock provider drives the loops)
+cargo test   # 156 tests, no live model required (the Mock provider drives the loops)
 ```
 
 ## The interactive shell

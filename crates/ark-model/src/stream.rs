@@ -55,7 +55,9 @@ pub(crate) fn anthropic_usage(u: &Value, output: Option<u64>) -> Usage {
         (Some(input), Some(out)) => {
             let read = n("cache_read_input_tokens").unwrap_or(0);
             let write = n("cache_creation_input_tokens").unwrap_or(0);
-            Usage::measured((input + read + write) as u32, out as u32).with_cached(read as u32)
+            Usage::measured((input + read + write) as u32, out as u32)
+                .with_cached(read as u32)
+                .with_cache_write(write as u32)
         }
         _ => Usage::default(),
     }
@@ -349,7 +351,12 @@ mod tests {
             &json!({"input_tokens": 20, "cache_read_input_tokens": 900, "cache_creation_input_tokens": 80}),
             Some(12),
         );
-        assert_eq!(a, Usage::measured(1000, 12).with_cached(900));
+        assert_eq!(
+            a,
+            Usage::measured(1000, 12)
+                .with_cached(900)
+                .with_cache_write(80)
+        );
         let o = openai_usage(
             &json!({"prompt_tokens": 1500, "completion_tokens": 9, "prompt_tokens_details": {"cached_tokens": 1024}}),
         );

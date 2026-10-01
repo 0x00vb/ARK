@@ -125,6 +125,10 @@ pub struct Usage {
     /// reports nothing).
     #[serde(default)]
     pub cached_tokens: u32,
+    /// The part of `prompt_tokens` written to the prompt cache on this call. Anthropic bills
+    /// it above the normal input price; providers that cache for free report 0.
+    #[serde(default)]
+    pub cache_write_tokens: u32,
 }
 
 impl Usage {
@@ -137,11 +141,22 @@ impl Usage {
             completion_tokens: completion,
             measured: true,
             cached_tokens: 0,
+            cache_write_tokens: 0,
         }
     }
     pub fn with_cached(mut self, cached: u32) -> Self {
         self.cached_tokens = cached;
         self
+    }
+    pub fn with_cache_write(mut self, written: u32) -> Self {
+        self.cache_write_tokens = written;
+        self
+    }
+    /// Prompt tokens neither read from nor written to a cache.
+    pub fn uncached(&self) -> u32 {
+        self.prompt_tokens
+            .saturating_sub(self.cached_tokens)
+            .saturating_sub(self.cache_write_tokens)
     }
 }
 

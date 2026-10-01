@@ -15,6 +15,9 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub struct Pricing {
     pub input: f64,
     pub cached_input: f64,
+    /// Price of input written to the cache (Anthropic: 1.25x input; OpenAI: input).
+    #[serde(default)]
+    pub cache_write: f64,
     pub output: f64,
     /// Where the prices come from ("list price of <model>", "reference", ...).
     pub basis: String,
@@ -22,32 +25,33 @@ pub struct Pricing {
 
 impl Pricing {
     /// The reference used when the model has no price (local or simulated): Claude Sonnet 5.5
-    /// list price, cache reads at 0.1x. Cost then means "what these tokens would cost there".
+    /// list price. Cost then means "what these tokens would cost there".
     pub fn reference() -> Self {
         Pricing {
             input: 2.0,
             cached_input: 0.2,
+            cache_write: 2.5,
             output: 10.0,
-            basis:
-                "reference: claude-sonnet-5-5 list price ($2 in, $0.20 cached, $10 out per Mtok)"
-                    .into(),
+            basis: "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)".into(),
         }
     }
 
     /// List price of a known hosted model, else the reference.
     pub fn for_model(model: &str) -> Self {
+        // (id, input, cache read, cache write, output)
         let known = [
-            ("claude-opus-5-5", 4.0, 0.2, 20.0),
-            ("claude-sonnet-5-5", 2.0, 0.2, 10.0),
-            ("claude-haiku-4-5", 1.0, 0.1, 5.0),
-            ("claude-fable-5-1", 10.0, 0.25, 50.0),
-            ("gpt-4o-mini", 0.15, 0.075, 0.6),
+            ("claude-opus-5-5", 4.0, 0.2, 5.0, 20.0),
+            ("claude-sonnet-5-5", 2.0, 0.2, 2.5, 10.0),
+            ("claude-haiku-4-5", 1.0, 0.1, 1.25, 5.0),
+            ("claude-fable-5-1", 10.0, 0.25, 12.5, 50.0),
+            ("gpt-4o-mini", 0.15, 0.075, 0.15, 0.6),
         ];
-        for (id, i, c, o) in known {
+        for (id, i, c, w, o) in known {
             if model == id {
                 return Pricing {
                     input: i,
                     cached_input: c,
+                    cache_write: w,
                     output: o,
                     basis: format!("list price of {id}"),
                 };
@@ -56,8 +60,11 @@ impl Pricing {
         Self::reference()
     }
 
-    pub fn cost(&self, uncached: u64, cached: u64, output: u64) -> f64 {
-        (uncached as f64 * self.input
+    /// `uncached` includes `written` (uncached tokens that were also written to the cache).
+    pub fn cost(&self, uncached: u64, cached: u64, written: u64, output: u64) -> f64 {
+        let plain = uncached.saturating_sub(written);
+        (plain as f64 * self.input
+            + written as f64 * self.cache_write
             + cached as f64 * self.cached_input
             + output as f64 * self.output)
             / 1_000_000.0
@@ -79,6 +86,9 @@ pub struct RunRecord {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
     pub uncached_input_tokens: u64,
+    /// Uncached input tokens that were written to the cache (priced above normal input).
+    #[serde(default)]
+    pub cache_write_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: u64,
     /// False when any number is an estimate or simulated rather than provider-reported.

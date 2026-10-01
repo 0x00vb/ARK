@@ -40,29 +40,67 @@ impl Anthropic {
     }
 }
 
-/// Anthropic has no `tool` role; results go in a `user` message as a `tool_result` block,
-/// and tool requests are `tool_use` blocks in an assistant message. Translate our flat
-/// messages accordingly.
-fn to_wire_message(m: &Message) -> Value {
+/// One message as Anthropic content blocks. Anthropic has no `tool` role: results go in a
+/// `user` message as `tool_result` blocks, and tool requests are `tool_use` blocks in an
+/// assistant message. Empty text is dropped (the API rejects empty text blocks).
+fn blocks(m: &Message) -> (&'static str, Vec<Value>) {
     match m.role {
-        Role::Tool => json!({
-            "role": "user",
-            "content": [ { "type": "tool_result", "tool_use_id": m.tool_call_id.clone().unwrap_or_default(), "content": m.content } ]
-        }),
-        Role::Assistant if !m.tool_calls.is_empty() => {
-            let mut blocks = Vec::new();
+        Role::Tool => (
+            "user",
+            vec![
+                json!({ "type": "tool_result", "tool_use_id": m.tool_call_id.clone().unwrap_or_default(), "content": m.content }),
+            ],
+        ),
+        Role::Assistant => {
+            let mut b = Vec::new();
             if !m.content.is_empty() {
-                blocks.push(json!({ "type": "text", "text": m.content }));
+                b.push(json!({ "type": "text", "text": m.content }));
             }
             for c in &m.tool_calls {
-                blocks.push(json!({ "type": "tool_use", "id": c.id, "name": mangle_tool_name(&c.name), "input": c.arguments }));
+                b.push(json!({ "type": "tool_use", "id": c.id, "name": mangle_tool_name(&c.name), "input": c.arguments }));
             }
-            json!({ "role": "assistant", "content": blocks })
+            ("assistant", b)
         }
-        Role::Assistant => json!({ "role": "assistant", "content": m.content }),
         // System is passed as a top-level field, not a message; anything else is a user turn.
-        _ => json!({ "role": "user", "content": m.content }),
+        _ if m.content.is_empty() => ("user", Vec::new()),
+        _ => ("user", vec![json!({ "type": "text", "text": m.content })]),
     }
+}
+
+/// The wire messages: consecutive messages of one role merged into one message (all the
+/// results of parallel tool calls travel together, as the API expects), and a cache
+/// breakpoint on the last block before the final one. The runtime ends every request with
+/// the part that changes (the working state), so the breakpoint marks the end of what the
+/// next request will repeat.
+pub(crate) fn wire_messages(messages: &[Message]) -> Vec<Value> {
+    let mut merged: Vec<(&'static str, Vec<Value>)> = Vec::new();
+    for m in messages {
+        let (role, b) = blocks(m);
+        if b.is_empty() {
+            continue;
+        }
+        match merged.last_mut() {
+            Some((r, existing)) if *r == role => existing.extend(b),
+            _ => merged.push((role, b)),
+        }
+    }
+    let total: usize = merged.iter().map(|(_, b)| b.len()).sum();
+    if total >= 2 {
+        let mut seen = 0;
+        'outer: for (_, b) in merged.iter_mut() {
+            for block in b.iter_mut() {
+                seen += 1;
+                if seen == total - 1 {
+                    block["cache_control"] = json!({ "type": "ephemeral" });
+                    break 'outer;
+                }
+            }
+        }
+    }
+    merged
+        .into_iter()
+        .map(|(role, content)| json!({ "role": role, "content": content }))
+        .collect()
 }
 
 #[async_trait]
@@ -148,16 +186,21 @@ impl Provider for Anthropic {
 
 impl Anthropic {
     fn body(&self, system: &str, messages: &[Message], tools: &[ToolDef], stream: bool) -> Value {
-        let wire: Vec<Value> = messages.iter().map(to_wire_message).collect();
-        let tool_defs: Vec<Value> = tools
+        // Prompt caching: breakpoints after the tool definitions, after the system prompt, and
+        // before the last message block. The runtime keeps the first two fixed for a turn.
+        // Prefixes shorter than the model's minimum are simply not cached.
+        let mut tool_defs: Vec<Value> = tools
             .iter()
             .map(|t| json!({ "name": mangle_tool_name(&t.name), "description": t.description, "input_schema": t.parameters }))
             .collect();
+        if let Some(last) = tool_defs.last_mut() {
+            last["cache_control"] = json!({ "type": "ephemeral" });
+        }
         json!({
             "model": self.model,
             "max_tokens": 2048,
-            "system": system,
-            "messages": wire,
+            "system": [{ "type": "text", "text": system, "cache_control": { "type": "ephemeral" } }],
+            "messages": wire_messages(messages),
             "tools": tool_defs,
             "stream": stream,
         })
@@ -172,5 +215,93 @@ impl Anthropic {
             .json(body)
             .send()
             .await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ToolCall;
+
+    fn call(id: &str) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            name: "fs.read".into(),
+            arguments: json!({ "path": id }),
+        }
+    }
+
+    #[test]
+    fn parallel_results_travel_in_one_user_message() {
+        let msgs = vec![
+            Message::user("task"),
+            Message::assistant_tool_calls(vec![call("a"), call("b")]),
+            Message::tool_result(&call("a"), "ra"),
+            Message::tool_result(&call("b"), "rb"),
+            Message::user("== WORKING STATE =="),
+        ];
+        let w = wire_messages(&msgs);
+        assert_eq!(w.len(), 3, "user, assistant, user: {w:#?}");
+        let last = w[2]["content"].as_array().unwrap();
+        assert_eq!(last.len(), 3, "two results and the state, merged");
+        assert_eq!(last[0]["type"], "tool_result");
+        assert_eq!(last[1]["type"], "tool_result");
+        assert_eq!(last[2]["type"], "text");
+    }
+
+    #[test]
+    fn breakpoint_sits_before_the_final_block() {
+        let msgs = vec![
+            Message::user("task"),
+            Message::assistant_tool_calls(vec![call("a")]),
+            Message::tool_result(&call("a"), "ra"),
+            Message::user("state"),
+        ];
+        let w = wire_messages(&msgs);
+        let marked: Vec<String> = w
+            .iter()
+            .flat_map(|m| m["content"].as_array().unwrap().iter())
+            .filter(|b| b.get("cache_control").is_some())
+            .map(|b| b["type"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            marked,
+            vec!["tool_result"],
+            "the last result, not the state"
+        );
+    }
+
+    #[test]
+    fn body_marks_tools_and_system_and_drops_empty_text() {
+        let a = Anthropic::new("m", "k");
+        let tools = vec![
+            ToolDef {
+                name: "a.b".into(),
+                description: "x".into(),
+                parameters: json!({}),
+            },
+            ToolDef {
+                name: "c.d".into(),
+                description: "y".into(),
+                parameters: json!({}),
+            },
+        ];
+        let msgs = vec![
+            Message::user("task"),
+            Message::assistant(""),
+            Message::user("state"),
+        ];
+        let b = a.body("sys", &msgs, &tools, false);
+        assert!(b["tools"][0].get("cache_control").is_none());
+        assert_eq!(b["tools"][1]["cache_control"]["type"], "ephemeral");
+        assert_eq!(b["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(b["system"][0]["text"], "sys");
+        let m = b["messages"].as_array().unwrap();
+        assert_eq!(
+            m.len(),
+            1,
+            "the empty assistant turn is dropped and the users merge"
+        );
+        assert_eq!(m[0]["content"][0]["cache_control"]["type"], "ephemeral");
     }
 }

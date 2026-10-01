@@ -35,6 +35,9 @@ pub struct RequestRecord {
     pub error: Option<String>,
     /// Tool names the model asked for in its reply.
     pub calls: Vec<String>,
+    /// Tokens the provider reports writing to its prompt cache (when it reports them).
+    #[serde(default)]
+    pub cache_write_tokens: u32,
 }
 
 /// Tracks recent request renderings to measure prefix reuse.
@@ -128,11 +131,27 @@ pub fn message_tokens(messages: &[Message]) -> u32 {
 pub struct Recorder {
     records: Mutex<Vec<RequestRecord>>,
     prefix: Mutex<PrefixTracker>,
+    sim_writes: Mutex<u64>,
 }
 
 impl Recorder {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+    /// Tokens the simulated model wrote to its cache.
+    pub fn add_sim_write(&self, tokens: u32) {
+        *self.sim_writes.lock().unwrap() += tokens as u64;
+    }
+    /// Cache writes over the run: simulated ones plus any a provider reported.
+    pub fn cache_writes(&self) -> u64 {
+        *self.sim_writes.lock().unwrap()
+            + self
+                .records
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|r| r.cache_write_tokens as u64)
+                .sum::<u64>()
     }
     pub fn records(&self) -> Vec<RequestRecord> {
         self.records.lock().unwrap().clone()
@@ -184,6 +203,11 @@ impl Metered {
         match r {
             Ok(c) => {
                 rec.usage = c.usage;
+                // Read by name, so this builds against runtimes without the field.
+                rec.cache_write_tokens = serde_json::to_value(c.usage)
+                    .ok()
+                    .and_then(|v| v.get("cache_write_tokens").and_then(|w| w.as_u64()))
+                    .unwrap_or(0) as u32;
                 rec.calls = c.tool_calls.iter().map(|t| t.name.clone()).collect();
             }
             Err(e) => rec.error = Some(e.to_string()),

@@ -59,6 +59,8 @@ pub struct SessionUsage {
     /// The part of `prompt_tokens` served from a provider's prompt cache.
     #[serde(default)]
     pub cached_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
     pub model_calls: u32,
     pub tool_calls: u32,
     pub duplicate_tool_calls: u32,
@@ -77,6 +79,7 @@ impl SessionUsage {
         self.prompt_tokens += m.prompt_tokens;
         self.completion_tokens += m.completion_tokens;
         self.cached_tokens += m.cached_tokens;
+        self.cache_write_tokens += m.cache_write_tokens;
         self.model_calls += m.total_model_calls();
         self.tool_calls += m.tool_calls;
         self.duplicate_tool_calls += m.duplicate_tool_calls;

@@ -35,6 +35,9 @@ pub struct Metrics {
     /// The part of `prompt_tokens` served from a provider's prompt cache.
     #[serde(default)]
     pub cached_tokens: u64,
+    /// The part of `prompt_tokens` written to a provider's prompt cache.
+    #[serde(default)]
+    pub cache_write_tokens: u64,
     /// Whether every usage number so far was measured by the provider (vs estimated).
     pub tokens_measured: bool,
     /// Adapter tool calls actually executed.
@@ -74,6 +77,7 @@ impl Metrics {
         self.prompt_tokens += usage.prompt_tokens as u64;
         self.completion_tokens += usage.completion_tokens as u64;
         self.cached_tokens += usage.cached_tokens as u64;
+        self.cache_write_tokens += usage.cache_write_tokens as u64;
         if !usage.measured {
             self.tokens_measured = false;
         }
@@ -203,6 +207,7 @@ mod tests {
                 completion_tokens: 2,
                 measured: false,
                 cached_tokens: 0,
+                cache_write_tokens: 0,
             },
         );
         assert!(!m.tokens_measured);

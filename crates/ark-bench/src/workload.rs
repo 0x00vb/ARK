@@ -226,12 +226,17 @@ pub trait Workload: Send + Sync {
     fn check(&self, out: &RunOutput) -> Verdict;
 }
 
-fn build_provider(spec: &str, policy: &Policy) -> anyhow::Result<Arc<dyn Provider>> {
-    if spec == "sim" {
-        return Ok(SimProvider::shared("sim", policy.clone()));
-    }
-    if spec == "sim-fast" {
-        return Ok(SimProvider::shared("sim-fast", policy.clone()));
+fn build_provider(
+    spec: &str,
+    policy: &Policy,
+    recorder: &Arc<Recorder>,
+) -> anyhow::Result<Arc<dyn Provider>> {
+    if spec == "sim" || spec == "sim-fast" {
+        return Ok(SimProvider::shared(
+            spec,
+            policy.clone(),
+            Some(recorder.clone()),
+        ));
     }
     let (provider, model) = spec
         .split_once(':')
@@ -251,10 +256,13 @@ pub async fn run(
     let mode = models.mode();
     let recorder = Recorder::new();
     let policy = w.policy();
-    let strong = Metered::wrap(build_provider(&models.strong, &policy)?, recorder.clone());
+    let strong = Metered::wrap(
+        build_provider(&models.strong, &policy, &recorder)?,
+        recorder.clone(),
+    );
     let router = match &models.fast {
         Some(fast) => ModelRouter::new(
-            Metered::wrap(build_provider(fast, &policy)?, recorder.clone()),
+            Metered::wrap(build_provider(fast, &policy, &recorder)?, recorder.clone()),
             strong,
         ),
         None => ModelRouter::single(strong),
@@ -425,11 +433,13 @@ fn measure(
         }
     }
     r.tools_used = used.len() as u32;
+    r.cache_write_tokens = recorder.cache_writes();
     r.uncached_input_tokens = r.input_tokens.saturating_sub(r.cached_input_tokens);
     r.total_tokens = r.input_tokens + r.output_tokens;
     r.cost_usd = pricing.cost(
         r.uncached_input_tokens,
         r.cached_input_tokens,
+        r.cache_write_tokens,
         r.output_tokens,
     );
 

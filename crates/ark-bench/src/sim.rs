@@ -167,16 +167,22 @@ pub fn word_after(text: &str, prefix: &str) -> Option<String> {
 pub struct SimProvider {
     id: String,
     policy: Policy,
+    recorder: Option<Arc<crate::record::Recorder>>,
     prefix: Mutex<PrefixTracker>,
     calls: Mutex<u64>,
 }
 
 impl SimProvider {
-    /// A shared provider driven by `policy`.
-    pub fn shared(id: impl Into<String>, policy: Policy) -> Arc<dyn Provider> {
+    /// A shared provider driven by `policy`. Simulated cache writes go to `recorder`.
+    pub fn shared(
+        id: impl Into<String>,
+        policy: Policy,
+        recorder: Option<Arc<crate::record::Recorder>>,
+    ) -> Arc<dyn Provider> {
         Arc::new(SimProvider {
             id: id.into(),
             policy,
+            recorder,
             prefix: Mutex::new(PrefixTracker::default()),
             calls: Mutex::new(0),
         })
@@ -219,6 +225,20 @@ impl SimProvider {
         } else {
             0
         };
+        // What a breakpoint before the last message writes: everything up to it that was not
+        // read from the cache, once the prefix is long enough to cache at all.
+        let last = messages
+            .last()
+            .map(|m| message_tokens(std::slice::from_ref(m)))
+            .unwrap_or(0);
+        let written = if prompt.saturating_sub(last) >= CACHE_MIN_TOKENS {
+            prompt.saturating_sub(last).saturating_sub(cached)
+        } else {
+            0
+        };
+        if let Some(r) = &self.recorder {
+            r.add_sim_write(written);
+        }
         let completion = estimate_tokens(&content)
             + tool_calls
                 .iter()
@@ -234,6 +254,8 @@ impl SimProvider {
                 completion_tokens: completion.max(1),
                 measured: false,
                 cached_tokens: cached,
+                // Builds against runtimes with and without newer usage fields.
+                ..Default::default()
             },
         }
     }

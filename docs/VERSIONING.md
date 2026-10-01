@@ -58,10 +58,21 @@ A harness update **must not silently break every application**: breaking changes
 behind a version bump and documented, and defaults change only on a MINOR+ with a changelog
 note.
 
+## Tags are immutable
+
+A release tag never moves. Once `vX.Y.Z` exists, anyone may have built against it, so
+re-pointing it would change what an existing pin means. Any correction after a tag, even a
+one-line doc fix, is a new version.
+
+- Never `git tag -f` or delete and re-create a release tag.
+- `v0.3.0` points at `d67b5b8`. The README fix that landed after it (`580655e`) ships in the
+  next version.
+- Consumers pin a tag (`{ git = "...", tag = "vX.Y.Z" }`), never a branch.
+
 ## Release process (maintainers)
 
 1. Update `CHANGELOG.md` (Keep-a-Changelog format).
 2. Bump `workspace.package.version` in the root `Cargo.toml`.
 3. `cargo test` (all suites green) and `cargo publish` each crate in dependency order:
    core → model, store, tools → runtime → sdk.
-4. Tag `vX.Y.Z` and push.
+4. Tag `vX.Y.Z` on the exact commit that was tested, and push the tag.

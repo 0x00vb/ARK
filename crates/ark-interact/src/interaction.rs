@@ -688,11 +688,17 @@ impl Interaction {
         let index = (self.session.turn_count() > turns_before)
             .then(|| self.session.turn_count().saturating_sub(1));
         if let Some(i) = index {
-            if let Ok(v) = serde_json::to_value(&record) {
-                let _ = self
-                    .engine()
-                    .store
-                    .put_turn_trace(self.session.id().as_str(), i, &v);
+            if let Some(stored) =
+                crate::trace::for_storage(&record, crate::trace::TraceMode::from_env())
+            {
+                if let Ok(v) = serde_json::to_value(&stored) {
+                    let store = &self.engine().store;
+                    let sid = self.session.id().as_str();
+                    let _ = store.put_turn_trace(sid, i, &v);
+                    // Traces of old turns go; their transcript entries stay.
+                    let _ =
+                        store.prune_turn_traces(sid, i.saturating_sub(crate::trace::TRACES_KEPT));
+                }
             }
         }
         let footer = match &result {

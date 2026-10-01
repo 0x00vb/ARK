@@ -693,6 +693,7 @@ impl Harness {
             } else {
                 stall += 1;
                 if stall == STALL_STEER {
+                    tracing::info!(idle_steps = stall, "no progress; nudging the model");
                     on_event(HarnessEvent::Stall {
                         idle_steps: stall,
                         stopped: false,
@@ -707,6 +708,7 @@ impl Harness {
             ws.push_round(round);
             retrieved.push(round_retrieved);
             if stall >= STALL_MAX {
+                tracing::info!(idle_steps = stall, "no progress; forcing a final answer");
                 on_event(HarnessEvent::Stall {
                     idle_steps: stall,
                     stopped: true,
@@ -804,6 +806,18 @@ impl Harness {
         });
         engine.store.put_checkpoint(project, &checkpoint)?;
 
+        tracing::info!(
+            steps = steps_taken,
+            model_calls = metrics.total_model_calls(),
+            prompt_tokens = metrics.prompt_tokens,
+            cached_tokens = metrics.cached_tokens,
+            completion_tokens = metrics.completion_tokens,
+            tool_calls = metrics.tool_calls,
+            duplicates = metrics.duplicate_tool_calls,
+            retries = metrics.provider_retries,
+            ms = metrics.elapsed_ms,
+            "turn finished"
+        );
         on_event(HarnessEvent::Answer {
             text: answer.clone(),
             streamed,
@@ -997,6 +1011,16 @@ impl Harness {
             }
             tally.cited.push(inv.id.clone());
 
+            if !ok {
+                let error: String = inv
+                    .error
+                    .clone()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(160)
+                    .collect();
+                tracing::info!(action = %p.call.name, %error, "tool call failed");
+            }
             let model_text = card_for_model(&card);
             let raw_tokens = estimate_tokens(&inv.output.to_string());
             on_event(HarnessEvent::ToolResult {
@@ -1101,6 +1125,13 @@ impl Harness {
                     let delay = self.retry.delay(retries, &e);
                     retries += 1;
                     metrics.record_retry();
+                    tracing::warn!(
+                        role = role_name(role),
+                        attempt = retries,
+                        delay_ms = delay.as_millis() as u64,
+                        error = %e,
+                        "model call failed; retrying"
+                    );
                     on_event(HarnessEvent::Retry {
                         role: role_name(role).to_string(),
                         attempt: retries,
@@ -1112,10 +1143,24 @@ impl Harness {
                     }
                     continue;
                 }
-                Err(e) => return Err(AgentError::Provider(e.to_string())),
+                Err(e) => {
+                    tracing::warn!(role = role_name(role), retries, error = %e, "model call failed");
+                    return Err(AgentError::Provider(e.to_string()));
+                }
             };
             let model = provider.model_id();
             metrics.record_call(role, &model, completion.usage);
+            tracing::debug!(
+                role = role_name(role),
+                model = %model,
+                prompt = completion.usage.prompt_tokens,
+                cached = completion.usage.cached_tokens,
+                completion = completion.usage.completion_tokens,
+                ms = started.elapsed().as_millis() as u64,
+                ttft_ms = first_token_ms,
+                retries,
+                "model call"
+            );
             on_event(HarnessEvent::ModelCall {
                 role: role_name(role).to_string(),
                 model,

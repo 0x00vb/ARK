@@ -137,6 +137,50 @@ pub enum EntryKind {
     Answer,
 }
 
+/// How much of each turn's trace is stored (`ARK_TRACE`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TraceMode {
+    /// Every event, as it happened (the default): a stored turn replays exactly.
+    Full,
+    /// Events without content: streamed text is dropped and tool inputs are emptied. Activity,
+    /// timings, token reports and results stay.
+    Summary,
+    /// No trace is stored; the transcript still is.
+    Off,
+}
+
+impl TraceMode {
+    pub fn from_env() -> Self {
+        match std::env::var("ARK_TRACE").as_deref() {
+            Ok("summary") => TraceMode::Summary,
+            Ok("off") => TraceMode::Off,
+            _ => TraceMode::Full,
+        }
+    }
+}
+
+/// Stored traces per session; older turns keep their transcript entry but lose the trace.
+pub const TRACES_KEPT: u32 = 1000;
+
+/// The record as `mode` stores it, or `None` for nothing.
+pub fn for_storage(record: &TurnRecord, mode: TraceMode) -> Option<TurnRecord> {
+    match mode {
+        TraceMode::Off => None,
+        TraceMode::Full => Some(record.clone()),
+        TraceMode::Summary => {
+            let mut r = record.clone();
+            r.events
+                .retain(|t| !matches!(t.event, HarnessEvent::TextDelta { .. }));
+            for t in &mut r.events {
+                if let HarnessEvent::ToolCall { input, .. } = &mut t.event {
+                    *input = serde_json::json!({});
+                }
+            }
+            Some(r)
+        }
+    }
+}
+
 /// One line of the timeline.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TraceEntry {
@@ -614,6 +658,36 @@ fn open_call<'a>(calls: &'a mut [CallView], action: &str) -> Option<&'a mut Call
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_summary_trace_keeps_activity_but_no_content() {
+        let mut r = TurnRecord::default();
+        r.push(
+            1,
+            &HarnessEvent::ToolCall {
+                id: "c".into(),
+                action: "vault.read".into(),
+                input: json!({ "key": "secret" }),
+            },
+        );
+        r.push(
+            2,
+            &HarnessEvent::TextDelta {
+                text: "the answer".into(),
+            },
+        );
+        let s = for_storage(&r, TraceMode::Summary).unwrap();
+        assert_eq!(s.events.len(), 1, "streamed text is dropped");
+        match &s.events[0].event {
+            HarnessEvent::ToolCall { action, input, .. } => {
+                assert_eq!(action, "vault.read");
+                assert_eq!(input, &json!({}));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(for_storage(&r, TraceMode::Off).is_none());
+        assert_eq!(for_storage(&r, TraceMode::Full).unwrap().events.len(), 2);
+    }
     use super::*;
     use ark_sdk::prelude::ark_model::Usage;
     use serde_json::json;

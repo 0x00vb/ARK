@@ -197,8 +197,19 @@ impl ArkCli {
             resume: args.resume,
         };
         let (approver, approvals) = ChannelApprover::channel();
+        let headless = args.print.is_some() || !std::io::stdin().is_terminal();
         let opened = self.app.open(&start, Arc::new(approver))?;
         let mut ix = opened.interaction;
+        // Unless the application installed its own logger: a file in the store for the
+        // shell (stderr would break the screen), stderr for a one-shot run.
+        let target = if headless {
+            ark_interact::logging::LogTarget::Stderr
+        } else {
+            ark_interact::logging::LogTarget::File(ark_interact::logging::file_in(
+                &ix.ark().settings().store_root,
+            ))
+        };
+        ark_interact::logging::init(target);
         ix.set_detail(args.verbose);
         ix.set_keys(
             [

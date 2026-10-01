@@ -123,6 +123,10 @@ impl ArkUi {
         let title = self.app.name().to_string();
         let (approver, approvals) = ChannelApprover::channel();
         let opened = self.app.open(&self.start, Arc::new(approver))?;
+        // Unless the application installed its own logger.
+        ark_interact::logging::init(ark_interact::logging::LogTarget::File(
+            ark_interact::logging::file_in(&opened.interaction.ark().settings().store_root),
+        ));
         let assets = Arc::new(Assets::new(
             title,
             self.files,

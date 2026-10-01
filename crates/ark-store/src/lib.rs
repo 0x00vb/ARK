@@ -549,6 +549,15 @@ impl Store {
     }
 
     /// Append (or replace) one turn of a session's transcript.
+    /// Delete a session's turn traces below index `below`.
+    pub fn prune_turn_traces(&self, session: &str, below: u32) -> Result<usize> {
+        let db = self.db.lock().unwrap();
+        Ok(db.execute(
+            "DELETE FROM turn_traces WHERE session_id=?1 AND idx < ?2",
+            rusqlite::params![session, below],
+        )?)
+    }
+
     pub fn put_session_turn(
         &self,
         session: &str,

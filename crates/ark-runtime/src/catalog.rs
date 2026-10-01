@@ -165,13 +165,15 @@ pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
         },
         ToolDef {
             name: GET_EVIDENCE.into(),
-            description: "Retrieve exact rows from a past tool result's full output by invocation id. Use this to pull details the evidence summary omitted.".into(),
+            description: "Read exact rows from a past tool result's full output. Use it for details the summary omitted; use `match` to find lines in a large output.".into(),
             parameters: serde_json::json!({
                 "type": "object", "required": ["invocation"],
                 "properties": {
-                    "invocation": { "type": "string", "description": "invocation id (or short id) shown in a reference like [inv:1a2b3c]" },
-                    "path": { "type": "string", "description": "optional dotted key path into the output" },
-                    "limit": { "type": "integer", "description": "max array items to return (default 40)" }
+                    "invocation": { "type": "string", "description": "id from a reference like [inv:1a2b3c]" },
+                    "path": { "type": "string", "description": "dotted key path into the output" },
+                    "match": { "type": "string", "description": "keep only items or lines containing this text" },
+                    "offset": { "type": "integer", "description": "skip this many items (to read more)" },
+                    "limit": { "type": "integer", "description": "max items (default 40)" }
                 }
             }),
         },

@@ -25,6 +25,7 @@ pub mod context_report;
 pub mod distill;
 pub mod engine;
 pub mod error;
+pub mod evidence;
 pub mod harness;
 pub mod knowledge;
 pub mod metrics;

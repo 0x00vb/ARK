@@ -1072,17 +1072,24 @@ impl Harness {
             catalog::GET_EVIDENCE => {
                 metrics.record_retrieval();
                 let inv_ref = sarg("invocation");
-                let path = a.get("path").and_then(|v| v.as_str());
-                let limit = a.get("limit").and_then(|v| v.as_u64()).unwrap_or(40) as usize;
+                let q = crate::evidence::Query {
+                    path: a.get("path").and_then(|v| v.as_str()),
+                    matching: a.get("match").and_then(|v| v.as_str()),
+                    offset: a.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                    limit: a.get("limit").and_then(|v| v.as_u64()).unwrap_or(40) as usize,
+                };
                 on_event(HarnessEvent::Retrieval {
                     what: format!(
-                        "get_evidence {inv_ref}{}",
-                        path.map(|p| format!(".{p}")).unwrap_or_default()
+                        "get_evidence {inv_ref}{}{}",
+                        q.path.map(|p| format!(".{p}")).unwrap_or_default(),
+                        q.matching
+                            .map(|m| format!(" match \"{m}\""))
+                            .unwrap_or_default()
                     ),
                 });
                 match engine.store.resolve_invocation(project, &inv_ref)? {
                     None => Ok(format!("no invocation matching `{inv_ref}`.")),
-                    Some(inv) => Ok(extract_evidence(&inv.output, path, limit)),
+                    Some(inv) => Ok(crate::evidence::extract(&inv.output, &q)),
                 }
             }
             catalog::SEARCH_EVIDENCE => {
@@ -1594,64 +1601,10 @@ fn card_for_model(card: &EvidenceCard) -> String {
     }
     let _ = write!(
         s,
-        "\n  (call get_evidence(\"inv:{}\") for exact rows)",
+        "\n  (get_evidence(\"inv:{}\") reads exact rows; add match to filter)",
         card.invocation.short()
     );
     s
-}
-
-fn extract_evidence(output: &serde_json::Value, path: Option<&str>, limit: usize) -> String {
-    let mut cur = output;
-    if let Some(p) = path {
-        for seg in p.split('.').filter(|s| !s.is_empty()) {
-            match cur.get(seg) {
-                Some(v) => cur = v,
-                None => {
-                    return format!(
-                        "no such path `{p}` in this evidence (top-level keys: {}).",
-                        top_keys(output)
-                    )
-                }
-            }
-        }
-    }
-    let capped = cap_arrays(cur, limit);
-    let body = serde_json::to_string_pretty(&capped).unwrap_or_default();
-    if body.chars().count() > 6000 {
-        let t: String = body.chars().take(6000).collect();
-        format!("{t}\n… (truncated; narrow with a path argument)")
-    } else {
-        body
-    }
-}
-
-fn cap_arrays(v: &serde_json::Value, limit: usize) -> serde_json::Value {
-    match v {
-        serde_json::Value::Array(a) => {
-            let mut out: Vec<serde_json::Value> =
-                a.iter().take(limit).map(|x| cap_arrays(x, limit)).collect();
-            if a.len() > limit {
-                out.push(json!(format!(
-                    "… (+{} more of {})",
-                    a.len() - limit,
-                    a.len()
-                )));
-            }
-            serde_json::Value::Array(out)
-        }
-        serde_json::Value::Object(m) => serde_json::Value::Object(
-            m.iter()
-                .map(|(k, x)| (k.clone(), cap_arrays(x, limit)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
-fn top_keys(v: &serde_json::Value) -> String {
-    v.as_object()
-        .map(|m| m.keys().cloned().collect::<Vec<_>>().join(", "))
-        .unwrap_or_default()
 }
 
 fn apply_state_update(state: &mut ResearchState, kind: &str, text: &str, args: &serde_json::Value) {

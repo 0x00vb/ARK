@@ -737,7 +737,8 @@ impl Harness {
                 .force_answer(
                     profile,
                     &mut ws,
-                    &system,
+                    &sys,
+                    (&first, first_tokens, &retrieved, loaded.len(), steps_taken),
                     &state,
                     &mut metrics,
                     &mut on_event,
@@ -910,21 +911,29 @@ impl Harness {
         };
         // Rounds before `last_compressed` were dropped from this request.
         let retrieved: u32 = retrieved.iter().skip(ws.last_compressed).sum();
+        let model_output = ws.kept_model_output();
         let tool_rounds = total
             .saturating_sub(system_total)
             .saturating_sub(working_state)
             .saturating_sub(first_kept)
-            .saturating_sub(retrieved);
-        let tool_schemas = tools
+            .saturating_sub(retrieved)
+            .saturating_sub(model_output);
+        let schema = |t: &ToolDef| {
+            estimate_tokens(&t.name)
+                + estimate_tokens(&t.description)
+                + estimate_tokens(&t.parameters.to_string())
+        };
+        let tool_schemas = tools.iter().map(schema).sum();
+        let action_schemas = tools
             .iter()
-            .map(|t| {
-                estimate_tokens(&t.name)
-                    + estimate_tokens(&t.description)
-                    + estimate_tokens(&t.parameters.to_string())
-            })
+            .filter(|t| !catalog::is_meta_tool(&t.name))
+            .map(schema)
             .sum();
         ContextReport {
             step,
+            role: "reason".into(),
+            model_output,
+            action_schemas,
             instructions,
             project,
             capability_index,
@@ -1389,6 +1398,18 @@ impl Harness {
         on_event: &mut impl FnMut(HarnessEvent),
     ) -> Option<Vec<String>> {
         let msgs = [Message::user(format!("Goal: {question}"))];
+        let instructions = estimate_tokens(&profile.prompts.plan_system);
+        let task = WorkingSet::message_tokens(&msgs[0]);
+        on_event(HarnessEvent::Context {
+            report: ContextReport {
+                role: "plan".into(),
+                instructions,
+                task,
+                total: instructions + task,
+                budget: self.budget,
+                ..Default::default()
+            },
+        });
         let c = self
             .call_model(
                 Role::Plan,
@@ -1441,22 +1462,46 @@ impl Harness {
         &self,
         profile: &AgentProfile,
         ws: &mut WorkingSet,
-        system: &str,
+        sys: &SystemPrompt,
+        (first, first_tokens, retrieved, loaded, step): (&FirstTurn, u32, &[u32], usize, usize),
         state: &ResearchState,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
     ) -> Result<Option<String>, AgentError> {
         // Same system prompt and rounds as the reasoning steps, so the cached prefix carries
         // over; only the state and the instruction to stop differ.
-        let tail = state_message(&state.digest(8));
-        let (mut messages, est) = ws.assemble_with(system, WorkingSet::message_tokens(&tail));
+        let system = sys.render();
+        let digest = state.digest(8);
+        let tail = state_message(&digest);
+        let stop = Message::user(&profile.prompts.force_answer);
+        let reserve = WorkingSet::message_tokens(&tail) + WorkingSet::message_tokens(&stop);
+        let (mut messages, est) = ws.assemble_with(&system, reserve);
         metrics.peak_prompt_tokens = metrics.peak_prompt_tokens.max(est);
+        let mut report = self.report(
+            profile,
+            sys,
+            &digest,
+            first,
+            first_tokens,
+            ws,
+            retrieved,
+            est,
+            &[],
+            loaded,
+            step,
+        );
+        report.role = "synthesize".into();
+        report.task += WorkingSet::message_tokens(&stop);
+        report.tool_rounds = report
+            .tool_rounds
+            .saturating_sub(WorkingSet::message_tokens(&stop));
+        on_event(HarnessEvent::Context { report });
         messages.push(tail);
-        messages.push(Message::user(&profile.prompts.force_answer));
+        messages.push(stop);
         Ok(self
             .call_model(
                 Role::Synthesize,
-                system,
+                &system,
                 &messages,
                 &[],
                 true,
@@ -1520,10 +1565,28 @@ impl Harness {
             "{system}\n\n{} (the check that failed: {issue})",
             profile.prompts.critic_intro
         );
+        let digest = state.digest(8);
         let msgs = [Message::user(format!(
-            "== WORKING STATE ==\n{}\n\n== DRAFT ANSWER ==\n{answer}",
-            state.digest(8)
+            "== WORKING STATE ==\n{digest}\n\n== DRAFT ANSWER ==\n{answer}"
         ))];
+        let system_tokens = estimate_tokens(system);
+        let instructions = estimate_tokens(&profile.prompts.instructions);
+        let review = estimate_tokens(&sys).saturating_sub(system_tokens);
+        let working_state = estimate_tokens(&digest);
+        let draft = WorkingSet::message_tokens(&msgs[0]).saturating_sub(working_state);
+        on_event(HarnessEvent::Context {
+            report: ContextReport {
+                role: "critic".into(),
+                instructions,
+                project: system_tokens.saturating_sub(instructions),
+                working_state,
+                model_output: draft,
+                task: review,
+                total: estimate_tokens(&sys) + WorkingSet::message_tokens(&msgs[0]),
+                budget: self.budget,
+                ..Default::default()
+            },
+        });
         let c = self
             .call_model(Role::Critic, &sys, &msgs, &[], false, metrics, on_event)
             .await

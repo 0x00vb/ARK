@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 pub struct ContextReport {
     /// The step within the turn this request belongs to (0 for a preview).
     pub step: usize,
+    /// What the request is for: `reason` (a step), `plan`, `critic` or `synthesize` (the
+    /// forced final answer). Empty in reports from before this field existed.
+    #[serde(default)]
+    pub role: String,
     /// The profile's persona and method block.
     pub instructions: u32,
     /// The runtime footer: project label, artifact list, approval note.
@@ -24,8 +28,11 @@ pub struct ContextReport {
     pub workspace: u32,
     /// The user's message for this turn.
     pub task: u32,
-    /// This turn's tool calls and distilled results still inside the window.
+    /// This turn's distilled tool results (and any steering) still inside the window.
     pub tool_rounds: u32,
+    /// The model's own earlier output in the window: its tool calls and narration.
+    #[serde(default)]
+    pub model_output: u32,
     /// Evidence and knowledge the agent looked up this turn, still inside the window.
     #[serde(default)]
     pub retrieved: u32,
@@ -34,6 +41,9 @@ pub struct ContextReport {
     /// Tool schemas sent alongside the prompt (meta-tools plus loaded actions). Reported
     /// separately because the budget manager does not count them.
     pub tool_schemas: u32,
+    /// The part of `tool_schemas` that is loaded actions (the rest is the runtime's tools).
+    #[serde(default)]
+    pub action_schemas: u32,
     /// How many action schemas were loaded.
     pub loaded_actions: usize,
     /// Estimated prompt size the budget manager assembled (system plus messages).
@@ -54,6 +64,7 @@ impl ContextReport {
             ("Workspace", self.workspace),
             ("Task", self.task),
             ("Tool results", self.tool_rounds),
+            ("Model output", self.model_output),
             ("Retrieved context", self.retrieved),
         ]
     }

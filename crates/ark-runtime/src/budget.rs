@@ -48,6 +48,18 @@ impl WorkingSet {
         self.rounds.len()
     }
 
+    /// Tokens of the model's own messages (tool calls, narration) in the rounds the last
+    /// assemble kept.
+    pub fn kept_model_output(&self) -> u32 {
+        self.rounds
+            .iter()
+            .skip(self.last_compressed)
+            .flatten()
+            .filter(|m| m.role == ark_model::Role::Assistant)
+            .map(Self::message_tokens)
+            .sum()
+    }
+
     /// A rough token cost for one message: its text plus a small structural overhead
     /// per tool call (name + serialized arguments).
     pub fn message_tokens(m: &Message) -> u32 {

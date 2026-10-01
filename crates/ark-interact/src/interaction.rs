@@ -666,8 +666,11 @@ impl Interaction {
         let result = ark
             .ask_session(session, input, opts, |ev| {
                 rec.lock().unwrap().record(&ev);
+                // The conversation's own requests; the planner's and critic's are separate.
                 if let HarnessEvent::Context { report } = &ev {
-                    last_context = Some(report.clone());
+                    if !matches!(report.role.as_str(), "plan" | "critic") {
+                        last_context = Some(report.clone());
+                    }
                 }
                 let a = activity::describe(labels, names, &ev);
                 on_event(&ev, a.as_ref());

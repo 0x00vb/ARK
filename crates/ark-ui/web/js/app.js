@@ -284,7 +284,7 @@ function onEvent(msg) {
     case "event": {
       thread.event(msg);
       const ev = msg.event;
-      if (ev.type === "context") setRing(ev.report.total, ev.report.budget);
+      if (ev.type === "context" && !["plan", "critic"].includes(ev.report.role)) setRing(ev.report.total, ev.report.budget);
       else if (ev.type === "steered") composer.delivered(ev.text);
       else if (ev.type === "present") present(ev.directive);
       break;

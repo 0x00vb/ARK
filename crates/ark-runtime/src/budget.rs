@@ -1,6 +1,5 @@
-//! Context budget manager. The old loop kept a single `messages` vec that grew with
-//! every turn and was re-sent in full on every completion — context grew unbounded
-//! and cost grew quadratically. Here the transcript is a list of **rounds** (a round
+//! Context budget manager. Re-sending one growing `messages` vec on every completion makes
+//! context unbounded and cost quadratic. Instead the transcript is a list of **rounds** (a round
 //! is an assistant tool-call turn plus its tool results, or a single plain message),
 //! and every model call is assembled under a token budget: the newest rounds are kept
 //! verbatim, the oldest are dropped once they no longer fit.

@@ -360,10 +360,6 @@ pub fn competent(
                     if req.mentions(&action) && req.has_tool("load_action") {
                         return Reply::call("load_action", json!({ "name": action }));
                     }
-                    let adapter = action.split('.').next().unwrap_or(&action).to_string();
-                    if req.has_tool("list_actions") && req.count_calls("list_actions") < 2 {
-                        return Reply::call("list_actions", json!({ "adapter": adapter }));
-                    }
                     // Cannot find it: give up on this goal.
                     break;
                 }

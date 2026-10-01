@@ -150,8 +150,8 @@ pub fn action_tooldef(d: &ActionDescriptor) -> ToolDef {
 /// The default set is small on purpose: every definition is sent with every request. Live
 /// runs with a small model (bench/m4) showed it choosing a vaguely described runtime tool over
 /// the application's own (`record_note` for "save a note", `search_evidence` for anything).
-/// `list_actions` and `record_note` are no longer offered (the index lists every action, and
-/// `record_state` takes notes); the runtime still answers them if a model calls them.
+/// `list_actions` and `record_note` are not offered (the index lists every action, and
+/// `record_state` takes notes), but the runtime answers them if a model calls them.
 pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
     let mut tools = vec![
         ToolDef {

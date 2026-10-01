@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "ARK SDK: the small, stable facade for building an agent — one builder, sane defaults."
+description = "ARK SDK: the small, stable facade for building an agent: one builder, sane defaults."
 
 [dependencies]
 serde.workspace = true

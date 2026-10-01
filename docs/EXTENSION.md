@@ -1,13 +1,37 @@
-# Extending ARK
+# Building an app on ARK
 
-Everything domain-specific is an **extension**, never a fork. This document lists the seams,
-from the one you'll always use (tools + profile) to the deeper ones.
+An ARK app is a crate that depends on ARK and supplies the domain. It never edits or forks
+ARK. If an app needs behavior ARK cannot express, the missing seam is an ARK change (see
+[`AGENTS.md`](../AGENTS.md)), not a workaround in the app.
 
-## 1. Tools — the `Adapter` trait
+## Steps
 
-A tool is an `Adapter`: a namespace and a set of `ActionDescriptor`s, each with a JSON-Schema
-input and a `RiskTier`. `run(action, input, ctx)` returns an `ActionOutput` (a JSON summary,
-the exact command line for reproducibility, and any produced artifacts).
+```mermaid
+flowchart LR
+    A["1. tools<br/>Adapter"] --> B["2. AgentProfile"] --> C["3. Ark::builder()"]
+    C --> D["4. App<br/>(ark-interact)"] --> E["5. ArkCli / ArkUi"]
+    C --> F["6. tests with<br/>MockProvider"]
+    C --> G["7. workloads<br/>(ark-bench)"]
+```
+
+| Step | What you write | Smallest example |
+|---|---|---|
+| 1. Tools | one `Adapter` per namespace | `examples/minimal-agent/src/main.rs` |
+| 2. Profile | persona, capabilities, distillers | same file, `build_ark` |
+| 3. Agent | `Ark::builder()...build()`, then `ark.ask(..)` | README quick start |
+| 4. App | commands, labels, status sections | `examples/writing-agent/src/main.rs` |
+| 5. Front-end | `ArkCli::new(app).run()`, or `ArkUi::new(app)` | same file; [`CLI.md`](CLI.md), [`UI.md`](UI.md) |
+| 6. Tests | scripted model, no network | `cargo test -p writing-agent` |
+| 7. Benchmark | your own `Workload`s | SecRes `crates/secres-bench`; [`BENCH.md`](BENCH.md) |
+
+Steps 4 to 7 are optional. A headless agent stops at step 3 and depends on `ark-sdk` and
+`ark-model` only.
+
+## 1. Tools: the `Adapter` trait
+
+An `Adapter` is a namespace and a set of `ActionDescriptor`s, each with a JSON Schema input
+and a `RiskTier`. `run(action, input, ctx)` returns an `ActionOutput`: a JSON summary, the
+exact command line for reproducibility, and any produced artifacts.
 
 ```rust
 #[async_trait::async_trait]
@@ -19,42 +43,41 @@ impl Adapter for MyTool {
             .with_input_schema(serde_json::json!({ "type": "object", "properties": {} }))]
     }
     async fn run(&self, action: &str, input: serde_json::Value, ctx: &RunCtx<'_>)
-        -> ark_tools::Result<ActionOutput> { /* … */ }
+        -> ark_tools::Result<ActionOutput> { /* ... */ }
 }
 ```
 
-- **Risk tiers** drive the approval gate: `Read` and `Observe` auto-run; `Mutate` needs
-  approval (denied unless `allow_mutate`). Choose honestly — a tool that spends money or writes
-  to a remote system is `Mutate`.
-- **`ctx.workspace`** is the project's on-disk scratch dir; confine file writes to it.
-- **`ctx.blobs`** resolves an artifact id to bytes/path, so a tool can operate on stored
-  artifacts.
-- **Produced artifacts** are stored content-addressed with provenance; large output belongs
-  here (retrievable on demand), not in the JSON summary.
+| Choice | Rule |
+|---|---|
+| `RiskTier` | `Read` and `Observe` run without asking. `Mutate` asks a person first (or runs with `allow_mutate`). Anything that writes, spends money or touches a remote system is `Mutate`. |
+| `Reuse` | see [Reuse of results](#reuse-of-results) |
+| `ctx.workspace` | the project's directory on disk; keep file writes inside it |
+| `ctx.blobs` | reads a stored artifact by id |
+| large output | return it as a produced artifact; keep the JSON summary small |
 
-## 2. The `AgentProfile` — persona, vocabulary, behavior
+## 2. The `AgentProfile`
 
-The profile is the single struct that turns the generic runtime into *your* agent:
+The one struct that turns the generic runtime into your agent. Build it with
+`AgentProfile::builder()`; every field has a neutral default.
 
 | Field | What it injects |
 |---|---|
-| `prompts.instructions` | The persona + method system block — the agent's identity. |
-| `capabilities` | A `CapabilityCatalog` (slug + description + synonyms) the agent reasons in. |
-| `inferrer` | Maps action names → capabilities when a descriptor doesn't declare them. |
-| `distillers` | A `DistillerSet` of domain result-summarizers (see §3). |
-| `knowledge` | An optional `KnowledgeProvider` → enables the `search_knowledge` meta-tool. |
-| `core_actions` | Actions kept always-loaded so simple tasks skip discovery. |
-| `investigation_markers` | Phrases that mark a task as a full investigation vs. trivial. |
-| `prompts.plan_system` / `critic_intro` / `force_answer` | The planner/critic/fallback prompts. |
+| `prompts.instructions` | persona and method: the agent's identity |
+| `prompts.plan_system`, `critic_intro`, `force_answer` | planner, critic and fallback prompts |
+| `capabilities` | a `CapabilityCatalog` (slug, description, synonyms) |
+| `inferrer` | maps action names to capabilities when a descriptor declares none |
+| `distillers` | a `DistillerSet` of result summarizers (below) |
+| `knowledge` | an optional `KnowledgeProvider`; adds the `search_knowledge` tool |
+| `acquisition` | an optional `AcquisitionProvider`; adds `find/propose/acquire_capability` |
+| `core_actions` | actions always loaded, so simple tasks skip discovery |
+| `investigation_markers` | phrases that mark a task as an investigation rather than trivial |
+| `approval_classifier` | groups approvals so "allow for this session" covers the right calls |
 
-Build it with `AgentProfile::builder()`; every field has a domain-neutral default.
+## 3. Distillers
 
-## 3. Distillers — turning tool output into evidence
-
-A `Distiller` is `Fn(action, output) -> Option<(summary, identifiers)>`. Push domain
-distillers onto a `DistillerSet`; the first to return `Some` wins, then ARK's common distiller
-(files/exec/edit/diff shapes), then a generic fallback. This is how you keep raw output out of
-the prompt without spending a model call.
+A `Distiller` is `Fn(action, output) -> Option<(summary, identifiers)>`. It turns a tool's
+output into the few lines the model sees, without a model call. Yours run first, then ARK's
+common distiller (files, exec, edit, diff shapes), then a generic fallback.
 
 ```rust
 let d: Distiller = std::sync::Arc::new(|action, out| match action {
@@ -64,47 +87,25 @@ let d: Distiller = std::sync::Arc::new(|action, out| match action {
 let distillers = DistillerSet::with_common().with(d);
 ```
 
-## 4. Content sniffers — recognizing your formats
+## 4. Other seams
 
-Implement `ark_core::Sniffer` and `engine.register_sniffer(...)` to classify ingested bytes
-into a domain `ArtifactKind::Other("…")`. ARK ships only the text/json/binary classifier.
-
-## 5. Out-of-process plugins — MCP
-
-Any tool written in any language can join as an **MCP server**. Drop it in
-`<store_root>/plugins.json`:
+| Seam | Use it to |
+|---|---|
+| `ark_core::Sniffer`, `engine.register_sniffer(..)` | classify ingested bytes as `ArtifactKind::Other("...")` |
+| `<store_root>/plugins.json` | add MCP servers in any language; each tool becomes `<name>.<tool>`, risk from MCP annotations or `x-ark-risk` |
+| `Provider` | add a model backend; `ModelRouter::new(fast, strong)` splits planning from reasoning |
+| `KnowledgeProvider` | give the agent a reference corpus it cites apart from observations |
+| `Command` (`ark-interact`) | add a slash command that returns a `Report`; both front-ends render it |
+| `ActivityLabels`, `ToolLabeler` (`ark-interact`) | say how your tools read in activity lines and approvals |
+| `ArkUi::handler`, `window.ark` | add backend methods, panels and viewers to the workspace ([`UI.md`](UI.md)) |
 
 ```json
 { "plugins": [ { "name": "entropy", "command": "python3", "args": ["entropy_server.py"] } ] }
 ```
 
-ARK spawns it, lists its tools, and registers each as `entropy.<tool>` — behind the same
-approval gate, invocation log, and evidence model as a native adapter. Risk is derived from
-MCP annotations (`readOnlyHint`/`destructiveHint`/`openWorldHint`, or an explicit
-`x-ark-risk`).
+## Reuse of results
 
-## 6. Models — the `Provider` trait
-
-Implement `Provider` to add a backend, or use the built-ins. Two-tier routing
-(`ModelRouter::new(fast, strong)`) sends planning/summarizing to a cheap model and
-reasoning/synthesis to a strong one.
-
-## 7. Knowledge — the `KnowledgeProvider` trait
-
-Implement it to give the agent an external reference corpus (docs, a vector store). When set,
-the `search_knowledge` meta-tool appears and the agent is told to cite results separately from
-observations.
-
-## 8. The shell: commands, labels, approvals
-
-`ark-cli` is extended from your app, never edited. Add slash commands by implementing
-`ark_cli::Command`, label your tools with `ActivityLabels` or a `ToolRenderer`, class approvals
-with `AgentProfile::builder().approval_classifier(..)`. Details and examples: [`CLI.md`](CLI.md).
-
-## 9. Reuse of results
-
-An identical successful call may be served from an earlier result. Say how far that holds
-for each action:
+An identical successful call may be served from an earlier result.
 
 | Declare | When | Reused |
 |---|---|---|
@@ -112,21 +113,18 @@ for each action:
 | `.reusable()` (`Reuse::Stable`) | output depends only on input | always |
 | `.volatile()` (`Reuse::Volatile`) | a live capture, a clock, a counter | never |
 
-SecRes marks its live captures (`frida.trace`, `debug.trace`, `debug.memory`,
-`debug.attach`) volatile; its static analyses of stored binaries are reused across turns
-without declaring anything.
+SecRes marks its live captures (`frida.trace`, `debug.trace`, `debug.memory`, `debug.attach`)
+volatile.
 
-## 10. What the user is looking at
+## What the user is looking at
 
-A front-end reports the focused surface and selection as a `Focus`. A `Selection` has
-`text` and `line`, and any other marks in the view's own words, at the top level of the JSON:
-`{"line": 12}`, `{"address": "0x1000"}`, `{"cell": "B4"}`. The agent sees each as
-`name value` and nearby evidence is matched against them. ARK gives none of these names a
+A front-end reports the focused view and selection as a `Focus`. A `Selection` has `text`,
+`line` and any other marks in the view's own words: `{"address": "0x1000"}`,
+`{"cell": "B4"}`. The agent sees each as `name value`. ARK gives none of these names a
 meaning.
 
-## What you should *not* do
+## Do not
 
-- Don't add a domain type to `ark-core`. Use `Other(String)`, a capability slug, or a
-  distiller instead.
-- Don't fork the runtime to change behavior. If you find yourself wanting to, the missing seam
-  is a bug — open an issue so the extension API grows instead.
+- Add a domain type to `ark-core`. Use `Other(String)`, a capability slug or a distiller.
+- Fork the runtime to change behavior. Ask for the seam instead.
+- Replay the transcript into a prompt. The working state is the memory.

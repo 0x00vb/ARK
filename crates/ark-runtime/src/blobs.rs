@@ -1,6 +1,6 @@
-//! Bridge the adapter `BlobResolver` interface to the `wb-store` blob store. This
-//! wrapper lives here (not in wb-adapters or wb-store) so neither of those crates
-//! depends on the other — the engine is where they meet.
+//! Bridge the adapter `BlobResolver` interface to the `ark-store` blob store. This
+//! wrapper lives here (not in ark-tools or ark-store) so neither of those crates
+//! depends on the other: the engine is where they meet.
 
 use ark_core::ArtifactId;
 use ark_store::Store;

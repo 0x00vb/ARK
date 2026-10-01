@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "writer: a novelist's developmental editor on ARK. The 'could this power a novel?' proof, now interactive."
+description = "writer: a novelist's developmental editor on ARK. The 'could this power a novel?' proof."
 
 [[bin]]
 name = "writer"

@@ -12,5 +12,5 @@ ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct \
 The interesting part is `build_ark` in `src/main.rs`: register two `Adapter`s, set an
 `AgentProfile`, pick a provider, `.build()`. That's the entire integration surface.
 
-`cargo test -p minimal-agent` runs it end-to-end against a scripted mock model — no live
+`cargo test -p minimal-agent` runs it end-to-end against a scripted mock model, no live
 model required.

@@ -3,9 +3,9 @@
 //! and `Observe` run immediately; `Mutate` runs only with explicit approval. The agent loops
 //! (`Agent`, `Harness`) are built on top of it.
 //!
-//! Unlike the source workstation, the engine registers **no** domain adapters — the consumer
-//! supplies a [`Registry`]. Content classification is pluggable via [`Sniffer`]; ARK ships
-//! only the text/json/binary classifier.
+//! The engine registers **no** domain adapters: the consumer supplies a [`Registry`].
+//! Content classification is pluggable via [`Sniffer`]; ARK ships only the text/json/binary
+//! classifier.
 
 use std::sync::Arc;
 

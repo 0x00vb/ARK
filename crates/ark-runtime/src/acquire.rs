@@ -1,6 +1,5 @@
-//! The capability-*acquisition* seam. Like [`crate::knowledge`], this replaces a
-//! domain-specific feature of the source workstation (which could install security tools on
-//! demand) with a trait the consumer implements. When a profile supplies an
+//! The capability-*acquisition* seam: a trait the consumer implements, like
+//! [`crate::knowledge`]. When a profile supplies an
 //! [`AcquisitionProvider`], the runtime exposes the `find_capability` / `propose_capability` /
 //! `acquire_capability` meta-tools, so an agent that hits a missing capability can reason
 //! about acquiring one — with approval — instead of faking it or giving up.

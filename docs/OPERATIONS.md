@@ -8,7 +8,7 @@ any application on ARK.
 
 | Variable | Default | Meaning |
 |---|---:|---|
-| `ARK_PROVIDER`, `ARK_MODEL` | `ollama`, per provider | the model (also `ARK_PROVIDER_FAST` / `ARK_MODEL_FAST`, `..._STRONG`) |
+| `ARK_PROVIDER`, `ARK_MODEL` | `ollama`, per provider | the model; two tiers with `ARK_PROVIDER_FAST` / `ARK_MODEL_FAST` and `ARK_PROVIDER_STRONG` / `ARK_MODEL_STRONG` |
 | `ARK_CTX_BUDGET` | 6000 | prompt-token budget per request (tool schemas not counted) |
 | `ARK_MODEL_RETRIES` | 2 | retries of a model call after a temporary failure |
 | `ARK_HTTP_CONNECT_TIMEOUT_S` | 10 | connecting to a provider |
@@ -17,6 +17,16 @@ any application on ARK.
 | `ARK_MAX_OUTPUT_TOKENS` | Anthropic 8192, Ollama 4096, OpenAI none | output cap per request |
 | `ARK_LOG` | `warn` | log level and filter (`info`, `debug`, `ark_runtime=debug`, ...) |
 | `ARK_TRACE` | `full` | stored turn traces: `full`, `summary` (no text, no tool inputs) or `off` |
+| `ARK_PRICE` | none | `in,out[,cached]` US dollars per million tokens, for `/usage` |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | none, `https://api.anthropic.com/v1` | Anthropic provider |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL` | none, `https://api.openai.com/v1` | OpenAI and compatible endpoints |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama provider |
+| `NO_COLOR` | unset | no colour in the terminal shell |
+
+Development only: `ARK_PROVIDER=mock` with `ARK_MOCK_SCRIPT` and `ARK_MOCK_DELAY_MS`
+([`CLI.md`](CLI.md#testing-an-app-without-a-model)); `ARK_UI_WEB`, `ARK_UI_ASSETS`
+([`UI.md`](UI.md#developing-the-page)); `ARK_UI_PAGE_TESTS`, `ARK_STRESS_TURNS`,
+`ARK_STRESS_CONNECTS` for tests ([`CONTRIBUTING.md`](../CONTRIBUTING.md)).
 
 ## When a model call fails
 

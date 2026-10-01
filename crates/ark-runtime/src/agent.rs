@@ -11,9 +11,9 @@ use ark_core::{Author, InvocationId, InvocationStatus, Note, NoteKind, ProjectId
 use ark_model::{Message, Provider, ToolDef};
 use std::fmt::Write as _;
 
-/// The meta-tool the agent uses to preserve notes. Handled inside the loop, so it never
-/// touches the approval gate.
-const RECORD_NOTE: &str = "record_note";
+// The agent preserves notes with `record_note`, handled inside the loop, so it never touches
+// the approval gate.
+use crate::catalog::RECORD_NOTE;
 
 /// Events emitted as the agent works, so a front-end can show live progress.
 pub enum AgentEvent<'a> {

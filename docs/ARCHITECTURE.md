@@ -1,144 +1,168 @@
-# ARK Architecture
+# Architecture
 
-ARK is a layered set of Rust crates. Each layer depends only on the ones beneath it, and
-nothing depends on a consumer. The design goal is a **small, stable public API over a headless
-core**, with every domain concern injected rather than baked in.
+ARK is a stack of Rust crates. Each layer depends only on layers below it. No ARK crate
+depends on an application. The application brings the domain; ARK brings the machinery.
 
+## Layers
+
+```mermaid
+flowchart TB
+    subgraph app["Application (your crate)"]
+        direction LR
+        tools["tools: Adapter"]
+        profile["AgentProfile: persona, capabilities,<br/>distillers, knowledge"]
+        appdesc["App: commands, labels, status"]
+        pages["page scripts: panels, viewers"]
+    end
+    subgraph pres["Presentation: draws, reads keys"]
+        direction LR
+        cli["ark-cli<br/>terminal"]
+        ui["ark-ui<br/>window or browser"]
+    end
+    subgraph inter["Interaction: no drawing"]
+        ix["ark-interact<br/>App, Interaction, Command → Report,<br/>activity, trace, inspect"]
+    end
+    subgraph rt["Runtime: no front-end"]
+        direction LR
+        sdk["ark-sdk<br/>Ark::builder()"]
+        runtime["ark-runtime<br/>Harness, Engine, Session"]
+        model["ark-model<br/>Provider"]
+        tl["ark-tools<br/>Adapter, MCP"]
+        store["ark-store<br/>blobs, SQLite, search"]
+        core["ark-core<br/>pure types"]
+    end
+    app --> pres --> inter --> rt
+    bench["ark-bench<br/>measurement"] --> sdk
 ```
-                   ┌──────────────┐   ┌──────────────────┐
- your application →│   ark-cli    │   │      ark-ui      │  presentation (optional; neither
-                   │  (terminal)  │   │ (window, browser)│  depends on the other)
-                   └──────┬───────┘   └────────┬─────────┘
-                      ┌───▼────────────────────▼──┐
-                      │       ark-interact         │  interaction: App, Interaction, commands
-                      │                            │  → Report, activity, trace, inspect
-                      └─────────────┬─────────────┘
-                      ┌─────────────▼─────────────┐
-                      │          ark-sdk           │  Ark::builder(), AgentProfile, prelude
-                      └─────────────┬─────────────┘
-                      ┌─────────────▼─────────────┐
-                      │        ark-runtime         │  Engine, Harness, Agent, budget, router,
-                      │                            │  distill, catalog, capmap, metrics, notebook
-                      └───┬─────────┬─────────┬────┘
-             ┌────────────▼──┐ ┌────▼─────┐ ┌─▼────────────┐
-             │  ark-model    │ │ ark-store│ │  ark-tools   │
-             │ Provider/…    │ │ blobs+db │ │ Adapter/…/MCP│
-             └───────┬───────┘ └────┬─────┘ └──────┬───────┘
-                     └──────────────┼──────────────┘
-                             ┌──────▼──────┐
-                             │  ark-core   │   pure types; no tool/domain name
-                             └─────────────┘
-```
 
-## The layers
-
-### `ark-core` — the domain, made neutral
-Pure data types with one invariant: **no tool name and no domain name appears here.** The
-generalization from the origin workstation was concentrated here — the fixed security
-vocabularies became open, consumer-supplied registries:
-
-- **`Capability` / `CapabilityCatalog`** — "reason about capabilities, not tool names" is the
-  crown-jewel idea; the *taxonomy* is now yours to declare (`drafting`, `citation-lookup`, …).
-- **`ArtifactKind`** — universal kinds (`Text`, `Json`, `Source`, `Image`, `Archive`,
-  `Binary`, `Blob`) plus `Other(String)` and a `Sniffer` seam for domain formats.
-- **`ActionDescriptor` / `RiskTier`** — a typed tool operation and how consequential it is
-  (`Read`/`Observe`/`Mutate`, the approval gate's currency).
-- **`Invocation`** — the reproducibility spine: every tool call becomes one.
-- **`EvidenceCard` / `ResearchState` / `InvestigationGraph`** — the compact memory that keeps
-  context small and answers cited. Generic research methodology, not a domain model.
-- **`WorkspaceContext` / `Focus` / `PresentDirective`** — what the user is looking at, and
-  what the agent asks a UI to show.
-
-### `ark-model` — bring-your-own-model
-One `Provider` trait: `complete(system, messages, tools) -> Completion` with usage. The
-runtime never knows which backend answered. Tool-name mangling papers over providers that
-forbid `.` in tool names.
-
-### `ark-store` — persistence
-Content-addressed blobs (dedup by blake3), a SQLite metadata DB (projects, artifacts,
-invocations, notes, evidence cards, working state, checkpoints — each a JSON blob with a few
-promoted columns), and a Tantivy full-text index. Fully domain-agnostic.
-
-### `ark-tools` — the tool boundary
-`Adapter` (a namespaced set of `ActionDescriptor`s + a `run`), `Registry` (the agent's tool
-list; ships **empty**), `RunCtx`/`BlobResolver` (how a tool reads artifacts and its
-workspace), a `subprocess` helper, and `McpAdapter` — an out-of-process plugin bridge that
-turns any MCP server (any language) into native actions with risk derived from annotations.
-
-### `ark-runtime` — the loop
-- **`Engine`** — ingest + `run_action` + the approval gate; pluggable `Sniffer`s; loads MCP
-  plugins from `plugins.json`.
-- **`Harness`** — the evidence-driven loop (budget, router, distill, dedup, progressive
-  disclosure, working state, self-check, critic, stall guard, metrics).
-- **`Agent`** — a simpler ReAct loop.
-- **`AgentProfile`** — the single injection point: persona, capabilities + inferrer,
-  distillers, knowledge, core actions, investigation markers, prompt fragments, and the
-  approval classifier.
-- **`Session`**: one continuing conversation. Turns are stored in full; the model gets a
-  bounded carry-over (recent exchanges plus gists), never the transcript.
-- **`ApprovalGate` / `Approver`**: asks a human before `Mutate` actions and remembers
-  session grants by approval class. The front-end only renders the question.
-- **`CancelToken`**: cooperative stop, checked at every await point in a turn.
-- **`ContextReport`**: the token breakdown of each request by source.
-
-### Three layers above the SDK
-
-| Layer | Crate | Owns | Knows nothing of |
+| Layer | Crates | Owns | Never knows about |
 |---|---|---|---|
-| Runtime | `ark-runtime` (via `ark-sdk`) | reasoning, tools, context, working state, models, approvals, cancel, steering | front-ends |
-| Interaction | `ark-interact` | sessions, turns, commands and their `Report`s, activity labels, traces, context/usage/state views | terminals, windows, HTML, ANSI |
-| Presentation | `ark-cli`, `ark-ui` | drawing, keys, layout | each other |
+| Runtime | `ark-core` to `ark-sdk` | the loop, context, models, tools, memory, approvals, cancel, steering | terminals, windows, HTML |
+| Interaction | `ark-interact` | sessions, turns, commands and `Report`s, activity words, traces, context and usage views | how anything is drawn |
+| Presentation | `ark-cli`, `ark-ui` | drawing, keys, layout, transport | each other |
+| Application | your crate | tools, prompts, vocabulary, commands, look | ARK internals |
 
-### `ark-interact`: the interaction layer
-An app is described once as an `App` and opened as an `Interaction`: project, session,
-approvals (`ChannelApprover`), turns (`run_turn` with a `TurnControl` of cancel, steering and
-a trace recorder). Slash commands return a `Reply` holding a `Report` (title and blocks:
-heading, text, fields, table, code, meter, actions) and an optional `Effect`. `activity`
-turns `HarnessEvent`s into a person's words, `trace::interpret` turns a recorded turn into
-calls with status, approval and context cost, and `inspect` builds the context, usage, state
-and session views. Both front-ends call these; neither recomputes them.
+Both front-ends call the same `Interaction` methods and render the same values. That is how
+the terminal and the window stay in step: a command, a label or a trace view is written once.
 
-### `ark-cli`: the shell
-The terminal front-end. It drives a turn as a future and multiplexes runtime events,
-approval requests, key presses and a spinner tick in one `select!` loop, and renders
-`Report`s and `Activity` as lines. See [`CLI.md`](CLI.md).
+## Crates
 
-### `ark-ui`: the workspace
-A `Host` wraps one `Interaction` and exposes `call(method, params)` plus an event stream.
-Two transports carry it: a Tauri window (feature `desktop`) and a loopback HTTP server with a
-per-run token. The page in `web/` is plain ES modules; apps add panels, artifact viewers,
-tool renderers, actions and status lines through `window.ark`, and backend methods through
-`ArkUi::handler`. See [`UI.md`](UI.md).
+```mermaid
+flowchart LR
+    core[ark-core] --> model[ark-model] & store[ark-store] & tools[ark-tools]
+    model & store & tools --> runtime[ark-runtime] --> sdk[ark-sdk]
+    sdk --> interact[ark-interact] --> cli[ark-cli] & ui[ark-ui]
+    sdk --> bench[ark-bench]
+```
 
-### `ark-bench`: measurement
-Beside the front-ends, on `ark-sdk`: workloads, a metered provider, a simulated model,
-reports and comparisons. Any application can run its own workloads through it; it names no
-domain. See [`BENCH.md`](BENCH.md).
+Arrows point from a dependency to its user. There are no cycles.
 
-### `ark-sdk` — the facade
-`Ark::builder()` composes an `Engine`, a `ModelRouter`, and an `AgentProfile` into a
-one-call `.ask()`. A `prelude` re-exports everything a typical consumer names.
+| Crate | Main types |
+|---|---|
+| `ark-core` | `Artifact`, `ArtifactKind` (+ `Other(String)`), `ActionDescriptor`, `RiskTier`, `Reuse`, `Invocation`, `Capability`, `CapabilityCatalog`, `EvidenceCard`, `ResearchState`, `WorkspaceContext`, `Focus`. No tool or domain name. |
+| `ark-model` | `Provider`, `Completion`, `Usage`, `ProviderError`, `RetryPolicy`, `MockProvider`; Anthropic, OpenAI, Ollama |
+| `ark-store` | `Store`: content-addressed blobs (blake3), SQLite metadata (WAL), Tantivy full-text index |
+| `ark-tools` | `Adapter`, `Registry` (ships empty), `RunCtx`, `ActionOutput`, `subprocess`, `McpAdapter` |
+| `ark-runtime` | `Harness` (the loop), `Engine` (ingest, run actions, approval gate), `Session`, `AgentProfile`, `ModelRouter`, `DistillerSet`, `ApprovalGate`, `CancelToken`, `Steering`, `ContextReport`, `Metrics`; `Agent`, a plain ReAct loop |
+| `ark-sdk` | `Ark`, `Ark::builder()`, `TurnOptions`, `prelude` |
+| `ark-interact` | `App`, `Interaction`, `Command`, `Reply`, `Report`, `ActivityLabels`, `ToolLabeler`, `trace`, `inspect`, `logging` |
+| `ark-cli` | `ArkCli`, `ArkArgs`, `Theme`. Details: [`CLI.md`](CLI.md) |
+| `ark-ui` | `ArkUi`, `Host`; Tauri window (feature `desktop`) or loopback HTTP + SSE. Details: [`UI.md`](UI.md) |
+| `ark-bench` | `Workload`, metered provider, simulated model, reports, `compare`. Details: [`BENCH.md`](BENCH.md) |
 
-## Key design principles (and where they live)
+## One turn
 
-- **Composition over inheritance** — the profile *holds* strategies (distillers, inferrer,
-  knowledge) rather than subclassing the harness.
-- **Interfaces over domain assumptions** — `Provider`, `Adapter`, `Sniffer`,
-  `KnowledgeProvider`, `Distiller`, `CapabilityCatalog` are all injection seams.
-- **Headless core over UI coupling** — the runtime emits structured `HarnessEvent`s; a UI is
-  optional and downstream. `PresentDirective` degrades to a no-op on a CLI.
-- **Explicit state over hidden global state** — no singletons; everything hangs off the
-  `Engine`/`Ark` you construct.
-- **Lazy context over dumping** — progressive tool disclosure and evidence retrieval on
-  demand.
-- **Isolated memory over replay** — the working state is the resume unit, not the transcript.
+What happens between a person pressing enter and the answer, in either front-end.
 
-## Events & observability
+```mermaid
+sequenceDiagram
+    participant FE as ark-cli / ark-ui
+    participant IX as Interaction
+    participant S as Session
+    participant H as Harness
+    participant M as Provider
+    participant E as Engine + tools
+    FE->>IX: run_turn(input, TurnControl)
+    IX->>S: begin_turn (stored before any work)
+    IX->>H: ask(input), bounded carry-over, never the transcript
+    H->>H: load working state, classify, plan if not trivial
+    loop each step, up to max_steps
+        H->>H: build request under the token budget
+        H->>M: complete(system, messages, loaded tools)
+        M-->>H: text and tool calls
+        alt no tool calls
+            H->>H: this is the answer
+        else tool calls
+            H->>H: runtime tools (load_action, get_evidence, ...) handled here
+            H->>FE: Mutate call waits for approval (ApprovalGate, ChannelApprover)
+            H->>E: run_action, reads in parallel, identical calls reused
+            E-->>H: output, stored as an Invocation
+            H->>H: distill output into a short EvidenceCard
+        end
+        H->>H: stall guard: no new information for 5 steps ends the loop
+    end
+    H->>H: self-check, critic if it fails, save working state
+    H-->>IX: HarnessOutcome (answer, citations, metrics)
+    IX->>S: record_turn
+    IX-->>FE: TurnEnd
+```
 
-The loop is a stream of typed, owned, serializable `HarnessEvent`s (step, context report,
-text delta, model call, tool call/result, duplicate, retrieval, approval requested/resolved,
-state update, note, present, self-check, cancelled, answer). The terminal shell, the `--events`
-JSON stream and the `ark-ui` window all consume the same stream. A UI, a logger, or a test
-consumes them without coupling to the loop's internals. `Metrics` accounts for tokens (in/out/
-peak), model calls by role and model id, tool calls, dedup and retrieval hits, and
-tokens-per-finding.
+Every step emits typed `HarnessEvent`s (step, context report, text delta, model call, tool
+call and result, retry, stall, approval, answer). `ark-interact` turns them into
+`Activity` lines and a stored trace. The front-ends only draw them.
+
+## Where the context goes
+
+The model never gets raw tool output or the chat transcript.
+
+```mermaid
+flowchart LR
+    out["tool output<br/>(any size)"] --> store[("store:<br/>blob + invocation")]
+    out --> card["EvidenceCard<br/>(a few lines)"]
+    card --> req["next request"]
+    state["working state<br/>(findings, hypotheses)"] --> req
+    carry["carry-over<br/>(recent exchanges, gists)"] --> req
+    store -. "get_evidence(match, offset)" .-> req
+```
+
+| Mechanism | Module |
+|---|---|
+| Request assembled under a token budget from whole rounds; old rounds drop in chunks | `ark-runtime::budget` |
+| Tool output distilled to an evidence card; full rows read on demand | `distill`, `evidence` |
+| A compact action index; a schema is loaded only when needed | `catalog`, `capmap` |
+| Fixed system prompt, tools in load order, working state last, so a prefix cache can serve it | `harness`, `ark-model` |
+| Identical successful calls reused within the rules of `Reuse` | `harness` |
+| Working state plus a bounded carry-over instead of transcript replay | `session` |
+| Every request reports where its tokens came from | `context_report` |
+
+Measured effect: [`bench/RESULTS.md`](../bench/RESULTS.md).
+
+## Design rules
+
+| Rule | In practice |
+|---|---|
+| No domain in the core | `ark-core` names no tool, format or domain concept. `crates/ark-ui/tests/neutral.rs` checks the runtime and front-ends. |
+| Inject, do not fork | Domain behavior goes through a seam: `Adapter`, `AgentProfile`, `Distiller`, `Sniffer`, `KnowledgeProvider`, `AcquisitionProvider`, `CapabilityCatalog`, `Provider`. |
+| Headless runtime | The runtime emits events and takes an `ApprovalGate`, a `CancelToken` and `Steering`. It never sees a key or a colour. |
+| One interaction layer | Commands, labels, views and traces live in `ark-interact`, so CLI and GUI mean the same thing. |
+| Bounded context | Working state is the memory, not the transcript. `crates/ark-sdk/tests/long_session.rs` checks that request size stays flat. |
+| Deterministic first | Distillers, the stall guard, reuse and the request layout are code, not model calls. |
+| Every call is recorded | A tool call becomes an `Invocation` with its input, output and command line. |
+| No global state | Everything hangs off the `Ark` or `Engine` you build. |
+
+## Origin
+
+ARK was extracted from SecRes, a security research workstation, which now consumes ARK by
+release tag. The extraction turned fixed security vocabularies into open, application-supplied
+ones:
+
+| In SecRes | In ARK |
+|---|---|
+| a fixed enum of nine security capabilities | `Capability(slug)` and a `CapabilityCatalog` the app supplies |
+| Mach-O, ELF, plist artifact kinds | universal kinds, `Other(String)` and a `Sniffer` |
+| typed RE and network evidence families | one generic `EvidenceCard`; families stay in the app |
+| the security persona, distillers, knowledge base | `AgentProfile`, `DistillerSet`, `KnowledgeProvider` |
+| `WB_*` environment variables | `ARK_*` |
+
+The test that kept it neutral: the same runtime must power an editor for a novelist.
+[`examples/writing-agent`](../examples/writing-agent) does, with no change to any ARK crate.

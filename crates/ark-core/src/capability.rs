@@ -8,16 +8,14 @@
 //! verbs onto these categories; the runtime discovers, and can acquire, capabilities
 //! rather than hard-coding tools.
 //!
-//! ## The generalization from the source harness
+//! ## Open vocabulary
 //!
-//! The original workstation baked a fixed enum of nine security capabilities into the
-//! core (decompilation, dynamic-tracing, debugging, …). That is exactly the kind of
-//! domain leakage ARK removes. Here a [`Capability`] is an open slug, and a
-//! [`CapabilityCatalog`] — supplied by the consuming application — gives each slug a
-//! one-line description and any natural-language synonyms. A security product registers
-//! `decompilation`; a writing agent registers `drafting` and `continuity-check`; a legal
-//! agent registers `citation-lookup`. The runtime machinery (coverage, `find_capability`,
-//! acquisition) is identical for all of them.
+//! A [`Capability`] is an open slug, never a fixed enum: a fixed set would put one domain's
+//! vocabulary in the core. A [`CapabilityCatalog`], supplied by the consuming application,
+//! gives each slug a one-line description and any natural-language synonyms. A security
+//! product registers `decompilation`; a writing agent registers `drafting` and
+//! `continuity-check`; a legal agent registers `citation-lookup`. The runtime machinery
+//! (coverage, `find_capability`, acquisition) is identical for all of them.
 
 use serde::{Deserialize, Serialize};
 

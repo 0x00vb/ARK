@@ -1,7 +1,7 @@
 //! # writer
 //!
-//! A developmental editor for novelists, built on the same ARK runtime and the same ARK
-//! terminal shell as the security workstation. Nothing in ARK knows it is a writing tool:
+//! A developmental editor for novelists, built on the ARK runtime and terminal shell.
+//! Nothing in ARK knows it is a writing tool:
 //! the manuscript tools, the editor persona, the `/chapter` and `/style` commands, the
 //! magenta theme and the activity labels are all supplied here.
 //!

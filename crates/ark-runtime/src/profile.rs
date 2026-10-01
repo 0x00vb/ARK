@@ -1,8 +1,7 @@
 //! The agent profile: the single place a consuming application injects its domain into the
-//! otherwise domain-agnostic runtime. Everything security-specific in the source workstation
-//! — the "You are Workbench, a security-engineering partner" persona, the fixed capability
-//! taxonomy, the RE-specific result distillers, the built-in knowledge base — is now a field
-//! here, supplied by the consumer. The runtime owns the *mechanics* (the loop, the budget,
+//! otherwise domain-agnostic runtime: the persona, the capability taxonomy, the result
+//! distillers and the knowledge source are fields here, supplied by the consumer. The
+//! runtime owns the *mechanics* (the loop, the budget,
 //! the approval gate, the evidence model); the profile owns the *domain*.
 
 use std::sync::Arc;
@@ -19,8 +18,7 @@ use crate::knowledge::KnowledgeProvider;
 /// consumer overrides any of them to shape the agent's voice and method.
 #[derive(Clone)]
 pub struct Prompts {
-    /// The persona + method system block — the heart of the agent's identity. This is what
-    /// was hard-coded as the security persona in the source; here it is entirely yours. The
+    /// The persona + method system block: the agent's identity, entirely the consumer's. The
     /// runtime appends only a mechanical footer (the project label, artifact list, and
     /// approval note).
     pub instructions: String,

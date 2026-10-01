@@ -1,16 +1,30 @@
 # Changelog
 
-All notable changes to ARK are documented here. Format: [Keep a Changelog](https://keepachangelog.com);
-this project adheres to [Semantic Versioning](https://semver.org).
+What changed for people building on ARK, per release. Not a commit log.
 
-## [0.4.1]
+- Sections: `Added`, `Changed`, `Fixed`, `Breaking`. A `Breaking` entry says what an app must
+  change.
+- New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
+- One line per change where possible. Link to a doc instead of explaining it here.
+
+## [Unreleased]
+
+### Changed
+- Documentation reorganized for maintainers: `AGENTS.md` (rules and change lifecycle; `CLAUDE.md`
+  imports it), `ROADMAP.md` at the root (state, limits, next), `docs/RELEASING.md` (release,
+  app upgrade, rollback; replaces `docs/VERSIONING.md`), diagrams in `docs/ARCHITECTURE.md`,
+  provider and development environment variables in `docs/OPERATIONS.md`.
+  `docs/EXTRACTION_MAP.md` is folded into `docs/ARCHITECTURE.md` (Origin).
+- Comments that described the extraction history now describe the code. No library change.
+
+## [0.4.1] - 2026-10-01
 
 ### Fixed
 - `scripts/ci.sh` ran the benchmark from `./target/release` even when `CARGO_TARGET_DIR`
   pointed elsewhere, so `scripts/verify-release.sh` (which honors `CARGO_TARGET_DIR`) failed
   at its last step. Found by verifying v0.4.0 from a fresh clone. No library change.
 
-## [0.4.0]
+## [0.4.0] - 2026-10-01
 
 Production hardening, measurement, and a cheaper harness. No new front-end surface.
 Before/after numbers are in `bench/RESULTS.md`; the benchmark harness is in `docs/BENCH.md`
@@ -42,7 +56,7 @@ and running ARK in production in `docs/OPERATIONS.md`.
 - `scripts/ci.sh`, `scripts/check-version.sh`, `scripts/verify-release.sh`,
   `.github/workflows/ci.yml`.
 
-### Changed (breaking)
+### Breaking
 - `ActionDescriptor::reusable: bool` is replaced by `reuse: Reuse`. `.reusable()` still
   marks an action `Stable`.
 - `Selection` keeps `text` and `line`; `address`, `symbol` and `function` become named
@@ -87,7 +101,7 @@ and running ARK in production in `docs/OPERATIONS.md`.
   final answer: the model is told once that nothing ran and asked again. With the working
   state as the last message, qwen3:4b did this in 4 of 39 live runs.
 
-## [0.3.0]
+## [0.3.0] - 2026-09-30
 
 An interaction layer both front-ends share, and a graphical workspace on it.
 
@@ -118,7 +132,7 @@ An interaction layer both front-ends share, and a graphical workspace on it.
   `ARK_UI_PAGE_TESTS=1`. A neutrality test covering the runtime's code as well as the
   front-end layers.
 
-### Changed (breaking)
+### Breaking
 - `ark-cli` renders `ark-interact` and holds no command logic. `ArkCli::new(app)` replaces
   `ArkCli::builder()`; the agent, commands, labels and status move to `App`. `Command::run`
   takes `&mut Interaction` and returns `Reply`; `CommandContext` and `CommandOutcome` are gone.
@@ -143,7 +157,7 @@ An interaction layer both front-ends share, and a graphical workspace on it.
 - Default activity labels no longer carry domain verbs; "Showing show …" and "1 model calls"
   wording.
 
-## [0.2.0]
+## [0.2.0] - 2026-09-30
 
 The interactive shell, and what the runtime needed to support it.
 
@@ -170,7 +184,7 @@ The interactive shell, and what the runtime needed to support it.
 - `ARK_PROVIDER=mock` with `ARK_MOCK_SCRIPT` (and `ARK_MOCK_DELAY_MS`) replays a scripted model
   for end-to-end tests of front-ends. `MockProvider::with_fallback`, `with_chunk_delay`.
 
-### Changed (breaking)
+### Breaking
 - `HarnessEvent` is owned (`String`/`Value` fields instead of borrows), `Clone` and
   `Serialize`, and has new variants: `Step`, `Context`, `TextDelta`, `ModelCall`,
   `ApprovalRequested`, `ApprovalResolved`, `Cancelled`. `ToolCall` gains `id`; `ToolResult`
@@ -187,13 +201,13 @@ The interactive shell, and what the runtime needed to support it.
   longer served stale. Within a turn, identical reads are still reused. `Mutate` calls are
   never deduplicated.
 
-## [0.1.3] — unreleased
+## [0.1.3] - 2026-09-30
 
 ### Added
-- `HarnessOutcome::grounded()` — true when the answer cites at least one piece of evidence.
+- `HarnessOutcome::grounded()`: true when the answer cites at least one piece of evidence.
   A convenience for consumers that gate on grounding.
 
-## [0.1.2] — unreleased
+## [0.1.2] - 2026-09-30
 
 ### Added
 - `ingest_bytes` now also indexes an `ArtifactKind::Other(_)` artifact for full-text search
@@ -201,12 +215,12 @@ The interactive shell, and what the runtime needed to support it.
   consumer's text-bearing domain format (a plist, a JSON trace, an outline) be searchable
   without ARK knowing the format. Binary `Other` bytes fail the UTF-8 guard and are skipped.
 
-### Changed
+### Breaking
 - `AcquisitionProvider` is now an **async** trait (`find`/`propose`/`acquire` are `async fn`),
   since acquiring a provider is inherently I/O (probe, install, connect). Refines the seam
   introduced in 0.1.1 before it ships in a released consumer.
 
-## [0.1.1] — unreleased
+## [0.1.1] - 2026-09-30
 
 ### Added
 - **Capability-acquisition seam** (async `AcquisitionProvider` trait, `AcquisitionResult`), injected
@@ -216,10 +230,10 @@ The interactive shell, and what the runtime needed to support it.
   were stubbed as "not enabled". Mirrors the existing `KnowledgeProvider` seam and stays
   domain-agnostic (a security agent installs a disassembler; a writing agent could wire a
   thesaurus). Discovered while migrating the security workbench onto ARK.
-- **`HarnessEvent::Capability { action, detail }`** — emitted when an acquisition meta-tool
+- **`HarnessEvent::Capability { action, detail }`**: emitted when an acquisition meta-tool
   runs, so a UI can surface it. This is additive; match arms should already carry a `_ =>`.
 
-## [0.1.0] — unreleased
+## [0.1.0] - 2026-09-30
 
 ### Added
 - Initial extraction of a domain-agnostic agent runtime from a security-research workstation.

@@ -1,5 +1,4 @@
-//! The external-knowledge seam. The source workstation had a built-in security knowledge
-//! base; that is domain-specific, so ARK replaces it with a trait. A consumer that wants
+//! The external-knowledge seam. ARK ships no knowledge base. A consumer that wants
 //! the agent to consult external references (docs, a corpus, a vector store) implements
 //! [`KnowledgeProvider`] and registers it on the agent profile. When one is present, the
 //! runtime exposes a `search_knowledge` meta-tool and instructs the agent to cite results

@@ -57,7 +57,7 @@ pub(crate) async fn run(
         .with_color(want_color(std::io::stderr().is_terminal()));
     let mut err_out = Out::sink(Box::new(std::io::stderr()));
     let mut view = TurnView::new(&theme, cfg.event_hook.as_ref(), st.ix.detail());
-    let mut answer_streamed = String::new();
+    let mut text_out = StdoutText::default();
 
     let end = st
         .ix
@@ -70,25 +70,21 @@ pub(crate) async fn run(
                 }
             }
             Mode::Json => {}
-            Mode::Text => match ev {
-                // The answer text goes to stdout as it streams; everything else is activity.
-                HarnessEvent::TextDelta { text } => {
-                    answer_streamed.push_str(text);
+            Mode::Text => {
+                // Model text goes to stdout as it streams; everything else is activity.
+                let printed = text_out.event(ev);
+                if !printed.is_empty() {
                     let mut o = std::io::stdout().lock();
-                    let _ = o.write_all(text.as_bytes());
+                    let _ = o.write_all(printed.as_bytes());
                     let _ = o.flush();
                 }
-                HarnessEvent::Answer { text, streamed } => {
-                    let mut o = std::io::stdout().lock();
-                    if !streamed || text.trim() != answer_streamed.trim() {
-                        let sep = if answer_streamed.is_empty() { "" } else { "\n" };
-                        let _ = writeln!(o, "{sep}{text}");
-                    } else {
-                        let _ = writeln!(o);
-                    }
+                if !matches!(
+                    ev,
+                    HarnessEvent::TextDelta { .. } | HarnessEvent::Answer { .. }
+                ) {
+                    view.event(ev.clone(), a.cloned(), &mut err_out);
                 }
-                other => view.event(other.clone(), a.cloned(), &mut err_out),
-            },
+            }
         })
         .await;
 
@@ -131,4 +127,94 @@ fn result_json(ix: &Interaction, end: &TurnEnd, tagged: bool) -> serde_json::Val
         v["type"] = serde_json::json!("result");
     }
     v
+}
+
+/// What text mode writes to stdout. Each step's streamed text is its own segment: narration
+/// before a tool call ends at the call, so the final answer is compared with its own stream
+/// only. (Comparing with everything streamed printed the answer twice after any narration.)
+#[derive(Default)]
+struct StdoutText {
+    segment: String,
+}
+
+impl StdoutText {
+    fn event(&mut self, ev: &HarnessEvent) -> String {
+        match ev {
+            HarnessEvent::TextDelta { text } => {
+                self.segment.push_str(text);
+                text.clone()
+            }
+            HarnessEvent::Step { .. }
+            | HarnessEvent::ToolCall { .. }
+            | HarnessEvent::Steered { .. } => self.end_segment(),
+            HarnessEvent::Answer { text, streamed } => {
+                let out = if *streamed && text.trim() == self.segment.trim() {
+                    "\n".to_string()
+                } else {
+                    format!("{}{text}\n", self.end_segment())
+                };
+                self.segment.clear();
+                out
+            }
+            _ => String::new(),
+        }
+    }
+
+    fn end_segment(&mut self) -> String {
+        if self.segment.is_empty() {
+            return String::new();
+        }
+        self.segment.clear();
+        "\n".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(events: Vec<HarnessEvent>) -> String {
+        let mut t = StdoutText::default();
+        events.iter().map(|e| t.event(e)).collect()
+    }
+    fn delta(s: &str) -> HarnessEvent {
+        HarnessEvent::TextDelta { text: s.into() }
+    }
+    fn call() -> HarnessEvent {
+        HarnessEvent::ToolCall {
+            id: "c".into(),
+            action: "notes.read".into(),
+            input: serde_json::json!({}),
+        }
+    }
+    fn answer(s: &str, streamed: bool) -> HarnessEvent {
+        HarnessEvent::Answer {
+            text: s.into(),
+            streamed,
+        }
+    }
+
+    #[test]
+    fn narration_then_answer_prints_the_answer_once() {
+        let out = run(vec![
+            HarnessEvent::Step { index: 1 },
+            delta("Reading the notes."),
+            call(),
+            HarnessEvent::Step { index: 2 },
+            delta("The notes mention "),
+            delta("a locket."),
+            answer("The notes mention a locket.", true),
+        ]);
+        assert_eq!(out, "Reading the notes.\nThe notes mention a locket.\n");
+    }
+
+    #[test]
+    fn an_unstreamed_or_revised_answer_is_printed() {
+        assert_eq!(run(vec![answer("Plain.", false)]), "Plain.\n");
+        let out = run(vec![
+            delta("Draft answer."),
+            answer("Revised answer.", true),
+        ]);
+        assert_eq!(out, "Draft answer.\nRevised answer.\n");
+    }
 }

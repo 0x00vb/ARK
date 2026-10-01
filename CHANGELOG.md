@@ -54,6 +54,8 @@ An interaction layer both front-ends share, and a graphical workspace on it.
 - An `artifact` argument given as a short id (`art:dc3b0c93c72c`), a prefix or a name is
   resolved to the full id before the adapter sees it. The model is shown short ids, so its
   calls used to fail with "artifact not found".
+- `-p` printed the answer twice after the model narrated before a tool call (the final
+  answer was compared with all streamed text, narration included).
 - Default activity labels no longer carry domain verbs; "Showing show …" and "1 model calls"
   wording.
 

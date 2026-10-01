@@ -116,6 +116,18 @@ async fn a_row_after_the_streamed_answer_does_not_repeat_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_stopped_turn_replays_as_it_was_shown() {
+    let long =
+        "Reading the notes slowly, one line at a time, so that there is time to stop. ".repeat(4);
+    drive(
+        "cancel",
+        vec![say(&long, true), say("unused", false)],
+        Duration::from_millis(120),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_narrow_window_keeps_the_sidebar_reachable() {
     drive("narrow", vec![], Duration::ZERO).await;
 }

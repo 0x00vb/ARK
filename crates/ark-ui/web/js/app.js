@@ -337,7 +337,8 @@ function palette() {
     const shown = paint();
     if (e.key === "ArrowDown") { sel = (sel + 1) % shown.length; paint(); e.preventDefault(); }
     if (e.key === "ArrowUp") { sel = (sel + shown.length - 1) % shown.length; paint(); e.preventDefault(); }
-    if (e.key === "Enter" && shown[sel]) { closePalette(); shown[sel].run(); }
+    // preventDefault: closing moves focus to the composer, which would get the line break.
+    if (e.key === "Enter" && shown[sel]) { e.preventDefault(); closePalette(); shown[sel].run(); }
     if (e.key === "Escape") { e.stopPropagation(); closePalette(); }
   });
   clear(overlay).append(h("div.palette-box", input, list));

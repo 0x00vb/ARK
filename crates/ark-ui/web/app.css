@@ -9,6 +9,7 @@
   --sidebar: #f7f7f6;
   --pane: #fafaf9;
   --card: #ffffff;
+  --seg-on: #ffffff;
   --sunken: rgba(0, 0, 0, 0.028);
   --code-bg: rgba(0, 0, 0, 0.035);
   --bubble: #f1f1f0;
@@ -39,6 +40,7 @@
     --sidebar: #151515;
     --pane: #181818;
     --card: #232323;
+    --seg-on: rgba(255, 255, 255, 0.13);
     --sunken: rgba(255, 255, 255, 0.03);
     --code-bg: rgba(255, 255, 255, 0.045);
     --bubble: #2a2a2a;
@@ -378,7 +380,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .work-head {
   display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
   border: 0; background: none; padding: 2px 6px 2px 0;
-  font-size: 13px; color: var(--text-3);
+  font-size: 13px; color: var(--text-3); text-align: left;
   cursor: pointer;
   transition: color 150ms var(--ease);
 }
@@ -386,7 +388,9 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .work-head .chev { width: 13px; height: 13px; transition: rotate 220ms var(--ease); }
 .work[data-open="true"] > .work-head .chev { rotate: 90deg; }
 .work-summary:empty { display: none; }
-.work:has(.work-summary:empty) > .work-head { display: none; }
+/* The head shows once the block has a summary (set by closeBlocks). An attribute, not
+   :has(:empty): the macOS web view does not restyle when the summary text arrives. */
+.work:not([data-summary]) > .work-head { display: none; }
 
 .disclose { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 280ms var(--ease), opacity 200ms var(--ease); }
 .disclose-inner { overflow: hidden; min-height: 0; }
@@ -394,7 +398,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .act[data-expanded="true"] > .act-more { grid-template-rows: 1fr; opacity: 1; }
 
 .work-rows { display: flex; flex-direction: column; gap: 1px; padding: 2px 0 2px; }
-.work:has(.work-summary:not(:empty)) .work-rows { padding: 6px 0 4px 2px; }
+.work[data-summary] .work-rows { padding: 6px 0 4px 2px; }
 .act { font-size: 13.5px; animation: rise 240ms var(--ease) both; }
 .act-line { display: flex; align-items: center; gap: 9px; color: var(--text-2); padding: 3px 0; min-width: 0; }
 .act-glyph { width: 5px; height: 5px; border-radius: 50%; background: var(--text-3); flex: none; margin: 0 1px; transition: background-color 200ms; }
@@ -642,7 +646,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .art-body .code-block { max-height: none; }
 .segs { display: inline-flex; background: var(--hover); border-radius: 9px; padding: 2px; }
 .seg { border: 0; background: transparent; padding: 3px 10px; border-radius: 7px; font-size: 12px; color: var(--text-2); cursor: pointer; transition: background-color 150ms, color 150ms; }
-.seg[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.seg[aria-pressed="true"] { background: var(--seg-on); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
 
 /* ---- popovers, palette, toast ------------------------------------------------------------- */
 
@@ -720,6 +724,8 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 @media (max-width: 760px) {
   .app { --sb: 0px; }
   .app[data-pane="open"] { --pw: 100vw; grid-template-columns: 0 0 100vw; }
+  /* The pane is then the whole window: its tabs clear the macOS window buttons. */
+  .app[data-shell="desktop"][data-pane="open"] .pane-head { padding-left: 84px; }
   .thread { padding: 8px 16px 40px; }
   .dock { padding: 0 12px 12px; }
 }

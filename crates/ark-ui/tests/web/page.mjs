@@ -47,6 +47,9 @@ const scenarios = {
       "work: Used 1 tool · Reading notes",
       "answer: The notes mention a locket.",
     ]);
+    // The head shows through an attribute, not :has(:empty), which the macOS web view does
+    // not re-evaluate when the summary text arrives.
+    assert.equal(await page.locator(".work[data-summary] > .work-head").isVisible(), true);
   },
 
   // A row that arrives after the streamed answer (a failed self-check) does not make the page
@@ -60,6 +63,21 @@ const scenarios = {
     assert.ok(live.some((s) => s.startsWith("work: ") && s.includes("ungrounded")), live.join("\n"));
     const agent = await page.locator(".turn .agent").last().innerText();
     assert.equal(agent.split("a locket").length - 1, 1, agent);
+  },
+
+  // A stopped turn says so once, and replays as it was shown live.
+  async cancel(page) {
+    await finished(page, async () => {
+      await page.locator("#input").fill("What do the notes say?");
+      await page.keyboard.press("Enter");
+      await page.locator(".prose.streaming").waitFor();
+      await page.keyboard.press("Escape");
+    });
+    const live = await shape(page);
+    assert.equal(live.filter((s) => s.includes("Stopped")).length, 1, live.join("\n"));
+    await page.reload();
+    await page.locator(".turn.stored").first().waitFor();
+    assert.deepEqual(await shape(page), live);
   },
 
   // A narrow window folds the sidebar into a drawer the reveal button opens; it closes on a

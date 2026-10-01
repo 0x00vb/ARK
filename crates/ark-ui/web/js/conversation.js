@@ -100,7 +100,8 @@ export class Thread {
       else turn.activity(a, null);
     }
     turn.closeBlocks();
-    if (t.cancelled) turn.notice("Stopped before answering.", "muted");
+    // A replayed "stopped" activity already said so, as it did live.
+    if (t.cancelled && !acts.some((a) => a.kind === "stopped")) turn.notice("Stopped.", "muted");
     else if (t.answer) turn.text(t.answer, true);
     turn.footer(t.footer, t.index);
     return turn.el;
@@ -236,6 +237,8 @@ class TurnView {
       const first = b.dataset.firstTool || b.dataset.first || "";
       const s = b.querySelector(".work-summary");
       s.textContent = n > 0 ? `Used ${n} tool${n === 1 ? "" : "s"}` + (first ? ` · ${clip(first, 60)}` : "") : clip(first, 80);
+      if (s.textContent) b.dataset.summary = "";
+      else delete b.dataset.summary;
       b.dataset.open = "false";
     }
     this.block = null;
@@ -417,7 +420,9 @@ class TurnView {
     clearInterval(this.timer);
     this.workEl?.remove();
     this.workEl = null;
-    if (this.textEl) this.markAnswer();
+    // Text still streaming is the answer only if the turn finished; a stopped turn has none.
+    if (this.textEl && !msg.cancelled && !msg.error) this.markAnswer();
+    else this.textEl?.classList.remove("streaming");
     this.closeBlocks();
     if (msg.error) this.notice(msg.error, "error");
     else if (msg.cancelled && !this.agent.querySelector(".notice")) this.notice("Stopped.", "muted");

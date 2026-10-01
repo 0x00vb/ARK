@@ -416,6 +416,7 @@ impl Harness {
         // reused after it.
         let mut changed_at = turn_started;
         let mut fresh_meta: u32 = 0;
+        let mut corrected_text_call = false;
         let mut steered: Vec<String> = Vec::new();
 
         for _ in 0..self.max_steps {
@@ -477,6 +478,21 @@ impl Harness {
                     ws.push_round(round);
                     retrieved.push(0);
                     stall = 0;
+                    continue;
+                }
+                // A reply that writes a tool call as text ran nothing; taking it as the answer
+                // loses the step (a small model does this with the working state last). Say so
+                // once and let it try again.
+                if !corrected_text_call && writes_tool_call_as_text(&completion.content, &tools) {
+                    corrected_text_call = true;
+                    tracing::info!("the model wrote a tool call as text; asking again");
+                    ws.push_round(vec![
+                        Message::assistant(completion.content.clone()),
+                        Message::user(
+                            "Your last reply wrote a tool call as text, so nothing ran. To use a tool, call it as a tool. If you are done, reply with the final answer only.",
+                        ),
+                    ]);
+                    retrieved.push(0);
                     continue;
                 }
                 answer = completion.content.trim().to_string();
@@ -1802,6 +1818,23 @@ fn core_loaded(engine: &Engine, profile: &AgentProfile) -> Vec<String> {
     v
 }
 
+/// Whether `text` contains a call to one of `tools` written out as text (`record_state({`,
+/// `fs__read(`), the way a model sometimes "calls" a tool without calling it.
+fn writes_tool_call_as_text(text: &str, tools: &[ToolDef]) -> bool {
+    tools.iter().any(|t| {
+        [t.name.clone(), ark_model::mangle_tool_name(&t.name)]
+            .iter()
+            .any(|name| {
+                text.match_indices(&format!("{name}(")).any(|(i, m)| {
+                    let before = text[..i].chars().last();
+                    let after = text[i + m.len()..].trim_start();
+                    !before.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
+                        && (after.starts_with('{') || after.starts_with(')'))
+                })
+            })
+    })
+}
+
 /// Search hits that show their matching lines, and lines shown per hit.
 const SNIPPET_HITS: usize = 5;
 const SNIPPET_LINES: usize = 2;
@@ -2139,6 +2172,38 @@ mod tests {
             "strings",
             "a bare adapter name is fine"
         );
+    }
+
+    #[test]
+    fn tool_calls_written_as_text_are_recognized() {
+        let tools = vec![ToolDef {
+            name: "record_state".into(),
+            description: String::new(),
+            parameters: json!({}),
+        }];
+        assert!(writes_tool_call_as_text(
+            r#"record_state({ "kind": "finding" })"#,
+            &tools
+        ));
+        assert!(writes_tool_call_as_text(
+            "Done.\nrecord_state( {\"kind\": 1})",
+            &tools
+        ));
+        assert!(!writes_tool_call_as_text("I recorded the state.", &tools));
+        assert!(!writes_tool_call_as_text("see my_record_state({})", &tools));
+        let dotted = vec![ToolDef {
+            name: "fs.read".into(),
+            description: String::new(),
+            parameters: json!({}),
+        }];
+        assert!(writes_tool_call_as_text(
+            r#"fs__read({"path": "a"})"#,
+            &dotted
+        ));
+        assert!(!writes_tool_call_as_text(
+            "fs.read is the tool for that",
+            &dotted
+        ));
     }
 
     #[test]

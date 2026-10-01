@@ -85,6 +85,9 @@ pub struct RunRecord {
     pub steps: u32,
     pub model_calls: u32,
     pub calls_by_role: BTreeMap<String, u32>,
+    /// Input plus output tokens, by role.
+    #[serde(default)]
+    pub tokens_by_role: BTreeMap<String, u64>,
     pub calls_by_model: BTreeMap<String, u32>,
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
@@ -108,7 +111,8 @@ pub struct RunRecord {
     pub tool_failed: u32,
     /// Calls served from an earlier identical result instead of running.
     pub deduplicated: u32,
-    /// Executions of a call identical to one that already ran in this run.
+    /// Executions of a call identical to one that already ran in this run, with no
+    /// state-changing call approved in between.
     pub repeated_executions: u32,
     /// Runtime-handled calls (discovery, retrieval, state), by name.
     pub meta_calls: BTreeMap<String, u32>,

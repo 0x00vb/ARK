@@ -110,6 +110,11 @@ per-run token. The page in `web/` is plain ES modules; apps add panels, artifact
 tool renderers, actions and status lines through `window.ark`, and backend methods through
 `ArkUi::handler`. See [`UI.md`](UI.md).
 
+### `ark-bench`: measurement
+Beside the front-ends, on `ark-sdk`: workloads, a metered provider, a simulated model,
+reports and comparisons. Any application can run its own workloads through it; it names no
+domain. See [`BENCH.md`](BENCH.md).
+
 ### `ark-sdk` — the facade
 `Ark::builder()` composes an `Engine`, a `ModelRouter`, and an `AgentProfile` into a
 one-call `.ask()`. A `prelude` re-exports everything a typical consumer names.

@@ -206,6 +206,13 @@ scripted run can be continued interactively later with `--resume`.
 
 Exit codes: 0 answered, 1 error, 130 stopped by Ctrl+C.
 
+## Logs
+
+The interactive shell logs to `<store>/ark.log`, a headless run to stderr, at the level in
+`ARK_LOG` (`warn` by default; `info` adds one line per turn with its tokens, calls and time).
+Logs never contain the conversation. Settings for timeouts, retries and traces are in
+[`OPERATIONS.md`](OPERATIONS.md).
+
 ## Building an app on the shell
 
 An app is described once as an `ark_interact::App`: the agent, its commands, labels and

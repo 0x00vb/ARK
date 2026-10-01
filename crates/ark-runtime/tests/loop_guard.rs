@@ -166,3 +166,64 @@ async fn varied_real_work_is_not_cut_off() {
     assert_eq!(r.stops, 0);
     assert_eq!(r.steps, 16, "ran to the step limit");
 }
+
+fn say(text: &str) -> Completion {
+    Completion {
+        content: text.into(),
+        tool_calls: vec![],
+        usage: Usage::measured(10, 5),
+    }
+}
+
+async fn answer_after(script: Vec<Completion>) -> (String, Arc<MockProvider>) {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open_with(dir.path(), Registry::new().with(Arc::new(Svc))).unwrap();
+    let project = engine.create_project("t", "").unwrap();
+    let model = Arc::new(MockProvider::new("m", script));
+    let p: Arc<dyn Provider> = model.clone();
+    let out = Harness::new(ModelRouter::single(p))
+        .planner(false)
+        .critic(false)
+        .ask(
+            &engine,
+            &AgentProfile::default(),
+            &project.id,
+            "what is the total",
+            |_| {},
+        )
+        .await
+        .unwrap();
+    (out.answer, model)
+}
+
+#[tokio::test]
+async fn a_tool_call_written_as_text_is_not_taken_as_the_answer() {
+    let (answer, model) = answer_after(vec![
+        say(r#"record_state({ "kind": "finding", "text": "the total is 5" })"#),
+        say("The total is 5."),
+    ])
+    .await;
+    assert_eq!(answer, "The total is 5.");
+    let second = &model.recorded()[1];
+    assert!(
+        second
+            .messages
+            .iter()
+            .any(|m| m.content.contains("wrote a tool call as text")),
+        "the model is told why"
+    );
+}
+
+#[tokio::test]
+async fn the_text_call_correction_happens_once() {
+    let (answer, model) = answer_after(vec![
+        say(r#"record_state({ "kind": "finding" })"#),
+        say(r#"record_state({ "kind": "finding" }) again"#),
+    ])
+    .await;
+    assert!(
+        answer.contains("again"),
+        "the second reply is accepted: {answer}"
+    );
+    assert_eq!(model.call_count(), 2);
+}

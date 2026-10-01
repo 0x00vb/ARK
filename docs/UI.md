@@ -164,6 +164,12 @@ front-end uses the same.
 | `summary` | Session, model, project or context changed |
 | `ext` | An app handler's `emitter.emit` |
 
+Every event carries `seq`, one higher than the last. `hello` returns `seq` (everything up to
+it is in its answer) and `live`, the running turn's events so far, so a window that opens or
+reconnects mid-turn rebuilds the turn and then follows it; the page drops events it has
+already shown and reloads on a gap. In a browser the stream reconnects with backoff (1 s
+doubling to 30 s) and stops after ten failures with a Retry button.
+
 The HTTP server binds 127.0.0.1, requires the per-run token on every request except static
 files, and rejects a `Host` header that is not the loopback address, so another local
 process or a web page cannot drive the agent.
@@ -184,16 +190,15 @@ process or a web page cannot drive the agent.
 
 ## Tokens
 
-The window sends the model exactly what the shell sends. `tests/host.rs` runs 500 turns
-through a CLI `Interaction` and 500 through the `Host`, and compares every request. Output
-from a run of that test:
+The window sends the model what the shell sends. `tests/host.rs` runs 500 turns through a CLI
+`Interaction` and 500 through the `Host` and compares every request: the system prompt and
+messages byte for byte (invocation ids aside), and the tool list, which differs only by
+`present` (a window can show things; a terminal cannot). Output from a run of that test:
 
 | path | requests | turn 50 answer request | turn 500 answer request |
 |---|---:|---:|---:|
-| CLI (Interaction) | 1000 | 1230 | 1233 |
-| GUI (Host) | 1000 | 1230 | 1233 |
-
-The test fails if any request differs in size.
+| CLI (Interaction) | 1000 | 1231 | 1234 |
+| GUI (Host) | 1000 | 1231 | 1234 |
 
 ## Limits
 
@@ -201,4 +206,6 @@ The test fails if any request differs in size.
   libraries (SecRes loads CodeMirror and xterm.js from cdnjs on first use).
 - One `Host` serves one live session. Two browser tabs on one server share it.
 - Approval grants are not persisted across processes, as in the shell.
-- There is no macOS WebDriver for the native window; its page is tested in WebKit instead.
+- There is no macOS WebDriver for the native window; its page is tested in WebKit instead,
+  and an app's bundle can be checked through its browser transport (SecRes:
+  `scripts/verify-desktop.sh`).

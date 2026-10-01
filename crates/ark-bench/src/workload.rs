@@ -386,6 +386,7 @@ fn measure(
                 } => {
                     r.model_calls += 1;
                     *r.calls_by_role.entry(role.clone()).or_default() += 1;
+                    *r.tokens_by_role.entry(role.clone()).or_default() += usage.total() as u64;
                     *r.calls_by_model.entry(model.clone()).or_default() += 1;
                     r.input_tokens += usage.prompt_tokens as u64;
                     r.cached_input_tokens += usage.cached_tokens as u64;
@@ -424,7 +425,11 @@ fn measure(
                     }
                 }
                 HarnessEvent::Duplicate { .. } => r.deduplicated += 1,
-                HarnessEvent::ApprovalRequested { .. } => r.approvals_requested += 1,
+                HarnessEvent::ApprovalRequested { .. } => {
+                    r.approvals_requested += 1;
+                    // A state change: a read after it is a new read, not a repeat.
+                    executed.clear();
+                }
                 HarnessEvent::Stall { stopped, .. } => {
                     if *stopped {
                         r.stall_stops += 1;

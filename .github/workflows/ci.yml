@@ -1,0 +1,27 @@
+# Runs scripts/ci.sh, the same checks a release is held to locally.
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/ci.sh
+  page:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cd crates/ark-ui/tests/web && npm ci && npx playwright-core install webkit
+      - run: ARK_UI_PAGE_TESTS=1 cargo test -p ark-ui --test page --locked

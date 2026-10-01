@@ -1,51 +1,35 @@
-# ARK — Agent Runtime Kit
+# ARK, the Agent Runtime Kit
 
-**A domain-agnostic runtime, SDK, CLI, and UI foundation for building agents.**
+A Rust runtime, SDK, terminal shell and workspace UI for building agents in any domain. ARK
+provides the agent loop, context and token management, model routing, the tool and approval
+model, an evidence and working-state memory, persistence, usage accounting and a benchmark
+harness. An application supplies its tools, prompts and vocabulary.
 
-ARK is the machinery that makes an LLM agent *effective, efficient, inspectable, and
-reliable* — extracted from a real, working security-research workstation and stripped of
-every domain assumption. It gives you an agent loop, context/token management, model
-routing, a tool/permission model, an evidence-and-working-state memory, persistence, and
-usage accounting, so you can start a new agent product without rebuilding any of it.
+ARK came out of a security research workstation (SecRes) and keeps no trace of that domain.
+The check it holds itself to: the same runtime must be able to run an agent that helps an
+author write a novel. [`examples/writing-agent`](examples/writing-agent) does, with no change
+to any ARK crate.
 
-> **The test ARK holds itself to:** *Could this exact runtime power an agent whose only job
-> is helping an author write a novel?* If not, the abstraction is too domain-specific. See
-> [`examples/writing-agent`](examples/writing-agent) — it does, on the same runtime a
-> security product uses, with zero changes to any ARK crate.
+The runtime is headless. The shell and the workspace are optional front-ends on top of it.
 
-Not a framework you fight: **headless runtime first, optional CLI, optional GUI.** The
-runtime never requires a UI, and adding a new domain is *configuration + extensions*, not
-edits to the harness.
-
----
-
-## Why ARK exists
-
-Every serious agent re-implements the same hard parts: keeping the context window bounded as
-a task runs long, distilling noisy tool output into something a model can reason over,
-routing cheap vs. expensive models, gating dangerous actions, remembering what's established
-vs. merely believed, and making all of it observable. ARK is those parts, done once, behind
-small stable interfaces — with the domain (tools, prompts, vocabulary) injected by you.
-
-## What's in the box
+## Crates
 
 | Crate | Responsibility |
 |---|---|
-| **`ark-core`** | Pure domain types. **No tool or domain name appears here.** Artifacts, actions, invocations, the capability *catalog*, the evidence/working-state model, workspace focus. |
-| **`ark-model`** | Bring-your-own-model: one `Provider` trait for chat + tool-calling. Anthropic, OpenAI(-compatible), Ollama, and a scriptable Mock. |
-| **`ark-store`** | Content-addressed blob store + SQLite metadata + full-text search. Domain-agnostic. |
-| **`ark-tools`** | The `Adapter`/`Registry` tool boundary, a subprocess helper, and an **MCP plugin bridge** for out-of-process tools in any language. Ships **no** domain tools. |
-| **`ark-runtime`** | The agent loop(s): context **budget**, model **router**, deterministic **distillation**, progressive tool disclosure, a persistent **working state + investigation graph**, self-check + critic, **metrics**, and the approval gate. |
-| **`ark-sdk`** | The small, stable facade — `Ark::builder()`, an `AgentProfile`, and a `prelude`. |
-| **`ark-interact`** | The interaction layer between the runtime and any front-end: `App`, `Interaction` (sessions, turns, approvals, steering), slash commands that return structured `Report`s, activity labels, traces, and context/usage/state views. Draws nothing. |
-| **`ark-cli`** | The interactive terminal shell every ARK app opens into: streaming, approvals, cancel, steering, sessions and resume, slash commands, and a headless `-p` mode. See [`docs/CLI.md`](docs/CLI.md). |
-| **`ark-ui`** | The same app in a window (Tauri) or a local browser page: conversation-first, approvals, sessions, inline reports, and app panels and viewers. Optional; see [`docs/UI.md`](docs/UI.md). |
+| `ark-core` | Pure types: artifacts, actions, invocations, the capability catalog, evidence cards, working state, workspace focus. No tool or domain name. |
+| `ark-model` | One `Provider` trait for chat with tool calls: Anthropic, OpenAI and compatible endpoints, Ollama, and a scriptable mock. Timeouts, output caps, error classes, retry policy, prompt caching. |
+| `ark-store` | Content-addressed blobs, SQLite metadata, full-text search. |
+| `ark-tools` | The `Adapter` / `Registry` tool boundary, a subprocess helper, and an MCP bridge for out-of-process tools. Ships no domain tools. |
+| `ark-runtime` | The agent loop: context budget, model router, deterministic distillation, progressive tool disclosure, result reuse, parallel reads, stall guard, retries, working state, self-check and critic, metrics, sessions, approvals, cancellation, steering. |
+| `ark-sdk` | The facade: `Ark::builder()`, `AgentProfile`, a `prelude`. |
+| `ark-interact` | Between the runtime and any front-end: `App`, `Interaction`, commands that return `Report`s, activity labels, traces, context and usage views, logging. Draws nothing. |
+| `ark-cli` | The terminal shell every ARK app opens into, plus a headless `-p` mode. [`docs/CLI.md`](docs/CLI.md) |
+| `ark-ui` | The same app in a window (Tauri) or a local browser page. [`docs/UI.md`](docs/UI.md) |
+| `ark-bench` | Benchmark and eval harness for any ARK app. [`docs/BENCH.md`](docs/BENCH.md) |
 
-Two unrelated example consumers ship in-tree to prove generality:
-[`minimal-agent`](examples/minimal-agent) (calculator + clock) and
-[`writing-agent`](examples/writing-agent) (a novelist's editor). A third, real consumer — a
-security-research workstation — lives in its own repo and consumes ARK as a version-pinned
-dependency, deleting ~5,300 lines of its own harness in the process.
+Consumers: [`minimal-agent`](examples/minimal-agent) (calculator and clock),
+[`writing-agent`](examples/writing-agent) (a novelist's editor), and SecRes, in its own
+repository, which pins ARK by release tag.
 
 ## Quick start
 
@@ -53,7 +37,7 @@ dependency, deleting ~5,300 lines of its own harness in the process.
 use ark_sdk::prelude::*;
 use std::sync::Arc;
 
-// 1. Define a tool (an Adapter). Any number of actions, each with a JSON-Schema input.
+// A tool: any number of actions, each with a JSON Schema input.
 struct Weather;
 #[async_trait::async_trait]
 impl Adapter for Weather {
@@ -72,7 +56,6 @@ impl Adapter for Weather {
 }
 
 # async fn run() -> Result<(), ArkError> {
-// 2. Wire the agent: tools + persona + model. That's the whole integration surface.
 let ark = Ark::builder()
     .store_root("./workspace")
     .tool(Arc::new(Weather))
@@ -82,130 +65,85 @@ let ark = Ark::builder()
     .provider(ark_model::from_env_arc()?)  // ARK_PROVIDER / ARK_MODEL
     .build()?;
 
-// 3. Run.
 let project = ark.create_project("trip", "weekend planning")?;
 let outcome = ark.ask(&project.id, "what's the weather in Lisbon today?").await?;
 println!("{}", outcome.answer);
 # Ok(()) }
 ```
 
-Run the examples:
-
 ```bash
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p minimal-agent -- "what is 6 * 7?"
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p writing-agent   # the interactive writer
-cargo test   # 156 tests, no live model required (the Mock provider drives the loops)
+cargo test --workspace   # no live model needed: the mock provider drives the loops
+scripts/ci.sh            # everything a release is held to
 ```
 
-## The interactive shell
+## The shell and the workspace
 
-An ARK app is something you enter, not a command you call. `ark-cli` gives every app the same
-terminal session: type in plain words, watch what the agent does, approve changes, press esc to
-stop, leave with ctrl+d and come back with `--resume`. The app supplies its name, tools,
-commands, labels and colours:
+An ARK app opens into a session: type in plain words, watch what the agent does, approve
+changes, press esc to stop, leave with ctrl+d and continue with `--resume`. The same app runs in
+a window or a browser page through `ark-ui`. The terminal transcript is never replayed into
+the model: a 500-turn session sends the same size request on turn 500 as on turn 50.
 
 ```rust
-let app = ark_interact::App::new("Writer")
-    .ark(ark)
-    .command(std::sync::Arc::new(ChapterCmd));
-ark_cli::ArkCli::new(app)
-    .theme(ark_cli::Theme::default().accent(ark_cli::Accent::Magenta).prompt("✎ "))
-    .run()
-    .await
+let app = ark_interact::App::new("Writer").ark(ark).command(std::sync::Arc::new(ChapterCmd));
+ark_cli::ArkCli::new(app).run().await
 ```
 
-The terminal transcript is never replayed into the model. A 500-turn session sends the same
-size request on turn 500 as on turn 50. Full guide: [`docs/CLI.md`](docs/CLI.md).
+## How it keeps cost down
 
-## Configuration reference
+| Mechanism | Where |
+|---|---|
+| Each request is assembled under a token budget from whole rounds; old rounds drop in chunks | `ark-runtime::budget` |
+| Tool output becomes a short evidence card; full rows stay in the store and `get_evidence` reads a filtered slice | `distill`, `evidence` |
+| The model sees a compact index of actions and loads a schema only when it needs one; four runtime tools by default | `catalog`, `capmap` |
+| A request layout a prefix cache can serve: fixed system prompt, tools in load order, working state last; Anthropic cache breakpoints | `harness`, `ark-model` |
+| Identical successful calls are reused within the rules of `Reuse` | `harness` |
+| Independent reads from one reply run together | `harness` |
+| A loop that stops making progress is ended | `harness` |
+| Working state and a bounded conversation carry-over instead of transcript replay | `session` |
+| Every request reports where its tokens came from | `ContextReport` |
 
-Wire everything through `Ark::builder()`; every knob has a sane default.
+Measured before and after in [`bench/RESULTS.md`](bench/RESULTS.md).
+
+## Configuration
+
+`Ark::builder()` has a default for every setting.
 
 | Builder method | Default | Purpose |
 |---|---|---|
-| `.store_root(path)` | `./ark-workspace` | Store location; also loads `<root>/plugins.json`. |
-| `.tool(Arc<dyn Adapter>)` / `.registry(r)` | empty | Register domain tools. |
-| `.profile(AgentProfile)` | generic assistant | Persona, capabilities, distillers, knowledge, core actions, markers. |
-| `.provider(Arc<dyn Provider>)` | — | Use one model for every role. |
-| `.router(ModelRouter)` | — | Two-tier (fast/strong) routing by role. |
-| `.context_budget(tokens)` | `6000` | Target prompt size; older rounds compress out. |
-| `.max_steps(n)` | `16` | Tool-loop step cap. |
-| `.planner(bool)` / `.critic(bool)` | `true` | Toggle the planning and self-critic passes. |
-| `.allow_mutate(bool)` | `false` | Let `Mutate` actions run without a separate approval step. |
+| `.store_root(path)` | `./ark-workspace` | store location; also loads `<root>/plugins.json` |
+| `.tool(adapter)` / `.registry(r)` | empty | the application's tools |
+| `.profile(AgentProfile)` | generic assistant | persona, capabilities, distillers, knowledge, core actions |
+| `.provider(p)` / `.router(r)` | from the environment | one model, or a fast and a strong tier |
+| `.context_budget(tokens)` | 6000 | request budget |
+| `.max_steps(n)` | 16 | step limit per turn |
+| `.planner(bool)` / `.critic(bool)` | on | planning and critic passes |
+| `.allow_mutate(bool)` | off | run state-changing actions without approval |
 
-**Environment:** `ARK_PROVIDER` (`ollama`|`openai`|`anthropic`|`mock` with `ARK_MOCK_SCRIPT`), `ARK_MODEL`,
-`ARK_MODEL_FAST`/`ARK_MODEL_STRONG` (+ `ARK_PROVIDER_*`) for two-tier routing,
-`ARK_CTX_BUDGET`, and the vendor keys `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` /
-`OLLAMA_HOST`.
+Environment variables (models, timeouts, retries, logs, traces) are listed in
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md). The `AgentProfile` is where an application
+injects its domain: [`docs/EXTENSION.md`](docs/EXTENSION.md).
 
-The `AgentProfile` is the single injection point for everything domain-specific — see
-[`docs/EXTENSION.md`](docs/EXTENSION.md).
-
-## Token & LLM efficiency (preserved from the source)
-
-ARK keeps the optimizations that made the original agent cheap, and makes them observable:
-
-- **Bounded context.** The transcript is a list of *rounds*; each model call is assembled
-  under a token budget, dropping whole oldest rounds (never half a tool-call pair). Context
-  stays roughly flat no matter how long a task runs. (`ark-runtime::budget`)
-- **Distillation, not dumping.** Raw tool output never enters the prompt; a deterministic
-  distiller turns each result into a compact evidence card with the salient identifiers, and
-  the full rows stay retrievable on demand. No model call spent summarizing. (`distill`)
-- **Progressive tool disclosure.** The model sees a one-line capability index, not every
-  tool's full schema, and loads a schema only when it needs it. (`catalog`)
-- **Dedup.** An identical `(action, input)` call reuses prior evidence instead of re-running.
-- **Working state over replay.** A resumed session loads a compact structured state, not the
-  whole chat history.
-- **Model routing.** Cheap models plan/summarize/extract; the strong model reasons and
-  synthesizes. Deterministic work (classification, dedup, self-check) spends no model call.
-- **Full accounting.** Every run reports input/output/peak-prompt tokens, calls by model and
-  role, tool calls, dedup/retrieval hits, and tokens-per-finding. (`Metrics`)
-
-## Architecture & dependency direction
+## Dependency direction
 
 ```
-ark-core ──► ark-model, ark-store, ark-tools ──► ark-runtime ──► ark-sdk ──► your app
+ark-core -> ark-model, ark-store, ark-tools -> ark-runtime -> ark-sdk -> ark-interact -> ark-cli, ark-ui
+                                                                    \-> ark-bench
 ```
 
-No ARK crate depends on a consumer; there are no cycles. `ark-core` depends on nothing but
-serde/uuid/blake3/time. Full detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), and
-the extraction rationale in [`docs/EXTRACTION_MAP.md`](docs/EXTRACTION_MAP.md).
+No ARK crate depends on a consumer, and there are no cycles. Details:
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Consuming & upgrading ARK
+## Versions
 
-ARK is a Cargo workspace publishing independently-versioned crates; consumers depend on them
-as ordinary dependencies and **never copy the source**. Pin a compatible range and update
-intentionally:
-
-```toml
-[dependencies]
-ark-sdk = "0.1"   # pulls the matching ark-core/model/store/tools/runtime
-```
-
-Versioning, compatibility guarantees, and the release process are in
-[`docs/VERSIONING.md`](docs/VERSIONING.md); changes are tracked in
-[`CHANGELOG.md`](CHANGELOG.md).
-
-## Status & roadmap
-
-Done and green (114 tests): the headless runtime, the model/tool/store abstractions, the
-SDK, the extension model (adapters + MCP plugins + `AgentProfile`), token/context
-optimization, usage accounting, docs, and two unrelated example agents.
-
-Since v0.1 (see [`CHANGELOG.md`](CHANGELOG.md)): an injectable `AcquisitionProvider` seam, and
-the **origin security product migrated onto ARK** as a versioned dependency (its harness
-duplication deleted; behavior and token efficiency verified unchanged) — ARK's third unrelated
-consumer.
-
-v0.2 adds `ark-cli`, the interactive shell, and the runtime seams it needs (streaming,
-approvals, cancellation, sessions, context reports). v0.3 splits out `ark-interact`, the
-interaction layer both front-ends share, and adds `ark-ui`, the graphical workspace. SecRes's
-desktop app runs on it. Next is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Consumers pin a release tag and upgrade on purpose. Tags never move; a correction is a new
+version. See [`docs/VERSIONING.md`](docs/VERSIONING.md) and [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). The one rule that matters: **no tool name and no
-domain name in `ark-core`** — the invariant that keeps ARK reusable.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). The one hard rule: no tool name and no domain name in
+`ark-core`.
 
 ## License
 

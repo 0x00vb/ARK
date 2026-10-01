@@ -99,8 +99,30 @@ observations.
 
 `ark-cli` is extended from your app, never edited. Add slash commands by implementing
 `ark_cli::Command`, label your tools with `ActivityLabels` or a `ToolRenderer`, class approvals
-with `AgentProfile::builder().approval_classifier(..)`, and mark results that never go stale
-with `ActionDescriptor::reusable()`. Details and examples: [`CLI.md`](CLI.md).
+with `AgentProfile::builder().approval_classifier(..)`. Details and examples: [`CLI.md`](CLI.md).
+
+## 9. Reuse of results
+
+An identical successful call may be served from an earlier result. Say how far that holds
+for each action:
+
+| Declare | When | Reused |
+|---|---|---|
+| nothing (`Reuse::Auto`) | most actions | within a turn until something changes state; across turns only a `Read` of a stored artifact |
+| `.reusable()` (`Reuse::Stable`) | output depends only on input | always |
+| `.volatile()` (`Reuse::Volatile`) | a live capture, a clock, a counter | never |
+
+SecRes marks its live captures (`frida.trace`, `debug.trace`, `debug.memory`,
+`debug.attach`) volatile; its static analyses of stored binaries are reused across turns
+without declaring anything.
+
+## 10. What the user is looking at
+
+A front-end reports the focused surface and selection as a `Focus`. A `Selection` has
+`text` and `line`, and any other marks in the view's own words, at the top level of the JSON:
+`{"line": 12}`, `{"address": "0x1000"}`, `{"cell": "B4"}`. The agent sees each as
+`name value` and nearby evidence is matched against them. ARK gives none of these names a
+meaning.
 
 ## What you should *not* do
 

@@ -3,6 +3,83 @@
 All notable changes to ARK are documented here. Format: [Keep a Changelog](https://keepachangelog.com);
 this project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.4.0]
+
+Production hardening, measurement, and a cheaper harness. No new front-end surface.
+Before/after numbers are in `bench/RESULTS.md`; the benchmark harness is in `docs/BENCH.md`
+and running ARK in production in `docs/OPERATIONS.md`.
+
+### Added
+- **`ark-bench`**: a benchmark and eval harness for any ARK application. Workloads, a metered
+  provider that records every request (size by part, measured usage, latency, first token,
+  prefix shared with recent requests), a simulated model whose policy reacts to what each
+  request contains, JSON reports and comparisons with regression gating, and a generic suite
+  of 13 workloads. `bench/at-commit.sh` builds the current bench against an earlier commit.
+- Provider resilience: `ProviderError::{Status, Overloaded, Malformed}` and
+  `is_transient()`; `HttpConfig` (connect, idle and request timeouts, output cap);
+  `RetryPolicy` (`ARK_MODEL_RETRIES`, default 2) used by the harness; `HarnessEvent::Retry`;
+  `ModelCall.retries`, `Metrics.provider_retries`.
+- `Reuse { Auto, Stable, Volatile }` on `ActionDescriptor` (`.reusable()`, `.volatile()`).
+- `get_evidence` takes `match` and `offset`; `ark_runtime::evidence`.
+- Context reports for every model call: `ContextReport.role`, `model_output`,
+  `action_schemas`; the planner, critic and forced answer emit one.
+- `Session::begin_turn` / `fail_turn`, `Turn.{incomplete, error, pid}`,
+  `Engine::recover_interrupted`, `Invocation.pid`, `session::INTERRUPTED`.
+- `ark_interact::logging` (`ARK_LOG`, file or stderr), `TraceMode` (`ARK_TRACE`),
+  `TRACES_KEPT`; `Store::{project_stats, session_text_chars, prune_turn_traces,
+  list_running_invocations}`.
+- `TurnOptions::present`, `Harness::presentation`, `Interaction::set_presentation`,
+  `Ark::context_preview_for`.
+- `Usage::cache_write_tokens`, `Usage::uncached()`, `Metrics.cache_write_tokens`.
+- Events: `HarnessEvent::Stall`, `ModelCall.first_token_ms`, `ToolResult.raw_tokens`.
+- `scripts/ci.sh`, `scripts/check-version.sh`, `scripts/verify-release.sh`,
+  `.github/workflows/ci.yml`.
+
+### Changed (breaking)
+- `ActionDescriptor::reusable: bool` is replaced by `reuse: Reuse`. `.reusable()` still
+  marks an action `Stable`.
+- `Selection` keeps `text` and `line`; `address`, `symbol` and `function` become named
+  `marks` (flattened in JSON, so `{"address": "0x1000"}` still parses). Use
+  `Selection::mark(name)`.
+- The runtime tools offered by default are `load_action`, `get_evidence`, `search_evidence`
+  and `record_state`. `list_actions` and `record_note` are no longer offered (still handled);
+  `present` is offered only when the front-end can present.
+- Request layout: the working state is the last message of each request instead of part of
+  the system prompt; the system prompt is fixed for a turn and ordered instructions, index,
+  project; loaded tools keep their load order; artifacts are listed as `art:<12 hex>`, at
+  most 12. Default prompt text changed accordingly (a MINOR behavior change by our policy;
+  in 0.x it ships with the breaking release).
+- Anthropic requests carry `cache_control` breakpoints and merge consecutive messages of
+  one role; the default output cap is 8192 (was 2048). Ollama sends `num_predict` (4096).
+- New fields on `HarnessEvent::ModelCall` and `ToolResult`, new variants `Retry` and `Stall`:
+  exhaustive matches need the new arms.
+- The default activity labeler no longer treats `process`, `function` or `symbol` arguments
+  as the subject.
+- A tool call whose arguments are not valid JSON is `ProviderError::Malformed`, not `{}`.
+
+### Fixed
+- The stall guard counted every retrieval as progress, so a model repeating one search ran
+  to the step limit.
+- A read after a write in the same turn could be served the stale first result.
+- A short artifact id and the full id were different calls to the dedup check.
+- `get_evidence` could not reach rows past the first 40 of a large output.
+- With no output cap and Ollama's context shifting, one degenerate reply ran for over 20
+  minutes; there was no request or idle timeout on any provider.
+- The common distiller summarized any `*.read` / `*.write` / `*.list` action as a file
+  operation and dropped its fields (`notes.read` became "read  (0 lines)").
+- The working-state digest showed the oldest six items of each section, not the newest.
+- After every turn the workspace loaded the whole transcript and every stored tool output to
+  count them; memory and turn time grew with each turn.
+- A turn killed mid-run, or ending in an error, vanished from the transcript; a tool call
+  killed mid-run left no record.
+- The browser event stream reconnected every few seconds forever, and a reconnect during a
+  turn could lose or repeat events.
+- The HTTP server spun when `accept` kept failing.
+- Warnings (for example a plugin that failed to load) went nowhere: no logger was installed.
+- A reply that writes a tool call as text (`record_state({...})`) is no longer taken as the
+  final answer: the model is told once that nothing ran and asked again. With the working
+  state as the last message, qwen3:4b did this in 4 of 39 live runs.
+
 ## [0.3.0]
 
 An interaction layer both front-ends share, and a graphical workspace on it.

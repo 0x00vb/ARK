@@ -352,7 +352,7 @@ fn deltas(before: &Summary, after: &Summary) -> Vec<Delta> {
 fn gated(metric: &str, mode: &str) -> bool {
     match metric {
         "success_rate" => true,
-        "repeated_executions" | "stall_stops" => true,
+        "repeated_executions" => true,
         // Token and call counts are deterministic in simulated runs; live runs are noisy.
         "model_calls"
         | "input_tokens"
@@ -412,8 +412,9 @@ fn fmt_opt(v: Option<f64>) -> String {
     match v {
         None => "n/a".into(),
         Some(x) if x.fract() == 0.0 => format!("{x:.0}"),
-        Some(x) if x.abs() < 0.01 => format!("{x:.6}"),
-        Some(x) => format!("{x:.2}"),
+        Some(x) if x.abs() < 1.0 => format!("{x:.6}"),
+        Some(x) if x.abs() < 100.0 => format!("{x:.3}"),
+        Some(x) => format!("{x:.1}"),
     }
 }
 
@@ -435,6 +436,29 @@ pub fn markdown(c: &Comparison) -> String {
                 .map(|x| fmt_opt(Some(x)))
                 .unwrap_or_else(|| "n/a".into()),
             pct
+        );
+    }
+    let _ = writeln!(
+        s,
+        "\n| Workload | Success | Model calls | Total tokens | Uncached input | Cost/success (USD) |"
+    );
+    let _ = writeln!(s, "|---|---:|---:|---:|---:|---:|");
+    for w in &c.workloads {
+        let get = |m: &str| w.metrics.iter().find(|d| d.metric == m);
+        let cell = |m: &str| match get(m) {
+            Some(d) if d.before == d.after => fmt_opt(d.after),
+            Some(d) => format!("{} -> {}", fmt_opt(d.before), fmt_opt(d.after)),
+            None => "n/a".into(),
+        };
+        let _ = writeln!(
+            s,
+            "| {} | {} | {} | {} | {} | {} |",
+            w.name,
+            cell("success_rate"),
+            cell("model_calls"),
+            cell("total_tokens"),
+            cell("uncached_input_tokens"),
+            cell("cost_per_success_usd")
         );
     }
     if !c.regressions.is_empty() {

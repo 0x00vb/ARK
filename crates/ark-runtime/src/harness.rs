@@ -342,13 +342,8 @@ impl Harness {
             }
         }
 
-        let static_system = self.static_system(engine, profile, project)?;
-        let index = crate::capmap::capability_index(
-            &engine.registry,
-            &profile.capabilities,
-            &profile.inferrer,
-        )
-        .await;
+        let sys = self.system_prompt(engine, profile, project).await?;
+        let system = sys.render();
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
             acquisition: profile.acquisition.is_some(),
@@ -357,13 +352,10 @@ impl Harness {
 
         let wsctx = self.build_workspace_context(engine, project)?;
 
-        // Loaded action schemas: the profile's core set (present in the registry) + on-demand.
-        let mut loaded: HashSet<String> = profile
-            .core_actions
-            .iter()
-            .filter(|a| engine.registry.descriptor(a).is_some())
-            .cloned()
-            .collect();
+        // Loaded action schemas: the profile's core set (present in the registry), then each
+        // on-demand load appended. The order never changes within a turn, so loading one more
+        // action keeps every earlier tool definition in the cacheable prefix.
+        let mut loaded: Vec<String> = core_loaded(engine, profile);
 
         let first = FirstTurn {
             workspace: wsctx.digest(6),
@@ -409,16 +401,15 @@ impl Harness {
                 metrics.cards_created - repeated_failures + fresh_meta + loaded.len() as u32;
 
             let state_digest = state.digest(STATE_DIGEST_ITEMS);
-            let system =
-                format!("{static_system}\n\n{index}\n\n== WORKING STATE ==\n{state_digest}");
-            let (messages, est) = ws.assemble(&system);
+            let tail = state_message(&state_digest);
+            let (mut messages, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
+            messages.push(tail);
             metrics.peak_prompt_tokens = metrics.peak_prompt_tokens.max(est);
 
             let tools = self.tool_set(engine, &loaded, meta_cfg);
             let report = self.report(
                 profile,
-                &static_system,
-                &index,
+                &sys,
                 &state_digest,
                 &first,
                 first_tokens,
@@ -671,8 +662,7 @@ impl Harness {
                 .force_answer(
                     profile,
                     &mut ws,
-                    &static_system,
-                    &index,
+                    &system,
                     &state,
                     &mut metrics,
                     &mut on_event,
@@ -709,7 +699,7 @@ impl Harness {
             if let Some(revised) = self
                 .run_critic(
                     profile,
-                    &static_system,
+                    &system,
                     &state,
                     &answer,
                     &detail,
@@ -767,13 +757,8 @@ impl Harness {
             .store
             .get_research_state(project)?
             .unwrap_or_default();
-        let static_system = self.static_system(engine, profile, project)?;
-        let index = crate::capmap::capability_index(
-            &engine.registry,
-            &profile.capabilities,
-            &profile.inferrer,
-        )
-        .await;
+        let sys = self.system_prompt(engine, profile, project).await?;
+        let system = sys.render();
         let wsctx = self.build_workspace_context(engine, project)?;
         let first = FirstTurn {
             workspace: wsctx.digest(6),
@@ -785,14 +770,9 @@ impl Harness {
         let mut ws = WorkingSet::new(self.budget);
         ws.push_round(vec![Message::user(first_text)]);
         let state_digest = state.digest(STATE_DIGEST_ITEMS);
-        let system = format!("{static_system}\n\n{index}\n\n== WORKING STATE ==\n{state_digest}");
-        let (_, est) = ws.assemble(&system);
-        let loaded: HashSet<String> = profile
-            .core_actions
-            .iter()
-            .filter(|a| engine.registry.descriptor(a).is_some())
-            .cloned()
-            .collect();
+        let tail = state_message(&state_digest);
+        let (_, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
+        let loaded = core_loaded(engine, profile);
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
             acquisition: profile.acquisition.is_some(),
@@ -801,8 +781,7 @@ impl Harness {
         let tools = self.tool_set(engine, &loaded, meta_cfg);
         Ok(self.report(
             profile,
-            &static_system,
-            &index,
+            &sys,
             &state_digest,
             &first,
             first_tokens,
@@ -819,8 +798,7 @@ impl Harness {
     fn report(
         &self,
         profile: &AgentProfile,
-        static_system: &str,
-        index: &str,
+        sys: &SystemPrompt,
         state_digest: &str,
         first: &FirstTurn,
         first_tokens: u32,
@@ -832,12 +810,12 @@ impl Harness {
         step: usize,
     ) -> ContextReport {
         let instructions = estimate_tokens(&profile.prompts.instructions);
-        let project = estimate_tokens(static_system).saturating_sub(instructions);
-        let capability_index = estimate_tokens(index);
-        let working_state = estimate_tokens(state_digest);
-        let system_total = estimate_tokens(&format!(
-            "{static_system}\n\n{index}\n\n== WORKING STATE ==\n{state_digest}"
-        ));
+        // The runtime's own lines: the rules after the instructions, and the project block.
+        let project = (estimate_tokens(&sys.rules) + estimate_tokens(&sys.project))
+            .saturating_sub(instructions);
+        let capability_index = estimate_tokens(&sys.index);
+        let working_state = WorkingSet::message_tokens(&state_message(state_digest));
+        let system_total = estimate_tokens(&sys.render());
         // The first round holds workspace + conversation + task; attribute its framing to the task.
         let (workspace, conversation, task) = if ws.last_compressed == 0 {
             let w = first.workspace.as_deref().map(estimate_tokens).unwrap_or(0);
@@ -859,6 +837,7 @@ impl Harness {
         let retrieved: u32 = retrieved.iter().skip(ws.last_compressed).sum();
         let tool_rounds = total
             .saturating_sub(system_total)
+            .saturating_sub(working_state)
             .saturating_sub(first_kept)
             .saturating_sub(retrieved);
         let tool_schemas = tools
@@ -1013,13 +992,11 @@ impl Harness {
     fn tool_set(
         &self,
         engine: &Engine,
-        loaded: &HashSet<String>,
+        loaded: &[String],
         cfg: MetaToolConfig,
     ) -> Vec<ark_model::ToolDef> {
         let mut tools = catalog::meta_tool_defs(cfg);
-        let mut names: Vec<&String> = loaded.iter().collect();
-        names.sort();
-        for name in names {
+        for name in loaded {
             if let Some(d) = engine.registry.descriptor(name) {
                 tools.push(catalog::action_tooldef(&d));
             }
@@ -1034,7 +1011,7 @@ impl Harness {
         profile: &AgentProfile,
         project: &ProjectId,
         call: &ark_model::ToolCall,
-        loaded: &mut HashSet<String>,
+        loaded: &mut Vec<String>,
         state: &mut ResearchState,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
@@ -1061,7 +1038,9 @@ impl Harness {
                 let name = normalize_action_name(&sarg("name"));
                 match engine.registry.descriptor(&name) {
                     Some(d) => {
-                        loaded.insert(name.clone());
+                        if !loaded.contains(&name) {
+                            loaded.push(name.clone());
+                        }
                         Ok(format!("loaded `{name}` ({}). Its input schema is now available; call it directly.", d.summary))
                     }
                     None => Ok(format!(
@@ -1285,23 +1264,22 @@ impl Harness {
         &self,
         profile: &AgentProfile,
         ws: &mut WorkingSet,
-        static_system: &str,
-        index: &str,
+        system: &str,
         state: &ResearchState,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
     ) -> Result<Option<String>, AgentError> {
-        let system = format!(
-            "{static_system}\n\n{index}\n\n== WORKING STATE ==\n{}",
-            state.digest(8)
-        );
-        let (mut messages, est) = ws.assemble(&system);
+        // Same system prompt and rounds as the reasoning steps, so the cached prefix carries
+        // over; only the state and the instruction to stop differ.
+        let tail = state_message(&state.digest(8));
+        let (mut messages, est) = ws.assemble_with(system, WorkingSet::message_tokens(&tail));
         metrics.peak_prompt_tokens = metrics.peak_prompt_tokens.max(est);
+        messages.push(tail);
         messages.push(Message::user(&profile.prompts.force_answer));
         Ok(self
             .call_model(
                 Role::Synthesize,
-                &system,
+                system,
                 &messages,
                 &[],
                 true,
@@ -1354,7 +1332,7 @@ impl Harness {
     async fn run_critic(
         &self,
         profile: &AgentProfile,
-        static_system: &str,
+        system: &str,
         state: &ResearchState,
         answer: &str,
         issue: &str,
@@ -1362,7 +1340,7 @@ impl Harness {
         on_event: &mut impl FnMut(HarnessEvent),
     ) -> Option<String> {
         let sys = format!(
-            "{static_system}\n\n{} (the check that failed: {issue})",
+            "{system}\n\n{} (the check that failed: {issue})",
             profile.prompts.critic_intro
         );
         let msgs = [Message::user(format!(
@@ -1416,39 +1394,100 @@ impl Harness {
         Ok(ctx)
     }
 
-    fn static_system(
+    /// The system prompt for a turn. Fixed for the whole turn, and ordered from most to least
+    /// stable (instructions and rules, the capability index, then the project and its
+    /// artifacts), so a provider's prefix cache can serve it across steps and across turns.
+    async fn system_prompt(
         &self,
         engine: &Engine,
         profile: &AgentProfile,
         project: &ProjectId,
-    ) -> Result<String, AgentError> {
+    ) -> Result<SystemPrompt, AgentError> {
         let p = engine
             .store
             .get_project(project)?
             .ok_or_else(|| AgentError::ProjectNotFound(project.to_string()))?;
         let artifacts = engine.store.list_artifacts(project)?;
-        let mut s = String::new();
-        // The consumer's persona + method.
-        s.push_str(&profile.prompts.instructions);
-        s.push_str("\n\n");
-        // The runtime's mechanical footer.
-        let _ = writeln!(s, "Project: {} — {}", p.name, p.target);
-        let _ = writeln!(s, "Artifacts (pass an id as the `artifact` argument):");
+        let rules = format!(
+            "{}\n\nActions that change state need explicit human approval; observation and analysis are free — reason from what tools return.",
+            profile.prompts.instructions
+        );
+        let index = crate::capmap::capability_index(
+            &engine.registry,
+            &profile.capabilities,
+            &profile.inferrer,
+        )
+        .await;
+        let mut project_block = String::new();
+        let _ = writeln!(project_block, "Project: {} — {}", p.name, p.target);
         if artifacts.is_empty() {
-            let _ = writeln!(s, "  (none yet — ingest a file or capture one first)");
-        }
-        for a in artifacts.iter().take(20) {
-            let _ = writeln!(
-                s,
-                "  - id={} name={} kind={}",
-                a.id.as_str(),
-                a.name,
-                a.kind.as_tag()
+            let _ = write!(
+                project_block,
+                "Artifacts: none yet (ingest a file or capture one first)."
             );
+        } else {
+            let _ = writeln!(
+                project_block,
+                "Artifacts, newest first (pass `art:<id>` as the `artifact` argument):"
+            );
+            for a in artifacts.iter().take(ARTIFACTS_LISTED) {
+                let _ = writeln!(
+                    project_block,
+                    "  - art:{} {} ({})",
+                    a.id.short(),
+                    a.name,
+                    a.kind.as_tag()
+                );
+            }
+            if artifacts.len() > ARTIFACTS_LISTED {
+                let _ = write!(
+                    project_block,
+                    "  (+{} more; search_evidence finds them by content or name)",
+                    artifacts.len() - ARTIFACTS_LISTED
+                );
+            }
         }
-        let _ = write!(s, "\nActions that change state need explicit human approval; observation and analysis are free — reason from what tools return.");
-        Ok(s)
+        Ok(SystemPrompt {
+            rules,
+            index,
+            project: project_block.trim_end().to_string(),
+        })
     }
+}
+
+/// Artifacts named in the system prompt. Older ones stay reachable through search.
+const ARTIFACTS_LISTED: usize = 12;
+
+/// The system prompt, by part.
+struct SystemPrompt {
+    /// The profile's instructions plus the runtime's fixed rules.
+    rules: String,
+    index: String,
+    project: String,
+}
+
+impl SystemPrompt {
+    fn render(&self) -> String {
+        format!("{}\n\n{}\n\n{}", self.rules, self.index, self.project)
+    }
+}
+
+/// The working state, sent as the last message of every request. It changes as the agent
+/// records findings; keeping it at the end leaves everything before it byte-identical between
+/// steps, which is what a prefix cache needs.
+fn state_message(digest: &str) -> Message {
+    Message::user(format!("== WORKING STATE ==\n{digest}"))
+}
+
+/// The profile's core actions that exist in the registry, in the profile's order.
+fn core_loaded(engine: &Engine, profile: &AgentProfile) -> Vec<String> {
+    let mut v: Vec<String> = Vec::new();
+    for a in &profile.core_actions {
+        if engine.registry.descriptor(a).is_some() && !v.contains(a) {
+            v.push(a.clone());
+        }
+    }
+    v
 }
 
 /// Runtime-handled calls whose first use in a turn is progress: they bring information in or

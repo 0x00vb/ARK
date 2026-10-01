@@ -373,6 +373,22 @@ pub fn competent(
                 }
             }
         }
+        // Before answering, record the finding the way the default instructions ask: once per
+        // task, citing what it rests on. This is what makes the working state change mid-turn.
+        let cited = req.cited();
+        if !cited.is_empty() && req.has_tool("record_state") && req.count_calls("record_state") == 0
+        {
+            let text = answer(req);
+            return Reply::call(
+                "record_state",
+                json!({
+                    "kind": "finding",
+                    "text": text.split(" [inv:").next().unwrap_or(&text),
+                    "claim_type": "fact",
+                    "cites": cited.iter().map(|i| format!("inv:{i}")).collect::<Vec<_>>(),
+                }),
+            );
+        }
         Reply::Text(answer(req))
     })
 }

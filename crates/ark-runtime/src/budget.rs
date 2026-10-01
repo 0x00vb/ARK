@@ -14,12 +14,17 @@
 
 use ark_model::{estimate_tokens, Message};
 
+/// Once over budget, old rounds are dropped until the messages fit in this share of the space
+/// left. Dropping a chunk at once, instead of one round per step, keeps the start of the
+/// message list unchanged for several steps, so a provider's prefix cache keeps serving it.
+const REFILL: f32 = 0.7;
+
 /// The budgeted working transcript.
 pub struct WorkingSet {
     rounds: Vec<Vec<Message>>,
     /// Max prompt tokens (system + assembled messages) to target.
     budget: u32,
-    /// How many oldest rounds were dropped on the last assemble.
+    /// How many oldest rounds were dropped on the last assemble. Only ever grows.
     pub last_compressed: usize,
 }
 
@@ -45,7 +50,7 @@ impl WorkingSet {
 
     /// A rough token cost for one message: its text plus a small structural overhead
     /// per tool call (name + serialized arguments).
-    fn message_tokens(m: &Message) -> u32 {
+    pub fn message_tokens(m: &Message) -> u32 {
         let mut t = estimate_tokens(&m.content) + 4;
         for c in &m.tool_calls {
             t += estimate_tokens(&c.name) + estimate_tokens(&c.arguments.to_string()) + 8;
@@ -61,38 +66,39 @@ impl WorkingSet {
     /// system prompt that will accompany it. Returns the messages and the estimated
     /// total prompt tokens (system + messages).
     pub fn assemble(&mut self, system: &str) -> (Vec<Message>, u32) {
-        let sys_tokens = estimate_tokens(system);
-        let avail = self.budget.saturating_sub(sys_tokens);
+        self.assemble_with(system, 0)
+    }
 
-        // Walk newest→oldest, keeping rounds while they fit.
-        let mut kept_rev: Vec<&Vec<Message>> = Vec::new();
-        let mut used = 0u32;
-        let mut dropped = 0usize;
-        for (i, round) in self.rounds.iter().enumerate().rev() {
-            let cost = Self::round_tokens(round);
-            if used + cost <= avail || kept_rev.is_empty() {
-                // Always keep at least the most recent round, even if it alone is
-                // over budget — the model must see the latest tool results to proceed.
-                used += cost;
-                kept_rev.push(round);
-            } else {
-                dropped = i + 1;
-                break;
+    /// Like [`assemble`](WorkingSet::assemble), keeping `reserve` tokens free for messages the
+    /// caller appends after the rounds (the working state).
+    pub fn assemble_with(&mut self, system: &str, reserve: u32) -> (Vec<Message>, u32) {
+        let sys_tokens = estimate_tokens(system);
+        let avail = self.budget.saturating_sub(sys_tokens + reserve);
+        let costs: Vec<u32> = self.rounds.iter().map(|r| Self::round_tokens(r)).collect();
+        let mut used: u32 = costs.iter().skip(self.last_compressed).sum();
+        // Always keep at least the most recent round, even if it alone is over budget: the
+        // model must see the latest tool results to proceed.
+        let last = self.rounds.len().saturating_sub(1);
+        if used > avail && self.last_compressed < last {
+            let target = (avail as f32 * REFILL) as u32;
+            while self.last_compressed < last && used > target {
+                used -= costs[self.last_compressed];
+                self.last_compressed += 1;
             }
         }
-        self.last_compressed = dropped;
+        let dropped = self.last_compressed;
 
         let mut out = Vec::new();
         if dropped > 0 {
             out.push(Message::user(format!(
-                "[{dropped} earlier step(s) compressed — their conclusions are in the research state above; \
+                "[{dropped} earlier step(s) compressed — their conclusions are in the research state; \
                  retrieve any specific detail with get_evidence or search_evidence.]"
             )));
         }
-        for round in kept_rev.into_iter().rev() {
+        for round in self.rounds.iter().skip(dropped) {
             out.extend(round.iter().cloned());
         }
-        let total = sys_tokens + used + if dropped > 0 { 40 } else { 0 };
+        let total = sys_tokens + used + reserve + if dropped > 0 { 40 } else { 0 };
         (out, total)
     }
 }
@@ -143,6 +149,40 @@ mod tests {
         assert!(
             total <= 1024 + 2000,
             "assembled prompt stays near the budget"
+        );
+    }
+
+    #[test]
+    fn drops_in_chunks_so_the_prefix_stays_put() {
+        let mut ws = WorkingSet::new(2000);
+        let mut drops = Vec::new();
+        for i in 0..30 {
+            ws.push_round(round(&"word ".repeat(60 + i % 3)));
+            let (msgs, total) = ws.assemble("sys");
+            assert!(total <= 2000 + 400, "stays near the budget: {total}");
+            drops.push(ws.last_compressed);
+            assert!(msgs.last().unwrap().content.contains("word"));
+        }
+        // The dropped count only grows, and it grows in steps of several rounds: most
+        // assemblies keep the same start as the one before.
+        assert!(drops.windows(2).all(|w| w[1] >= w[0]));
+        let changes = drops.windows(2).filter(|w| w[1] != w[0]).count();
+        assert!(changes > 0 && changes <= 10, "dropped in chunks: {drops:?}");
+    }
+
+    #[test]
+    fn reserve_leaves_room_for_the_tail() {
+        let mut a = WorkingSet::new(1500);
+        let mut b = WorkingSet::new(1500);
+        for _ in 0..10 {
+            a.push_round(round(&"x ".repeat(200)));
+            b.push_round(round(&"x ".repeat(200)));
+        }
+        a.assemble_with("sys", 0);
+        b.assemble_with("sys", 500);
+        assert!(
+            b.last_compressed > a.last_compressed,
+            "a reserve drops more history"
         );
     }
 

@@ -131,6 +131,7 @@ pub enum EntryKind {
     Present,
     SelfCheck,
     Steered,
+    Stall,
     Cancelled,
     Answer,
 }
@@ -281,6 +282,7 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             model,
             usage,
             elapsed_ms,
+            ..
         } => (
             E::ModelCall,
             format!(
@@ -398,6 +400,19 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             "your message reached the model".into(),
             Some(clip(text, 100)),
             Tone::Accent,
+        ),
+        HarnessEvent::Stall {
+            idle_steps,
+            stopped,
+        } => (
+            E::Stall,
+            if *stopped {
+                format!("stall: {idle_steps} idle steps, answer forced")
+            } else {
+                format!("stall: {idle_steps} idle steps, agent nudged")
+            },
+            None,
+            Tone::Warning,
         ),
         HarnessEvent::Cancelled => (E::Cancelled, "cancelled".into(), None, Tone::Warning),
         HarnessEvent::Answer { text, streamed } => (
@@ -631,6 +646,7 @@ mod tests {
             duration_ms: Some(4),
             error: None,
             context_tokens: 30,
+            raw_tokens: 300,
         }
     }
 
@@ -644,6 +660,8 @@ mod tests {
                 model: "m".into(),
                 usage: Usage::measured(100, 5),
                 elapsed_ms: 20,
+                first_token_ms: None,
+                retries: 0,
             },
             call("c1", "notes.save"),
             HarnessEvent::ApprovalRequested {

@@ -191,6 +191,18 @@ pub fn describe(
         HarnessEvent::Steered { text } => {
             Activity::new(K::Steered, "Your message reached the agent").detail(text.clone())
         }
+        HarnessEvent::Stall {
+            idle_steps,
+            stopped,
+        } => Activity::new(
+            K::Warning,
+            if *stopped {
+                format!("No progress in {idle_steps} steps; answering with what is known")
+            } else {
+                format!("No progress in {idle_steps} steps; asked the agent to change course")
+            },
+        )
+        .tone(Tone::Warning),
         HarnessEvent::Cancelled => Activity::new(K::Stopped, "Stopped.").tone(Tone::Warning),
     })
 }
@@ -252,6 +264,7 @@ mod tests {
                 duration_ms: None,
                 error: Some("no such file\nmore".into()),
                 context_tokens: 0,
+                raw_tokens: 0,
             },
         )
         .unwrap();

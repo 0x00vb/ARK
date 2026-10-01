@@ -69,6 +69,13 @@ pub enum HarnessEvent {
         model: String,
         usage: Usage,
         elapsed_ms: u64,
+        /// Milliseconds from sending the request to the first streamed text, when any text
+        /// arrived (a reply that is only tool calls has none).
+        #[serde(default)]
+        first_token_ms: Option<u64>,
+        /// Provider-level retries this call needed before it succeeded.
+        #[serde(default)]
+        retries: u32,
     },
     ToolCall {
         id: String,
@@ -87,6 +94,10 @@ pub enum HarnessEvent {
         /// the raw output (which stays in the store).
         #[serde(default)]
         context_tokens: u32,
+        /// Estimated tokens of the raw output kept in the store. `raw_tokens` against
+        /// `context_tokens` is what distillation saved.
+        #[serde(default)]
+        raw_tokens: u32,
     },
     Duplicate {
         action: String,
@@ -132,6 +143,12 @@ pub enum HarnessEvent {
     /// A message the user sent while the turn was running reached the model.
     Steered {
         text: String,
+    },
+    /// Several steps in a row produced nothing new. `stopped` is false when the model was
+    /// nudged to change course, true when the loop ended and a final answer was forced.
+    Stall {
+        idle_steps: u32,
+        stopped: bool,
     },
     /// The turn was cancelled; no answer follows.
     Cancelled,
@@ -568,6 +585,7 @@ impl Harness {
                 cited.push(inv.id.clone());
 
                 let model_text = card_for_model(&card);
+                let raw_tokens = estimate_tokens(&inv.output.to_string());
                 on_event(HarnessEvent::ToolResult {
                     id: call.id.clone(),
                     action: call.name.clone(),
@@ -578,6 +596,7 @@ impl Harness {
                     error: inv.error.clone(),
                     // The same per-message estimate the working set budgets with.
                     context_tokens: estimate_tokens(&model_text) + 4,
+                    raw_tokens,
                 });
                 round.push(Message::tool_result(call, model_text));
             }
@@ -599,6 +618,10 @@ impl Harness {
             } else {
                 stall += 1;
                 if stall == STALL_STEER {
+                    on_event(HarnessEvent::Stall {
+                        idle_steps: stall,
+                        stopped: false,
+                    });
                     round.push(Message::user(
                         "You have gathered no new evidence for several steps. Either call load_action(name) \
                          and then a concrete action to produce evidence, or stop now and give your best \
@@ -609,6 +632,10 @@ impl Harness {
             ws.push_round(round);
             retrieved.push(round_retrieved);
             if stall >= STALL_MAX {
+                on_event(HarnessEvent::Stall {
+                    idle_steps: stall,
+                    stopped: true,
+                });
                 break;
             }
         }
@@ -904,6 +931,7 @@ impl Harness {
             let _ = tx.send(t.to_string());
         };
         let started = std::time::Instant::now();
+        let mut first_token_ms: Option<u64> = None;
         let fut = provider.complete_streaming(system, messages, tools, &sink);
         tokio::pin!(fut);
         let result = loop {
@@ -911,6 +939,7 @@ impl Harness {
                 biased;
                 _ = cancel::wait(&self.cancel) => return Ok(None),
                 Some(text) = rx.recv() => {
+                    first_token_ms.get_or_insert(started.elapsed().as_millis() as u64);
                     if stream {
                         on_event(HarnessEvent::TextDelta { text });
                     }
@@ -931,6 +960,8 @@ impl Harness {
             model,
             usage: completion.usage,
             elapsed_ms: started.elapsed().as_millis() as u64,
+            first_token_ms,
+            retries: 0,
         });
         Ok(Some(completion))
     }

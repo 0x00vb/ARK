@@ -384,6 +384,7 @@ mod tests {
                 duration_ms: Some(4),
                 error: None,
                 context_tokens: 20,
+                raw_tokens: 0,
             },
             HarnessEvent::TextDelta {
                 text: "Done.".into(),

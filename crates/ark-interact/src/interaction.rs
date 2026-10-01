@@ -654,6 +654,7 @@ impl Interaction {
             ..
         } = self;
         let rec = ctl.recorder.clone();
+        let turns_before = session.turn_count();
         let result = ark
             .ask_session(session, input, opts, |ev| {
                 rec.lock().unwrap().record(&ev);
@@ -672,8 +673,8 @@ impl Interaction {
         if last_context.is_some() {
             self.last_context = last_context;
         }
-        let index = result
-            .is_ok()
+        // A failed turn is stored too (marked incomplete), with its trace.
+        let index = (self.session.turn_count() > turns_before)
             .then(|| self.session.turn_count().saturating_sub(1));
         if let Some(i) = index {
             if let Ok(v) = serde_json::to_value(&record) {
@@ -876,6 +877,11 @@ impl Interaction {
             r = r.text(format!("› {}", clip(&t.input, 100)));
             r = r.note(if t.cancelled {
                 "  (stopped)".to_string()
+            } else if t.incomplete {
+                format!(
+                    "  (did not finish: {})",
+                    t.error.as_deref().unwrap_or("unknown reason")
+                )
             } else {
                 format!("  {}", clip(&t.answer, 160))
             });

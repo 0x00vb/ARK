@@ -263,6 +263,20 @@ impl Store {
         collect(rows)
     }
 
+    /// Invocations still marked running, in every project.
+    pub fn list_running_invocations(&self) -> Result<Vec<(ProjectId, Invocation)>> {
+        let db = self.db.lock().unwrap();
+        let mut stmt =
+            db.prepare("SELECT project_id, json FROM invocations WHERE status='running'")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (p, json) = row?;
+            out.push((ProjectId(p), serde_json::from_str(&json)?));
+        }
+        Ok(out)
+    }
+
     /// Fetch one invocation by exact id — the anchor for on-demand evidence retrieval.
     pub fn get_invocation(&self, project: &ProjectId, id: &str) -> Result<Option<Invocation>> {
         let db = self.db.lock().unwrap();

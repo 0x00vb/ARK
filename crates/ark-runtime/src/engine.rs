@@ -43,7 +43,24 @@ impl Engine {
     ) -> Result<Self, AgentError> {
         let root = root.as_ref().to_path_buf();
         load_plugins(&root, &mut registry);
-        Ok(Engine::new(Store::open(root)?, registry))
+        let engine = Engine::new(Store::open(root)?, registry);
+        engine.recover_interrupted()?;
+        Ok(engine)
+    }
+
+    /// Mark calls left running by a process that no longer exists as failed, so nothing reads
+    /// as still in progress (or, worse, as finished) after a crash. Returns how many.
+    pub fn recover_interrupted(&self) -> Result<usize, AgentError> {
+        let mut n = 0;
+        for (project, mut inv) in self.store.list_running_invocations()? {
+            if inv.pid.is_some_and(crate::process::alive) {
+                continue;
+            }
+            inv.mark_failed("interrupted: the process stopped before this call finished");
+            self.store.put_invocation(&project, &inv)?;
+            n += 1;
+        }
+        Ok(n)
     }
 
     /// Open a workspace at `root` with an empty registry (plus MCP plugins). Register the
@@ -177,6 +194,10 @@ impl Engine {
             self.store.put_invocation(project, &inv)?;
             return Ok(inv);
         }
+        // Recorded before it runs: a crash mid-call leaves a trace that recovery can mark.
+        inv.status = InvocationStatus::Running;
+        inv.pid = Some(std::process::id());
+        self.store.put_invocation(project, &inv)?;
 
         let blobs = StoreBlobs(&self.store);
         let ctx = RunCtx::new(&blobs).with_workspace(self.workspace_dir(project)?);

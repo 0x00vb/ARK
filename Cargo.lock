@@ -204,6 +204,7 @@ dependencies = [
  "ark-tools",
  "async-trait",
  "futures",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

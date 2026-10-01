@@ -47,6 +47,10 @@ pub struct Invocation {
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub finished_at: Option<OffsetDateTime>,
+    /// The process that ran the call. A call still `Running` whose process is gone was
+    /// interrupted (see the runtime's recovery on open).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
 }
 
 impl Invocation {
@@ -69,6 +73,7 @@ impl Invocation {
             error: None,
             created_at: OffsetDateTime::now_utc(),
             finished_at: None,
+            pid: None,
         }
     }
 

@@ -102,6 +102,7 @@ export class Thread {
     turn.closeBlocks();
     // A replayed "stopped" activity already said so, as it did live.
     if (t.cancelled && !acts.some((a) => a.kind === "stopped")) turn.notice("Stopped.", "muted");
+    else if (t.unfinished) turn.notice(`Did not finish: ${t.unfinished}`, "error");
     else if (t.answer) turn.text(t.answer, true);
     turn.footer(t.footer, t.index);
     return turn.el;

@@ -30,6 +30,7 @@ pub mod harness;
 pub mod knowledge;
 pub mod metrics;
 pub mod notebook;
+mod process;
 pub mod profile;
 pub mod router;
 pub mod session;

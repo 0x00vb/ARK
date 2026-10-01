@@ -208,11 +208,21 @@ impl Ark {
             .steering(opts.steer)
             .focus(opts.focus);
         let project = session.project().clone();
-        let outcome = harness
+        session.begin_turn(&self.engine, input)?;
+        match harness
             .ask(&self.engine, &self.profile, &project, input, on_event)
-            .await?;
-        session.record_turn(&self.engine, input, &outcome)?;
-        Ok(outcome)
+            .await
+        {
+            Ok(outcome) => {
+                session.record_turn(&self.engine, input, &outcome)?;
+                Ok(outcome)
+            }
+            Err(e) => {
+                // Kept in the transcript, marked, so the person sees what failed.
+                session.fail_turn(&self.engine, input, &e.to_string())?;
+                Err(e.into())
+            }
+        }
     }
 
     /// What the next turn's first request would contain, by source, without calling a model.

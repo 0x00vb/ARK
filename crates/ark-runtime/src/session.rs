@@ -135,7 +135,37 @@ pub struct Turn {
     pub metrics: Metrics,
     #[serde(with = "time::serde::rfc3339")]
     pub at: OffsetDateTime,
+    /// The turn did not finish: it failed, or the process stopped while it ran. `answer` is
+    /// then empty and `error` says why.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub incomplete: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The process running the turn, while it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
 }
+
+impl Turn {
+    fn placeholder(index: u32, input: &str) -> Turn {
+        Turn {
+            index,
+            input: input.to_string(),
+            answer: String::new(),
+            cited: Vec::new(),
+            cancelled: false,
+            steered: Vec::new(),
+            metrics: Metrics::default(),
+            at: OffsetDateTime::now_utc(),
+            incomplete: true,
+            error: None,
+            pid: Some(std::process::id()),
+        }
+    }
+}
+
+/// Why a turn that never finished is marked so.
+pub const INTERRUPTED: &str = "interrupted: the app stopped before this turn finished";
 
 /// What a compaction changed, in estimated tokens.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -227,13 +257,29 @@ impl Session {
     }
 
     fn load(engine: &Engine, record: SessionRecord) -> Result<Session, AgentError> {
-        // Turns already folded into gists are excluded from the window.
+        // Turns already folded into gists are excluded from the window; a turn at or past
+        // `turn_count` was begun and never recorded.
         let start = Self::window_start(&record);
-        let recent = Self::read_turns(engine, &record.id, Some(record.policy.recent_turns))?
+        let count = record.turn_count;
+        let read = Self::read_turns(engine, &record.id, Some(record.policy.recent_turns + 1))?;
+        let begun = read.iter().find(|t| t.index >= count).cloned();
+        let recent = read
             .into_iter()
-            .filter(|t| t.index as usize >= start)
+            .filter(|t| t.index as usize >= start && t.index < count)
             .collect();
-        Ok(Session { record, recent })
+        let mut session = Session { record, recent };
+        // A turn begun by a process that is gone was interrupted: keep it, marked, so the
+        // person sees what they asked and the next turn's carry-over says it did not finish.
+        if let Some(mut t) = begun {
+            if !t.pid.is_some_and(crate::process::alive) {
+                t.index = count;
+                t.incomplete = true;
+                t.error = Some(INTERRUPTED.to_string());
+                t.pid = None;
+                session.push_turn(engine, t, &Metrics::default())?;
+            }
+        }
+        Ok(session)
     }
 
     /// Index of the first turn still in the verbatim window: every folded turn became a gist,
@@ -242,17 +288,19 @@ impl Session {
         (record.gists.len() + record.dropped_turns as usize).min(record.turn_count as usize)
     }
 
+    /// Stored turns; one that cannot be read (a damaged record) is shown as such instead of
+    /// making the whole session unreadable.
     fn read_turns(
         engine: &Engine,
         id: &SessionId,
         last: Option<usize>,
     ) -> Result<Vec<Turn>, AgentError> {
-        engine
+        Ok(engine
             .store
             .list_session_turns(id.as_str(), last)?
             .into_iter()
-            .map(|v| serde_json::from_value(v).map_err(AgentError::from))
-            .collect()
+            .map(readable_turn)
+            .collect())
     }
 
     fn save(&self, engine: &Engine) -> Result<(), AgentError> {
@@ -308,21 +356,38 @@ impl Session {
         before: Option<u32>,
         limit: usize,
     ) -> Result<Vec<Turn>, AgentError> {
-        engine
+        let before = Some(
+            before
+                .unwrap_or(self.record.turn_count)
+                .min(self.record.turn_count),
+        );
+        Ok(engine
             .store
             .list_session_turns_before(self.record.id.as_str(), before, limit)?
             .into_iter()
-            .map(|v| serde_json::from_value(v).map_err(AgentError::from))
-            .collect()
+            .map(readable_turn)
+            .collect())
     }
 
-    /// The full stored transcript, for display. Never sent to a model.
+    /// The full stored transcript, for display. Never sent to a model. A turn still running
+    /// is not part of it.
     pub fn transcript(
         &self,
         engine: &Engine,
         last: Option<usize>,
     ) -> Result<Vec<Turn>, AgentError> {
-        Self::read_turns(engine, &self.record.id, last)
+        let count = self.record.turn_count;
+        Ok(
+            Self::read_turns(engine, &self.record.id, last.map(|n| n + 1))?
+                .into_iter()
+                .filter(|t| t.index < count)
+                .rev()
+                .take(last.unwrap_or(usize::MAX))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect(),
+        )
     }
 
     /// The bounded carry-over for the next turn, or `None` for a fresh session.
@@ -352,6 +417,11 @@ impl Session {
                 let _ = writeln!(s, "  [user] {}", clip(&t.user_text(), p.input_chars));
                 let reply = if t.cancelled {
                     "(cancelled before answering)".to_string()
+                } else if t.incomplete {
+                    format!(
+                        "(did not finish: {})",
+                        t.error.as_deref().unwrap_or("unknown reason")
+                    )
                 } else {
                     clip(&t.answer, p.answer_chars)
                 };
@@ -359,6 +429,19 @@ impl Session {
             }
         }
         Some(s.trim_end().to_string())
+    }
+
+    /// Record that a turn started, before it runs. If the process stops before
+    /// [`record_turn`](Session::record_turn) or [`fail_turn`](Session::fail_turn), the next
+    /// open marks the turn interrupted instead of losing it.
+    pub fn begin_turn(&mut self, engine: &Engine, input: &str) -> Result<(), AgentError> {
+        let t = Turn::placeholder(self.record.turn_count, input);
+        engine.store.put_session_turn(
+            self.record.id.as_str(),
+            t.index,
+            &serde_json::to_value(&t)?,
+        )?;
+        Ok(())
     }
 
     /// Store a finished turn and slide the carry-over window.
@@ -381,17 +464,42 @@ impl Session {
             steered: outcome.steered.clone(),
             metrics: outcome.metrics.clone(),
             at: OffsetDateTime::now_utc(),
+            incomplete: false,
+            error: None,
+            pid: None,
         };
+        self.push_turn(engine, turn, &outcome.metrics)
+    }
+
+    /// Store a turn that ended in an error, marked incomplete with the error.
+    pub fn fail_turn(
+        &mut self,
+        engine: &Engine,
+        input: &str,
+        error: &str,
+    ) -> Result<(), AgentError> {
+        let mut t = Turn::placeholder(self.record.turn_count, input);
+        t.error = Some(error.to_string());
+        t.pid = None;
+        self.push_turn(engine, t, &Metrics::default())
+    }
+
+    fn push_turn(
+        &mut self,
+        engine: &Engine,
+        turn: Turn,
+        metrics: &Metrics,
+    ) -> Result<(), AgentError> {
         engine.store.put_session_turn(
             self.record.id.as_str(),
             turn.index,
             &serde_json::to_value(&turn)?,
         )?;
         if self.record.title.is_empty() {
-            self.record.title = clip(input, 60);
+            self.record.title = clip(&turn.input, 60);
         }
         self.record.turn_count += 1;
-        self.record.usage.add(&outcome.metrics);
+        self.record.usage.add(metrics);
         self.record.updated_at = OffsetDateTime::now_utc();
         self.recent.push(turn);
         let keep = self.record.policy.recent_turns;
@@ -470,9 +578,23 @@ impl Turn {
 }
 
 /// A one-line summary of a turn: the question and the answer's first sentence.
+/// A stored turn, or a marked stand-in when the record cannot be read.
+fn readable_turn(v: serde_json::Value) -> Turn {
+    let index = v["index"].as_u64().unwrap_or(0) as u32;
+    let input = v["input"].as_str().unwrap_or_default().to_string();
+    serde_json::from_value(v).unwrap_or_else(|e| {
+        let mut t = Turn::placeholder(index, &input);
+        t.pid = None;
+        t.error = Some(format!("this turn's record could not be read ({e})"));
+        t
+    })
+}
+
 fn gist(t: &Turn, max: usize) -> String {
     let answer = if t.cancelled {
         "(cancelled)".to_string()
+    } else if t.incomplete {
+        "(did not finish)".to_string()
     } else {
         first_sentence(&t.answer)
     };

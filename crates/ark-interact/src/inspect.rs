@@ -584,6 +584,9 @@ pub struct TranscriptTurn {
     #[serde(default)]
     pub steered: Vec<String>,
     pub cancelled: bool,
+    /// Why the turn did not finish (it failed, or the app stopped while it ran).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unfinished: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub at: OffsetDateTime,
     pub footer: Vec<String>,
@@ -602,6 +605,9 @@ impl TranscriptTurn {
             answer: t.answer.clone(),
             steered: t.steered.clone(),
             cancelled: t.cancelled,
+            unfinished: t
+                .incomplete
+                .then(|| t.error.clone().unwrap_or_else(|| "did not finish".into())),
             at: t.at,
             footer: footer(
                 &t.metrics,

@@ -38,6 +38,8 @@ pub(crate) async fn serve(
     let task = tokio::spawn(async move {
         loop {
             let Ok((sock, _)) = listener.accept().await else {
+                // Out of file descriptors or similar: pause instead of spinning.
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 continue;
             };
             let (host, assets, token) = (host.clone(), assets.clone(), token.clone());

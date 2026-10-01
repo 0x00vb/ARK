@@ -708,6 +708,8 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   transition: opacity 180ms var(--ease), translate 180ms var(--ease);
 }
 .toast[data-show="true"] { opacity: 1; translate: -50% 0; }
+.toast[data-persist] { pointer-events: auto; }
+.toast .link { color: inherit; text-decoration: underline; }
 
 /* ---- motion ---------------------------------------------------------------------------------- */
 

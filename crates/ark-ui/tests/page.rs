@@ -143,3 +143,20 @@ async fn steering_lands_where_it_was_read_and_replays_the_same() {
     ];
     drive("steer", script, Duration::from_millis(120)).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_that_reloads_mid_turn_rebuilds_it_once() {
+    let narration =
+        "Reading the notes slowly, one line at a time, so that a window can reload in between. "
+            .repeat(3);
+    let script = vec![
+        say(narration.trim(), true),
+        say("The notes mention a locket.", false),
+    ];
+    drive("rejoin", script, Duration::from_millis(120)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failing_event_stream_backs_off_and_stops() {
+    drive("backoff", vec![], Duration::ZERO).await;
+}

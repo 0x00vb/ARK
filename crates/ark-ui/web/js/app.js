@@ -83,6 +83,7 @@ function retitle(key, title) {
 let toastTimer;
 function toast(msg) {
   const t = $("#toast");
+  delete t.dataset.persist;
   t.textContent = msg;
   t.dataset.show = "true";
   clearTimeout(toastTimer);
@@ -238,7 +239,36 @@ async function refreshRing() {
 
 // ---- host events ------------------------------------------------------------------------------
 
+// Every server event carries a sequence number. `hello` says how far its answer reaches, so
+// events at or below it are already shown; events that arrive while the page boots wait in
+// `early` and are applied after. A gap means events were lost: reload.
+const feed = { seq: 0, booting: false, early: [] };
+
+function receive(msg) {
+  if (typeof msg.seq !== "number") return onEvent(msg);
+  if (feed.booting) return void feed.early.push(msg);
+  if (msg.seq <= feed.seq) return;
+  if (feed.seq && msg.seq > feed.seq + 1) {
+    feed.seq = msg.seq;
+    return void boot(true);
+  }
+  feed.seq = msg.seq;
+  onEvent(msg);
+}
+
+function connection(msg) {
+  const el = $("#toast");
+  if (msg.kind === "connected") return toast("Reconnected");
+  if (msg.kind === "reconnecting") return toast(`Connection lost; retrying in ${Math.round(msg.delay / 1000)} s`);
+  // Disconnected for good: say so until the person retries.
+  clearTimeout(toastTimer);
+  clear(el).append(h("span", "Disconnected from the agent. "), h("button.link", { onclick: () => { el.dataset.show = "false"; delete el.dataset.persist; msg.retry(); } }, "Retry"));
+  el.dataset.persist = "";
+  el.dataset.show = "true";
+}
+
 function onEvent(msg) {
+  if (msg.kind === "reconnecting" || msg.kind === "disconnected" || msg.kind === "connected") return connection(msg);
   // App scripts can follow the same stream: `ark.on("ark:turn_finished", fn)`.
   if (msg.kind !== "ext" && msg.kind !== "text") dispatchExt(`ark:${msg.kind}`, msg);
   switch (msg.kind) {
@@ -420,6 +450,19 @@ function fit() {
 // ---- boot -------------------------------------------------------------------------------------
 
 async function boot(again = false) {
+  feed.booting = true;
+  feed.early = [];
+  try {
+    await bootOnce(again);
+  } finally {
+    feed.booting = false;
+    const early = feed.early;
+    feed.early = [];
+    for (const m of early) receive(m);
+  }
+}
+
+async function bootOnce(again) {
   let hello;
   try {
     hello = await transport.call("hello");
@@ -427,6 +470,7 @@ async function boot(again = false) {
     clear($("#thread")).append(h("div.welcome", h("h1", "Not connected"), h("p", e.message)));
     return;
   }
+  feed.seq = hello.seq || 0;
   state.ui = hello.ui || {};
   state.commands = hello.commands || [];
   composer.commands = state.commands;
@@ -439,6 +483,11 @@ async function boot(again = false) {
   if (hello.running) {
     thread.begin(hello.running);
     setRunning(true);
+    // Rebuild the running turn from its events so far. Open questions come from
+    // `approvals` below, so the replay skips them.
+    for (const m of hello.live || []) {
+      if (m.kind === "text" || m.kind === "event") onEvent(m);
+    }
   } else setRunning(false);
   for (const a of hello.approvals || []) onEvent({ kind: "approval", ...a });
 }
@@ -472,7 +521,7 @@ async function start() {
   $("#ctx-ring").addEventListener("click", () => runCommand("/context"));
   $("#session-title").addEventListener("dblclick", renameInline);
   document.addEventListener("keydown", keys);
-  transport.subscribe(onEvent);
+  transport.subscribe(receive);
   await boot();
   composer.focus();
   requestAnimationFrame(() => appEl.classList.add("ready"));

@@ -51,16 +51,74 @@ impl HandlerCtx {
     }
 }
 
+/// Events kept for a window that reconnects in the middle of a turn. Beyond this the replay
+/// is cut short (the page then shows the turn from where it rejoined).
+const LIVE_EVENTS: usize = 20_000;
+
+/// The event stream every window reads. Each event gets the next sequence number, so a window
+/// that reconnects can tell what it has already seen; the running turn's events are kept so a
+/// window that joins late can rebuild it.
+pub(crate) struct Feed {
+    tx: broadcast::Sender<Value>,
+    state: Mutex<FeedState>,
+}
+
+#[derive(Default)]
+struct FeedState {
+    seq: u64,
+    /// Events since the running turn started; `None` between turns.
+    live: Option<Vec<Value>>,
+}
+
+impl Feed {
+    fn new() -> Arc<Feed> {
+        let (tx, _) = broadcast::channel(8192);
+        Arc::new(Feed {
+            tx,
+            state: Mutex::new(FeedState::default()),
+        })
+    }
+
+    /// Number the event and send it. The lock keeps numbering and sending in one order.
+    pub(crate) fn send(&self, mut v: Value) {
+        let mut st = self.state.lock().unwrap();
+        st.seq += 1;
+        v["seq"] = json!(st.seq);
+        let kind = v["kind"].as_str().unwrap_or_default().to_string();
+        if kind == "turn_started" {
+            st.live = Some(Vec::new());
+        }
+        if let Some(live) = st.live.as_mut() {
+            if live.len() < LIVE_EVENTS {
+                live.push(v.clone());
+            }
+        }
+        if kind == "turn_finished" {
+            st.live = None;
+        }
+        let _ = self.tx.send(v);
+    }
+
+    /// The last sequence number sent, and the running turn's events so far.
+    pub(crate) fn position(&self) -> (u64, Vec<Value>) {
+        let st = self.state.lock().unwrap();
+        (st.seq, st.live.clone().unwrap_or_default())
+    }
+
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<Value> {
+        self.tx.subscribe()
+    }
+}
+
 /// Sends consumer events to every connected window.
 #[derive(Clone)]
 pub struct Emitter {
-    tx: broadcast::Sender<Value>,
+    feed: Arc<Feed>,
 }
 
 impl Emitter {
     pub fn emit(&self, name: &str, payload: Value) {
-        let _ = self
-            .tx
+        self.feed
             .send(json!({ "kind": "ext", "name": name, "payload": payload }));
     }
 }
@@ -104,7 +162,7 @@ pub struct Host {
     ix: tokio::sync::Mutex<Interaction>,
     engine: Arc<Engine>,
     labels: Labels,
-    tx: broadcast::Sender<Value>,
+    feed: Arc<Feed>,
     running: Mutex<Option<Running>>,
     approvals: Mutex<HashMap<u64, (Value, oneshot::Sender<ApprovalDecision>)>>,
     next_id: AtomicU64,
@@ -140,13 +198,12 @@ impl Host {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
         );
-        let (tx, _) = broadcast::channel(8192);
         let host = Arc::new(Host {
             engine: ix.ark().shared_engine(),
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
             ix: tokio::sync::Mutex::new(ix),
-            tx,
+            feed: Feed::new(),
             running: Mutex::new(None),
             approvals: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
@@ -160,18 +217,19 @@ impl Host {
         host
     }
 
+    /// Every event from now on, each with a `seq` one higher than the last.
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
-        self.tx.subscribe()
+        self.feed.subscribe()
     }
 
     pub fn emitter(&self) -> Emitter {
         Emitter {
-            tx: self.tx.clone(),
+            feed: self.feed.clone(),
         }
     }
 
     fn emit(&self, v: Value) {
-        let _ = self.tx.send(v);
+        self.feed.send(v);
     }
 
     pub fn is_running(&self) -> bool {
@@ -248,11 +306,16 @@ impl Host {
                     .unwrap()
                     .as_ref()
                     .map(|r| r.input.clone());
+                // Everything up to `seq` is in this answer: stored turns through `summary`,
+                // the running turn through `live`. A window ignores events at or below it.
+                let (seq, live) = self.feed.position();
                 Ok(json!({
                     "summary": self.summary(),
                     "ui": self.info,
                     "commands": self.commands,
                     "running": running,
+                    "live": live,
+                    "seq": seq,
                     "approvals": pending,
                     "version": env!("CARGO_PKG_VERSION"),
                 }))
@@ -552,7 +615,7 @@ impl Host {
         if let Some(focus) = self.focus.lock().unwrap().take() {
             ix.set_focus(focus);
         }
-        let tx = self.tx.clone();
+        let feed = self.feed.clone();
         let end = ix
             .run_turn(&input, &ctl, |ev, a| {
                 // Text arrives in small pieces; everything else carries its description.
@@ -560,7 +623,7 @@ impl Host {
                     HarnessEvent::TextDelta { text } => json!({ "kind": "text", "text": text }),
                     _ => json!({ "kind": "event", "event": ev, "activity": a }),
                 };
-                let _ = tx.send(v);
+                feed.send(v);
             })
             .await;
         let (ok, cancelled, error, answer, steps) = match &end.result {

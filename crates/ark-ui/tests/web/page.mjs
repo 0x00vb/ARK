@@ -84,7 +84,8 @@ const scenarios = {
   // pick, and the width never scrolls sideways.
   async narrow(page) {
     await page.setViewportSize({ width: 720, height: 800 });
-    await page.waitForTimeout(150);
+    // Wait for the layout to switch rather than a fixed time (flaky on a busy machine).
+    await page.waitForFunction(() => document.getElementById("app").dataset.compact === "true");
     const state = () => page.evaluate(() => ({
       compact: document.getElementById("app").dataset.compact,
       drawer: document.getElementById("app").dataset.drawer || "",
@@ -132,6 +133,71 @@ const scenarios = {
     const stored = await shape(page);
     assert.deepEqual(stored, live);
   },
+
+  // A window that reloads in the middle of a turn rebuilds the turn from its events so far and
+  // then follows it: the narration shows once and whole, the answer once.
+  async rejoin(page) {
+    await page.locator("#input").fill("What do the notes say?");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(900);
+    await page.reload();
+    await page.locator("#input").waitFor();
+    await page.locator(".answer", { hasText: "The notes mention a locket." }).waitFor({ timeout: 20000 });
+    await page.waitForTimeout(250);
+    const after = await shape(page);
+    assert.deepEqual(after, [
+      `text: ${NARRATION}`,
+      "work: Used 1 tool · Reading notes",
+      "answer: The notes mention a locket.",
+    ]);
+    assert.equal(await page.locator(".turn").count(), 1, "one turn, not a copy");
+  },
+
+  // A stream that keeps failing: reconnects back off (1 s doubling to 30 s), stop after ten,
+  // and say so with a way to try again.
+  async backoff(page) {
+    await page.waitForFunction(() => window.__es.opened >= 11, null, { timeout: 10000 });
+    await page.waitForTimeout(200);
+    const { opened, delays } = await page.evaluate(() => window.__es);
+    assert.equal(opened, 11, "the first try and ten reconnects");
+    assert.equal(delays.length, 10, delays.join(","));
+    delays.forEach((d, i) => {
+      const cap = Math.min(30000, 1000 * 2 ** i);
+      assert.ok(d >= cap / 2 && d <= cap, `delay ${i} = ${d}, cap ${cap}`);
+    });
+    const toast = page.locator("#toast");
+    assert.match(await toast.innerText(), /Disconnected/);
+    await toast.locator("button", { hasText: "Retry" }).click();
+    await page.waitForFunction(() => window.__es.opened >= 12, null, { timeout: 5000 });
+  },
+};
+
+const NARRATION = "Reading the notes slowly, one line at a time, so that a window can reload in between. ".repeat(3).trim();
+
+// Scripts that run before the page, for scenarios that replace a browser API.
+const inits = {
+  // An EventSource that always fails, and timers that fire at once (recording how long the
+  // page asked to wait) so ten backoffs take milliseconds.
+  backoff: () => {
+    window.__es = { opened: 0, delays: [] };
+    const realTimeout = window.setTimeout.bind(window);
+    window.setTimeout = (fn, ms, ...a) => {
+      // Only the transport's reconnect waits are compressed and recorded.
+      const caller = (new Error().stack || "").split("\n")[1] || "";
+      if (ms >= 500 && caller.includes("transport.js")) {
+        window.__es.delays.push(ms);
+        return realTimeout(fn, 1, ...a);
+      }
+      return realTimeout(fn, ms, ...a);
+    };
+    window.EventSource = class {
+      constructor() {
+        window.__es.opened += 1;
+        realTimeout(() => this.onerror && this.onerror(new Event("error")), 1);
+      }
+      close() {}
+    };
+  },
 };
 
 const run = scenarios[scenario];
@@ -144,6 +210,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
+  if (inits[scenario]) await page.addInitScript(inits[scenario]);
   await page.goto(url);
   await page.locator("#input").waitFor();
   await run(page);

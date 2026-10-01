@@ -386,3 +386,63 @@ async fn gui_and_cli_send_the_same_context_for_500_turns() {
         "the prompt plateaus: {at_50} vs {at_500}"
     );
 }
+
+#[tokio::test]
+async fn events_are_numbered_and_a_late_window_gets_the_running_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let saves = Arc::new(AtomicUsize::new(0));
+    let model = mock_paced("notes.read", Duration::from_millis(5));
+    let (host, _) = ArkUi::new(app(dir.path(), model, saves))
+        .open()
+        .await
+        .unwrap();
+    let mut rx = host.subscribe();
+    host.call("send", json!({ "text": "read the notes" }))
+        .await
+        .unwrap();
+    // Wait until some answer text has streamed, then join as a new window would.
+    let mut seen: Vec<Value> = Vec::new();
+    loop {
+        let v = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let text = v["kind"] == "text";
+        seen.push(v);
+        if text && seen.iter().filter(|e| e["kind"] == "text").count() > 5 {
+            break;
+        }
+    }
+    let hello = host.call("hello", json!({})).await.unwrap();
+    let live = hello["live"].as_array().unwrap();
+    let seq = hello["seq"].as_u64().unwrap();
+    assert_eq!(
+        live[0]["kind"], "turn_started",
+        "the replay starts at the turn"
+    );
+    assert_eq!(live.last().unwrap()["seq"].as_u64().unwrap(), seq);
+    assert!(
+        live.len() >= seen.len(),
+        "everything this window saw is in the replay"
+    );
+    // The rest of the turn arrives after `seq`, numbered one by one.
+    let mut last = seen.last().unwrap()["seq"].as_u64().unwrap();
+    loop {
+        let v = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let n = v["seq"].as_u64().unwrap();
+        assert_eq!(n, last + 1, "no gaps, no repeats");
+        last = n;
+        if v["kind"] == "turn_finished" {
+            break;
+        }
+    }
+    let after = host.call("hello", json!({})).await.unwrap();
+    assert!(
+        after["live"].as_array().unwrap().is_empty(),
+        "nothing to replay between turns"
+    );
+    assert_eq!(after["seq"].as_u64().unwrap(), last);
+}

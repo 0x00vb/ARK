@@ -1302,7 +1302,7 @@ impl Harness {
                     return Ok(format!("no stored file or document matches \"{query}\". This searches stored artifacts only: to get new data, load and call an action from the capability index; to search a result you already have, use get_evidence with match."));
                 }
                 let mut s = format!("{} match(es) for \"{query}\":\n", hits.len());
-                for h in hits {
+                for (i, h) in hits.iter().enumerate() {
                     let _ = writeln!(
                         s,
                         "  art:{} {} ({}) score {:.2}",
@@ -1311,6 +1311,13 @@ impl Harness {
                         h.kind,
                         h.score
                     );
+                    // The lines that matched, for the best hits: often the answer itself, and
+                    // otherwise what tells the model whether the file is worth opening.
+                    if i < SNIPPET_HITS {
+                        for line in matching_lines(engine, &h.artifact_id, &query) {
+                            let _ = writeln!(s, "      > {line}");
+                        }
+                    }
                 }
                 Ok(s)
             }
@@ -1793,6 +1800,55 @@ fn core_loaded(engine: &Engine, profile: &AgentProfile) -> Vec<String> {
         }
     }
     v
+}
+
+/// Search hits that show their matching lines, and lines shown per hit.
+const SNIPPET_HITS: usize = 5;
+const SNIPPET_LINES: usize = 2;
+
+/// Up to [`SNIPPET_LINES`] lines of a stored text artifact that contain a word of `query`
+/// (three letters or more, any case), clipped. Empty for binary or very large artifacts.
+fn matching_lines(engine: &Engine, artifact: &str, query: &str) -> Vec<String> {
+    let terms: Vec<String> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.chars().count() >= 3)
+        .map(|t| t.to_lowercase())
+        .collect();
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    let Ok(bytes) = engine.store.read_blob(&ArtifactId(artifact.to_string())) else {
+        return Vec::new();
+    };
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Vec::new();
+    }
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return Vec::new();
+    };
+    // Lines with the most query words first, then in file order.
+    let mut scored: Vec<(usize, usize, &str)> = text
+        .lines()
+        .enumerate()
+        .filter_map(|(n, line)| {
+            let l = line.to_lowercase();
+            let hits = terms.iter().filter(|t| l.contains(t.as_str())).count();
+            (hits > 0).then_some((hits, n, line))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored
+        .into_iter()
+        .take(SNIPPET_LINES)
+        .map(|(_, _, line)| {
+            let t = line.trim();
+            if t.chars().count() > 200 {
+                format!("{}…", t.chars().take(200).collect::<String>())
+            } else {
+                t.to_string()
+            }
+        })
+        .collect()
 }
 
 /// Runtime-handled calls whose first use in a turn is progress: they bring information in or

@@ -499,6 +499,10 @@ pub fn retrieval() -> Spec {
         policy: competent(
             |r| {
                 let mut g = vec![Goal::call("search_evidence", json!({ "query": "K7 kettle warranty" }))];
+                // The matching lines may already answer; then there is nothing to open.
+                if r.results().iter().any(|(_, t)| t.contains("18 months")) {
+                    return g;
+                }
                 let Some(hit) = r
                     .result_of("search_evidence")
                     .and_then(|t| word_after(t, "art:"))

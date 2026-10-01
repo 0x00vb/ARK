@@ -213,6 +213,16 @@ impl Engine {
     /// way; adapters look blobs up by full id. Rewrite an `artifact` argument given as a full
     /// id, a short prefix (with or without `art:`) or an exact name to the full id. An
     /// argument that matches nothing is left as it was, so the adapter reports it.
+    /// The input as the adapter will see it: an `artifact` argument resolved to its full id.
+    /// Two calls with equal canonical inputs are the same call.
+    pub fn canonical_input(
+        &self,
+        project: &ProjectId,
+        input: serde_json::Value,
+    ) -> serde_json::Value {
+        self.resolve_artifact_arg(project, input)
+    }
+
     fn resolve_artifact_arg(
         &self,
         project: &ProjectId,

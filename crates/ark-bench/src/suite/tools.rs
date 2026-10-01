@@ -299,6 +299,37 @@ pub fn notes() -> Arc<dyn Adapter> {
     })
 }
 
+/// A settings store: `settings.get` reads what `settings.set` changes.
+pub fn settings() -> Arc<dyn Adapter> {
+    let value = Arc::new(std::sync::Mutex::new("slow".to_string()));
+    Arc::new(Table {
+        name: "settings",
+        actions: vec![
+            read(
+                "settings.get",
+                "read a setting",
+                json!({ "key": { "type": "string" } }),
+                &["key"],
+            ),
+            mutate(
+                "settings.set",
+                "change a setting",
+                json!({ "key": { "type": "string" }, "value": { "type": "string" } }),
+                &["key", "value"],
+            ),
+        ],
+        run: Arc::new(move |action, input, _| {
+            let mut v = value.lock().unwrap();
+            if action == "settings.set" {
+                *v = s(input, "value");
+                return Ok(json!({ "key": s(input, "key"), "updated": true }));
+            }
+            Ok(json!({ "key": s(input, "key"), "value": v.clone() }))
+        }),
+        delay: Duration::ZERO,
+    })
+}
+
 /// Adapters the workloads never need, so discovery happens among realistic neighbors.
 pub fn filler() -> Vec<Arc<dyn Adapter>> {
     let ok: RunFn = Arc::new(|action, _, _| Ok(json!({ "action": action, "ok": true })));
@@ -449,6 +480,7 @@ pub fn all() -> Vec<Arc<dyn Adapter>> {
         mirror(),
         weather(),
         notes(),
+        settings(),
     ];
     v.extend(filler());
     v

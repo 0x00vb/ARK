@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use ark_core::{
     ArtifactId, Author, Claim, ClaimType, EvidenceCard, Focus, Interesting, InvocationId,
-    InvocationStatus, Note, NoteKind, ProjectId, ResearchState, RiskTier, WorkspaceContext,
+    InvocationStatus, Note, NoteKind, ProjectId, ResearchState, Reuse, RiskTier, WorkspaceContext,
 };
 use ark_model::{estimate_tokens, Completion, Message, ToolDef, Usage};
 use serde::{Deserialize, Serialize};
@@ -386,6 +386,9 @@ impl Harness {
         // Runtime-handled calls (retrievals, state edits, notes) seen this turn. Only a new one
         // counts as progress: repeating the same search or the same hypothesis is not work.
         let mut meta_seen: HashSet<String> = HashSet::new();
+        // When an action that changes state last ran this turn. Reads before it are not
+        // reused after it.
+        let mut changed_at = turn_started;
         let mut fresh_meta: u32 = 0;
         let mut steered: Vec<String> = Vec::new();
 
@@ -537,22 +540,31 @@ impl Harness {
                     }
                 }
 
-                // Dedup: reuse identical prior evidence instead of re-running the tool. A
-                // state-changing call is never deduplicated: running it again is the point.
-                // Only a successful result is evidence. A failure (an error, a timeout, a
-                // missing tool) may be transient, so the same call runs again; a repeat that
-                // fails again counts as no progress, which keeps the stall guard working.
-                let digest = call_digest(&call.name, &call.arguments);
+                // Dedup: reuse identical prior evidence instead of re-running the tool (see
+                // `Reuse`). A state-changing call is never deduplicated: running it again is
+                // the point. Only a successful result is evidence. A failure (an error, a
+                // timeout, a missing tool) may be transient, so the same call runs again; a
+                // repeat that fails again counts as no progress, which keeps the stall guard
+                // working. The digest uses the canonical artifact id, so a short id and a full
+                // id name the same call.
+                let canonical = engine.canonical_input(project, call.arguments.clone());
+                let digest = call_digest(&call.name, &canonical);
                 let mut failed_before = false;
-                if desc.risk != RiskTier::Mutate {
+                if desc.risk != RiskTier::Mutate && desc.reuse != Reuse::Volatile {
                     let prior = engine.store.find_card_by_digest(project, &digest)?;
                     failed_before = prior
                         .as_ref()
                         .is_some_and(|c| !c.ok && c.created_at >= turn_started);
                     let reuse = prior.filter(|card| {
                         card.ok
-                            && (card.created_at >= turn_started
-                                || reusable_across_turns(engine, project, &desc, &call.arguments))
+                            && match desc.reuse {
+                                Reuse::Stable => true,
+                                // Within this turn, and after the last state change.
+                                _ if card.created_at >= turn_started => {
+                                    card.created_at >= changed_at
+                                }
+                                _ => reads_stored_artifact(engine, project, &desc, &canonical),
+                            }
                     });
                     if let Some(existing) = reuse {
                         metrics.record_duplicate();
@@ -576,6 +588,11 @@ impl Harness {
                     break;
                 };
                 let inv = inv?;
+                if desc.risk == RiskTier::Mutate && inv.status != InvocationStatus::PendingApproval
+                {
+                    // Something changed: earlier reads this turn may no longer hold.
+                    changed_at = time::OffsetDateTime::now_utc();
+                }
                 metrics.record_tool_call();
                 let ok = matches!(inv.status, InvocationStatus::Ok);
                 let card = distill(&inv, &profile.distillers);
@@ -1496,17 +1513,17 @@ fn counts_as_progress(name: &str) -> bool {
     catalog::is_retrieval(name) || matches!(name, catalog::RECORD_STATE | catalog::RECORD_NOTE)
 }
 
-/// Whether evidence from an earlier turn still answers this call. Workspace files and external
-/// systems change between turns, so only calls on fixed data qualify: an action declared
-/// reusable, or one that names a content-addressed artifact (its bytes can never change).
-fn reusable_across_turns(
+/// Whether an `Auto` call's result from an earlier turn still holds: a `Read` of a stored
+/// artifact, whose bytes are content-addressed and cannot change. Workspace files and external
+/// systems change between turns, and an `Observe` call depends on more than its artifact.
+fn reads_stored_artifact(
     engine: &Engine,
     project: &ProjectId,
     desc: &ark_core::ActionDescriptor,
     input: &serde_json::Value,
 ) -> bool {
-    if desc.reusable {
-        return true;
+    if desc.risk != RiskTier::Read {
+        return false;
     }
     match input.get("artifact").and_then(|a| a.as_str()) {
         Some(id) => engine

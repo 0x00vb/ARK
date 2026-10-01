@@ -35,6 +35,24 @@ impl RiskTier {
     }
 }
 
+/// Whether an earlier result of the same call may stand in for running it again. Only a
+/// successful, completed result is ever reused; a failure, a timeout or a cancelled call runs
+/// again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reuse {
+    /// The runtime decides. Within a turn an identical call is reused until an action that
+    /// changes state runs (a write may change what a read returns). Across turns it is
+    /// reused only when it is a `Read` of a stored artifact: those bytes cannot change.
+    #[default]
+    Auto,
+    /// The output depends only on the input: reuse it from any earlier turn, even after
+    /// state changes.
+    Stable,
+    /// Every call observes something new (a live capture, a clock, a counter): always run.
+    Volatile,
+}
+
 /// A capability an adapter offers. The `name` is namespaced `adapter.verb`
 /// (e.g. `fs.read`, `web.get`, `draft.expand`). The schemas are JSON Schema documents;
 /// they are what the agent reads to call the tool, and what a UI can render as a form.
@@ -53,12 +71,10 @@ pub struct ActionDescriptor {
     /// the action name. When present, it is authoritative.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<Capability>,
-    /// The result stays true for the same input (it reads fixed data, not a workspace that can
-    /// change). The runtime may then reuse it from an earlier turn instead of running it again.
-    /// Within a single turn every identical read is reused regardless. Calls that name a
-    /// content-addressed `artifact` are treated as reusable automatically.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub reusable: bool,
+    /// When an earlier identical result may be reused (see [`Reuse`]). State-changing
+    /// actions are never reused, whatever this says.
+    #[serde(default)]
+    pub reuse: Reuse,
 }
 
 impl ActionDescriptor {
@@ -72,13 +88,19 @@ impl ActionDescriptor {
             input_schema: serde_json::json!({ "type": "object", "properties": {} }),
             output_schema: serde_json::json!({ "type": "object" }),
             capabilities: Vec::new(),
-            reusable: false,
+            reuse: Reuse::Auto,
         }
     }
 
-    /// Mark the result as reusable across turns (see [`ActionDescriptor::reusable`]).
+    /// The output depends only on the input: reuse it across turns ([`Reuse::Stable`]).
     pub fn reusable(mut self) -> Self {
-        self.reusable = true;
+        self.reuse = Reuse::Stable;
+        self
+    }
+
+    /// Every call observes something new: never reuse it ([`Reuse::Volatile`]).
+    pub fn volatile(mut self) -> Self {
+        self.reuse = Reuse::Volatile;
         self
     }
 

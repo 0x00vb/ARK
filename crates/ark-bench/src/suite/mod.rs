@@ -110,6 +110,7 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(retrieval()),
         Box::new(approval()),
         Box::new(parallel()),
+        Box::new(stale_read()),
     ]
 }
 
@@ -622,6 +623,54 @@ pub fn parallel() -> Spec {
                 has(a, "14") && has(a, "22") && has(a, "18"),
                 "missing a city's temperature",
             )])
+        }),
+    }
+}
+
+/// Read, change, read again: the second read must see the change, not a reused result.
+pub fn stale_read() -> Spec {
+    Spec {
+        name: "stale-read",
+        class: "reuse",
+        description: "read a setting, change it, read it again",
+        turns: one("Read the `mode` setting, set it to `fast`, then read it again and tell me its value now."),
+        policy: Arc::new(|r: &SimRequest| {
+            if let Some(reply) = housekeeping(r) {
+                return reply;
+            }
+            let key = json!({ "key": "mode" });
+            let gets = r.count_calls("settings.get");
+            let sets = r.count_calls("settings.set");
+            let next = if gets == 0 {
+                Some(("settings.get", key))
+            } else if sets == 0 {
+                Some(("settings.set", json!({ "key": "mode", "value": "fast" })))
+            } else if gets == 1 {
+                Some(("settings.get", key))
+            } else {
+                None
+            };
+            match next {
+                Some((a, _)) if !r.has_tool(a) => Reply::call("load_action", json!({ "name": a })),
+                Some((a, args)) => Reply::call(a, args),
+                None => {
+                    let v = r
+                        .results()
+                        .iter()
+                        .rev()
+                        .filter(|(a, _)| *a == "settings.get")
+                        .find_map(|(_, t)| word_after(t, "value="))
+                        .unwrap_or_else(|| "unknown".into());
+                    Reply::Text(format!("The mode is now {v} {}", cite_all(r)))
+                }
+            }
+        }),
+        prepare: None,
+        check: Arc::new(|o| {
+            Verdict::all(&[
+                (has(o.answer(), "fast"), "reported a stale value"),
+                (o.executed("settings.set") == 1, "the change was not made exactly once"),
+            ])
         }),
     }
 }

@@ -131,6 +131,7 @@ pub enum EntryKind {
     Present,
     SelfCheck,
     Steered,
+    Retry,
     Stall,
     Cancelled,
     Answer,
@@ -400,6 +401,17 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             "your message reached the model".into(),
             Some(clip(text, 100)),
             Tone::Accent,
+        ),
+        HarnessEvent::Retry {
+            role,
+            attempt,
+            delay_ms,
+            error,
+        } => (
+            E::Retry,
+            format!("retry {role} #{attempt} after {}", millis(*delay_ms)),
+            Some(clip(error, 160)),
+            Tone::Warning,
         ),
         HarnessEvent::Stall {
             idle_steps,

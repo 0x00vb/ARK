@@ -1,6 +1,7 @@
 //! Anthropic Messages API. API-key auth. Content is block-structured: assistant tool
 //! requests are `tool_use` blocks and results are `tool_result` blocks.
 
+use crate::resilience::{status_error, HttpConfig};
 use crate::stream::{for_each_line, sse_data, AnthropicFold};
 use crate::{
     mangle_tool_name, unmangle_tool_name, Completion, Message, Provider, ProviderError, Result,
@@ -9,35 +10,56 @@ use crate::{
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
+/// Output cap when none is configured. Room for adaptive thinking plus an answer.
+const DEFAULT_MAX_TOKENS: u32 = 8192;
+
 pub struct Anthropic {
     base: String,
     model: String,
     key: String,
     client: reqwest::Client,
+    http: HttpConfig,
 }
 
 impl Anthropic {
     pub fn from_env(model: impl Into<String>) -> Result<Self> {
         let key = std::env::var("ANTHROPIC_API_KEY")
             .map_err(|_| ProviderError::MissingCredential("ANTHROPIC_API_KEY".into()))?;
-        Ok(Anthropic {
-            base: std::env::var("ANTHROPIC_BASE_URL")
-                .unwrap_or_else(|_| "https://api.anthropic.com/v1".into()),
-            model: model.into(),
-            key,
-            client: reqwest::Client::new(),
-        })
+        let mut a = Anthropic::new(model, key);
+        if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL") {
+            a.base = base;
+        }
+        Ok(a)
     }
 
     /// Construct explicitly (for consumers wiring their own credentials).
     pub fn new(model: impl Into<String>, key: impl Into<String>) -> Self {
+        let http = HttpConfig::default();
         Anthropic {
             base: "https://api.anthropic.com/v1".into(),
             model: model.into(),
             key: key.into(),
-            client: reqwest::Client::new(),
+            client: http.client(),
+            http,
         }
     }
+
+    /// Use these timeouts and output cap.
+    pub fn with_http(mut self, http: HttpConfig) -> Self {
+        self.client = http.client();
+        self.http = http;
+        self
+    }
+
+    /// Send requests to another base URL (a proxy, or a test server).
+    pub fn with_base_url(mut self, base: impl Into<String>) -> Self {
+        self.base = base.into();
+        self
+    }
+}
+
+fn error_detail(v: &Value) -> Option<String> {
+    v["error"]["message"].as_str().map(str::to_string)
 }
 
 /// One message as Anthropic content blocks. Anthropic has no `tool` role: results go in a
@@ -119,19 +141,11 @@ impl Provider for Anthropic {
         tools: &[ToolDef],
     ) -> Result<Completion> {
         let body = self.body(system, messages, tools, false);
-        let resp = self.post(&body).await?;
-        let status = resp.status();
-        let v: Value = resp.json().await?;
-        if !status.is_success() {
-            return Err(ProviderError::Api {
-                provider: "anthropic".into(),
-                detail: v["error"]["message"]
-                    .as_str()
-                    .unwrap_or("request failed")
-                    .to_string(),
-            });
+        let resp = self.post(&body, false).await?;
+        if !resp.status().is_success() {
+            return Err(status_error("anthropic", resp, error_detail).await);
         }
-
+        let v: Value = resp.json().await?;
         let mut content = String::new();
         let mut tool_calls = Vec::new();
         if let Some(blocks) = v["content"].as_array() {
@@ -146,6 +160,13 @@ impl Provider for Anthropic {
                     _ => {}
                 }
             }
+        }
+        if v["stop_reason"] == "max_tokens" && !tool_calls.is_empty() {
+            // A tool call cut off at the output cap: its arguments may be incomplete.
+            return Err(ProviderError::Malformed {
+                provider: "anthropic".into(),
+                detail: "the reply hit the output cap inside a tool call".into(),
+            });
         }
         let usage = crate::stream::anthropic_usage(&v["usage"], None);
         Ok(Completion {
@@ -163,16 +184,9 @@ impl Provider for Anthropic {
         on_text: TextSink<'_>,
     ) -> Result<Completion> {
         let body = self.body(system, messages, tools, true);
-        let resp = self.post(&body).await?;
+        let resp = self.post(&body, true).await?;
         if !resp.status().is_success() {
-            let v: Value = resp.json().await.unwrap_or_default();
-            return Err(ProviderError::Api {
-                provider: "anthropic".into(),
-                detail: v["error"]["message"]
-                    .as_str()
-                    .unwrap_or("request failed")
-                    .to_string(),
-            });
+            return Err(status_error("anthropic", resp, error_detail).await);
         }
         let mut fold = AnthropicFold::default();
         for_each_line(resp, |line| match sse_data(line) {
@@ -180,7 +194,7 @@ impl Provider for Anthropic {
             None => Ok(()),
         })
         .await?;
-        Ok(fold.finish())
+        fold.finish()
     }
 }
 
@@ -198,7 +212,7 @@ impl Anthropic {
         }
         json!({
             "model": self.model,
-            "max_tokens": 2048,
+            "max_tokens": self.http.max_output_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
             "system": [{ "type": "text", "text": system, "cache_control": { "type": "ephemeral" } }],
             "messages": wire_messages(messages),
             "tools": tool_defs,
@@ -206,15 +220,17 @@ impl Anthropic {
         })
     }
 
-    async fn post(&self, body: &Value) -> Result<reqwest::Response> {
-        Ok(self
+    async fn post(&self, body: &Value, stream: bool) -> Result<reqwest::Response> {
+        let mut req = self
             .client
             .post(format!("{}/messages", self.base))
             .header("x-api-key", &self.key)
             .header("anthropic-version", "2023-06-01")
-            .json(body)
-            .send()
-            .await?)
+            .json(body);
+        if !stream {
+            req = req.timeout(self.http.request_timeout);
+        }
+        Ok(req.send().await?)
     }
 }
 

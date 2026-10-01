@@ -1,28 +1,64 @@
 //! Local models via Ollama's `/api/chat` (no auth). The default provider: private,
 //! offline, and the one the agent loop is tested against.
 
-use crate::stream::{for_each_line, OllamaFold};
+use crate::resilience::{status_error, HttpConfig};
+use crate::stream::{for_each_line, parse_args, OllamaFold};
 use crate::{
-    mangle_tool_name, Completion, Message, Provider, ProviderError, Result, Role, TextSink,
-    ToolCall, ToolDef, Usage,
+    mangle_tool_name, Completion, Message, Provider, Result, Role, TextSink, ToolCall, ToolDef,
+    Usage,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
+
+/// Output cap when none is configured. Ollama has none by default, and with context shifting
+/// a degenerate reply can run for as long as the server is up.
+const DEFAULT_NUM_PREDICT: u32 = 4096;
 
 pub struct Ollama {
     host: String,
     model: String,
     client: reqwest::Client,
+    http: HttpConfig,
 }
 
 impl Ollama {
     pub fn new(model: impl Into<String>) -> Self {
+        let http = HttpConfig::default();
         Ollama {
             host: std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".into()),
             model: model.into(),
-            client: reqwest::Client::new(),
+            client: http.client(),
+            http,
         }
     }
+
+    /// Use these timeouts and output cap.
+    pub fn with_http(mut self, http: HttpConfig) -> Self {
+        self.client = http.client();
+        self.http = http;
+        self
+    }
+
+    /// Talk to another Ollama server.
+    pub fn with_host(mut self, host: impl Into<String>) -> Self {
+        self.host = host.into();
+        self
+    }
+
+    async fn post(&self, body: &Value, stream: bool) -> Result<reqwest::Response> {
+        let mut req = self
+            .client
+            .post(format!("{}/api/chat", self.host))
+            .json(body);
+        if !stream {
+            req = req.timeout(self.http.request_timeout);
+        }
+        Ok(req.send().await?)
+    }
+}
+
+fn error_detail(v: &Value) -> Option<String> {
+    v.get("error").and_then(|e| e.as_str()).map(str::to_string)
 }
 
 fn role_str(r: Role) -> &'static str {
@@ -67,25 +103,11 @@ impl Provider for Ollama {
         tools: &[ToolDef],
     ) -> Result<Completion> {
         let body = self.body(system, messages, tools, false);
-        let resp = self
-            .client
-            .post(format!("{}/api/chat", self.host))
-            .json(&body)
-            .send()
-            .await?;
-        let status = resp.status();
-        let v: Value = resp.json().await?;
-        if !status.is_success() {
-            return Err(ProviderError::Api {
-                provider: "ollama".into(),
-                detail: v
-                    .get("error")
-                    .and_then(|e| e.as_str())
-                    .unwrap_or("request failed")
-                    .to_string(),
-            });
+        let resp = self.post(&body, false).await?;
+        if !resp.status().is_success() {
+            return Err(status_error("ollama", resp, error_detail).await);
         }
-
+        let v: Value = resp.json().await?;
         let msg = &v["message"];
         let content = msg
             .get("content")
@@ -99,7 +121,7 @@ impl Provider for Ollama {
                 let name = f.get("name").and_then(|n| n.as_str()).unwrap_or_default();
                 // Ollama returns arguments as an object; occasionally as a JSON string.
                 let arguments = match f.get("arguments") {
-                    Some(Value::String(s)) => serde_json::from_str(s).unwrap_or(json!({})),
+                    Some(Value::String(s)) => parse_args("ollama", name, s)?,
                     Some(other) => other.clone(),
                     None => json!({}),
                 };
@@ -132,22 +154,9 @@ impl Provider for Ollama {
         on_text: TextSink<'_>,
     ) -> Result<Completion> {
         let body = self.body(system, messages, tools, true);
-        let resp = self
-            .client
-            .post(format!("{}/api/chat", self.host))
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.post(&body, true).await?;
         if !resp.status().is_success() {
-            let v: Value = resp.json().await.unwrap_or_default();
-            return Err(ProviderError::Api {
-                provider: "ollama".into(),
-                detail: v
-                    .get("error")
-                    .and_then(|e| e.as_str())
-                    .unwrap_or("request failed")
-                    .to_string(),
-            });
+            return Err(status_error("ollama", resp, error_detail).await);
         }
         let mut fold = OllamaFold::default();
         for_each_line(resp, |line| {
@@ -177,7 +186,10 @@ impl Ollama {
             "messages": wire,
             "tools": tool_defs,
             "stream": stream,
-            "options": { "temperature": 0.1 }
+            "options": {
+                "temperature": 0.1,
+                "num_predict": self.http.max_output_tokens.unwrap_or(DEFAULT_NUM_PREDICT),
+            }
         })
     }
 }

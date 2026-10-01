@@ -144,6 +144,15 @@ pub enum HarnessEvent {
     Steered {
         text: String,
     },
+    /// A model call failed with a temporary error and is tried again after `delay_ms`. No
+    /// text of the failed attempt had reached the user, and no tool runs twice: tools run
+    /// only after a model call succeeds.
+    Retry {
+        role: String,
+        attempt: u32,
+        delay_ms: u64,
+        error: String,
+    },
     /// Several steps in a row produced nothing new. `stopped` is false when the model was
     /// nudged to change course, true when the loop ended and a final answer was forced.
     Stall {
@@ -196,6 +205,7 @@ pub struct Harness {
     approvals: Option<Arc<ApprovalGate>>,
     cancel: Option<CancelToken>,
     steer: Option<Steering>,
+    retry: ark_model::RetryPolicy,
 }
 
 /// The pieces of the first user message, kept separate so the context report can attribute
@@ -240,7 +250,14 @@ impl Harness {
             approvals: None,
             cancel: None,
             steer: None,
+            retry: ark_model::RetryPolicy::default(),
         }
+    }
+
+    /// How failed model calls are retried (default: `ARK_MODEL_RETRIES`, 2).
+    pub fn retry_policy(mut self, policy: ark_model::RetryPolicy) -> Self {
+        self.retry = policy;
+        self
     }
 
     /// Tell the harness what the user is currently looking at, so on-screen references
@@ -1028,44 +1045,69 @@ impl Harness {
         on_event: &mut impl FnMut(HarnessEvent),
     ) -> Result<Option<Completion>, AgentError> {
         let provider = self.router.provider(role).clone();
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let sink = move |t: &str| {
-            let _ = tx.send(t.to_string());
-        };
         let started = std::time::Instant::now();
-        let mut first_token_ms: Option<u64> = None;
-        let fut = provider.complete_streaming(system, messages, tools, &sink);
-        tokio::pin!(fut);
-        let result = loop {
-            tokio::select! {
-                biased;
-                _ = cancel::wait(&self.cancel) => return Ok(None),
-                Some(text) = rx.recv() => {
-                    first_token_ms.get_or_insert(started.elapsed().as_millis() as u64);
-                    if stream {
-                        on_event(HarnessEvent::TextDelta { text });
+        let mut retries = 0u32;
+        loop {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+            let sink = move |t: &str| {
+                let _ = tx.send(t.to_string());
+            };
+            let attempt_started = std::time::Instant::now();
+            let mut first_token_ms: Option<u64> = None;
+            let fut = provider.complete_streaming(system, messages, tools, &sink);
+            tokio::pin!(fut);
+            let result = loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel::wait(&self.cancel) => return Ok(None),
+                    Some(text) = rx.recv() => {
+                        first_token_ms.get_or_insert(attempt_started.elapsed().as_millis() as u64);
+                        if stream {
+                            on_event(HarnessEvent::TextDelta { text });
+                        }
                     }
+                    r = &mut fut => break r,
                 }
-                r = &mut fut => break r,
+            };
+            while let Ok(text) = rx.try_recv() {
+                first_token_ms.get_or_insert(attempt_started.elapsed().as_millis() as u64);
+                if stream {
+                    on_event(HarnessEvent::TextDelta { text });
+                }
             }
-        };
-        while let Ok(text) = rx.try_recv() {
-            if stream {
-                on_event(HarnessEvent::TextDelta { text });
-            }
+            let completion = match result {
+                Ok(c) => c,
+                // Retry only when nothing of this attempt was shown: a second answer after
+                // half of a first one would duplicate output.
+                Err(e) if first_token_ms.is_none() && self.retry.should_retry(&e, retries) => {
+                    let delay = self.retry.delay(retries, &e);
+                    retries += 1;
+                    metrics.record_retry();
+                    on_event(HarnessEvent::Retry {
+                        role: role_name(role).to_string(),
+                        attempt: retries,
+                        delay_ms: delay.as_millis() as u64,
+                        error: e.to_string(),
+                    });
+                    if self.cancellable(tokio::time::sleep(delay)).await.is_none() {
+                        return Ok(None);
+                    }
+                    continue;
+                }
+                Err(e) => return Err(AgentError::Provider(e.to_string())),
+            };
+            let model = provider.model_id();
+            metrics.record_call(role, &model, completion.usage);
+            on_event(HarnessEvent::ModelCall {
+                role: role_name(role).to_string(),
+                model,
+                usage: completion.usage,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                first_token_ms,
+                retries,
+            });
+            return Ok(Some(completion));
         }
-        let completion = result.map_err(|e| AgentError::Provider(e.to_string()))?;
-        let model = provider.model_id();
-        metrics.record_call(role, &model, completion.usage);
-        on_event(HarnessEvent::ModelCall {
-            role: role_name(role).to_string(),
-            model,
-            usage: completion.usage,
-            elapsed_ms: started.elapsed().as_millis() as u64,
-            first_token_ms,
-            retries: 0,
-        });
-        Ok(Some(completion))
     }
 
     /// Ask the approval gate about a `Mutate` call. `None`: cancelled while waiting.

@@ -16,23 +16,73 @@ mod anthropic;
 pub mod mock;
 mod ollama;
 mod openai;
+pub mod resilience;
 mod stream;
 
 pub use anthropic::Anthropic;
 pub use mock::MockProvider;
 pub use ollama::Ollama;
 pub use openai::OpenAi;
+pub use resilience::{HttpConfig, RetryPolicy};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
+    /// The connection failed, timed out or broke.
     #[error("http: {0}")]
     Http(#[from] reqwest::Error),
+    /// The provider refused the request for a reason a retry does not change.
     #[error("{provider} error: {detail}")]
     Api { provider: String, detail: String },
+    /// A non-success HTTP status.
+    #[error("{provider} returned {status}: {detail}")]
+    Status {
+        provider: String,
+        status: u16,
+        detail: String,
+        /// The server's `retry-after`, when it sent one.
+        retry_after: Option<std::time::Duration>,
+    },
+    /// The provider reported a temporary failure inside a successful response (an
+    /// `overloaded_error` event mid-stream).
+    #[error("{provider} is overloaded: {detail}")]
+    Overloaded { provider: String, detail: String },
+    /// The reply could not be used as sent: a tool call whose arguments are not valid JSON
+    /// (usually cut off). Running the tool with guessed arguments would be wrong.
+    #[error("{provider} sent a malformed reply: {detail}")]
+    Malformed { provider: String, detail: String },
     #[error("missing credential: {0}")]
     MissingCredential(String),
     #[error("serde: {0}")]
     Serde(#[from] serde_json::Error),
+}
+
+impl ProviderError {
+    /// Whether the same request may succeed if sent again: network failures and timeouts,
+    /// rate limits and server errors (408, 425, 429, 5xx), overload, and a malformed reply (a
+    /// new generation may be well formed). A bad request, missing credentials or a refusal
+    /// are not.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            ProviderError::Http(e) => {
+                e.is_timeout() || e.is_connect() || e.is_request() || e.is_body()
+            }
+            ProviderError::Status { status, .. } => {
+                matches!(status, 408 | 425 | 429) || (500..=599).contains(status)
+            }
+            ProviderError::Overloaded { .. } | ProviderError::Malformed { .. } => true,
+            ProviderError::Api { .. }
+            | ProviderError::MissingCredential(_)
+            | ProviderError::Serde(_) => false,
+        }
+    }
+
+    /// How long the server asked to wait, if it did.
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
+        match self {
+            ProviderError::Status { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, ProviderError>;

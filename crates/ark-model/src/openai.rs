@@ -1,7 +1,8 @@
 //! OpenAI-compatible chat completions (also serves any OpenAI-compatible endpoint via
 //! `OPENAI_BASE_URL`). API-key auth.
 
-use crate::stream::{for_each_line, sse_data, OpenAiFold};
+use crate::resilience::{status_error, HttpConfig};
+use crate::stream::{for_each_line, parse_args, sse_data, OpenAiFold};
 use crate::{
     mangle_tool_name, unmangle_tool_name, Completion, Message, Provider, ProviderError, Result,
     Role, TextSink, ToolCall, ToolDef,
@@ -14,30 +15,42 @@ pub struct OpenAi {
     model: String,
     key: String,
     client: reqwest::Client,
+    http: HttpConfig,
 }
 
 impl OpenAi {
     pub fn from_env(model: impl Into<String>) -> Result<Self> {
         let key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| ProviderError::MissingCredential("OPENAI_API_KEY".into()))?;
-        Ok(OpenAi {
-            base: std::env::var("OPENAI_BASE_URL")
-                .unwrap_or_else(|_| "https://api.openai.com/v1".into()),
-            model: model.into(),
+        Ok(OpenAi::new(
+            std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into()),
+            model,
             key,
-            client: reqwest::Client::new(),
-        })
+        ))
     }
 
     /// Construct explicitly against any OpenAI-compatible endpoint.
     pub fn new(base: impl Into<String>, model: impl Into<String>, key: impl Into<String>) -> Self {
+        let http = HttpConfig::default();
         OpenAi {
             base: base.into(),
             model: model.into(),
             key: key.into(),
-            client: reqwest::Client::new(),
+            client: http.client(),
+            http,
         }
     }
+
+    /// Use these timeouts and output cap.
+    pub fn with_http(mut self, http: HttpConfig) -> Self {
+        self.client = http.client();
+        self.http = http;
+        self
+    }
+}
+
+fn error_detail(v: &Value) -> Option<String> {
+    v["error"]["message"].as_str().map(str::to_string)
 }
 
 fn role_str(r: Role) -> &'static str {
@@ -85,19 +98,11 @@ impl Provider for OpenAi {
         tools: &[ToolDef],
     ) -> Result<Completion> {
         let body = self.body(system, messages, tools, false);
-        let resp = self.post(&body).await?;
-        let status = resp.status();
-        let v: Value = resp.json().await?;
-        if !status.is_success() {
-            return Err(ProviderError::Api {
-                provider: "openai".into(),
-                detail: v["error"]["message"]
-                    .as_str()
-                    .unwrap_or("request failed")
-                    .to_string(),
-            });
+        let resp = self.post(&body, false).await?;
+        if !resp.status().is_success() {
+            return Err(status_error("openai", resp, error_detail).await);
         }
-
+        let v: Value = resp.json().await?;
         let msg = &v["choices"][0]["message"];
         let content = msg
             .get("content")
@@ -109,11 +114,11 @@ impl Provider for OpenAi {
             for c in calls {
                 let f = &c["function"];
                 let name = f["name"].as_str().unwrap_or_default();
-                let arguments = f
-                    .get("arguments")
-                    .and_then(|a| a.as_str())
-                    .and_then(|s| serde_json::from_str(s).ok())
-                    .unwrap_or(json!({}));
+                let arguments = parse_args(
+                    "openai",
+                    name,
+                    f.get("arguments").and_then(|a| a.as_str()).unwrap_or(""),
+                )?;
                 tool_calls.push(ToolCall {
                     id: c["id"].as_str().unwrap_or("call_0").to_string(),
                     name: unmangle_tool_name(name),
@@ -137,16 +142,9 @@ impl Provider for OpenAi {
         on_text: TextSink<'_>,
     ) -> Result<Completion> {
         let body = self.body(system, messages, tools, true);
-        let resp = self.post(&body).await?;
+        let resp = self.post(&body, true).await?;
         if !resp.status().is_success() {
-            let v: Value = resp.json().await.unwrap_or_default();
-            return Err(ProviderError::Api {
-                provider: "openai".into(),
-                detail: v["error"]["message"]
-                    .as_str()
-                    .unwrap_or("request failed")
-                    .to_string(),
-            });
+            return Err(status_error("openai", resp, error_detail).await);
         }
         let mut fold = OpenAiFold::default();
         for_each_line(resp, |line| match sse_data(line) {
@@ -154,7 +152,7 @@ impl Provider for OpenAi {
             None => Ok(()),
         })
         .await?;
-        Ok(fold.finish())
+        fold.finish()
     }
 }
 
@@ -170,6 +168,9 @@ impl OpenAi {
             }))
             .collect();
         let mut body = json!({ "model": self.model, "messages": wire, "tools": tool_defs, "temperature": 0.1 });
+        if let Some(n) = self.http.max_output_tokens {
+            body["max_tokens"] = json!(n);
+        }
         if stream {
             body["stream"] = json!(true);
             body["stream_options"] = json!({ "include_usage": true });
@@ -177,13 +178,15 @@ impl OpenAi {
         body
     }
 
-    async fn post(&self, body: &Value) -> Result<reqwest::Response> {
-        Ok(self
+    async fn post(&self, body: &Value, stream: bool) -> Result<reqwest::Response> {
+        let mut req = self
             .client
             .post(format!("{}/chat/completions", self.base))
             .bearer_auth(&self.key)
-            .json(body)
-            .send()
-            .await?)
+            .json(body);
+        if !stream {
+            req = req.timeout(self.http.request_timeout);
+        }
+        Ok(req.send().await?)
     }
 }

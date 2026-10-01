@@ -191,6 +191,16 @@ pub fn describe(
         HarnessEvent::Steered { text } => {
             Activity::new(K::Steered, "Your message reached the agent").detail(text.clone())
         }
+        HarnessEvent::Retry {
+            attempt, delay_ms, ..
+        } => Activity::new(
+            K::Warning,
+            format!(
+                "Model call failed; retrying ({attempt}) in {:.1}s",
+                *delay_ms as f64 / 1000.0
+            ),
+        )
+        .tone(Tone::Warning),
         HarnessEvent::Stall {
             idle_steps,
             stopped,

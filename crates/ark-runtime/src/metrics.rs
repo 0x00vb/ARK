@@ -55,6 +55,9 @@ pub struct Metrics {
     pub steps: u32,
     /// The largest single-call prompt we sent, in tokens — the context-size headline.
     pub peak_prompt_tokens: u32,
+    /// Model calls tried again after a temporary failure.
+    #[serde(default)]
+    pub provider_retries: u32,
     /// Wall-clock milliseconds.
     pub elapsed_ms: u64,
     #[serde(skip)]
@@ -100,6 +103,9 @@ impl Metrics {
     }
     pub fn record_state_update(&mut self) {
         self.state_updates += 1;
+    }
+    pub fn record_retry(&mut self) {
+        self.provider_retries += 1;
     }
     pub fn record_step(&mut self) {
         self.steps += 1;

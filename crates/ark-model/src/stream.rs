@@ -117,35 +117,41 @@ impl AnthropicFold {
                 }
             }
             "error" => {
-                return Err(ProviderError::Api {
-                    provider: "anthropic".into(),
-                    detail: ev["error"]["message"]
-                        .as_str()
-                        .unwrap_or("stream error")
-                        .to_string(),
-                })
+                let detail = ev["error"]["message"]
+                    .as_str()
+                    .unwrap_or("stream error")
+                    .to_string();
+                let provider = "anthropic".to_string();
+                return Err(match ev["error"]["type"].as_str().unwrap_or_default() {
+                    "overloaded_error" | "api_error" | "rate_limit_error" => {
+                        ProviderError::Overloaded { provider, detail }
+                    }
+                    _ => ProviderError::Api { provider, detail },
+                });
             }
             _ => {}
         }
         Ok(())
     }
 
-    pub(crate) fn finish(self) -> Completion {
+    pub(crate) fn finish(self) -> Result<Completion> {
         let tool_calls = self
             .tools
             .into_iter()
-            .map(|(_, id, name, json_text)| ToolCall {
-                id,
-                name: unmangle_tool_name(&name),
-                arguments: parse_args(&json_text),
+            .map(|(_, id, name, json_text)| {
+                Ok(ToolCall {
+                    id,
+                    arguments: parse_args("anthropic", &name, &json_text)?,
+                    name: unmangle_tool_name(&name),
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         let usage = anthropic_usage(&self.start_usage, self.output_tokens);
-        Completion {
+        Ok(Completion {
             content: self.content,
             tool_calls,
             usage,
-        }
+        })
     }
 }
 
@@ -205,26 +211,28 @@ impl OpenAiFold {
         Ok(())
     }
 
-    pub(crate) fn finish(self) -> Completion {
+    pub(crate) fn finish(self) -> Result<Completion> {
         let tool_calls = self
             .tools
             .into_iter()
-            .map(|(i, id, name, args)| ToolCall {
-                id: if id.is_empty() {
-                    format!("call_{i}")
-                } else {
-                    id
-                },
-                name: unmangle_tool_name(&name),
-                arguments: parse_args(&args),
+            .map(|(i, id, name, args)| {
+                Ok(ToolCall {
+                    id: if id.is_empty() {
+                        format!("call_{i}")
+                    } else {
+                        id
+                    },
+                    arguments: parse_args("openai", &name, &args)?,
+                    name: unmangle_tool_name(&name),
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         let usage = self.usage.unwrap_or_default();
-        Completion {
+        Ok(Completion {
             content: self.content,
             tool_calls,
             usage,
-        }
+        })
     }
 }
 
@@ -256,7 +264,7 @@ impl OllamaFold {
                 let f = &c["function"];
                 let name = f.get("name").and_then(|n| n.as_str()).unwrap_or_default();
                 let arguments = match f.get("arguments") {
-                    Some(Value::String(s)) => parse_args(s),
+                    Some(Value::String(s)) => parse_args("ollama", name, s)?,
                     Some(other) => other.clone(),
                     None => json!({}),
                 };
@@ -292,11 +300,16 @@ impl OllamaFold {
     }
 }
 
-fn parse_args(text: &str) -> Value {
+/// Tool-call arguments as JSON. Empty means no arguments; anything that does not parse (a
+/// reply cut off mid-call) is an error, never silently `{}`.
+pub(crate) fn parse_args(provider: &str, tool: &str, text: &str) -> Result<Value> {
     if text.trim().is_empty() {
-        return json!({});
+        return Ok(json!({}));
     }
-    serde_json::from_str(text).unwrap_or(json!({}))
+    serde_json::from_str(text).map_err(|e| ProviderError::Malformed {
+        provider: provider.to_string(),
+        detail: format!("arguments for `{tool}` are not valid JSON ({e})"),
+    })
 }
 
 #[cfg(test)]
@@ -336,7 +349,7 @@ mod tests {
         for e in &events {
             f.feed(e, &sink).unwrap();
         }
-        let c = f.finish();
+        let c = f.finish().unwrap();
         assert_eq!(*seen.lock().unwrap(), "Let me check.");
         assert_eq!(c.content, "Let me check.");
         assert_eq!(c.tool_calls.len(), 1);
@@ -367,11 +380,34 @@ mod tests {
     #[test]
     fn anthropic_fold_surfaces_stream_errors() {
         let mut f = AnthropicFold::default();
-        let err = f.feed(
-            &json!({"type":"error","error":{"message":"overloaded"}}),
-            &|_: &str| {},
-        );
-        assert!(err.is_err());
+        let err = f
+            .feed(
+                &json!({"type":"error","error":{"type":"overloaded_error","message":"overloaded"}}),
+                &|_: &str| {},
+            )
+            .unwrap_err();
+        assert!(err.is_transient(), "overload is worth a retry");
+        let err = f
+            .feed(
+                &json!({"type":"error","error":{"type":"invalid_request_error","message":"bad"}}),
+                &|_: &str| {},
+            )
+            .unwrap_err();
+        assert!(!err.is_transient());
+    }
+
+    #[test]
+    fn a_cut_off_tool_call_is_an_error_not_empty_arguments() {
+        let mut f = AnthropicFold::default();
+        for e in [
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t","name":"fs__write"}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\": \"a"}}),
+        ] {
+            f.feed(&e, &|_: &str| {}).unwrap();
+        }
+        let err = f.finish().unwrap_err();
+        assert!(matches!(err, ProviderError::Malformed { .. }), "{err}");
+        assert!(err.is_transient());
     }
 
     #[test]
@@ -388,7 +424,7 @@ mod tests {
         for c in &chunks {
             f.feed(c, &sink).unwrap();
         }
-        let c = f.finish();
+        let c = f.finish().unwrap();
         assert_eq!(*seen.lock().unwrap(), "Hi");
         assert_eq!(c.tool_calls[0].id, "call_a");
         assert_eq!(c.tool_calls[0].name, "calc.eval");

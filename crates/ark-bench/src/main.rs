@@ -43,6 +43,9 @@ enum Cmd {
         /// Context budget in tokens (default: the runtime's).
         #[arg(long)]
         budget: Option<u32>,
+        /// Seconds a turn may take before the run counts as failed.
+        #[arg(long)]
+        turn_timeout: Option<u64>,
         #[arg(long, default_value = "run")]
         label: String,
         #[arg(long)]
@@ -79,6 +82,7 @@ async fn main() -> anyhow::Result<()> {
             no_planner,
             no_critic,
             budget,
+            turn_timeout,
             label,
             out,
         } => {
@@ -95,8 +99,17 @@ async fn main() -> anyhow::Result<()> {
                 planner: !no_planner,
                 critic: !no_critic,
                 budget,
+                turn_timeout: turn_timeout.map(std::time::Duration::from_secs),
             };
-            let r = ark_bench::run_suite(&workloads, &models, &settings, reps, &label, |r| {
+            // Write the report after every run, so an interrupted run keeps its data.
+            let save = |r: &Report| {
+                if let Some(path) = &out {
+                    if let Ok(json) = serde_json::to_string_pretty(r) {
+                        let _ = std::fs::write(path, json);
+                    }
+                }
+            };
+            let progress = |r: &ark_bench::RunRecord| {
                 eprintln!(
                     "{:<18} rep {} {} calls={} tokens={} ({} cached) tools={} {}ms  {}",
                     r.workload,
@@ -109,7 +122,10 @@ async fn main() -> anyhow::Result<()> {
                     r.wall_ms,
                     r.verdict
                 );
-            })
+            };
+            let r = ark_bench::run_suite_with(
+                &workloads, &models, &settings, reps, &label, progress, save,
+            )
             .await?;
             print_summary(&r);
             if let Some(path) = out {

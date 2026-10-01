@@ -140,13 +140,14 @@ pub fn tool_lookup() -> Spec {
     Spec {
         name: "tool-lookup",
         class: "tool-lookup",
-        description: "convert miles to km with a tool that must be discovered among 20 actions",
-        turns: one("Convert 26.2 miles to kilometers."),
+        description:
+            "convert currency with a tool found among 25 actions; only the tool knows the rate",
+        turns: one("Convert 250 US dollars to euros at the converter's current rate."),
         policy: competent(
             |_| {
                 vec![Goal::call(
                     "units.convert",
-                    json!({ "value": 26.2, "from": "mi", "to": "km" }),
+                    json!({ "value": 250, "from": "usd", "to": "eur" }),
                 )]
             },
             answer(|r| {
@@ -154,8 +155,8 @@ pub fn tool_lookup() -> Spec {
                     .result_of("units.convert")
                     .and_then(|t| word_after(t, "result="))
                 {
-                    Some(v) => format!("26.2 miles is {v} km {}", cite_all(r)),
-                    None => "I could not convert it; the unit tool was unavailable.".into(),
+                    Some(v) => format!("250 USD is {v} EUR {}", cite_all(r)),
+                    None => "I could not convert it; the converter was unavailable.".into(),
                 }
             }),
         ),
@@ -163,8 +164,8 @@ pub fn tool_lookup() -> Spec {
         check: Arc::new(|o| {
             Verdict::all(&[
                 (
-                    has(o.answer(), "42.16") || has(o.answer(), "42.2"),
-                    "wrong or missing result",
+                    has(o.answer(), "230"),
+                    "wrong or missing result (expected 230 EUR)",
                 ),
                 (o.executed("units.convert") >= 1, "never ran units.convert"),
             ])
@@ -318,7 +319,9 @@ pub fn failure_recovery() -> Spec {
         name: "failure-recovery",
         class: "failure-recovery",
         description: "primary mirror is down; retry at most once, then use the backup",
-        turns: one("Fetch release.txt from the primary mirror and tell me the version it lists."),
+        turns: one(
+            "Fetch release.txt from the mirror (try the primary first; there is a backup) and tell me the version it lists.",
+        ),
         policy: Arc::new(|r: &SimRequest| {
             if let Some(reply) = housekeeping(r) {
                 return reply;

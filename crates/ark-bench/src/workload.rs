@@ -70,6 +70,9 @@ pub struct BenchSettings {
     pub planner: bool,
     pub critic: bool,
     pub budget: Option<u32>,
+    /// A turn that runs longer fails the run: a hung request is a result, not a stall of the
+    /// whole benchmark.
+    pub turn_timeout: Option<std::time::Duration>,
 }
 
 impl Default for BenchSettings {
@@ -78,6 +81,7 @@ impl Default for BenchSettings {
             planner: true,
             critic: true,
             budget: None,
+            turn_timeout: None,
         }
     }
 }
@@ -294,9 +298,14 @@ pub async fn run(
             ..Default::default()
         };
         let started = Instant::now();
-        let out = ark
-            .ask_session(&mut session, &spec.input, opts, |e| events.push(e))
-            .await;
+        let ask = ark.ask_session(&mut session, &spec.input, opts, |e| events.push(e));
+        let out = match settings.turn_timeout {
+            None => ask.await.map_err(|e| e.to_string()),
+            Some(limit) => match tokio::time::timeout(limit, ask).await {
+                Ok(r) => r.map_err(|e| e.to_string()),
+                Err(_) => Err(format!("timed out after {}s", limit.as_secs())),
+            },
+        };
         let ms = started.elapsed().as_millis() as u64;
         let failed = out.is_err();
         turns.push(match out {
@@ -316,7 +325,7 @@ pub async fn run(
                 cited: 0,
                 steps: 0,
                 cancelled: false,
-                error: Some(e.to_string()),
+                error: Some(e),
                 events,
                 ms,
             },

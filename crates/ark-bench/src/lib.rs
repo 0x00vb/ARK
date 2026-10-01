@@ -32,29 +32,56 @@ pub async fn run_suite(
     settings: &BenchSettings,
     reps: u32,
     label: &str,
+    progress: impl FnMut(&RunRecord),
+) -> anyhow::Result<Report> {
+    run_suite_with(workloads, models, settings, reps, label, progress, |_| {}).await
+}
+
+/// [`run_suite`], also handing the report so far to `checkpoint` after every run, so an
+/// interrupted live run keeps what it measured.
+pub async fn run_suite_with(
+    workloads: &[Box<dyn Workload>],
+    models: &ModelSpec,
+    settings: &BenchSettings,
+    reps: u32,
+    label: &str,
     mut progress: impl FnMut(&RunRecord),
+    mut checkpoint: impl FnMut(&Report),
 ) -> anyhow::Result<Report> {
     let pricing = match models.mode() {
         Mode::Simulated => Pricing::reference(),
         Mode::Live => Pricing::for_model(&models.priced_model()),
     };
-    let mut out = Vec::new();
+    let mut out: Vec<report::WorkloadReport> = Vec::new();
     for w in workloads {
-        let mut runs = Vec::new();
-        for rep in 0..reps {
-            let r = workload::run(w.as_ref(), models, settings, rep, &pricing).await?;
-            progress(&r);
-            runs.push(r);
-        }
-        let refs: Vec<&RunRecord> = runs.iter().collect();
         out.push(report::WorkloadReport {
             name: w.name().to_string(),
             class: w.class().to_string(),
             description: w.description().to_string(),
-            summary: Summary::of(&refs),
-            runs,
+            summary: Summary::default(),
+            runs: Vec::new(),
         });
+        for rep in 0..reps {
+            let r = workload::run(w.as_ref(), models, settings, rep, &pricing).await?;
+            progress(&r);
+            let last = out.last_mut().expect("pushed above");
+            last.runs.push(r);
+            let refs: Vec<&RunRecord> = last.runs.iter().collect();
+            last.summary = Summary::of(&refs);
+            checkpoint(&assemble(&out, models, settings, reps, label, &pricing));
+        }
     }
+    Ok(assemble(&out, models, settings, reps, label, &pricing))
+}
+
+fn assemble(
+    out: &[report::WorkloadReport],
+    models: &ModelSpec,
+    settings: &BenchSettings,
+    reps: u32,
+    label: &str,
+    pricing: &Pricing,
+) -> Report {
     let all: Vec<&RunRecord> = out.iter().flat_map(|w| w.runs.iter()).collect();
     let mut s = BTreeMap::new();
     s.insert("planner".into(), settings.planner.to_string());
@@ -66,7 +93,10 @@ pub async fn run_suite(
             .map(|b| b.to_string())
             .unwrap_or_else(|| "default".into()),
     );
-    Ok(Report {
+    if let Some(t) = settings.turn_timeout {
+        s.insert("turn_timeout_s".into(), t.as_secs().to_string());
+    }
+    Report {
         schema_version: report::SCHEMA_VERSION,
         label: label.to_string(),
         ark_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -77,9 +107,9 @@ pub async fn run_suite(
         model: models.strong.clone(),
         fast_model: models.fast.clone(),
         reps,
-        pricing,
+        pricing: pricing.clone(),
         settings: s,
         totals: Summary::of(&all),
-        workloads: out,
-    })
+        workloads: out.to_vec(),
+    }
 }

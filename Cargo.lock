@@ -125,6 +125,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-bench"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "ark-sdk",
+ "async-trait",
+ "clap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+]
+
+[[package]]
 name = "ark-cli"
 version = "0.3.0"
 dependencies = [

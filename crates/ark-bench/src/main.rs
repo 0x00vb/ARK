@@ -1,0 +1,173 @@
+//! `ark-bench`: run the generic workload suite and compare reports.
+//!
+//! ```text
+//! ark-bench run --out baseline.json                       # simulated, deterministic
+//! ark-bench run --model ollama:qwen3:4b-instruct --reps 3 --out live.json
+//! ark-bench compare baseline.json candidate.json --out comparison.json
+//! ```
+
+use std::path::PathBuf;
+
+use ark_bench::{compare, report, suite, BenchSettings, ModelSpec, Report};
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(name = "ark-bench", about = "Benchmark an ARK agent and compare runs")]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Run the suite and write a report.
+    Run {
+        /// `sim` (simulated model) or `provider:model`.
+        #[arg(long, default_value = "sim")]
+        model: String,
+        /// A cheaper model for the fast tier (`provider:model`).
+        #[arg(long)]
+        fast: Option<String>,
+        #[arg(long, default_value_t = 1)]
+        reps: u32,
+        /// Comma-separated workload names.
+        #[arg(long)]
+        only: Option<String>,
+        /// Turns in the long-session workload (live runs cap it at 12).
+        #[arg(long, default_value_t = 500)]
+        long_turns: usize,
+        #[arg(long)]
+        no_planner: bool,
+        #[arg(long)]
+        no_critic: bool,
+        /// Context budget in tokens (default: the runtime's).
+        #[arg(long)]
+        budget: Option<u32>,
+        #[arg(long, default_value = "run")]
+        label: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Compare two reports.
+    Compare {
+        baseline: PathBuf,
+        candidate: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Print a Markdown table of the totals.
+        #[arg(long)]
+        md: bool,
+    },
+    /// List the workloads.
+    List,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    match Cli::parse().cmd {
+        Cmd::List => {
+            for w in suite::all(500) {
+                println!("{:<18} {:<16} {}", w.name(), w.class(), w.description());
+            }
+        }
+        Cmd::Run {
+            model,
+            fast,
+            reps,
+            only,
+            long_turns,
+            no_planner,
+            no_critic,
+            budget,
+            label,
+            out,
+        } => {
+            let mut workloads = suite::all(long_turns);
+            if let Some(only) = only {
+                let names: Vec<&str> = only.split(',').map(str::trim).collect();
+                workloads.retain(|w| names.contains(&w.name()));
+            }
+            let models = ModelSpec {
+                strong: model,
+                fast,
+            };
+            let settings = BenchSettings {
+                planner: !no_planner,
+                critic: !no_critic,
+                budget,
+            };
+            let r = ark_bench::run_suite(&workloads, &models, &settings, reps, &label, |r| {
+                eprintln!(
+                    "{:<18} rep {} {} calls={} tokens={} ({} cached) tools={} {}ms  {}",
+                    r.workload,
+                    r.rep,
+                    if r.success { "PASS" } else { "FAIL" },
+                    r.model_calls,
+                    r.total_tokens,
+                    r.cached_input_tokens,
+                    r.tool_calls,
+                    r.wall_ms,
+                    r.verdict
+                );
+            })
+            .await?;
+            print_summary(&r);
+            if let Some(path) = out {
+                std::fs::write(&path, serde_json::to_string_pretty(&r)?)?;
+                eprintln!("wrote {}", path.display());
+            }
+        }
+        Cmd::Compare {
+            baseline,
+            candidate,
+            out,
+            md,
+        } => {
+            let b: Report = serde_json::from_str(&std::fs::read_to_string(&baseline)?)?;
+            let c: Report = serde_json::from_str(&std::fs::read_to_string(&candidate)?)?;
+            let cmp = compare(&b, &c);
+            if md {
+                print!("{}", report::markdown(&cmp));
+            } else {
+                println!("{}", serde_json::to_string_pretty(&cmp)?);
+            }
+            if let Some(path) = out {
+                std::fs::write(&path, serde_json::to_string_pretty(&cmp)?)?;
+            }
+            if !cmp.regressions.is_empty() {
+                std::process::exit(2);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_summary(r: &Report) {
+    println!(
+        "\n{} · {} · model {} · {} rep(s)",
+        r.label, r.mode, r.model, r.reps
+    );
+    println!(
+        "{:<18} {:>7} {:>6} {:>9} {:>9} {:>6} {:>8} {:>10}",
+        "workload", "success", "calls", "tokens", "uncached", "tools", "peak ctx", "cost/succ"
+    );
+    let row = |name: &str, s: &ark_bench::Summary| {
+        println!(
+            "{:<18} {:>7.2} {:>6.1} {:>9.0} {:>9.0} {:>6.1} {:>8.0} {:>10}",
+            name,
+            s.success_rate,
+            s.model_calls,
+            s.total_tokens,
+            s.uncached_input_tokens,
+            s.tool_calls,
+            s.peak_context_tokens,
+            s.cost_per_success_usd
+                .map(|c| format!("${c:.5}"))
+                .unwrap_or_else(|| "n/a".into())
+        );
+    };
+    for w in &r.workloads {
+        row(&w.name, &w.summary);
+    }
+    row("TOTAL", &r.totals);
+}

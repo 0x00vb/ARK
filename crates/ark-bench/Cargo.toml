@@ -1,0 +1,22 @@
+[package]
+name = "ark-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK benchmark and eval harness: run workloads against an ARK agent, record what every model request cost, and compare runs."
+
+[dependencies]
+ark-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tempfile.workspace = true
+time.workspace = true
+
+[[bin]]
+name = "ark-bench"
+path = "src/main.rs"

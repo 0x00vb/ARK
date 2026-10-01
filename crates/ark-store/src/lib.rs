@@ -31,6 +31,18 @@ pub use error::StoreError;
 pub use index::Hit;
 pub type Result<T> = std::result::Result<T, StoreError>;
 
+/// What a project holds, counted (see [`Store::project_stats`]).
+#[derive(Clone, Debug, Default)]
+pub struct ProjectStats {
+    pub invocations: usize,
+    /// Characters of stored tool output (compact JSON).
+    pub output_chars: usize,
+    pub cards: usize,
+    /// Characters of distilled summaries and identifiers.
+    pub card_chars: usize,
+    pub artifacts: usize,
+}
+
 pub struct Store {
     root: PathBuf,
     db: Mutex<Connection>,
@@ -77,8 +89,19 @@ impl Store {
                  PRIMARY KEY(session_id, idx));
              CREATE TABLE IF NOT EXISTS turn_traces(
                  session_id TEXT NOT NULL, idx INTEGER NOT NULL, json TEXT NOT NULL,
-                 PRIMARY KEY(session_id, idx));",
+                 PRIMARY KEY(session_id, idx));
+             -- The lookups every turn makes; without them each one scans its table, so a
+             -- turn gets slower as the project grows.
+             CREATE INDEX IF NOT EXISTS cards_by_digest
+                 ON evidence_cards(project_id, call_digest, created_at);
+             CREATE INDEX IF NOT EXISTS cards_by_time ON evidence_cards(project_id, created_at);
+             CREATE INDEX IF NOT EXISTS invocations_by_time ON invocations(project_id, created_at);
+             CREATE INDEX IF NOT EXISTS invocations_by_status ON invocations(status);
+             CREATE INDEX IF NOT EXISTS artifacts_by_time ON artifacts(project_id, created_at);
+             CREATE INDEX IF NOT EXISTS sessions_by_project ON sessions(project_id, updated_at);
+             CREATE INDEX IF NOT EXISTS notes_by_time ON notes(project_id, created_at);",
         )?;
+        migrate(&db)?;
         let search = match index::SearchIndex::open(&root.join("index")) {
             Ok(s) => Some(s),
             Err(e) => {
@@ -241,15 +264,16 @@ impl Store {
     pub fn put_invocation(&self, project: &ProjectId, inv: &Invocation) -> Result<()> {
         let db = self.db.lock().unwrap();
         db.execute(
-            "INSERT OR REPLACE INTO invocations(project_id, id, action, status, created_at, json)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT OR REPLACE INTO invocations(project_id, id, action, status, created_at, json, output_len)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 project.as_str(),
                 inv.id.as_str(),
                 inv.action,
                 serde_json::to_string(&inv.status)?.trim_matches('"'),
                 rfc(inv.created_at),
-                serde_json::to_string(inv)?
+                serde_json::to_string(inv)?,
+                serde_json::to_string(&inv.output)?.len() as i64
             ],
         )?;
         Ok(())
@@ -261,6 +285,45 @@ impl Store {
             db.prepare("SELECT json FROM invocations WHERE project_id=?1 ORDER BY created_at ASC")?;
         let rows = stmt.query_map([project.as_str()], |r| r.get::<_, String>(0))?;
         collect(rows)
+    }
+
+    /// Counts and sizes for a project, computed in the database (no rows are loaded).
+    pub fn project_stats(&self, project: &ProjectId) -> Result<ProjectStats> {
+        let db = self.db.lock().unwrap();
+        let p = project.as_str();
+        let (invocations, output_chars): (i64, i64) = db.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(output_len), 0) FROM invocations WHERE project_id=?1",
+            [p],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let (cards, card_chars): (i64, i64) = db.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(text_len), 0) FROM evidence_cards WHERE project_id=?1",
+            [p],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let artifacts: i64 = db.query_row(
+            "SELECT COUNT(*) FROM artifacts WHERE project_id=?1",
+            [p],
+            |r| r.get(0),
+        )?;
+        Ok(ProjectStats {
+            invocations: invocations as usize,
+            output_chars: output_chars as usize,
+            cards: cards as usize,
+            card_chars: card_chars as usize,
+            artifacts: artifacts as usize,
+        })
+    }
+
+    /// Characters of input and answer in a session's first `below` turns.
+    pub fn session_text_chars(&self, session: &str, below: u32) -> Result<usize> {
+        let db = self.db.lock().unwrap();
+        let n: i64 = db.query_row(
+            "SELECT COALESCE(SUM(text_len), 0) FROM session_turns WHERE session_id=?1 AND idx < ?2",
+            rusqlite::params![session, below],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
     }
 
     /// Invocations still marked running, in every project.
@@ -359,11 +422,12 @@ impl Store {
     pub fn put_evidence_card(&self, project: &ProjectId, card: &EvidenceCard) -> Result<()> {
         let db = self.db.lock().unwrap();
         db.execute(
-            "INSERT OR REPLACE INTO evidence_cards(project_id, invocation_id, action, call_digest, created_at, json)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT OR REPLACE INTO evidence_cards(project_id, invocation_id, action, call_digest, created_at, json, text_len)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 project.as_str(), card.invocation.as_str(), card.action,
-                card.call_digest, rfc(card.created_at), serde_json::to_string(card)?
+                card.call_digest, rfc(card.created_at), serde_json::to_string(card)?,
+                (card.summary.len() + card.identifiers.iter().map(|i| i.len()).sum::<usize>()) as i64
             ],
         )?;
         Ok(())
@@ -493,8 +557,13 @@ impl Store {
     ) -> Result<()> {
         let db = self.db.lock().unwrap();
         db.execute(
-            "INSERT OR REPLACE INTO session_turns(session_id, idx, json) VALUES(?1, ?2, ?3)",
-            rusqlite::params![session, index, serde_json::to_string(turn)?],
+            "INSERT OR REPLACE INTO session_turns(session_id, idx, json, text_len) VALUES(?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                session,
+                index,
+                serde_json::to_string(turn)?,
+                (turn["input"].as_str().map_or(0, str::len) + turn["answer"].as_str().map_or(0, str::len)) as i64
+            ],
         )?;
         Ok(())
     }
@@ -583,8 +652,89 @@ fn collect<T: for<'de> serde::Deserialize<'de>>(
     Ok(out)
 }
 
+/// Bring an older store up to the current schema. Each step is idempotent.
+fn migrate(db: &Connection) -> Result<()> {
+    // Sizes kept next to each row, so the counts shown after every turn are a sum over an
+    // integer column instead of a parse of every stored row. Rows written before this get
+    // their size once, here.
+    add_column(
+        db,
+        "invocations",
+        "output_len",
+        "UPDATE invocations SET output_len = COALESCE(LENGTH(json_extract(json, '$.output')), 0)",
+    )?;
+    add_column(
+        db,
+        "evidence_cards",
+        "text_len",
+        "UPDATE evidence_cards SET text_len = COALESCE(LENGTH(json_extract(json, '$.summary')), 0)
+             + COALESCE(LENGTH(json_extract(json, '$.identifiers')), 0)",
+    )?;
+    add_column(
+        db,
+        "session_turns",
+        "text_len",
+        "UPDATE session_turns SET text_len = COALESCE(LENGTH(json_extract(json, '$.input')), 0)
+             + COALESCE(LENGTH(json_extract(json, '$.answer')), 0)",
+    )?;
+    Ok(())
+}
+
+fn add_column(db: &Connection, table: &str, column: &str, backfill: &str) -> Result<()> {
+    let exists = db
+        .prepare(&format!(
+            "SELECT 1 FROM pragma_table_info('{table}') WHERE name=?1"
+        ))?
+        .exists([column])?;
+    if !exists {
+        db.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0; {backfill};"
+        ))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_older_store_gains_size_columns_with_its_old_rows_counted() {
+        let dir = tempfile::tempdir().unwrap();
+        // A store as an earlier version wrote it: no size columns.
+        {
+            let db = Connection::open(dir.path().join("meta.db")).unwrap();
+            db.execute_batch(
+                "CREATE TABLE invocations(project_id TEXT NOT NULL, id TEXT NOT NULL,
+                     action TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+                     json TEXT NOT NULL, PRIMARY KEY(project_id, id));
+                 CREATE TABLE evidence_cards(project_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
+                     action TEXT NOT NULL, call_digest TEXT NOT NULL, created_at TEXT NOT NULL,
+                     json TEXT NOT NULL, PRIMARY KEY(project_id, invocation_id));
+                 CREATE TABLE session_turns(session_id TEXT NOT NULL, idx INTEGER NOT NULL,
+                     json TEXT NOT NULL, PRIMARY KEY(session_id, idx));
+                 INSERT INTO invocations VALUES('p', 'i1', 'a.b', 'ok', '2026-01-01T00:00:00Z',
+                     '{\"output\": {\"k\": \"abcdef\"}}');
+                 INSERT INTO session_turns VALUES('s', 0, '{\"input\": \"hello\", \"answer\": \"world!\"}');",
+            )
+            .unwrap();
+        }
+        let store = Store::open(dir.path()).unwrap();
+        let stats = store.project_stats(&ProjectId("p".into())).unwrap();
+        assert_eq!(stats.invocations, 1);
+        assert_eq!(stats.output_chars, r#"{"k":"abcdef"}"#.len());
+        assert_eq!(store.session_text_chars("s", 1).unwrap(), 11);
+        // Opening again is a no-op.
+        drop(store);
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(
+            store
+                .project_stats(&ProjectId("p".into()))
+                .unwrap()
+                .invocations,
+            1
+        );
+    }
+
     use super::*;
     use ark_core::{ArtifactKind, Invocation, NoteKind, Provenance, RiskTier};
 

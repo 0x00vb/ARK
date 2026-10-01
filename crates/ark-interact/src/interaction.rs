@@ -774,33 +774,27 @@ impl Interaction {
 
     /// The measurements behind the "kept out of the request" list.
     pub fn kept_out(&self) -> anyhow::Result<KeptOut> {
+        // Counted in the database: this runs after every turn, and loading every stored
+        // output to measure it made each turn slower as the project grew.
         let rec = self.session.record();
         let engine = self.engine();
         let pid = &self.project.id;
-        let transcript = self.session.transcript(engine, None)?;
-        let invs = engine
+        let stats = engine
             .store
-            .list_invocations(pid)
+            .project_stats(pid)
             .map_err(ark_runtime::AgentError::from)?;
-        let cards = engine
+        let transcript_chars = engine
             .store
-            .list_evidence_cards(pid)
-            .map_err(ark_runtime::AgentError::from)?;
-        let artifacts = engine
-            .store
-            .list_artifacts(pid)
+            .session_text_chars(self.session.id().as_str(), rec.turn_count)
             .map_err(ark_runtime::AgentError::from)?;
         let state = engine
             .store
             .get_research_state(pid)
             .map_err(ark_runtime::AgentError::from)?
             .unwrap_or_default();
-        let k = KeptOut {
+        Ok(KeptOut {
             transcript_turns: rec.turn_count,
-            transcript_chars: transcript
-                .iter()
-                .map(|t| t.input.len() + t.answer.len())
-                .sum(),
+            transcript_chars,
             carried_tokens: self
                 .session
                 .conversation_digest()
@@ -809,17 +803,13 @@ impl Interaction {
             gists: rec.gists.len(),
             dropped_turns: rec.dropped_turns,
             compactions: rec.compactions,
-            tool_calls: invs.len(),
-            raw_output_chars: invs.iter().map(|i| i.output.to_string().len()).sum(),
-            distilled_chars: cards
-                .iter()
-                .map(|c| c.summary.len() + c.identifiers.iter().map(|x| x.len()).sum::<usize>())
-                .sum(),
-            cards: cards.len(),
-            artifacts: artifacts.len(),
+            tool_calls: stats.invocations,
+            raw_output_chars: stats.output_chars,
+            distilled_chars: stats.card_chars,
+            cards: stats.cards,
+            artifacts: stats.artifacts,
             state_overflow: StateView::build(state, STATE_DIGEST_ITEMS, &[]).overflow(),
-        };
-        Ok(k)
+        })
     }
 
     pub fn usage_view(&self) -> UsageView {

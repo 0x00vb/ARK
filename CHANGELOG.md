@@ -3,6 +3,13 @@
 All notable changes to ARK are documented here. Format: [Keep a Changelog](https://keepachangelog.com);
 this project adheres to [Semantic Versioning](https://semver.org).
 
+## [0.4.1]
+
+### Fixed
+- `scripts/ci.sh` ran the benchmark from `./target/release` even when `CARGO_TARGET_DIR`
+  pointed elsewhere, so `scripts/verify-release.sh` (which honors `CARGO_TARGET_DIR`) failed
+  at its last step. Found by verifying v0.4.0 from a fresh clone. No library change.
+
 ## [0.4.0]
 
 Production hardening, measurement, and a cheaper harness. No new front-end surface.

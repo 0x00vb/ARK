@@ -25,8 +25,9 @@ scripts/check-version.sh
 
 step "simulated benchmark against the committed baseline"
 out=$(mktemp -d)
-./target/release/ark-bench run --label candidate --out "$out/candidate.json" >/dev/null 2>&1
-./target/release/ark-bench compare bench/baseline.json "$out/candidate.json" --md
+bench="${CARGO_TARGET_DIR:-target}/release/ark-bench"
+"$bench" run --label candidate --out "$out/candidate.json" >/dev/null 2>&1
+"$bench" compare bench/baseline.json "$out/candidate.json" --md
 rm -rf "$out"
 
 printf '\nall checks passed\n'

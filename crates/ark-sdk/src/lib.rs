@@ -28,7 +28,7 @@ use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
 use ark_runtime::skills;
 use ark_runtime::{
-    Agent, AgentProfile, ApprovalGate, CancelToken, ContextReport, Distiller, Engine, Harness,
+    AgentProfile, ApprovalGate, CancelToken, ContextReport, Distiller, Engine, Harness,
     HarnessEvent, HarnessOutcome, ModelRouter, Role, RuleBook, RuleSelection, RulesTool, Session,
     Steering, StoreLedger,
 };
@@ -482,22 +482,6 @@ impl Ark {
             .harness()
             .ask(&engine, &profile, project, task, on_event)
             .await?)
-    }
-
-    /// Run the simpler [`Agent`] loop (no context budget/router/state). Handy for small tasks.
-    pub async fn ask_simple(
-        &self,
-        provider: Box<dyn Provider>,
-        project: &ProjectId,
-        task: &str,
-    ) -> Result<String, ArkError> {
-        let agent = Agent::new(provider)
-            .max_steps(self.max_steps)
-            .allow_mutate(self.allow_mutate);
-        let outcome = agent
-            .ask(&self.turn_engine(), &self.profile, project, task, |_| {})
-            .await?;
-        Ok(outcome.answer)
     }
 }
 

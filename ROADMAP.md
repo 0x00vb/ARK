@@ -69,11 +69,12 @@ Throughout: one runtime, many clients. Desktop, CLI, Cloud and domain products u
 ARK capabilities; prefer a reusable primitive in the right layer over a feature-specific
 implementation.
 
-API trim for v0.8.0 (breaking): public items no caller uses. Remove each, or keep it with a
-reason: `Interaction::ark_mut`, `App::ark_builder`, `Harness::budget_tokens`,
-`budget::WorkingSet::round_count`, `Registry::from_adapters`, `Store::get_artifact`,
-`Store::get_session`, `ActionDescriptor::with_output_schema`, `SurfaceRef::with_title`,
-`PendingApproval::is_closed`, `Ark::ask_simple`.
+API trim for v0.8.0 (breaking), done: removed `Interaction::ark_mut`, `Harness::budget_tokens`,
+`budget::WorkingSet::round_count`, `Registry::from_adapters`, `PendingApproval::is_closed`,
+`Ark::ask_simple`. Kept, each the missing half of a pair: `App::ark_builder` (a full
+`ArkBuilder` built at open time), `Store::get_artifact` and `Store::get_session` (read by id
+after `put_*`), `ActionDescriptor::with_output_schema` and `SurfaceRef::with_title` (builder
+twins of `with_input_schema` and `new`).
 
 ### Capabilities
 

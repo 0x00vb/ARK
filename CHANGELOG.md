@@ -56,7 +56,8 @@ What changed for people building on ARK, per release. Not a commit log.
   through `App` before open), `Harness::budget_tokens` (the budget given to
   `Harness::budget`), `budget::WorkingSet::round_count` (none), `Registry::from_adapters`
   (`Registry::new()` plus `with`/`register`), `PendingApproval::is_closed`
-  (`PendingApproval::closed().await`).
+  (`PendingApproval::closed().await`), `Ark::ask_simple` (`Ark::ask`, or `ark_runtime::Agent`
+  for the loop without a context budget).
 - `ContextReport` and `AgentSpec` have a new field, `skills`; a struct literal without
   `..Default::default()` (or `AgentSpec::new`) needs it.
 

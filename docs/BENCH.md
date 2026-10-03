@@ -87,6 +87,7 @@ neighbors.
 | parallel | three slow independent lookups in one reply |
 | stale-read | read, write, read again: no stale reuse |
 | team | a lead delegates two independent lookups to two workers (`Workload::team`) |
+| skill | write release notes in a format only a stored skill gives: one catalog line, then `skills.read` |
 
 ## The naive baseline
 

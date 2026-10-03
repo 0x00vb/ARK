@@ -201,6 +201,19 @@ impl Command for Plugin {
     }
 }
 
+pub struct Skills;
+#[async_trait::async_trait]
+impl Command for Skills {
+    meta!(
+        "skills",
+        "Skills the conversation and agents can read, and where they are"
+    );
+    async fn run(&self, ix: &mut Interaction, _args: &str) -> anyhow::Result<Reply> {
+        let found = crate::skills::list(ix.ark(), &ix.project().id);
+        Ok(crate::skills::report(&found, ix.ark().engine(), &ix.project().id).into())
+    }
+}
+
 pub struct TraceCmd;
 #[async_trait::async_trait]
 impl Command for TraceCmd {

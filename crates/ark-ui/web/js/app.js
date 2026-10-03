@@ -13,6 +13,7 @@ import { Pane, invocationView, artifactView } from "./pane.js";
 import { registry, installApi, dispatchExt, presenterFor } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
 import { registerPlugins } from "./plugins.js";
+import { registerSkills } from "./skills.js";
 
 const transport = connect();
 const appEl = $("#app");
@@ -599,8 +600,9 @@ async function bootOnce(again) {
   if (!again) {
     sidebar.renderExtensions();
     topbar.render();
-    // Settings › Tool servers, when the app has plugins.
+    // Settings › Tool servers and Skills, ARK's own sections.
     registerPlugins(window.ark);
+    registerSkills(window.ark);
   }
   await loadSession();
   if (hello.running) {

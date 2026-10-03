@@ -266,18 +266,19 @@ scenarios.workbench = workbench;
 // while Settings is open joins the list. `ark.compose` fills the composer from any view and
 // sends nothing.
 async function settings(page) {
-  // Tool servers registers once the page is connected: wait for its Settings entry.
+  // ARK's own sections register once the page is connected: wait for the Settings entry.
   await page.locator("#open-settings:not([hidden])").waitFor();
   await page.evaluate(() => window.ark.setting({ id: "keys", title: "Keys", render: (el) => el.append("the keys") }));
   await page.locator("#open-settings").click();
   assert.equal(await page.locator(".settings-title").innerText(), "Keys", "the app's section opens first");
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
   const rows = page.locator(".settings-list .nav-row");
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Tool servers"]);
+  await rows.nth(2).waitFor();
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Skills", "Tool servers"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Skills", "Tool servers"]);
   await page.locator(".settings-list .nav-row", { hasText: "Look" }).click();
   assert.equal(await page.locator(".settings-title").innerText(), "Look");
   assert.equal(await page.locator(".settings-section").innerText(), "the look");
@@ -293,7 +294,8 @@ scenarios.settings = settings;
 // Settings › Tool servers: an MCP server is added from a typed command, shows its tools,
 // joins the app's tools, and is removed with a second click. One that cannot start says why.
 async function plugins(page) {
-  await page.locator("#open-settings").click();
+  await page.locator("#open-settings:not([hidden])").waitFor();
+  await page.evaluate(() => window.ark.openSettings("plugins"));
   await page.locator(".settings-title", { hasText: "Tool servers" }).waitFor();
   assert.equal(await page.locator(".plugin-list").innerText(), "No servers yet.");
 
@@ -320,6 +322,21 @@ async function plugins(page) {
   assert.equal(await page.locator(".plugin-list").innerText(), "No servers yet.");
 }
 scenarios.plugins = plugins;
+
+// Settings › Skills lists the store's skill, and Add opens the Terminal in the project folder
+// with the install command typed, unsent.
+async function skills(page) {
+  await page.locator("#open-settings:not([hidden])").waitFor();
+  await page.evaluate(() => window.ark.openSettings("skills"));
+  const row = page.locator('.skill-row[data-name="release-notes"]');
+  await row.waitFor();
+  assert.match(await row.innerText(), /All projects/);
+  assert.match(await row.innerText(), /Write release notes/);
+  await page.locator(".skill-pkg").fill("vercel-labs/agent-skills");
+  await page.locator(".skill-add .btn.primary").click();
+  await page.locator(".xterm-rows", { hasText: "npx skills add vercel-labs/agent-skills" }).waitFor();
+}
+scenarios.skills = skills;
 
 const NARRATION = "Reading the notes slowly, one line at a time, so that a window can reload in between. ".repeat(3).trim();
 

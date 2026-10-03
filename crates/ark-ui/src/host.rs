@@ -215,6 +215,8 @@ struct Snapshot {
 pub struct Host {
     ix: tokio::sync::Mutex<Interaction>,
     engine: Arc<Engine>,
+    /// The names the conversation's skills are chosen by (`Ark::skill_names`).
+    chat_skills: Vec<String>,
     labels: Labels,
     feed: Arc<Feed>,
     running: Mutex<Option<Running>>,
@@ -262,6 +264,7 @@ impl Host {
             orch: Mutex::new(None),
             terminals: Default::default(),
             engine: ix.ark().shared_engine(),
+            chat_skills: ix.ark().skill_names().to_vec(),
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
             ix: tokio::sync::Mutex::new(ix),
@@ -739,6 +742,16 @@ impl Host {
                     .map(|p| json!({ "name": p.name, "summary": p.summary }))
                     .collect(),
             )),
+            // Skills of the project folder and the store; `chat` says whether the conversation
+            // may read each (agents choose their own in their spec).
+            "skills" => {
+                let project = self.project()?;
+                Ok(serde_json::to_value(ark_interact::skills::list_for(
+                    &self.engine,
+                    &project.id,
+                    &self.chat_skills,
+                ))?)
+            }
             // MCP plugins: the engine's, worded and run off the async runtime by ark-interact,
             // as `/plugin` is. None waits for a running turn; a change applies from the next.
             // `plugins` is null when the app has none (it was not opened on a store root).

@@ -23,6 +23,7 @@ use std::time::Duration;
 use ark_core::{Project, ProjectId, RuleBinding, RuleScope};
 use ark_model::estimate_tokens;
 use ark_runtime::rules::{select, RULES_BUDGET};
+use ark_runtime::skills;
 use ark_runtime::{
     AgentProfile, ApprovalDecision, ApprovalGate, ApprovalRequest, Approver, CancelToken, Engine,
     Harness, HarnessEvent, RuleBook, RulesTool, Session, Steering,
@@ -1473,8 +1474,26 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         if !sets.is_empty() {
             registry.register(Arc::new(RulesTool::new(sets)));
         }
+        // Skills it may read: their catalog in the first message, their instructions on demand.
+        let skills = if spec.skills.is_empty() {
+            Vec::new()
+        } else {
+            skills::allowed(
+                &skills::discover(&skills::dirs(&self.engine, &self.project.id)),
+                &spec.skills,
+            )
+        };
+        let catalog = skills::catalog(&skills, skills::CATALOG_BUDGET).map(|c| c.text);
+        if !skills.is_empty() {
+            registry.register(Arc::new(skills::SkillsTool::new(skills)));
+        }
         let engine = self.engine.scoped(registry);
-        let profile = self.agent_profile(spec, &delegates);
+        let mut profile = self.agent_profile(spec, &delegates);
+        if catalog.is_some() {
+            // The catalog says to call it, so it is loaded, not left to discovery.
+            profile.distillers.push(skills::distiller());
+            profile.core_actions.push(skills::READ.into());
+        }
         let scope = ProjectId(agent.scope.clone());
 
         let dep_refs: Vec<&TaskRecord> = deps.iter().collect();
@@ -1521,7 +1540,8 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             .cancel(Some(cancel.clone()))
             .steering(Some(steer.clone()))
             .conversation(session.conversation_digest())
-            .rules(selection.clone());
+            .rules(selection.clone())
+            .skills(catalog);
 
         let session_id = session.id().to_string();
         let attempt_no = {

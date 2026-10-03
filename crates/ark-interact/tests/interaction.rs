@@ -515,3 +515,123 @@ async fn a_plugin_added_by_command_serves_the_next_turn_and_the_agents_it_is_giv
         "{removed}"
     );
 }
+
+/// A skill in the store: the conversation sees its one line, reads its instructions with
+/// `skills.read`, and `/skills` lists it. An agent sees it only when its spec names it.
+#[tokio::test]
+async fn the_conversation_reads_a_skill_and_agents_get_the_ones_they_are_given() {
+    use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec};
+    let dir = tempfile::tempdir().unwrap();
+    let skill = dir.path().join("skills/release-notes");
+    std::fs::create_dir_all(&skill).unwrap();
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: release-notes\ndescription: Write release notes from a list of changes\n---\nStart with a line that says NOTES-FORMAT-7.\n",
+    )
+    .unwrap();
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+    let log = seen.clone();
+    let model: Arc<dyn ark_model::Provider> =
+        Arc::new(MockProvider::new("m", vec![]).with_fallback(move |req| {
+            let first = req
+                .messages
+                .first()
+                .map(|m| m.content.clone())
+                .unwrap_or_default();
+            log.lock().unwrap().push(first.clone());
+            let returned: Vec<String> = req
+                .messages
+                .iter()
+                .filter(|m| m.tool_call_id.is_some())
+                .map(|m| m.content.clone())
+                .collect();
+            if returned.is_empty() && first.contains("== SKILLS ==") {
+                Completion {
+                    content: String::new(),
+                    tool_calls: vec![ToolCall {
+                        id: "s1".into(),
+                        name: "skills.read".into(),
+                        arguments: serde_json::json!({ "name": "release-notes" }),
+                    }],
+                    usage: Usage::measured(100, 5),
+                }
+            } else {
+                Completion {
+                    content: format!("ANSWER {}", returned.join(" | ")),
+                    tool_calls: vec![],
+                    usage: Usage::measured(100, 5),
+                }
+            }
+        }));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = App::new("Test")
+        .ark(ark)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+
+    let listed = ix.execute("/skills").await.report.plain_text();
+    assert!(
+        listed.contains("release-notes") && listed.contains("all projects"),
+        "{listed}"
+    );
+
+    let ctl = TurnControl::new();
+    let answer = ix
+        .run_turn("write notes for these changes", &ctl, |_, _| {})
+        .await
+        .result
+        .unwrap()
+        .answer;
+    assert!(
+        answer.contains("NOTES-FORMAT-7"),
+        "the instructions reached the model: {answer}"
+    );
+    let first = seen.lock().unwrap()[0].clone();
+    assert!(
+        first.contains("- release-notes: Write release notes"),
+        "{first}"
+    );
+    assert!(
+        !first.contains("NOTES-FORMAT-7"),
+        "instructions are not sent up front"
+    );
+
+    // Agents: only the one given the skill sees it.
+    let project = ix.project().clone();
+    let orch = Orchestrator::builder(ix.ark(), &project)
+        .configure_models(|b| b.provider("m", model.clone()).default_model("m"))
+        .build()
+        .unwrap();
+    orch.spawn(AgentSpec::new("writer").skills(["release-notes"]))
+        .await
+        .unwrap();
+    orch.spawn(AgentSpec::new("other")).await.unwrap();
+    seen.lock().unwrap().clear();
+    let w = orch
+        .run("writer", TaskSpec::new("write the notes"))
+        .await
+        .unwrap();
+    assert!(
+        w.result.as_deref().unwrap().contains("NOTES-FORMAT-7"),
+        "{w:?}"
+    );
+    seen.lock().unwrap().clear();
+    orch.run("other", TaskSpec::new("write the notes"))
+        .await
+        .unwrap();
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .all(|m| !m.contains("== SKILLS ==")),
+        "an agent without skills gets no catalog"
+    );
+}

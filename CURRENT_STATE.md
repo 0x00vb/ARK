@@ -11,13 +11,13 @@ Last updated: 2026-10-03
 | | |
 |---|---|
 | Latest tag | v0.7.0 (2026-10-03), on `origin` and `github` |
-| In progress | the measured-runtime milestone is closed at v0.7.0; what it left open (the Haiku check, `parallel` and `team` overhead, output tokens) is under "Deferred" in `ROADMAP.md`. Next is the capability and product roadmap |
+| In progress | the measured-runtime milestone is closed at v0.7.0; what it left open (the Haiku check, `parallel` and `team` overhead, output tokens) is under "Deferred" in `ROADMAP.md`. Since v0.7.0 on `main` (`[Unreleased]`): MCP plugins added and removed while ARK runs (`/plugin`, Settings › Tool servers) and skills read on demand (`/skills`, Settings › Skills, ADR 0009) |
 
 ## Waiting on this repo
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | nothing: v0.7.0 has what its `agents-canvas` branch uses (`ark.setting`, `ark.compose`, top-bar tabs, projects as folders, the chat's agent tools); it can pin v0.7.0 and drop its local `[patch]` |
+| ark-desktop | nothing for its current work (v0.7.0). The next tag brings it Settings › Tool servers and Settings › Skills with no change of its own; per-agent skill switches in its agent inspector need that tag too (`AgentSpec::skills`, method `skills`) |
 | SecRes | nothing; pins v0.5.0 |
 
 ## Next

@@ -26,6 +26,7 @@ use std::sync::Arc;
 use ark_core::{Focus, Project, ProjectId, RuleScope};
 use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
+use ark_runtime::skills;
 use ark_runtime::{
     Agent, AgentProfile, ApprovalGate, CancelToken, ContextReport, Distiller, Engine, Harness,
     HarnessEvent, HarnessOutcome, ModelRouter, Role, RuleBook, RuleSelection, RulesTool, Session,
@@ -117,6 +118,8 @@ pub struct Ark {
     planner: bool,
     critic: bool,
     allow_mutate: bool,
+    /// The skills the conversation may read (`*`, names; empty: none).
+    skills: Vec<String>,
 }
 
 impl Ark {
@@ -225,7 +228,14 @@ impl Ark {
     ) -> Result<HarnessOutcome, ArkError> {
         let project = session.project().clone();
         let (engine, rules) = self.with_rules(&project, input)?;
-        let (engine, profile) = self.with_tools(engine, &opts.tools);
+        let (engine, catalog) = self.with_skills(engine, &project);
+        let (engine, mut profile) = self.with_tools(engine, &opts.tools);
+        if catalog.is_some() {
+            // The catalog says to call it, so it is loaded, not left to discovery.
+            let p = profile.to_mut();
+            p.distillers.push(skills::distiller());
+            p.core_actions.push(skills::READ.into());
+        }
         let router = self.session_router(session).await;
         let harness = self
             .harness_with(router)
@@ -235,7 +245,8 @@ impl Ark {
             .steering(opts.steer)
             .presentation(opts.present)
             .focus(opts.focus)
-            .rules(rules);
+            .rules(rules)
+            .skills(catalog);
         session.begin_turn(&self.engine, input)?;
         match harness
             .ask(&engine, &profile, &project, input, on_event)
@@ -319,6 +330,43 @@ impl Ark {
         Ok((Arc::new(engine.scoped(registry)), Some(selection)))
     }
 
+    /// The skills a conversation turn may read, and the engine that offers `skills.read` for
+    /// them. None found (or none allowed): the engine as it was, no catalog.
+    fn with_skills(
+        &self,
+        engine: Arc<Engine>,
+        project: &ProjectId,
+    ) -> (Arc<Engine>, Option<String>) {
+        if self.skills.is_empty() {
+            return (engine, None);
+        }
+        let found = skills::allowed(
+            &skills::discover(&skills::dirs(&engine, project)),
+            &self.skills,
+        );
+        let Some(catalog) = skills::catalog(&found, skills::CATALOG_BUDGET) else {
+            return (engine, None);
+        };
+        let registry = engine
+            .registry
+            .clone()
+            .with(Arc::new(skills::SkillsTool::new(found)));
+        (Arc::new(engine.scoped(registry)), Some(catalog.text))
+    }
+
+    /// The names the conversation's skills are chosen by (`*`, names).
+    pub fn skill_names(&self) -> &[String] {
+        &self.skills
+    }
+
+    /// The skills this project's conversation may read, as found now.
+    pub fn skills(&self, project: &ProjectId) -> Vec<skills::Skill> {
+        skills::allowed(
+            &skills::discover(&skills::dirs(&self.engine, project)),
+            &self.skills,
+        )
+    }
+
     /// The engine and profile of a turn with `tools` added: their adapters registered, their
     /// actions offered directly, their distillers first.
     fn with_tools(
@@ -371,12 +419,19 @@ impl Ark {
         tools: &[TurnTools],
     ) -> Result<ContextReport, ArkError> {
         let (engine, rules) = self.with_rules(session.project(), "")?;
-        let (engine, profile) = self.with_tools(engine, tools);
+        let (engine, catalog) = self.with_skills(engine, session.project());
+        let (engine, mut profile) = self.with_tools(engine, tools);
+        if catalog.is_some() {
+            let p = profile.to_mut();
+            p.distillers.push(skills::distiller());
+            p.core_actions.push(skills::READ.into());
+        }
         Ok(self
             .harness()
             .presentation(present)
             .conversation(session.conversation_digest())
             .rules(rules)
+            .skills(catalog)
             .preview_context(&engine, &profile, session.project(), "")
             .await?)
     }
@@ -430,6 +485,7 @@ pub struct ArkBuilder {
     critic: bool,
     allow_mutate: bool,
     subscriptions: Option<SubscriptionRuntime>,
+    skills: Vec<String>,
 }
 
 impl Default for ArkBuilder {
@@ -450,6 +506,7 @@ impl Default for ArkBuilder {
             critic: true,
             allow_mutate: false,
             subscriptions: None,
+            skills: vec!["*".into()],
         }
     }
 }
@@ -513,6 +570,14 @@ impl ArkBuilder {
         self
     }
 
+    /// The skills a conversation turn may read: names, `*` (the default: every skill of the
+    /// project folder's `.agents/skills` and the store's `skills`), or none. Agents of an
+    /// orchestrator choose their own (`AgentSpec::skills`).
+    pub fn skills<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        self.skills = names.into_iter().map(Into::into).collect();
+        self
+    }
+
     /// Use this subscription runtime (capacities, session policy, ledger) instead of the
     /// default one, which keeps vendor session state in the store.
     pub fn subscriptions(mut self, s: SubscriptionRuntime) -> Self {
@@ -548,6 +613,7 @@ impl ArkBuilder {
             planner: self.planner,
             critic: self.critic,
             allow_mutate: self.allow_mutate,
+            skills: self.skills,
         })
     }
 }

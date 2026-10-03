@@ -73,6 +73,15 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         return;
     }
     let dir = tempfile::tempdir().unwrap();
+    if scenario == "skills" {
+        let skill = dir.path().join("skills/release-notes");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: release-notes\ndescription: Write release notes from a list of changes\n---\nSteps.\n",
+        )
+        .unwrap();
+    }
     let model: Arc<dyn ark_model::Provider> =
         Arc::new(MockProvider::new("m", script).with_chunk_delay(chunk));
     let ark = Ark::builder()
@@ -160,6 +169,11 @@ async fn settings_sections_show_and_compose_fills_the_composer_unsent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn tool_servers_are_added_and_removed_in_settings() {
     drive("plugins", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn skills_are_listed_in_settings_and_added_from_the_terminal() {
+    drive("skills", vec![], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

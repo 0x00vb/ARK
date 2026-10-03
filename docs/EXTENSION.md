@@ -92,6 +92,7 @@ let distillers = DistillerSet::with_common().with(d);
 | Seam | Use it to |
 |---|---|
 | `ark_core::Sniffer`, `engine.register_sniffer(..)` | classify ingested bytes as `ArtifactKind::Other("...")` |
+| `.agents/skills`, `<store_root>/skills` | give the agent instructions for kinds of work, read only when a task needs them. See [Skills](#skills) |
 | `<store_root>/plugins.json` | add MCP servers in any language; each tool becomes `<name>.<tool>`, risk from MCP annotations or `x-ark-risk`. See [MCP plugins](#mcp-plugins) |
 | `Provider` | add a model backend; `ModelRouter::new(fast, strong)` splits planning from reasoning |
 | `KnowledgeProvider` | give the agent a reference corpus it cites apart from observations |
@@ -124,6 +125,23 @@ and restarted while it runs.
 | A server has 20 s to answer `initialize` and `tools/list` | A server that hangs is refused (and stopped), not waited on |
 | A plugin's name is not one of the app's own adapters | `<name>.<tool>` must stay unambiguous |
 | Local servers only | A `url` (remote) entry is refused |
+
+### Skills
+
+A skill is a folder with a `SKILL.md`: front matter with a `name` (lower case, digits, `-`) and a
+`description` (when to use it), then the instructions, and any files they refer to. ARK reads
+them from the project folder's `.agents/skills` (where `npx skills add` installs) and the
+store's `skills` (every project); the project's wins on a name.
+
+| Part | What |
+|---|---|
+| In each request | One line per skill the turn may read, after the rules, capped at `skills::CATALOG_BUDGET` tokens; reported as `skills` in `ContextReport` |
+| On demand | `skills.read {name}` (the instructions and the files beside them), `skills.file {name, path}` (one file, inside the skill's folder) |
+| Who reads which | The conversation: all (`ArkBuilder::skills` narrows it). An orchestrated agent: the ones `AgentSpec::skills` names, none by default |
+| Front-ends | `/skills`; Settings › Skills in the window |
+| Not ARK's | Installing skills, and running scripts a skill mentions (that needs a tool the app gives) |
+
+Why the instructions are not sent up front: [ADR 0009](adr/0009-skills-load-on-demand.md).
 
 ## Reuse of results
 

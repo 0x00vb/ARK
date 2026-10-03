@@ -1,0 +1,571 @@
+{
+  "schema_version": 1,
+  "label": "skills-qwen",
+  "ark_version": "0.7.0",
+  "created_at": "2026-10-03T18:57:12.682929Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "240"
+  },
+  "workloads": [
+    {
+      "name": "simple",
+      "class": "simple",
+      "description": "say hello in French; no tool needed",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 1.0,
+        "input_tokens": 1379.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 1379.0,
+        "output_tokens": 8.0,
+        "total_tokens": 1387.0,
+        "cost_usd": 0.002838,
+        "cost_per_success_usd": 0.002838,
+        "tool_calls": 0.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 1.0,
+        "peak_context_tokens": 1162.0,
+        "mean_context_tokens": 1162.0,
+        "tool_schema_tokens": 550.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 149.0,
+        "p95_turn_ms": 2670.0,
+        "median_first_token_ms": 46.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "simple",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Hello in French is \"Bonjour\".",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 1387
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 1
+          },
+          "input_tokens": 1379,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 1379,
+          "cache_write_tokens": 0,
+          "output_tokens": 8,
+          "total_tokens": 1387,
+          "tokens_measured": true,
+          "cost_usd": 0.002838,
+          "wall_ms": 2670,
+          "turn_ms": [
+            2670
+          ],
+          "first_token_ms": [
+            2571
+          ],
+          "model_latency_ms": [
+            2668
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1162,
+          "mean_context_tokens": 1162,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 550,
+          "tools_exposed_max": 5,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "simple",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Hello in French is \"Bonjour\".",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 1387
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 1
+          },
+          "input_tokens": 1379,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 1379,
+          "cache_write_tokens": 0,
+          "output_tokens": 8,
+          "total_tokens": 1387,
+          "tokens_measured": true,
+          "cost_usd": 0.002838,
+          "wall_ms": 149,
+          "turn_ms": [
+            149
+          ],
+          "first_token_ms": [
+            42
+          ],
+          "model_latency_ms": [
+            146
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1162,
+          "mean_context_tokens": 1162,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 550,
+          "tools_exposed_max": 5,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "simple",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Hello in French is \"Bonjour\".",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 1387
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 1
+          },
+          "input_tokens": 1379,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 1379,
+          "cache_write_tokens": 0,
+          "output_tokens": 8,
+          "total_tokens": 1387,
+          "tokens_measured": true,
+          "cost_usd": 0.002838,
+          "wall_ms": 144,
+          "turn_ms": [
+            144
+          ],
+          "first_token_ms": [
+            46
+          ],
+          "model_latency_ms": [
+            140
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1162,
+          "mean_context_tokens": 1162,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 550,
+          "tools_exposed_max": 5,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "skill",
+      "class": "skill",
+      "description": "write release notes in the format a stored skill sets; only the skill says what it is",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 2.0,
+        "input_tokens": 3454.3333333333335,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 3454.3333333333335,
+        "output_tokens": 41.0,
+        "total_tokens": 3495.3333333333335,
+        "cost_usd": 0.007318666666666667,
+        "cost_per_success_usd": 0.007318666666666667,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 2.0,
+        "peak_context_tokens": 1487.0,
+        "mean_context_tokens": 1440.0,
+        "tool_schema_tokens": 1290.0,
+        "prefix_reuse_tokens": 1355.0,
+        "median_turn_ms": 953.0,
+        "p95_turn_ms": 2508.0,
+        "median_first_token_ms": 257.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "skill",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Release notes, format R7\nAdded: an export button\nFixed: the login timeout",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 3498
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 2
+          },
+          "input_tokens": 3457,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 3457,
+          "cache_write_tokens": 0,
+          "output_tokens": 41,
+          "total_tokens": 3498,
+          "tokens_measured": true,
+          "cost_usd": 0.007324,
+          "wall_ms": 2508,
+          "turn_ms": [
+            2508
+          ],
+          "first_token_ms": [
+            266
+          ],
+          "model_latency_ms": [
+            1985,
+            517
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1487,
+          "mean_context_tokens": 1440,
+          "context_sources": {
+            "Capability index": 578,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 21,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 106,
+            "Task": 76,
+            "Tool results": 72,
+            "Tool schemas": 1290,
+            "Working state": 66,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1290,
+          "tools_exposed_max": 8,
+          "tools_used": 1,
+          "result_context_tokens": 72,
+          "result_raw_tokens": 66,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 1355,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "skill",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Release notes, format R7  \nAdded: an export button  \nFixed: the login timeout",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 3494
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 2
+          },
+          "input_tokens": 3453,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 3453,
+          "cache_write_tokens": 0,
+          "output_tokens": 41,
+          "total_tokens": 3494,
+          "tokens_measured": true,
+          "cost_usd": 0.007316,
+          "wall_ms": 938,
+          "turn_ms": [
+            938
+          ],
+          "first_token_ms": [
+            257
+          ],
+          "model_latency_ms": [
+            423,
+            507
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1487,
+          "mean_context_tokens": 1440,
+          "context_sources": {
+            "Capability index": 578,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 21,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 106,
+            "Task": 76,
+            "Tool results": 72,
+            "Tool schemas": 1290,
+            "Working state": 66,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1290,
+          "tools_exposed_max": 8,
+          "tools_used": 1,
+          "result_context_tokens": 72,
+          "result_raw_tokens": 66,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 1355,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "skill",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Release notes, format R7  \nAdded: an export button  \nFixed: the login timeout",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 3494
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 2
+          },
+          "input_tokens": 3453,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 3453,
+          "cache_write_tokens": 0,
+          "output_tokens": 41,
+          "total_tokens": 3494,
+          "tokens_measured": true,
+          "cost_usd": 0.007316,
+          "wall_ms": 953,
+          "turn_ms": [
+            953
+          ],
+          "first_token_ms": [
+            257
+          ],
+          "model_latency_ms": [
+            428,
+            518
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1487,
+          "mean_context_tokens": 1440,
+          "context_sources": {
+            "Capability index": 578,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 21,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 106,
+            "Task": 76,
+            "Tool results": 72,
+            "Tool schemas": 1290,
+            "Working state": 66,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1290,
+          "tools_exposed_max": 8,
+          "tools_used": 1,
+          "result_context_tokens": 72,
+          "result_raw_tokens": 66,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 1355,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 6,
+    "successes": 6,
+    "success_rate": 1.0,
+    "model_calls": 1.5,
+    "input_tokens": 2416.6666666666665,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 2416.6666666666665,
+    "output_tokens": 24.5,
+    "total_tokens": 2441.1666666666665,
+    "cost_usd": 0.005078333333333333,
+    "cost_per_success_usd": 0.005078333333333333,
+    "tool_calls": 0.5,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 1.5,
+    "peak_context_tokens": 1487.0,
+    "mean_context_tokens": 1301.0,
+    "tool_schema_tokens": 920.0,
+    "prefix_reuse_tokens": 677.5,
+    "median_turn_ms": 938.0,
+    "p95_turn_ms": 2670.0,
+    "median_first_token_ms": 257.0,
+    "stall_stops": 0.0
+  }
+}

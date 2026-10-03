@@ -48,7 +48,14 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 ## Next
 
-The capability and product roadmap comes next; it is not written here yet.
+The capability and product roadmap comes next; it is not written here yet. Done toward it
+since v0.7.0: MCP servers added while ARK runs, and skills read on demand (ADR 0009).
+
+| Kept out on purpose | Until |
+|---|---|
+| Remote MCP servers (HTTP/SSE `url` entries) | a consumer needs one; stdio servers only today |
+| Installing skills from ARK | never in the runtime: a person runs an installer (`npx skills add`) or copies a folder |
+| Preloading a skill's instructions when a task matches it | a benchmark shows it pays (the `skill` workload is the start) |
 
 ### Deferred: measured runtime
 

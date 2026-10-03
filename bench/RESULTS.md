@@ -3,6 +3,22 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Skills read on demand (2026-10-03)
+
+The `skill` workload: write release notes in a format only a stored skill gives. The request
+carries one catalog line; the instructions come back from `skills.read`. Report:
+`bench/skills/qwen-skill.json` (`--only skill,simple --reps 3`, `ollama:qwen3:4b-instruct`).
+
+| Run | Success | Calls | Tokens | Cost per success |
+|---|---:|---:|---:|---:|
+| `skill`, live qwen3:4b | 3/3 | 2.0 | 3,495 | $0.00732 |
+| `simple`, live qwen3:4b (same run) | 3/3 | 1.0 | 1,387 | $0.00284 |
+| `skill`, simulated | 1/1 | 3.0 | 4,540 | $0.00549 |
+
+In every live run the model read the skill first and its answer began with the format line
+the skill sets. The other 14 simulated workloads have the same calls, tokens and cost with
+skills in the build: a turn with no skills carries no catalog (`bench/baseline.json`).
+
 ## Overhead on small tasks: the planner (P2, 2026-10-03)
 
 Target: after tool selection, ARK still cost 1.1 to 1.5x the naive loop per success on

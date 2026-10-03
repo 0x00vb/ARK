@@ -18,6 +18,16 @@ What changed for people building on ARK, per release. Not a commit log.
   (methods `plugins`, `plugin_add`, `plugin_remove`, `plugin_restart`).
 - `Engine::tools()` (the registry plus the plugins connected now) and `Engine::for_turn()`.
 - `McpAdapter::connect_within`, `McpClient::connect_within`, `McpAdapter::running`.
+- Skills (Agent Skills format) from the project folder's `.agents/skills` and the store's
+  `skills`: a one-line-per-skill catalog in the first message (reported as `skills` in
+  `ContextReport`), `skills.read` and `skills.file` on demand (`ark_runtime::skills`,
+  `Harness::skills`, [ADR 0009](docs/adr/0009-skills-load-on-demand.md)). The conversation
+  reads all of them (`ArkBuilder::skills`, `Ark::skills`, `Ark::skill_names`); an agent reads
+  the ones `AgentSpec::skills` names; `agents.create` takes `skills`.
+- `/skills` in both front-ends (`ark_interact::skills`), Settings › Skills in the window (method
+  `skills`; Add skills opens the Terminal with `npx skills add` typed).
+- `ark-bench`: the `skill` workload. Live on qwen3:4b it passes 3 of 3 in 2 calls
+  (`bench/RESULTS.md`).
 
 ### Changed
 - An MCP server has 20 s to answer `initialize` and `tools/list` (`mcp::HANDSHAKE_TIMEOUT`);
@@ -28,6 +38,8 @@ What changed for people building on ARK, per release. Not a commit log.
 - `Engine::registry` no longer holds MCP plugins. Code that read or ran plugin actions
   through it uses `Engine::tools()`; `Engine::run_action` and the SDK's turns already do.
 - `AgentError` has a new variant, `Plugin(String)`; a `match` over it needs an arm.
+- `ContextReport` and `AgentSpec` have a new field, `skills`; a struct literal without
+  `..Default::default()` (or `AgentSpec::new`) needs it.
 
 ## [0.7.0] - 2026-10-03
 

@@ -137,3 +137,59 @@ async fn every_request_is_explained_by_role() {
     );
     assert!(last_step.action_schemas > 0 && last_step.action_schemas < last_step.tool_schemas);
 }
+
+/// The skills catalog rides in the first message after the rules, is reported as `skills`,
+/// and the parts still add up to the request.
+#[tokio::test]
+async fn the_skills_catalog_is_counted_as_its_own_part() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open_with(dir.path(), Registry::new().with(Arc::new(Kv))).unwrap();
+    let project = engine.create_project("t", "").unwrap();
+    let skill = ark_runtime::Skill {
+        name: "release-notes".into(),
+        description: "Write release notes from a list of changes".into(),
+        dir: dir.path().to_path_buf(),
+        scope: ark_runtime::SkillScope::Store,
+    };
+    let catalog = ark_runtime::skills::catalog(&[skill], ark_runtime::skills::CATALOG_BUDGET)
+        .unwrap()
+        .text;
+    let model = Arc::new(MockProvider::new(
+        "m",
+        vec![Completion {
+            content: "Done.".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(10, 5),
+        }],
+    ));
+    let p: Arc<dyn Provider> = model.clone();
+    let mut reports = Vec::new();
+    Harness::new(ModelRouter::single(p))
+        .critic(false)
+        .skills(Some(catalog.clone()))
+        .ask(
+            &engine,
+            &AgentProfile::builder().core_actions(["kv.get"]).build(),
+            &project.id,
+            "write the notes",
+            |e| {
+                if let HarnessEvent::Context { report } = e {
+                    reports.push(report);
+                }
+            },
+        )
+        .await
+        .unwrap();
+    let req = &model.recorded()[0];
+    let first = &req.messages[0].content;
+    let at = first
+        .find("== SKILLS ==")
+        .expect("the catalog is in the first message");
+    assert!(at < first.find("== TASK ==").unwrap(), "before the task");
+    assert!(first.contains("- release-notes: Write release notes"));
+    let r = &reports[0];
+    assert_eq!(r.skills, estimate_tokens(&catalog));
+    let parts: u32 = r.rows().iter().map(|(_, n)| n).sum();
+    assert!(parts.abs_diff(r.total) <= 4, "{parts} vs {}", r.total);
+    assert!(r.task < r.skills, "the catalog is not counted as the task");
+}

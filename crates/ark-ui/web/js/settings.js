@@ -18,10 +18,11 @@ export const settingsView = {
     let current = null;
     let ctl = {};
 
-    // The app's sections first, then ARK's own (Tool servers).
+    // The app's sections first, as registered; then ARK's own (Skills, Tool servers) by title.
     const ordered = () => {
       const all = [...registry.settings.values()];
-      return [...all.filter((s) => !s.builtin), ...all.filter((s) => s.builtin)];
+      const own = all.filter((s) => s.builtin).sort((a, b) => a.title.localeCompare(b.title));
+      return [...all.filter((s) => !s.builtin), ...own];
     };
 
     const pick = (id) => {

@@ -112,6 +112,7 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(parallel()),
         Box::new(stale_read()),
         Box::new(team()),
+        Box::new(skill()),
     ]
 }
 
@@ -206,6 +207,49 @@ pub fn tool_lookup() -> Spec {
                     "wrong or missing result (expected 230 EUR)",
                 ),
                 (o.executed("units.convert") >= 1, "never ran units.convert"),
+            ])
+        }),
+    }
+}
+
+/// The format of the answer is in a stored skill: the agent sees one line about it, reads its
+/// instructions with `skills.read`, and follows them.
+pub fn skill() -> Spec {
+    Spec {
+        name: "skill",
+        class: "skill",
+        description: "write release notes in the format a stored skill sets; only the skill says what it is",
+        turns: one("Write release notes for these changes: added an export button, fixed the login timeout."),
+        policy: competent(
+            |r| {
+                if r.mentions("== SKILLS ==") {
+                    vec![Goal::call("skills.read", json!({ "name": "release-notes" }))]
+                } else {
+                    Vec::new()
+                }
+            },
+            answer(|r| match r.result_of("skills.read") {
+                Some(t) if t.contains("format R7") => {
+                    "Release notes, format R7\nAdded: an export button\nFixed: the login timeout".into()
+                }
+                _ => "Release notes: added an export button; fixed the login timeout.".into(),
+            }),
+        ),
+        prepare: Some(Arc::new(|ark: &Ark| {
+            let dir = ark.engine().store.root().join("skills").join("release-notes");
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(
+                dir.join("SKILL.md"),
+                "---\nname: release-notes\ndescription: Write release notes from a list of changes. Use for any release notes.\n---\n\
+Begin with the line `Release notes, format R7`.\n\
+Then one line per change, starting with `Added:`, `Fixed:` or `Changed:`.\n",
+            )?;
+            Ok(ark.find_or_create_project("bench", "")?.id)
+        })),
+        check: Arc::new(|o| {
+            Verdict::all(&[
+                (has(o.answer(), "format R7"), "did not follow the skill's format"),
+                (o.executed("skills.read") >= 1, "never read the skill"),
             ])
         }),
     }

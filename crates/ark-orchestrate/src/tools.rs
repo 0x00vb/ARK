@@ -287,7 +287,8 @@ impl Adapter for ChatTools {
                 "properties": {
                     "name": { "type": "string", "description": "short, lowercase, e.g. reviewer" },
                     "role": { "type": "string", "description": "one line on what it does" },
-                    "instructions": { "type": "string", "description": "how it works, as a system prompt" }
+                    "instructions": { "type": "string", "description": "how it works, as a system prompt" },
+                    "skills": { "type": "array", "items": { "type": "string" }, "description": "skills it may read, by name from the SKILLS list" }
                 }
             })),
         ]
@@ -349,9 +350,20 @@ impl Adapter for ChatTools {
                         format!("`{name}` exists; hand it the task with {DELEGATE}"),
                     ));
                 }
+                let skills: Vec<String> = input
+                    .get("skills")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let spec = AgentSpec::new(&name)
                     .role(s("role"))
-                    .instructions(s("instructions"));
+                    .instructions(s("instructions"))
+                    .skills(skills);
                 let a = self.orch.spawn(spec).await.map_err(fail)?;
                 Ok(ActionOutput::json(
                     json!({ "agent": a.name, "role": a.spec.role }),

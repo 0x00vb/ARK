@@ -221,6 +221,7 @@ pub struct Harness {
     retry: ark_model::RetryPolicy,
     presentation: bool,
     rules: Option<RuleSelection>,
+    skills: Option<String>,
 }
 
 /// The pieces of the first user message, kept separate so the context report can attribute
@@ -229,6 +230,8 @@ struct FirstTurn {
     workspace: Option<String>,
     conversation: Option<String>,
     rules: Option<String>,
+    /// The skills catalog ([`crate::skills::catalog`]).
+    skills: Option<String>,
     /// The actions already loaded, one line each, so a model calls them instead of looking
     /// for others in the index.
     ready: Option<String>,
@@ -246,6 +249,9 @@ impl FirstTurn {
         }
         if let Some(r) = &self.rules {
             let _ = write!(s, "== RULES ==\n{r}\n\n");
+        }
+        if let Some(k) = &self.skills {
+            let _ = write!(s, "== SKILLS ==\n{k}\n\n");
         }
         if let Some(r) = &self.ready {
             let _ = write!(s, "== READY TO CALL ==\n{r}\n\n");
@@ -286,6 +292,7 @@ impl Harness {
             retry: ark_model::RetryPolicy::default(),
             presentation: false,
             rules: None,
+            skills: None,
         }
     }
 
@@ -294,6 +301,14 @@ impl Harness {
     /// [`ContextReport`].
     pub fn rules(mut self, selection: Option<RuleSelection>) -> Self {
         self.rules = selection.filter(|s| !s.is_empty());
+        self
+    }
+
+    /// The skills this turn may read: the catalog [`crate::skills::catalog`] wrote, one line
+    /// per skill. It rides in the first message after the rules and is reported as `skills`;
+    /// the runtime reads a skill's instructions only through `skills.read`.
+    pub fn skills(mut self, catalog: Option<String>) -> Self {
+        self.skills = catalog.filter(|t| !t.trim().is_empty());
         self
     }
 
@@ -451,6 +466,7 @@ impl Harness {
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
+            skills: self.skills.clone(),
             ready: self.ready_block(engine, &loaded),
             task: question.to_string(),
         };
@@ -942,6 +958,7 @@ impl Harness {
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
+            skills: self.skills.clone(),
             ready: self.ready_block(engine, &loaded),
             task: task.to_string(),
         };
@@ -997,9 +1014,9 @@ impl Harness {
             estimate_tokens(&sys.index) + if ws.last_compressed == 0 { ready } else { 0 };
         let working_state = WorkingSet::message_tokens(&state_message(state_digest));
         let system_total = estimate_tokens(&sys.render());
-        // The first round holds workspace + conversation + rules + task; attribute its framing
-        // to the task.
-        let (workspace, conversation, rules, task) = if ws.last_compressed == 0 {
+        // The first round holds workspace + conversation + rules + skills + task; attribute its
+        // framing to the task.
+        let (workspace, conversation, rules, skills, task) = if ws.last_compressed == 0 {
             let w = first.workspace.as_deref().map(estimate_tokens).unwrap_or(0);
             let c = first
                 .conversation
@@ -1007,9 +1024,16 @@ impl Harness {
                 .map(estimate_tokens)
                 .unwrap_or(0);
             let r = first.rules.as_deref().map(estimate_tokens).unwrap_or(0);
-            (w, c, r, first_tokens.saturating_sub(w + c + r + ready))
+            let k = first.skills.as_deref().map(estimate_tokens).unwrap_or(0);
+            (
+                w,
+                c,
+                r,
+                k,
+                first_tokens.saturating_sub(w + c + r + k + ready),
+            )
         } else {
-            (0, 0, 0, 0)
+            (0, 0, 0, 0, 0)
         };
         let first_kept = if ws.last_compressed == 0 {
             first_tokens
@@ -1048,6 +1072,7 @@ impl Harness {
             conversation,
             workspace,
             rules,
+            skills,
             task,
             tool_rounds,
             retrieved,

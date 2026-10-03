@@ -43,6 +43,11 @@ pub struct AgentSpec {
     /// Offer the diagram tool (`diagram.create`, `diagram.read`).
     #[serde(default)]
     pub diagrams: bool,
+    /// The skills it may read (`*`: all, else names; empty: none). Their catalog rides in each
+    /// task's first message; their instructions load with `skills.read`
+    /// ([`ark_runtime::skills`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
     /// Override the orchestrator's planner and critic settings for this agent.
     #[serde(default)]
     pub planner: Option<bool>,
@@ -69,6 +74,7 @@ impl std::fmt::Debug for AgentSpec {
             .field("delegates_to", &self.delegates_to)
             .field("parent", &self.parent)
             .field("profile_name", &self.profile_name)
+            .field("skills", &self.skills)
             .finish_non_exhaustive()
     }
 }
@@ -94,6 +100,7 @@ impl AgentSpec {
             critic: None,
             profile_name: None,
             profile: None,
+            skills: Vec::new(),
         }
     }
     pub fn role(mut self, r: impl Into<String>) -> Self {
@@ -115,6 +122,11 @@ impl AgentSpec {
     }
     pub fn delegates_to<S: Into<String>>(mut self, agents: impl IntoIterator<Item = S>) -> Self {
         self.delegates_to = agents.into_iter().map(Into::into).collect();
+        self
+    }
+    /// The skills it may read: names, or `*` for every skill of the project and the store.
+    pub fn skills<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
+        self.skills = names.into_iter().map(Into::into).collect();
         self
     }
     pub fn allow_mutate(mut self, yes: bool) -> Self {

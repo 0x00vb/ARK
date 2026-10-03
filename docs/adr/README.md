@@ -15,6 +15,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0006](0006-release-by-immutable-tag.md) | A release is an immutable git tag; consumers pin it | Accepted |
 | [0007](0007-the-chat-creates-agents-and-tasks.md) | The person's chat creates agents and tasks; forms are not the way in | Accepted |
 | [0008](0008-planner-off-by-default.md) | The planner is off by default | Accepted |
+| [0009](0009-skills-load-on-demand.md) | Skills: names in context, instructions on demand | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

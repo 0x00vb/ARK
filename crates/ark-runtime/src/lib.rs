@@ -37,6 +37,7 @@ pub mod profile;
 pub mod router;
 pub mod rules;
 pub mod session;
+pub mod skills;
 pub mod steer;
 
 mod blobs;
@@ -60,6 +61,7 @@ pub use profile::{AgentProfile, AgentProfileBuilder, Prompts};
 pub use router::{ModelRouter, Role};
 pub use rules::{RuleBook, RuleSelection, RulesTool};
 pub use session::{CarryPolicy, CompactReport, Session, SessionRecord, SessionUsage, Turn};
+pub use skills::{Skill, SkillCatalog, SkillScope, SkillsTool};
 pub use steer::Steering;
 
 // Re-export the blob bridge for consumers wiring their own engine.

@@ -28,6 +28,7 @@ pub mod logging;
 pub mod orchestration;
 pub mod plugins;
 pub mod report;
+pub mod skills;
 pub mod trace;
 
 pub use activity::{Activity, ActivityKind};

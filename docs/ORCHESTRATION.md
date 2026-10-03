@@ -74,7 +74,7 @@ person asks in words; the chat decides what becomes an agent or a task.
 
 | Action | Does |
 |---|---|
-| `agents.create {name, role, instructions?}` | adds an agent with every app tool; its state-changing actions still ask the person. An existing name is refused |
+| `agents.create {name, role, instructions?, skills?}` | adds an agent with every app tool and the skills named (none by default); its state-changing actions still ask the person. An existing name is refused |
 | `agents.delegate {to, objective, context?, wait?}` | hands any live agent a task with `Origin::External`; waits for the result unless `wait: false` |
 | `agents.wait {tasks}` | waits for tasks handed off with `wait: false` |
 
@@ -197,6 +197,15 @@ and is counted as `rules` in each `ContextReport`. The rest are reachable with `
 and `rules.get`. The selection is recorded on the task (`TaskRecord.rules`, as
 `set@version:id`) and in the trace (`RulesApplied`). Project bindings apply to a
 single-agent `Ark` too.
+
+## Skills
+
+An agent with `skills(["release-notes"])` (or `["*"]`) gets those skills of the project folder's
+`.agents/skills` and the store's `skills`: their catalog (one line each) in every task's first
+message, counted as `skills` in each `ContextReport`, and `skills.read` / `skills.file` to read
+one. None by default. The person's conversation reads every skill unless the app narrows it
+(`ArkBuilder::skills`). See [EXTENSION.md](EXTENSION.md#skills) and
+[ADR 0009](adr/0009-skills-load-on-demand.md).
 
 ## Diagrams
 

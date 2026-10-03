@@ -556,6 +556,11 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .plugin-hint { font-size: 12px; color: var(--text-3); }
 .plugin-why { margin: 0; font-size: 12.5px; color: var(--err); overflow-wrap: anywhere; }
 .plugin-why:empty { display: none; }
+.skill-scope { margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 500; color: var(--text-2); background: var(--hover); }
+.skill-desc { font-size: 12.5px; line-height: 1.45; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.skill-add { display: flex; gap: 8px; }
+.skill-add .plugin-input { min-height: 0; height: 36px; resize: none; padding: 0 11px; }
+.skill-add .btn { flex: none; height: 36px; white-space: nowrap; }
 
 /* Command results shown in the conversation. */
 .sysmsg { padding: 14px 0; font-size: 13.5px; animation: rise 280ms var(--ease) both; }

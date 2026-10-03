@@ -41,6 +41,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Inline reports | `/context`, `/usage`, `/state`, `/trace` and every other command render in the conversation. There is no permanent inspector. |
 | App views | An app's `ark.view` takes the main column in place of the conversation (ARK Desktop's graph, agents and tasks). The "Chat" tab, or choosing a chat, brings the conversation back. |
 | Settings | One page in the main column for the app's and the account's configuration, with the sections apps register (`ark.setting`), then ARK's own. A project's own settings are in its menu. |
+| Settings › Skills | ARK's own section: the skills of the project folder and the store (name, "This project" or "All projects", description). Add skills opens the Terminal in the project folder with `npx skills add <package>` typed; Enter is the person's |
 | Settings › Tool servers | ARK's own section, when the app has plugins: the MCP servers (running or why not, their tools, the command), Add (a name and a command, or a pasted `mcpServers` snippet), Restart, Remove (a second click confirms). The same as `/plugin`. An app section with the id `plugins` replaces it |
 | Agents' questions | An orchestrated agent's approval waits in a tray at the bottom right, whatever the main column shows. |
 
@@ -175,6 +176,7 @@ front-end uses the same.
 
 | Methods | |
 |---|---|
+| Skills | `skills` (each: `name`, `description`, `scope` `project` or `store`, `chat`: the conversation may read it). Does not wait for a running turn |
 | Plugins | `plugins` (each: `name`, `command`, `args`, `env_keys`, `running`, `tools`, `error`; null when the app has none), `plugin_add {text}` or `{spec}` (answers the plugins added), `plugin_remove {name}`, `plugin_restart {name}`. None waits for a running turn |
 | Workbench | `term_open {cols, rows}` (the project's shell: `session`, `cwd`, `history`), `term_write {session, data}`, `term_resize`, `term_close`, `files {path?}`, `file_read {path}`, `file_write {path, text}` (inside the project folder) |
 | Session | `hello`, `summary`, `sessions {project?}`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `open_project {id}` (back to its last chat), `add_project {path?, name?}` (a folder becomes a project, or opens the one it is), `rename_project {id, name}`, `project_folder {id, path}`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models` |

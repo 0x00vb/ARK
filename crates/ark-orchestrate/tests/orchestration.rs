@@ -1043,3 +1043,107 @@ async fn the_harness_roles_use_the_agents_own_models() {
     );
     assert_eq!(b.seen.lock().unwrap().len(), 1);
 }
+
+/// A scripted model with a web search of its own, which records the tools each request offers.
+struct Searcher {
+    script: Arc<Script>,
+    tools: Mutex<Vec<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl Provider for Searcher {
+    async fn complete(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+    ) -> ark_model::Result<Completion> {
+        self.tools
+            .lock()
+            .unwrap()
+            .push(tools.iter().map(|t| t.name.clone()).collect());
+        self.script.complete(system, messages, tools).await
+    }
+    async fn web_search(
+        &self,
+        query: &str,
+        _limit: usize,
+    ) -> Option<ark_model::Result<Vec<ark_model::WebHit>>> {
+        Some(Ok(vec![ark_model::WebHit {
+            title: format!("{query} as {} found it", self.script.id),
+            url: format!("https://{}.example/", self.script.id),
+            snippet: String::new(),
+        }]))
+    }
+    fn describe(&self) -> String {
+        self.script.id.clone()
+    }
+}
+
+#[tokio::test]
+async fn each_agent_searches_the_web_on_its_own_model_when_its_tools_allow_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Arc::new(ark_model::MockProvider::new("unused", vec![])))
+        .web_with(ark_tools::web::WebAdapter::new().backends(vec![]))
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("p", "").unwrap();
+    let researcher = Arc::new(Searcher {
+        script: Script::new(
+            "researcher",
+            vec![
+                calls(vec![("web.search", json!({ "query": "tea" }))]),
+                answer("found it [inv:1]"),
+            ],
+        ),
+        tools: Mutex::new(Vec::new()),
+    });
+    let writer = Arc::new(Searcher {
+        script: Script::new("writer", vec![answer("written")]),
+        tools: Mutex::new(Vec::new()),
+    });
+    let (r, w) = (researcher.clone(), writer.clone());
+    let o = Orchestrator::builder(&ark, &project)
+        .configure_models(move |b| {
+            b.provider("researcher", r as Arc<dyn Provider>)
+                .provider("writer", w as Arc<dyn Provider>)
+        })
+        .build()
+        .unwrap();
+    o.spawn(
+        AgentSpec::new("researcher")
+            .model("researcher")
+            .tools(["web.search"]),
+    )
+    .await
+    .unwrap();
+    o.spawn(AgentSpec::new("writer").model("writer").tools(["notes.*"]))
+        .await
+        .unwrap();
+    o.run("researcher", TaskSpec::new("find tea"))
+        .await
+        .unwrap();
+    o.run("writer", TaskSpec::new("write")).await.unwrap();
+
+    let offered = researcher.tools.lock().unwrap()[0].clone();
+    assert!(offered.contains(&"web.search".to_string()), "{offered:?}");
+    assert!(
+        !offered.contains(&"web.fetch".to_string()),
+        "only what its tools allow"
+    );
+    let seen = researcher.script.texts();
+    assert!(
+        seen[1].contains("1 result(s) for \"tea\" (researcher):"),
+        "searched on its own model: {}",
+        seen[1]
+    );
+    let offered = writer.tools.lock().unwrap()[0].clone();
+    assert!(
+        !offered.iter().any(|t| t.starts_with("web.")),
+        "{offered:?}"
+    );
+}

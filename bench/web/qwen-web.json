@@ -1,0 +1,584 @@
+{
+  "schema_version": 1,
+  "label": "qwen-web",
+  "ark_version": "0.7.0",
+  "created_at": "2026-10-03T19:58:36.725095Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false"
+  },
+  "workloads": [
+    {
+      "name": "simple",
+      "class": "simple",
+      "description": "say hello in French; no tool needed",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 1.0,
+        "input_tokens": 1379.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 1379.0,
+        "output_tokens": 8.0,
+        "total_tokens": 1387.0,
+        "cost_usd": 0.002838,
+        "cost_per_success_usd": 0.002838,
+        "tool_calls": 0.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 1.0,
+        "peak_context_tokens": 1162.0,
+        "mean_context_tokens": 1162.0,
+        "tool_schema_tokens": 550.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 163.0,
+        "p95_turn_ms": 1923.0,
+        "median_first_token_ms": 46.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "simple",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Hello in French is \"Bonjour\".",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 1387
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 1
+          },
+          "input_tokens": 1379,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 1379,
+          "cache_write_tokens": 0,
+          "output_tokens": 8,
+          "total_tokens": 1387,
+          "tokens_measured": true,
+          "cost_usd": 0.002838,
+          "wall_ms": 1923,
+          "turn_ms": [
+            1923
+          ],
+          "first_token_ms": [
+            1822
+          ],
+          "model_latency_ms": [
+            1919
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1162,
+          "mean_context_tokens": 1162,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 550,
+          "tools_exposed_max": 5,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "simple",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Hello in French is \"Bonjour\".",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 1387
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 1
+          },
+          "input_tokens": 1379,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 1379,
+          "cache_write_tokens": 0,
+          "output_tokens": 8,
+          "total_tokens": 1387,
+          "tokens_measured": true,
+          "cost_usd": 0.002838,
+          "wall_ms": 163,
+          "turn_ms": [
+            163
+          ],
+          "first_token_ms": [
+            45
+          ],
+          "model_latency_ms": [
+            159
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1162,
+          "mean_context_tokens": 1162,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 550,
+          "tools_exposed_max": 5,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "simple",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Hello in French is \"Bonjour\".",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 1387
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 1
+          },
+          "input_tokens": 1379,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 1379,
+          "cache_write_tokens": 0,
+          "output_tokens": 8,
+          "total_tokens": 1387,
+          "tokens_measured": true,
+          "cost_usd": 0.002838,
+          "wall_ms": 144,
+          "turn_ms": [
+            144
+          ],
+          "first_token_ms": [
+            46
+          ],
+          "model_latency_ms": [
+            141
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1162,
+          "mean_context_tokens": 1162,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 550,
+          "tools_exposed_max": 5,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "web",
+      "class": "web",
+      "description": "find a page on the web, read it, and answer from the passage that holds the fact",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 4.333333333333333,
+        "input_tokens": 9764.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 9764.0,
+        "output_tokens": 321.6666666666667,
+        "total_tokens": 10085.666666666666,
+        "cost_usd": 0.022744666666666667,
+        "cost_per_success_usd": 0.022744666666666667,
+        "tool_calls": 2.3333333333333335,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.333333333333333,
+        "peak_context_tokens": 2270.0,
+        "mean_context_tokens": 1817.6666666666667,
+        "tool_schema_tokens": 3085.3333333333335,
+        "prefix_reuse_tokens": 5569.666666666667,
+        "median_turn_ms": 7522.0,
+        "p95_turn_ms": 8966.0,
+        "median_first_token_ms": 222.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "web",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Facts:**\n- The page \"A tea brewing guide\" (http://127.0.0.1:52300/guide) states that green tea should be steeped at 80 °C (175 °F) for two minutes. [cites: inv:609f1c6f]\n\n**Inference:**\n- This is the only source in the search results that specifically addresses green tea brewing temperature.\n\n**Hypothesis:**\n- 80 °C (175 °F) is the recommended water temperature for brewing green tea.\n\n**Next ste",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 9115
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 8826,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8826,
+          "cache_write_tokens": 0,
+          "output_tokens": 289,
+          "total_tokens": 9115,
+          "tokens_measured": true,
+          "cost_usd": 0.020542,
+          "wall_ms": 7522,
+          "turn_ms": [
+            7522
+          ],
+          "first_token_ms": [
+            222
+          ],
+          "model_latency_ms": [
+            2104,
+            1030,
+            1573,
+            2806
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2108,
+          "mean_context_tokens": 1786,
+          "context_sources": {
+            "Capability index": 1208,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 165,
+            "Project": 200,
+            "Retrieved context": 27,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 128,
+            "Tool results": 1304,
+            "Tool schemas": 2848,
+            "Working state": 120,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2848,
+          "tools_exposed_max": 8,
+          "tools_used": 2,
+          "result_context_tokens": 585,
+          "result_raw_tokens": 2722,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4891,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "web",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Facts:**\n- The page \"A tea brewing guide\" (http://127.0.0.1:52300/guide) states that green tea should be steeped at 80 °C (175 °F) for two minutes. This is the only specific temperature value found in the search results.\n\n**Inference:**\n- The temperature of 80 °C (175 °F) is the most directly relevant and specific recommendation for brewing green tea, as it is explicitly stated in the guide.\n\n**",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 12110
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 5
+          },
+          "input_tokens": 11653,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 11653,
+          "cache_write_tokens": 0,
+          "output_tokens": 457,
+          "total_tokens": 12110,
+          "tokens_measured": true,
+          "cost_usd": 0.027876,
+          "wall_ms": 8966,
+          "turn_ms": [
+            8966
+          ],
+          "first_token_ms": [
+            218,
+            468
+          ],
+          "model_latency_ms": [
+            530,
+            991,
+            1464,
+            2165,
+            3803
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2270,
+          "mean_context_tokens": 1882,
+          "context_sources": {
+            "Capability index": 1510,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 271,
+            "Project": 250,
+            "Retrieved context": 56,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 160,
+            "Tool results": 2025,
+            "Tool schemas": 3560,
+            "Working state": 150,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3560,
+          "tools_exposed_max": 8,
+          "tools_used": 2,
+          "result_context_tokens": 721,
+          "result_raw_tokens": 2827,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 6927,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "web",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Fact**: Green tea should be brewed at 80 °C (175 °F) for two minutes, as stated in the \"A tea brewing guide\" at http://127.0.0.1:52300/guide.\n\n**Next step**: Verify if this temperature recommendation is consistent with other authoritative sources or if further clarification is needed. However, since the query specifically asks for which page says so, and we have found the exact statement in the ",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 9032
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 8813,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8813,
+          "cache_write_tokens": 0,
+          "output_tokens": 219,
+          "total_tokens": 9032,
+          "tokens_measured": true,
+          "cost_usd": 0.019816,
+          "wall_ms": 5233,
+          "turn_ms": [
+            5233
+          ],
+          "first_token_ms": [
+            236
+          ],
+          "model_latency_ms": [
+            503,
+            1200,
+            1629,
+            1892
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2106,
+          "mean_context_tokens": 1785,
+          "context_sources": {
+            "Capability index": 1208,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 162,
+            "Project": 200,
+            "Retrieved context": 28,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 128,
+            "Tool results": 1304,
+            "Tool schemas": 2848,
+            "Working state": 120,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2848,
+          "tools_exposed_max": 8,
+          "tools_used": 2,
+          "result_context_tokens": 585,
+          "result_raw_tokens": 2722,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4891,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 6,
+    "successes": 6,
+    "success_rate": 1.0,
+    "model_calls": 2.6666666666666665,
+    "input_tokens": 5571.5,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 5571.5,
+    "output_tokens": 164.83333333333334,
+    "total_tokens": 5736.333333333333,
+    "cost_usd": 0.012791333333333333,
+    "cost_per_success_usd": 0.012791333333333333,
+    "tool_calls": 1.1666666666666667,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 2.6666666666666665,
+    "peak_context_tokens": 2270.0,
+    "mean_context_tokens": 1489.8333333333333,
+    "tool_schema_tokens": 1817.6666666666667,
+    "prefix_reuse_tokens": 2784.8333333333335,
+    "median_turn_ms": 1923.0,
+    "p95_turn_ms": 8966.0,
+    "median_first_token_ms": 222.0,
+    "stall_stops": 0.0
+  }
+}

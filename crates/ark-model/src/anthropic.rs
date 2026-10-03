@@ -5,7 +5,7 @@ use crate::resilience::{status_error, HttpConfig};
 use crate::stream::{for_each_line, sse_data, AnthropicFold};
 use crate::{
     mangle_tool_name, unmangle_tool_name, Completion, Message, Provider, ProviderError, Result,
-    Role, TextSink, ToolCall, ToolDef,
+    Role, TextSink, ToolCall, ToolDef, WebHit,
 };
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -125,6 +125,45 @@ pub(crate) fn wire_messages(messages: &[Message]) -> Vec<Value> {
         .collect()
 }
 
+/// The pages a `web_search` reply found, in its order, with the first sentence the model
+/// cited from each as its snippet.
+fn search_hits(reply: &Value, limit: usize) -> Vec<WebHit> {
+    let blocks = reply["content"].as_array().cloned().unwrap_or_default();
+    let mut hits: Vec<WebHit> = Vec::new();
+    for b in &blocks {
+        if b["type"] != "web_search_tool_result" {
+            continue;
+        }
+        for r in b["content"].as_array().into_iter().flatten() {
+            let url = r["url"].as_str().unwrap_or_default();
+            if url.is_empty() || hits.iter().any(|h| h.url == url) {
+                continue;
+            }
+            hits.push(WebHit {
+                title: r["title"].as_str().unwrap_or_default().to_string(),
+                url: url.to_string(),
+                snippet: String::new(),
+            });
+        }
+    }
+    for c in blocks
+        .iter()
+        .flat_map(|b| b["citations"].as_array().cloned().unwrap_or_default())
+    {
+        let (Some(url), Some(text)) = (c["url"].as_str(), c["cited_text"].as_str()) else {
+            continue;
+        };
+        if let Some(h) = hits
+            .iter_mut()
+            .find(|h| h.url == url && h.snippet.is_empty())
+        {
+            h.snippet = text.trim().to_string();
+        }
+    }
+    hits.truncate(limit);
+    hits
+}
+
 #[async_trait]
 impl Provider for Anthropic {
     fn describe(&self) -> String {
@@ -174,6 +213,25 @@ impl Provider for Anthropic {
             tool_calls,
             usage,
         })
+    }
+
+    /// Anthropic's server-side `web_search` tool, used once. The results come back as
+    /// `web_search_result` blocks; a sentence the model cited from a page becomes its snippet.
+    async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
+        let body = json!({
+            "model": self.model,
+            "max_tokens": 1024,
+            "messages": [{ "role": "user", "content": crate::search_prompt(query, limit) }],
+            "tools": [{ "type": "web_search_20250305", "name": "web_search", "max_uses": 1 }],
+        });
+        let run = async {
+            let resp = self.post(&body, false).await?;
+            if !resp.status().is_success() {
+                return Err(status_error("anthropic", resp, error_detail).await);
+            }
+            Ok(search_hits(&resp.json::<Value>().await?, limit))
+        };
+        Some(run.await)
     }
 
     async fn complete_streaming(
@@ -285,6 +343,28 @@ mod tests {
             vec!["tool_result"],
             "the last result, not the state"
         );
+    }
+
+    // The block shapes of a Messages API reply with the `web_search` server tool.
+    #[test]
+    fn search_results_come_from_result_blocks_with_cited_text_as_snippets() {
+        let reply = json!({ "content": [
+            { "type": "server_tool_use", "id": "s1", "name": "web_search", "input": { "query": "tea" } },
+            { "type": "web_search_tool_result", "tool_use_id": "s1", "content": [
+                { "type": "web_search_result", "url": "https://a.example/", "title": "A", "encrypted_content": "x" },
+                { "type": "web_search_result", "url": "https://b.example/", "title": "B", "encrypted_content": "y" },
+                { "type": "web_search_result", "url": "https://a.example/", "title": "A again", "encrypted_content": "z" }
+            ]},
+            { "type": "text", "text": "Brew at 80 C.", "citations": [
+                { "type": "web_search_result_location", "url": "https://b.example/", "title": "B", "cited_text": " Brew green tea at 80 C. " }
+            ]}
+        ]});
+        let hits = search_hits(&reply, 5);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].url, "https://a.example/");
+        assert_eq!(hits[0].snippet, "");
+        assert_eq!(hits[1].snippet, "Brew green tea at 80 C.");
+        assert_eq!(search_hits(&reply, 1).len(), 1);
     }
 
     #[test]

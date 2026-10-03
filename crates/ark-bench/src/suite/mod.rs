@@ -4,6 +4,9 @@
 //! approvals and independent slow calls. Nothing here is specific to an application domain.
 
 pub mod tools;
+mod web;
+
+pub use web::{web, WebSpec};
 
 use std::sync::Arc;
 
@@ -45,15 +48,7 @@ impl Workload for Spec {
         self.policy.clone()
     }
     fn build(&self, env: &Env) -> anyhow::Result<Ark> {
-        let mut registry = Registry::new();
-        for a in tools::all() {
-            registry.register(a);
-        }
-        Ok(env
-            .builder()
-            .registry(registry)
-            .profile(AgentProfile::builder().core_actions(["calc.eval"]).build())
-            .build()?)
+        Ok(builder(env).build()?)
     }
     fn prepare(&self, ark: &Ark) -> anyhow::Result<ProjectId> {
         match &self.prepare {
@@ -64,6 +59,17 @@ impl Workload for Spec {
     fn check(&self, out: &RunOutput) -> Verdict {
         (self.check)(out)
     }
+}
+
+/// The suite's agent: every simulated tool, `calc.eval` preloaded.
+fn builder(env: &Env) -> ArkBuilder {
+    let mut registry = Registry::new();
+    for a in tools::all() {
+        registry.register(a);
+    }
+    env.builder()
+        .registry(registry)
+        .profile(AgentProfile::builder().core_actions(["calc.eval"]).build())
 }
 
 fn one(input: &'static str) -> Turns {
@@ -113,6 +119,7 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(stale_read()),
         Box::new(team()),
         Box::new(skill()),
+        Box::new(web()),
     ]
 }
 

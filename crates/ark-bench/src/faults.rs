@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use ark_sdk::prelude::ark_model::{
-    Completion, Message, Provider, ProviderError, Result as ModelResult, TextSink, ToolDef,
+    Completion, Message, Provider, ProviderError, Result as ModelResult, TextSink, ToolDef, WebHit,
 };
 use async_trait::async_trait;
 
@@ -186,6 +186,11 @@ impl Provider for Faulty {
             .complete_streaming(system, messages, tools, on_text)
             .await?;
         Ok(if bad { self.bad_tool(c) } else { c })
+    }
+
+    /// Searches go through unchanged; they are not model calls of the run.
+    async fn web_search(&self, query: &str, limit: usize) -> Option<ModelResult<Vec<WebHit>>> {
+        self.inner.web_search(query, limit).await
     }
 
     fn describe(&self) -> String {

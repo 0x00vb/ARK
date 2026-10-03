@@ -1,0 +1,268 @@
+{
+  "schema_version": 1,
+  "label": "qwen-web-naive",
+  "ark_version": "0.7.0",
+  "created_at": "2026-10-03T19:59:03.011027Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "naive",
+    "planner": "false"
+  },
+  "workloads": [
+    {
+      "name": "web",
+      "class": "web",
+      "description": "find a page on the web, read it, and answer from the passage that holds the fact",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 3.0,
+        "input_tokens": 10684.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 10684.0,
+        "output_tokens": 151.0,
+        "total_tokens": 10835.0,
+        "cost_usd": 0.022878,
+        "cost_per_success_usd": 0.022878,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.0,
+        "peak_context_tokens": 4330.0,
+        "mean_context_tokens": 2484.0,
+        "tool_schema_tokens": 4278.0,
+        "prefix_reuse_tokens": 3075.0,
+        "median_turn_ms": 7653.0,
+        "p95_turn_ms": 10882.0,
+        "median_first_token_ms": null,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "web",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Green tea should be brewed at 80 °C (175 °F) for two minutes, as stated in the \"A tea brewing guide\" page.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 10835
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 10684,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 10684,
+          "cache_write_tokens": 0,
+          "output_tokens": 151,
+          "total_tokens": 10835,
+          "tokens_measured": true,
+          "cost_usd": 0.022878,
+          "wall_ms": 10882,
+          "turn_ms": [
+            10882
+          ],
+          "first_token_ms": [],
+          "model_latency_ms": [
+            4097,
+            1292,
+            5486
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 4330,
+          "mean_context_tokens": 2484,
+          "context_sources": {},
+          "tool_schema_tokens": 4278,
+          "tools_exposed_max": 32,
+          "tools_used": 2,
+          "result_context_tokens": 2722,
+          "result_raw_tokens": 2722,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3075,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "web",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Green tea should be brewed at 80 °C (175 °F) for two minutes, as stated in the \"A tea brewing guide\" page.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 10835
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 10684,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 10684,
+          "cache_write_tokens": 0,
+          "output_tokens": 151,
+          "total_tokens": 10835,
+          "tokens_measured": true,
+          "cost_usd": 0.022878,
+          "wall_ms": 7653,
+          "turn_ms": [
+            7653
+          ],
+          "first_token_ms": [],
+          "model_latency_ms": [
+            888,
+            1243,
+            5515
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 4330,
+          "mean_context_tokens": 2484,
+          "context_sources": {},
+          "tool_schema_tokens": 4278,
+          "tools_exposed_max": 32,
+          "tools_used": 2,
+          "result_context_tokens": 2722,
+          "result_raw_tokens": 2722,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3075,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "web",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Green tea should be brewed at 80 °C (175 °F) for two minutes, as stated in the \"A tea brewing guide\" page.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 10835
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 10684,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 10684,
+          "cache_write_tokens": 0,
+          "output_tokens": 151,
+          "total_tokens": 10835,
+          "tokens_measured": true,
+          "cost_usd": 0.022878,
+          "wall_ms": 7596,
+          "turn_ms": [
+            7596
+          ],
+          "first_token_ms": [],
+          "model_latency_ms": [
+            839,
+            1247,
+            5504
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 4330,
+          "mean_context_tokens": 2484,
+          "context_sources": {},
+          "tool_schema_tokens": 4278,
+          "tools_exposed_max": 32,
+          "tools_used": 2,
+          "result_context_tokens": 2722,
+          "result_raw_tokens": 2722,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3075,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 3,
+    "success_rate": 1.0,
+    "model_calls": 3.0,
+    "input_tokens": 10684.0,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 10684.0,
+    "output_tokens": 151.0,
+    "total_tokens": 10835.0,
+    "cost_usd": 0.022878,
+    "cost_per_success_usd": 0.022878,
+    "tool_calls": 2.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 3.0,
+    "peak_context_tokens": 4330.0,
+    "mean_context_tokens": 2484.0,
+    "tool_schema_tokens": 4278.0,
+    "prefix_reuse_tokens": 3075.0,
+    "median_turn_ms": 7653.0,
+    "p95_turn_ms": 10882.0,
+    "median_first_token_ms": null,
+    "stall_stops": 0.0
+  }
+}

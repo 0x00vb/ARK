@@ -29,6 +29,20 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark-bench`: the `skill` workload. Live on qwen3:4b it passes 3 of 3 in 2 calls
   (`bench/RESULTS.md`).
 
+- The web: `web.search` and `web.fetch` (`ark_tools::web`: `WebAdapter`, `SearchBackend`,
+  `ResultPage`, `Wikipedia`, `distill`), on with `ArkBuilder::web(true)` or
+  `ArkBuilder::web_with(adapter)`, offered to orchestrated agents whose `tools` allow them.
+  Search uses the model's own search first, then keyless sources; no key
+  ([`EXTENSION.md`](docs/EXTENSION.md#the-web), [ADR 0010](docs/adr/0010-web-search-without-a-key.md)).
+- `Provider::web_search` and `SessionBackend::web_search` (default: none), with `WebHit`;
+  implemented by `Anthropic` (the `web_search` server tool) and `CliModel` (Claude Code
+  `WebSearch`, Codex `--search`); `ManagedSession` and `Limited` forward it.
+- `ark_runtime::web` (`ModelSearch`, `on_model`, `distiller`), `Ark::web_adapter`,
+  `Ark::web_tools`.
+- `ark-bench`: the `web` workload (a loopback page and a fixed search engine); the naive loop
+  is offered the web too when the app turns it on.
+- `examples/writing-agent` turns the web on.
+
 ### Changed
 - An MCP server has 20 s to answer `initialize` and `tools/list` (`mcp::HANDSHAKE_TIMEOUT`);
   a server whose connection is dropped is stopped.

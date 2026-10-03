@@ -5,8 +5,9 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 
 | File | What |
 |---|---|
-| `baseline.json` | the simulated report of `main` (15 workloads since the skill workload; the 14 older ones did not move with it); `scripts/ci.sh` compares against it. Regenerate it in the commit that moves the numbers on purpose |
+| `baseline.json` | the simulated report of `main` (16 workloads since the web workload; the 15 older ones did not move with it); `scripts/ci.sh` compares against it. Regenerate it in the commit that moves the numbers on purpose |
 | `skills/qwen-skill.json` | live, the `skill` and `simple` workloads on qwen3:4b-instruct, 3 repetitions |
+| `web/qwen-web.json`, `web/qwen-web-naive.json` | live, the `web` workload (and `simple`) on qwen3:4b-instruct, 3 repetitions, ARK and the naive loop |
 | `baseline-naive.json` | the same suite through the naive loop (`--harness naive`), for "ARK against a naive loop" in `RESULTS.md` |
 | `m4/sim.json` | simulated, the M4 runtime (v0.3.0 plus measurement-only event fields, `035a06b`) |
 | `m4/live-qwen3-4b.json` | live, M4 runtime, qwen3:4b-instruct through Ollama, 3 repetitions |

@@ -147,6 +147,7 @@ impl<'a> OrchestratorBuilder<'a> {
             project,
             models,
             approvals: self.approvals,
+            web: self.ark.web_adapter().cloned(),
             max_parallel: self.max_parallel,
             global: Arc::new(Semaphore::new(self.max_parallel)),
             accounts: Mutex::new(HashMap::new()),
@@ -392,6 +393,8 @@ pub(crate) struct Inner {
     pub project: Project,
     pub models: Arc<dyn ModelResolver>,
     approvals: Option<Arc<ApprovalGate>>,
+    /// The app's `web` tool, when it turned the web on; each agent searches on its own model.
+    web: Option<ark_tools::web::WebAdapter>,
     pub max_parallel: usize,
     global: Arc<Semaphore>,
     accounts: Mutex<HashMap<String, Arc<Semaphore>>>,
@@ -1468,6 +1471,21 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         if spec.diagrams {
             registry.register(Arc::new(ark_tools::diagram::Diagrams));
         }
+        let web: Vec<&str> = match &self.web {
+            Some(_) => ark_runtime::web::ACTIONS
+                .into_iter()
+                .filter(|a| spec.tools.iter().any(|p| action_matches(p, a)))
+                .collect(),
+            None => Vec::new(),
+        };
+        if let (Some(base), false) = (&self.web, web.is_empty()) {
+            let model = models.router.provider(ark_runtime::Role::Plan);
+            let adapter = Arc::new(ark_runtime::web::on_model(base, model));
+            let allowed = Registry::new().with(adapter).filtered(|a| web.contains(&a));
+            for a in allowed.adapters() {
+                registry.register(a.clone());
+            }
+        }
         let sets = self.rules_for(&task);
         let objective = format!("{}\n{}", task.objective, task.context);
         let selection = (!sets.is_empty()).then(|| select(&sets, &objective, RULES_BUDGET));
@@ -1493,6 +1511,12 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             // The catalog says to call it, so it is loaded, not left to discovery.
             profile.distillers.push(skills::distiller());
             profile.core_actions.push(skills::READ.into());
+        }
+        if !web.is_empty() {
+            profile.distillers.push(ark_runtime::web::distiller());
+            profile
+                .core_actions
+                .extend(web.iter().map(|a| a.to_string()));
         }
         let scope = ProjectId(agent.scope.clone());
 

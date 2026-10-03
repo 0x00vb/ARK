@@ -33,7 +33,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::capacity::{rate_limit_wait, Capacity, CapacitySnapshot, Limiter};
-use crate::{estimate_tokens, Completion, Message, Provider, ProviderError, Result, Role, ToolDef};
+use crate::{
+    estimate_tokens, Completion, Message, Provider, ProviderError, Result, Role, ToolDef, WebHit,
+};
 
 /// What a resumed vendor session has not seen yet.
 #[derive(Clone, Debug, Default)]
@@ -92,6 +94,10 @@ pub trait SessionBackend: Send + Sync {
     /// Forget a vendor session ARK let go: delete what the vendor stored for it. Best effort;
     /// the default does nothing.
     async fn discard(&self, _vendor: &str) {}
+    /// The vendor's own web search, outside any session ([`Provider::web_search`]).
+    async fn web_search(&self, _query: &str, _limit: usize) -> Option<Result<Vec<WebHit>>> {
+        None
+    }
 }
 
 /// When a lane keeps, rotates or drops its vendor session.
@@ -685,6 +691,10 @@ impl Provider for ManagedSession {
         self.call(system, messages, tools).await
     }
 
+    async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
+        self.backend.web_search(query, limit).await
+    }
+
     fn describe(&self) -> String {
         self.backend.label()
     }
@@ -1005,6 +1015,9 @@ impl Provider for OneShot {
         let (vendor, c) = self.backend.open(system, tools, messages).await?;
         self.backend.discard(&vendor).await;
         Ok(c)
+    }
+    async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
+        self.backend.web_search(query, limit).await
     }
     fn describe(&self) -> String {
         self.backend.label()

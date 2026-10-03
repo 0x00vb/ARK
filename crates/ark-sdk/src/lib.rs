@@ -32,6 +32,7 @@ use ark_runtime::{
     HarnessEvent, HarnessOutcome, ModelRouter, Role, RuleBook, RuleSelection, RulesTool, Session,
     Steering, StoreLedger,
 };
+use ark_tools::web::WebAdapter;
 use ark_tools::{Adapter, Registry};
 
 /// A convenient, curated prelude for consumers.
@@ -120,6 +121,8 @@ pub struct Ark {
     allow_mutate: bool,
     /// The skills the conversation may read (`*`, names; empty: none).
     skills: Vec<String>,
+    /// The `web` tool, when the app turned it on ([`ArkBuilder::web`]).
+    web: Option<WebAdapter>,
 }
 
 impl Ark {
@@ -227,16 +230,17 @@ impl Ark {
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
         let project = session.project().clone();
+        let router = self.session_router(session).await;
         let (engine, rules) = self.with_rules(&project, input)?;
         let (engine, catalog) = self.with_skills(engine, &project);
-        let (engine, mut profile) = self.with_tools(engine, &opts.tools);
+        let tools = self.turn_tools(&opts.tools, &router);
+        let (engine, mut profile) = self.with_tools(engine, &tools);
         if catalog.is_some() {
             // The catalog says to call it, so it is loaded, not left to discovery.
             let p = profile.to_mut();
             p.distillers.push(skills::distiller());
             p.core_actions.push(skills::READ.into());
         }
-        let router = self.session_router(session).await;
         let harness = self
             .harness_with(router)
             .conversation(session.conversation_digest())
@@ -367,6 +371,29 @@ impl Ark {
         )
     }
 
+    /// The app's `web` tool before it is put on a model; `None` unless the app turned it on.
+    pub fn web_adapter(&self) -> Option<&WebAdapter> {
+        self.web.as_ref()
+    }
+
+    /// The `web` tool on `model`: its own search first ([`ark_runtime::web`]). `None` unless
+    /// the app turned the web on. An orchestrator gives each agent one on the agent's model.
+    pub fn web_tools(&self, model: &Arc<dyn Provider>) -> Option<TurnTools> {
+        let base = self.web.as_ref()?;
+        Some(TurnTools {
+            adapter: Arc::new(ark_runtime::web::on_model(base, model)),
+            distiller: Some(ark_runtime::web::distiller()),
+        })
+    }
+
+    /// A turn's tools: the front-end's, and the web on the turn's planning model (a search
+    /// needs no reasoning).
+    fn turn_tools(&self, tools: &[TurnTools], router: &ModelRouter) -> Vec<TurnTools> {
+        let mut all = tools.to_vec();
+        all.extend(self.web_tools(router.provider(Role::Plan)));
+        all
+    }
+
     /// The engine and profile of a turn with `tools` added: their adapters registered, their
     /// actions offered directly, their distillers first.
     fn with_tools(
@@ -420,7 +447,8 @@ impl Ark {
     ) -> Result<ContextReport, ArkError> {
         let (engine, rules) = self.with_rules(session.project(), "")?;
         let (engine, catalog) = self.with_skills(engine, session.project());
-        let (engine, mut profile) = self.with_tools(engine, tools);
+        let tools = self.turn_tools(tools, &self.router);
+        let (engine, mut profile) = self.with_tools(engine, &tools);
         if catalog.is_some() {
             let p = profile.to_mut();
             p.distillers.push(skills::distiller());
@@ -448,9 +476,11 @@ impl Ark {
         task: &str,
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
+        let tools = self.turn_tools(&[], &self.router);
+        let (engine, profile) = self.with_tools(self.turn_engine(), &tools);
         Ok(self
             .harness()
-            .ask(&self.turn_engine(), &self.profile, project, task, on_event)
+            .ask(&engine, &profile, project, task, on_event)
             .await?)
     }
 
@@ -486,6 +516,7 @@ pub struct ArkBuilder {
     allow_mutate: bool,
     subscriptions: Option<SubscriptionRuntime>,
     skills: Vec<String>,
+    web: Option<WebAdapter>,
 }
 
 impl Default for ArkBuilder {
@@ -507,6 +538,7 @@ impl Default for ArkBuilder {
             allow_mutate: false,
             subscriptions: None,
             skills: vec!["*".into()],
+            web: None,
         }
     }
 }
@@ -578,6 +610,20 @@ impl ArkBuilder {
         self
     }
 
+    /// Offer the `web` tool (`web.search`, `web.fetch`; [`ark_tools::web`]) in every turn and to
+    /// agents whose tools allow it. Off by default.
+    pub fn web(mut self, yes: bool) -> Self {
+        self.web = yes.then(WebAdapter::new);
+        self
+    }
+
+    /// [`web`](ArkBuilder::web) with an adapter set up by the app: its own search backends,
+    /// or private addresses allowed for an intranet.
+    pub fn web_with(mut self, web: WebAdapter) -> Self {
+        self.web = Some(web);
+        self
+    }
+
     /// Use this subscription runtime (capacities, session policy, ledger) instead of the
     /// default one, which keeps vendor session state in the store.
     pub fn subscriptions(mut self, s: SubscriptionRuntime) -> Self {
@@ -614,6 +660,7 @@ impl ArkBuilder {
             critic: self.critic,
             allow_mutate: self.allow_mutate,
             skills: self.skills,
+            web: self.web,
         })
     }
 }
@@ -690,6 +737,116 @@ mod tests {
         let outcome = ark.ask(&project.id, "reverse abc").await.unwrap();
         assert!(outcome.answer.contains("cba"), "answer: {}", outcome.answer);
         assert_eq!(outcome.metrics.tool_calls, 1);
+    }
+
+    struct OneHit;
+    #[async_trait::async_trait]
+    impl ark_tools::web::SearchBackend for OneHit {
+        fn name(&self) -> String {
+            "fixed".into()
+        }
+        async fn search(
+            &self,
+            query: &str,
+            _limit: usize,
+        ) -> ark_tools::Result<Vec<ark_tools::web::Hit>> {
+            Ok(vec![ark_tools::web::Hit {
+                title: format!("All about {query}"),
+                url: "https://tea.example/guide".into(),
+                snippet: "Green tea at 80 C.".into(),
+            }])
+        }
+    }
+
+    #[tokio::test]
+    async fn a_conversation_turn_offers_the_web_and_reads_its_card() {
+        let dir = tempfile::tempdir().unwrap();
+        let search = ToolCall {
+            id: "c1".into(),
+            name: "web.search".into(),
+            arguments: serde_json::json!({ "query": "tea" }),
+        };
+        let mock = Arc::new(MockProvider::new(
+            "mock",
+            vec![
+                Completion {
+                    content: String::new(),
+                    tool_calls: vec![search],
+                    usage: Usage::measured(50, 5),
+                },
+                Completion {
+                    content: "80 C, says tea.example [inv:1].".into(),
+                    tool_calls: vec![],
+                    usage: Usage::measured(60, 6),
+                },
+            ],
+        ));
+        let provider: Arc<dyn ark_model::Provider> = mock.clone();
+        let web = ark_tools::web::WebAdapter::new().backends(vec![Arc::new(OneHit)]);
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(provider)
+            .web_with(web)
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("t", "").unwrap();
+        let mut session = ark.start_session(&project.id).unwrap();
+        ark.ask_session(
+            &mut session,
+            "how hot for green tea?",
+            TurnOptions::default(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let seen = mock.recorded();
+        let offered: Vec<&str> = seen[0].tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(
+            offered.contains(&"web.search") && offered.contains(&"web.fetch"),
+            "{offered:?}"
+        );
+        let card = seen[1]
+            .messages
+            .iter()
+            .find(|m| m.content.contains("result(s) for"))
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+        assert!(
+            card.contains("1. All about tea https://tea.example/guide\n   Green tea at 80 C."),
+            "{card}"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_the_web_no_turn_offers_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mock = Arc::new(MockProvider::new(
+            "mock",
+            vec![Completion {
+                content: "ok".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(10, 2),
+            }],
+        ));
+        let provider: Arc<dyn ark_model::Provider> = mock.clone();
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(provider)
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("t", "").unwrap();
+        let mut session = ark.start_session(&project.id).unwrap();
+        ark.ask_session(&mut session, "hi", TurnOptions::default(), |_| {})
+            .await
+            .unwrap();
+        assert!(!mock.recorded()[0]
+            .tools
+            .iter()
+            .any(|t| t.name.starts_with("web.")));
     }
 
     #[tokio::test]

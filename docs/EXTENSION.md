@@ -143,6 +143,21 @@ store's `skills` (every project); the project's wins on a name.
 
 Why the instructions are not sent up front: [ADR 0009](adr/0009-skills-load-on-demand.md).
 
+### The web
+
+`ArkBuilder::web(true)` offers `web.search` and `web.fetch` in every turn, preloaded, and to
+each orchestrated agent whose `tools` patterns allow them (`web.*`, `web.search`). Both are
+`Observe`: they run without asking.
+
+| Action | What |
+|---|---|
+| `web.search {query, limit}` | Up to 10 results (title, link, a sentence). Sources in order, the first that finds something: the turn's own model's search (Claude API, Claude Code, Codex), Brave's result page, Wikipedia. No key |
+| `web.fetch {url}` | The page as text (its `<main>` or `<article>` when marked), its title and up to 60 links. HTML and text only, at most 4 MB. Loopback and private addresses are refused, also after a redirect |
+| Card | Search results whole; a page's first 1,500 characters, the rest through `get_evidence` with `path: "text"` and `match` |
+| Own search API | `ArkBuilder::web_with(WebAdapter::new().search_with(backend))`, `backend` a `web::SearchBackend` |
+
+Why no key, and what each source does: [ADR 0010](adr/0010-web-search-without-a-key.md).
+
 ## Reuse of results
 
 An identical successful call may be served from an earlier result.

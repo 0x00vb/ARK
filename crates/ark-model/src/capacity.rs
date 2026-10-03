@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::{Completion, Message, Provider, Result, TextSink, ToolDef};
+use crate::{Completion, Message, Provider, Result, TextSink, ToolDef, WebHit};
 
 /// What one account allows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +242,12 @@ impl Provider for Limited {
             self.limiter.cool_down(wait);
         }
         r
+    }
+
+    /// A search draws on the account like a completion does.
+    async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
+        let _slot = self.limiter.acquire().await;
+        self.inner.web_search(query, limit).await
     }
 
     fn describe(&self) -> String {

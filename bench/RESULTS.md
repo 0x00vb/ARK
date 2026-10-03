@@ -3,6 +3,36 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## The web (2026-10-03)
+
+The `web` workload: find a page with `web.search`, read it with `web.fetch`, answer a fact that
+sits near the end of a 95-line page. Pages come from a loopback server and search from a fixed
+engine, so no run touches the network. Reports: `bench/web/qwen-web.json` (`--only web,simple
+--reps 3`), `bench/web/qwen-web-naive.json` (`--harness naive`), `ollama:qwen3:4b-instruct`.
+
+| Run | Success | Calls | Tokens | Cost per success |
+|---|---:|---:|---:|---:|
+| `web`, ARK, live qwen3:4b | 3/3 | 4.3 | 10,086 | $0.0227 |
+| `web`, naive loop, live qwen3:4b | 3/3 | 3.0 | 10,835 | $0.0229 |
+| `web`, ARK, simulated | 1/1 | 5.0 | 9,458 | $0.0086 |
+| `web`, naive loop, simulated | 1/1 | 3.0 | 7,424 | $0.0106 |
+
+ARK reads the page's first 1,500 characters in the card and finds the passage with
+`get_evidence`, so it makes one or two more calls; the naive loop gets the whole page in its
+transcript once. On this 95-line page the two cost about the same live. A real page is often
+tens of thousands of tokens, which the naive loop then resends on every later call; this
+workload does not measure that. The other 15 simulated workloads did not move
+(`bench/baseline.json`).
+
+Outside the bench, one question through `examples/writing-agent` (`writer -p`, "On what date
+and at about what time of day did the great Lisbon earthquake strike?"):
+
+| Model | Search source | Result |
+|---|---|---|
+| `claude:haiku` (Claude Code) | Claude Code's own search | 1 November 1755, 9:40, cites Wikipedia; 32 s |
+| `ollama:qwen3:4b-instruct` | Brave answered 429 (rate limit from earlier probes); Wikipedia | read the Wikipedia article, quoted "approximately 09:40 local time"; 8.7 s |
+| `ollama:qwen3:4b-instruct`, before Wikipedia was a source | Brave 429 only | no result; it said so and gave the date from memory, marked unverified |
+
 ## Skills read on demand (2026-10-03)
 
 The `skill` workload: write release notes in a format only a stored skill gives. The request

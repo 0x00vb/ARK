@@ -46,8 +46,17 @@ impl Naive {
         input: &str,
         on_event: &mut (dyn FnMut(HarnessEvent) + Send),
     ) -> anyhow::Result<NaiveTurn> {
-        let engine = ark.engine();
         let provider = ark.router().provider(Role::Reason).clone();
+        // The app's tools, and the web when the app turned it on, as an app would offer them.
+        let scoped;
+        let engine = match ark.web_tools(&provider) {
+            Some(web) => {
+                let base = ark.engine();
+                scoped = base.scoped(base.registry.clone().with(web.adapter));
+                &scoped
+            }
+            None => ark.engine(),
+        };
         let mut tools: Vec<ToolDef> = engine
             .registry
             .actions()

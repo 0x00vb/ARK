@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use ark_sdk::prelude::ark_model::{
-    estimate_tokens, Completion, Message, Provider, Result as ModelResult, TextSink, ToolDef, Usage,
+    estimate_tokens, Completion, Message, Provider, Result as ModelResult, TextSink, ToolDef,
+    Usage, WebHit,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -263,6 +264,11 @@ impl Provider for Metered {
         rec.first_token_ms = *first.lock().unwrap();
         self.finish(rec, started, &r);
         r
+    }
+
+    /// Searches go through unchanged; they are not model calls of the run.
+    async fn web_search(&self, query: &str, limit: usize) -> Option<ModelResult<Vec<WebHit>>> {
+        self.inner.web_search(query, limit).await
     }
 
     fn describe(&self) -> String {

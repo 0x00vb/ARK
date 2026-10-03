@@ -15,7 +15,9 @@
 //! complete.
 
 use crate::session::{Base, Delta, SessionBackend};
-use crate::{Completion, Message, Provider, ProviderError, Result, Role, ToolCall, ToolDef, Usage};
+use crate::{
+    Completion, Message, Provider, ProviderError, Result, Role, ToolCall, ToolDef, Usage, WebHit,
+};
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -272,24 +274,56 @@ impl CliModel {
         Ok(second.after(&first))
     }
 
-    /// Run the CLI once. `sys` is the full system prompt (Claude takes it as a flag; Codex
-    /// reads it from `input`). Returns the completion and the vendor's session id when it
-    /// reported one.
+    /// Run the CLI once for a completion. `sys` is the full system prompt (Claude takes it as
+    /// a flag; Codex reads it from `input`). Returns the completion and the vendor's session id
+    /// when it reported one.
     async fn exec(&self, mode: Mode<'_>, sys: &str, input: String) -> Result<Exec> {
+        let p = self
+            .invoke(mode, Some(sys), input, REPLY_SCHEMA, false)
+            .await?;
+        let c = self.completion(&p.reply, p.usage)?;
+        // Claude Code refused calls to host tools the model made as native ones, and the
+        // model then answered without asking the host for anything: it gave up.
+        let gave_up = self.cli == Cli::Claude && p.turns > 2 && c.tool_calls.is_empty();
+        Ok(Exec {
+            completion: c,
+            vendor: p.vendor,
+            gave_up,
+        })
+    }
+
+    /// One search with the CLI's own web search on, and nothing else: Claude Code's
+    /// `WebSearch` tool, Codex `--search`. Always a fresh run, never a session.
+    async fn search(&self, query: &str, limit: usize) -> Result<Vec<WebHit>> {
+        let input = crate::search_prompt(query, limit);
+        let p = self
+            .invoke(Mode::OneShot, None, input, crate::SEARCH_SCHEMA, true)
+            .await?;
+        Ok(crate::hits_from(&p.reply, limit))
+    }
+
+    /// Run the CLI once with a reply shaped by `schema`. `sys`: the system prompt (Claude
+    /// takes it as a flag; Codex reads it from `input`). `search`: the CLI's own web search
+    /// is the one tool it may use.
+    async fn invoke(
+        &self,
+        mode: Mode<'_>,
+        sys: Option<&str>,
+        input: String,
+        schema: &str,
+        search: bool,
+    ) -> Result<Parsed> {
         let bin = self.program()?;
         let dir = work_dir()?;
         let (mut cmd, out_file) = match self.cli {
             Cli::Claude => {
                 let mut c = command(&bin);
-                c.args([
-                    "-p",
-                    "--output-format",
-                    "json",
-                    "--tools",
-                    "",
-                    "--strict-mcp-config",
-                ])
-                .args(["--setting-sources", ""]);
+                let tools = if search { "WebSearch" } else { "" };
+                c.args(["-p", "--output-format", "json", "--tools", tools])
+                    .args(["--strict-mcp-config", "--setting-sources", ""]);
+                if search {
+                    c.args(["--allowedTools", "WebSearch"]);
+                }
                 match mode {
                     Mode::OneShot => {
                         c.arg("--no-session-persistence");
@@ -301,16 +335,23 @@ impl CliModel {
                         c.args(["--resume", id]);
                     }
                 }
-                c.args(["--model", &self.model, "--system-prompt", sys])
-                    .args(["--json-schema", REPLY_SCHEMA]);
+                c.args(["--model", &self.model]);
+                if let Some(sys) = sys {
+                    c.args(["--system-prompt", sys]);
+                }
+                c.args(["--json-schema", schema]);
                 (c, None)
             }
             Cli::Codex => {
+                let schema_text = schema;
                 let n = self.calls.fetch_add(1, Ordering::Relaxed);
                 let tag = format!("{}-{n}", std::process::id());
                 let schema = dir.join(format!("schema-{tag}.json"));
-                std::fs::write(&schema, REPLY_SCHEMA).map_err(io_err)?;
+                std::fs::write(&schema, schema_text).map_err(io_err)?;
                 let mut c = command(&bin);
+                if search {
+                    c.arg("--search");
+                }
                 match mode {
                     Mode::Resume(id) => {
                         // `resume` takes no sandbox flag; the config key does the same.
@@ -364,17 +405,7 @@ impl CliModel {
             Cli::Codex => parse_codex(&stdout),
         };
         match parsed {
-            Ok(p) => {
-                let c = self.completion(&p.reply, p.usage)?;
-                // Claude Code refused calls to host tools the model made as native ones, and the
-                // model then answered without asking the host for anything: it gave up.
-                let gave_up = self.cli == Cli::Claude && p.turns > 2 && c.tool_calls.is_empty();
-                Ok(Exec {
-                    completion: c,
-                    vendor: p.vendor,
-                    gave_up,
-                })
-            }
+            Ok(p) => Ok(p),
             Err(detail) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let tail = stderr.trim().lines().last().unwrap_or("");
@@ -487,6 +518,10 @@ impl Provider for CliModel {
         self.run(system, messages, tools).await
     }
 
+    async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
+        Some(self.search(query, limit).await)
+    }
+
     fn describe(&self) -> String {
         format!("{} {}", self.cli.name(), self.model)
     }
@@ -557,6 +592,10 @@ impl SessionBackend for CliModel {
 
     fn account(&self) -> String {
         self.cli.name().to_string()
+    }
+
+    async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
+        Some(self.search(query, limit).await)
     }
 
     async fn open(
@@ -1149,6 +1188,48 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         (p, log)
+    }
+
+    // The flags are the ones a live search was run with (2026-10-03, Claude Code 2.1, Codex
+    // 0.153): Claude Code's WebSearch is the one tool it may use; Codex gets `--search`.
+    #[tokio::test]
+    async fn a_search_turns_on_the_clis_own_web_search_and_nothing_else() {
+        let out = r#"echo '{"is_error":false,"structured_output":{"results":[{"title":"Tea","url":"https://tea.example/","snippet":"About tea."},{"title":"Not a page","url":"javascript:x","snippet":""}]},"usage":{"input_tokens":10,"output_tokens":2}}'"#;
+        let (bin, log) = recording("claude-search", out);
+        let m = CliModel::new(Cli::Claude, "haiku").with_program(bin);
+        let hits = Provider::web_search(&m, "green tea", 5)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            hits,
+            vec![WebHit {
+                title: "Tea".into(),
+                url: "https://tea.example/".into(),
+                snippet: "About tea.".into()
+            }]
+        );
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(
+            log.contains("--tools\nWebSearch\n--strict-mcp-config"),
+            "{log}"
+        );
+        assert!(log.contains("--allowedTools\nWebSearch"), "{log}");
+        assert!(log.contains("--no-session-persistence"), "{log}");
+        assert!(!log.contains("--system-prompt"), "{log}");
+        assert!(log.contains("Search the web for: green tea"), "{log}");
+
+        let script = r#"echo '{"type":"item.completed","item":{"id":"i","type":"agent_message","text":"{\"results\":[{\"title\":\"Tea\",\"url\":\"https://tea.example/\",\"snippet\":\"\"}]}"}}'"#;
+        let (bin, log) = recording("codex-search", script);
+        let m = CliModel::new(Cli::Codex, "").with_program(bin);
+        let hits = Provider::web_search(&m, "green tea", 5)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(log.starts_with("--search\nexec\n"), "{log}");
+        assert!(log.contains("--ephemeral"), "{log}");
     }
 
     #[tokio::test]

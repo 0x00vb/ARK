@@ -39,6 +39,7 @@ pub mod rules;
 pub mod session;
 pub mod skills;
 pub mod steer;
+pub mod web;
 
 mod blobs;
 

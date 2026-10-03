@@ -236,6 +236,40 @@ pub struct Completion {
     pub usage: Usage,
 }
 
+/// One web search result from a provider's own search ([`Provider::web_search`]).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WebHit {
+    pub title: String,
+    pub url: String,
+    /// A sentence about the page. Empty when the search gave none.
+    #[serde(default)]
+    pub snippet: String,
+}
+
+/// What a provider's search is asked for, and the shape its answer must have. Shared by the
+/// providers that search through a model call (the CLIs).
+pub(crate) fn search_prompt(query: &str, limit: usize) -> String {
+    format!(
+        "Search the web for: {query}\n\nReturn up to {limit} results from the search, each with \
+         its title, url and one sentence from or about the page. Do not answer the question \
+         yourself; only report what the search found."
+    )
+}
+
+pub(crate) const SEARCH_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"properties":{"results":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"title":{"type":"string"},"url":{"type":"string"},"snippet":{"type":"string"}},"required":["title","url","snippet"]}}},"required":["results"]}"#;
+
+/// The hits of a reply shaped by [`SEARCH_SCHEMA`], at most `limit`, web links only.
+pub(crate) fn hits_from(reply: &serde_json::Value, limit: usize) -> Vec<WebHit> {
+    reply["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| serde_json::from_value::<WebHit>(r.clone()).ok())
+        .filter(|h| h.url.starts_with("http://") || h.url.starts_with("https://"))
+        .take(limit)
+        .collect()
+}
+
 /// Receives incremental answer text while a streaming completion arrives. It is called from
 /// inside the provider's future, so it must be cheap and must not block.
 pub type TextSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
@@ -265,6 +299,11 @@ pub trait Provider: Send + Sync {
             on_text(&c.content);
         }
         Ok(c)
+    }
+    /// Search the web with the vendor's own search. `None`: this provider has none. The
+    /// default has none; wrappers forward to what they wrap.
+    async fn web_search(&self, _query: &str, _limit: usize) -> Option<Result<Vec<WebHit>>> {
+        None
     }
     /// Human description, e.g. "ollama qwen3:4b-instruct".
     fn describe(&self) -> String;

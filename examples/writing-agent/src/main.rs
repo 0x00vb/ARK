@@ -370,6 +370,8 @@ fn build_ark(
         .store_root(store_root)
         .tool(Arc::new(Manuscript))
         .tool(Arc::new(Craft))
+        // A writer checks facts: places, dates, how things worked.
+        .web(true)
         .profile(writer_profile());
     if let Some(p) = provider {
         b = b.provider(p);

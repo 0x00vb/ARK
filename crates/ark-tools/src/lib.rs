@@ -7,8 +7,9 @@
 //! tool's name appears in exactly one adapter, defined by the consumer.
 //!
 //! ARK ships **no domain adapters**. It ships the trait, the [`Registry`], a
-//! [`subprocess`] helper for driving CLI tools, and the [`mcp`] bridge for out-of-process
-//! plugins in any language. A security product registers `MachoAdapter`; a writing agent
+//! [`subprocess`] helper for driving CLI tools, the [`mcp`] bridge for out-of-process
+//! plugins in any language, and two adapters any domain can use, [`diagram`] and [`web`]
+//! (both off unless the app turns them on). A security product registers `MachoAdapter`; a writing agent
 //! registers a `DraftAdapter`; both use the exact same machinery.
 
 use std::path::PathBuf;
@@ -20,6 +21,7 @@ use async_trait::async_trait;
 pub mod diagram;
 pub mod mcp;
 pub mod subprocess;
+pub mod web;
 
 mod error;
 pub use error::AdapterError;

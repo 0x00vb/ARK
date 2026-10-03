@@ -133,6 +133,7 @@ pub enum EntryKind {
     Steered,
     Retry,
     Stall,
+    Rules,
     Cancelled,
     Answer,
 }
@@ -469,6 +470,18 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             },
             None,
             Tone::Warning,
+        ),
+        HarnessEvent::Rules { applied, held_back } => (
+            E::Rules,
+            format!("rules: {} applied, {held_back} held back", applied.len()),
+            Some(
+                applied
+                    .iter()
+                    .map(|r| r.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            Tone::Muted,
         ),
         HarnessEvent::Cancelled => (E::Cancelled, "cancelled".into(), None, Tone::Warning),
         HarnessEvent::Answer { text, streamed } => (

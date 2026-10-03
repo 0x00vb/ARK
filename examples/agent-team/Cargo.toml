@@ -1,0 +1,23 @@
+[package]
+name = "agent-team"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "A coordinator delegates two independent readings to two agents, then combines their results. Provider-agnostic."
+
+[[bin]]
+name = "agent-team"
+path = "src/main.rs"
+
+[dependencies]
+ark-sdk.workspace = true
+ark-orchestrate.workspace = true
+ark-interact.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

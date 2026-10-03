@@ -20,6 +20,30 @@ impl Command for Context {
     }
 }
 
+pub struct Agents;
+#[async_trait::async_trait]
+impl Command for Agents {
+    meta!(
+        "agents",
+        "Agents, the tasks they run and delegate, and one task's trace"
+    );
+    fn usage(&self) -> &str {
+        "[task]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let Some(o) = ix.orchestrator() else {
+            return Ok(Report::new().note("This app runs a single agent.").into());
+        };
+        let g = o.graph();
+        let task = args.trim();
+        if task.is_empty() {
+            return Ok(crate::orchestration::graph_report(&g).into());
+        }
+        let events = o.task_trace(task)?;
+        Ok(crate::orchestration::task_report(&g, task, &events).into())
+    }
+}
+
 pub struct Usage;
 #[async_trait::async_trait]
 impl Command for Usage {

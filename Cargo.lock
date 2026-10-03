@@ -9,6 +9,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agent-team"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "ark-interact",
+ "ark-orchestrate",
+ "ark-sdk",
+ "async-trait",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -172,6 +186,7 @@ name = "ark-interact"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "ark-orchestrate",
  "ark-sdk",
  "async-trait",
  "serde",
@@ -194,6 +209,30 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "ark-orchestrate"
+version = "0.5.0"
+dependencies = [
+ "ark-core",
+ "ark-model",
+ "ark-runtime",
+ "ark-sdk",
+ "ark-store",
+ "ark-tools",
+ "async-trait",
+ "futures",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

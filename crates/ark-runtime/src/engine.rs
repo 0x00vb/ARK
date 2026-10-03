@@ -20,7 +20,8 @@ use crate::blobs::StoreBlobs;
 use crate::error::AgentError;
 
 pub struct Engine {
-    pub store: Store,
+    /// Shared with every engine made by [`scoped`](Engine::scoped).
+    pub store: Arc<Store>,
     pub registry: Registry,
     sniffers: Vec<Arc<dyn Sniffer>>,
 }
@@ -29,9 +30,20 @@ impl Engine {
     /// Construct with a store and a consumer-supplied registry.
     pub fn new(store: Store, registry: Registry) -> Self {
         Engine {
-            store,
+            store: Arc::new(store),
             registry,
             sniffers: Vec::new(),
+        }
+    }
+
+    /// An engine over the same store with a different registry: the same projects, artifacts
+    /// and records, another set of tools. An orchestrator gives each agent one, so an agent
+    /// sees only the actions it is allowed and its own agent tools.
+    pub fn scoped(&self, registry: Registry) -> Engine {
+        Engine {
+            store: self.store.clone(),
+            registry,
+            sniffers: self.sniffers.clone(),
         }
     }
 

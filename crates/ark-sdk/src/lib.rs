@@ -23,11 +23,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark_core::{Focus, Project, ProjectId};
+use ark_core::{Focus, Project, ProjectId, RuleScope};
 use ark_model::Provider;
 use ark_runtime::{
     Agent, AgentProfile, ApprovalGate, CancelToken, ContextReport, Engine, Harness, HarnessEvent,
-    HarnessOutcome, ModelRouter, Session, Steering,
+    HarnessOutcome, ModelRouter, RuleBook, RuleSelection, RulesTool, Session, Steering,
 };
 use ark_tools::{Adapter, Registry};
 
@@ -37,13 +37,14 @@ pub mod prelude {
     pub use crate::{Settings, TurnOptions};
     pub use ark_core::{
         ActionDescriptor, Artifact, ArtifactId, ArtifactKind, Capability, CapabilityCatalog,
-        CapabilitySpec, Project, ProjectId, Provenance, RiskTier, Sniffer,
+        CapabilitySpec, Diagram, DiagramKind, Project, ProjectId, Provenance, RiskTier, Rule,
+        RuleBinding, RuleScope, RuleSet, Sniffer,
     };
     pub use ark_runtime::{
         AcquisitionProvider, AcquisitionResult, AgentProfile, ApprovalDecision, ApprovalGate,
         ApprovalRequest, Approver, CancelToken, ContextReport, Distiller, DistillerSet, Engine,
         FixedApprover, Harness, HarnessEvent, HarnessOutcome, KnowledgeHit, KnowledgeProvider,
-        ModelRouter, Prompts, Role, Session, Steering,
+        ModelRouter, Prompts, Role, RuleBook, RuleSelection, Session, Steering,
     };
     pub use ark_tools::{
         ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArtifact, Registry, RunCtx,
@@ -203,6 +204,8 @@ impl Ark {
         opts: TurnOptions,
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
+        let project = session.project().clone();
+        let (engine, rules) = self.with_rules(&project, input)?;
         let harness = self
             .harness()
             .conversation(session.conversation_digest())
@@ -210,11 +213,11 @@ impl Ark {
             .cancel(opts.cancel)
             .steering(opts.steer)
             .presentation(opts.present)
-            .focus(opts.focus);
-        let project = session.project().clone();
+            .focus(opts.focus)
+            .rules(rules);
         session.begin_turn(&self.engine, input)?;
         match harness
-            .ask(&self.engine, &self.profile, &project, input, on_event)
+            .ask(&engine, &self.profile, &project, input, on_event)
             .await
         {
             Ok(outcome) => {
@@ -229,6 +232,34 @@ impl Ark {
         }
     }
 
+    /// The store's rule sets: put a project's standards here and bind them to the project
+    /// (`RuleScope::Project`) so its turns follow them.
+    pub fn rule_book(&self) -> RuleBook<'_> {
+        RuleBook::new(&self.engine.store)
+    }
+
+    /// The rules bound to `project`, selected for `input`, and the engine to run with: the
+    /// usual one, or a view of it that also offers the `rules` tool when rules are bound.
+    fn with_rules(
+        &self,
+        project: &ProjectId,
+        input: &str,
+    ) -> Result<(Arc<Engine>, Option<RuleSelection>), ArkError> {
+        let sets = self
+            .rule_book()
+            .resolve(&[RuleScope::Project(project.to_string())])?;
+        if sets.is_empty() {
+            return Ok((self.engine.clone(), None));
+        }
+        let selection = ark_runtime::rules::select(&sets, input, ark_runtime::rules::RULES_BUDGET);
+        let registry = self
+            .engine
+            .registry
+            .clone()
+            .with(Arc::new(RulesTool::new(sets)));
+        Ok((Arc::new(self.engine.scoped(registry)), Some(selection)))
+    }
+
     /// What the next turn's first request would contain, by source, without calling a model.
     pub async fn context_preview(&self, session: &Session) -> Result<ContextReport, ArkError> {
         self.context_preview_for(session, false).await
@@ -241,11 +272,13 @@ impl Ark {
         session: &Session,
         present: bool,
     ) -> Result<ContextReport, ArkError> {
+        let (engine, rules) = self.with_rules(session.project(), "")?;
         Ok(self
             .harness()
             .presentation(present)
             .conversation(session.conversation_digest())
-            .preview_context(&self.engine, &self.profile, session.project(), "")
+            .rules(rules)
+            .preview_context(&engine, &self.profile, session.project(), "")
             .await?)
     }
 
@@ -476,5 +509,58 @@ mod tests {
         let outcome = ark.ask(&project.id, "reverse abc").await.unwrap();
         assert!(outcome.answer.contains("cba"), "answer: {}", outcome.answer);
         assert_eq!(outcome.metrics.tool_calls, 1);
+    }
+
+    #[tokio::test]
+    async fn project_rules_reach_a_single_agent_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let mock = Arc::new(MockProvider::new(
+            "mock",
+            vec![Completion {
+                content: "ok".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(10, 2),
+            }],
+        ));
+        let provider: Arc<dyn ark_model::Provider> = mock.clone();
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(provider)
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("p", "").unwrap();
+        let book = ark.rule_book();
+        book.put(&RuleSet::parse(
+            "style",
+            "- [S1] (always) Use plain words.\n- [S2] Tables need a header. #tables",
+        ))
+        .unwrap();
+        book.bind(&RuleBinding::new(
+            "style",
+            RuleScope::Project(project.id.to_string()),
+        ))
+        .unwrap();
+        let mut session = ark.start_session(&project.id).unwrap();
+        let mut applied = Vec::new();
+        ark.ask_session(&mut session, "write a note", TurnOptions::default(), |e| {
+            if let HarnessEvent::Rules { applied: a, .. } = e {
+                applied = a;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(applied.len(), 1, "only the always-rule fits this input");
+        let req = &mock.recorded()[0];
+        let first = &req.messages[0].content;
+        assert!(first.contains("== RULES ==") && first.contains("[S1] Use plain words."));
+        assert!(!first.contains("Tables need a header"));
+        assert!(
+            req.tools.iter().all(|t| !t.name.starts_with("rules.")),
+            "the rules tool is loadable, not preloaded"
+        );
+        let preview = ark.context_preview(&session).await.unwrap();
+        assert!(preview.rules > 0);
     }
 }

@@ -42,6 +42,7 @@ pub struct App {
     status: Vec<(String, StatusFn)>,
     on_project: Option<ProjectHook>,
     pricing: Option<Pricing>,
+    orchestrator: Option<ark_orchestrate::Orchestrator>,
 }
 
 /// How to open an [`App`]: the generic choices a person makes at launch.
@@ -71,6 +72,7 @@ impl App {
             status: Vec::new(),
             on_project: None,
             pricing: None,
+            orchestrator: None,
         }
     }
     pub fn name(&self) -> &str {
@@ -147,6 +149,12 @@ impl App {
         self.on_project = Some(Arc::new(f));
         self
     }
+    /// The app runs several agents: `/agents` shows their graph and each task's trace, and a
+    /// window can follow it live.
+    pub fn orchestrator(mut self, o: ark_orchestrate::Orchestrator) -> Self {
+        self.orchestrator = Some(o);
+        self
+    }
     /// Prices for the usage view. Without them (and without `ARK_PRICE`) no cost is shown.
     pub fn pricing(mut self, p: Pricing) -> Self {
         self.pricing = Some(p);
@@ -202,6 +210,9 @@ impl App {
         };
         let mut commands = self.commands;
         commands.extend(crate::builtins::all());
+        if self.orchestrator.is_some() {
+            commands.push(crate::builtins::agents());
+        }
         let mut ix = Interaction {
             info: AppInfo {
                 name: self.name,
@@ -224,6 +235,7 @@ impl App {
             focus: None,
             names: HashMap::new(),
             present: false,
+            orchestrator: self.orchestrator,
         };
         ix.refresh_names();
         Ok(Opened {
@@ -350,9 +362,14 @@ pub struct Interaction {
     focus: Option<Focus>,
     names: HashMap<String, String>,
     present: bool,
+    orchestrator: Option<ark_orchestrate::Orchestrator>,
 }
 
 impl Interaction {
+    /// The app's orchestrator, when it runs several agents.
+    pub fn orchestrator(&self) -> Option<&ark_orchestrate::Orchestrator> {
+        self.orchestrator.as_ref()
+    }
     /// The front-end can show things beside the conversation (see `TurnOptions::present`).
     pub fn set_presentation(&mut self, yes: bool) {
         self.present = yes;
@@ -526,6 +543,7 @@ impl Interaction {
             .list_projects()
             .map_err(ark_runtime::AgentError::from)?
             .iter()
+            .filter(|p| p.parent.is_none())
             .map(|p| self.project_summary(p))
             .collect())
     }

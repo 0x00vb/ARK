@@ -77,6 +77,9 @@ impl DistillerSet {
                 return r;
             }
         }
+        if let Some(r) = distill_builtin(action, out) {
+            return r;
+        }
         if self.common {
             if let Some(r) = distill_common(action, out) {
                 return r;
@@ -108,6 +111,55 @@ fn canonical(v: &serde_json::Value) -> String {
             a.iter().map(canonical).collect::<Vec<_>>().join(",")
         ),
         other => other.to_string(),
+    }
+}
+
+/// Results of ARK's own optional tools (`rules.*`, `diagram.*`), whose text is the point: a
+/// rule's wording, a diagram's source. Applied whatever the set, after the app's distillers.
+fn distill_builtin(action: &str, out: &serde_json::Value) -> Option<(String, Vec<String>)> {
+    let s = |k: &str| out.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    match action {
+        "rules.lookup" => {
+            let rules = out.get("rules")?.as_array()?;
+            if rules.is_empty() {
+                return Some((
+                    format!("no bound rule matches \"{}\"", s("query")),
+                    Vec::new(),
+                ));
+            }
+            let mut lines = Vec::new();
+            let mut ids = Vec::new();
+            for r in rules {
+                let id = r.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let text = r.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                lines.push(format!("[{id}] {text}"));
+                ids.push(id.to_string());
+            }
+            Some((format!("{} rules: {}", rules.len(), lines.join(" | ")), ids))
+        }
+        "rules.get" => Some((format!("[{}] {}", s("id"), s("text")), vec![s("id").into()])),
+        "diagram.create" => Some((
+            format!(
+                "stored {} diagram \"{}\" v{} ({} lines) as {}",
+                s("kind"),
+                s("title"),
+                out.get("version").and_then(|v| v.as_u64()).unwrap_or(1),
+                out.get("lines").and_then(|v| v.as_u64()).unwrap_or(0),
+                s("stored")
+            ),
+            Vec::new(),
+        )),
+        "diagram.read" => Some((
+            format!(
+                "{} diagram \"{}\" v{}:\n{}",
+                s("kind"),
+                s("title"),
+                out.get("version").and_then(|v| v.as_u64()).unwrap_or(1),
+                short(s("source"), 4000)
+            ),
+            vec![s("artifact").into()],
+        )),
+        _ => None,
     }
 }
 

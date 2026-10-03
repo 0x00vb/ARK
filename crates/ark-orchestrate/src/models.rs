@@ -1,0 +1,323 @@
+//! From an agent's model spec to the models it runs on. The orchestrator asks a
+//! [`ModelResolver`] for an agent's [`AgentModels`] and never looks at the vendor:
+//!
+//! ```text
+//! agent "researcher", model "claude:sonnet"
+//!   -> Models::resolve(lane, spec)
+//!   -> SubscriptionRuntime::session(lane, spec)   one managed vendor session per agent
+//!   -> CliModel (Claude Code)                      opened, resumed, rotated, released
+//! ```
+//!
+//! [`Models`] is the default resolver. A subscription spec (`claude:*`, `codex:*`) gets a
+//! [`ManagedSession`] of its own for reasoning and a stateless call on the same account for
+//! the planner and critic; any other spec gets the provider `ark_model::build` makes. Every
+//! model sits behind its account's [`Limiter`], so the scheduler and each call respect the
+//! account's capacity.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use ark_model::capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
+use ark_model::session::{SessionLedger, SubscriptionRuntime};
+use ark_model::{ManagedSession, Provider, SessionPolicy, SessionSnapshot};
+use ark_runtime::{ModelRouter, Role};
+use ark_store::Store;
+
+use crate::OrchError;
+
+/// The models of one agent.
+pub struct AgentModels {
+    pub router: ModelRouter,
+    /// The account whose capacity it draws on (`claude`, `ollama`, ...).
+    pub account: String,
+    pub capacity: Capacity,
+    /// The model it runs on, as a spec (`claude:sonnet`).
+    pub model: String,
+    /// Its managed vendor session, when the model is a subscription.
+    pub session: Option<Arc<ManagedSession>>,
+}
+
+/// Resolves agents' model specs. Implement it to route agents your own way.
+#[async_trait::async_trait]
+pub trait ModelResolver: Send + Sync {
+    /// The models for the agent on `lane` (unique per agent), asking for `spec` (`None`: the
+    /// default model).
+    async fn resolve(&self, lane: &str, spec: Option<&str>) -> Result<AgentModels, OrchError>;
+    /// The capacity of an account (for scheduling).
+    fn capacity_of(&self, account: &str) -> Capacity {
+        Capacity::for_provider(account)
+    }
+    /// Every account's limiter, for display.
+    fn capacity(&self) -> Vec<CapacitySnapshot> {
+        Vec::new()
+    }
+    /// Every managed session, for display.
+    fn sessions(&self) -> Vec<SessionSnapshot> {
+        Vec::new()
+    }
+    /// The agent on `lane` is gone: release its session.
+    async fn close(&self, _lane: &str) {}
+    /// Release idle sessions. Returns how many.
+    async fn sweep_idle(&self) -> usize {
+        0
+    }
+}
+
+/// The default resolver.
+pub struct Models {
+    subs: SubscriptionRuntime,
+    default: Option<ModelRouter>,
+    default_spec: Option<String>,
+    named: HashMap<String, Arc<dyn Provider>>,
+    capacities: HashMap<String, Capacity>,
+    limiters: Mutex<HashMap<String, Arc<Limiter>>>,
+}
+
+/// Builder for [`Models`].
+#[derive(Default)]
+pub struct ModelsBuilder {
+    default: Option<ModelRouter>,
+    default_spec: Option<String>,
+    named: HashMap<String, Arc<dyn Provider>>,
+    capacities: HashMap<String, Capacity>,
+    policy: Option<SessionPolicy>,
+    ledger: Option<Arc<dyn SessionLedger>>,
+    subs: Option<SubscriptionRuntime>,
+}
+
+impl ModelsBuilder {
+    /// The router agents without a model spec use (usually the app's `Ark` router).
+    pub fn default_router(mut self, r: ModelRouter) -> Self {
+        self.default = Some(r);
+        self
+    }
+    /// A spec agents without one use, instead of a router (`claude:sonnet`).
+    pub fn default_model(mut self, spec: impl Into<String>) -> Self {
+        self.default_spec = Some(spec.into());
+        self
+    }
+    /// A provider an agent can name as its model (`"mock-a"`, `"local-small"`). It is used
+    /// for every role, behind a limiter for the account `name`.
+    pub fn provider(mut self, name: impl Into<String>, p: Arc<dyn Provider>) -> Self {
+        self.named.insert(name.into(), p);
+        self
+    }
+    /// Limits for an account (default: [`Capacity::for_provider`]).
+    pub fn capacity(mut self, account: impl Into<String>, c: Capacity) -> Self {
+        self.capacities.insert(account.into(), c);
+        self
+    }
+    /// When managed sessions are reused, rotated and released (default:
+    /// [`SessionPolicy::from_env`]).
+    pub fn session_policy(mut self, p: SessionPolicy) -> Self {
+        self.policy = Some(p);
+        self
+    }
+    /// Where vendor session state survives a restart (the orchestrator passes a store
+    /// ledger).
+    pub fn ledger(mut self, l: Arc<dyn SessionLedger>) -> Self {
+        self.ledger = Some(l);
+        self
+    }
+    /// Use this subscription runtime (its own backends, ledger and capacities) instead of
+    /// building one. The builder's capacities and policy then do not apply to subscriptions.
+    pub fn subscriptions(mut self, s: SubscriptionRuntime) -> Self {
+        self.subs = Some(s);
+        self
+    }
+    pub(crate) fn has_ledger(&self) -> bool {
+        self.ledger.is_some() || self.subs.is_some()
+    }
+    pub fn build(self) -> Models {
+        let subs = self.subs.unwrap_or_else(|| {
+            let mut b = SubscriptionRuntime::builder();
+            if let Some(p) = self.policy {
+                b = b.policy(p);
+            }
+            if let Some(l) = self.ledger {
+                b = b.ledger(l);
+            }
+            for (a, c) in &self.capacities {
+                b = b.capacity(a.clone(), *c);
+            }
+            b.build()
+        });
+        Models {
+            subs,
+            default: self.default,
+            default_spec: self.default_spec,
+            named: self.named,
+            capacities: self.capacities,
+            limiters: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl Models {
+    pub fn builder() -> ModelsBuilder {
+        ModelsBuilder::default()
+    }
+
+    pub fn subscriptions(&self) -> &SubscriptionRuntime {
+        &self.subs
+    }
+
+    fn limiter(&self, account: &str) -> Arc<Limiter> {
+        if self.subs.manages(account) {
+            return self.subs.limiter(account);
+        }
+        self.limiters
+            .lock()
+            .unwrap()
+            .entry(account.to_string())
+            .or_insert_with(|| Arc::new(Limiter::new(account, self.capacity_of(account))))
+            .clone()
+    }
+
+    fn limited(&self, p: Arc<dyn Provider>, account: &str) -> Arc<dyn Provider> {
+        Arc::new(Limited::new(p, self.limiter(account)))
+    }
+
+    fn single(&self, p: Arc<dyn Provider>, account: &str, model: String) -> AgentModels {
+        let limited = self.limited(p, account);
+        AgentModels {
+            router: ModelRouter::single(limited),
+            account: account.to_string(),
+            capacity: self.capacity_of(account),
+            model,
+            session: None,
+        }
+    }
+}
+
+/// The account of a model id: the provider part (`claude` of `claude:sonnet`).
+pub fn account_of(model_id: &str) -> String {
+    model_id
+        .split([':', ' '])
+        .next()
+        .unwrap_or(model_id)
+        .to_string()
+}
+
+#[async_trait::async_trait]
+impl ModelResolver for Models {
+    async fn resolve(&self, lane: &str, spec: Option<&str>) -> Result<AgentModels, OrchError> {
+        let spec = match spec.or(self.default_spec.as_deref()) {
+            Some(s) => s.to_string(),
+            None => match &self.default {
+                Some(r) => {
+                    let id = r.model_id(Role::Reason);
+                    // The app's own model is a subscription CLI: the agent still gets a
+                    // managed session of its own.
+                    if self.subs.manages(&id) {
+                        id
+                    } else {
+                        let account = account_of(&id);
+                        let router = ModelRouter::new(
+                            self.limited(r.provider(Role::Plan).clone(), &account),
+                            self.limited(r.provider(Role::Reason).clone(), &account),
+                        );
+                        return Ok(AgentModels {
+                            router,
+                            capacity: self.capacity_of(&account),
+                            account,
+                            model: id,
+                            session: None,
+                        });
+                    }
+                }
+                None => {
+                    return Err(OrchError::NotAllowed(
+                        "no model: set a default model or give the agent one".into(),
+                    ))
+                }
+            },
+        };
+        if let Some(p) = self.named.get(&spec) {
+            return Ok(self.single(p.clone(), &spec, spec.clone()));
+        }
+        if let Some(session) = self.subs.session(lane, &spec).await {
+            let (provider, _) = ark_model::session::split_spec(&spec);
+            let account = provider.to_string();
+            let stateless = self
+                .subs
+                .stateless(&spec)
+                .expect("a spec with a session has a stateless form");
+            let router = ModelRouter::new(stateless, session.clone() as Arc<dyn Provider>);
+            return Ok(AgentModels {
+                router,
+                capacity: self.capacity_of(&account),
+                account,
+                model: session.model_id(),
+                session: Some(session),
+            });
+        }
+        let (provider, model) = ark_model::session::split_spec(&spec);
+        let p = ark_model::build(provider, (!model.is_empty()).then(|| model.to_string()))?;
+        let model = p.model_id();
+        Ok(self.single(p, provider, model))
+    }
+
+    fn capacity_of(&self, account: &str) -> Capacity {
+        self.capacities.get(account).copied().unwrap_or_else(|| {
+            if self.subs.manages(account) {
+                self.subs.limiter(account).capacity()
+            } else {
+                Capacity::for_provider(account)
+            }
+        })
+    }
+
+    fn capacity(&self) -> Vec<CapacitySnapshot> {
+        let mut v = self.subs.capacity();
+        v.extend(self.limiters.lock().unwrap().values().map(|l| l.snapshot()));
+        v.sort_by(|a, b| a.account.cmp(&b.account));
+        v
+    }
+
+    fn sessions(&self) -> Vec<SessionSnapshot> {
+        self.subs.sessions()
+    }
+
+    async fn close(&self, lane: &str) {
+        self.subs.close(lane).await;
+    }
+
+    async fn sweep_idle(&self) -> usize {
+        self.subs.sweep_idle().await
+    }
+}
+
+/// A [`SessionLedger`] in the ARK store, so vendor sessions survive a restart of the app.
+pub struct StoreLedger {
+    store: Arc<Store>,
+}
+
+impl StoreLedger {
+    pub fn new(store: Arc<Store>) -> Self {
+        StoreLedger { store }
+    }
+}
+
+const LANE: &str = "vendor_session";
+
+impl SessionLedger for StoreLedger {
+    fn load(&self, lane: &str) -> Option<ark_model::session::LaneRecord> {
+        self.store
+            .get_record(LANE, lane)
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::from_value(v).ok())
+    }
+    fn save(&self, lane: &str, record: &ark_model::session::LaneRecord) {
+        if let Ok(v) = serde_json::to_value(record) {
+            let scope = lane.split('/').next().unwrap_or("");
+            if let Err(e) = self.store.put_record(LANE, lane, scope, &v) {
+                tracing::warn!(%lane, "could not save vendor session state: {e}");
+            }
+        }
+    }
+    fn remove(&self, lane: &str) {
+        let _ = self.store.delete_record(LANE, lane);
+    }
+}

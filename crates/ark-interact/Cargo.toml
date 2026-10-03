@@ -8,6 +8,7 @@ description = "ARK interaction layer: sessions, commands, structured reports, ac
 
 [dependencies]
 ark-sdk.workspace = true
+ark-orchestrate.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true

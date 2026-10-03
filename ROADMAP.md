@@ -9,8 +9,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | | |
 |---|---|
 | Stable release | **v0.5.0** (2026-10-01) |
-| `main` | v0.5.0 |
-| Consumers | SecRes (pins v0.5.0), `examples/minimal-agent`, `examples/writing-agent` |
+| `main` | v0.5.0 plus orchestration, managed vendor sessions, rule sets and diagrams (unreleased; breaking, so the next release is 0.6.0) |
+| Consumers | SecRes (pins v0.5.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b: success 0.85, cost per successful task $0.0298 (v0.4.0, `bench/RESULTS.md`) |
 | Phase | functionally complete for now. No milestone in progress. |
 
@@ -19,6 +19,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Area | Status |
 |---|---|
 | Runtime (`ark-core` to `ark-sdk`) | stable seams, bounded context, retries, crash recovery, flat memory over 2,000 turns |
+| Orchestration (`ark-orchestrate`) | new: agents, tasks, delegation, capacity-aware scheduling, a graph and event stream; tested with scripted models, run live on Claude and ChatGPT subscriptions |
 | Models (`ark-model`) | Ollama, Anthropic and OpenAI APIs, Claude and ChatGPT subscriptions through their CLIs, mock |
 | Interaction (`ark-interact`) | commands, reports, activity, traces, context and usage views shared by both front-ends |
 | Terminal (`ark-cli`) | interactive shell, approvals, steering, resume, headless `-p` |
@@ -35,7 +36,10 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Every live benchmark uses one 4B local model (qwen3:4b-instruct through Ollama) | `bench/RESULTS.md` |
 | With qwen3:4b, `tool-lookup` and `approval` fail 3 of 3: the model picks a plausible neighbor tool, or files the note in its own working state | `bench/RESULTS.md` |
 | Time to first token rose 137 to 259 ms (median) with the working state last in the request; cause not proven | `bench/RESULTS.md` |
-| Subscription providers (`claude`, `codex`) start a process per call, do not stream, and resend the whole transcript; Codex adds about 18k tokens per call | `ark-model` |
+| Subscription providers (`claude`, `codex`) start a process per call and do not stream. A plain `Ark` still resends the request on every call; only orchestrated agents use managed sessions | `ark-model`, `ark-sdk` |
+| `claude:haiku` tries host tools natively before answering in the structured form | `bench/RESULTS.md` |
+| Orchestration is measured on one program, one run per setting | `bench/RESULTS.md` |
+| The window has no graph view of its own; it serves `graph`, `task_trace` and `orch` events for an app's panel | `ark-ui` |
 | Approval grants are not persisted across processes | CLI, UI |
 | One `Host` serves one live session; two browser tabs share it | `ark-ui` |
 | `/context` token numbers are estimates; provider numbers are in `/trace` | `ark-interact` |
@@ -45,12 +49,15 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 In order. Each item should show its value in a benchmark or a consumer before it grows.
 
-1. **Live cache measurement** on Anthropic and OpenAI: run the generic suite with a key and
+1. **Orchestration in a consumer**: run a real multi-agent task through SecRes or the writing
+   agent, then decide on a managed session for the single-agent `Ark` and a graph panel in
+   the window. Add an orchestration workload to `ark-bench` (several runs, cost per success).
+2. **Live cache measurement** on Anthropic and OpenAI: run the generic suite with a key and
    record `cached_tokens` and cost per success next to the simulated estimate.
-2. **Small-model tool choice**: find out why `tool-lookup` and `approval` fail live, and fix
+3. **Small-model tool choice**: find out why `tool-lookup` and `approval` fail live, and fix
    it in the request (descriptions, index layout), not with a bigger model. Measure live.
-3. **Native window test**: drive the Tauri IPC path in CI, or document why it cannot be.
-4. **API trim at the next minor**: public items no caller uses (`Interaction::ark_mut`,
+4. **Native window test**: drive the Tauri IPC path in CI, or document why it cannot be.
+5. **API trim at the next minor**: public items no caller uses (`Interaction::ark_mut`,
    `App::ark_builder`, `Harness::budget_tokens`, `budget::WorkingSet::round_count`,
    `Registry::from_adapters`, `Store::get_artifact`, `Store::get_session`,
    `ActionDescriptor::with_output_schema`, `SurfaceRef::with_title`,

@@ -16,13 +16,15 @@ upgrades: [`docs/RELEASING.md`](docs/RELEASING.md).
 application   tools, prompts, vocabulary, commands, look      (consumer crates, never ARK)
 presentation  ark-cli, ark-ui: drawing, keys, transport       (never each other)
 interaction   ark-interact: turns, commands, reports, traces  (never draws)
-runtime       ark-core .. ark-sdk: loop, context, tools        (never a front-end)
+runtime       ark-core .. ark-orchestrate: loop, context, tools, several agents   (never a front-end)
 ```
 
 | Rule | Check |
 |---|---|
 | `ark-core` names no tool, file format or domain concept | `crates/ark-ui/tests/neutral.rs`; ask "would this make sense for an agent that edits novels?" |
 | Domain behavior goes through a seam (`Adapter`, `AgentProfile`, `Distiller`, `Sniffer`, `KnowledgeProvider`, `Provider`), never an `if domain` | review |
+| Orchestration names no vendor; vendors live in `ark-model`. Team, manager, department are things apps build from `AgentSpec`s | `crates/ark-ui/tests/neutral.rs` |
+| A delegated agent receives a brief, never another agent's conversation | `crates/ark-orchestrate/tests/orchestration.rs` |
 | The runtime never sees keys, colours or terminals; it emits `HarnessEvent`s and takes `ApprovalGate`, `CancelToken`, `Steering` | review |
 | Anything both front-ends show (commands, labels, views, traces) is computed once in `ark-interact`. A feature in one front-end has the same meaning in the other | `crates/ark-ui/tests/host.rs` compares CLI and GUI requests |
 | Terminal history is not model context. Never replay the transcript into a prompt | `crates/ark-sdk/tests/long_session.rs` |
@@ -79,6 +81,9 @@ Understand -> Change -> Test -> Benchmark (when relevant) -> Dogfood -> Docs/roa
 |---|---|
 | a new model backend | `ark-model` |
 | a loop, context or reuse behavior | `ark-runtime` (`harness`, `budget`, `distill`, `catalog`) |
+| vendor session handling or provider capacity | `ark-model` (`session`, `capacity`, `cli`) |
+| agents, tasks, delegation, scheduling, the orchestration graph | `ark-orchestrate` |
+| rule selection, the `rules` tool | `ark-runtime::rules`; types in `ark-core::rules` |
 | a persisted record | `ark-store`, with `#[serde(default)]` on new fields |
 | a command, view or label both front-ends show | `ark-interact` |
 | terminal rendering or keys | `ark-cli` |

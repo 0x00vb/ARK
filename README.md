@@ -17,7 +17,7 @@ State and next steps: [`ROADMAP.md`](ROADMAP.md).
 ```mermaid
 flowchart LR
     app["your app<br/>tools, prompts, commands"] --> pres["presentation<br/>ark-cli · ark-ui"]
-    pres --> inter["interaction<br/>ark-interact"] --> rt["runtime<br/>ark-sdk · ark-runtime<br/>ark-model · ark-tools · ark-store · ark-core"]
+    pres --> inter["interaction<br/>ark-interact"] --> rt["runtime<br/>ark-orchestrate · ark-sdk · ark-runtime<br/>ark-model · ark-tools · ark-store · ark-core"]
 ```
 
 The runtime is headless. The interaction layer turns its events into commands, reports and
@@ -27,12 +27,13 @@ they behave the same. Layers, crates and one turn step by step:
 
 | Crate | Responsibility |
 |---|---|
-| `ark-core` | Pure types: artifacts, actions, invocations, capabilities, evidence cards, working state, focus. No tool or domain name. |
-| `ark-model` | One `Provider` trait: Anthropic, OpenAI and compatible endpoints, Ollama, Claude and ChatGPT subscriptions through their CLIs, a scriptable mock. Timeouts, retries, prompt caching. |
+| `ark-core` | Pure types: artifacts, actions, invocations, capabilities, evidence cards, working state, focus, rule sets, diagrams. No tool or domain name. |
+| `ark-model` | One `Provider` trait: Anthropic, OpenAI and compatible endpoints, Ollama, Claude and ChatGPT subscriptions through their CLIs, a scriptable mock. Timeouts, retries, prompt caching, per-account capacity, managed vendor sessions. |
 | `ark-store` | Content-addressed blobs, SQLite metadata, full-text search. |
 | `ark-tools` | The `Adapter` / `Registry` tool boundary, a subprocess helper, an MCP bridge. Ships no domain tools. |
 | `ark-runtime` | The agent loop: context budget, model router, distillation, tool disclosure, reuse, parallel reads, stall guard, retries, sessions, approvals, cancel, steering, metrics. |
 | `ark-sdk` | The facade: `Ark::builder()`, `AgentProfile`, `prelude`. |
+| `ark-orchestrate` | Several agents: agents, tasks, delegation, messages, a capacity-aware scheduler, one managed model session per agent, and an observable graph. |
 | `ark-interact` | Between runtime and front-ends: `App`, `Interaction`, commands that return `Report`s, activity, traces, context and usage views. Draws nothing. |
 | `ark-cli` | The terminal shell every ARK app opens into, plus headless `-p`. |
 | `ark-ui` | The same app in a window (Tauri) or a local browser page. |
@@ -103,6 +104,7 @@ Run the examples in this repository:
 ```sh
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p minimal-agent -- "what is 6 * 7?"
 ARK_PROVIDER=ollama ARK_MODEL=qwen3:4b-instruct cargo run -p writing-agent   # interactive
+cargo run -p agent-team   # a coordinator and two readers on Claude and ChatGPT subscriptions
 cargo test --workspace   # no model needed: a scripted mock drives the loops
 ```
 
@@ -131,6 +133,7 @@ In reading order:
 | Where is ARK now, what is next? | [`ROADMAP.md`](ROADMAP.md) |
 | How is it structured? How does a turn work? | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | How do I build an app? | [`docs/EXTENSION.md`](docs/EXTENSION.md), then [`docs/CLI.md`](docs/CLI.md) (terminal) and [`docs/UI.md`](docs/UI.md) (window) |
+| How do several agents work together? | [`docs/ORCHESTRATION.md`](docs/ORCHESTRATION.md) |
 | How do I run it in production? | [`docs/OPERATIONS.md`](docs/OPERATIONS.md): settings, failures, logs, long sessions |
 | How do I develop and test ARK? | [`AGENTS.md`](AGENTS.md) (rules, lifecycle), [`CONTRIBUTING.md`](CONTRIBUTING.md) (commands) |
 | How do I measure a change? | [`docs/BENCH.md`](docs/BENCH.md); results in [`bench/RESULTS.md`](bench/RESULTS.md) |

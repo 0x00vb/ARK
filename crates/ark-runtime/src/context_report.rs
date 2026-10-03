@@ -26,6 +26,9 @@ pub struct ContextReport {
     pub conversation: u32,
     /// What the user is looking at (focus and nearby evidence).
     pub workspace: u32,
+    /// The bound rules selected for this task.
+    #[serde(default)]
+    pub rules: u32,
     /// The user's message for this turn.
     pub task: u32,
     /// This turn's distilled tool results (and any steering) still inside the window.
@@ -62,6 +65,7 @@ impl ContextReport {
             ("Working state", self.working_state),
             ("Conversation", self.conversation),
             ("Workspace", self.workspace),
+            ("Rules", self.rules),
             ("Task", self.task),
             ("Tool results", self.tool_rounds),
             ("Model output", self.model_output),

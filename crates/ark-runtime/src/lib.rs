@@ -33,6 +33,7 @@ pub mod notebook;
 mod process;
 pub mod profile;
 pub mod router;
+pub mod rules;
 pub mod session;
 pub mod steer;
 
@@ -53,6 +54,7 @@ pub use knowledge::{KnowledgeHit, KnowledgeProvider};
 pub use metrics::{role_name, Metrics};
 pub use profile::{AgentProfile, AgentProfileBuilder, Prompts};
 pub use router::{ModelRouter, Role};
+pub use rules::{RuleBook, RuleSelection, RulesTool};
 pub use session::{CarryPolicy, CompactReport, Session, SessionRecord, SessionUsage, Turn};
 pub use steer::Steering;
 

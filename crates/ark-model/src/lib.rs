@@ -13,21 +13,28 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 mod anthropic;
+pub mod capacity;
 mod catalog;
 pub mod cli;
 pub mod mock;
 mod ollama;
 mod openai;
 pub mod resilience;
+pub mod session;
 mod stream;
 
 pub use anthropic::Anthropic;
+pub use capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
 pub use catalog::{catalog, Backend, BackendKind, PROVIDERS};
 pub use cli::{Cli, CliModel, CliStatus};
 pub use mock::MockProvider;
 pub use ollama::Ollama;
 pub use openai::OpenAi;
 pub use resilience::{HttpConfig, RetryPolicy};
+pub use session::{
+    ManagedSession, SessionBackend, SessionEvent, SessionEventKind, SessionPolicy, SessionSnapshot,
+    SessionState, SubscriptionRuntime,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -110,7 +117,7 @@ pub struct ToolCall {
 
 /// One message in the conversation. Carries tool calls (assistant) or a tool result
 /// (tool), so the transcript round-trips across providers.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Message {
     pub role: Role,
     pub content: String,
@@ -158,7 +165,7 @@ impl Message {
 }
 
 /// A tool the model may call. `parameters` is a JSON Schema object.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolDef {
     pub name: String,
     pub description: String,

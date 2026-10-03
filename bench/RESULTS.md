@@ -159,6 +159,52 @@ running a subprocess, then 300 browser connections dropped). Before the fix, RSS
 | 1000 | 21.6 | 15 | 0 | 11597 | 5 |
 | 2000 | 21.6 | 15 | 0 | 18901 | 5 |
 
+## Orchestration on subscriptions (live, 2026-10-03)
+
+`examples/agent-team`: a coordinator on `claude:sonnet` delegates two document readings in
+one reply to `reader-a` on `codex` and `reader-b` on `claude:haiku`, then stores a diagram and
+answers. Same binary, run twice back to back: managed vendor sessions on (the default), then
+off (`ARK_SESSION_REUSE=0`: every call opens a fresh vendor session, the earlier behavior).
+One run each, so the time and token figures are indicative only. Records:
+`bench/orchestration/`.
+
+| Metric | Sessions on | Sessions off | Delta |
+|---|---:|---:|---:|
+| Task result | done | done | |
+| Wall time | 55.3 s | 67.5 s | -18% |
+| Model calls | 7 | 8 | |
+| Input tokens, provider-reported | 74k | 76k | -3% |
+| Uncached input tokens | 40.0k | 62.2k | -36% |
+| Tokens ARK sent (estimate) | 5.1k | 12.3k | -59% |
+| Brief `reader-a` received | 173 tokens | 161 tokens | |
+
+| Agent | Calls on / off | Uncached input on / off |
+|---|---:|---:|
+| lead (`claude:sonnet`) | 3 / 3 | 5.4k / 6.3k |
+| reader-a (`codex`) | 2 / 2 | 20.9k / 40.8k |
+| reader-b (`claude:haiku`) | 2 / 3 | 13.7k / 15.2k |
+
+What the numbers say:
+
+- The vendor processes its whole context on every call either way, so total input tokens
+  hardly move. The saving is in uncached input: a resumed Codex session serves its 20k base
+  prompt from cache (20,096 of 20,719 tokens on the reader's second call, 0 without a session).
+- The two readers ran at the same time in both runs; each saw only its brief and its document.
+- Before the protocol change below, two runs of the same program took 102 s and 94 s and the
+  lead used 40k and 41k tokens: Sonnet first tried to call host tools natively and Claude
+  Code refused them, inside the same call.
+
+Protocol wording for Claude Code, one delegation request through `claude -p --model sonnet`,
+2 runs each:
+
+| Opening of the system prompt | Internal turns | Input tokens |
+|---|---:|---:|
+| "You have no tools of your own" (before) | 4 | 3,049 |
+| "Your only tool is StructuredOutput" (now) | 2 | 1,384 |
+
+`claude:haiku` still tries a refused native call (`doc.read`, `load_action`) before it answers
+in the structured form (seen in its session file of the "on" run); Sonnet no longer does.
+
 ## What these numbers do not show
 
 - Provider-reported cache reads on Anthropic or OpenAI (no key in this environment).

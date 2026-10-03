@@ -8,9 +8,13 @@
 //! person or a list of tool calls. ARK's loop runs the tools, so approvals, traces and budgets
 //! work as with any other provider.
 //!
-//! Each call starts a process and resends the whole transcript, so it is slower than an API.
-//! No streaming: text arrives when the reply is complete.
+//! As a plain [`Provider`], each call starts a process and resends the whole transcript. As a
+//! [`SessionBackend`], driven by a [`crate::session::ManagedSession`], a vendor session is
+//! opened once (Claude `--session-id`, Codex `exec`) and continued with only what is new
+//! (Claude `--resume`, Codex `exec resume`). No streaming: text arrives when the reply is
+//! complete.
 
+use crate::session::{Base, Delta, SessionBackend};
 use crate::{Completion, Message, Provider, ProviderError, Result, Role, ToolCall, ToolDef, Usage};
 use async_trait::async_trait;
 use serde::Serialize;
@@ -18,6 +22,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
@@ -252,11 +257,26 @@ impl CliModel {
         messages: &[Message],
         tools: &[ToolDef],
     ) -> Result<Completion> {
+        let sys = protocol(Some(self.cli), system, tools, false);
+        let input = match self.cli {
+            Cli::Claude => render_transcript(messages),
+            Cli::Codex => format!("{sys}\n\n{}", render_transcript(messages)),
+        };
+        self.exec(Mode::OneShot, &sys, input).await.map(|(c, _)| c)
+    }
+
+    /// Run the CLI once. `sys` is the full system prompt (Claude takes it as a flag; Codex
+    /// reads it from `input`). Returns the completion and the vendor's session id when it
+    /// reported one.
+    async fn exec(
+        &self,
+        mode: Mode<'_>,
+        sys: &str,
+        input: String,
+    ) -> Result<(Completion, Option<String>)> {
         let bin = self.program()?;
-        let sys = protocol_prompt(system, tools);
-        let transcript = render_transcript(messages);
         let dir = work_dir()?;
-        let (mut cmd, stdin, out_file) = match self.cli {
+        let (mut cmd, out_file) = match self.cli {
             Cli::Claude => {
                 let mut c = command(&bin);
                 c.args([
@@ -267,10 +287,21 @@ impl CliModel {
                     "",
                     "--strict-mcp-config",
                 ])
-                .args(["--setting-sources", "", "--no-session-persistence"])
-                .args(["--model", &self.model, "--system-prompt", &sys])
-                .args(["--json-schema", REPLY_SCHEMA]);
-                (c, transcript, None)
+                .args(["--setting-sources", ""]);
+                match mode {
+                    Mode::OneShot => {
+                        c.arg("--no-session-persistence");
+                    }
+                    Mode::Open(id) => {
+                        c.args(["--session-id", id]);
+                    }
+                    Mode::Resume(id) => {
+                        c.args(["--resume", id]);
+                    }
+                }
+                c.args(["--model", &self.model, "--system-prompt", sys])
+                    .args(["--json-schema", REPLY_SCHEMA]);
+                (c, None)
             }
             Cli::Codex => {
                 let n = self.calls.fetch_add(1, Ordering::Relaxed);
@@ -278,17 +309,29 @@ impl CliModel {
                 let schema = dir.join(format!("schema-{tag}.json"));
                 std::fs::write(&schema, REPLY_SCHEMA).map_err(io_err)?;
                 let mut c = command(&bin);
-                c.args(["exec", "--json", "--skip-git-repo-check", "--ephemeral"])
-                    .args(["--ignore-rules", "--ignore-user-config", "-s", "read-only"])
-                    .arg("-C")
-                    .arg(&dir)
-                    .arg("--output-schema")
-                    .arg(&schema);
+                match mode {
+                    Mode::Resume(id) => {
+                        // `resume` takes no sandbox flag; the config key does the same.
+                        c.args(["exec", "resume", id, "--json", "--skip-git-repo-check"])
+                            .args(["--ignore-rules", "--ignore-user-config"])
+                            .args(["-c", "sandbox_mode=\"read-only\""]);
+                    }
+                    Mode::OneShot | Mode::Open(_) => {
+                        c.args(["exec", "--json", "--skip-git-repo-check"]);
+                        if matches!(mode, Mode::OneShot) {
+                            c.arg("--ephemeral");
+                        }
+                        c.args(["--ignore-rules", "--ignore-user-config", "-s", "read-only"])
+                            .arg("-C")
+                            .arg(&dir);
+                    }
+                }
+                c.arg("--output-schema").arg(&schema);
                 if self.model != "default" {
                     c.args(["-m", &self.model]);
                 }
                 c.arg("-");
-                (c, format!("{sys}\n\n{transcript}"), Some(schema))
+                (c, Some(schema))
             }
         };
         cmd.current_dir(&dir)
@@ -301,7 +344,7 @@ impl CliModel {
                 .spawn()
                 .map_err(|e| self.api(format!("could not start: {e}")))?;
             if let Some(mut w) = child.stdin.take() {
-                w.write_all(stdin.as_bytes()).await.map_err(io_err)?;
+                w.write_all(input.as_bytes()).await.map_err(io_err)?;
             }
             match tokio::time::timeout(CALL_TIMEOUT, child.wait_with_output()).await {
                 Ok(r) => r.map_err(io_err),
@@ -319,7 +362,7 @@ impl CliModel {
             Cli::Codex => parse_codex(&stdout),
         };
         match parsed {
-            Ok((reply, usage)) => self.completion(&reply, usage),
+            Ok((reply, usage, vendor)) => Ok((self.completion(&reply, usage)?, vendor)),
             Err(detail) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let tail = stderr.trim().lines().last().unwrap_or("");
@@ -328,8 +371,31 @@ impl CliModel {
                 } else {
                     format!("{detail} ({tail})")
                 };
-                Err(self.api(self.signed_out_hint(detail)))
+                Err(self.classify(self.signed_out_hint(detail)))
             }
+        }
+    }
+
+    /// A usage or rate limit is temporary: the account recovers, so the call may be retried
+    /// after a wait. Anything else stays a plain error.
+    fn classify(&self, detail: String) -> ProviderError {
+        let d = detail.to_lowercase();
+        if [
+            "rate limit",
+            "usage limit",
+            "too many requests",
+            "overloaded",
+            "429",
+        ]
+        .iter()
+        .any(|k| d.contains(k))
+        {
+            ProviderError::Overloaded {
+                provider: self.cli.name().into(),
+                detail,
+            }
+        } else {
+            self.api(detail)
         }
     }
 
@@ -418,6 +484,77 @@ impl Provider for CliModel {
     }
 }
 
+/// How one CLI run relates to a vendor session.
+#[derive(Clone, Copy)]
+enum Mode<'a> {
+    /// No session: nothing is kept (the stateless provider).
+    OneShot,
+    /// Start a session. Claude takes the id from ARK; Codex picks its own and reports it.
+    Open(&'a str),
+    /// Continue a session by its vendor id.
+    Resume(&'a str),
+}
+
+#[async_trait]
+impl SessionBackend for CliModel {
+    fn label(&self) -> String {
+        Provider::describe(self)
+    }
+
+    fn model(&self) -> String {
+        Provider::model_id(self)
+    }
+
+    fn account(&self) -> String {
+        self.cli.name().to_string()
+    }
+
+    async fn open(
+        &self,
+        system: &str,
+        tools: &[ToolDef],
+        messages: &[Message],
+    ) -> Result<(String, Completion)> {
+        let sys = protocol(Some(self.cli), system, tools, true);
+        let id = new_session_id();
+        let input = match self.cli {
+            Cli::Claude => render_transcript(messages),
+            Cli::Codex => format!("{sys}\n\n{}", render_transcript(messages)),
+        };
+        let (c, vendor) = self.exec(Mode::Open(&id), &sys, input).await?;
+        let vendor = match self.cli {
+            Cli::Claude => vendor.unwrap_or(id),
+            Cli::Codex => vendor.ok_or_else(|| self.api("codex reported no thread id".into()))?,
+        };
+        Ok((vendor, c))
+    }
+
+    async fn resume(&self, vendor: &str, base: Base<'_>, delta: &Delta) -> Result<Completion> {
+        // Claude records the system prompt with the session; it is passed again unchanged so
+        // a CLI without that record behaves the same.
+        let sys = protocol(Some(self.cli), base.system, base.tools, true);
+        self.exec(Mode::Resume(vendor), &sys, render_delta(delta))
+            .await
+            .map(|(c, _)| c)
+    }
+}
+
+/// The session backend for a model spec's provider and model, when it is a subscription
+/// CLI (`claude`, `codex`).
+pub fn session_backend(provider: &str, model: &str) -> Option<Arc<dyn SessionBackend>> {
+    let cli = match provider {
+        "claude" => Cli::Claude,
+        "codex" => Cli::Codex,
+        _ => return None,
+    };
+    Some(Arc::new(CliModel::new(cli, model)))
+}
+
+/// A version-4 UUID, as Claude Code requires for `--session-id`.
+fn new_session_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 /// A command with the executable's own directory first on `PATH`: Codex is a Node script,
 /// and `node` usually sits next to it.
 fn command(bin: &Path) -> tokio::process::Command {
@@ -450,16 +587,55 @@ fn io_err(e: std::io::Error) -> ProviderError {
 
 /// The system prompt the CLI sees: the reply protocol, ARK's tools, then the app's own prompt.
 pub fn protocol_prompt(system: &str, tools: &[ToolDef]) -> String {
-    let mut s = String::from(
-        "You are the model behind a host application's agent. The host owns the tools listed \
-below and runs them. You have no tools of your own and must not try to run anything yourself.\n\n\
-Answer every turn with exactly one action:\n\
+    protocol(None, system, tools, false)
+}
+
+/// [`protocol_prompt`] for a vendor session that later requests continue with only what is
+/// new.
+pub fn session_prompt(system: &str, tools: &[ToolDef]) -> String {
+    protocol(None, system, tools, true)
+}
+
+/// How the reply protocol opens. Claude Code returns a structured reply through its own
+/// `StructuredOutput` tool, and a model told only that it "has no tools" first tries to call
+/// a host tool by name (measured: 4 internal turns and 3,049 input tokens for one delegation
+/// with the generic wording, 2 turns and 1,384 tokens with this one).
+fn opening(cli: Option<Cli>) -> &'static str {
+    match cli {
+        Some(Cli::Claude) => {
+            "You are the model behind a host application's agent. Your only tool is \
+StructuredOutput: answer every turn with exactly one StructuredOutput call and nothing else. The \
+host owns the tools listed below and runs them for you. They are not tools of yours; to use one, \
+name it in the tool_calls field of your StructuredOutput call. Every tool listed is available \
+now; no loading step is needed.\n\n"
+        }
+        _ => {
+            "You are the model behind a host application's agent. The host owns the tools listed \
+below and runs them. You have no tools of your own and must not try to run anything yourself. \
+The host tools are not tools you can call directly: calling one by name fails. You use them only \
+by putting them in tool_calls of your structured answer. Every tool listed below is available \
+now; no loading step is needed for it.\n\n"
+        }
+    }
+}
+
+fn protocol(cli: Option<Cli>, system: &str, tools: &[ToolDef], session: bool) -> String {
+    let mut s = String::from(opening(cli));
+    s.push_str(
+        "Answer every turn with exactly one action:\n\
 - \"call_tools\": put one or more calls in tool_calls (name, and arguments as a JSON object \
 string). text may hold a short note. The host runs the calls and sends the results back.\n\
 - \"reply\": your answer to the person goes in text, in Markdown. tool_calls must be empty.\n\n\
 Earlier results appear in the transcript as <tool_result>. Never repeat a call whose result \
 you already have.\n",
     );
+    if session {
+        s.push_str(
+            "\nThis conversation continues over several requests. Each later request carries only \
+what is new, in <new_messages>. A <host_update> replaces the tool list or the application's \
+instructions it names.\n",
+        );
+    }
     if tools.is_empty() {
         s.push_str("\nNo host tools are available in this turn. Use \"reply\".\n");
     } else {
@@ -485,37 +661,81 @@ you already have.\n",
 pub fn render_transcript(messages: &[Message]) -> String {
     let mut s = String::from("<transcript>\n");
     for m in messages {
-        match m.role {
-            Role::System => s.push_str(&format!("<system>\n{}\n</system>\n", m.content)),
-            Role::User => s.push_str(&format!("<user>\n{}\n</user>\n", m.content)),
-            Role::Assistant => {
-                s.push_str("<assistant>\n");
-                if !m.content.trim().is_empty() {
-                    s.push_str(m.content.trim());
-                    s.push('\n');
-                }
-                for c in &m.tool_calls {
-                    s.push_str(&format!(
-                        "<tool_call id=\"{}\" name=\"{}\">{}</tool_call>\n",
-                        c.id, c.name, c.arguments
-                    ));
-                }
-                s.push_str("</assistant>\n");
-            }
-            Role::Tool => s.push_str(&format!(
-                "<tool_result id=\"{}\" name=\"{}\">\n{}\n</tool_result>\n",
-                m.tool_call_id.as_deref().unwrap_or(""),
-                m.tool_name.as_deref().unwrap_or(""),
-                m.content
-            )),
-        }
+        render_message(&mut s, m);
     }
     s.push_str("</transcript>\nContinue as the assistant with one action.\n");
     s
 }
 
+/// What a resumed session has not seen: host updates, then the new messages.
+pub fn render_delta(delta: &Delta) -> String {
+    let mut s = String::new();
+    if delta.tools_now.is_some() || !delta.new_tools.is_empty() {
+        s.push_str("<host_update>\n");
+        if let Some(names) = &delta.tools_now {
+            if names.is_empty() {
+                s.push_str("No host tools are available now. Use \"reply\".\n");
+            } else {
+                s.push_str(&format!(
+                    "Host tools available now: {}.\n",
+                    names.join(", ")
+                ));
+            }
+        }
+        for t in &delta.new_tools {
+            s.push_str(&format!(
+                "\n## {}\n{}\nParameters (JSON Schema): {}\n",
+                t.name,
+                t.description.trim(),
+                t.parameters
+            ));
+        }
+        s.push_str("</host_update>\n");
+    }
+    if let Some(sys) = &delta.system {
+        s.push_str(
+            "<host_update>\nThe application's instructions changed. These replace the earlier ones:\n\n",
+        );
+        s.push_str(sys.trim());
+        s.push_str("\n</host_update>\n");
+    }
+    s.push_str("<new_messages>\n");
+    for m in &delta.messages {
+        render_message(&mut s, m);
+    }
+    s.push_str("</new_messages>\nContinue as the assistant with one action.\n");
+    s
+}
+
+fn render_message(s: &mut String, m: &Message) {
+    match m.role {
+        Role::System => s.push_str(&format!("<system>\n{}\n</system>\n", m.content)),
+        Role::User => s.push_str(&format!("<user>\n{}\n</user>\n", m.content)),
+        Role::Assistant => {
+            s.push_str("<assistant>\n");
+            if !m.content.trim().is_empty() {
+                s.push_str(m.content.trim());
+                s.push('\n');
+            }
+            for c in &m.tool_calls {
+                s.push_str(&format!(
+                    "<tool_call id=\"{}\" name=\"{}\">{}</tool_call>\n",
+                    c.id, c.name, c.arguments
+                ));
+            }
+            s.push_str("</assistant>\n");
+        }
+        Role::Tool => s.push_str(&format!(
+            "<tool_result id=\"{}\" name=\"{}\">\n{}\n</tool_result>\n",
+            m.tool_call_id.as_deref().unwrap_or(""),
+            m.tool_name.as_deref().unwrap_or(""),
+            m.content
+        )),
+    }
+}
+
 /// `claude -p --output-format json`: one result object.
-fn parse_claude(stdout: &str) -> std::result::Result<(Value, Usage), String> {
+fn parse_claude(stdout: &str) -> std::result::Result<(Value, Usage, Option<String>), String> {
     let v: Value = serde_json::from_str(stdout.trim())
         .map_err(|_| format!("unexpected output: {}", clip(stdout)))?;
     if v["is_error"].as_bool() == Some(true) {
@@ -543,12 +763,14 @@ fn parse_claude(stdout: &str) -> std::result::Result<(Value, Usage), String> {
     let usage = Usage::measured(n("input_tokens") + cached + written, n("output_tokens"))
         .with_cached(cached)
         .with_cache_write(written);
-    Ok((reply, usage))
+    let session = v["session_id"].as_str().map(str::to_string);
+    Ok((reply, usage, session))
 }
 
 /// `codex exec --json`: JSONL events; the last agent message is the reply.
-fn parse_codex(stdout: &str) -> std::result::Result<(Value, Usage), String> {
+fn parse_codex(stdout: &str) -> std::result::Result<(Value, Usage, Option<String>), String> {
     let mut reply = None;
+    let mut thread = None;
     let mut usage = Usage::default();
     let mut failure = None;
     for line in stdout.lines() {
@@ -556,6 +778,9 @@ fn parse_codex(stdout: &str) -> std::result::Result<(Value, Usage), String> {
             continue;
         };
         match ev["type"].as_str() {
+            Some("thread.started") => {
+                thread = ev["thread_id"].as_str().map(str::to_string);
+            }
             Some("item.completed") if ev["item"]["type"] == "agent_message" => {
                 reply = ev["item"]["text"].as_str().map(str::to_string);
             }
@@ -583,7 +808,7 @@ fn parse_codex(stdout: &str) -> std::result::Result<(Value, Usage), String> {
     let text = reply.ok_or_else(|| format!("no reply: {}", clip(stdout)))?;
     let v = serde_json::from_str(text.trim())
         .map_err(|_| format!("reply was not structured: {}", clip(&text)))?;
-    Ok((v, usage))
+    Ok((v, usage, thread))
 }
 
 fn clip(s: &str) -> String {
@@ -627,6 +852,9 @@ mod tests {
         assert!(p.contains("\"path\""));
         assert!(p.ends_with("Be terse.\n"));
         assert!(protocol_prompt("", &[]).contains("No host tools"));
+        assert!(protocol(Some(Cli::Claude), "", &tools(), false)
+            .contains("Your only tool is StructuredOutput"));
+        assert!(!protocol(Some(Cli::Codex), "", &tools(), false).contains("StructuredOutput"));
     }
 
     #[test]
@@ -695,6 +923,117 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
         assert!(c.tool_calls.is_empty());
         assert_eq!(c.usage.prompt_tokens, 50);
         assert_eq!(c.usage.completion_tokens, 6);
+    }
+
+    /// A fake CLI that records its arguments and stdin next to itself, then prints `out`.
+    fn recording(name: &str, out: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ark-cli-rec-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("log");
+        let _ = std::fs::remove_file(&log);
+        let p = dir.join(name);
+        std::fs::write(
+            &p,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {log}\necho '--stdin--' >> {log}\ncat >> {log}\necho '--end--' >> {log}\n{out}\n",
+                log = log.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        (p, log)
+    }
+
+    #[tokio::test]
+    async fn claude_sessions_open_with_an_id_and_resume_with_a_delta() {
+        let out = r#"echo '{"is_error":false,"session_id":"S1","structured_output":{"action":"reply","text":"ok","tool_calls":[]},"usage":{"input_tokens":10,"output_tokens":2}}'"#;
+        let (bin, log) = recording("claude", out);
+        let m = CliModel::new(Cli::Claude, "haiku").with_program(bin);
+        let (vendor, c) = SessionBackend::open(&m, "Be terse.", &tools(), &[Message::user("hi")])
+            .await
+            .unwrap();
+        assert_eq!(vendor, "S1");
+        assert_eq!(c.content, "ok");
+        let delta = Delta {
+            messages: vec![Message::user("next")],
+            new_tools: vec![ToolDef {
+                name: "fs.list".into(),
+                description: "List files".into(),
+                parameters: json!({"type":"object"}),
+            }],
+            tools_now: Some(vec!["fs.read".into(), "fs.list".into()]),
+            ..Default::default()
+        };
+        let tools = tools();
+        let base = Base {
+            system: "Be terse.",
+            tools: &tools,
+        };
+        SessionBackend::resume(&m, "S1", base, &delta)
+            .await
+            .unwrap();
+        let log = std::fs::read_to_string(log).unwrap();
+        let (open, resume) = log.split_once("--end--").unwrap();
+        assert!(open.contains("--session-id"), "{open}");
+        assert!(!open.contains("--no-session-persistence"));
+        assert!(open.contains("<user>\nhi\n</user>"));
+        assert!(resume.contains("--resume\nS1"), "{resume}");
+        assert!(resume.contains("<new_messages>\n<user>\nnext\n</user>"));
+        assert!(
+            resume.contains("## fs.list"),
+            "a new tool's schema is sent once"
+        );
+        assert!(
+            !resume.contains("<user>\nhi"),
+            "nothing already sent is resent"
+        );
+    }
+
+    #[tokio::test]
+    async fn codex_sessions_report_their_thread_and_resume_it() {
+        let out = r#"echo '{"type":"thread.started","thread_id":"T9"}'
+echo '{"type":"item.completed","item":{"id":"i","type":"agent_message","text":"{\"action\":\"reply\",\"text\":\"ok\",\"tool_calls\":[]}"}}'
+echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":40,"output_tokens":4}}'"#;
+        let (bin, log) = recording("codex", out);
+        let m = CliModel::new(Cli::Codex, "").with_program(bin);
+        let (vendor, _) = SessionBackend::open(&m, "", &[], &[Message::user("hi")])
+            .await
+            .unwrap();
+        assert_eq!(vendor, "T9");
+        let delta = Delta {
+            messages: vec![Message::user("more")],
+            ..Default::default()
+        };
+        let base = Base {
+            system: "",
+            tools: &[],
+        };
+        SessionBackend::resume(&m, "T9", base, &delta)
+            .await
+            .unwrap();
+        let log = std::fs::read_to_string(log).unwrap();
+        let (open, resume) = log.split_once("--end--").unwrap();
+        assert!(!open.contains("--ephemeral"), "a session is persisted");
+        assert!(open.contains("This conversation continues"));
+        assert!(resume.starts_with("\nexec\nresume\nT9"), "{resume}");
+        assert!(resume.contains("sandbox_mode"));
+        assert!(
+            !resume.contains("This conversation continues"),
+            "no system prompt again"
+        );
+    }
+
+    #[test]
+    fn rate_and_usage_limits_are_temporary() {
+        let m = CliModel::new(Cli::Claude, "");
+        assert!(m
+            .classify("Claude usage limit reached".into())
+            .is_transient());
+        assert!(!m.classify("bad flag".into()).is_transient());
     }
 
     #[tokio::test]

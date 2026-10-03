@@ -185,3 +185,70 @@ async fn late_steering_comes_back_undelivered() {
         .await;
     assert_eq!(end.undelivered, vec!["and the door?"]);
 }
+
+/// `/agents` shows the orchestrator's graph and one task's trace, from its own records.
+#[tokio::test]
+async fn agents_command_shows_the_graph_and_a_task() {
+    use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec};
+    let dir = tempfile::tempdir().unwrap();
+    let worker: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new(
+        "w",
+        vec![Completion {
+            content: "WORKER-RESULT".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(50, 5),
+        }],
+    ));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(worker.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "").unwrap();
+    let orch = Orchestrator::builder(&ark, &project)
+        .configure_models(|b| b.provider("w", worker))
+        .build()
+        .unwrap();
+    orch.spawn(AgentSpec::new("worker").model("w"))
+        .await
+        .unwrap();
+    let done = orch
+        .run("worker", TaskSpec::new("do the thing"))
+        .await
+        .unwrap();
+
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = App::new("Team")
+        .ark(ark)
+        .orchestrator(orch)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    assert!(ix.commands().iter().any(|c| c.name == "agents"));
+    let g = ix.execute("/agents").await.report;
+    let text = g.plain_text();
+    assert!(text.contains("worker"), "{text}");
+    assert!(text.contains(&done.id));
+    assert_eq!(g.data.as_ref().unwrap().view, "orchestration");
+    let t = ix.execute(&format!("/agents {}", done.id)).await.report;
+    let text = t.plain_text();
+    assert!(text.contains("WORKER-RESULT"), "{text}");
+    assert!(text.contains("started (attempt 1)"));
+    // A single-agent app does not offer it.
+    let (approver, _rx) = ChannelApprover::channel();
+    let dir2 = tempfile::tempdir().unwrap();
+    let solo = App::new("Solo")
+        .ark(
+            Ark::builder()
+                .store_root(dir2.path())
+                .provider(Arc::new(MockProvider::new("m", vec![])))
+                .build()
+                .unwrap(),
+        )
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    assert!(!solo.commands().iter().any(|c| c.name == "agents"));
+}

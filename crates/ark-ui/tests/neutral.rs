@@ -86,6 +86,7 @@ fn runtime_code_names_no_domain() {
         "ark-tools/src",
         "ark-runtime/src",
         "ark-sdk/src",
+        "ark-orchestrate/src",
         "ark-bench/src",
     ] {
         scan(&crates.join(dir), true, &mut hits);
@@ -93,6 +94,45 @@ fn runtime_code_names_no_domain() {
     assert!(
         hits.is_empty(),
         "domain words in ARK's runtime code:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// Orchestration works the same on any provider: its code names no vendor. Vendors live in
+/// `ark-model` only (`cli`, `anthropic`, `openai`, `ollama`).
+#[test]
+fn orchestration_names_no_vendor() {
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut hits = Vec::new();
+    for e in std::fs::read_dir(crates.join("ark-orchestrate/src"))
+        .unwrap()
+        .flatten()
+    {
+        let text = std::fs::read_to_string(e.path()).unwrap().to_lowercase();
+        for (n, line) in text.lines().enumerate() {
+            if line.trim_start().starts_with("#[cfg(test)]") {
+                break;
+            }
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for w in [
+                "claude",
+                "codex",
+                "anthropic",
+                "openai",
+                "ollama",
+                "chatgpt",
+            ] {
+                if line.contains(w) {
+                    hits.push(format!("{}:{}: `{w}`", e.path().display(), n + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "vendor names in orchestration code:\n{}",
         hits.join("\n")
     );
 }

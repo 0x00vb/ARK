@@ -1,0 +1,559 @@
+{
+  "project": "4c1b0cb3-25ef-4d1d-8409-d749c5081b5e",
+  "seq": 79,
+  "at_ms": 1791001633539,
+  "agents": [
+    {
+      "id": "agent:lead",
+      "name": "lead",
+      "role": "coordinates the review",
+      "parent": null,
+      "state": "idle",
+      "current_task": null,
+      "model": "claude:sonnet",
+      "account": "claude",
+      "session": {
+        "lane": "4c1b0cb3-25ef-4d1d-8409-d749c5081b5e/lead",
+        "model": "claude:sonnet",
+        "account": "claude",
+        "vendor": "eec36a1b-4a90-4101-8e1b-a3beb55ecd14",
+        "state": "idle",
+        "context_tokens": 6900,
+        "max_context_tokens": 64000,
+        "turns": 3,
+        "calls": 3,
+        "opens": 1,
+        "rotations": 0,
+        "sent_tokens": 2267,
+        "saved_tokens": 3691,
+        "last_used_ms": 1791001633535,
+        "last_event": {
+          "lane": "4c1b0cb3-25ef-4d1d-8409-d749c5081b5e/lead",
+          "vendor": "eec36a1b-4a90-4101-8e1b-a3beb55ecd14",
+          "context_tokens": 6900,
+          "at_ms": 1791001633536,
+          "kind": "resumed",
+          "sent_tokens": 74,
+          "saved_tokens": 2201
+        }
+      },
+      "context": {
+        "tokens": 1854,
+        "budget": 6000
+      },
+      "usage": {
+        "prompt_tokens": 14962,
+        "completion_tokens": 1886,
+        "cached_tokens": 9520,
+        "model_calls": 3,
+        "tool_calls": 3,
+        "steps": 3,
+        "measured": false
+      },
+      "tasks_done": 1,
+      "tasks_failed": 0,
+      "delegates_to": [
+        "reader-a",
+        "reader-b"
+      ],
+      "tools": [],
+      "inbox": 0
+    },
+    {
+      "id": "agent:reader-a",
+      "name": "reader-a",
+      "role": "reads one document and reports its facts",
+      "parent": "lead",
+      "state": "idle",
+      "current_task": null,
+      "model": "codex:default",
+      "account": "codex",
+      "session": {
+        "lane": "4c1b0cb3-25ef-4d1d-8409-d749c5081b5e/reader-a",
+        "model": "codex:default",
+        "account": "codex",
+        "vendor": "01a10003-68e5-79f2-8e3a-bbf38e99337c",
+        "state": "idle",
+        "context_tokens": 21006,
+        "max_context_tokens": 64000,
+        "turns": 2,
+        "calls": 2,
+        "opens": 1,
+        "rotations": 0,
+        "sent_tokens": 1393,
+        "saved_tokens": 1207,
+        "last_used_ms": 1791001619025,
+        "last_event": {
+          "lane": "4c1b0cb3-25ef-4d1d-8409-d749c5081b5e/reader-a",
+          "vendor": "01a10003-68e5-79f2-8e3a-bbf38e99337c",
+          "context_tokens": 21006,
+          "at_ms": 1791001619026,
+          "kind": "resumed",
+          "sent_tokens": 190,
+          "saved_tokens": 1207
+        }
+      },
+      "context": {
+        "tokens": 870,
+        "budget": 6000
+      },
+      "usage": {
+        "prompt_tokens": 40999,
+        "completion_tokens": 346,
+        "cached_tokens": 20096,
+        "model_calls": 2,
+        "tool_calls": 1,
+        "steps": 2,
+        "measured": false
+      },
+      "tasks_done": 1,
+      "tasks_failed": 0,
+      "delegates_to": [],
+      "tools": [
+        "doc.read"
+      ],
+      "inbox": 0
+    },
+    {
+      "id": "agent:reader-b",
+      "name": "reader-b",
+      "role": "reads one document and reports its facts",
+      "parent": "lead",
+      "state": "idle",
+      "current_task": null,
+      "model": "claude:haiku",
+      "account": "claude",
+      "session": {
+        "lane": "4c1b0cb3-25ef-4d1d-8409-d749c5081b5e/reader-b",
+        "model": "claude:haiku",
+        "account": "claude",
+        "vendor": "83f38499-4f36-4582-b146-c5c5b9e8cf0b",
+        "state": "idle",
+        "context_tokens": 5591,
+        "max_context_tokens": 64000,
+        "turns": 2,
+        "calls": 2,
+        "opens": 1,
+        "rotations": 0,
+        "sent_tokens": 1399,
+        "saved_tokens": 1207,
+        "last_used_ms": 1791001610487,
+        "last_event": {
+          "lane": "4c1b0cb3-25ef-4d1d-8409-d749c5081b5e/reader-b",
+          "vendor": "83f38499-4f36-4582-b146-c5c5b9e8cf0b",
+          "context_tokens": 5591,
+          "at_ms": 1791001610488,
+          "kind": "resumed",
+          "sent_tokens": 196,
+          "saved_tokens": 1207
+        }
+      },
+      "context": {
+        "tokens": 876,
+        "budget": 6000
+      },
+      "usage": {
+        "prompt_tokens": 13692,
+        "completion_tokens": 2342,
+        "cached_tokens": 0,
+        "model_calls": 2,
+        "tool_calls": 1,
+        "steps": 2,
+        "measured": false
+      },
+      "tasks_done": 1,
+      "tasks_failed": 0,
+      "delegates_to": [],
+      "tools": [
+        "doc.read"
+      ],
+      "inbox": 0
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task:t-215357a3",
+      "task": "t-215357a3",
+      "owner": "lead",
+      "objective": "Compare the spring and summer support reviews: what improved, what did not, and what the team should do next.",
+      "origin": {
+        "by": "external"
+      },
+      "parent": null,
+      "children": [
+        "t-c5bb3955",
+        "t-dbdf6499"
+      ],
+      "after": [],
+      "state": "done",
+      "waiting_on": null,
+      "waiting_for": [],
+      "attempts": 1,
+      "max_attempts": 1,
+      "elapsed_ms": 55316,
+      "run_ms": 55315,
+      "usage": {
+        "prompt_tokens": 14962,
+        "completion_tokens": 1886,
+        "cached_tokens": 9520,
+        "model_calls": 3,
+        "tool_calls": 3,
+        "steps": 3,
+        "measured": false
+      },
+      "budget": {
+        "max_steps": 8,
+        "max_tokens": null,
+        "max_model_calls": null,
+        "timeout_secs": null,
+        "max_delegations": null
+      },
+      "tool_calls": [
+        {
+          "id": "claude_0_0",
+          "action": "agents.delegate",
+          "ok": true,
+          "summary": "reader-a done task t-c5bb3955: All facts below come from **spring-review.md, “Spring review: support team.”**\n\n- **Key figures:** The team answered “4,120 requests” between March and May, up from “3,380” in winter (requests). Median first reply time was “3 hours 10 minutes”; the goal was “2 hours.”\n…",
+          "invocation": "dd84c662-cd6e-4d65-826e-2065cf41af9c",
+          "duration_ms": 35011,
+          "reused": false
+        },
+        {
+          "id": "claude_0_1",
+          "action": "agents.delegate",
+          "ok": true,
+          "summary": "reader-b done task t-dbdf6499: ## Summer Review Report\n\nAll information below comes from the summer review document (art:f3b31fd6e1f4).\n\n### Key Figures (quoted exactly with units)\n- **4,610 requests** answered between June and August\n- **Median first reply time fell to 1 hour 55 minutes**, inside t…",
+          "invocation": "27b5b7fa-fca1-4200-a347-c8db26a44d02",
+          "duration_ms": 26471,
+          "reused": false
+        },
+        {
+          "id": "claude_1_0",
+          "action": "diagram.create",
+          "ok": true,
+          "summary": "stored flowchart diagram \"Themes shared by spring and summer support reviews\" v1 (19 lines) as themes-shared-by-spring-and-summer-support-reviews.mmd",
+          "invocation": "a58ddcdf-8dd1-4587-bc56-2c9fae0e5610",
+          "duration_ms": 69,
+          "reused": false
+        }
+      ],
+      "inputs": [
+        {
+          "id": "74ae89d31c6eea117d90e4a4dbcdcaa5b24844c577f60ad3b04bbb96d3ea953e",
+          "name": "spring-review.md",
+          "kind": "text"
+        },
+        {
+          "id": "f3b31fd6e1f4f534351d238ec1d8f3a8193bb6e8649d87950331d50aeb58e44f",
+          "name": "summer-review.md",
+          "kind": "text"
+        }
+      ],
+      "outputs": [
+        {
+          "id": "89f95daee2c62b4e9a48f2c4d077ec851510c77c86105b1de192c325f34daca3",
+          "name": "themes-shared-by-spring-and-summer-support-reviews.mmd",
+          "kind": "diagram"
+        }
+      ],
+      "rules": [
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W1"
+        },
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W2"
+        },
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W3"
+        },
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W4"
+        }
+      ],
+      "rules_held_back": 1,
+      "brief_tokens": 67,
+      "model": "claude:sonnet",
+      "result": "## Spring vs. summer support reviews\n\nShared-themes diagram: art:89f95daee2c6\n\n### What improved (summer review unless noted)\n- **Volume handled:** the spring review reports \"4,120 requests\" (March–May), up from \"3,380\" in winter. The summer review reports \"4,610 requests\" (June–August).\n- **First reply time:** the spring review gives a median of \"3 hours 10 minutes\" against a goal of \"2 hours\". The summer review gives \"1 hour 55 minutes\", inside the 2 hour goal for the first time.\n- **Account access:** the spring review says requests \"doubled\" after the 14 April login change and plans \"five a…",
+      "error": null,
+      "created_ms": 1791001578221,
+      "started_ms": 1791001578222,
+      "finished_ms": 1791001633538
+    },
+    {
+      "id": "task:t-c5bb3955",
+      "task": "t-c5bb3955",
+      "owner": "reader-a",
+      "objective": "Read the spring support review and report its facts: key figures quoted exactly with units, problems found (with any owner or next step stated), what went well, and themes covered. Say clearly that everything comes from the spring review.",
+      "origin": {
+        "by": "agent",
+        "agent": "lead",
+        "task": "t-215357a3"
+      },
+      "parent": "t-215357a3",
+      "children": [],
+      "after": [],
+      "state": "done",
+      "waiting_on": null,
+      "waiting_for": [],
+      "attempts": 1,
+      "max_attempts": 1,
+      "elapsed_ms": 35008,
+      "run_ms": 35006,
+      "usage": {
+        "prompt_tokens": 40999,
+        "completion_tokens": 346,
+        "cached_tokens": 20096,
+        "model_calls": 2,
+        "tool_calls": 1,
+        "steps": 2,
+        "measured": false
+      },
+      "budget": {
+        "max_steps": 4,
+        "max_tokens": null,
+        "max_model_calls": null,
+        "timeout_secs": null,
+        "max_delegations": null
+      },
+      "tool_calls": [
+        {
+          "id": "codex_1_0",
+          "action": "doc.read",
+          "ok": true,
+          "summary": "# Spring review: support team\n\nThe team answered 4,120 requests between March and May, up from 3,380 in winter.\nMedian first reply time was 3 hours 10 minutes; the goal was 2 hours.\n\nWhat went well:\n- The new help articles cut repeat questions about billing by about a third.\n- Weekend coverage by tw…",
+          "invocation": "483bb866-7bd5-4046-94bc-c247dbd869a4",
+          "duration_ms": 0,
+          "reused": false
+        }
+      ],
+      "inputs": [
+        {
+          "id": "74ae89d31c6eea117d90e4a4dbcdcaa5b24844c577f60ad3b04bbb96d3ea953e",
+          "name": "spring-review.md",
+          "kind": "text"
+        }
+      ],
+      "outputs": [],
+      "rules": [
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W1"
+        },
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W2"
+        },
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W4"
+        }
+      ],
+      "rules_held_back": 2,
+      "brief_tokens": 173,
+      "model": "codex:default",
+      "result": "All facts below come from **spring-review.md, “Spring review: support team.”**\n\n- **Key figures:** The team answered “4,120 requests” between March and May, up from “3,380” in winter (requests). Median first reply time was “3 hours 10 minutes”; the goal was “2 hours.”\n- **What went well:** New help articles cut repeat billing questions by “about a third.” Weekend coverage by “two volunteers” kept the Monday backlog “under 90 requests.”\n- **Problems and stated next steps:**\n  - Two people left in April; replacements started only in late May. Next quarter: “hire one more person.”\n  - Account-acc…",
+      "error": null,
+      "created_ms": 1791001584018,
+      "started_ms": 1791001584020,
+      "finished_ms": 1791001619028
+    },
+    {
+      "id": "task:t-dbdf6499",
+      "task": "t-dbdf6499",
+      "owner": "reader-b",
+      "objective": "Read the summer support review and report its facts: key figures quoted exactly with units, problems found (with any owner or next step stated), what went well, and themes covered. Say clearly that everything comes from the summer review.",
+      "origin": {
+        "by": "agent",
+        "agent": "lead",
+        "task": "t-215357a3"
+      },
+      "parent": "t-215357a3",
+      "children": [],
+      "after": [],
+      "state": "done",
+      "waiting_on": null,
+      "waiting_for": [],
+      "attempts": 1,
+      "max_attempts": 1,
+      "elapsed_ms": 26468,
+      "run_ms": 26466,
+      "usage": {
+        "prompt_tokens": 13692,
+        "completion_tokens": 2342,
+        "cached_tokens": 0,
+        "model_calls": 2,
+        "tool_calls": 1,
+        "steps": 2,
+        "measured": false
+      },
+      "budget": {
+        "max_steps": 4,
+        "max_tokens": null,
+        "max_model_calls": null,
+        "timeout_secs": null,
+        "max_delegations": null
+      },
+      "tool_calls": [
+        {
+          "id": "claude_0_0",
+          "action": "doc.read",
+          "ok": true,
+          "summary": "# Summer review: support team\n\nThe team answered 4,610 requests between June and August.\nMedian first reply time fell to 1 hour 55 minutes, inside the 2 hour goal for the first time.\n\nWhat went well:\n- Five account access articles shipped in June; access requests fell from 610 to 240 a month.\n- The …",
+          "invocation": "b768e476-f1b4-4818-8e16-ed8d46cfcccb",
+          "duration_ms": 0,
+          "reused": false
+        }
+      ],
+      "inputs": [
+        {
+          "id": "f3b31fd6e1f4f534351d238ec1d8f3a8193bb6e8649d87950331d50aeb58e44f",
+          "name": "summer-review.md",
+          "kind": "text"
+        }
+      ],
+      "outputs": [],
+      "rules": [
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W1"
+        },
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W2"
+        },
+        {
+          "set": "review-writing",
+          "version": 1,
+          "id": "W4"
+        }
+      ],
+      "rules_held_back": 2,
+      "brief_tokens": 173,
+      "model": "claude:haiku",
+      "result": "## Summer Review Report\n\nAll information below comes from the summer review document (art:f3b31fd6e1f4).\n\n### Key Figures (quoted exactly with units)\n- **4,610 requests** answered between June and August\n- **Median first reply time fell to 1 hour 55 minutes**, inside the **2 hour goal** for the first time\n- **Five account access articles** shipped in June\n- Access requests fell from **610 to 240 a month**\n- **380 billing questions in one week** (July, following pricing change)\n\n### What Went Well\n- Five account access articles shipped in June; access requests fell from 610 to 240 a month\n- The…",
+      "error": null,
+      "created_ms": 1791001584020,
+      "started_ms": 1791001584022,
+      "finished_ms": 1791001610490
+    }
+  ],
+  "edges": [
+    {
+      "kind": "may_delegate",
+      "from": "agent:lead",
+      "to": "agent:reader-a"
+    },
+    {
+      "kind": "may_delegate",
+      "from": "agent:lead",
+      "to": "agent:reader-b"
+    },
+    {
+      "kind": "parent",
+      "from": "agent:reader-a",
+      "to": "agent:lead"
+    },
+    {
+      "kind": "parent",
+      "from": "agent:reader-b",
+      "to": "agent:lead"
+    },
+    {
+      "kind": "owns",
+      "from": "agent:lead",
+      "to": "task:t-215357a3"
+    },
+    {
+      "kind": "produced",
+      "from": "task:t-215357a3",
+      "to": "art:89f95daee2c62b4e9a48f2c4d077ec851510c77c86105b1de192c325f34daca3",
+      "label": "themes-shared-by-spring-and-summer-support-reviews.mmd"
+    },
+    {
+      "kind": "input",
+      "from": "art:74ae89d31c6eea117d90e4a4dbcdcaa5b24844c577f60ad3b04bbb96d3ea953e",
+      "to": "task:t-215357a3",
+      "label": "spring-review.md"
+    },
+    {
+      "kind": "input",
+      "from": "art:f3b31fd6e1f4f534351d238ec1d8f3a8193bb6e8649d87950331d50aeb58e44f",
+      "to": "task:t-215357a3",
+      "label": "summer-review.md"
+    },
+    {
+      "kind": "owns",
+      "from": "agent:reader-a",
+      "to": "task:t-c5bb3955"
+    },
+    {
+      "kind": "delegated",
+      "from": "task:t-215357a3",
+      "to": "task:t-c5bb3955",
+      "label": "reader-a"
+    },
+    {
+      "kind": "input",
+      "from": "art:74ae89d31c6eea117d90e4a4dbcdcaa5b24844c577f60ad3b04bbb96d3ea953e",
+      "to": "task:t-c5bb3955",
+      "label": "spring-review.md"
+    },
+    {
+      "kind": "owns",
+      "from": "agent:reader-b",
+      "to": "task:t-dbdf6499"
+    },
+    {
+      "kind": "delegated",
+      "from": "task:t-215357a3",
+      "to": "task:t-dbdf6499",
+      "label": "reader-b"
+    },
+    {
+      "kind": "input",
+      "from": "art:f3b31fd6e1f4f534351d238ec1d8f3a8193bb6e8649d87950331d50aeb58e44f",
+      "to": "task:t-dbdf6499",
+      "label": "summer-review.md"
+    }
+  ],
+  "accounts": [
+    {
+      "account": "claude",
+      "max_concurrent": 2,
+      "in_flight": 0,
+      "waiting": 0,
+      "started": 5,
+      "cooling_ms": 0
+    },
+    {
+      "account": "codex",
+      "max_concurrent": 2,
+      "in_flight": 0,
+      "waiting": 0,
+      "started": 2,
+      "cooling_ms": 0
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 69653,
+    "completion_tokens": 4574,
+    "cached_tokens": 29616,
+    "model_calls": 7,
+    "tool_calls": 5,
+    "steps": 7,
+    "measured": false
+  }
+}

@@ -213,6 +213,25 @@ pub fn describe(
             },
         )
         .tone(Tone::Warning),
+        HarnessEvent::Rules { applied, .. } if applied.is_empty() => return None,
+        HarnessEvent::Rules { applied, held_back } => {
+            let n = applied.len();
+            let ids: Vec<String> = applied.iter().map(|r| r.id.clone()).collect();
+            let more = if *held_back > 0 {
+                format!(" ({held_back} more on request)")
+            } else {
+                String::new()
+            };
+            Activity::new(
+                K::Note,
+                format!(
+                    "Following {n} {}{more}",
+                    if n == 1 { "rule" } else { "rules" }
+                ),
+            )
+            .detail(ids.join(", "))
+            .tone(Tone::Muted)
+        }
         HarnessEvent::Cancelled => Activity::new(K::Stopped, "Stopped.").tone(Tone::Warning),
     })
 }

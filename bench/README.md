@@ -14,5 +14,7 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 | `m5/live-qwen3-4b-fasttier.json` | live, M5 with planning and the critic on qwen2.5:3b-instruct |
 | `m5/rejected-index-summaries-live.json` | live, a change measured and not adopted |
 | `m5/live-qwen3-4b-final.json` | live, v0.4.0, run right after the M4 live run on the same idle machine |
+| `orchestration/agent-team-sessions-{on,off}.log` | live, `examples/agent-team` on Claude and ChatGPT subscriptions, managed sessions on and off (`ARK_SESSION_REUSE=0`); the printed run |
+| `orchestration/agent-team-sessions-{on,off}.graph.json` | the orchestration `Graph` at the end of each of those runs |
 
 `RESULTS.md` has the tables; `results.py` prints them from two reports.

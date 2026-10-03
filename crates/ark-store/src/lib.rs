@@ -8,7 +8,8 @@
 //! ```text
 //! <root>/
 //!   objects/<blake3>      raw artifact bytes, deduplicated across projects
-//!   meta.db               SQLite: projects, artifacts, invocations, notes, …
+//!   meta.db               SQLite: projects, artifacts, invocations, notes, typed records,
+//!                         event streams, …
 //!   index/                full-text search index (best-effort)
 //! ```
 //!
@@ -90,6 +91,15 @@ impl Store {
              CREATE TABLE IF NOT EXISTS turn_traces(
                  session_id TEXT NOT NULL, idx INTEGER NOT NULL, json TEXT NOT NULL,
                  PRIMARY KEY(session_id, idx));
+             -- Typed records a runtime layer owns (agents, tasks, rule sets, vendor
+             -- sessions). `kind` names the type, `scope` groups them (usually a project).
+             CREATE TABLE IF NOT EXISTS records(
+                 kind TEXT NOT NULL, id TEXT NOT NULL, scope TEXT NOT NULL,
+                 updated_at TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY(kind, id));
+             -- Append-only event streams. `seq` orders events across all streams.
+             CREATE TABLE IF NOT EXISTS events(
+                 seq INTEGER PRIMARY KEY AUTOINCREMENT, stream TEXT NOT NULL,
+                 at TEXT NOT NULL, json TEXT NOT NULL);
              -- The lookups every turn makes; without them each one scans its table, so a
              -- turn gets slower as the project grows.
              CREATE INDEX IF NOT EXISTS cards_by_digest
@@ -99,7 +109,9 @@ impl Store {
              CREATE INDEX IF NOT EXISTS invocations_by_status ON invocations(status);
              CREATE INDEX IF NOT EXISTS artifacts_by_time ON artifacts(project_id, created_at);
              CREATE INDEX IF NOT EXISTS sessions_by_project ON sessions(project_id, updated_at);
-             CREATE INDEX IF NOT EXISTS notes_by_time ON notes(project_id, created_at);",
+             CREATE INDEX IF NOT EXISTS notes_by_time ON notes(project_id, created_at);
+             CREATE INDEX IF NOT EXISTS records_by_scope ON records(kind, scope, updated_at);
+             CREATE INDEX IF NOT EXISTS events_by_stream ON events(stream, seq);",
         )?;
         migrate(&db)?;
         let search = match index::SearchIndex::open(&root.join("index")) {
@@ -638,6 +650,115 @@ impl Store {
     }
 }
 
+impl Store {
+    // ---- records ------------------------------------------------------------
+
+    /// Insert or replace a typed record (opaque JSON owned by the caller). `kind` names the
+    /// type and `scope` groups records for listing, usually a project id.
+    pub fn put_record(
+        &self,
+        kind: &str,
+        id: &str,
+        scope: &str,
+        json: &serde_json::Value,
+    ) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT OR REPLACE INTO records(kind, id, scope, updated_at, json) VALUES(?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![kind, id, scope, rfc(OffsetDateTime::now_utc()), serde_json::to_string(json)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_record(&self, kind: &str, id: &str) -> Result<Option<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        one(db.query_row(
+            "SELECT json FROM records WHERE kind=?1 AND id=?2",
+            rusqlite::params![kind, id],
+            |r| r.get::<_, String>(0),
+        ))
+    }
+
+    /// Records of one kind, oldest update first; every scope when `scope` is `None`.
+    pub fn list_records(&self, kind: &str, scope: Option<&str>) -> Result<Vec<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        match scope {
+            Some(sc) => {
+                let mut stmt = db.prepare(
+                    "SELECT json FROM records WHERE kind=?1 AND scope=?2 ORDER BY updated_at, rowid",
+                )?;
+                let rows =
+                    stmt.query_map(rusqlite::params![kind, sc], |r| r.get::<_, String>(0))?;
+                collect(rows)
+            }
+            None => {
+                let mut stmt = db
+                    .prepare("SELECT json FROM records WHERE kind=?1 ORDER BY updated_at, rowid")?;
+                let rows = stmt.query_map([kind], |r| r.get::<_, String>(0))?;
+                collect(rows)
+            }
+        }
+    }
+
+    /// Remove a record. Returns whether one existed.
+    pub fn delete_record(&self, kind: &str, id: &str) -> Result<bool> {
+        let db = self.db.lock().unwrap();
+        Ok(db.execute(
+            "DELETE FROM records WHERE kind=?1 AND id=?2",
+            rusqlite::params![kind, id],
+        )? > 0)
+    }
+
+    // ---- event streams --------------------------------------------------------
+
+    /// Append an event to `stream`. Returns its sequence number, which increases across all
+    /// streams, so a reader can resume after the last one it saw.
+    pub fn append_event(&self, stream: &str, json: &serde_json::Value) -> Result<u64> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO events(stream, at, json) VALUES(?1, ?2, ?3)",
+            rusqlite::params![
+                stream,
+                rfc(OffsetDateTime::now_utc()),
+                serde_json::to_string(json)?
+            ],
+        )?;
+        Ok(db.last_insert_rowid() as u64)
+    }
+
+    /// The sequence number of the newest event in `stream` (0 when it has none).
+    pub fn last_event(&self, stream: &str) -> Result<u64> {
+        let db = self.db.lock().unwrap();
+        Ok(db.query_row(
+            "SELECT COALESCE(MAX(seq), 0) FROM events WHERE stream=?1",
+            [stream],
+            |r| r.get::<_, i64>(0),
+        )? as u64)
+    }
+
+    /// Up to `limit` events of `stream` with a sequence number above `after`, oldest first.
+    pub fn list_events(
+        &self,
+        stream: &str,
+        after: u64,
+        limit: usize,
+    ) -> Result<Vec<(u64, serde_json::Value)>> {
+        let db = self.db.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT seq, json FROM events WHERE stream=?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![stream, after as i64, limit as i64], |r| {
+            Ok((r.get::<_, i64>(0)? as u64, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            let (seq, json) = r?;
+            out.push((seq, serde_json::from_str(&json)?));
+        }
+        Ok(out)
+    }
+}
+
 fn rfc(t: time::OffsetDateTime) -> String {
     t.format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()
@@ -780,6 +901,40 @@ mod tests {
             vec![3, 4]
         );
         assert_eq!(s.list_session_turns("abc123", None).unwrap().len(), 5);
+    }
+
+    #[test]
+    fn records_and_event_streams() {
+        let (_d, s) = store();
+        s.put_record("task", "t1", "p", &serde_json::json!({ "n": 1 }))
+            .unwrap();
+        s.put_record("task", "t2", "q", &serde_json::json!({ "n": 2 }))
+            .unwrap();
+        s.put_record("task", "t1", "p", &serde_json::json!({ "n": 3 }))
+            .unwrap();
+        assert_eq!(s.get_record("task", "t1").unwrap().unwrap()["n"], 3);
+        assert!(s.get_record("agent", "t1").unwrap().is_none());
+        assert_eq!(s.list_records("task", Some("p")).unwrap().len(), 1);
+        assert_eq!(s.list_records("task", None).unwrap().len(), 2);
+        assert!(s.delete_record("task", "t2").unwrap());
+        assert!(!s.delete_record("task", "t2").unwrap());
+
+        let a = s
+            .append_event("run", &serde_json::json!({ "e": "a" }))
+            .unwrap();
+        s.append_event("other", &serde_json::json!({ "e": "x" }))
+            .unwrap();
+        let b = s
+            .append_event("run", &serde_json::json!({ "e": "b" }))
+            .unwrap();
+        assert!(b > a);
+        let all = s.list_events("run", 0, 10).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(s.last_event("run").unwrap(), b);
+        assert_eq!(s.last_event("none").unwrap(), 0);
+        let after = s.list_events("run", a, 10).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].1["e"], "b");
     }
 
     #[test]

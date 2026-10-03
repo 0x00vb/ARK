@@ -53,8 +53,28 @@ Costs, measured with `minimal-agent` on 2026-10-01 (one question, two tool calls
 | `codex:default` | 34 s | 38.9k |
 
 Codex adds about 18k tokens of its own instructions to every call. No streaming: the answer
-appears when the call ends. `claude:haiku` often says the host tools do not exist; use
-`sonnet` or larger.
+appears when the call ends. `claude:haiku` first tries to call host tools natively, which
+Claude Code refuses, then answers correctly; `sonnet` or larger does not.
+
+### Managed sessions and capacity
+
+An orchestrated agent on a subscription keeps one vendor session of its own
+(`ark_model::session`). A resumed call sends only what the vendor has not seen; the session
+rotates before its context passes the limit and rehydrates from ARK's own request. Measured:
+`bench/RESULTS.md` (orchestration). Details: [`ORCHESTRATION.md`](ORCHESTRATION.md).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ARK_SESSION_REUSE` | `1` | `0`: every call opens a fresh vendor session |
+| `ARK_SESSION_MAX_CONTEXT` | `64000` | rotate before the vendor context passes this many tokens |
+| `ARK_SESSION_MAX_TURNS` | `100` | rotate after this many calls in one vendor session |
+| `ARK_SESSION_IDLE_S` | `1800` | `sweep_idle` releases a session unused this long |
+| `ARK_<ACCOUNT>_CONCURRENCY` | `2` for `claude`, `codex`; `4` otherwise | requests in flight per account (`ARK_CLAUDE_CONCURRENCY=3`) |
+
+A usage or rate limit reported by a CLI is a temporary error: the account cools down and the
+harness retries. Vendor session files stay under the vendor's own retention
+(`~/.claude/projects/...`, `~/.codex/sessions/...`); ARK releases a session but does not
+delete them.
 
 ## When a model call fails
 

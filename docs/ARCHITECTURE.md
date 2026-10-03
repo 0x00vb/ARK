@@ -24,6 +24,7 @@ flowchart TB
     end
     subgraph rt["Runtime: no front-end"]
         direction LR
+        orch["ark-orchestrate<br/>Orchestrator, Graph"]
         sdk["ark-sdk<br/>Ark::builder()"]
         runtime["ark-runtime<br/>Harness, Engine, Session"]
         model["ark-model<br/>Provider"]
@@ -37,7 +38,7 @@ flowchart TB
 
 | Layer | Crates | Owns | Never knows about |
 |---|---|---|---|
-| Runtime | `ark-core` to `ark-sdk` | the loop, context, models, tools, memory, approvals, cancel, steering | terminals, windows, HTML |
+| Runtime | `ark-core` to `ark-orchestrate` | the loop, context, models, tools, memory, approvals, cancel, steering, several agents | terminals, windows, HTML |
 | Interaction | `ark-interact` | sessions, turns, commands and `Report`s, activity words, traces, context and usage views | how anything is drawn |
 | Presentation | `ark-cli`, `ark-ui` | drawing, keys, layout, transport | each other |
 | Application | your crate | tools, prompts, vocabulary, commands, look | ARK internals |
@@ -51,7 +52,7 @@ the terminal and the window stay in step: a command, a label or a trace view is 
 flowchart LR
     core[ark-core] --> model[ark-model] & store[ark-store] & tools[ark-tools]
     model & store & tools --> runtime[ark-runtime] --> sdk[ark-sdk]
-    sdk --> interact[ark-interact] --> cli[ark-cli] & ui[ark-ui]
+    sdk --> orch[ark-orchestrate] --> interact[ark-interact] --> cli[ark-cli] & ui[ark-ui]
     sdk --> bench[ark-bench]
 ```
 
@@ -59,12 +60,13 @@ Arrows point from a dependency to its user. There are no cycles.
 
 | Crate | Main types |
 |---|---|
-| `ark-core` | `Artifact`, `ArtifactKind` (+ `Other(String)`), `ActionDescriptor`, `RiskTier`, `Reuse`, `Invocation`, `Capability`, `CapabilityCatalog`, `EvidenceCard`, `ResearchState`, `WorkspaceContext`, `Focus`. No tool or domain name. |
-| `ark-model` | `Provider`, `Completion`, `Usage`, `ProviderError`, `RetryPolicy`, `MockProvider`; Anthropic, OpenAI, Ollama, `CliModel` (Claude Code, Codex), `catalog` |
+| `ark-core` | `Artifact`, `ArtifactKind` (+ `Other(String)`), `ActionDescriptor`, `RiskTier`, `Reuse`, `Invocation`, `Capability`, `CapabilityCatalog`, `EvidenceCard`, `ResearchState`, `WorkspaceContext`, `Focus`, `RuleSet`, `RuleBinding`, `Diagram`. No tool or domain name. |
+| `ark-model` | `Provider`, `Completion`, `Usage`, `ProviderError`, `RetryPolicy`, `MockProvider`; Anthropic, OpenAI, Ollama, `CliModel` (Claude Code, Codex), `catalog`; `Capacity`, `Limiter`; `SubscriptionRuntime`, `ManagedSession` |
 | `ark-store` | `Store`: content-addressed blobs (blake3), SQLite metadata (WAL), Tantivy full-text index |
 | `ark-tools` | `Adapter`, `Registry` (ships empty), `RunCtx`, `ActionOutput`, `subprocess`, `McpAdapter` |
 | `ark-runtime` | `Harness` (the loop), `Engine` (ingest, run actions, approval gate), `Session`, `AgentProfile`, `ModelRouter`, `DistillerSet`, `ApprovalGate`, `CancelToken`, `Steering`, `ContextReport`, `Metrics`; `Agent`, a plain ReAct loop |
 | `ark-sdk` | `Ark`, `Ark::builder()`, `TurnOptions`, `prelude` |
+| `ark-orchestrate` | `Orchestrator`, `AgentSpec`, `TaskSpec`, `TaskRecord`, `Budget`, `Models`, `ModelResolver`, `Graph`, `OrchEvent`. Details: [`ORCHESTRATION.md`](ORCHESTRATION.md) |
 | `ark-interact` | `App`, `Interaction`, `Command`, `Reply`, `Report`, `ActivityLabels`, `ToolLabeler`, `trace`, `inspect`, `logging` |
 | `ark-cli` | `ArkCli`, `ArkArgs`, `Theme`. Details: [`CLI.md`](CLI.md) |
 | `ark-ui` | `ArkUi`, `Host`; Tauri window (feature `desktop`) or loopback HTTP + SSE. Details: [`UI.md`](UI.md) |
@@ -137,6 +139,21 @@ flowchart LR
 
 Measured effect: [`bench/RESULTS.md`](../bench/RESULTS.md).
 
+## Several agents
+
+`ark-orchestrate` composes the single-agent loop; it does not change it. Each agent is one
+harness turn per task, in its own child project, on its own models. Details:
+[`ORCHESTRATION.md`](ORCHESTRATION.md).
+
+```mermaid
+flowchart LR
+    O["Orchestrator<br/>run(agent, task)"] --> S["scheduler<br/>deps, agent free, account capacity"]
+    S --> H["Harness turn<br/>agent's project, brief, rules, tools"]
+    H --> R["ModelResolver"] --> MS["ManagedSession<br/>one per agent"] --> V["vendor CLI or API"]
+    H -- "agents.delegate" --> O
+    O --> G["records + event stream"] --> GR["Graph<br/>any front-end"]
+```
+
 ## Design rules
 
 | Rule | In practice |
@@ -147,7 +164,8 @@ Measured effect: [`bench/RESULTS.md`](../bench/RESULTS.md).
 | One interaction layer | Commands, labels, views and traces live in `ark-interact`, so CLI and GUI mean the same thing. |
 | Bounded context | Working state is the memory, not the transcript. `crates/ark-sdk/tests/long_session.rs` checks that request size stays flat. |
 | Deterministic first | Distillers, the stall guard, reuse and the request layout are code, not model calls. |
-| Every call is recorded | A tool call becomes an `Invocation` with its input, output and command line. |
+| Every call is recorded | A tool call becomes an `Invocation` with its input, output and command line. A delegation is a tool call too. |
+| Vendor sessions are disposable | ARK's store is canonical; a vendor session is reused while healthy and rebuilt from ARK's own request when it is not. |
 | No global state | Everything hangs off the `Ark` or `Engine` you build. |
 
 ## Origin

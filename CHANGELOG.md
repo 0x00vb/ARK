@@ -9,6 +9,64 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+Several agents as compositions of a few primitives, run on subscriptions first.
+Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
+
+### Added
+- **`ark-orchestrate`**: agents (`AgentSpec`: identity, instructions, model, allowed tools,
+  delegation permissions, parent, budget), tasks (`TaskSpec`/`TaskRecord`: objective, state,
+  owner, dependencies, artifacts, budget, attempts), delegation (`agents.delegate`,
+  `agents.wait`), messages (`agents.message`), lifecycle (`spawn`, `run`, `suspend`,
+  `resume`, `cancel`, `terminate`, `retry`), a scheduler that respects each account's
+  capacity, budgets (steps, tokens, model calls, time, delegations), crash recovery, and an
+  observable `Graph` with a stored event stream (`subscribe`, `events`, `task_trace`,
+  `Graph::to_mermaid`). Each agent works in its own child project; a delegated agent gets a
+  brief, never the delegator's conversation.
+- **Managed vendor sessions** (`ark_model::session`): `SubscriptionRuntime` gives each lane
+  (agent) its own `ManagedSession`, a `Provider` that resumes the vendor session with only
+  what is new, monitors its context, rotates before `max_context_tokens`, rehydrates from
+  ARK's budgeted request, recovers after a crash (`SessionLedger`), and releases idle
+  sessions. `CliModel` implements `SessionBackend` (Claude `--session-id`/`--resume`, Codex
+  `exec`/`exec resume`). Settings: `ARK_SESSION_REUSE`, `ARK_SESSION_MAX_CONTEXT`,
+  `ARK_SESSION_MAX_TURNS`, `ARK_SESSION_IDLE_S`.
+- **Capacity** (`ark_model::capacity`): `Capacity`, `Limiter` and `Limited` queue calls per
+  account (default 2 at a time for `claude` and `codex`, 4 otherwise;
+  `ARK_<ACCOUNT>_CONCURRENCY`) and cool down after a rate or usage limit. A CLI usage limit
+  is now a temporary error (`ProviderError::Overloaded`).
+- **Rule sets**: `ark_core::{RuleSet, Rule, RuleBinding, RuleScope, RuleRef}`, stored and
+  versioned with `ark_runtime::RuleBook` (`Ark::rule_book`), bound to a project, agent or task,
+  selected per task by `ark_runtime::rules::select`, looked up with the `rules` tool
+  (`RulesTool`), and traced (`HarnessEvent::Rules`, `TaskRecord.rules`). Project bindings
+  apply to single-agent turns too.
+- **Diagrams**: `ark_core::diagram` (`Diagram`, `DiagramKind`, `validate`) and the opt-in
+  `ark_tools::diagram::Diagrams` tool (`diagram.create`, `diagram.read`) store validated
+  Mermaid diagrams as `diagram` artifacts, with versions.
+- `Registry::filtered` and `ark_tools::action_matches`: a per-agent view of the tools.
+  `Engine::scoped`: an engine over the same store with another registry.
+- `Store` typed records (`put_record`, `get_record`, `list_records`, `delete_record`) and
+  event streams (`append_event`, `list_events`, `last_event`).
+- `Project.parent`; front-ends list only top-level projects.
+- `ark_model::Message` and `ToolDef` derive `Serialize` and `Deserialize`.
+- `ark_interact::orchestration` and `App::orchestrator`: `/agents` and `/agents <task>` in
+  both front-ends. Workspace protocol methods `graph` and `task_trace`, events
+  `{kind: "orch"}`.
+- `examples/agent-team`: a coordinator and two readers on different subscriptions.
+
+### Changed
+- Claude Code is told its only tool is `StructuredOutput`. With the earlier wording Sonnet
+  first tried to call a host tool by name and failed: one delegation took 4 internal turns
+  and 3,049 input tokens, now 2 turns and 1,384 (measured with `claude -p`, 2 runs each).
+- `ContextReport.rules` and a `Rules` row in `/context`.
+- Results of `rules.*` and `diagram.*` reach the model in full instead of a generic summary.
+
+### Breaking
+- `Engine.store` is an `Arc<Store>`. Method calls are unchanged; code that moved the store
+  out of an engine takes a clone of the `Arc`.
+- `HarnessEvent::Rules` is a new variant: add an arm where you match the enum exhaustively.
+- `ContextReport` has a `rules` field and `Project` a `parent` field: struct literals add
+  them (or use `..Default::default()` / `Project::new`).
+- `ark_interact::trace::EntryKind::Rules` is a new variant.
+
 ## [0.5.0] - 2026-10-01
 
 ### Added

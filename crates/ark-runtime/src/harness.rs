@@ -36,6 +36,7 @@ use crate::error::AgentError;
 use crate::metrics::{role_name, Metrics};
 use crate::profile::AgentProfile;
 use crate::router::{ModelRouter, Role};
+use crate::rules::RuleSelection;
 use crate::steer::{self, Steering};
 
 /// Events emitted as the harness works. They describe *what happened*, never how to show it:
@@ -159,6 +160,12 @@ pub enum HarnessEvent {
         idle_steps: u32,
         stopped: bool,
     },
+    /// Bound rules were selected for this turn: `applied` reached the model, `held_back`
+    /// more are reachable with `rules.lookup`.
+    Rules {
+        applied: Vec<ark_core::RuleRef>,
+        held_back: usize,
+    },
     /// The turn was cancelled; no answer follows.
     Cancelled,
     /// The final answer. `streamed` is true when its text already arrived as `TextDelta`s.
@@ -207,6 +214,7 @@ pub struct Harness {
     steer: Option<Steering>,
     retry: ark_model::RetryPolicy,
     presentation: bool,
+    rules: Option<RuleSelection>,
 }
 
 /// The pieces of the first user message, kept separate so the context report can attribute
@@ -214,6 +222,7 @@ pub struct Harness {
 struct FirstTurn {
     workspace: Option<String>,
     conversation: Option<String>,
+    rules: Option<String>,
     task: String,
 }
 
@@ -225,6 +234,9 @@ impl FirstTurn {
         }
         if let Some(c) = &self.conversation {
             let _ = write!(s, "== EARLIER IN THIS CONVERSATION ==\n{c}\n\n");
+        }
+        if let Some(r) = &self.rules {
+            let _ = write!(s, "== RULES ==\n{r}\n\n");
         }
         if s.is_empty() {
             return self.task.clone();
@@ -253,7 +265,16 @@ impl Harness {
             steer: None,
             retry: ark_model::RetryPolicy::default(),
             presentation: false,
+            rules: None,
         }
+    }
+
+    /// The bound rules chosen for this turn (see [`crate::rules::select`]). Their block rides
+    /// in the first message under the budget and is reported as `rules` in each
+    /// [`ContextReport`].
+    pub fn rules(mut self, selection: Option<RuleSelection>) -> Self {
+        self.rules = selection.filter(|s| !s.is_empty());
+        self
     }
 
     /// Offer the `present` tool: the front-end can show things beside the conversation (a
@@ -319,6 +340,13 @@ impl Harness {
     pub fn describe(&self) -> String {
         self.router.describe()
     }
+
+    fn rules_text(&self) -> Option<String> {
+        self.rules
+            .as_ref()
+            .map(|r| r.text.clone())
+            .filter(|t| !t.is_empty())
+    }
     pub fn budget_tokens(&self) -> u32 {
         self.budget
     }
@@ -347,6 +375,12 @@ impl Harness {
 
         let trivial = classify_trivial(question, &profile.investigation_markers);
         on_event(HarnessEvent::Classified { trivial });
+        if let Some(r) = &self.rules {
+            on_event(HarnessEvent::Rules {
+                applied: r.applied.clone(),
+                held_back: r.held_back,
+            });
+        }
 
         let mut cancelled = false;
 
@@ -386,6 +420,7 @@ impl Harness {
         let first = FirstTurn {
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
+            rules: self.rules_text(),
             task: question.to_string(),
         };
         let first_text = first.render();
@@ -869,6 +904,7 @@ impl Harness {
         let first = FirstTurn {
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
+            rules: self.rules_text(),
             task: task.to_string(),
         };
         let first_text = first.render();
@@ -922,17 +958,19 @@ impl Harness {
         let capability_index = estimate_tokens(&sys.index);
         let working_state = WorkingSet::message_tokens(&state_message(state_digest));
         let system_total = estimate_tokens(&sys.render());
-        // The first round holds workspace + conversation + task; attribute its framing to the task.
-        let (workspace, conversation, task) = if ws.last_compressed == 0 {
+        // The first round holds workspace + conversation + rules + task; attribute its framing
+        // to the task.
+        let (workspace, conversation, rules, task) = if ws.last_compressed == 0 {
             let w = first.workspace.as_deref().map(estimate_tokens).unwrap_or(0);
             let c = first
                 .conversation
                 .as_deref()
                 .map(estimate_tokens)
                 .unwrap_or(0);
-            (w, c, first_tokens.saturating_sub(w + c))
+            let r = first.rules.as_deref().map(estimate_tokens).unwrap_or(0);
+            (w, c, r, first_tokens.saturating_sub(w + c + r))
         } else {
-            (0, 0, 0)
+            (0, 0, 0, 0)
         };
         let first_kept = if ws.last_compressed == 0 {
             first_tokens
@@ -970,6 +1008,7 @@ impl Harness {
             working_state,
             conversation,
             workspace,
+            rules,
             task,
             tool_rounds,
             retrieved,

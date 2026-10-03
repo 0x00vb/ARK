@@ -18,6 +18,11 @@ pub struct Project {
     /// workspace under the store root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// The project this one belongs to. An orchestrated agent works in a child project of
+    /// the project it serves, so its working state, evidence and conversation stay its own.
+    /// Front-ends list only top-level projects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<ProjectId>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
 }
@@ -29,8 +34,14 @@ impl Project {
             name: name.into(),
             target: target.into(),
             workspace: None,
+            parent: None,
             created_at: OffsetDateTime::now_utc(),
         }
+    }
+
+    pub fn with_parent(mut self, parent: ProjectId) -> Self {
+        self.parent = Some(parent);
+        self
     }
 
     pub fn with_workspace(mut self, workspace: impl Into<String>) -> Self {

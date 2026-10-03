@@ -1,0 +1,30 @@
+[package]
+name = "ark-orchestrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK orchestration: agents, tasks, delegation, capacity-aware scheduling and an observable graph."
+
+[dependencies]
+ark-core.workspace = true
+ark-model.workspace = true
+ark-store.workspace = true
+ark-tools.workspace = true
+ark-runtime.workspace = true
+ark-sdk.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+time.workspace = true
+uuid.workspace = true
+futures.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true

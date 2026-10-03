@@ -7,12 +7,14 @@ members = [
     "crates/ark-tools",
     "crates/ark-runtime",
     "crates/ark-sdk",
+    "crates/ark-orchestrate",
     "crates/ark-interact",
     "crates/ark-cli",
     "crates/ark-ui",
     "crates/ark-bench",
     "examples/minimal-agent",
     "examples/writing-agent",
+    "examples/agent-team",
 ]
 
 [workspace.package]
@@ -48,6 +50,7 @@ ark-store = { path = "crates/ark-store", version = "0.5.0" }
 ark-tools = { path = "crates/ark-tools", version = "0.5.0" }
 ark-runtime = { path = "crates/ark-runtime", version = "0.5.0" }
 ark-sdk = { path = "crates/ark-sdk", version = "0.5.0" }
+ark-orchestrate = { path = "crates/ark-orchestrate", version = "0.5.0" }
 ark-interact = { path = "crates/ark-interact", version = "0.5.0" }
 ark-cli = { path = "crates/ark-cli", version = "0.5.0" }
 ark-ui = { path = "crates/ark-ui", version = "0.5.0", default-features = false }

@@ -26,6 +26,35 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+/// Pass the orchestrator's events to every window as `{kind: "orch", event}`. Streamed text
+/// stays out: a window reads results from the graph.
+async fn forward_orchestration(
+    feed: Arc<Feed>,
+    mut rx: broadcast::Receiver<ark_interact::ark_orchestrate::OrchEvent>,
+) {
+    use ark_interact::ark_orchestrate::EventKind;
+    loop {
+        match rx.recv().await {
+            Ok(ev) => {
+                if matches!(
+                    ev.kind,
+                    EventKind::Agent {
+                        event: HarnessEvent::TextDelta { .. },
+                        ..
+                    }
+                ) {
+                    continue;
+                }
+                feed.send(json!({ "kind": "orch", "event": ev }));
+            }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                feed.send(json!({ "kind": "orch_lagged", "missed": n }));
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
 /// A consumer's backend method, called from its panels as `ark.call("ext", {name, params})`.
 pub type Handler = Arc<
     dyn Fn(HandlerCtx, Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + Send>>
@@ -171,6 +200,7 @@ pub struct Host {
     handlers: HashMap<String, Handler>,
     info: UiInfo,
     commands: Value,
+    orchestrator: Option<ark_interact::ark_orchestrate::Orchestrator>,
 }
 
 impl Host {
@@ -200,7 +230,9 @@ impl Host {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
         );
+        let orchestrator = ix.orchestrator().cloned();
         let host = Arc::new(Host {
+            orchestrator: orchestrator.clone(),
             engine: ix.ark().shared_engine(),
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
@@ -216,6 +248,9 @@ impl Host {
         });
         host.refresh().await;
         tokio::spawn(forward_approvals(host.clone(), approvals));
+        if let Some(o) = orchestrator {
+            tokio::spawn(forward_orchestration(host.feed.clone(), o.subscribe()));
+        }
         host
     }
 
@@ -443,6 +478,15 @@ impl Host {
                 Ok(json!({ "call": call, "invocation": inv, "entries": entries }))
             }
             "context" => Ok(serde_json::to_value(self.context().await?)?),
+            // The agent and task graph; follow it with `orch` events after its `seq`.
+            "graph" => match &self.orchestrator {
+                Some(o) => Ok(serde_json::to_value(o.graph())?),
+                None => Ok(Value::Null),
+            },
+            "task_trace" => match &self.orchestrator {
+                Some(o) => Ok(serde_json::to_value(o.task_trace(&s("task"))?)?),
+                None => anyhow::bail!("this app runs a single agent"),
+            },
             "usage" => {
                 if !self.is_running() {
                     self.refresh().await;

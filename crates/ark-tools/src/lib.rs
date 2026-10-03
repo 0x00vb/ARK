@@ -17,6 +17,7 @@ use std::sync::Arc;
 use ark_core::{ActionDescriptor, ArtifactId, ArtifactKind};
 use async_trait::async_trait;
 
+pub mod diagram;
 pub mod mcp;
 pub mod subprocess;
 
@@ -225,6 +226,33 @@ impl Registry {
         self.adapters.iter().find(|a| a.name() == ns).cloned()
     }
 
+    /// A view of this registry with only the actions `keep` accepts. The adapters are shared,
+    /// not copied; an action left out is neither listed nor run. Gives each agent of an
+    /// orchestration its own tool permissions over one set of adapters.
+    pub fn filtered(&self, keep: impl Fn(&str) -> bool) -> Registry {
+        let mut out = Registry::new();
+        for a in &self.adapters {
+            let allowed: Vec<String> = a
+                .actions()
+                .into_iter()
+                .map(|d| d.name)
+                .filter(|n| keep(n))
+                .collect();
+            if allowed.is_empty() {
+                continue;
+            }
+            if allowed.len() == a.actions().len() {
+                out.register(a.clone());
+            } else {
+                out.register(Arc::new(Filtered {
+                    inner: a.clone(),
+                    allowed,
+                }));
+            }
+        }
+        out
+    }
+
     /// Run an action by full name.
     pub async fn run(
         &self,
@@ -237,6 +265,50 @@ impl Registry {
             .ok_or_else(|| AdapterError::UnknownAction(action.to_string()))?;
         adapter.run(action, input, ctx).await
     }
+}
+
+/// An adapter with some of its actions hidden (see [`Registry::filtered`]).
+struct Filtered {
+    inner: Arc<dyn Adapter>,
+    allowed: Vec<String>,
+}
+
+#[async_trait]
+impl Adapter for Filtered {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        self.inner
+            .actions()
+            .into_iter()
+            .filter(|d| self.allowed.contains(&d.name))
+            .collect()
+    }
+    async fn health(&self) -> AdapterHealth {
+        self.inner.health().await
+    }
+    async fn run(
+        &self,
+        action: &str,
+        input: serde_json::Value,
+        ctx: &RunCtx<'_>,
+    ) -> Result<ActionOutput> {
+        if !self.allowed.iter().any(|a| a == action) {
+            return Err(AdapterError::UnknownAction(action.to_string()));
+        }
+        self.inner.run(action, input, ctx).await
+    }
+}
+
+/// Whether `action` matches a pattern: an exact name (`fs.read`), a namespace (`fs.*`) or
+/// everything (`*`).
+pub fn action_matches(pattern: &str, action: &str) -> bool {
+    let p = pattern.trim();
+    p == "*"
+        || p == action
+        || p.strip_suffix(".*")
+            .is_some_and(|ns| action.split('.').next() == Some(ns))
 }
 
 // ---- shared input helpers (for adapter authors) ----------------------------
@@ -327,6 +399,55 @@ mod tests {
             .run("nope.nope", serde_json::json!({}), &ctx)
             .await
             .is_err());
+    }
+
+    struct Two;
+    #[async_trait]
+    impl Adapter for Two {
+        fn name(&self) -> &str {
+            "two"
+        }
+        fn actions(&self) -> Vec<ActionDescriptor> {
+            vec![
+                ActionDescriptor::new("two.read", "r", RiskTier::Read),
+                ActionDescriptor::new("two.write", "w", RiskTier::Mutate),
+            ]
+        }
+        async fn run(
+            &self,
+            a: &str,
+            _i: serde_json::Value,
+            _c: &RunCtx<'_>,
+        ) -> Result<ActionOutput> {
+            Ok(ActionOutput::json(serde_json::json!({ "ran": a })))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_filtered_view_hides_and_refuses_actions() {
+        let reg = Registry::new()
+            .with(Arc::new(Two))
+            .with(Arc::new(EchoAdapter));
+        let view = reg.filtered(|a| action_matches("two.read", a));
+        let names: Vec<String> = view.actions().into_iter().map(|d| d.name).collect();
+        assert_eq!(names, vec!["two.read"]);
+        let blobs = NoBlobs;
+        let ctx = RunCtx::new(&blobs);
+        assert!(view
+            .run("two.read", serde_json::json!({}), &ctx)
+            .await
+            .is_ok());
+        assert!(view
+            .run("two.write", serde_json::json!({}), &ctx)
+            .await
+            .is_err());
+        assert!(view
+            .run("echo.say", serde_json::json!({}), &ctx)
+            .await
+            .is_err());
+        assert_eq!(reg.filtered(|a| action_matches("*", a)).actions().len(), 3);
+        assert!(action_matches("two.*", "two.write"));
+        assert!(!action_matches("two.*", "twofold.x"));
     }
 
     #[test]

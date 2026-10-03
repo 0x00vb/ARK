@@ -29,6 +29,8 @@ request the actions a task needs, which is what the plan gave a small model.
   0.0189, 4.2 model calls per run against 5.3. `retrieval` and `stale-read` pass 3/3
   without it. Simulated: 0.0075 to 0.0071 per success, no lost success.
 - Not measured on Claude Haiku yet: the 0.7 release gate runs Haiku once on all P2 defaults.
+  (2026-10-03: v0.7.0 shipped without that run; the Haiku check moved to ROADMAP › Next,
+  step 4.)
 - An app with long tasks that benefit from a plan turns it on and measures it.
 
 ## Check

@@ -24,7 +24,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Interaction (`ark-interact`) | commands, reports, activity, traces, context and usage views shared by both front-ends |
 | Terminal (`ark-cli`) | interactive shell, approvals, steering, resume, headless `-p` |
 | Workspace (`ark-ui`) | Tauri window and loopback browser page; page tested in WebKit; orchestration control in the protocol, app views in the main column |
-| Measurement (`ark-bench`) | 14 generic workloads (one orchestrated team), simulated and live, a naive baseline loop, faults, record and replay; regression gate in `scripts/ci.sh` |
+| Measurement (`ark-bench`) | 16 generic workloads (one orchestrated team), simulated and live, a naive baseline loop, faults, record and replay; regression gate in `scripts/ci.sh` |
 | Release | `scripts/ci.sh`, `scripts/verify-release.sh`, immutable tags, two remotes |
 
 ## Known limitations

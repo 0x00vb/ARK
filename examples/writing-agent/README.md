@@ -18,7 +18,7 @@ What the app adds on top of ARK:
 
 | Piece | What |
 |---|---|
-| Tools | `manuscript.list/read/wordcount/save`, `craft.continuity`, `craft.voice` |
+| Tools | `manuscript.list/read/wordcount/save`, `craft.continuity`, `craft.voice`; `web.search`, `web.fetch` |
 | Persona | an editor that reads before it judges and keeps the narrator's voice |
 | Distiller | writer-facing summaries (`"locket": 2 mention(s) in chapter-01.md, chapter-02.md`) |
 | Commands | `/manuscript`, `/chapter <n>`, `/style [n]`, `/review <n>` |

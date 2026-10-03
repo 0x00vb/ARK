@@ -17,6 +17,10 @@ any application on ARK.
 | `ARK_MAX_OUTPUT_TOKENS` | Anthropic 8192, Ollama 4096, OpenAI none | output cap per request |
 | `ARK_LOG` | `warn` | log level and filter (`info`, `debug`, `ark_runtime=debug`, ...) |
 | `ARK_TRACE` | `full` | stored turn traces: `full`, `summary` (no text, no tool inputs) or `off` |
+| `ARK_PRELOAD_ACTIONS` | 2 | actions whose schemas are offered before the model asks for them |
+| `ARK_READY_LIST` | on | name the loaded actions in the first message; `0` turns it off |
+| `ARK_INLINE_ROWS` | on | show small arrays in a tool result whole; `0` shows only their count |
+| `ARK_WHOLE_RESULT_TOKENS` | 0 | give a result whole when it is under this many tokens (0: always the summary) |
 | `ARK_PRICE` | none | `in,out[,cached]` US dollars per million tokens, for `/usage` |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | none, `https://api.anthropic.com/v1` | Anthropic provider |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | none, `https://api.openai.com/v1` | OpenAI and compatible endpoints |

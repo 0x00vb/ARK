@@ -27,10 +27,10 @@ they behave the same. Layers, crates and one turn step by step:
 
 | Crate | Responsibility |
 |---|---|
-| `ark-core` | Pure types: artifacts, actions, invocations, capabilities, evidence cards, working state, focus, rule sets, diagrams. No tool or domain name. |
+| `ark-core` | Pure types: artifacts, actions, invocations, capabilities, evidence cards, working state, focus, rule sets. No tool or domain name. |
 | `ark-model` | One `Provider` trait: Anthropic, OpenAI and compatible endpoints, Ollama, Claude and ChatGPT subscriptions through their CLIs, a scriptable mock. Timeouts, retries, prompt caching, per-account capacity, managed vendor sessions. |
 | `ark-store` | Content-addressed blobs, SQLite metadata, full-text search. |
-| `ark-tools` | The `Adapter` / `Registry` tool boundary, a subprocess helper, an MCP bridge. Ships no domain tools. |
+| `ark-tools` | The `Adapter` / `Registry` tool boundary, a subprocess helper, an MCP bridge, and two generic adapters (diagram; web, off unless the app turns it on). Ships no domain tools. |
 | `ark-runtime` | The agent loop: context budget, model router, distillation, tool disclosure, reuse, parallel reads, stall guard, retries, sessions, approvals, cancel, steering, metrics. |
 | `ark-sdk` | The facade: `Ark::builder()`, `AgentProfile`, `prelude`. |
 | `ark-orchestrate` | Several agents: agents, tasks, delegation, messages, a capacity-aware scheduler, one managed model session per agent, and an observable graph. |
@@ -125,6 +125,8 @@ setting: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 | `.max_steps(n)` | 16 | step limit per turn |
 | `.planner(bool)` / `.critic(bool)` | off / on | planning pass (off: ADR 0008) and critic pass |
 | `.allow_mutate(bool)` | off | run state-changing actions without approval |
+| `.web(bool)` / `.web_with(adapter)` | off | `web.search` and `web.fetch` |
+| `.skills(names)` | every skill | the skills a conversation turn may read |
 
 ## Documentation
 

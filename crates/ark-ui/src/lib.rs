@@ -1,7 +1,7 @@
 //! # ark-ui
 //!
 //! A graphical agent workspace for any ARK app: the conversation, what the agent is doing,
-//! approvals, sessions, and inspectors for context, working state, usage and traces. It opens
+//! approvals, sessions, and inline reports of context, working state, usage and traces. It opens
 //! the same [`ark_interact::App`] the terminal shell does, so commands, sessions and traces mean
 //! the same thing in both.
 //!

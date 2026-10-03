@@ -50,20 +50,20 @@ the terminal and the window stay in step: a command, a label or a trace view is 
 
 ```mermaid
 flowchart LR
-    core[ark-core] --> model[ark-model] & store[ark-store] & tools[ark-tools]
-    model & store & tools --> runtime[ark-runtime] --> sdk[ark-sdk]
+    core[ark-core] --> store[ark-store] & tools[ark-tools]
+    model[ark-model] & store & tools --> runtime[ark-runtime] --> sdk[ark-sdk]
     sdk --> orch[ark-orchestrate] --> interact[ark-interact] --> cli[ark-cli] & ui[ark-ui]
-    sdk --> bench[ark-bench]
+    orch --> bench[ark-bench]
 ```
 
 Arrows point from a dependency to its user. There are no cycles.
 
 | Crate | Main types |
 |---|---|
-| `ark-core` | `Artifact`, `ArtifactKind` (+ `Other(String)`), `ActionDescriptor`, `RiskTier`, `Reuse`, `Invocation`, `Capability`, `CapabilityCatalog`, `EvidenceCard`, `ResearchState`, `WorkspaceContext`, `Focus`, `RuleSet`, `RuleBinding`, `Diagram`. No tool or domain name. |
+| `ark-core` | `Artifact`, `ArtifactKind` (+ `Other(String)`), `ActionDescriptor`, `RiskTier`, `Reuse`, `Invocation`, `Capability`, `CapabilityCatalog`, `EvidenceCard`, `ResearchState`, `WorkspaceContext`, `Focus`, `RuleSet`, `RuleBinding`. No tool or domain name. |
 | `ark-model` | `Provider`, `Completion`, `Usage`, `ProviderError`, `RetryPolicy`, `MockProvider`; Anthropic, OpenAI, Ollama, `CliModel` (Claude Code, Codex), `catalog`; `Capacity`, `Limiter`; `SubscriptionRuntime`, `ManagedSession` |
 | `ark-store` | `Store`: content-addressed blobs (blake3), SQLite metadata (WAL), Tantivy full-text index |
-| `ark-tools` | `Adapter`, `Registry` (ships empty), `RunCtx`, `ActionOutput`, `subprocess`, `McpAdapter`; the generic `web` adapter (search and fetch, off unless the app turns it on) |
+| `ark-tools` | `Adapter`, `Registry` (ships empty), `RunCtx`, `ActionOutput`, `subprocess`, `McpAdapter`; the generic `diagram` adapter (`Diagram`) and `web` adapter (search and fetch, off unless the app turns it on) |
 | `ark-runtime` | `Harness` (the loop), `Engine` (ingest, run actions, approval gate), `Session`, `AgentProfile`, `ModelRouter`, `DistillerSet`, `ApprovalGate`, `CancelToken`, `Steering`, `ContextReport`, `Metrics`; `Agent`, a plain ReAct loop |
 | `ark-sdk` | `Ark`, `Ark::builder()`, `TurnOptions`, `prelude` |
 | `ark-orchestrate` | `Orchestrator`, `AgentSpec`, `TaskSpec`, `TaskRecord`, `Budget`, `Models`, `ModelResolver`, `Graph`, `OrchEvent`. Details: [`ORCHESTRATION.md`](ORCHESTRATION.md) |
@@ -87,7 +87,7 @@ sequenceDiagram
     FE->>IX: run_turn(input, TurnControl)
     IX->>S: begin_turn (stored before any work)
     IX->>H: ask(input), bounded carry-over, never the transcript
-    H->>H: load working state, classify, plan if not trivial
+    H->>H: load working state, classify; plan only if the planner is on (off by default) and the task is not trivial
     loop each step, up to max_steps
         H->>H: build request under the token budget
         H->>M: complete(system, messages, loaded tools)

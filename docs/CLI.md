@@ -33,7 +33,7 @@ $ writer
 ✎ _
 ```
 
-Captured from a real run with a local 4B model. The answer is trimmed, and the five repeated "Recalling evidence" lines are shown collapsed, as the current build prints them.
+Captured from a real run with a local 4B model and the planner on (it is off by default since 0.7, so a current run starts at the first tool). The answer is trimmed, and the five repeated "Recalling evidence" lines are shown collapsed, as the current build prints them.
 
 ## Running an app
 
@@ -76,6 +76,7 @@ Every app has these. Apps add their own (`/device`, `/chapter`, ...), listed fir
 | `/sessions` | Sessions in this project |
 | `/rename <title>` | Give this session a title |
 | `/project [name]` | List projects, or switch (created if new) |
+| `/folder [path]` | Show the folder this project's tools work in, or change it |
 | `/model [provider] [model]` | Show the model and the usable backends, or switch for the next turn |
 | `/context` | What the model receives, by source, and what ARK kept out |
 | `/usage` | Tokens, model calls and tool calls for this session |
@@ -90,6 +91,8 @@ Every app has these. Apps add their own (`/device`, `/chapter`, ...), listed fir
 | `/config` | Budget, steps, planner, critic, carry-over policy |
 | `/debug [on\|off]` | Show arguments, durations and model calls inline |
 | `/exit` | Leave |
+
+With an orchestrator, `/agents`, `/agent` and `/task` are added ([`ORCHESTRATION.md`](ORCHESTRATION.md)).
 
 ## Approvals
 

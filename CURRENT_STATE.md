@@ -10,14 +10,14 @@ Last updated: 2026-10-03
 
 | | |
 |---|---|
-| Latest tag | v0.5.0 (2026-10-01) |
-| In progress | v0.6.0 is being prepared by another session (stabilization: named agent profiles, project folder in ARK, native folder picker, shared approval title, changelog fixes). Not tagged. Check `git log` and `CHANGELOG.md` `[Unreleased]` for the current state. |
+| Latest tag | v0.6.0 (2026-10-03), on `origin` and `github` |
+| In progress | next milestone: a measured runtime, starting with P0 (usage ledger, trace format, eval workloads with graders, naive baseline, fault injection, replay) |
 
 ## Waiting on this repo
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | the v0.6.0 tag, to bump its pin and drop its local `[patch]` |
+| ark-desktop | nothing; pins v0.6.0 |
 | SecRes | nothing; pins v0.5.0 |
 
 ## Next

@@ -3,6 +3,44 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Tool selection on a small model (P2, 2026-10-03)
+
+Target from P1: on qwen3:4b the naive loop beat ARK. Local qwen and simulated runs only.
+Reports in `bench/p2/` (`bench/harness.py` prints the tables).
+
+What the traces showed, and the change for each:
+
+| Failure (qwen3:4b) | Cause | Change |
+|---|---|---|
+| `tool-lookup` 0/3: called `market.quote` for "the converter's current rate" | The index lists names only; preloading also loaded a distractor (`mirror.backup`, "always current") and the model followed the index's "load an action first" | Preloading keeps only matches near the best score (siblings of the best match's adapter excepted), and the first message names the loaded actions as ready to call |
+| `team` 0/3: a worker answered "she has 4 orders" with no total | The generic summary said `orders=4 items`; the model did not open the result | A small array is shown whole in the generic summary |
+| `team`: a worker guessed a customer id | The floor alone dropped `crm.find_customer` next to `crm.orders` | An adapter's weaker matches stay next to its strong one |
+| `large-output` 1/3 once the model stopped flailing | `lines=3000 items` gave no way to read them; the model searched stored documents instead | A counted array says how to read its rows (`get_evidence` with `match`) |
+
+14 workloads x 3 on qwen3:4b (A and B ran at the same time on one Ollama):
+
+| Configuration | Success | Cost / success (USD) | Model calls / run | Tokens / run |
+|---|---:|---:|---:|---:|
+| P1: ARK, preload 2 (the default before this change) | 35/42 | 0.0324 | 7.0 | 11,662 |
+| P1: naive loop | 36/42 | 0.0268 | 4.3 | 11,014 |
+| A: + preload floor + ready list | 37/42 | 0.0228 | 5.6 | 8,694 |
+| **B: A + small arrays whole + read hint (now the default)** | **41/42** | **0.0189** | **5.3** | **8,085** |
+
+- B closes the gap and passes it: 5 more successes than the naive loop at 29% less per
+  success; against P1's default, 6 more successes at 42% less.
+- `tool-lookup` 0/3 to 3/3 (3 calls, naive 2) and `team` 0/3 to 3/3. Neither the floor nor
+  the ready list fixed `tool-lookup` alone; together they did.
+- `large-output` is the one failure left (2/3); it was 3/3 in P1 after six search calls, and
+  1/3 in A. The read hint is what makes it pass without flailing (3/3 in a focused run).
+- Still dearer than naive per success on `multi-step`, `resume`, `parallel` and `team`
+  (1.1 to 1.5x): discovery and the planner still cost calls on small tasks.
+- Simulated, the defaults cost the same as before (cost per success 0.0074 to 0.0075 without
+  the long session); the ready list adds about 60 tokens per turn.
+- Not run live on Claude Haiku: these defaults are not measured there yet.
+
+"Pass small results whole" (`ARK_WHOLE_RESULT_TOKENS`) stays off: the narrower inline-rows
+rule fixed what it fixed on qwen, without passing whole outputs.
+
 ## ARK against a naive loop, live (P1, 2026-10-03)
 
 14 workloads, 3 repetitions, long session capped at 12 turns, 300 s turn timeout. Reports and

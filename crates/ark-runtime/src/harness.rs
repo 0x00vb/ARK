@@ -208,6 +208,9 @@ pub struct Harness {
     /// Actions to load before the first step because they match the task's words (see
     /// [`catalog::matching_actions`]); 0 leaves discovery to the model. Default 2.
     preload: usize,
+    /// Name the loaded actions in the first message (default on; `ARK_READY_LIST=0` turns it
+    /// off). Measured live on qwen3:4b (bench/RESULTS.md, P2).
+    ready_list: bool,
     planner: bool,
     critic: bool,
     focus: Option<Focus>,
@@ -226,6 +229,9 @@ struct FirstTurn {
     workspace: Option<String>,
     conversation: Option<String>,
     rules: Option<String>,
+    /// The actions already loaded, one line each, so a model calls them instead of looking
+    /// for others in the index.
+    ready: Option<String>,
     task: String,
 }
 
@@ -240,6 +246,9 @@ impl FirstTurn {
         }
         if let Some(r) = &self.rules {
             let _ = write!(s, "== RULES ==\n{r}\n\n");
+        }
+        if let Some(r) = &self.ready {
+            let _ = write!(s, "== READY TO CALL ==\n{r}\n\n");
         }
         if s.is_empty() {
             return self.task.clone();
@@ -264,6 +273,7 @@ impl Harness {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(2),
+            ready_list: std::env::var("ARK_READY_LIST").map_or(true, |v| v != "0"),
             planner: true,
             critic: true,
             focus: None,
@@ -439,6 +449,7 @@ impl Harness {
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
+            ready: self.ready_block(engine, &loaded),
             task: question.to_string(),
         };
         let first_text = first.render();
@@ -919,10 +930,17 @@ impl Harness {
         let sys = self.system_prompt(engine, profile, project).await?;
         let system = sys.render();
         let wsctx = self.build_workspace_context(engine, project)?;
+        let mut loaded = core_loaded(engine, profile);
+        for name in catalog::matching_actions(&engine.registry, task, self.preload) {
+            if !loaded.contains(&name) {
+                loaded.push(name);
+            }
+        }
         let first = FirstTurn {
             workspace: wsctx.digest(6),
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
+            ready: self.ready_block(engine, &loaded),
             task: task.to_string(),
         };
         let first_text = first.render();
@@ -932,7 +950,6 @@ impl Harness {
         let state_digest = state.digest(STATE_DIGEST_ITEMS);
         let tail = state_message(&state_digest);
         let (_, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
-        let loaded = core_loaded(engine, profile);
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
             acquisition: profile.acquisition.is_some(),
@@ -973,7 +990,9 @@ impl Harness {
         // The runtime's own lines: the rules after the instructions, and the project block.
         let project = (estimate_tokens(&sys.rules) + estimate_tokens(&sys.project))
             .saturating_sub(instructions);
-        let capability_index = estimate_tokens(&sys.index);
+        let ready = first.ready.as_deref().map(estimate_tokens).unwrap_or(0);
+        let capability_index =
+            estimate_tokens(&sys.index) + if ws.last_compressed == 0 { ready } else { 0 };
         let working_state = WorkingSet::message_tokens(&state_message(state_digest));
         let system_total = estimate_tokens(&sys.render());
         // The first round holds workspace + conversation + rules + task; attribute its framing
@@ -986,7 +1005,7 @@ impl Harness {
                 .map(estimate_tokens)
                 .unwrap_or(0);
             let r = first.rules.as_deref().map(estimate_tokens).unwrap_or(0);
-            (w, c, r, first_tokens.saturating_sub(w + c + r))
+            (w, c, r, first_tokens.saturating_sub(w + c + r + ready))
         } else {
             (0, 0, 0, 0)
         };
@@ -1864,6 +1883,22 @@ impl SystemPrompt {
 /// steps, which is what a prefix cache needs.
 fn state_message(digest: &str) -> Message {
     Message::user(format!("== WORKING STATE ==\n{digest}"))
+}
+
+impl Harness {
+    /// The loaded actions as lines for the first message, when `ready_list` is on.
+    fn ready_block(&self, engine: &Engine, loaded: &[String]) -> Option<String> {
+        if !self.ready_list || loaded.is_empty() {
+            return None;
+        }
+        let mut s = String::from("Already loaded; call these directly, without load_action:");
+        for name in loaded {
+            if let Some(d) = engine.registry.descriptor(name) {
+                let _ = write!(s, "\n- {name}: {}", d.summary);
+            }
+        }
+        Some(s)
+    }
 }
 
 /// The profile's core actions that exist in the registry, in the profile's order.

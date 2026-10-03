@@ -1,0 +1,659 @@
+{
+  "schema_version": 1,
+  "label": "qwen-frrh",
+  "ark_version": "0.6.0",
+  "created_at": "2026-10-03T16:35:36.40191Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "true",
+    "turn_timeout_s": "300"
+  },
+  "workloads": [
+    {
+      "name": "large-output",
+      "class": "large-output",
+      "description": "find the one error code in 3,000 log lines",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 4.0,
+        "input_tokens": 6449.333333333333,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 6449.333333333333,
+        "output_tokens": 368.6666666666667,
+        "total_tokens": 6818.0,
+        "cost_usd": 0.01658533333333333,
+        "cost_per_success_usd": 0.01658533333333333,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.0,
+        "peak_context_tokens": 1423.0,
+        "mean_context_tokens": 1327.3333333333333,
+        "tool_schema_tokens": 2348.0,
+        "prefix_reuse_tokens": 3777.0,
+        "median_turn_ms": 5737.0,
+        "p95_turn_ms": 6800.0,
+        "median_first_token_ms": 208.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "large-output",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The error log from the payments service today includes the line: \"10:31:13 ERROR charge failed code=E4721 card=visa retry=false\". \n\nHowever, the error code is specified as \"E4721\", which is not a numeric code (it starts with \"E\"). The query to extract numeric codes (`code=\\d+`) returned nothing, indicating no numeric error code was found in the log.\n\n**Finding**: The error code in the log is E4721",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 6852
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 6441,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 6441,
+          "cache_write_tokens": 0,
+          "output_tokens": 411,
+          "total_tokens": 6852,
+          "tokens_measured": true,
+          "cost_usd": 0.016992,
+          "wall_ms": 6800,
+          "turn_ms": [
+            6800
+          ],
+          "first_token_ms": [
+            208,
+            176
+          ],
+          "model_latency_ms": [
+            630,
+            757,
+            2187,
+            3218
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1405,
+          "mean_context_tokens": 1326,
+          "context_sources": {
+            "Capability index": 1020,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 145,
+            "Project": 200,
+            "Retrieved context": 74,
+            "Rules": 0,
+            "Task": 100,
+            "Tool results": 174,
+            "Tool schemas": 2348,
+            "Working state": 96,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2348,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 58,
+          "result_raw_tokens": 42763,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3777,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "large-output",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The log entry with an error indicates \"code=E4721\", but the pattern `code=\\d+` does not match because it is not a numeric code. The error code is E4721, which is a string, not a numeric value.\n\nFinding: The payments service logged an error with code E4721 today. [cites inv:43c02502]\n\nHypothesis: The error code E4721 is the specific error code associated with the charge failure in the payments serv",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 6795
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 6441,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 6441,
+          "cache_write_tokens": 0,
+          "output_tokens": 354,
+          "total_tokens": 6795,
+          "tokens_measured": true,
+          "cost_usd": 0.016422,
+          "wall_ms": 5737,
+          "turn_ms": [
+            5737
+          ],
+          "first_token_ms": [
+            210,
+            176
+          ],
+          "model_latency_ms": [
+            371,
+            775,
+            2237,
+            2346
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1405,
+          "mean_context_tokens": 1326,
+          "context_sources": {
+            "Capability index": 1020,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 145,
+            "Project": 200,
+            "Retrieved context": 74,
+            "Rules": 0,
+            "Task": 100,
+            "Tool results": 174,
+            "Tool schemas": 2348,
+            "Working state": 96,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2348,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 58,
+          "result_raw_tokens": 42763,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3777,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "large-output",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Fact**: The error code logged by the payments service today is `E4721`, as evidenced by the log entry: \"ERROR charge failed code=E4721 card=visa retry=false\" [inv:94c28fba].\n\n**Next step**: Confirm whether this error code is documented in any internal system (e.g., CRM, notes, or tickets) to understand its cause or implications.  \n\nI will now search for any documentation or references to `E4721`",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 6807
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 6466,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 6466,
+          "cache_write_tokens": 0,
+          "output_tokens": 341,
+          "total_tokens": 6807,
+          "tokens_measured": true,
+          "cost_usd": 0.016342,
+          "wall_ms": 5607,
+          "turn_ms": [
+            5607
+          ],
+          "first_token_ms": [
+            209,
+            212
+          ],
+          "model_latency_ms": [
+            369,
+            754,
+            2625,
+            1851
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1423,
+          "mean_context_tokens": 1330,
+          "context_sources": {
+            "Capability index": 1020,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 144,
+            "Project": 200,
+            "Retrieved context": 93,
+            "Rules": 0,
+            "Task": 100,
+            "Tool results": 174,
+            "Tool schemas": 2348,
+            "Working state": 96,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2348,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 58,
+          "result_raw_tokens": 42763,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3777,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "team",
+      "class": "orchestration",
+      "description": "a lead delegates two independent lookups to two workers and combines them",
+      "summary": {
+        "runs": 3,
+        "successes": 1,
+        "success_rate": 0.3333333333333333,
+        "model_calls": 15.666666666666666,
+        "input_tokens": 20672.333333333332,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 20672.333333333332,
+        "output_tokens": 926.0,
+        "total_tokens": 21598.333333333332,
+        "cost_usd": 0.050604666666666666,
+        "cost_per_success_usd": 0.151814,
+        "tool_calls": 7.666666666666667,
+        "tool_failed": 2.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 1.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 15.666666666666666,
+        "peak_context_tokens": 2487.0,
+        "mean_context_tokens": 1126.6666666666667,
+        "tool_schema_tokens": 7038.0,
+        "prefix_reuse_tokens": 10827.666666666666,
+        "median_turn_ms": 18512.0,
+        "p95_turn_ms": 22601.0,
+        "median_first_token_ms": 845.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "team",
+          "rep": 0,
+          "success": false,
+          "verdict": "no tier",
+          "answer": "The current temperature in Paris is 14°C, and in Tokyo is 22°C. These findings are confirmed and complete.\n\nRegarding Ada Lovelace's customer tier and total order amount:  \n- The customer database does not contain a record for \"ada-lovelace\" with the provided ID.  \n- Multiple attempts to query the database failed with \"invalid input for `crm.orders`: unknown customer id\".  \n- No alternative identi",
+          "turns": 1,
+          "steps": 16,
+          "model_calls": 16,
+          "calls_by_role": {
+            "plan": 4,
+            "reason": 12
+          },
+          "tokens_by_role": {
+            "plan": 760,
+            "reason": 22585
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 16
+          },
+          "input_tokens": 22197,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 22197,
+          "cache_write_tokens": 0,
+          "output_tokens": 1148,
+          "total_tokens": 23345,
+          "tokens_measured": true,
+          "cost_usd": 0.055874,
+          "wall_ms": 22601,
+          "turn_ms": [
+            22601
+          ],
+          "first_token_ms": [
+            116,
+            150,
+            1137,
+            845,
+            873,
+            1079,
+            367,
+            972
+          ],
+          "model_latency_ms": [
+            642,
+            1876,
+            997,
+            1699,
+            1382,
+            1322,
+            1400,
+            997,
+            1223,
+            1440,
+            3680,
+            3772,
+            522,
+            1436,
+            4189,
+            4165
+          ],
+          "tool_calls": 8,
+          "tool_ok": 5,
+          "tool_failed": 3,
+          "deduplicated": 0,
+          "repeated_executions": 2,
+          "meta_calls": {
+            "record_state": 4,
+            "search_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2487,
+          "mean_context_tokens": 1195,
+          "context_sources": {
+            "Capability index": 1076,
+            "Conversation": 166,
+            "Instructions": 4484,
+            "Model output": 817,
+            "Project": 716,
+            "Retrieved context": 144,
+            "Rules": 0,
+            "Task": 1094,
+            "Tool results": 1480,
+            "Tool schemas": 7356,
+            "Working state": 1790,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 7356,
+          "tools_exposed_max": 6,
+          "tools_used": 3,
+          "result_context_tokens": 572,
+          "result_raw_tokens": 340,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 12130,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "team",
+          "rep": 1,
+          "success": false,
+          "verdict": "no tier",
+          "answer": "I have retrieved the current temperatures in both Paris and Tokyo. The temperature in Paris is 14°C, and in Tokyo it is 22°C.\n\nRegarding Ada Lovelace: After attempting to locate her in the database and stored artifacts, I found no record of a customer named \"Ada Lovelace.\" The CRM system returns an error for an unknown customer ID, and searches in stored documents or files also return no results. ",
+          "turns": 1,
+          "steps": 15,
+          "model_calls": 15,
+          "calls_by_role": {
+            "plan": 4,
+            "reason": 11
+          },
+          "tokens_by_role": {
+            "plan": 759,
+            "reason": 19177
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 15
+          },
+          "input_tokens": 18985,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 18985,
+          "cache_write_tokens": 0,
+          "output_tokens": 951,
+          "total_tokens": 19936,
+          "tokens_measured": true,
+          "cost_usd": 0.04748,
+          "wall_ms": 18512,
+          "turn_ms": [
+            18512
+          ],
+          "first_token_ms": [
+            146,
+            145,
+            1254,
+            879,
+            1002,
+            1188,
+            2341,
+            902
+          ],
+          "model_latency_ms": [
+            660,
+            1873,
+            1119,
+            1744,
+            1356,
+            1388,
+            1449,
+            1033,
+            1352,
+            1533,
+            1528,
+            1608,
+            3012,
+            2495,
+            5644
+          ],
+          "tool_calls": 7,
+          "tool_ok": 5,
+          "tool_failed": 2,
+          "deduplicated": 0,
+          "repeated_executions": 1,
+          "meta_calls": {
+            "search_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1865,
+          "mean_context_tokens": 1079,
+          "context_sources": {
+            "Capability index": 967,
+            "Conversation": 164,
+            "Instructions": 3990,
+            "Model output": 402,
+            "Project": 650,
+            "Retrieved context": 195,
+            "Rules": 0,
+            "Task": 1063,
+            "Tool results": 684,
+            "Tool schemas": 6523,
+            "Working state": 1558,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6523,
+          "tools_exposed_max": 6,
+          "tools_used": 3,
+          "result_context_tokens": 464,
+          "result_raw_tokens": 273,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 9785,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "team",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Record the findings with evidence:\n\n- Ada Lovelace's customer tier is gold, and her total order amount is $565.74. [cites: inv:5bdb13a8]\n- The current temperature in Paris is 14°C. [cites: inv:49fe1903]\n- The current temperature in Tokyo is 22°C. [cites: inv:bcc6936d]\n\nAll objectives have been fulfilled. The final result is complete.\n\nNext step: None. The task is done.",
+          "turns": 1,
+          "steps": 16,
+          "model_calls": 16,
+          "calls_by_role": {
+            "plan": 4,
+            "reason": 12
+          },
+          "tokens_by_role": {
+            "plan": 727,
+            "reason": 20787
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 16
+          },
+          "input_tokens": 20835,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 20835,
+          "cache_write_tokens": 0,
+          "output_tokens": 679,
+          "total_tokens": 21514,
+          "tokens_measured": true,
+          "cost_usd": 0.04846,
+          "wall_ms": 15056,
+          "turn_ms": [
+            15056
+          ],
+          "first_token_ms": [
+            134,
+            149,
+            794,
+            785,
+            750,
+            848,
+            931,
+            802
+          ],
+          "model_latency_ms": [
+            656,
+            1862,
+            699,
+            1358,
+            1343,
+            1310,
+            1327,
+            938,
+            1137,
+            1300,
+            1873,
+            1978,
+            1525,
+            1001,
+            2097,
+            2502
+          ],
+          "tool_calls": 8,
+          "tool_ok": 7,
+          "tool_failed": 1,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "load_action": 1,
+            "search_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1767,
+          "mean_context_tokens": 1106,
+          "context_sources": {
+            "Capability index": 1064,
+            "Conversation": 166,
+            "Instructions": 4312,
+            "Model output": 508,
+            "Project": 710,
+            "Retrieved context": 252,
+            "Rules": 0,
+            "Task": 1141,
+            "Tool results": 753,
+            "Tool schemas": 7235,
+            "Working state": 1562,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 7235,
+          "tools_exposed_max": 7,
+          "tools_used": 4,
+          "result_context_tokens": 423,
+          "result_raw_tokens": 220,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 10568,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 6,
+    "successes": 4,
+    "success_rate": 0.6666666666666666,
+    "model_calls": 9.833333333333334,
+    "input_tokens": 13560.833333333334,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 13560.833333333334,
+    "output_tokens": 647.3333333333334,
+    "total_tokens": 14208.166666666666,
+    "cost_usd": 0.033595,
+    "cost_per_success_usd": 0.0503925,
+    "tool_calls": 4.333333333333333,
+    "tool_failed": 1.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.5,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 9.833333333333334,
+    "peak_context_tokens": 2487.0,
+    "mean_context_tokens": 1227.0,
+    "tool_schema_tokens": 4693.0,
+    "prefix_reuse_tokens": 7302.333333333333,
+    "median_turn_ms": 6800.0,
+    "p95_turn_ms": 22601.0,
+    "median_first_token_ms": 785.0,
+    "stall_stops": 0.0
+  }
+}

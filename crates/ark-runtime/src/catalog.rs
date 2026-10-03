@@ -138,7 +138,10 @@ pub fn list_actions(registry: &Registry, adapter: &str) -> Vec<ActionDescriptor>
 /// the action's name scores 2, as does a summary word of six letters or more (specific
 /// enough: "temperature"); a shorter summary word scores 1. Words match when one is a prefix
 /// of the other and the shorter has at least four letters ("orders" and "order"). An action
-/// needs a score of 2 to be chosen. No model call.
+/// needs a score of 2, and at least the best score minus 1 unless it belongs to the same
+/// adapter as an action that has: one coincidental word ("current") does not bring in another
+/// adapter's action next to a strong match, which misleads a small model, while an adapter's
+/// actions that work together (find, then list) stay together. No model call.
 pub fn matching_actions(registry: &Registry, task: &str, n: usize) -> Vec<String> {
     if n == 0 {
         return Vec::new();
@@ -175,7 +178,22 @@ pub fn matching_actions(registry: &Registry, task: &str, n: usize) -> Vec<String
         })
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-    scored.into_iter().take(n).map(|(_, name)| name).collect()
+    let floor = scored
+        .first()
+        .map(|(s, _)| s.saturating_sub(1))
+        .unwrap_or(0);
+    let adapter = |name: &str| name.split('.').next().unwrap_or("").to_string();
+    let strong: Vec<String> = scored
+        .iter()
+        .filter(|(s, _)| *s >= floor)
+        .map(|(_, name)| adapter(name))
+        .collect();
+    scored
+        .into_iter()
+        .filter(|(s, name)| *s >= floor || strong.contains(&adapter(name)))
+        .take(n)
+        .map(|(_, name)| name)
+        .collect()
 }
 
 /// Words that say nothing about which tool a task needs.
@@ -366,6 +384,20 @@ mod tests {
             vec!["weather.current"]
         );
         assert!(matching_actions(&r, "Say hello in French.", 3).is_empty());
+        // A weak match from another adapter does not ride along with a strong one...
+        assert_eq!(
+            matching_actions(
+                &r,
+                "Convert dollars with the converter at the current rate",
+                3
+            ),
+            vec!["units.convert"]
+        );
+        // ...but a weaker sibling from the same adapter does (find, then list).
+        assert_eq!(
+            matching_actions(&r, "Total of the orders of the customer Ada", 3),
+            vec!["crm.orders", "crm.find_customer"]
+        );
         assert!(matching_actions(&r, "Find the customer", 0).is_empty());
     }
 

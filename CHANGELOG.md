@@ -52,6 +52,16 @@ What changed for people building on ARK, per release. Not a commit log.
   in the top bar's + menu, not in the sidebar. "New session" is "New chat".
 - **Action preloading is on by default** (2 actions; `ARK_PRELOAD_ACTIONS=0` turns it off).
   Measured live on qwen3:4b and Claude Haiku (`bench/RESULTS.md`, P1).
+- Preloading drops a match from another adapter that scores below the best match minus 1
+  (one coincidental word no longer brings in a distractor), and keeps an adapter's weaker
+  matches next to its strong one (find, then list).
+- **The first message names the loaded actions** under `== READY TO CALL ==`, one line each
+  with its summary, so a model calls them instead of loading others from the index.
+  `ARK_READY_LIST=0` turns it off. Counted under the capability index in `ContextReport`.
+- **The generic summary shows a small array whole** (up to 400 characters of JSON) instead
+  of its count, and says how to read the rows of an array it counts (`get_evidence` with
+  `match`). `ARK_INLINE_ROWS=0` restores the count only. Results with a distiller are
+  unchanged. Measured live on qwen3:4b (`bench/RESULTS.md`, P2).
 - `ark-bench`'s simulated model reads raw JSON results as it reads ARK's cards, and finds
   the task in a plain transcript. ARK's simulated numbers do not move.
 - `bench/baseline.json` has the `team` workload (14 workloads); `bench/baseline-naive.json`

@@ -1,0 +1,1189 @@
+{
+  "schema_version": 1,
+  "label": "qwen-floor-ready",
+  "ark_version": "0.6.0",
+  "created_at": "2026-10-03T16:30:41.087783Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "true",
+    "turn_timeout_s": "300"
+  },
+  "workloads": [
+    {
+      "name": "tool-lookup",
+      "class": "tool-lookup",
+      "description": "convert currency with a tool found among 25 actions; only the tool knows the rate",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 3.0,
+        "input_tokens": 4944.666666666667,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 4944.666666666667,
+        "output_tokens": 139.0,
+        "total_tokens": 5083.666666666667,
+        "cost_usd": 0.011279333333333334,
+        "cost_per_success_usd": 0.011279333333333334,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.0,
+        "peak_context_tokens": 1404.0,
+        "mean_context_tokens": 1342.0,
+        "tool_schema_tokens": 1893.0,
+        "prefix_reuse_tokens": 2543.0,
+        "median_turn_ms": 2688.0,
+        "p95_turn_ms": 2846.0,
+        "median_first_token_ms": 256.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "tool-lookup",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- Fact: 250 US dollars converted to euros at the current rate is 230 euros. [cites inv:e3cfbcbe]\n\nHypothesis: The conversion rate used is 1 USD = 0.92 EUR.\n\nNext step: Verify the conversion rate by checking market data or a financial source to confirm accuracy.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5074
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 4942,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 4942,
+          "cache_write_tokens": 0,
+          "output_tokens": 132,
+          "total_tokens": 5074,
+          "tokens_measured": true,
+          "cost_usd": 0.011204,
+          "wall_ms": 2846,
+          "turn_ms": [
+            2846
+          ],
+          "first_token_ms": [
+            255
+          ],
+          "model_latency_ms": [
+            812,
+            744,
+            1281
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1404,
+          "mean_context_tokens": 1342,
+          "context_sources": {
+            "Capability index": 786,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 64,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Task": 84,
+            "Tool results": 108,
+            "Tool schemas": 1893,
+            "Working state": 81,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1893,
+          "tools_exposed_max": 6,
+          "tools_used": 2,
+          "result_context_tokens": 74,
+          "result_raw_tokens": 21,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2543,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "tool-lookup",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- Fact: 250 US dollars converted to euros at the current rate is 230.0 euros. [cites inv:684125e9]\n\nHypothesis: The conversion rate used is 1 USD = 0.92 EUR (230.0 / 250.0).\n\nNext step: Verify the conversion rate by checking market data or a financial source to confirm accuracy.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5097
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 4946,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 4946,
+          "cache_write_tokens": 0,
+          "output_tokens": 151,
+          "total_tokens": 5097,
+          "tokens_measured": true,
+          "cost_usd": 0.011402,
+          "wall_ms": 2688,
+          "turn_ms": [
+            2688
+          ],
+          "first_token_ms": [
+            257
+          ],
+          "model_latency_ms": [
+            418,
+            732,
+            1530
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1404,
+          "mean_context_tokens": 1342,
+          "context_sources": {
+            "Capability index": 786,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 64,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Task": 84,
+            "Tool results": 108,
+            "Tool schemas": 1893,
+            "Working state": 81,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1893,
+          "tools_exposed_max": 6,
+          "tools_used": 2,
+          "result_context_tokens": 74,
+          "result_raw_tokens": 21,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2543,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "tool-lookup",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- Fact: 250 US dollars converted to euros at the current rate is 230 euros. [cites inv:b89ad6a9]\n\nHypothesis: The conversion rate used is 1 USD = 0.92 EUR.\n\nNext step: Verify the conversion rate by checking the market or financial data source to confirm accuracy.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5080
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 4946,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 4946,
+          "cache_write_tokens": 0,
+          "output_tokens": 134,
+          "total_tokens": 5080,
+          "tokens_measured": true,
+          "cost_usd": 0.011232,
+          "wall_ms": 2490,
+          "turn_ms": [
+            2490
+          ],
+          "first_token_ms": [
+            256
+          ],
+          "model_latency_ms": [
+            434,
+            732,
+            1315
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1404,
+          "mean_context_tokens": 1342,
+          "context_sources": {
+            "Capability index": 786,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 64,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Task": 84,
+            "Tool results": 108,
+            "Tool schemas": 1893,
+            "Working state": 81,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1893,
+          "tools_exposed_max": 6,
+          "tools_used": 2,
+          "result_context_tokens": 74,
+          "result_raw_tokens": 21,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2543,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "multi-step",
+      "class": "multi-step",
+      "description": "find a customer, list her orders, add the amounts",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 5.666666666666667,
+        "input_tokens": 8601.333333333334,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 8601.333333333334,
+        "output_tokens": 358.0,
+        "total_tokens": 8959.333333333334,
+        "cost_usd": 0.020782666666666668,
+        "cost_per_success_usd": 0.020782666666666668,
+        "tool_calls": 2.3333333333333335,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.666666666666667,
+        "peak_context_tokens": 1699.0,
+        "mean_context_tokens": 1232.3333333333333,
+        "tool_schema_tokens": 2940.0,
+        "prefix_reuse_tokens": 4916.666666666667,
+        "median_turn_ms": 6549.0,
+        "p95_turn_ms": 7390.0,
+        "median_first_token_ms": 341.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "multi-step",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "I have retrieved the customer record for Ada Lovelace (ID: C-1042) and her orders. The order amounts are $120.50, $89.99, $310.00, and $45.25. \n\nThe total sum of these amounts is $565.74.\n\nFinal answer: $565.74",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 6,
+          "calls_by_role": {
+            "plan": 1,
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "plan": 134,
+            "reason": 9597
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 6
+          },
+          "input_tokens": 9348,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 9348,
+          "cache_write_tokens": 0,
+          "output_tokens": 383,
+          "total_tokens": 9731,
+          "tokens_measured": true,
+          "cost_usd": 0.022526,
+          "wall_ms": 7390,
+          "turn_ms": [
+            7390
+          ],
+          "first_token_ms": [
+            86,
+            341,
+            481
+          ],
+          "model_latency_ms": [
+            447,
+            849,
+            684,
+            800,
+            2875,
+            1725
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1699,
+          "mean_context_tokens": 1265,
+          "context_sources": {
+            "Capability index": 1365,
+            "Conversation": 0,
+            "Instructions": 1503,
+            "Model output": 322,
+            "Project": 250,
+            "Retrieved context": 90,
+            "Rules": 0,
+            "Task": 221,
+            "Tool results": 311,
+            "Tool schemas": 3150,
+            "Working state": 375,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3150,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 77,
+          "result_raw_tokens": 50,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5394,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "multi-step",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Facts:**\n- Ada Lovelace is a customer with ID C-1042 and tier gold. [cites inv:0773e7e9]\n- Ada Lovelace has four orders with the following amounts: $120.50, $89.99, $310.00, and $45.25. [cites inv:39d82b18]\n- The total amount of all her orders is $565.74. [cites inv:99de137d]\n\n**Inference:** The sum of all order amounts for Ada Lovelace is $565.74.\n\n**Next step:** Confirm if there are any additi",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 6,
+          "calls_by_role": {
+            "plan": 1,
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "plan": 134,
+            "reason": 9482
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 6
+          },
+          "input_tokens": 9259,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 9259,
+          "cache_write_tokens": 0,
+          "output_tokens": 357,
+          "total_tokens": 9616,
+          "tokens_measured": true,
+          "cost_usd": 0.022088,
+          "wall_ms": 6549,
+          "turn_ms": [
+            6549
+          ],
+          "first_token_ms": [
+            46,
+            359
+          ],
+          "model_latency_ms": [
+            411,
+            522,
+            669,
+            807,
+            997,
+            3132
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1612,
+          "mean_context_tokens": 1250,
+          "context_sources": {
+            "Capability index": 1365,
+            "Conversation": 0,
+            "Instructions": 1503,
+            "Model output": 234,
+            "Project": 250,
+            "Retrieved context": 90,
+            "Rules": 0,
+            "Task": 221,
+            "Tool results": 312,
+            "Tool schemas": 3150,
+            "Working state": 375,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3150,
+          "tools_exposed_max": 7,
+          "tools_used": 3,
+          "result_context_tokens": 118,
+          "result_raw_tokens": 64,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5394,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "multi-step",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Record finding: Customer Ada Lovelace (ID: C-1042) exists and is a gold-tier customer. [cites: inv:f89e2ec7]\n\nRecord finding: Ada Lovelace has four orders with amounts $120.50, $89.99, $310.00, and $45.25. [cites: inv:86f0e4f7]\n\nInference: The total amount of all her orders is $120.50 + $89.99 + $310.00 + $45.25 = $565.74.\n\nNext step: Confirm the total by performing the addition. \n\nCalculation: (1",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 5,
+          "calls_by_role": {
+            "plan": 1,
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "plan": 134,
+            "reason": 7397
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 5
+          },
+          "input_tokens": 7197,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7197,
+          "cache_write_tokens": 0,
+          "output_tokens": 334,
+          "total_tokens": 7531,
+          "tokens_measured": true,
+          "cost_usd": 0.017734,
+          "wall_ms": 5858,
+          "turn_ms": [
+            5858
+          ],
+          "first_token_ms": [
+            54,
+            388
+          ],
+          "model_latency_ms": [
+            413,
+            518,
+            661,
+            728,
+            3531
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1567,
+          "mean_context_tokens": 1182,
+          "context_sources": {
+            "Capability index": 1092,
+            "Conversation": 0,
+            "Instructions": 1217,
+            "Model output": 134,
+            "Project": 200,
+            "Retrieved context": 70,
+            "Rules": 0,
+            "Task": 183,
+            "Tool results": 194,
+            "Tool schemas": 2520,
+            "Working state": 300,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2520,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 77,
+          "result_raw_tokens": 50,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3962,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "approval",
+      "class": "approval",
+      "description": "save a note; the write goes through the approval gate",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 2.0,
+        "input_tokens": 3100.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 3100.0,
+        "output_tokens": 110.0,
+        "total_tokens": 3210.0,
+        "cost_usd": 0.007300000000000001,
+        "cost_per_success_usd": 0.007300000000000001,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 2.0,
+        "peak_context_tokens": 1304.0,
+        "mean_context_tokens": 1274.0,
+        "tool_schema_tokens": 1204.0,
+        "prefix_reuse_tokens": 1214.0,
+        "median_turn_ms": 1854.0,
+        "p95_turn_ms": 2087.0,
+        "median_first_token_ms": 206.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "approval",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The note \"ship the release on Thursday\" has been successfully saved. \n\n- **Fact**: The note was saved with the text \"ship the release on Thursday\" [cites inv:0ea418ad].  \n- **Next Step**: Verify that the note is accessible and correctly displayed in the notes list to ensure completeness.  \n\nI will now confirm the note's presence in the list of saved notes.",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 3210
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 2
+          },
+          "input_tokens": 3100,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 3100,
+          "cache_write_tokens": 0,
+          "output_tokens": 110,
+          "total_tokens": 3210,
+          "tokens_measured": true,
+          "cost_usd": 0.0073,
+          "wall_ms": 2087,
+          "turn_ms": [
+            2087
+          ],
+          "first_token_ms": [
+            206
+          ],
+          "model_latency_ms": [
+            695,
+            1387
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1304,
+          "mean_context_tokens": 1274,
+          "context_sources": {
+            "Capability index": 512,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 25,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Task": 52,
+            "Tool results": 34,
+            "Tool schemas": 1204,
+            "Working state": 48,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1204,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 34,
+          "result_raw_tokens": 7,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 1214,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "approval",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The note \"ship the release on Thursday\" has been successfully saved. \n\n- **Fact**: The note was saved successfully ([inv:3fafce98](https://example.com/notes/3fafce98)).  \n- **Next Step**: Confirm if any additional actions or updates are required based on this note or related tasks.  \n\nNo further action is needed at this time. The goal has been achieved.",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 3209
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 2
+          },
+          "input_tokens": 3098,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 3098,
+          "cache_write_tokens": 0,
+          "output_tokens": 111,
+          "total_tokens": 3209,
+          "tokens_measured": true,
+          "cost_usd": 0.007306,
+          "wall_ms": 1854,
+          "turn_ms": [
+            1854
+          ],
+          "first_token_ms": [
+            206
+          ],
+          "model_latency_ms": [
+            438,
+            1411
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1304,
+          "mean_context_tokens": 1274,
+          "context_sources": {
+            "Capability index": 512,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 25,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Task": 52,
+            "Tool results": 34,
+            "Tool schemas": 1204,
+            "Working state": 48,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1204,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 34,
+          "result_raw_tokens": 7,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 1214,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "approval",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The note \"ship the release on Thursday\" has been successfully saved. \n\n- **Fact**: The note was saved with the text \"ship the release on Thursday\" [cites inv:137798ed].  \n- **Next Step**: Verify that the note is accessible and confirm alignment with the project's workflow.  \n\nI will now check if the note is retrievable and confirm its content.",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 3211
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 2
+          },
+          "input_tokens": 3102,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 3102,
+          "cache_write_tokens": 0,
+          "output_tokens": 109,
+          "total_tokens": 3211,
+          "tokens_measured": true,
+          "cost_usd": 0.007294,
+          "wall_ms": 1800,
+          "turn_ms": [
+            1800
+          ],
+          "first_token_ms": [
+            207
+          ],
+          "model_latency_ms": [
+            435,
+            1361
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1304,
+          "mean_context_tokens": 1274,
+          "context_sources": {
+            "Capability index": 512,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 25,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Task": 52,
+            "Tool results": 34,
+            "Tool schemas": 1204,
+            "Working state": 48,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1204,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 34,
+          "result_raw_tokens": 7,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 1214,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "team",
+      "class": "orchestration",
+      "description": "a lead delegates two independent lookups to two workers and combines them",
+      "summary": {
+        "runs": 3,
+        "successes": 0,
+        "success_rate": 0.0,
+        "model_calls": 15.666666666666666,
+        "input_tokens": 20620.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 20620.0,
+        "output_tokens": 947.0,
+        "total_tokens": 21567.0,
+        "cost_usd": 0.05071,
+        "cost_per_success_usd": null,
+        "tool_calls": 7.333333333333333,
+        "tool_failed": 1.6666666666666667,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.6666666666666666,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 15.666666666666666,
+        "peak_context_tokens": 2336.0,
+        "mean_context_tokens": 1126.0,
+        "tool_schema_tokens": 7038.0,
+        "prefix_reuse_tokens": 10739.666666666666,
+        "median_turn_ms": 20587.0,
+        "p95_turn_ms": 20781.0,
+        "median_first_token_ms": 809.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "team",
+          "rep": 0,
+          "success": false,
+          "verdict": "no tier",
+          "answer": "I have retrieved the current temperatures in both Paris and Tokyo. The temperature in Paris is 14°C, and in Tokyo it is 22°C. However, I cannot find any record of a customer named \"Ada Lovelace\" in the database. Initial queries for related terms or identifiers failed, and no stored artifacts mention her as a customer. \n\nThis indicates that either:\n- \"Ada Lovelace\" is not a valid customer ID or nam",
+          "turns": 1,
+          "steps": 15,
+          "model_calls": 15,
+          "calls_by_role": {
+            "plan": 4,
+            "reason": 11
+          },
+          "tokens_by_role": {
+            "plan": 722,
+            "reason": 18850
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 15
+          },
+          "input_tokens": 18755,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 18755,
+          "cache_write_tokens": 0,
+          "output_tokens": 817,
+          "total_tokens": 19572,
+          "tokens_measured": true,
+          "cost_usd": 0.04568,
+          "wall_ms": 16614,
+          "turn_ms": [
+            16614
+          ],
+          "first_token_ms": [
+            111,
+            151,
+            809,
+            797,
+            847,
+            1112,
+            2505,
+            886
+          ],
+          "model_latency_ms": [
+            624,
+            1956,
+            714,
+            1308,
+            1455,
+            1473,
+            1332,
+            946,
+            1184,
+            1348,
+            1382,
+            1502,
+            3188,
+            2671,
+            4249
+          ],
+          "tool_calls": 7,
+          "tool_ok": 5,
+          "tool_failed": 2,
+          "deduplicated": 0,
+          "repeated_executions": 1,
+          "meta_calls": {
+            "search_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1879,
+          "mean_context_tokens": 1070,
+          "context_sources": {
+            "Capability index": 967,
+            "Conversation": 164,
+            "Instructions": 3990,
+            "Model output": 392,
+            "Project": 650,
+            "Retrieved context": 189,
+            "Rules": 0,
+            "Task": 1063,
+            "Tool results": 698,
+            "Tool schemas": 6523,
+            "Working state": 1418,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6523,
+          "tools_exposed_max": 6,
+          "tools_used": 3,
+          "result_context_tokens": 478,
+          "result_raw_tokens": 288,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 9783,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "team",
+          "rep": 1,
+          "success": false,
+          "verdict": "wrong or missing order total (expected 565.74)",
+          "answer": "The total order amount for Ada Lovelace cannot be determined from the current data because the individual item amounts are not provided. While it is known that she has 4 items ordered, without pricing information, a total order amount cannot be computed.\n\nFacts established:\n- Ada Lovelace's customer tier is gold. [cites: inv:791739ce]\n- The current temperature in Paris is 14°C. [cites: inv:020b33b",
+          "turns": 1,
+          "steps": 17,
+          "model_calls": 17,
+          "calls_by_role": {
+            "plan": 4,
+            "reason": 13
+          },
+          "tokens_by_role": {
+            "plan": 727,
+            "reason": 23595
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 17
+          },
+          "input_tokens": 23319,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 23319,
+          "cache_write_tokens": 0,
+          "output_tokens": 1003,
+          "total_tokens": 24322,
+          "tokens_measured": true,
+          "cost_usd": 0.056668,
+          "wall_ms": 20587,
+          "turn_ms": [
+            20587
+          ],
+          "first_token_ms": [
+            124,
+            151,
+            805,
+            782,
+            750,
+            861,
+            871,
+            913
+          ],
+          "model_latency_ms": [
+            639,
+            1866,
+            710,
+            1359,
+            1329,
+            1313,
+            1331,
+            935,
+            1137,
+            1306,
+            1852,
+            1954,
+            1538,
+            1016,
+            1819,
+            4356,
+            3977
+          ],
+          "tool_calls": 8,
+          "tool_ok": 7,
+          "tool_failed": 1,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "load_action": 1,
+            "record_state": 4,
+            "search_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2220,
+          "mean_context_tokens": 1172,
+          "context_sources": {
+            "Capability index": 1167,
+            "Conversation": 166,
+            "Instructions": 4720,
+            "Model output": 838,
+            "Project": 773,
+            "Retrieved context": 252,
+            "Rules": 0,
+            "Task": 1193,
+            "Tool results": 1027,
+            "Tool schemas": 7946,
+            "Working state": 1843,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 7946,
+          "tools_exposed_max": 7,
+          "tools_used": 4,
+          "result_context_tokens": 426,
+          "result_raw_tokens": 250,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 12221,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "team",
+          "rep": 2,
+          "success": false,
+          "verdict": "no tier",
+          "answer": "The current temperature in Paris is 14°C, and in Tokyo is 22°C.  \n\nRegarding Ada Lovelace:  \n- No customer record or ID was found for \"Ada Lovelace\" in the database or stored documents.  \n- This suggests she is either not a registered customer, or the name is incorrect or misidentified.  \n\n**Next step**: Investigate whether \"Ada Lovelace\" might be referenced under an alternative name or customer I",
+          "turns": 1,
+          "steps": 15,
+          "model_calls": 15,
+          "calls_by_role": {
+            "plan": 4,
+            "reason": 11
+          },
+          "tokens_by_role": {
+            "plan": 774,
+            "reason": 20033
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 15
+          },
+          "input_tokens": 19786,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 19786,
+          "cache_write_tokens": 0,
+          "output_tokens": 1021,
+          "total_tokens": 20807,
+          "tokens_measured": true,
+          "cost_usd": 0.049782,
+          "wall_ms": 20781,
+          "turn_ms": [
+            20781
+          ],
+          "first_token_ms": [
+            121,
+            152,
+            1368,
+            921,
+            910,
+            1144,
+            375,
+            1011
+          ],
+          "model_latency_ms": [
+            642,
+            1891,
+            1227,
+            1936,
+            1566,
+            1506,
+            1490,
+            1076,
+            1259,
+            1482,
+            3061,
+            3147,
+            530,
+            4750,
+            3265
+          ],
+          "tool_calls": 7,
+          "tool_ok": 5,
+          "tool_failed": 2,
+          "deduplicated": 0,
+          "repeated_executions": 1,
+          "meta_calls": {
+            "record_state": 4,
+            "search_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2336,
+          "mean_context_tokens": 1136,
+          "context_sources": {
+            "Capability index": 973,
+            "Conversation": 164,
+            "Instructions": 4076,
+            "Model output": 626,
+            "Project": 653,
+            "Retrieved context": 134,
+            "Rules": 0,
+            "Task": 1036,
+            "Tool results": 912,
+            "Tool schemas": 6645,
+            "Working state": 1831,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6645,
+          "tools_exposed_max": 6,
+          "tools_used": 3,
+          "result_context_tokens": 473,
+          "result_raw_tokens": 282,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 10215,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 12,
+    "successes": 9,
+    "success_rate": 0.75,
+    "model_calls": 6.583333333333333,
+    "input_tokens": 9316.5,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 9316.5,
+    "output_tokens": 388.5,
+    "total_tokens": 9705.0,
+    "cost_usd": 0.022518,
+    "cost_per_success_usd": 0.030024000000000002,
+    "tool_calls": 3.1666666666666665,
+    "tool_failed": 0.4166666666666667,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.16666666666666666,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 6.333333333333333,
+    "peak_context_tokens": 2336.0,
+    "mean_context_tokens": 1243.5833333333333,
+    "tool_schema_tokens": 3268.75,
+    "prefix_reuse_tokens": 4853.333333333333,
+    "median_turn_ms": 2846.0,
+    "p95_turn_ms": 20781.0,
+    "median_first_token_ms": 388.0,
+    "stall_stops": 0.0
+  }
+}

@@ -337,14 +337,35 @@ fn distill_common(action: &str, out: &serde_json::Value) -> Option<(String, Vec<
     })
 }
 
-/// Fallback: describe an unknown output by its counts and top-level scalar fields.
+/// The longest array (as compact JSON) the generic summary shows row by row; a longer one is
+/// shown by its count. `ARK_INLINE_ROWS=0` always shows the count (the v0.6.0 behavior).
+const INLINE_ROWS_CHARS: usize = 400;
+
+fn inline_rows() -> bool {
+    std::env::var("ARK_INLINE_ROWS").map_or(true, |v| v != "0")
+}
+
+/// Fallback: describe an unknown output by its counts and top-level scalar fields. A small
+/// array is shown whole (a count hides the values a task may
+/// need, and a small model does not always open the result to find them), and a summary that
+/// counts an array says how to read its rows.
 pub fn generic_summary(out: &serde_json::Value) -> (String, Vec<String>) {
     match out {
         serde_json::Value::Object(map) => {
             let mut parts = Vec::new();
+            let inline = inline_rows();
+            let mut collapsed = false;
             for (k, v) in map.iter().take(6) {
                 match v {
-                    serde_json::Value::Array(a) => parts.push(format!("{k}={} items", a.len())),
+                    serde_json::Value::Array(_)
+                        if inline && v.to_string().len() <= INLINE_ROWS_CHARS =>
+                    {
+                        parts.push(format!("{k}={v}"))
+                    }
+                    serde_json::Value::Array(a) => {
+                        parts.push(format!("{k}={} items", a.len()));
+                        collapsed = true;
+                    }
                     serde_json::Value::String(s) => parts.push(format!("{k}={}", short(s, 40))),
                     serde_json::Value::Number(_) | serde_json::Value::Bool(_) => {
                         parts.push(format!("{k}={v}"))
@@ -352,14 +373,17 @@ pub fn generic_summary(out: &serde_json::Value) -> (String, Vec<String>) {
                     _ => {}
                 }
             }
-            (
-                if parts.is_empty() {
-                    "output recorded".into()
-                } else {
-                    parts.join(", ")
-                },
-                Vec::new(),
-            )
+            let mut summary = if parts.is_empty() {
+                "output recorded".to_string()
+            } else {
+                parts.join(", ")
+            };
+            if inline && collapsed {
+                summary.push_str(
+                    " (rows not shown: get_evidence on this result, with `match`, reads them)",
+                );
+            }
+            (summary, Vec::new())
         }
         serde_json::Value::Null => ("output recorded".into(), Vec::new()),
         other => (short(&other.to_string(), 200), Vec::new()),
@@ -485,19 +509,15 @@ mod tests {
 
     #[test]
     fn a_small_unknown_result_can_go_whole() {
-        let out = json!({ "orders": [{ "id": "O-1", "amount": 120.5 }, { "id": "O-2", "amount": 89.99 }] });
+        // Too many rows to show inline, few enough tokens to pass whole at 2,000.
+        let rows: Vec<_> = (0..40).map(|i| json!({ "id": i, "amount": 1.5 })).collect();
+        let out = json!({ "orders": rows });
         let summary =
             |set: DistillerSet| distill(&inv("crm.orders", json!({}), out.clone()), &set).summary;
-        assert_eq!(
-            summary(DistillerSet::with_common().whole_below(0)),
-            "orders=2 items"
-        );
-        assert!(summary(DistillerSet::with_common().whole_below(200)).contains("\"amount\":89.99"));
+        assert!(summary(DistillerSet::with_common().whole_below(0)).starts_with("orders=40 items"));
+        assert!(summary(DistillerSet::with_common().whole_below(2000)).contains("\"amount\":1.5"));
         // Larger than the limit: the summary again.
-        assert_eq!(
-            summary(DistillerSet::with_common().whole_below(5)),
-            "orders=2 items"
-        );
+        assert!(summary(DistillerSet::with_common().whole_below(5)).starts_with("orders=40 items"));
     }
 
     #[test]
@@ -511,7 +531,20 @@ mod tests {
             &set(),
         );
         assert!(card.summary.contains("count=5"));
-        assert!(card.summary.contains("items=3 items"));
+        // A small array is shown whole...
+        assert!(card.summary.contains("items=[1,2,3]"), "{}", card.summary);
+        // ...a large one by its count, with how to read its rows.
+        let many: Vec<u32> = (0..500).collect();
+        let card = distill(
+            &inv("weird.thing", json!({}), json!({ "items": many })),
+            &set(),
+        );
+        assert!(
+            card.summary.starts_with("items=500 items"),
+            "{}",
+            card.summary
+        );
+        assert!(card.summary.contains("get_evidence"), "{}", card.summary);
     }
 
     #[test]

@@ -10,7 +10,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 |---|---|
 | Stable release | **v0.8.0** (2026-10-03): MCP servers added while ARK runs, skills read on demand (ADR 0009), web search and fetch on every model with no key (ADR 0010), the API trim. v0.7.0 brought the measured runtime P0 to P2 and the window apps build on |
 | `main` | v0.8.0 |
-| Consumers | SecRes (pins v0.5.0; moving to v0.8.0), ARK Desktop (`ark-desktop` repo; pins v0.7.0; moving to v0.8.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Consumers | SecRes (pins v0.8.0), ARK Desktop (`ark-desktop` repo; pins v0.8.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 
@@ -58,7 +58,7 @@ are.** Advanced controls stay, behind simple primitives (progressive disclosure)
 
 | # | Step | Done means |
 |---|---|---|
-| 1 | **v0.8.0**: the API trim that was planned for 0.7 and never shipped (below), cleanup and stabilization, stale docs fixed. Since v0.7.0 on `main`: MCP servers added while ARK runs, skills read on demand (ADR 0009) | v0.8.0 tagged; SecRes upgraded from v0.5.0 and running a real task on it |
+| 1 | **v0.8.0** (done 2026-10-03): the API trim that was planned for 0.7 and never shipped (below), cleanup and stabilization, stale docs fixed. Since v0.7.0 on `main`: MCP servers added while ARK runs, skills read on demand (ADR 0009) | v0.8.0 tagged; SecRes upgraded from v0.5.0 and running a real task on it. Done: SecRes live on qwen3:4b 12/15 against 10/15 on v0.4.1, cost per success -49% (`workbench/bench/README.md`); ark-desktop on v0.8.0 with the web on |
 | 2 | **Claude Code and Codex first-class**: the main execution path. Persistent agent sessions, streaming output, cancellation, clear errors, and the UX around them | no process per call; output streams; cancel stops the work; failures say what to do; a long task feels as good as the vendor CLI |
 | 3 | **ARK Desktop public**: signed and notarized release, aiark.dev live, a real download flow, onboarding that asks almost nothing | a non-expert passes the product test above on a clean machine |
 | 4 | **Prove the advantage** on hosted models and real workflows: the hosted-model runs and P3 (ARK against the naive loop). Metrics: task success, tokens, cost, latency, retries, context growth. Time-boxed: enough evidence to state the thesis, not an open milestone | headline numbers in `bench/RESULTS.md`, reproducible, usable on aiark.dev |

@@ -9,6 +9,9 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Fixed
+- An empty command line (`command` in the window protocol) no longer starts an empty turn.
+
 ## [0.8.0] - 2026-10-03
 
 Capabilities an app turns on without code of its own: MCP servers added while ARK runs,

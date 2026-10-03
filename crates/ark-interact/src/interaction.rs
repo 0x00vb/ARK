@@ -805,6 +805,10 @@ impl Interaction {
     /// an error report, never as a failed call.
     pub async fn execute(&mut self, line: &str) -> Reply {
         let Some((name, args)) = parse(line) else {
+            // Nothing typed starts no turn.
+            if line.trim().is_empty() {
+                return Reply::default();
+            }
             return Reply::submit(line.trim());
         };
         let Some(cmd) = self.find_command(name) else {

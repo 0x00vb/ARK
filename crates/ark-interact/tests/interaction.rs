@@ -151,6 +151,7 @@ async fn commands_return_structured_reports_and_effects() {
         ix.execute("hello").await.effect,
         Some(Effect::Submit("hello".into()))
     );
+    assert_eq!(ix.execute("  ").await.effect, None);
     assert!(ix
         .execute("/nope")
         .await

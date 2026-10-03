@@ -6,9 +6,21 @@ ARK is a domain-neutral agent runtime in Rust: the loop, context, models, tools,
 interaction layer, a terminal and a window. Applications bring the domain. The goal is the
 lowest **cost per successful task** for any app built on it.
 
-Read first: [`README.md`](README.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
-[`ROADMAP.md`](ROADMAP.md). Commands: [`CONTRIBUTING.md`](CONTRIBUTING.md). Releases and
-upgrades: [`docs/RELEASING.md`](docs/RELEASING.md).
+## Start here
+
+| File | Holds | Read |
+|---|---|---|
+| `AGENTS.md` | how to work in this repo | always |
+| [`CURRENT_STATE.md`](CURRENT_STATE.md) | what is in progress, blocked, next | always |
+| [`ROADMAP.md`](ROADMAP.md) | where ARK is going, limits, rejected ideas | before starting a change |
+| [`CHANGELOG.md`](CHANGELOG.md) | what shipped, per version | when touching public API |
+| [`docs/adr/`](docs/adr/README.md) | why key decisions were made | before changing a boundary |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layers, crates, one turn | when the task needs it |
+| [`../WORKSPACE.md`](../WORKSPACE.md) | the other repos and cross-repo rules | when a change crosses repos |
+
+Commands: [`CONTRIBUTING.md`](CONTRIBUTING.md). Releases and upgrades:
+[`docs/RELEASING.md`](docs/RELEASING.md). Before ending a session, update `CURRENT_STATE.md`
+if what is in progress, blocked or next has changed.
 
 ## Boundaries
 
@@ -60,7 +72,7 @@ Understand -> Change -> Test -> Benchmark (when relevant) -> Dogfood -> Docs/roa
 | Test | `scripts/ci.sh` passes (fmt, clippy `-D warnings`, tests, release build, version, bench gate) |
 | Benchmark | before/after numbers for harness changes; `bench/baseline.json` regenerated in the same commit if numbers move on purpose |
 | Dogfood | a real task through the affected app and front-end |
-| Docs/roadmap | `CHANGELOG.md` `[Unreleased]` for any user- or developer-visible change; the matching doc in `docs/`; `ROADMAP.md` if a limit, priority or state changed |
+| Docs/roadmap | `CHANGELOG.md` `[Unreleased]` for any user- or developer-visible change; the matching doc in `docs/`; `ROADMAP.md` if a limit, priority or state changed; an ADR in `docs/adr/` for a decision a later change could undo; `CURRENT_STATE.md` |
 | Commit | one logical change, message `area: what changed` in plain words |
 | Release | only when asked or when a fix must reach consumers; follow [`docs/RELEASING.md`](docs/RELEASING.md) exactly |
 
@@ -90,6 +102,7 @@ Understand -> Change -> Test -> Benchmark (when relevant) -> Dogfood -> Docs/roa
 | window rendering, page API, transport | `ark-ui` (`web/` is plain ES modules, no build step) |
 | a benchmark workload | `ark-bench/src/suite` (neutral names only) |
 | a domain tool, prompt or distiller | the consuming app, not ARK |
+| why a boundary or format was chosen | `docs/adr/` |
 
 ## Writing style (docs, comments, commit messages, reports)
 

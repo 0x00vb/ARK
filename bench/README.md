@@ -5,7 +5,8 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 
 | File | What |
 |---|---|
-| `baseline.json` | the simulated report of v0.4.0 (v0.4.1 changed no library code); `scripts/ci.sh` compares against it. Regenerate it in the commit that moves the numbers on purpose |
+| `baseline.json` | the simulated report of `main` (14 workloads since the team workload; the 13 older ones have v0.4.0's numbers); `scripts/ci.sh` compares against it. Regenerate it in the commit that moves the numbers on purpose |
+| `baseline-naive.json` | the same suite through the naive loop (`--harness naive`), for "ARK against a naive loop" in `RESULTS.md` |
 | `m4/sim.json` | simulated, the M4 runtime (v0.3.0 plus measurement-only event fields, `035a06b`) |
 | `m4/live-qwen3-4b.json` | live, M4 runtime, qwen3:4b-instruct through Ollama, 3 repetitions |
 | `m5/steps/<commit>.json` | simulated, after each M5 change (the commit), with the final bench code |

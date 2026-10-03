@@ -143,6 +143,7 @@ name = "ark-bench"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "ark-orchestrate",
  "ark-sdk",
  "async-trait",
  "clap",

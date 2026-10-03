@@ -1,7 +1,56 @@
-# M5 results
+# Results
 
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
+
+## ARK against a naive loop (simulated, 2026-10-03)
+
+The measured-runtime milestone, P0. `ark-bench run --harness naive` runs the same 14
+workloads with a plain agent loop: the whole transcript and every tool schema on every call,
+raw tool results, no guards (`docs/BENCH.md`). Same tools, store, simulated model and checks.
+Reports: `baseline.json` (ARK) and `baseline-naive.json`.
+
+| Total (14 workloads, 1 run each) | ARK | Naive |
+|---|---:|---:|
+| Task success | 1.00 | 0.79 |
+| Cost / successful task (USD) | 0.121 | 1.172 |
+| Tokens / run | 179,106 | 1,273,778 |
+| Model calls / run | 113.3 | 75.7 |
+| Peak context (tokens) | 1,739 | 44,137 |
+
+Per workload, ARK / naive:
+
+| Workload | Success | Model calls | Tokens | Peak context | Cost / success (USD) |
+|---|---:|---:|---:|---:|---:|
+| simple | 1 / 1 | 1 / 1 | 1,124 / 1,344 | 1,121 / 1,341 | 0.0028 / 0.0034 |
+| tool-lookup | 1 / 1 | 4 / 2 | 5,272 / 2,776 | 1,412 / 1,396 | 0.0079 / 0.0041 |
+| multi-step | 1 / 1 | 9 / 4 | 11,963 / 5,798 | 1,716 / 1,505 | 0.0152 / 0.0054 |
+| large-output | 1 / 1 | 5 / 2 | 6,535 / 45,515 | 1,421 / 44,137 | 0.0086 / 0.0896 |
+| long-session (500 turns) | 1 / 1 | 1500 / 1000 | 2,404,142 / 17,694,977 | 1,638 / 34,145 | 1.5496 / 12.7277 |
+| failure-recovery | 1 / 1 | 7 / 4 | 8,546 / 5,802 | 1,587 / 1,504 | 0.0131 / 0.0054 |
+| duplicate | 1 / 0 | 6 / 4 | 6,700 / 5,710 | 1,420 / 1,472 | 0.0087 / failed |
+| runaway | 1 / 0 | 8 / 25 | 10,156 / 45,150 | 1,739 / 2,220 | 0.0112 / failed |
+| resume | 1 / 1 | 9 / 3 | 10,773 / 4,197 | 1,441 / 1,416 | 0.0115 / 0.0045 |
+| retrieval | 1 / 0 | 4 / 1 | 3,740 / 1,372 | 1,412 / 1,358 | 0.0064 / failed |
+| approval | 1 / 1 | 4 / 2 | 5,035 / 2,759 | 1,332 / 1,385 | 0.0076 / 0.0040 |
+| parallel | 1 / 1 | 4 / 2 | 3,982 / 2,844 | 1,403 / 1,436 | 0.0078 / 0.0045 |
+| stale-read | 1 / 1 | 7 / 4 | 8,254 / 5,681 | 1,498 / 1,455 | 0.0124 / 0.0052 |
+| team | 1 / 1 | 18 / 6 | 21,258 / 8,972 | 1,689 / 1,572 | 0.0355 / 0.0068 |
+
+What it says:
+
+- ARK wins where context grows or the model misbehaves: a long session (flat context,
+  -88% cost), a large output (-90%), and the three runs the naive loop fails (a repeated
+  call executed twice, a loop that never ends, a document it cannot search for).
+- **ARK loses on small tasks**: 1.5 to 5 times the calls and cost on 9 of 14 workloads. Most
+  of it is tool discovery (find the action in the index, load it, then call it) and the
+  planner and critic calls a short task does not need. The team workload pays it in three
+  agents. This is the first P2 target.
+- The totals are means, so the 500-turn session dominates them. Read the rows.
+
+Limits: simulated. The policy is a careful scripted agent, so it never wanders the way a
+real model can without guards, and the naive loop's lack of guards costs it less here than
+it would live. P1 measures both live.
 
 ## How it was measured
 

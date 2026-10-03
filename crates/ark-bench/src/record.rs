@@ -132,6 +132,7 @@ pub struct Recorder {
     records: Mutex<Vec<RequestRecord>>,
     prefix: Mutex<PrefixTracker>,
     sim_writes: Mutex<u64>,
+    faults: Mutex<u32>,
 }
 
 impl Recorder {
@@ -152,6 +153,13 @@ impl Recorder {
                 .iter()
                 .map(|r| r.cache_write_tokens as u64)
                 .sum::<u64>()
+    }
+    /// A fault was injected into one of the run's model calls.
+    pub fn add_fault(&self) {
+        *self.faults.lock().unwrap() += 1;
+    }
+    pub fn faults(&self) -> u32 {
+        *self.faults.lock().unwrap()
     }
     pub fn records(&self) -> Vec<RequestRecord> {
         self.records.lock().unwrap().clone()

@@ -12,6 +12,9 @@
 //! - [`suite`]: the generic workloads. They name no application domain; an application keeps
 //!   its own workloads and runs them through the same [`run_suite`].
 
+pub mod cassette;
+pub mod faults;
+pub mod naive;
 pub mod record;
 pub mod report;
 pub mod sim;
@@ -22,7 +25,8 @@ use std::collections::BTreeMap;
 
 pub use report::{compare, Comparison, Pricing, Report, RunRecord, Summary};
 pub use workload::{
-    BenchSettings, Env, Mode, ModelSpec, RunOutput, TurnResult, TurnSpec, Verdict, Workload,
+    BenchSettings, Env, HarnessKind, Mode, ModelSpec, RunOutput, TurnResult, TurnSpec, Verdict,
+    Workload,
 };
 
 /// Run every workload `reps` times and build the report.
@@ -95,6 +99,16 @@ fn assemble(
     );
     if let Some(t) = settings.turn_timeout {
         s.insert("turn_timeout_s".into(), t.as_secs().to_string());
+    }
+    s.insert("harness".into(), settings.harness.as_str().into());
+    if let Some(f) = &settings.faults {
+        s.insert("faults".into(), f.describe());
+    }
+    if let Some(c) = &settings.cassette {
+        s.insert(
+            "cassette".into(),
+            if c.is_replay() { "replay" } else { "record" }.into(),
+        );
     }
     Report {
         schema_version: report::SCHEMA_VERSION,

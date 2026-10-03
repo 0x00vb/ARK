@@ -8,6 +8,7 @@ description = "ARK benchmark and eval harness: run workloads against an ARK agen
 
 [dependencies]
 ark-sdk.workspace = true
+ark-orchestrate.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

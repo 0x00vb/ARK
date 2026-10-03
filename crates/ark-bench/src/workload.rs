@@ -12,6 +12,11 @@ use ark_sdk::prelude::ark_model::Provider;
 use ark_sdk::prelude::ark_runtime::{call_digest, catalog};
 use ark_sdk::prelude::*;
 
+use ark_orchestrate::{AgentSpec, EventKind, Orchestrator, TaskSpec, TaskState};
+
+use crate::cassette::Cassette;
+use crate::faults::{FaultPlan, Faulty};
+use crate::naive::Naive;
 use crate::record::{Metered, Recorder};
 use crate::report::{Pricing, RunRecord};
 use crate::sim::{Policy, SimProvider};
@@ -64,6 +69,32 @@ impl ModelSpec {
     }
 }
 
+/// Which loop runs the workloads.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HarnessKind {
+    /// ARK's harness (and, for a workload with a team, its orchestrator).
+    #[default]
+    Ark,
+    /// The naive baseline ([`crate::naive`]): same tools, store, model and checks.
+    Naive,
+}
+
+impl HarnessKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HarnessKind::Ark => "ark",
+            HarnessKind::Naive => "naive",
+        }
+    }
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "ark" => Ok(HarnessKind::Ark),
+            "naive" => Ok(HarnessKind::Naive),
+            other => Err(format!("unknown harness `{other}` (ark, naive)")),
+        }
+    }
+}
+
 /// Runtime settings applied to every workload (so a comparison can flip one).
 #[derive(Clone, Debug)]
 pub struct BenchSettings {
@@ -73,6 +104,13 @@ pub struct BenchSettings {
     /// A turn that runs longer fails the run: a hung request is a result, not a stall of the
     /// whole benchmark.
     pub turn_timeout: Option<std::time::Duration>,
+    pub harness: HarnessKind,
+    /// Faults to inject into model calls ([`crate::faults`]).
+    pub faults: Option<FaultPlan>,
+    /// Record every model reply, or replay a recording ([`crate::cassette`]).
+    pub cassette: Option<Arc<Cassette>>,
+    /// Write each run's requests and events to `<dir>/<workload>-<rep>.jsonl`.
+    pub traces: Option<PathBuf>,
 }
 
 impl Default for BenchSettings {
@@ -82,6 +120,10 @@ impl Default for BenchSettings {
             critic: true,
             budget: None,
             turn_timeout: None,
+            harness: HarnessKind::Ark,
+            faults: None,
+            cassette: None,
+            traces: None,
         }
     }
 }
@@ -228,6 +270,12 @@ pub trait Workload: Send + Sync {
         Ok(ark.find_or_create_project("bench", "")?.id)
     }
     fn check(&self, out: &RunOutput) -> Verdict;
+    /// Agents to run it with. Empty (the default): one agent. Otherwise each turn is a task
+    /// for the first agent, run by an orchestrator over the built agent's store and tools.
+    /// The naive harness ignores the team and does the task alone.
+    fn team(&self) -> Vec<AgentSpec> {
+        Vec::new()
+    }
 }
 
 fn build_provider(
@@ -248,6 +296,27 @@ fn build_provider(
     Ok(ark_model::build(provider, Some(model.to_string()))?)
 }
 
+/// One tier's provider for a run: the model (or the recording of it), faults when asked
+/// for, and the meter outermost so it sees what the harness sees.
+fn tier(
+    spec: &str,
+    w: &dyn Workload,
+    rep: u32,
+    policy: &Policy,
+    recorder: &Arc<Recorder>,
+    settings: &BenchSettings,
+) -> anyhow::Result<Arc<dyn Provider>> {
+    let mut p = match &settings.cassette {
+        Some(c) if c.is_replay() => c.provider(w.name(), rep, None),
+        Some(c) => c.provider(w.name(), rep, Some(build_provider(spec, policy, recorder)?)),
+        None => build_provider(spec, policy, recorder)?,
+    };
+    if let Some(plan) = &settings.faults {
+        p = Faulty::wrap(p, plan, rep as u64, recorder.clone());
+    }
+    Ok(Metered::wrap(p, recorder.clone()))
+}
+
 /// Run one repetition of a workload and measure it.
 pub async fn run(
     w: &dyn Workload,
@@ -260,15 +329,9 @@ pub async fn run(
     let mode = models.mode();
     let recorder = Recorder::new();
     let policy = w.policy();
-    let strong = Metered::wrap(
-        build_provider(&models.strong, &policy, &recorder)?,
-        recorder.clone(),
-    );
+    let strong = tier(&models.strong, w, rep, &policy, &recorder, settings)?;
     let router = match &models.fast {
-        Some(fast) => ModelRouter::new(
-            Metered::wrap(build_provider(fast, &policy, &recorder)?, recorder.clone()),
-            strong,
-        ),
+        Some(fast) => ModelRouter::new(tier(fast, w, rep, &policy, &recorder, settings)?, strong),
         None => ModelRouter::single(strong),
     };
     let env = Env {
@@ -278,14 +341,21 @@ pub async fn run(
         settings: settings.clone(),
     };
 
+    let team = match settings.harness {
+        HarnessKind::Ark => w.team(),
+        HarnessKind::Naive => Vec::new(),
+    };
     let mut ark = w.build(&env)?;
     let project = w.prepare(&ark)?;
     let mut session = ark.start_session(&project)?;
+    let mut naive = Naive::default();
+    let mut orch: Option<Orchestrator> = None;
     let approver: Arc<dyn Approver> = Arc::new(FixedApprover(ApprovalDecision::AllowOnce));
 
     let mut turns = Vec::new();
     for spec in w.turns(mode) {
         if spec.restart {
+            orch = None;
             drop(ark);
             ark = w.build(&env)?;
             session = ark
@@ -293,28 +363,66 @@ pub async fn run(
                 .ok_or_else(|| anyhow::anyhow!("no session to resume"))?;
         }
         let mut events = Vec::new();
-        let opts = TurnOptions {
-            approvals: Some(Arc::new(ApprovalGate::new(approver.clone()))),
-            ..Default::default()
-        };
         let started = Instant::now();
-        let ask = ark.ask_session(&mut session, &spec.input, opts, |e| events.push(e));
-        let out = match settings.turn_timeout {
-            None => ask.await.map_err(|e| e.to_string()),
-            Some(limit) => match tokio::time::timeout(limit, ask).await {
-                Ok(r) => r.map_err(|e| e.to_string()),
-                Err(_) => Err(format!("timed out after {}s", limit.as_secs())),
-            },
+        let out: Result<(String, usize, usize, bool), String> = {
+            let ask = async {
+                match (settings.harness, team.is_empty()) {
+                    (HarnessKind::Naive, _) => {
+                        let mut push = |e: HarnessEvent| events.push(e);
+                        naive
+                            .turn(&ark, &project, &spec.input, &mut push)
+                            .await
+                            .map(|t| (t.answer, 0, t.steps, false))
+                            .map_err(|e| e.to_string())
+                    }
+                    (HarnessKind::Ark, true) => {
+                        let opts = TurnOptions {
+                            approvals: Some(Arc::new(ApprovalGate::new(approver.clone()))),
+                            ..Default::default()
+                        };
+                        ark.ask_session(&mut session, &spec.input, opts, |e| events.push(e))
+                            .await
+                            .map(|o| (o.answer.clone(), o.cited.len(), o.steps, o.cancelled))
+                            .map_err(|e| e.to_string())
+                    }
+                    (HarnessKind::Ark, false) => {
+                        if orch.is_none() {
+                            let p = ark
+                                .engine()
+                                .store
+                                .get_project(&project)
+                                .map_err(|e| e.to_string())?
+                                .ok_or("no project")?;
+                            let o = Orchestrator::builder(&ark, &p)
+                                .build()
+                                .map_err(|e| e.to_string())?;
+                            for a in &team {
+                                o.spawn(a.clone()).await.map_err(|e| e.to_string())?;
+                            }
+                            orch = Some(o);
+                        }
+                        let o = orch.as_ref().expect("set above");
+                        team_turn(o, &team[0].name, &spec.input, &mut events).await
+                    }
+                }
+            };
+            match settings.turn_timeout {
+                None => ask.await,
+                Some(limit) => match tokio::time::timeout(limit, ask).await {
+                    Ok(r) => r,
+                    Err(_) => Err(format!("timed out after {}s", limit.as_secs())),
+                },
+            }
         };
         let ms = started.elapsed().as_millis() as u64;
         let failed = out.is_err();
         turns.push(match out {
-            Ok(o) => TurnResult {
+            Ok((answer, cited, steps, cancelled)) => TurnResult {
                 input: spec.input.clone(),
-                answer: o.answer.clone(),
-                cited: o.cited.len(),
-                steps: o.steps,
-                cancelled: o.cancelled,
+                answer,
+                cited,
+                steps,
+                cancelled,
                 error: None,
                 events,
                 ms,
@@ -343,7 +451,86 @@ pub async fn run(
             project: &project,
         }),
     };
-    Ok(measure(w, rep, &turns, &recorder, verdict, pricing))
+    if let Some(dir) = &settings.traces {
+        write_trace(dir, w.name(), rep, &turns, &recorder)?;
+    }
+    let mut r = measure(w, rep, &turns, &recorder, verdict, pricing);
+    r.faults_injected = recorder.faults();
+    if let Some(c) = &settings.cassette {
+        r.replay_diverged = c.diverged(w.name(), rep);
+    }
+    Ok(r)
+}
+
+/// One turn through the orchestrator: a task for `lead`, waited for, with every agent's
+/// harness events collected (in the order they happened).
+async fn team_turn(
+    o: &Orchestrator,
+    lead: &str,
+    input: &str,
+    events: &mut Vec<HarnessEvent>,
+) -> Result<(String, usize, usize, bool), String> {
+    let mut rx = o.subscribe();
+    let id = o
+        .submit(lead, TaskSpec::new(input))
+        .map_err(|e| e.to_string())?;
+    let wait = o.wait(&id);
+    tokio::pin!(wait);
+    let take = |ev: ark_orchestrate::OrchEvent, events: &mut Vec<HarnessEvent>| {
+        if let EventKind::Agent { event, .. } = ev.kind {
+            events.push(event);
+        }
+    };
+    let done = loop {
+        tokio::select! {
+            r = &mut wait => break r.map_err(|e| e.to_string())?,
+            ev = rx.recv() => if let Ok(ev) = ev { take(ev, events) },
+        }
+    };
+    while let Ok(ev) = rx.try_recv() {
+        take(ev, events);
+    }
+    let steps = events
+        .iter()
+        .filter(|e| matches!(e, HarnessEvent::ModelCall { .. }))
+        .count();
+    match done.state {
+        TaskState::Done => Ok((done.result.unwrap_or_default(), 0, steps, false)),
+        s => Err(format!(
+            "the task ended {}: {}",
+            s.as_str(),
+            done.error.unwrap_or_default()
+        )),
+    }
+}
+
+/// `<dir>/<workload>-<rep>.jsonl`: every model request as the meter saw it, then every
+/// harness event with its turn.
+fn write_trace(
+    dir: &Path,
+    workload: &str,
+    rep: u32,
+    turns: &[TurnResult],
+    recorder: &Recorder,
+) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let mut out = String::new();
+    for q in recorder.records() {
+        out.push_str(&serde_json::to_string(
+            &serde_json::json!({ "type": "request", "request": q }),
+        )?);
+        out.push('\n');
+    }
+    for (i, t) in turns.iter().enumerate() {
+        for e in &t.events {
+            out.push_str(&serde_json::to_string(
+                &serde_json::json!({ "type": "event", "turn": i, "event": e }),
+            )?);
+            out.push('\n');
+        }
+    }
+    std::fs::write(dir.join(format!("{workload}-{rep}.jsonl")), out)?;
+    Ok(())
 }
 
 fn measure(

@@ -111,7 +111,45 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(approval()),
         Box::new(parallel()),
         Box::new(stale_read()),
+        Box::new(team()),
     ]
+}
+
+/// A workload run by several agents: [`Workload::team`] lists them, the first gets each turn
+/// as a task.
+pub struct TeamSpec {
+    pub spec: Spec,
+    pub agents: Vec<ark_orchestrate::AgentSpec>,
+}
+
+impl Workload for TeamSpec {
+    fn name(&self) -> &str {
+        self.spec.name()
+    }
+    fn class(&self) -> &str {
+        self.spec.class()
+    }
+    fn description(&self) -> &str {
+        self.spec.description()
+    }
+    fn turns(&self, mode: Mode) -> Vec<TurnSpec> {
+        self.spec.turns(mode)
+    }
+    fn policy(&self) -> Policy {
+        self.spec.policy()
+    }
+    fn build(&self, env: &Env) -> anyhow::Result<Ark> {
+        self.spec.build(env)
+    }
+    fn prepare(&self, ark: &Ark) -> anyhow::Result<ProjectId> {
+        self.spec.prepare(ark)
+    }
+    fn check(&self, out: &RunOutput) -> Verdict {
+        self.spec.check(out)
+    }
+    fn team(&self) -> Vec<ark_orchestrate::AgentSpec> {
+        self.agents.clone()
+    }
 }
 
 /// Trivial work: no tool is needed. Tests whether the harness overthinks.
@@ -181,34 +219,7 @@ pub fn multi_step() -> Spec {
         description: "find a customer, list her orders, add the amounts",
         turns: one("Find the customer named Ada Lovelace, then add up the amounts of all her orders and tell me the total."),
         policy: competent(
-            |r| {
-                let mut g = vec![Goal::call("crm.find_customer", json!({ "name": "Ada Lovelace" }))];
-                let Some(id) = r
-                    .result_of("crm.find_customer")
-                    .and_then(|t| word_after(t, "id="))
-                else {
-                    return g;
-                };
-                g.push(Goal::call("crm.orders", json!({ "customer_id": id })));
-                g.push(Goal::find("\"amount\"", "crm.orders", "amount"));
-                let amounts: Vec<String> = r
-                    .results()
-                    .iter()
-                    .flat_map(|(_, t)| t.split("\"amount\":").skip(1))
-                    .filter_map(|rest| {
-                        let n: String = rest
-                            .trim()
-                            .chars()
-                            .take_while(|c| c.is_ascii_digit() || *c == '.')
-                            .collect();
-                        (!n.is_empty()).then_some(n)
-                    })
-                    .collect();
-                if !amounts.is_empty() {
-                    g.push(Goal::call("calc.eval", json!({ "expr": amounts.join("+") })));
-                }
-                g
-            },
+            order_total_goals,
             answer(|r| match r.result_of("calc.eval").and_then(|t| word_after(t, "value=")) {
                 Some(v) => format!("Ada Lovelace's orders total {v} {}", cite_all(r)),
                 None => "I could not total the orders: the amounts were not available.".into(),
@@ -222,6 +233,42 @@ pub fn multi_step() -> Spec {
             ])
         }),
     }
+}
+
+/// Find Ada Lovelace, list her orders, and add the amounts: each step needs the last result.
+fn order_total_goals(r: &SimRequest) -> Vec<Goal> {
+    let mut g = vec![Goal::call(
+        "crm.find_customer",
+        json!({ "name": "Ada Lovelace" }),
+    )];
+    let Some(id) = r
+        .result_of("crm.find_customer")
+        .and_then(|t| word_after(t, "id="))
+    else {
+        return g;
+    };
+    g.push(Goal::call("crm.orders", json!({ "customer_id": id })));
+    g.push(Goal::find("\"amount\"", "crm.orders", "amount"));
+    let amounts: Vec<String> = r
+        .results()
+        .iter()
+        .flat_map(|(_, t)| t.split("\"amount\":").skip(1))
+        .filter_map(|rest| {
+            let n: String = rest
+                .trim()
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            (!n.is_empty()).then_some(n)
+        })
+        .collect();
+    if !amounts.is_empty() {
+        g.push(Goal::call(
+            "calc.eval",
+            json!({ "expr": amounts.join("+") }),
+        ));
+    }
+    g
 }
 
 /// A 3,000-line output where one line answers the question.
@@ -453,7 +500,9 @@ pub fn resume() -> Spec {
         }),
         policy: competent(
             |r| {
-                if r.task().contains("tier") && r.mentions("tier=gold") {
+                if r.task().contains("tier")
+                    && word_after(&r.visible(), "tier=").as_deref() == Some("gold")
+                {
                     return vec![];
                 }
                 vec![Goal::call(
@@ -680,4 +729,160 @@ pub fn stale_read() -> Spec {
             ])
         }),
     }
+}
+
+/// Two independent pieces of work: a lead hands one to each of two workers (they run in
+/// parallel, each in its own context with only its own tools) and combines what they report.
+/// The naive harness does it alone with every tool.
+pub fn team() -> TeamSpec {
+    use ark_orchestrate::AgentSpec;
+    const A: &str = "Find the customer Ada Lovelace: her tier, and the total of all her orders.";
+    const B: &str = "Get the current temperature in Paris and in Tokyo.";
+    let weather = |_: &SimRequest| {
+        vec![
+            Goal::call("weather.current", json!({ "city": "Paris" })),
+            Goal::call("weather.current", json!({ "city": "Tokyo" })),
+        ]
+    };
+    let customer_answer = |r: &SimRequest| {
+        let tier = r
+            .result_of("crm.find_customer")
+            .and_then(|t| word_after(t, "tier="))
+            .unwrap_or_else(|| "unknown".into());
+        let total = r
+            .result_of("calc.eval")
+            .and_then(|t| word_after(t, "value="))
+            .unwrap_or_else(|| "unknown".into());
+        format!("Ada Lovelace is {tier}; her orders total {total}.")
+    };
+    let weather_answer = |r: &SimRequest| {
+        let temps: Vec<String> = r
+            .results()
+            .iter()
+            .filter(|(a, _)| *a == "weather.current")
+            .filter_map(|(_, t)| {
+                Some(format!(
+                    "{} {}°C",
+                    word_after(t, "city=")?,
+                    word_after(t, "temp_c=")?
+                ))
+            })
+            .collect();
+        temps.join(", ")
+    };
+    let worker_a = competent(
+        order_total_goals,
+        answer(move |r| format!("{} {}", customer_answer(r), cite_all(r))),
+    );
+    let worker_b = competent(
+        weather,
+        answer(move |r| format!("{} {}", weather_answer(r), cite_all(r))),
+    );
+    let solo = competent(
+        move |r| {
+            let mut g = order_total_goals(r);
+            g.extend(weather(r));
+            g
+        },
+        answer(move |r| {
+            format!(
+                "{} {} {}",
+                customer_answer(r),
+                weather_answer(r),
+                cite_all(r)
+            )
+        }),
+    );
+    let lead = |r: &SimRequest| {
+        if let Some(reply) = housekeeping_lead(r) {
+            return reply;
+        }
+        if r.count_calls("agents.delegate") == 0 {
+            return Reply::Calls(vec![
+                (
+                    "agents.delegate".into(),
+                    json!({ "to": "worker-a", "objective": A }),
+                ),
+                (
+                    "agents.delegate".into(),
+                    json!({ "to": "worker-b", "objective": B }),
+                ),
+            ]);
+        }
+        Reply::Text(team_answer(r))
+    };
+    Spec {
+        name: "team",
+        class: "orchestration",
+        description: "a lead delegates two independent lookups to two workers and combines them",
+        turns: one("Two things: Ada Lovelace's customer tier and the total of all her orders; and the current temperature in Paris and in Tokyo."),
+        policy: Arc::new(move |r: &SimRequest| {
+            if r.system.contains("agent \"worker-a\"") {
+                worker_a(r)
+            } else if r.system.contains("agent \"worker-b\"") {
+                worker_b(r)
+            } else if r.system.contains("agent \"lead\"") {
+                lead(r)
+            } else {
+                solo(r)
+            }
+        }),
+        prepare: None,
+        check: Arc::new(|o| {
+            Verdict::all(&[
+                (has(o.answer(), "gold"), "no tier"),
+                (has(o.answer(), "565.74"), "wrong or missing order total (expected 565.74)"),
+                (has(o.answer(), "14"), "no temperature for Paris"),
+                (has(o.answer(), "22"), "no temperature for Tokyo"),
+            ])
+        }),
+    }
+    .with_team(vec![
+        AgentSpec::new("lead")
+            .role("splits the work, delegates it and combines the results")
+            .tools(Vec::<String>::new())
+            .delegates_to(["worker-a", "worker-b"]),
+        AgentSpec::new("worker-a")
+            .role("looks up customers and their orders")
+            .tools(["crm.*", "calc.*"])
+            .parent("lead"),
+        AgentSpec::new("worker-b")
+            .role("looks up the weather")
+            .tools(["weather.*"])
+            .parent("lead"),
+    ])
+}
+
+impl Spec {
+    /// Run this workload with several agents (see [`TeamSpec`]).
+    pub fn with_team(self, agents: Vec<ark_orchestrate::AgentSpec>) -> TeamSpec {
+        TeamSpec { spec: self, agents }
+    }
+}
+
+/// The lead's planner, critic and forced answer.
+fn housekeeping_lead(r: &SimRequest) -> Option<Reply> {
+    if r.is_planner() {
+        return Some(Reply::Text(
+            "- delegate the two lookups\n- combine the results".into(),
+        ));
+    }
+    if r.is_critic() {
+        return Some(Reply::Text(r.draft()));
+    }
+    if r.tools.is_empty() {
+        return Some(Reply::Text(team_answer(r)));
+    }
+    None
+}
+
+/// What the workers reported, together.
+fn team_answer(r: &SimRequest) -> String {
+    let parts: Vec<&str> = r
+        .results()
+        .iter()
+        .filter(|(a, _)| *a == "agents.delegate")
+        .map(|(_, t)| *t)
+        .collect();
+    format!("Combined: {}", parts.join(" | "))
 }

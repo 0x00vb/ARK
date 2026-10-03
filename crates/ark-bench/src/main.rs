@@ -4,11 +4,17 @@
 //! ark-bench run --out baseline.json                       # simulated, deterministic
 //! ark-bench run --model ollama:qwen3:4b-instruct --reps 3 --out live.json
 //! ark-bench compare baseline.json candidate.json --out comparison.json
+//! ark-bench run --harness naive --out naive.json          # the naive baseline loop
+//! ark-bench run --faults overloaded=0.1,bad-tool=0.05 --seed 7 --out faults.json
+//! ark-bench run --model claude:haiku --record live.jsonl --out live.json
+//! ark-bench run --model claude:haiku --replay live.jsonl --out replay.json
 //! ```
 
 use std::path::PathBuf;
 
-use ark_bench::{compare, report, suite, BenchSettings, ModelSpec, Report};
+use ark_bench::cassette::Cassette;
+use ark_bench::faults::FaultPlan;
+use ark_bench::{compare, report, suite, BenchSettings, HarnessKind, ModelSpec, Report};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -18,6 +24,8 @@ struct Cli {
     cmd: Cmd,
 }
 
+// Parsed once per process: the size of the largest variant does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Cmd {
     /// Run the suite and write a report.
@@ -50,6 +58,24 @@ enum Cmd {
         label: String,
         #[arg(long)]
         out: Option<PathBuf>,
+        /// `ark` (default) or `naive`, the baseline loop.
+        #[arg(long, default_value = "ark")]
+        harness: String,
+        /// Faults to inject into model calls: `overloaded=0.1,malformed=0.05,bad-tool=0.05`.
+        #[arg(long)]
+        faults: Option<String>,
+        /// Seed of the fault schedule.
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Keep every model reply in this file (JSON lines), to replay later.
+        #[arg(long, conflicts_with = "replay")]
+        record: Option<PathBuf>,
+        /// Serve model replies from a recording instead of calling the model.
+        #[arg(long)]
+        replay: Option<PathBuf>,
+        /// Write each run's requests and events to `<dir>/<workload>-<rep>.jsonl`.
+        #[arg(long)]
+        traces: Option<PathBuf>,
     },
     /// Compare two reports.
     Compare {
@@ -85,7 +111,23 @@ async fn main() -> anyhow::Result<()> {
             turn_timeout,
             label,
             out,
+            harness,
+            faults,
+            seed,
+            record,
+            replay,
+            traces,
         } => {
+            let harness = HarnessKind::parse(&harness).map_err(anyhow::Error::msg)?;
+            let faults = faults
+                .map(|f| FaultPlan::parse(&f, seed))
+                .transpose()
+                .map_err(anyhow::Error::msg)?;
+            let cassette = match (&record, &replay) {
+                (Some(_), _) => Some(Cassette::record()),
+                (_, Some(path)) => Some(Cassette::load(path)?),
+                _ => None,
+            };
             let mut workloads = suite::all(long_turns);
             if let Some(only) = only {
                 let names: Vec<&str> = only.split(',').map(str::trim).collect();
@@ -100,6 +142,10 @@ async fn main() -> anyhow::Result<()> {
                 critic: !no_critic,
                 budget,
                 turn_timeout: turn_timeout.map(std::time::Duration::from_secs),
+                harness,
+                faults,
+                cassette: cassette.clone(),
+                traces,
             };
             // Write the report after every run, so an interrupted run keeps its data.
             let save = |r: &Report| {
@@ -107,6 +153,9 @@ async fn main() -> anyhow::Result<()> {
                     if let Ok(json) = serde_json::to_string_pretty(r) {
                         let _ = std::fs::write(path, json);
                     }
+                }
+                if let (Some(c), Some(path)) = (&cassette, &record) {
+                    let _ = c.save(path);
                 }
             };
             let progress = |r: &ark_bench::RunRecord| {
@@ -128,6 +177,10 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
             print_summary(&r);
+            if let (Some(c), Some(path)) = (&cassette, &record) {
+                c.save(path)?;
+                eprintln!("recorded {}", path.display());
+            }
             if let Some(path) = out {
                 std::fs::write(&path, serde_json::to_string_pretty(&r)?)?;
                 eprintln!("wrote {}", path.display());

@@ -135,6 +135,12 @@ pub struct RunRecord {
     pub compressed_rounds_max: u32,
     /// Estimated tokens each request shared with a recent one (what a prefix cache can serve).
     pub prefix_reuse_tokens: u64,
+    /// Faults injected into this run's model calls (`--faults`).
+    #[serde(default)]
+    pub faults_injected: u32,
+    /// Requests a replay had no recorded reply for (`--replay`); 0 is a faithful replay.
+    #[serde(default)]
+    pub replay_diverged: u32,
 }
 
 /// Aggregates over a workload's runs (or over everything).

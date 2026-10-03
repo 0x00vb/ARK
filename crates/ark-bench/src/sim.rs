@@ -83,20 +83,37 @@ impl<'a> SimRequest<'a> {
             .trim()
             .to_string()
     }
-    /// The task of this turn (the text after `== TASK ==`, or the first user message).
+    /// The task of this turn: the text after `== TASK ==` (ARK marks it when it adds
+    /// context), else the first user message after the last finished turn (an assistant reply
+    /// in text with no tool calls). In a plain transcript that is this turn's input; within one
+    /// harness turn, later user messages are the harness's own nudges, not the task.
     pub fn task(&self) -> String {
-        let first = self
+        if let Some(m) = self
             .messages
             .iter()
+            .find(|m| m.role == Role::User && m.content.contains("== TASK =="))
+        {
+            return m
+                .content
+                .split("== TASK ==")
+                .last()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+        }
+        let start = self
+            .messages
+            .iter()
+            .rposition(|m| {
+                m.role == Role::Assistant && m.tool_calls.is_empty() && !m.content.is_empty()
+            })
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        self.messages[start..]
+            .iter()
             .find(|m| m.role == Role::User)
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
-        first
-            .split("== TASK ==")
-            .last()
-            .unwrap_or(first)
-            .trim()
-            .to_string()
+            .map(|m| m.content.trim().to_string())
+            .unwrap_or_default()
     }
     /// Tool results still in the window: (action, text), oldest first.
     pub fn results(&self) -> Vec<(&str, &str)> {
@@ -153,14 +170,23 @@ impl<'a> SimRequest<'a> {
     }
 }
 
-/// The token after `prefix` in `text` (letters, digits, `.`, `_`, `-`).
+/// The token after `prefix` in `text` (letters, digits, `.`, `_`, `-`). A `key=` prefix also
+/// matches the raw JSON form (`"key": value` or `"key":"value"`), so a policy reads a result
+/// the same whether a harness distilled it into a card or passed the raw output.
 pub fn word_after(text: &str, prefix: &str) -> Option<String> {
-    let i = text.find(prefix)? + prefix.len();
-    let w: String = text[i..]
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-        .collect();
-    (!w.is_empty()).then_some(w)
+    let token = |rest: &str| {
+        let w: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            .collect();
+        (!w.is_empty()).then_some(w)
+    };
+    if let Some(i) = text.find(prefix) {
+        return token(&text[i + prefix.len()..]);
+    }
+    let key = prefix.strip_suffix('=')?;
+    let i = text.find(&format!("\"{key}\":"))? + key.len() + 3;
+    token(text[i..].trim_start().trim_start_matches('"'))
 }
 
 /// A scripted model that answers through a [`Policy`] and simulates usage.

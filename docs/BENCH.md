@@ -14,6 +14,10 @@ cargo build --release -p ark-bench
     --long-turns 12 --turn-timeout 300 --out live.json            # a real model
 ./target/release/ark-bench compare baseline.json candidate.json --md
 ./target/release/ark-bench compare baseline.json candidate.json --out comparison.json
+./target/release/ark-bench run --harness naive --out naive.json  # the naive baseline loop
+./target/release/ark-bench run --faults overloaded=0.1,bad-tool=0.05 --seed 7 --out faults.json
+./target/release/ark-bench run --model claude:haiku --record live.jsonl --out live.json
+./target/release/ark-bench run --model claude:haiku --replay live.jsonl --out replay.json
 ```
 
 `compare` exits with status 2 when it finds a regression, so CI can gate on it
@@ -29,6 +33,10 @@ cargo build --release -p ark-bench
 | `--no-planner`, `--no-critic`, `--budget N` | runtime settings to compare |
 | `--turn-timeout S` | a turn that takes longer fails its run instead of stalling the benchmark |
 | `--label` | the name the comparison shows |
+| `--harness ark` / `naive` | ARK's harness (default) or the naive baseline loop |
+| `--faults spec`, `--seed N` | inject faults into model calls (below) |
+| `--record file` / `--replay file` | keep every model reply, or serve them back (below) |
+| `--traces dir` | write each run's requests and events to `<dir>/<workload>-<rep>.jsonl` |
 
 The report is rewritten after every run, so an interrupted live run keeps what it measured.
 
@@ -78,6 +86,61 @@ neighbors.
 | approval | a state-changing call through the approval gate |
 | parallel | three slow independent lookups in one reply |
 | stale-read | read, write, read again: no stale reuse |
+| team | a lead delegates two independent lookups to two workers (`Workload::team`) |
+
+## The naive baseline
+
+`--harness naive` runs the suite through the loop an application usually starts with
+(`ark_bench::naive`): one short system prompt, the whole transcript and every tool's full
+schema on every call, raw tool results, transient errors retried as a provider SDK does, and
+a 25-step cap. No planner, critic, dedupe, distilling, compaction or stall guard. The
+transcript survives a restart, as an app that saves it would keep it. A team workload is done
+alone, with every tool.
+
+Same tools, same store, same model, same checks: a difference between the two reports is the
+harness. Two things keep it fair in simulated runs:
+
+- The simulated model reads a result the same whether it arrives as ARK's card (`id=C-1042`)
+  or raw JSON (`"id":"C-1042"`), and finds the task in a plain transcript (the first user
+  message after the last finished turn).
+- Where the naive loop fails, the reason is a missing guard or capability, never the
+  simulated model: `duplicate` (no dedupe), `runaway` (no stall guard), `retrieval` (no
+  search over stored documents, which ARK's evidence index gives).
+
+`bench/RESULTS.md` has the numbers.
+
+## Several agents
+
+A workload whose `team()` lists agents runs each turn as a task for the first one, through an
+`Orchestrator` over the workload's store and tools; the report counts every agent's model and
+tool calls. The simulated model tells agents apart by the system prompt ("You are the agent
+\"lead\""). `suite::Spec::with_team` builds one.
+
+## Faults
+
+`--faults overloaded=0.1,malformed=0.05,bad-tool=0.05` fails that share of model calls:
+
+| Fault | What the harness sees |
+|---|---|
+| `overloaded` | a temporary provider error, worth a retry |
+| `malformed` | a reply that cannot be used as sent |
+| `bad-tool` | the reply's first tool call names a tool that does not exist |
+
+The schedule depends only on `--seed` and the repetition, so a rerun sees the same faults.
+`faults_injected` counts them per run. Faults land per model call, so two harnesses that make
+different calls meet different faults: compare several seeds or repetitions, not one run.
+
+## Record and replay
+
+`--record file` keeps every model reply of a run (JSON lines); `--replay file` serves them
+back instead of calling the model, so a live run can be reproduced, re-graded or inspected
+offline at no cost. Replies are matched by a fingerprint of the request with run-specific ids
+normalized out, and ids a reply quotes are translated to the replaying run's. A request the
+recording never saw counts in `replay_diverged`; 0 means the replay was faithful.
+
+Pass the same `--model` as the recording, so cost is priced the same. Replaying a simulated
+recording loses the simulated cache-write cost (the simulated model reports it outside the
+reply); a live recording carries it in the reply's usage.
 
 ## Your application's workloads
 

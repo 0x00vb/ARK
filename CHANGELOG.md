@@ -13,6 +13,21 @@ What changed for people building on ARK, per release. Not a commit log.
 - `/agent` and `/task` in both front-ends: add, pause, resume, end and message agents, hand
   out, cancel and retry tasks. `ark_interact::orchestration::{Control, ControlOutcome,
   control, parse_agent, parse_task}`; the window's methods run the same `control`.
+- `ark-bench`: the naive baseline loop (`--harness naive`, `ark_bench::naive`), orchestrated
+  workloads (`Workload::team`, `suite::TeamSpec`, the `team` workload), fault injection
+  (`--faults`, `--seed`, `ark_bench::faults`), record and replay (`--record`, `--replay`,
+  `ark_bench::cassette`), per-run traces (`--traces`). `RunRecord.faults_injected` and
+  `.replay_diverged`. See `docs/BENCH.md`.
+
+### Changed
+- `ark-bench`'s simulated model reads raw JSON results as it reads ARK's cards, and finds
+  the task in a plain transcript. ARK's simulated numbers do not move.
+- `bench/baseline.json` has the `team` workload (14 workloads); `bench/baseline-naive.json`
+  is the naive loop on the same suite.
+
+### Breaking
+- `ark_bench::BenchSettings` has `harness`, `faults`, `cassette` and `traces`: struct
+  literals add them, or end with `..Default::default()`.
 
 ### Fixed
 - A task waiting on a paused agent ends as soon as it is cancelled (it noticed within 250 ms).

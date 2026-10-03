@@ -11,8 +11,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Stable release | **v0.7.0** (2026-10-03): the measured runtime P0 to P2 (naive baseline, team workloads, faults, record and replay; preloading, the ready list, small arrays whole, planner off), the window's projects, top bar, Settings, Terminal, Browser and Files, and the chat that creates agents |
 | `main` | v0.7.0 |
 | Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; pins v0.6.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
-| Benchmark | live qwen3:4b: success 0.85, cost per successful task $0.0298 (v0.4.0, `bench/RESULTS.md`) |
-| Phase | **Measured runtime**: P0 to P2 shipped in v0.7.0, measured live on qwen3:4b. Still open: the Haiku regression check of the P2 defaults (not run for v0.7.0), and overhead on `parallel` and `team` (about 1.4 times the naive loop per success on qwen3:4b). See Next. |
+| Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
+| Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: the capability and product roadmap. |
 
 ## State
 
@@ -48,7 +48,24 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 ## Next
 
-### Milestone: a measured runtime (0.7)
+The capability and product roadmap comes next; it is not written here yet.
+
+### Deferred: measured runtime
+
+Left open when the milestone closed at v0.7.0. Not scheduled. Pick one up only with a
+before/after in `bench/RESULTS.md`.
+
+| Item | What is known |
+|---|---|
+| Haiku check of the P2 defaults | preloading, the floor, the ready list, small arrays whole and planner off are measured live on qwen3:4b only. P1's Haiku runs (`bench/p1/`) are the baseline: 42/42 at $0.0703 per success |
+| `parallel` overhead | 1.42x the naive loop per success on qwen3:4b: the model calls one item per reply, where the naive loop gets all three in one |
+| `team` overhead | 1.37x: the lead and each worker pay a final answer; a lead can delegate in two replies instead of one |
+| Output tokens | ARK answers use 2 to 4 times naive's output tokens (the instructions ask for facts, inference and a next step); output is billed at 5x input |
+| `tool-lookup` | 1.16x: one extra call before the conversion |
+| P2 items not started | step checkpoints, a model routing policy, tool-result compression, a cost model for delegating, recovery rules per failure class |
+| P3 prove | one script and one report, ARK against the naive loop on the same tasks and models |
+
+### Milestone: a measured runtime (0.7, closed)
 
 The claim to prove: agents on ARK do more work, more reliably, for fewer tokens. Each phase
 ends with numbers in `bench/RESULTS.md`; nothing in P2 lands without a before/after.
@@ -67,8 +84,8 @@ ends with numbers in `bench/RESULTS.md`; nothing in P2 lands without a before/af
 | Before P0 | Orchestration control (spawn, submit, pause, resume, end, message, cancel, retry) moves from `ark-ui`'s Host into `ark-interact`, so the terminal can operate agents and an eval driven from it can too | `/agent` and `/task` in both front-ends; the Host forwards |
 | P0 foundations | In `ark-bench`: a naive baseline harness (full transcript every call, every tool offered, raw results, no guards) graded by the same checks; orchestration workloads (a lead and workers); deterministic fault injection (temporary provider errors, malformed calls); record and replay of a live run; a trace per run | `ark-bench run --harness naive`, `--faults`, `--record`/`--replay`, `--traces`; simulated numbers for both harnesses |
 | P1 measure | Live runs of both harnesses on the suite (2 or 3 models, 3 repetitions) | a baseline table in `bench/RESULTS.md`, no harness change |
-| P2 improve | One change at a time, each measured. Done: action preloading (default 2); tool choice on small models (preload floor, ready-to-call list, small arrays whole: qwen3:4b 35/42 to 41/42, ahead of the naive loop's 36/42; Haiku not yet re-measured). Done: the planner off by default (its steps caused most of the extra calls on small tasks; qwen3:4b 42/42 at $0.0181 per success, ADR 0008). Next: `parallel` (1.4x naive: a small model calls one item per reply) and `team` (1.4x: each agent pays a final answer). Then step checkpoints (resume a task where it stopped), a model routing policy, tool-result compression, a cost model for delegating, recovery rules per failure class | before/after per change |
-| P3 prove | One script and one report: ARK against the naive baseline on the same tasks and models | `bench/RESULTS.md` headline, reproducible |
+| P2 improve | One change at a time, each measured. Done: action preloading (default 2); tool choice on small models (preload floor, ready-to-call list, small arrays whole: qwen3:4b 35/42 to 41/42, ahead of the naive loop's 36/42; Haiku not yet re-measured). Done: the planner off by default (its steps caused most of the extra calls on small tasks; qwen3:4b 42/42 at $0.0181 per success, ADR 0008). The rest is deferred (above) | before/after per change |
+| P3 prove | Deferred (above) | `bench/RESULTS.md` headline, reproducible |
 
 Folded in from the earlier list:
 

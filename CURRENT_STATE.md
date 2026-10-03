@@ -11,7 +11,7 @@ Last updated: 2026-10-03
 | | |
 |---|---|
 | Latest tag | v0.7.0 (2026-10-03), on `origin` and `github` |
-| In progress | the measured-runtime milestone continues after v0.7.0: the Haiku regression check of the P2 defaults (not run for v0.7.0), then overhead on multi-step, resume, `parallel` and `team`. `ROADMAP.md` has the phases |
+| In progress | the measured-runtime milestone is closed at v0.7.0; what it left open (the Haiku check, `parallel` and `team` overhead, output tokens) is under "Deferred" in `ROADMAP.md`. Next is the capability and product roadmap |
 
 ## Waiting on this repo
 

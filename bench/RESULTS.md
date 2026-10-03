@@ -3,6 +3,45 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## ARK against a naive loop, live (P1, 2026-10-03)
+
+14 workloads, 3 repetitions, long session capped at 12 turns, 300 s turn timeout. Reports and
+recordings in `bench/p1/` (`bench/harness.py` prints the per-workload tables). Cost uses the
+reference price for both models (Haiku is priced as Sonnet here; the ratios hold). Subscription
+calls go through the `claude` CLI.
+
+| Model, configuration | Success | Cost / success (USD) | Model calls / run |
+|---|---:|---:|---:|
+| Claude Haiku, ARK as shipped (vendor sessions on) | **42/42** | **0.0703** | 7.3 |
+| Claude Haiku, naive loop | 37/42 | 0.1068 | 5.0 |
+| Claude Haiku, ARK with sessions off | 40/42 | 0.1200 | 6.5 |
+| qwen3:4b, ARK (v0.6.0 defaults) | 33/42 | 0.0398 | 7.5 |
+| qwen3:4b, naive loop | 36/42 | **0.0268** | 4.3 |
+| qwen3:4b, ARK, preload 2 | 35/42 | 0.0324 | 7.0 |
+| qwen3:4b, ARK, preload 2 and whole results under 200 tokens | **37/42** | 0.0338 | 7.1 |
+
+What it says:
+
+- On Haiku, ARK as shipped beats the naive loop on both counts: 5 more successes, 34% less per
+  success. Most of the cost win is vendor session reuse (cached reads); with sessions off ARK
+  still succeeds more often (40 against 37) but costs 12% more.
+- On qwen3:4b the naive loop beat v0.6.0's defaults. Seeing every tool at once suits a small
+  model better than finding them in the index: `tool-lookup` failed 3 of 3 in every ARK
+  configuration and passed 3 of 3 naive.
+- ARK wins wherever context grows or a guard matters: large output (0.19x naive's cost on
+  Haiku; the naive loop overflows qwen's context), the 12-turn session (0.30x on Haiku,
+  0.76x on qwen), and retrieval, which the naive loop cannot do.
+- ARK loses on small tasks: 1.2 to 1.8 times naive's cost on most, 4.5x on `tool-lookup` and
+  5x on `team` (three agents each pay for discovery).
+- Live models did not repeat calls or loop as the simulated `duplicate` and `runaway`
+  workloads script, so those guards mattered less live (one Haiku `runaway` failure).
+
+Preloading (P2, first change): on qwen, preload 2 fixed `approval` (0/3 to 3/3) and cut small
+tasks' cost by 20 to 40%; on Haiku with sessions off it cut cost per success 18% (0.1045 to
+0.0862) over the 11 workloads it finished before the run was stopped to save quota, with no
+failure. **Adopted: preload 2 is the default.** Whole small results were measured on qwen only,
+with mixed results (`team` 0/3 to 3/3, `large-output` 3/3 to 2/3), so they stay off.
+
 ## ARK against a naive loop (simulated, 2026-10-03)
 
 The measured-runtime milestone, P0. `ark-bench run --harness naive` runs the same 14

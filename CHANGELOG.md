@@ -45,6 +45,8 @@ What changed for people building on ARK, per release. Not a commit log.
   new one (`Interaction::set_project`).
 - Window: `nav` on `ark.view` and `ark.panel` puts the view in a top-bar tab and the panel
   on a top-bar button, not in the sidebar. "New session" is "New chat".
+- **Action preloading is on by default** (2 actions; `ARK_PRELOAD_ACTIONS=0` turns it off).
+  Measured live on qwen3:4b and Claude Haiku (`bench/RESULTS.md`, P1).
 - `ark-bench`'s simulated model reads raw JSON results as it reads ARK's cards, and finds
   the task in a plain transcript. ARK's simulated numbers do not move.
 - `bench/baseline.json` has the `team` workload (14 workloads); `bench/baseline-naive.json`

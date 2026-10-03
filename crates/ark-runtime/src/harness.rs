@@ -206,7 +206,7 @@ pub struct Harness {
     max_steps: usize,
     budget: u32,
     /// Actions to load before the first step because they match the task's words (see
-    /// [`catalog::matching_actions`]); 0 leaves discovery to the model.
+    /// [`catalog::matching_actions`]); 0 leaves discovery to the model. Default 2.
     preload: usize,
     planner: bool,
     critic: bool,
@@ -259,10 +259,11 @@ impl Harness {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(6000),
+            // 2: measured live on qwen3:4b and Claude Haiku (bench/RESULTS.md, P1).
             preload: std::env::var("ARK_PRELOAD_ACTIONS")
                 .ok()
                 .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
+                .unwrap_or(2),
             planner: true,
             critic: true,
             focus: None,

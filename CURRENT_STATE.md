@@ -11,7 +11,7 @@ Last updated: 2026-10-03
 | | |
 |---|---|
 | Latest tag | v0.6.0 (2026-10-03), on `origin` and `github` |
-| In progress | the measured-runtime milestone (0.7): orchestration control is in `ark-interact`; P0 is done (naive baseline, team workload, faults, record and replay, traces in `ark-bench`); P1 (live runs of both harnesses) is next. `ROADMAP.md` has the phases |
+| In progress | the measured-runtime milestone (0.7): orchestration control is in `ark-interact`; P0 and P1 are done (live results in `bench/RESULTS.md`: ARK beats a naive loop on Claude Haiku, loses to it on qwen3:4b); P2 under way, preloading adopted, tool choice on small models next. `ROADMAP.md` has the phases |
 
 ## Waiting on this repo
 

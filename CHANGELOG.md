@@ -9,6 +9,14 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- `/agent` and `/task` in both front-ends: add, pause, resume, end and message agents, hand
+  out, cancel and retry tasks. `ark_interact::orchestration::{Control, ControlOutcome,
+  control, parse_agent, parse_task}`; the window's methods run the same `control`.
+
+### Fixed
+- A task waiting on a paused agent ends as soon as it is cancelled (it noticed within 250 ms).
+
 ## [0.6.0] - 2026-10-03
 
 Several agents as compositions of a few primitives, run on subscriptions first.

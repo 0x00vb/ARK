@@ -19,7 +19,7 @@ use ark_interact::inspect::{
     ArtifactSummary, ContextSource, ContextView, KeptOut, StateView, UsageView,
 };
 use ark_interact::interaction::load_trace;
-use ark_interact::orchestration::event_line;
+use ark_interact::orchestration::{event_line, Control, ControlOutcome};
 use ark_interact::trace::interpret;
 use ark_interact::{Effect, Interaction, Labels, PendingApproval, TurnControl};
 use ark_sdk::prelude::ark_core::Focus;
@@ -337,6 +337,15 @@ impl Host {
         }
     }
 
+    async fn control(&self, c: Control) -> anyhow::Result<ControlOutcome> {
+        ark_interact::orchestration::control(&self.orchestrator()?, c).await
+    }
+
+    async fn control_done(&self, c: Control) -> anyhow::Result<Value> {
+        self.control(c).await?;
+        Ok(json!({}))
+    }
+
     /// The orchestrator, for the orchestration methods. They do not wait for the
     /// conversation: agents work on their own.
     fn orchestrator(&self) -> anyhow::Result<Orchestrator> {
@@ -596,47 +605,52 @@ impl Host {
                 ))
             }
             "agents" => Ok(serde_json::to_value(self.orchestrator()?.agents())?),
+            // Changes to the agents go through ark-interact's `control`, as the terminal's
+            // `/agent` and `/task` do; only the answer's shape is the protocol's.
             "spawn_agent" => {
                 let spec: AgentSpec = serde_json::from_value(params["spec"].clone())?;
-                Ok(serde_json::to_value(
-                    self.orchestrator()?.spawn(spec).await?,
-                )?)
+                match self.control(Control::Spawn(Box::new(spec))).await? {
+                    ControlOutcome::Agent(a) => Ok(serde_json::to_value(*a)?),
+                    _ => Ok(json!({})),
+                }
             }
             "submit_task" => {
-                let spec: TaskSpec = serde_json::from_value(params["task"].clone())?;
-                if spec.objective.trim().is_empty() {
-                    anyhow::bail!("a task needs an objective");
+                let task: TaskSpec = serde_json::from_value(params["task"].clone())?;
+                match self
+                    .control(Control::Submit {
+                        agent: s("agent"),
+                        task,
+                    })
+                    .await?
+                {
+                    ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                    _ => Ok(json!({})),
                 }
-                let id = self.orchestrator()?.submit(&s("agent"), spec)?;
-                Ok(json!({ "task": id }))
             }
-            "cancel_task" => {
-                self.orchestrator()?.cancel(&s("task"))?;
-                Ok(json!({}))
-            }
-            "retry_task" => {
-                self.orchestrator()?.retry(&s("task"))?;
-                Ok(json!({}))
-            }
+            "cancel_task" => self.control_done(Control::Cancel { task: s("task") }).await,
+            "retry_task" => self.control_done(Control::Retry { task: s("task") }).await,
             "suspend_agent" => {
-                self.orchestrator()?.suspend(&s("agent"))?;
-                Ok(json!({}))
+                self.control_done(Control::Suspend { agent: s("agent") })
+                    .await
             }
             "resume_agent" => {
-                self.orchestrator()?.resume(&s("agent"))?;
-                Ok(json!({}))
+                self.control_done(Control::Resume { agent: s("agent") })
+                    .await
             }
             "terminate_agent" => {
-                self.orchestrator()?.terminate(&s("agent")).await?;
-                Ok(json!({}))
+                self.control_done(Control::Terminate { agent: s("agent") })
+                    .await
             }
-            // A note from the person: into the agent's running task, else its next one.
-            "message_agent" => {
-                let delivered = self
-                    .orchestrator()?
-                    .message("user", &s("agent"), &s("text"))?;
-                Ok(json!({ "delivered": delivered }))
-            }
+            "message_agent" => match self
+                .control(Control::Message {
+                    agent: s("agent"),
+                    text: s("text"),
+                })
+                .await?
+            {
+                ControlOutcome::Messaged { delivered, .. } => Ok(json!({ "delivered": delivered })),
+                _ => Ok(json!({})),
+            },
             // The profiles the app offers, which an agent's `profile_name` chooses from.
             "profiles" => Ok(Value::Array(
                 self.orchestrator()?

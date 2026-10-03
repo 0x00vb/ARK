@@ -44,6 +44,52 @@ impl Command for Agents {
     }
 }
 
+/// `/agent` and `/task`: change the agents, the same [`Control`](crate::orchestration::Control)s
+/// the window sends.
+pub struct AgentCmd;
+#[async_trait::async_trait]
+impl Command for AgentCmd {
+    meta!(
+        "agent",
+        "Add, pause, resume, end or message an agent: /agent new <name> [model]"
+    );
+    fn usage(&self) -> &str {
+        "new|pause|resume|end|message <name> …"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        control_cmd(ix, crate::orchestration::parse_agent(args)).await
+    }
+}
+
+pub struct TaskCmd;
+#[async_trait::async_trait]
+impl Command for TaskCmd {
+    meta!(
+        "task",
+        "Hand an agent a task, or cancel or retry one: /task <agent> <objective>"
+    );
+    fn usage(&self) -> &str {
+        "<agent> <objective> | cancel|retry <task>"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        control_cmd(ix, crate::orchestration::parse_task(args)).await
+    }
+}
+
+async fn control_cmd(
+    ix: &mut Interaction,
+    parsed: Result<crate::orchestration::Control, String>,
+) -> anyhow::Result<Reply> {
+    let Some(o) = ix.orchestrator() else {
+        return Ok(Report::new().note("This app runs a single agent.").into());
+    };
+    let c = match parsed {
+        Ok(c) => c,
+        Err(usage) => return Ok(Report::new().warning(usage).into()),
+    };
+    Ok(crate::orchestration::control(o, c).await?.report().into())
+}
+
 pub struct Usage;
 #[async_trait::async_trait]
 impl Command for Usage {

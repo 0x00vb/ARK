@@ -1136,9 +1136,14 @@ impl Inner {
                         TaskState::Suspended,
                         format!("agent {owner} is suspended"),
                     );
-                    // Wake on resume, and now and then to notice a cancel.
+                    // Wake on resume, or on a cancel. A task the suspend stopped mid-run holds
+                    // a token that is already cancelled: it waits for the resume (and checks
+                    // now and then for a cancel).
+                    let cancel = self.cancel_token(id);
+                    let fresh = !cancel.is_cancelled();
                     tokio::select! {
                         _ = status.wait_for(|s| *s != AgentState::Suspended) => {}
+                        _ = cancel.cancelled(), if fresh => {}
                         _ = tokio::time::sleep(Duration::from_millis(250)) => {}
                     }
                     continue;

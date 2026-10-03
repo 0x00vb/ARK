@@ -378,3 +378,62 @@ async fn the_project_folder_is_set_once_and_its_agents_follow_it() {
     let scope: ProjectId = serde_json::from_value(agent["scope"].clone()).unwrap();
     assert_eq!(ark.engine().workspace_dir(&scope).unwrap(), want);
 }
+
+/// The terminal's `/agent` and `/task` run the same controls as the window's methods: what
+/// one does, the other sees.
+#[tokio::test]
+async fn terminal_commands_and_window_methods_share_one_control() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let cmd = |line: &str| {
+        let host = host.clone();
+        let line = line.to_string();
+        async move {
+            host.call("command", json!({ "line": line }))
+                .await
+                .unwrap()
+                .to_string()
+        }
+    };
+    let state = |name: &'static str| {
+        let host = host.clone();
+        async move {
+            let g = host.call("graph", json!({})).await.unwrap();
+            g["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["name"] == name)
+                .map(|a| a["state"].as_str().unwrap().to_string())
+        }
+    };
+
+    assert!(cmd("/agent new scribe").await.contains("scribe is ready"));
+    assert_eq!(state("scribe").await.as_deref(), Some("idle"));
+    assert!(cmd("/agent pause scribe").await.contains("scribe paused"));
+    assert_eq!(state("scribe").await.as_deref(), Some("suspended"));
+
+    // A task for a paused agent waits; the window's method cancels what the terminal started.
+    let started = cmd("/task scribe save the notes").await;
+    assert!(started.contains("started task t-"), "{started}");
+    let g = host.call("graph", json!({})).await.unwrap();
+    let id = g["tasks"][0]["task"].as_str().unwrap().to_string();
+    let mut rx = host.subscribe();
+    host.call("cancel_task", json!({ "task": id }))
+        .await
+        .unwrap();
+    wait_for(&mut rx, "task_finished", |v| orch_type(v, "task_finished")).await;
+    let t = host.call("task", json!({ "task": id })).await.unwrap();
+    assert_eq!(t["task"]["state"], "cancelled");
+
+    assert!(cmd("/agent message scribe use the short form")
+        .await
+        .contains("kept for scribe's next task"));
+    assert!(cmd("/agent resume scribe").await.contains("scribe resumed"));
+    assert!(cmd("/agent end scribe").await.contains("scribe ended"));
+    assert_eq!(state("scribe").await.as_deref(), Some("terminated"));
+    assert!(cmd("/agent").await.contains("usage: /agent"));
+    assert!(cmd("/task scribe")
+        .await
+        .contains("a task needs an objective"));
+}

@@ -209,7 +209,8 @@ To follow a run: load `graph()`, then apply events after its `seq`.
 | Front-end | Where |
 |---|---|
 | Both | `App::orchestrator(orch)` (one project) or `App::orchestrate(f)` (one orchestrator per project, with the front-end's approval gate) adds `/agents` (the graph) and `/agents <task>` (one task's trace); reports come from `ark_interact::orchestration` and carry the graph as typed data (`view: "orchestration"`) |
-| Terminal, headless | `app -p "/agents"` prints the same report; any slash command runs this way |
+| Both | `/agent new <name> [provider:model]`, `/agent pause|resume|end <name>`, `/agent message <name> <text>`, `/task <agent> <objective>`, `/task cancel|retry <task>`. Each is an `ark_interact::orchestration::Control` run by `control`; the window's methods (`spawn_agent`, `submit_task`, ...) build the same `Control`s, so a change means the same in both |
+| Terminal, headless | `app -p "/agents"` prints the same report; any slash command runs this way (`app -p "/task lead summarize notes.md"`) |
 | Window | read: `graph`, `agents`, `tools`, `task`, `task_trace`, `orch_events {after, limit}`. Control: `spawn_agent`, `submit_task`, `cancel_task`, `retry_task`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent`. Live: `{kind: "orch", event, line, tone, activity}`, which page scripts receive as `ark:orch`. With `App::orchestrate` each project has its own orchestrator. Details: [`UI.md`](UI.md#protocol) |
 
 ## Limits

@@ -233,7 +233,7 @@ impl App {
         let mut commands = self.commands;
         commands.extend(crate::builtins::all());
         if self.orchestrator.is_some() || self.orchestrate.is_some() {
-            commands.push(crate::builtins::agents());
+            commands.extend(crate::builtins::agents());
         }
         let orchestrate = self
             .orchestrate

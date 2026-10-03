@@ -317,3 +317,168 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
         | EventKind::Session { .. } => return None,
     })
 }
+
+// ---- control ---------------------------------------------------------------------------------
+
+/// One change a person asks of the agents. Both front-ends build these (the window from its
+/// protocol methods, the terminal from `/agent` and `/task`) and run them through
+/// [`control`], so a change means the same wherever it was asked for.
+#[derive(Clone, Debug)]
+pub enum Control {
+    /// Add an agent, or change one (an ended agent comes back).
+    Spawn(Box<ark_orchestrate::AgentSpec>),
+    /// Hand an agent a task.
+    Submit {
+        agent: String,
+        task: ark_orchestrate::TaskSpec,
+    },
+    /// Stop a task and what it delegated.
+    Cancel {
+        task: String,
+    },
+    /// Run a failed or cancelled task again.
+    Retry {
+        task: String,
+    },
+    /// Pause an agent: its running task stops at the next step and waits.
+    Suspend {
+        agent: String,
+    },
+    Resume {
+        agent: String,
+    },
+    /// End an agent: its open tasks are cancelled and its model session closes.
+    Terminate {
+        agent: String,
+    },
+    /// A note from the person: into the agent's running task, else its next one.
+    Message {
+        agent: String,
+        text: String,
+    },
+}
+
+/// What a [`Control`] did.
+#[derive(Clone, Debug)]
+pub enum ControlOutcome {
+    Agent(Box<ark_orchestrate::AgentRecord>),
+    Submitted {
+        task: String,
+    },
+    /// `delivered`: it reached a running task (else it waits for the next one).
+    Messaged {
+        agent: String,
+        delivered: bool,
+    },
+    Done(String),
+}
+
+impl ControlOutcome {
+    /// The one line a front-end shows for it.
+    pub fn report(&self) -> Report {
+        match self {
+            ControlOutcome::Agent(a) => Report::new().success(format!("{} is ready", a.name)),
+            ControlOutcome::Submitted { task } => Report::new()
+                .success(format!("started task {task}"))
+                .note(format!("Follow it with /agents {task}")),
+            ControlOutcome::Messaged { agent, delivered } => Report::new().success(if *delivered {
+                format!("sent into {agent}'s running task")
+            } else {
+                format!("kept for {agent}'s next task")
+            }),
+            ControlOutcome::Done(what) => Report::new().success(what.clone()),
+        }
+    }
+}
+
+/// Run one [`Control`] on `o`.
+pub async fn control(
+    o: &ark_orchestrate::Orchestrator,
+    c: Control,
+) -> anyhow::Result<ControlOutcome> {
+    Ok(match c {
+        Control::Spawn(spec) => ControlOutcome::Agent(Box::new(o.spawn(*spec).await?)),
+        Control::Submit { agent, task } => {
+            if task.objective.trim().is_empty() {
+                anyhow::bail!("a task needs an objective");
+            }
+            ControlOutcome::Submitted {
+                task: o.submit(&agent, task)?,
+            }
+        }
+        Control::Cancel { task } => {
+            o.cancel(&task)?;
+            ControlOutcome::Done(format!("cancelled {task}"))
+        }
+        Control::Retry { task } => {
+            o.retry(&task)?;
+            ControlOutcome::Done(format!("running {task} again"))
+        }
+        Control::Suspend { agent } => {
+            o.suspend(&agent)?;
+            ControlOutcome::Done(format!("{agent} paused"))
+        }
+        Control::Resume { agent } => {
+            o.resume(&agent)?;
+            ControlOutcome::Done(format!("{agent} resumed"))
+        }
+        Control::Terminate { agent } => {
+            o.terminate(&agent).await?;
+            ControlOutcome::Done(format!("{agent} ended"))
+        }
+        Control::Message { agent, text } => {
+            if text.trim().is_empty() {
+                anyhow::bail!("a message needs text");
+            }
+            let delivered = o.message("user", &agent, &text)?;
+            ControlOutcome::Messaged { agent, delivered }
+        }
+    })
+}
+
+/// `/agent …` as a [`Control`]: `new <name> [provider:model]`, `pause|resume|end <name>`,
+/// `message <name> <text>`.
+pub fn parse_agent(args: &str) -> Result<Control, String> {
+    let mut it = args.split_whitespace();
+    let verb = it.next().unwrap_or("");
+    let name = it.next().map(str::to_string);
+    let need = |n: Option<String>| n.ok_or_else(|| format!("/agent {verb} needs an agent name"));
+    Ok(match verb {
+        "new" => {
+            let mut spec = ark_orchestrate::AgentSpec::new(need(name)?);
+            if let Some(model) = it.next() {
+                spec = spec.model(model);
+            }
+            Control::Spawn(Box::new(spec))
+        }
+        "pause" => Control::Suspend { agent: need(name)? },
+        "resume" => Control::Resume { agent: need(name)? },
+        "end" => Control::Terminate { agent: need(name)? },
+        "message" => Control::Message {
+            agent: need(name)?,
+            text: it.collect::<Vec<_>>().join(" "),
+        },
+        _ => {
+            return Err(
+                "usage: /agent new <name> [provider:model] | pause|resume|end <name> | message <name> <text>"
+                    .into(),
+            )
+        }
+    })
+}
+
+/// `/task …` as a [`Control`]: `cancel <id>`, `retry <id>`, or `<agent> <objective>`.
+pub fn parse_task(args: &str) -> Result<Control, String> {
+    let args = args.trim();
+    let (first, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
+    let rest = rest.trim();
+    Ok(match first {
+        "" => return Err("usage: /task <agent> <objective> | cancel <task> | retry <task>".into()),
+        "cancel" if !rest.is_empty() => Control::Cancel { task: rest.into() },
+        "retry" if !rest.is_empty() => Control::Retry { task: rest.into() },
+        agent => Control::Submit {
+            agent: agent.into(),
+            task: ark_orchestrate::TaskSpec::new(rest),
+        },
+    })
+}

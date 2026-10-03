@@ -180,7 +180,9 @@ front-end uses the same.
 | `orch` | An orchestration event: `event` (an `OrchEvent`), `line` and `tone` (its timeline line, from `ark_interact::orchestration::event_line`), `activity` (for an agent's runtime event, what the conversation would show; none for steps and context reports) |
 
 The agent and task methods need an app with an orchestrator and do not wait for the
-conversation: they answer while a turn runs. `spawn_agent` takes an `AgentSpec` as JSON and
+conversation: they answer while a turn runs. The ones that change something build an
+`ark_interact::orchestration::Control`, the same one the terminal's `/agent` and `/task`
+build, and only shape the answer. `spawn_agent` takes an `AgentSpec` as JSON and
 `submit_task` a `TaskSpec`; both are what the orchestrator stores, so the same definitions
 work wherever the runtime runs. Tests: `tests/orchestration.rs`.
 

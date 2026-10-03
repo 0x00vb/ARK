@@ -193,13 +193,6 @@ impl Registry {
         }
     }
 
-    /// Build a registry from a list of adapters.
-    pub fn from_adapters(adapters: impl IntoIterator<Item = Arc<dyn Adapter>>) -> Self {
-        Registry {
-            adapters: adapters.into_iter().collect(),
-        }
-    }
-
     pub fn register(&mut self, a: Arc<dyn Adapter>) {
         self.adapters.push(a);
     }

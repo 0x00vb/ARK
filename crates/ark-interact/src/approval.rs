@@ -27,10 +27,6 @@ impl PendingApproval {
     pub fn answer(self, d: ApprovalDecision) {
         let _ = self.reply.send(d);
     }
-    /// The turn no longer waits for this answer (it was cancelled or ended).
-    pub fn is_closed(&self) -> bool {
-        self.reply.is_closed()
-    }
     /// Resolves when the turn stops waiting for this answer.
     pub async fn closed(&mut self) {
         self.reply.closed().await

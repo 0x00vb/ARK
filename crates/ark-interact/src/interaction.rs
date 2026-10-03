@@ -437,9 +437,6 @@ impl Interaction {
     pub fn ark(&self) -> &Ark {
         &self.ark
     }
-    pub fn ark_mut(&mut self) -> &mut Ark {
-        &mut self.ark
-    }
     pub fn engine(&self) -> &Engine {
         self.ark.engine()
     }

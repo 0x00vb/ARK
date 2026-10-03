@@ -387,10 +387,6 @@ impl Harness {
             .map(|r| r.text.clone())
             .filter(|t| !t.is_empty())
     }
-    pub fn budget_tokens(&self) -> u32 {
-        self.budget
-    }
-
     /// Run a task grounded in a project, shaped by `profile`.
     pub async fn ask(
         &self,

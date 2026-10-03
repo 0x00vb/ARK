@@ -43,10 +43,6 @@ impl WorkingSet {
         }
     }
 
-    pub fn round_count(&self) -> usize {
-        self.rounds.len()
-    }
-
     /// Tokens of the model's own messages (tool calls, narration) in the rounds the last
     /// assemble kept.
     pub fn kept_model_output(&self) -> u32 {

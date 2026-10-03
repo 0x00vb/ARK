@@ -52,6 +52,11 @@ What changed for people building on ARK, per release. Not a commit log.
 - `Engine::registry` no longer holds MCP plugins. Code that read or ran plugin actions
   through it uses `Engine::tools()`; `Engine::run_action` and the SDK's turns already do.
 - `AgentError` has a new variant, `Plugin(String)`; a `match` over it needs an arm.
+- Removed public items no caller used. Use instead: `Interaction::ark_mut` (none; configure
+  through `App` before open), `Harness::budget_tokens` (the budget given to
+  `Harness::budget`), `budget::WorkingSet::round_count` (none), `Registry::from_adapters`
+  (`Registry::new()` plus `with`/`register`), `PendingApproval::is_closed`
+  (`PendingApproval::closed().await`).
 - `ContextReport` and `AgentSpec` have a new field, `skills`; a struct literal without
   `..Default::default()` (or `AgentSpec::new`) needs it.
 

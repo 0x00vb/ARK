@@ -31,8 +31,7 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
   `ARK_SESSION_MAX_TURNS`, `ARK_SESSION_IDLE_S`.
 - **Capacity** (`ark_model::capacity`): `Capacity`, `Limiter` and `Limited` queue calls per
   account (default 2 at a time for `claude` and `codex`, 4 otherwise;
-  `ARK_<ACCOUNT>_CONCURRENCY`) and cool down after a rate or usage limit. A CLI usage limit
-  is now a temporary error (`ProviderError::Overloaded`).
+  `ARK_<ACCOUNT>_CONCURRENCY`) and cool down after a rate or usage limit.
 - **Rule sets**: `ark_core::{RuleSet, Rule, RuleBinding, RuleScope, RuleRef}`, stored and
   versioned with `ark_runtime::RuleBook` (`Ark::rule_book`), bound to a project, agent or task,
   selected per task by `ark_runtime::rules::select`, looked up with the `rules` tool
@@ -63,18 +62,39 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
 - `ark.view({ id, title, icon, nav, render })`: an app view in the main column, in place of
   the conversation, listed in the sidebar (`ark.openView`, `ark.showConversation`).
 - Labels for ARK's own tools: "Delegating to reader-a: …", "Messaging lead", "Drawing …".
-- A single-agent `Ark` on a subscription keeps one managed vendor session per conversation
-  (`Ark::session_router`, `Ark::subscriptions`, `ArkBuilder::subscriptions`); its state is
-  in the store (`ark_runtime::StoreLedger`), so the next process resumes it. An orchestrator
-  shares the `Ark`'s runtime and capacity. `ARK_SESSION_REUSE=0` restores stateless calls.
+- `Ark::session_router`, `Ark::subscriptions`, `ArkBuilder::subscriptions`: the runtime
+  behind single-agent managed sessions (see Changed); its state is in the store
+  (`ark_runtime::StoreLedger`). An orchestrator shares the `Ark`'s runtime and capacity.
 - When ARK lets a vendor session go it deletes the vendor's file for that id
   (`SessionBackend::discard`; `ARK_SESSION_KEEP_FILES=1` keeps them).
 - `SubscriptionRuntime::stored` and `ModelResolver::stored_session`: the graph shows an
   agent's stored session before it runs again after a restart.
-- Headless `-p "/command"` runs a slash command and prints its report.
 - `examples/writing-agent`: `/review <n>`, an editor and two readers per manuscript project.
+- Named profiles: `OrchestratorBuilder::profile(name, summary, profile)`,
+  `Orchestrator::profiles`, `AgentSpec::profile_name` (stored, unlike `AgentSpec::profile`,
+  so it survives a restart and a front-end can choose it), `AgentNode.profile`. Workspace
+  protocol method `profiles`; `/agents` shows an agent's profile next to its model.
+- The project folder in ARK: `Engine::set_workspace`, `Interaction::workspace` and
+  `::set_workspace`, `/folder [path]` in both front-ends, workspace protocol method
+  `workspace` (`{path}` sets it), `ProjectSummary.workspace`.
+- `ark.pickFolder({ title })`: the window's own folder picker (`undefined` in a browser,
+  where the page cannot see the runtime's disk).
+- `ark_interact::approval_title`: the approval headline both front-ends show. The terminal
+  now names the agent and task that ask ("reader-a (task t-1a2b3c4d) wants to run:"); the
+  window's `approval` events carry it as `title`.
 
 ### Changed
+- **Single-agent turns on a subscription keep a vendor session.** With a `claude:` or
+  `codex:` model, `Ark::ask_session` resumes one managed vendor session per conversation and
+  sends only what is new (median uncached input 59.3k to 37.8k in `bench/RESULTS.md`).
+  `ARK_SESSION_REUSE=0` restores stateless calls.
+- A CLI rate or usage limit is `ProviderError::Overloaded` (was `Api`), so the harness
+  retries it after the account's cool-down. Apps that matched `Api` for it match `Overloaded`.
+- Headless `-p "/command"` runs the slash command and prints its report, instead of sending
+  the text to the model.
+- `ark-interact` depends on `ark-orchestrate` and re-exports it (`ark_interact::ark_orchestrate`).
+- An orchestrated agent's project has no folder of its own: it works in its top-level
+  project's folder, read when it runs, so changing the folder moves existing agents too.
 - Claude Code is told its only tool is `StructuredOutput`. With the earlier wording Sonnet
   first tried to call a host tool by name and failed: one delegation took 4 internal turns
   and 3,049 input tokens, now 2 turns and 1,384 (measured with `claude -p`, 2 runs each).
@@ -89,6 +109,7 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
   with a one-line correction, in the same vendor session. Seen once in 9 live runs with a Haiku reader.
 
 ### Fixed
+- Agents created before the project folder was chosen kept working in the old folder.
 - The window opens artifacts an orchestrated agent produced (they live in its child project).
 - `ark.h` sets CSS custom properties given in `style` (`{ "--hue": 200 }`).
 
@@ -100,6 +121,10 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
   them (or use `..Default::default()` / `Project::new`).
 - `ark_interact::trace::EntryKind::Rules` is a new variant.
 - `ApprovalRequest` has `agent` and `task` fields: struct literals add `agent: None, task: None`.
+- `ProjectSummary` has a `workspace` field: struct literals add `workspace: None`.
+- `ark_sdk::prelude` exports `Rule`, `RuleSet`, `RuleBinding`, `RuleScope`, `RuleBook`,
+  `RuleSelection`, `Diagram` and `DiagramKind`; a glob import of another module with the same
+  names becomes ambiguous.
 
 ## [0.5.0] - 2026-10-01
 

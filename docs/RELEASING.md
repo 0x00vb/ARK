@@ -37,7 +37,7 @@ flowchart LR
 |---|---|---|
 | 1 | Every change on `main` already passed tests, clippy and fmt | `scripts/ci.sh` |
 | 2 | Benchmark: simulated always; live when the harness changed ([`BENCH.md`](BENCH.md)). If the simulated numbers moved on purpose, regenerate `bench/baseline.json` in that commit | `ark-bench run --out bench/baseline.json` |
-| 3 | Pick the version (see the table above) and set it in the root `Cargo.toml`: `workspace.package.version` and the ten internal `ark-*` dependency versions | `Cargo.toml` |
+| 3 | Pick the version (see the table above) and set it in the root `Cargo.toml`: `workspace.package.version` and the eleven internal `ark-*` dependency versions | `Cargo.toml` |
 | 4 | Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD` | `CHANGELOG.md` |
 | 5 | Update `ROADMAP.md` (current version, state, limits) and the tag in the README install block | `ROADMAP.md`, `README.md` |
 | 6 | Full check on the release commit, page tests included | `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` |

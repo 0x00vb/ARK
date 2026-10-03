@@ -1,0 +1,446 @@
+{"request":{"cache_write_tokens":0,"calls":["agents.delegate"],"error":null,"est_prompt_tokens":1389,"first_token_ms":217,"latency_ms":1890,"message_tokens":171,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":0,"system_tokens":507,"tool_schema_tokens":711,"tools":6,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":119,"measured":true,"prompt_tokens":1616}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["crm.find_customer"],"error":null,"est_prompt_tokens":1272,"first_token_ms":null,"latency_ms":629,"message_tokens":209,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":498,"system_tokens":433,"tool_schema_tokens":630,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":25,"measured":true,"prompt_tokens":1551}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["crm.orders"],"error":null,"est_prompt_tokens":1335,"first_token_ms":null,"latency_ms":668,"message_tokens":272,"messages":4,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1192,"system_tokens":433,"tool_schema_tokens":630,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":27,"measured":true,"prompt_tokens":1648}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1420,"first_token_ms":382,"latency_ms":1891,"message_tokens":357,"messages":6,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1244,"system_tokens":433,"tool_schema_tokens":630,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":104,"measured":true,"prompt_tokens":1796}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["agents.delegate"],"error":null,"est_prompt_tokens":1534,"first_token_ms":null,"latency_ms":1104,"message_tokens":316,"messages":4,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1334,"system_tokens":507,"tool_schema_tokens":711,"tools":6,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":37,"measured":true,"prompt_tokens":1838}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["weather.current"],"error":null,"est_prompt_tokens":1127,"first_token_ms":null,"latency_ms":641,"message_tokens":176,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":498,"system_tokens":412,"tool_schema_tokens":539,"tools":5,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":21,"measured":true,"prompt_tokens":1342}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["weather.current"],"error":null,"est_prompt_tokens":1182,"first_token_ms":null,"latency_ms":692,"message_tokens":231,"messages":4,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1049,"system_tokens":412,"tool_schema_tokens":539,"tools":5,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":22,"measured":true,"prompt_tokens":1424}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1237,"first_token_ms":300,"latency_ms":934,"message_tokens":286,"messages":6,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1094,"system_tokens":412,"tool_schema_tokens":539,"tools":5,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":34,"measured":true,"prompt_tokens":1508}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1648,"first_token_ms":373,"latency_ms":3707,"message_tokens":430,"messages":6,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1467,"system_tokens":507,"tool_schema_tokens":711,"tools":6,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":174,"measured":true,"prompt_tokens":1988}},"type":"request"}
+{"event":{"trivial":false,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":211,"budget":6000,"capability_index":103,"compressed_rounds":0,"conversation":0,"instructions":408,"loaded_actions":2,"model_output":0,"project":63,"retrieved":0,"role":"reason","rules":0,"step":1,"task":52,"tool_rounds":0,"tool_schemas":711,"total":678,"working_state":51,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"I","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" need","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" find","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'s","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" tier","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" total","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" temperatures","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Paris","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Tokyo","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" I","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'ll","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" split","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" this","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" into","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" two","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" parts","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" one","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" for","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" data","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" one","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" for","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" weather","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" data","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"First","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" I","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'ll","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" delegate","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" worker","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-a","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" look","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" up","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'s","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" information","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" worker","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-b","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" get","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" weather","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Paris","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Tokyo","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":1890,"first_token_ms":217,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":119,"measured":true,"prompt_tokens":1616}},"turn":0,"type":"event"}
+{"event":{"action":"agents.delegate","id":"call_0","input":{"objective":"Look up Ada Lovelace's customer tier and total orders.","to":"worker-a"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"trivial":false,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":130,"budget":6000,"capability_index":115,"compressed_rounds":0,"conversation":0,"instructions":322,"loaded_actions":3,"model_output":0,"project":60,"retrieved":0,"role":"reason","rules":0,"step":1,"task":73,"tool_rounds":0,"tool_schemas":630,"total":642,"working_state":72,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":629,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":25,"measured":true,"prompt_tokens":1551}},"turn":0,"type":"event"}
+{"event":{"action":"crm.find_customer","id":"call_0","input":{"name":"Ada Lovelace"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"crm.find_customer","context_tokens":40,"duration_ms":0,"error":null,"id":"call_0","invocation":"20237da2-2260-45e4-beb4-3b3372fa3910","ok":true,"raw_tokens":13,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":2,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":130,"budget":6000,"capability_index":115,"compressed_rounds":0,"conversation":0,"instructions":322,"loaded_actions":3,"model_output":23,"project":60,"retrieved":0,"role":"reason","rules":0,"step":2,"task":73,"tool_rounds":40,"tool_schemas":630,"total":705,"working_state":72,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":668,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":27,"measured":true,"prompt_tokens":1648}},"turn":0,"type":"event"}
+{"event":{"action":"crm.orders","id":"call_0","input":{"customer_id":"C-1042"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"crm.orders","context_tokens":64,"duration_ms":1,"error":null,"id":"call_0","invocation":"81fa0344-8368-41e3-9434-138749789052","ok":true,"raw_tokens":37,"summary":"customer_id=C-1042, orders=[{\"amount\":120.5,\"id\":\"O-1\"},{\"amount\":89.99,\"id\":\"O-2\"},{\"amount\":310.0,\"id\":\"O-3\"},{\"amount\":45.25,\"id\":\"O-4\"}]","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":3,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":130,"budget":6000,"capability_index":115,"compressed_rounds":0,"conversation":0,"instructions":322,"loaded_actions":3,"model_output":44,"project":60,"retrieved":0,"role":"reason","rules":0,"step":3,"task":73,"tool_rounds":104,"tool_schemas":630,"total":790,"working_state":72,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'s","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" tier","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" gold","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Her","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" total","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" amount","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" +","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" +","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" +","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" =","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" tier","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" gold","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ited","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"da","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":")\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Total","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"cal","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"culated","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" from","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"fa","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":")\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"This","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" result","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" satisfies","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" objective","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":1891,"first_token_ms":382,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":104,"measured":true,"prompt_tokens":1796}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 2 evidence items cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"Ada Lovelace's customer tier is gold. Her total orders amount to $120.50 + $89.99 + $310.00 + $45.25 = $565.74.\n\n- Customer tier: gold (cited: inv:20237da2)\n- Total orders: $565.74 (calculated from inv:81fa0344)\n\nThis result satisfies the objective.","type":"answer"},"turn":0,"type":"event"}
+{"event":{"action":"agents.delegate","context_tokens":107,"duration_ms":3209,"error":null,"id":"call_0","invocation":"3d3ab0e6-52b7-4ca9-a777-b0dfe1b7a30d","ok":true,"raw_tokens":91,"summary":"worker-a done task t-81b25565: Ada Lovelace's customer tier is gold. Her total orders amount to $120.50 + $89.99 + $310.00 + $45.25 = $565.74.\n\n- Customer tier: gold (cited: inv:20237da2)\n- Total orders: $565.74 (calculated from inv:81fa0344)\n\nThis result satisfies the objective.","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":2,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":211,"budget":6000,"capability_index":103,"compressed_rounds":0,"conversation":0,"instructions":408,"loaded_actions":2,"model_output":38,"project":63,"retrieved":0,"role":"reason","rules":0,"step":2,"task":52,"tool_rounds":107,"tool_schemas":711,"total":823,"working_state":51,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":1104,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":37,"measured":true,"prompt_tokens":1838}},"turn":0,"type":"event"}
+{"event":{"action":"agents.delegate","id":"call_0","input":{"objective":"Look up the current temperature in Paris and in Tokyo.","to":"worker-b"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"trivial":false,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":39,"budget":6000,"capability_index":69,"compressed_rounds":0,"conversation":0,"instructions":318,"loaded_actions":1,"model_output":0,"project":56,"retrieved":0,"role":"reason","rules":0,"step":1,"task":73,"tool_rounds":0,"tool_schemas":539,"total":588,"working_state":72,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":641,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":21,"measured":true,"prompt_tokens":1342}},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","id":"call_0","input":{"city":"Paris"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","context_tokens":35,"duration_ms":252,"error":null,"id":"call_0","invocation":"256cb84e-804b-44f6-a5c7-42759d4b6afb","ok":true,"raw_tokens":7,"summary":"city=Paris, temp_c=14","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":2,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":39,"budget":6000,"capability_index":69,"compressed_rounds":0,"conversation":0,"instructions":318,"loaded_actions":1,"model_output":20,"project":56,"retrieved":0,"role":"reason","rules":0,"step":2,"task":73,"tool_rounds":35,"tool_schemas":539,"total":643,"working_state":72,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":692,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":22,"measured":true,"prompt_tokens":1424}},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","id":"call_0","input":{"city":"Tokyo"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","context_tokens":35,"duration_ms":252,"error":null,"id":"call_0","invocation":"cc8b2645-3ccd-4589-b3fb-f462e1103054","ok":true,"raw_tokens":7,"summary":"city=Tokyo, temp_c=22","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":3,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":39,"budget":6000,"capability_index":69,"compressed_rounds":0,"conversation":0,"instructions":318,"loaded_actions":1,"model_output":40,"project":56,"retrieved":0,"role":"reason","rules":0,"step":3,"task":73,"tool_rounds":70,"tool_schemas":539,"total":698,"working_state":72,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Paris","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Tokyo","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"These","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" are","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" temperatures","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Paris","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Tokyo","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" as","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" retrieved","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" from","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" weather","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" service","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":934,"first_token_ms":300,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":34,"measured":true,"prompt_tokens":1508}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 2 evidence items cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"- Paris: 14°C  \n- Tokyo: 22°C  \n\nThese are the current temperatures in Paris and Tokyo, as retrieved from the weather service.","type":"answer"},"turn":0,"type":"event"}
+{"event":{"action":"agents.delegate","context_tokens":76,"duration_ms":2781,"error":null,"id":"call_0","invocation":"70f060e9-deba-4740-98d0-b8682ff43540","ok":true,"raw_tokens":60,"summary":"worker-b done task t-d22c5c0b: - Paris: 14°C  \n- Tokyo: 22°C  \n\nThese are the current temperatures in Paris and Tokyo, as retrieved from the weather service.","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":3,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":211,"budget":6000,"capability_index":103,"compressed_rounds":0,"conversation":0,"instructions":408,"loaded_actions":2,"model_output":76,"project":63,"retrieved":0,"role":"reason","rules":0,"step":3,"task":52,"tool_rounds":183,"tool_schemas":711,"total":937,"working_state":51,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"F","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"acts","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ited","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"):\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'s","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" tier","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" gold","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ites","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"da","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"].\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'s","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" total","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" amount","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" calculated","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" from","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ites","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"fa","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"].\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" temperature","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Paris","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ites","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"f","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"e","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"].\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" temperature","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Tokyo","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ites","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"f","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"e","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"].\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"In","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ference","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" objective","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" has","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" been","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" fully","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" satisfied","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" with","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" all","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" required","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" data","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" points","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Next","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" step","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" No","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" further","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" action","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" needed","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" task","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" complete","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":3707,"first_token_ms":373,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":174,"measured":true,"prompt_tokens":1988}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 2 evidence items cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"Facts (cited):\n\n- Ada Lovelace's customer tier is gold [cites: inv:20237da2].\n- Ada Lovelace's total orders amount to $565.74, calculated from $120.50, $89.99, $310.00, and $45.25 [cites: inv:81fa0344].\n- Current temperature in Paris is 14°C [cites: inv:70f060e9].\n- Current temperature in Tokyo is 22°C [cites: inv:70f060e9].\n\nInference: The objective has been fully satisfied with all required data points.\n\nNext step: No further action is needed. The task is complete.","type":"answer"},"turn":0,"type":"event"}

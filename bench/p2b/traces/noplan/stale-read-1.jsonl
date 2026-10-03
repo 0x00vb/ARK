@@ -1,0 +1,114 @@
+{"request":{"cache_write_tokens":0,"calls":["settings.get"],"error":null,"est_prompt_tokens":1280,"first_token_ms":null,"latency_ms":436,"message_tokens":116,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":0,"system_tokens":546,"tool_schema_tokens":618,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":21,"measured":true,"prompt_tokens":1559}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["settings.set"],"error":null,"est_prompt_tokens":1333,"first_token_ms":null,"latency_ms":607,"message_tokens":169,"messages":4,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1241,"system_tokens":546,"tool_schema_tokens":618,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":27,"measured":true,"prompt_tokens":1639}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["settings.get"],"error":null,"est_prompt_tokens":1391,"first_token_ms":null,"latency_ms":533,"message_tokens":227,"messages":6,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1284,"system_tokens":546,"tool_schema_tokens":618,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":21,"measured":true,"prompt_tokens":1720}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1444,"first_token_ms":212,"latency_ms":1558,"message_tokens":280,"messages":8,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1331,"system_tokens":546,"tool_schema_tokens":618,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":88,"measured":true,"prompt_tokens":1802}},"type":"request"}
+{"event":{"trivial":false,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":118,"budget":6000,"capability_index":258,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":0,"project":50,"retrieved":0,"role":"reason","rules":0,"step":1,"task":34,"tool_rounds":0,"tool_schemas":618,"total":662,"working_state":33,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":436,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":21,"measured":true,"prompt_tokens":1559}},"turn":0,"type":"event"}
+{"event":{"action":"settings.get","id":"call_0","input":{"key":"mode"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"settings.get","context_tokens":34,"duration_ms":0,"error":null,"id":"call_0","invocation":"f97a3796-b509-40db-b6c6-80bc25f3aaaf","ok":true,"raw_tokens":8,"summary":"key=mode, value=slow","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":2,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":118,"budget":6000,"capability_index":258,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":19,"project":50,"retrieved":0,"role":"reason","rules":0,"step":2,"task":34,"tool_rounds":34,"tool_schemas":618,"total":715,"working_state":33,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":607,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":27,"measured":true,"prompt_tokens":1639}},"turn":0,"type":"event"}
+{"event":{"action":"settings.set","id":"call_0","input":{"key":"mode","value":"fast"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"request":{"action":"settings.set","class":"settings.set","input":{"key":"mode","value":"fast"},"preview":"settings.set(key=\"mode\", value=\"fast\")","risk":"mutate","summary":"change a setting"},"type":"approval_requested"},"turn":0,"type":"event"}
+{"event":{"action":"settings.set","class":"settings.set","decision":"allow_once","type":"approval_resolved"},"turn":0,"type":"event"}
+{"event":{"action":"settings.set","context_tokens":35,"duration_ms":0,"error":null,"id":"call_0","invocation":"a0ffc048-cb85-496c-9777-05c36394d5fa","ok":true,"raw_tokens":8,"summary":"key=mode, updated=true","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":3,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":118,"budget":6000,"capability_index":258,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":42,"project":50,"retrieved":0,"role":"reason","rules":0,"step":3,"task":34,"tool_rounds":69,"tool_schemas":618,"total":773,"working_state":33,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":533,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":21,"measured":true,"prompt_tokens":1720}},"turn":0,"type":"event"}
+{"event":{"action":"settings.get","id":"call_0","input":{"key":"mode"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"settings.get","context_tokens":34,"duration_ms":0,"error":null,"id":"call_0","invocation":"4a205590-ee28-41f9-9c40-5700af5daed6","ok":true,"raw_tokens":8,"summary":"key=mode, value=fast","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":4,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":118,"budget":6000,"capability_index":258,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":61,"project":50,"retrieved":0,"role":"reason","rules":0,"step":4,"task":34,"tool_rounds":103,"tool_schemas":618,"total":826,"working_state":33,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" initial","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" value","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" of","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" `","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"mode","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"`","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" setting","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" was","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" `","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"slow","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"`","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ited","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":f","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"a","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":").\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" setting","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" was","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" successfully","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" updated","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" `","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"fast","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"`","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ited","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":a","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ffc","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":").\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" value","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" of","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" `","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"mode","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"`","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" setting","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" `","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"fast","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"`","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ited","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"a","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":").\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Final","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" value","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" of","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" `","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"mode","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"`:","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" fast","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":1558,"first_token_ms":212,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":88,"measured":true,"prompt_tokens":1802}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 3 evidence items cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"- The initial value of the `mode` setting was `slow` (cited: inv:f97a3796).\n- The setting was successfully updated to `fast` (cited: inv:a0ffc048).\n- The current value of the `mode` setting is `fast` (cited: inv:4a205590).\n\nFinal value of `mode`: fast.","type":"answer"},"turn":0,"type":"event"}

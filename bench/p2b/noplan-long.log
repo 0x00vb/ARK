@@ -1,0 +1,13 @@
+simple             rep 0 PASS calls=1 tokens=1387 (0 cached) tools=0 2679ms  all checks passed
+simple             rep 1 PASS calls=1 tokens=1387 (0 cached) tools=0 136ms  all checks passed
+simple             rep 2 PASS calls=1 tokens=1387 (0 cached) tools=0 129ms  all checks passed
+long-session       rep 0 PASS calls=14 tokens=27817 (0 cached) tools=2 28508ms  all checks passed
+long-session       rep 1 PASS calls=17 tokens=32686 (0 cached) tools=5 30567ms  all checks passed
+long-session       rep 2 PASS calls=14 tokens=27116 (0 cached) tools=2 25415ms  all checks passed
+
+noplan-long · live · model ollama:qwen3:4b-instruct · 3 rep(s)
+workload           success  calls    tokens  uncached  tools peak ctx  cost/succ
+simple                1.00    1.0      1387      1379    0.0     1162   $0.00284
+long-session          1.00   15.0     29206     27961    3.0     1797   $0.06837
+TOTAL                 1.00    8.0     15297     14670    1.5     1797   $0.03561
+wrote noplan-long.json

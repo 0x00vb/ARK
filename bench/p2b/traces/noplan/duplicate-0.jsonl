@@ -1,0 +1,106 @@
+{"request":{"cache_write_tokens":0,"calls":["crm.find_customer"],"error":null,"est_prompt_tokens":1293,"first_token_ms":null,"latency_ms":769,"message_tokens":117,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":0,"system_tokens":546,"tool_schema_tokens":630,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":25,"measured":true,"prompt_tokens":1561}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1356,"first_token_ms":206,"latency_ms":1527,"message_tokens":180,"messages":4,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1260,"system_tokens":546,"tool_schema_tokens":630,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":94,"measured":true,"prompt_tokens":1658}},"type":"request"}
+{"event":{"trivial":false,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":130,"budget":6000,"capability_index":273,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":0,"project":50,"retrieved":0,"role":"reason","rules":0,"step":1,"task":27,"tool_rounds":0,"tool_schemas":630,"total":663,"working_state":26,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":770,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":25,"measured":true,"prompt_tokens":1561}},"turn":0,"type":"event"}
+{"event":{"action":"crm.find_customer","id":"call_0","input":{"name":"Ada Lovelace"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"crm.find_customer","context_tokens":40,"duration_ms":0,"error":null,"id":"call_0","invocation":"ab15216e-1b30-4bd1-8a06-4942db293916","ok":true,"raw_tokens":13,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":2,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":130,"budget":6000,"capability_index":273,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":23,"project":50,"retrieved":0,"role":"reason","rules":0,"step":2,"task":27,"tool_rounds":40,"tool_schemas":630,"total":726,"working_state":26,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Fact","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**:","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'s","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" tier","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" gold","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Evidence","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**:","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ab","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"e","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"]","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" cr","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"m","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".find","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"_customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" returned","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" id","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"=C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" name","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"=","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" tier","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"=","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"gold","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"No","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" further","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" action","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" needed","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" to","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" answer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" original","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" query","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" task","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" complete","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Next","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" step","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**:","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Confirm","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" if","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" additional","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" details","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" about","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"e","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".g","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".,","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" history","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":")","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" are","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" required","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":1527,"first_token_ms":206,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":94,"measured":true,"prompt_tokens":1658}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 1 evidence item cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"**Fact**: Ada Lovelace's customer tier is gold.  \n**Evidence**: [inv:ab15216e] crm.find_customer returned id=C-1042, name=Ada Lovelace, tier=gold.\n\nNo further action is needed to answer the original query. The task is complete.  \n\n**Next step**: Confirm if additional details about Ada Lovelace (e.g., orders, history) are required.","type":"answer"},"turn":0,"type":"event"}

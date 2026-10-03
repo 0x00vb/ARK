@@ -11,7 +11,7 @@ Last updated: 2026-10-03
 | | |
 |---|---|
 | Latest tag | v0.6.0 (2026-10-03), on `origin` and `github` |
-| In progress | the measured-runtime milestone (0.7): orchestration control is in `ark-interact`; P0 and P1 are done (live results in `bench/RESULTS.md`: ARK beats a naive loop on Claude Haiku, loses to it on qwen3:4b); P2 under way: preloading, the ready-to-call list and small arrays whole are defaults (qwen3:4b now 41/42 against the naive loop's 36/42); not re-measured on Haiku yet. `ROADMAP.md` has the phases |
+| In progress | the measured-runtime milestone (0.7): orchestration control is in `ark-interact`; P0 and P1 are done (live results in `bench/RESULTS.md`: ARK beats a naive loop on Claude Haiku, loses to it on qwen3:4b); P2 under way: preloading, the ready-to-call list, small arrays whole and the planner off are defaults (qwen3:4b 42/42 at $0.0181 per success, against the naive loop's 36/42 at $0.0268). The user chose to run the Haiku check once, at the 0.7 release gate, after the remaining runtime work; no Claude runs before that without asking. `ROADMAP.md` has the phases |
 
 ## Waiting on this repo
 

@@ -912,12 +912,6 @@ mod tests {
             arguments: serde_json::json!({ "term": "locket" }),
         };
         let script = vec![
-            // The planner runs first (the task has an " and " marker → an investigation).
-            Completion {
-                content: "measure chapter 1 length\ncheck whether the locket recurs".into(),
-                tool_calls: vec![],
-                usage: Usage::measured(40, 10),
-            },
             Completion {
                 content: String::new(),
                 tool_calls: vec![c1],

@@ -1,0 +1,14 @@
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1162,"first_token_ms":2581,"latency_ms":2676,"message_tokens":66,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":0,"system_tokens":546,"tool_schema_tokens":550,"tools":5,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":8,"measured":true,"prompt_tokens":1379}},"type":"request"}
+{"event":{"trivial":true,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":50,"budget":6000,"capability_index":242,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":1,"model_output":0,"project":50,"retrieved":0,"role":"reason","rules":0,"step":1,"task":17,"tool_rounds":0,"tool_schemas":550,"total":612,"working_state":16,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"Hello","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" French","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" \"","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Bonjour","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"\".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":2676,"first_token_ms":2582,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":8,"measured":true,"prompt_tokens":1379}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 0 evidence items cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"Hello in French is \"Bonjour\".","type":"answer"},"turn":0,"type":"event"}

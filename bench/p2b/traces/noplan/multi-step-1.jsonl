@@ -1,0 +1,192 @@
+{"request":{"cache_write_tokens":0,"calls":["crm.find_customer"],"error":null,"est_prompt_tokens":1315,"first_token_ms":null,"latency_ms":708,"message_tokens":139,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":0,"system_tokens":546,"tool_schema_tokens":630,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":25,"measured":true,"prompt_tokens":1579}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["crm.orders"],"error":null,"est_prompt_tokens":1378,"first_token_ms":null,"latency_ms":961,"message_tokens":202,"messages":4,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1270,"system_tokens":546,"tool_schema_tokens":630,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":27,"measured":true,"prompt_tokens":1676}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1463,"first_token_ms":348,"latency_ms":4521,"message_tokens":287,"messages":6,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1322,"system_tokens":546,"tool_schema_tokens":630,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":174,"measured":true,"prompt_tokens":1824}},"type":"request"}
+{"event":{"trivial":false,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":130,"budget":6000,"capability_index":273,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":0,"project":50,"retrieved":0,"role":"reason","rules":0,"step":1,"task":38,"tool_rounds":0,"tool_schemas":630,"total":685,"working_state":37,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":708,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":25,"measured":true,"prompt_tokens":1579}},"turn":0,"type":"event"}
+{"event":{"action":"crm.find_customer","id":"call_0","input":{"name":"Ada Lovelace"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"crm.find_customer","context_tokens":40,"duration_ms":0,"error":null,"id":"call_0","invocation":"8f236eb5-4b24-4bf7-8bed-dbe01386d7f0","ok":true,"raw_tokens":13,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":2,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":130,"budget":6000,"capability_index":273,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":23,"project":50,"retrieved":0,"role":"reason","rules":0,"step":2,"task":38,"tool_rounds":40,"tool_schemas":630,"total":748,"working_state":37,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":961,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":27,"measured":true,"prompt_tokens":1676}},"turn":0,"type":"event"}
+{"event":{"action":"crm.orders","id":"call_0","input":{"customer_id":"C-1042"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"crm.orders","context_tokens":64,"duration_ms":0,"error":null,"id":"call_0","invocation":"729fc0d6-29e6-4671-8b7a-59ff9a8236a5","ok":true,"raw_tokens":37,"summary":"customer_id=C-1042, orders=[{\"amount\":120.5,\"id\":\"O-1\"},{\"amount\":89.99,\"id\":\"O-2\"},{\"amount\":310.0,\"id\":\"O-3\"},{\"amount\":45.25,\"id\":\"O-4\"}]","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":3,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":130,"budget":6000,"capability_index":273,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":44,"project":50,"retrieved":0,"role":"reason","rules":0,"step":3,"task":38,"tool_rounds":104,"tool_schemas":630,"total":833,"working_state":37,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"I","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" have","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" found","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" customer","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" named","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"id","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":")","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" retrieved","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" her","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" amounts","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" of","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" her","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" are","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" \n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Now","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" I","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" will","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" calculate","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" total","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" of","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" these","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" amounts","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Calc","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ulation","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" +","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" +","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" +","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" =","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"I","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" will","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" now","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" record","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" this","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" as","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" a","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" finding","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Finding","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" total","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" amount","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" of","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Ada","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lov","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"el","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ace","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'s","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" orders","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" $","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ites","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"fc","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"d","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"]\n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Next","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" step","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Confirm","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" calculation","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" correct","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" finalize","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" response","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":4521,"first_token_ms":348,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":174,"measured":true,"prompt_tokens":1824}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 2 evidence items cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"I have found the customer named Ada Lovelace (id: C-1042) and retrieved her orders. The amounts of her orders are: $120.50, $89.99, $310.00, and $45.25. \n\nNow I will calculate the total of these amounts.\n\n**Calculation:**  \n120.50 + 89.99 + 310.00 + 45.25 = 565.74\n\nI will now record this as a finding.\n\n**Finding:** The total amount of Ada Lovelace's orders is $565.74. [cites inv:729fc0d6]\n\nNext step: Confirm the calculation is correct and finalize the response.","type":"answer"},"turn":0,"type":"event"}

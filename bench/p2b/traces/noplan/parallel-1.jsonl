@@ -1,0 +1,151 @@
+{"request":{"cache_write_tokens":0,"calls":["weather.current"],"error":null,"est_prompt_tokens":1236,"first_token_ms":null,"latency_ms":367,"message_tokens":101,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":0,"system_tokens":546,"tool_schema_tokens":589,"tools":6,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":21,"measured":true,"prompt_tokens":1468}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["weather.current"],"error":null,"est_prompt_tokens":1291,"first_token_ms":null,"latency_ms":545,"message_tokens":156,"messages":4,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1204,"system_tokens":546,"tool_schema_tokens":589,"tools":6,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":22,"measured":true,"prompt_tokens":1552}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":["weather.current"],"error":null,"est_prompt_tokens":1346,"first_token_ms":null,"latency_ms":542,"message_tokens":211,"messages":6,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1249,"system_tokens":546,"tool_schema_tokens":589,"tools":6,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":22,"measured":true,"prompt_tokens":1638}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1401,"first_token_ms":245,"latency_ms":2012,"message_tokens":266,"messages":8,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1294,"system_tokens":546,"tool_schema_tokens":589,"tools":6,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":127,"measured":true,"prompt_tokens":1715}},"type":"request"}
+{"event":{"trivial":false,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":89,"budget":6000,"capability_index":258,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":2,"model_output":0,"project":50,"retrieved":0,"role":"reason","rules":0,"step":1,"task":27,"tool_rounds":0,"tool_schemas":589,"total":647,"working_state":25,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":367,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":21,"measured":true,"prompt_tokens":1468}},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","id":"call_0","input":{"city":"Paris"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","context_tokens":35,"duration_ms":253,"error":null,"id":"call_0","invocation":"7898a8c6-ec22-4771-80a9-2da5a8d14b80","ok":true,"raw_tokens":7,"summary":"city=Paris, temp_c=14","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":2,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":89,"budget":6000,"capability_index":258,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":2,"model_output":20,"project":50,"retrieved":0,"role":"reason","rules":0,"step":2,"task":27,"tool_rounds":35,"tool_schemas":589,"total":702,"working_state":25,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":545,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":22,"measured":true,"prompt_tokens":1552}},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","id":"call_0","input":{"city":"Tokyo"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","context_tokens":35,"duration_ms":253,"error":null,"id":"call_0","invocation":"2f691547-128a-4caa-ade8-cae1e7f9d0d4","ok":true,"raw_tokens":7,"summary":"city=Tokyo, temp_c=22","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":3,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":89,"budget":6000,"capability_index":258,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":2,"model_output":40,"project":50,"retrieved":0,"role":"reason","rules":0,"step":3,"task":27,"tool_rounds":70,"tool_schemas":589,"total":757,"working_state":25,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":542,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":22,"measured":true,"prompt_tokens":1638}},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","id":"call_0","input":{"city":"Lima"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"action":"weather.current","context_tokens":35,"duration_ms":252,"error":null,"id":"call_0","invocation":"b3dfa4ee-66e6-4a7e-9d57-04696574682a","ok":true,"raw_tokens":7,"summary":"city=Lima, temp_c=18","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":4,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":89,"budget":6000,"capability_index":258,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":2,"model_output":60,"project":50,"retrieved":0,"role":"reason","rules":0,"step":4,"task":27,"tool_rounds":105,"tool_schemas":589,"total":812,"working_state":25,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"F","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"acts","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" (","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ited","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"):","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" temperature","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Paris","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"a","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"].","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" temperature","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Tokyo","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"f","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"6","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"9","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"].","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" temperature","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lima","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":b","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"3","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"dfa","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ee","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"].","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"In","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ference","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" current","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" temperatures","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" in","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Paris","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Tokyo","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Lima","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" are","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" ","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"1","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"°C","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":",","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" respectively","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Next","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" step","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":**","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" None","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" required","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" —","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" query","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" has","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" been","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" fully","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" answered","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" with","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" verified","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" data","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":2012,"first_token_ms":245,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":127,"measured":true,"prompt_tokens":1715}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 3 evidence items cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"**Facts (cited):**  \n- Current temperature in Paris is 14°C [inv:7898a8c6].  \n- Current temperature in Tokyo is 22°C [inv:2f691547].  \n- Current temperature in Lima is 18°C [inv:b3dfa4ee].  \n\n**Inference:**  \nThe current temperatures in Paris, Tokyo, and Lima are 14°C, 22°C, and 18°C, respectively.  \n\n**Next step:** None required — the query has been fully answered with verified data.","type":"answer"},"turn":0,"type":"event"}

@@ -1,0 +1,53 @@
+tool-lookup        rep 0 PASS calls=3 tokens=5094 (0 cached) tools=2 5994ms  all checks passed
+tool-lookup        rep 1 PASS calls=3 tokens=5084 (0 cached) tools=2 3500ms  all checks passed
+tool-lookup        rep 2 PASS calls=3 tokens=5091 (0 cached) tools=2 4228ms  all checks passed
+multi-step         rep 0 PASS calls=3 tokens=5309 (0 cached) tools=2 6277ms  all checks passed
+multi-step         rep 1 PASS calls=3 tokens=5305 (0 cached) tools=2 6195ms  all checks passed
+multi-step         rep 2 PASS calls=4 tokens=7307 (0 cached) tools=3 7720ms  all checks passed
+large-output       rep 0 PASS calls=4 tokens=6810 (0 cached) tools=1 10878ms  all checks passed
+large-output       rep 1 PASS calls=3 tokens=4868 (0 cached) tools=1 4739ms  all checks passed
+large-output       rep 2 PASS calls=4 tokens=10736 (0 cached) tools=1 76520ms  all checks passed
+failure-recovery   rep 0 PASS calls=3 tokens=5108 (0 cached) tools=2 3099ms  all checks passed
+failure-recovery   rep 1 PASS calls=3 tokens=5111 (0 cached) tools=2 2240ms  all checks passed
+failure-recovery   rep 2 PASS calls=3 tokens=5150 (0 cached) tools=2 2588ms  all checks passed
+duplicate          rep 0 PASS calls=2 tokens=3338 (0 cached) tools=1 2303ms  all checks passed
+duplicate          rep 1 PASS calls=2 tokens=3300 (0 cached) tools=1 1469ms  all checks passed
+duplicate          rep 2 PASS calls=2 tokens=3343 (0 cached) tools=1 2016ms  all checks passed
+runaway            rep 0 PASS calls=3 tokens=4315 (0 cached) tools=0 5215ms  all checks passed
+runaway            rep 1 PASS calls=3 tokens=4349 (0 cached) tools=0 6853ms  all checks passed
+runaway            rep 2 PASS calls=3 tokens=4345 (0 cached) tools=0 6539ms  all checks passed
+resume             rep 0 PASS calls=3 tokens=5171 (0 cached) tools=1 5710ms  all checks passed
+resume             rep 1 PASS calls=3 tokens=5208 (0 cached) tools=1 4803ms  all checks passed
+resume             rep 2 PASS calls=3 tokens=5202 (0 cached) tools=1 4715ms  all checks passed
+retrieval          rep 0 PASS calls=3 tokens=6001 (0 cached) tools=1 5251ms  all checks passed
+retrieval          rep 1 PASS calls=3 tokens=6000 (0 cached) tools=1 5933ms  all checks passed
+retrieval          rep 2 PASS calls=3 tokens=5988 (0 cached) tools=1 4466ms  all checks passed
+approval           rep 0 PASS calls=2 tokens=3211 (0 cached) tools=1 2185ms  all checks passed
+approval           rep 1 PASS calls=2 tokens=3214 (0 cached) tools=1 1857ms  all checks passed
+approval           rep 2 PASS calls=2 tokens=3214 (0 cached) tools=1 1889ms  all checks passed
+parallel           rep 0 PASS calls=4 tokens=6544 (0 cached) tools=3 4191ms  all checks passed
+parallel           rep 1 PASS calls=4 tokens=6565 (0 cached) tools=3 4239ms  all checks passed
+parallel           rep 2 PASS calls=4 tokens=6548 (0 cached) tools=3 4852ms  all checks passed
+stale-read         rep 0 PASS calls=4 tokens=6894 (0 cached) tools=3 3587ms  all checks passed
+stale-read         rep 1 PASS calls=4 tokens=6877 (0 cached) tools=3 3141ms  all checks passed
+stale-read         rep 2 PASS calls=4 tokens=6918 (0 cached) tools=3 4077ms  all checks passed
+team               rep 0 PASS calls=9 tokens=15345 (0 cached) tools=6 17235ms  all checks passed
+team               rep 1 PASS calls=9 tokens=15274 (0 cached) tools=6 12702ms  all checks passed
+team               rep 2 PASS calls=9 tokens=15418 (0 cached) tools=6 15956ms  all checks passed
+
+noplan · live · model ollama:qwen3:4b-instruct · 3 rep(s)
+workload           success  calls    tokens  uncached  tools peak ctx  cost/succ
+tool-lookup           1.00    3.0      5090      4939    2.0     1404   $0.01138
+multi-step            1.00    3.3      5974      5731    2.3     1529   $0.01389
+large-output          1.00    3.7      7471      5861    1.0     1406   $0.02783
+failure-recovery      1.00    3.0      5123      5007    2.0     1459   $0.01117
+duplicate             1.00    2.0      3327      3218    1.0     1356   $0.00752
+runaway               1.00    3.0      4336      4005    0.0     1402   $0.01132
+resume                1.00    3.0      5194      4922    1.0     1434   $0.01256
+retrieval             1.00    3.0      5996      5805    1.0     1583   $0.01353
+approval              1.00    2.0      3213      3103    1.0     1304   $0.00730
+parallel              1.00    4.0      6552      6372    3.0     1401   $0.01454
+stale-read            1.00    4.0      6896      6723    3.0     1444   $0.01518
+team                  1.00    9.0     15346     14741    6.0     1678   $0.03553
+TOTAL                 1.00    3.6      6210      5869    1.9     1678   $0.01515
+wrote noplan.json

@@ -116,7 +116,7 @@ pub struct BenchSettings {
 impl Default for BenchSettings {
     fn default() -> Self {
         BenchSettings {
-            planner: true,
+            planner: false,
             critic: true,
             budget: None,
             turn_timeout: None,

@@ -440,7 +440,7 @@ impl Default for ArkBuilder {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(6000),
-            planner: true,
+            planner: false,
             critic: true,
             allow_mutate: false,
             subscriptions: None,

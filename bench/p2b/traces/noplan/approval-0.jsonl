@@ -1,0 +1,98 @@
+{"request":{"cache_write_tokens":0,"calls":["notes.write"],"error":null,"est_prompt_tokens":1245,"first_token_ms":null,"latency_ms":760,"message_tokens":97,"messages":2,"model":"qwen3:4b-instruct","prefix_reuse_tokens":0,"system_tokens":546,"tool_schema_tokens":602,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":25,"measured":true,"prompt_tokens":1509}},"type":"request"}
+{"request":{"cache_write_tokens":0,"calls":[],"error":null,"est_prompt_tokens":1304,"first_token_ms":198,"latency_ms":1422,"message_tokens":156,"messages":4,"model":"qwen3:4b-instruct","prefix_reuse_tokens":1214,"system_tokens":546,"tool_schema_tokens":602,"tools":7,"usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":84,"measured":true,"prompt_tokens":1593}},"type":"request"}
+{"event":{"trivial":true,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":102,"budget":6000,"capability_index":256,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":0,"project":50,"retrieved":0,"role":"reason","rules":0,"step":1,"task":26,"tool_rounds":0,"tool_schemas":602,"total":643,"working_state":24,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":760,"first_token_ms":null,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":25,"measured":true,"prompt_tokens":1509}},"turn":0,"type":"event"}
+{"event":{"action":"notes.write","id":"call_0","input":{"text":"ship the release on Thursday"},"type":"tool_call"},"turn":0,"type":"event"}
+{"event":{"request":{"action":"notes.write","class":"notes.write","input":{"text":"ship the release on Thursday"},"preview":"notes.write(text=\"ship the release on Thursday\")","risk":"mutate","summary":"save a note"},"type":"approval_requested"},"turn":0,"type":"event"}
+{"event":{"action":"notes.write","class":"notes.write","decision":"allow_once","type":"approval_resolved"},"turn":0,"type":"event"}
+{"event":{"action":"notes.write","context_tokens":34,"duration_ms":0,"error":null,"id":"call_0","invocation":"70524aa8-f0ab-4d6a-a2d6-48ea9477b445","ok":true,"raw_tokens":7,"summary":"chars=28, saved=true","type":"tool_result"},"turn":0,"type":"event"}
+{"event":{"index":2,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":102,"budget":6000,"capability_index":256,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":3,"model_output":25,"project":50,"retrieved":0,"role":"reason","rules":0,"step":2,"task":26,"tool_rounds":34,"tool_schemas":602,"total":702,"working_state":24,"workspace":0},"type":"context"},"turn":0,"type":"event"}
+{"event":{"text":"The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" note","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" \"","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ship","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" release","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" on","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Thursday","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"\"","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" has","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" been","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" successfully","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" saved","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" \n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" **","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Fact","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**:","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" The","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" note","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" was","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" saved","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" with","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" text","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" \"","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ship","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" release","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" on","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Thursday","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"\"","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" [","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"c","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"ites","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" inv","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":":","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"7","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"0","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"5","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"2","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"4","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"aa","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"8","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"].","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"-","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" **","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"Next","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Step","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"**:","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" Verify","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" that","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" note","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" accessible","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" confirm","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" alignment","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" with","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" project","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"'s","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" workflow","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"  \n\n","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"I","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" will","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" now","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" check","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" if","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" the","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" note","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" is","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" retrie","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":"vable","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" and","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" confirm","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" its","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":" content","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"text":".","type":"text_delta"},"turn":0,"type":"event"}
+{"event":{"elapsed_ms":1422,"first_token_ms":198,"model":"qwen3:4b-instruct","retries":0,"role":"reason","type":"model_call","usage":{"cache_write_tokens":0,"cached_tokens":0,"completion_tokens":84,"measured":true,"prompt_tokens":1593}},"turn":0,"type":"event"}
+{"event":{"detail":"answered; 1 evidence item cited","passed":true,"type":"self_check"},"turn":0,"type":"event"}
+{"event":{"streamed":true,"text":"The note \"ship the release on Thursday\" has been successfully saved. \n\n- **Fact**: The note was saved with the text \"ship the release on Thursday\" [cites inv:70524aa8].  \n- **Next Step**: Verify that the note is accessible and confirm alignment with the project's workflow.  \n\nI will now check if the note is retrievable and confirm its content.","type":"answer"},"turn":0,"type":"event"}

@@ -3,6 +3,57 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Overhead on small tasks: the planner (P2, 2026-10-03)
+
+Target: after tool selection, ARK still cost 1.1 to 1.5x the naive loop per success on
+`multi-step`, `resume`, `parallel` and `team` (qwen3:4b). Local qwen and simulated runs
+only. Reports in `bench/p2b/`; `qwen-noplan.json` joins the two live runs.
+
+Where the extra cost came from on those four (live qwen3:4b, mean per run, cost at the
+reference price; from the traces in `bench/p2/traces/qwen-B`):
+
+| Source | multi-step | resume | parallel | team | Cause |
+|---|---:|---:|---:|---:|---|
+| Plan calls | 1 | 1 | 1 | 4 | one per agent and task |
+| Extra reasoning calls the plan's steps caused | 1 (`calc.eval` for "sum the amounts") | 1.3 (a search repeated after the restart; a `record_state` written as text) | 2 (one city per reply) | 2 (one task per step: worker-b ran two) | the steps |
+| Answer length (output tokens, ARK / naive) | 172 / 51 | 90 / 14 per turn | 45 / 29 | 299 / 74 | the instructions ask for facts, inference and a next step |
+| Prompt per reasoning call (ARK / naive) | 1,790 / 2,350 | 1,720 / 2,320 | 1,620 / 2,320 | 1,660 / 2,420 | ARK is cheaper per call |
+| Cost per run (ARK / naive, USD x 1000) | 17.5 / 15.1 | 18.0 / 14.4 | 14.5 / 10.2 | 37.8 / 25.9 | |
+
+Repeated context, tool discovery and result summaries were not the cause: every ARK call is
+24 to 31% cheaper than a naive call (index plus meta tools are smaller than 30 full schemas,
+and preloading leaves no `load_action` round trip). The cause is the number of calls, and
+the planner made most of them. Its steps also stay in the working state into the next turn,
+which is why `resume` searched again after the restart.
+
+Planner off (14 workloads x 3, qwen3:4b):
+
+| Configuration | Success | Cost / success (USD) | Model calls / run | Tokens / run |
+|---|---:|---:|---:|---:|
+| P2 tool selection (planner on) | 41/42 | 0.0189 | 5.3 | 8,085 |
+| **Planner off (now the default)** | **42/42** | **0.0181** | **4.2** | **7,508** |
+| naive loop (P1) | 36/42 | 0.0268 | 4.3 | 11,014 |
+
+| Workload, cost per success | Planner on | Planner off | Naive |
+|---|---:|---:|---:|
+| multi-step | 0.0175 | 0.0139 | 0.0151 |
+| resume | 0.0180 | 0.0126 | 0.0144 |
+| parallel | 0.0145 | 0.0145 | 0.0102 |
+| team | 0.0378 | 0.0355 | 0.0259 |
+| duplicate | 0.0121 | 0.0075 | 0.0095 |
+| retrieval | 0.0184 | 0.0135 | failed |
+
+- `multi-step` and `resume` now cost less than the naive loop; `retrieval` and `stale-read`
+  pass 3/3 (they failed without the planner in M5, before preloading and the ready list).
+- `large-output` (3/3 against 2/3) and the 12-turn `long-session` cost 6 to 24% more per
+  success: one large-output run read the 3,000 lines in three tries.
+- Still dearer than naive: `parallel` (1.42x: qwen calls one city per reply even without a
+  plan; naive's every-schema request gets all three in one), `team` (1.37x: a lead and two
+  workers each pay a final answer), `tool-lookup` (1.16x).
+- Simulated (13 workloads without the long session): 13/13 both ways, cost per success
+  0.0075 to 0.0071, dearer on none.
+- Not run on Claude Haiku: the 0.7 release gate measures all P2 defaults there once.
+
 ## Tool selection on a small model (P2, 2026-10-03)
 
 Target from P1: on qwen3:4b the naive loop beat ARK. Local qwen and simulated runs only.
@@ -256,7 +307,7 @@ after).
 
 | Change | Live result (qwen3:4b, 3 reps) | Decision |
 |---|---|---|
-| Planner off | success 0.85 to 0.72, cost per success +29% (`m5/live-qwen3-4b-noplanner.json`) | planner stays on |
+| Planner off | success 0.85 to 0.72, cost per success +29% (`m5/live-qwen3-4b-noplanner.json`) | planner stayed on; after P2 it measured the other way and is off (ADR 0008) |
 | Planning and critic on qwen2.5:3b (fast tier) | success 0.85 to 0.69, cost per success +19%; Ollama also swaps models on every plan call (`m5/live-qwen3-4b-fasttier.json`) | single tier by default; the router stays available |
 | One-line summaries per action in the capability index | tool-lookup 0/3 to 0/3, approval 0/3 to 0/3, multi-step 3/3 to 2/3, tokens +15 to 40% (`m5/rejected-index-summaries-live.json`) | reverted |
 

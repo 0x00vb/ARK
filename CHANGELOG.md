@@ -62,6 +62,11 @@ What changed for people building on ARK, per release. Not a commit log.
   of its count, and says how to read the rows of an array it counts (`get_evidence` with
   `match`). `ARK_INLINE_ROWS=0` restores the count only. Results with a distiller are
   unchanged. Measured live on qwen3:4b (`bench/RESULTS.md`, P2).
+- **The planner is off by default** (`Harness`, `ArkBuilder`, `Orchestrator` agents,
+  `BenchSettings`). Its steps cost calls on small tasks and helped none: on qwen3:4b, 42/42
+  without it against 41/42, 0.0181 against 0.0189 per success (`bench/RESULTS.md`, P2
+  overhead; ADR 0008). `.planner(true)` or `AgentSpec::planner(true)` turns it back on;
+  `ark-bench --planner` measures it.
 - `ark-bench`'s simulated model reads raw JSON results as it reads ARK's cards, and finds
   the task in a plain transcript. ARK's simulated numbers do not move.
 - `bench/baseline.json` has the `team` workload (14 workloads); `bench/baseline-naive.json`

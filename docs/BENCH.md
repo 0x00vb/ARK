@@ -30,7 +30,7 @@ cargo build --release -p ark-bench
 | `--reps N` | repetitions per workload |
 | `--only a,b` | run some workloads |
 | `--long-turns N` | turns in the long-session workload (live runs cap it at 12) |
-| `--no-planner`, `--no-critic`, `--budget N` | runtime settings to compare |
+| `--planner`, `--no-critic`, `--budget N` | runtime settings to compare (the planner is off by default) |
 | `--turn-timeout S` | a turn that takes longer fails its run instead of stalling the benchmark |
 | `--label` | the name the comparison shows |
 | `--harness ark` / `naive` | ARK's harness (default) or the naive baseline loop |

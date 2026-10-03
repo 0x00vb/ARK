@@ -123,7 +123,7 @@ setting: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 | `.provider(p)` / `.router(r)` | from the environment | one model, or a fast and a strong tier |
 | `.context_budget(tokens)` | 6000 | request budget |
 | `.max_steps(n)` | 16 | step limit per turn |
-| `.planner(bool)` / `.critic(bool)` | on | planning and critic passes |
+| `.planner(bool)` / `.critic(bool)` | off / on | planning pass (off: ADR 0008) and critic pass |
 | `.allow_mutate(bool)` | off | run state-changing actions without approval |
 
 ## Documentation

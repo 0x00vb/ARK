@@ -75,6 +75,7 @@ async fn every_request_is_explained_by_role() {
     let p: Arc<dyn Provider> = model.clone();
     let mut events = Vec::new();
     Harness::new(ModelRouter::single(p))
+        .planner(true)
         .max_steps(3)
         .ask(
             &engine,

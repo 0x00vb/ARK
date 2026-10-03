@@ -12,7 +12,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | `main` | v0.6.0 |
 | Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; pins v0.6.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b: success 0.85, cost per successful task $0.0298 (v0.4.0, `bench/RESULTS.md`) |
-| Phase | **Measured runtime** (0.7): P0 and P1 done (`bench/RESULTS.md`); P2 under way (preloading adopted). See Next. |
+| Phase | **Measured runtime** (0.7): P0 and P1 done (`bench/RESULTS.md`); P2 under way (preloading, tool selection, planner off). See Next. |
 
 ## State
 
@@ -67,7 +67,7 @@ ends with numbers in `bench/RESULTS.md`; nothing in P2 lands without a before/af
 | Before P0 | Orchestration control (spawn, submit, pause, resume, end, message, cancel, retry) moves from `ark-ui`'s Host into `ark-interact`, so the terminal can operate agents and an eval driven from it can too | `/agent` and `/task` in both front-ends; the Host forwards |
 | P0 foundations | In `ark-bench`: a naive baseline harness (full transcript every call, every tool offered, raw results, no guards) graded by the same checks; orchestration workloads (a lead and workers); deterministic fault injection (temporary provider errors, malformed calls); record and replay of a live run; a trace per run | `ark-bench run --harness naive`, `--faults`, `--record`/`--replay`, `--traces`; simulated numbers for both harnesses |
 | P1 measure | Live runs of both harnesses on the suite (2 or 3 models, 3 repetitions) | a baseline table in `bench/RESULTS.md`, no harness change |
-| P2 improve | One change at a time, each measured. Done: action preloading (default 2); tool choice on small models (preload floor, ready-to-call list, small arrays whole: qwen3:4b 35/42 to 41/42, ahead of the naive loop's 36/42; Haiku not yet re-measured). Next: ARK's overhead on small tasks (still 1.1 to 1.5x naive's cost on several) (1.5 to 5 times the naive loop's calls and cost on 9 of 14 simulated workloads: tool discovery, planner and critic a short task does not need). Then step checkpoints (resume a task where it stopped), a model routing policy, tool-result compression, a cost model for delegating, recovery rules per failure class | before/after per change |
+| P2 improve | One change at a time, each measured. Done: action preloading (default 2); tool choice on small models (preload floor, ready-to-call list, small arrays whole: qwen3:4b 35/42 to 41/42, ahead of the naive loop's 36/42; Haiku not yet re-measured). Done: the planner off by default (its steps caused most of the extra calls on small tasks; qwen3:4b 42/42 at $0.0181 per success, ADR 0008). Next: `parallel` (1.4x naive: a small model calls one item per reply) and `team` (1.4x: each agent pays a final answer). Then step checkpoints (resume a task where it stopped), a model routing policy, tool-result compression, a cost model for delegating, recovery rules per failure class | before/after per change |
 | P3 prove | One script and one report: ARK against the naive baseline on the same tasks and models | `bench/RESULTS.md` headline, reproducible |
 
 Folded in from the earlier list:
@@ -107,7 +107,7 @@ Outside the milestone:
 | Uncached input in workloads that never record state (+2% simulated) | simulated, `uncached` |
 
 Already measured and rejected (do not retry without a new reason): action summaries in the
-index, planner on a smaller model, planner off. See `bench/RESULTS.md`.
+index, planner on a smaller model. (Planner off was rejected in M5 and adopted after P2: ADR 0008.) See `bench/RESULTS.md`.
 
 ## Notable changes
 

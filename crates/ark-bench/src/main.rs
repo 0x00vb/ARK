@@ -44,7 +44,11 @@ enum Cmd {
         /// Turns in the long-session workload (live runs cap it at 12).
         #[arg(long, default_value_t = 500)]
         long_turns: usize,
+        /// Draft a plan before a non-trivial task (off by default).
         #[arg(long)]
+        planner: bool,
+        /// The default; kept so older commands still run.
+        #[arg(long, conflicts_with = "planner")]
         no_planner: bool,
         #[arg(long)]
         no_critic: bool,
@@ -105,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
             reps,
             only,
             long_turns,
+            planner,
             no_planner,
             no_critic,
             budget,
@@ -138,7 +143,7 @@ async fn main() -> anyhow::Result<()> {
                 fast,
             };
             let settings = BenchSettings {
-                planner: !no_planner,
+                planner: planner && !no_planner,
                 critic: !no_critic,
                 budget,
                 turn_timeout: turn_timeout.map(std::time::Duration::from_secs),

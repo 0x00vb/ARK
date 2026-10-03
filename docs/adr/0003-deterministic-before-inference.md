@@ -15,8 +15,8 @@ change). A change that saves tokens and loses success is a regression.
 
 ## Consequences
 - Ideas measured and rejected are listed in `ROADMAP.md` and `bench/RESULTS.md` (action
-  summaries in the index, planner on a smaller model, planner off). Do not retry them without
-  a new reason.
+  summaries in the index, planner on a smaller model). Do not retry them without a new
+  reason. "Planner off" was on that list until ADR 0008 measured it again after P2.
 - `bench/baseline.json` moves only on purpose, in the same commit as the change.
 
 ## Check

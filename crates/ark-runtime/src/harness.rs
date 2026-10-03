@@ -274,7 +274,9 @@ impl Harness {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(2),
             ready_list: std::env::var("ARK_READY_LIST").map_or(true, |v| v != "0"),
-            planner: true,
+            // Off: on qwen3:4b the plan cost calls and success on nothing it helped
+            // (bench/RESULTS.md, P2 overhead).
+            planner: false,
             critic: true,
             focus: None,
             conversation: None,

@@ -8,9 +8,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.7.0** (2026-10-03): the measured runtime P0 to P2 (naive baseline, team workloads, faults, record and replay; preloading, the ready list, small arrays whole, planner off), the window's projects, top bar, Settings, Terminal, Browser and Files, and the chat that creates agents |
-| `main` | v0.7.0 |
-| Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; pins v0.7.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Stable release | **v0.8.0** (2026-10-03): MCP servers added while ARK runs, skills read on demand (ADR 0009), web search and fetch on every model with no key (ADR 0010), the API trim. v0.7.0 brought the measured runtime P0 to P2 and the window apps build on |
+| `main` | v0.8.0 |
+| Consumers | SecRes (pins v0.5.0; moving to v0.8.0), ARK Desktop (`ark-desktop` repo; pins v0.7.0; moving to v0.8.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

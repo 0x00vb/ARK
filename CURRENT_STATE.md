@@ -10,15 +10,15 @@ Last updated: 2026-10-03
 
 | | |
 |---|---|
-| Latest tag | v0.7.0 (2026-10-03), on `origin` and `github` |
-| In progress | the measured-runtime milestone is closed at v0.7.0; what it left open (the Haiku check, `parallel` and `team` overhead, output tokens) is under "Deferred" in `ROADMAP.md`. Since v0.7.0 on `main` (`[Unreleased]`): MCP plugins added and removed while ARK runs (`/plugin`, Settings › Tool servers), skills read on demand (`/skills`, Settings › Skills, ADR 0009), and the web (`web.search`, `web.fetch`, ADR 0010; step C1 of ROADMAP › Capabilities) |
+| Latest tag | v0.8.0 (2026-10-03), on `origin` and `github` |
+| In progress | Next step 1 closes with the consumer upgrades: SecRes and ark-desktop move to v0.8.0. v0.8.0 shipped MCP plugins while ARK runs (`/plugin`), skills on demand (`/skills`, ADR 0009), the web (`web.search`, `web.fetch`, ADR 0010; step C1 of ROADMAP › Capabilities) and the API trim. The measured-runtime leftovers are under "Deferred" in `ROADMAP.md` |
 
 ## Waiting on this repo
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | nothing for its current work (v0.7.0). The next tag brings it Settings › Tool servers and Settings › Skills with no change of its own; per-agent skill switches in its agent inspector need that tag too (`AgentSpec::skills`, method `skills`). The web needs one line once on that tag: `.web(true)` on its `Ark::builder()` |
-| SecRes | nothing; pins v0.5.0 |
+| ark-desktop | nothing; v0.8.0 is out. It brings Settings › Tool servers and Settings › Skills with no change of its own; per-agent skill switches in its agent inspector need that tag too (`AgentSpec::skills`, method `skills`). The web needs one line: `.web(true)` on its `Ark::builder()` |
+| SecRes | nothing; v0.8.0 is out (pins v0.5.0 until its upgrade lands) |
 
 ## Next
 

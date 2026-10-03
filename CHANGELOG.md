@@ -9,6 +9,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-03
+
+Capabilities an app turns on without code of its own: MCP servers added while ARK runs,
+skills read on demand, and web search and fetch on every model with no key. The public API is
+trimmed of items no caller used.
+
 ### Added
 - MCP plugins change while the engine runs: `Engine::plugins()` (`ark_runtime::Plugins`:
   `list`, `remove`, `restart`), `Engine::add_plugin(PluginSpec)`, `PluginStatus`. A change
@@ -28,7 +34,6 @@ What changed for people building on ARK, per release. Not a commit log.
   `skills`; Add skills opens the Terminal with `npx skills add` typed).
 - `ark-bench`: the `skill` workload. Live on qwen3:4b it passes 3 of 3 in 2 calls
   (`bench/RESULTS.md`).
-
 - The web: `web.search` and `web.fetch` (`ark_tools::web`: `WebAdapter`, `SearchBackend`,
   `ResultPage`, `Wikipedia`, `distill`), on with `ArkBuilder::web(true)` or
   `ArkBuilder::web_with(adapter)`, offered to orchestrated agents whose `tools` allow them.

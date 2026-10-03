@@ -101,6 +101,17 @@ fn assemble(
         s.insert("turn_timeout_s".into(), t.as_secs().to_string());
     }
     s.insert("harness".into(), settings.harness.as_str().into());
+    // Runtime settings read from the environment, so a report says how it was made.
+    for var in [
+        "ARK_PRELOAD_ACTIONS",
+        "ARK_SESSION_REUSE",
+        "ARK_CTX_BUDGET",
+        "ARK_MODEL_RETRIES",
+    ] {
+        if let Ok(v) = std::env::var(var) {
+            s.insert(format!("env.{var}"), v);
+        }
+    }
     if let Some(f) = &settings.faults {
         s.insert("faults".into(), f.describe());
     }

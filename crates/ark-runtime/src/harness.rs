@@ -205,6 +205,9 @@ pub struct Harness {
     allow_mutate: bool,
     max_steps: usize,
     budget: u32,
+    /// Actions to load before the first step because they match the task's words (see
+    /// [`catalog::matching_actions`]); 0 leaves discovery to the model.
+    preload: usize,
     planner: bool,
     critic: bool,
     focus: Option<Focus>,
@@ -256,6 +259,10 @@ impl Harness {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(6000),
+            preload: std::env::var("ARK_PRELOAD_ACTIONS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
             planner: true,
             critic: true,
             focus: None,
@@ -306,6 +313,11 @@ impl Harness {
     }
     pub fn budget(mut self, tokens: u32) -> Self {
         self.budget = tokens;
+        self
+    }
+    /// Load up to `n` actions that match the task's words before the first step.
+    pub fn preload(mut self, n: usize) -> Self {
+        self.preload = n;
         self
     }
     pub fn planner(mut self, yes: bool) -> Self {
@@ -416,6 +428,11 @@ impl Harness {
         // on-demand load appended. The order never changes within a turn, so loading one more
         // action keeps every earlier tool definition in the cacheable prefix.
         let mut loaded: Vec<String> = core_loaded(engine, profile);
+        for name in catalog::matching_actions(&engine.registry, question, self.preload) {
+            if !loaded.contains(&name) {
+                loaded.push(name);
+            }
+        }
 
         let first = FirstTurn {
             workspace: wsctx.digest(6),

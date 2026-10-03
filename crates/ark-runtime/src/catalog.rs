@@ -134,6 +134,58 @@ pub fn list_actions(registry: &Registry, adapter: &str) -> Vec<ActionDescriptor>
         .collect()
 }
 
+/// Up to `n` actions whose name or summary shares words with `task`, best first. A word of
+/// the action's name scores 2, as does a summary word of six letters or more (specific
+/// enough: "temperature"); a shorter summary word scores 1. Words match when one is a prefix
+/// of the other and the shorter has at least four letters ("orders" and "order"). An action
+/// needs a score of 2 to be chosen. No model call.
+pub fn matching_actions(registry: &Registry, task: &str, n: usize) -> Vec<String> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let words = |s: &str| -> Vec<String> {
+        s.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() >= 3)
+            .map(str::to_lowercase)
+            .filter(|w| !STOP.contains(&w.as_str()))
+            .collect()
+    };
+    let same = |a: &str, b: &str| {
+        let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
+        short == long || (short.len() >= 4 && long.starts_with(short))
+    };
+    let mut asked = words(task);
+    asked.sort();
+    asked.dedup();
+    let mut scored: Vec<(u32, String)> = registry
+        .actions()
+        .into_iter()
+        .filter_map(|d| {
+            let name = words(&d.name);
+            let summary = words(&d.summary);
+            let mut score = 0;
+            for q in &asked {
+                if name.iter().any(|w| same(q, w)) {
+                    score += 2;
+                } else if let Some(w) = summary.iter().find(|w| same(q, w)) {
+                    score += if w.len() >= 6 && q.len() >= 6 { 2 } else { 1 };
+                }
+            }
+            (score >= 2).then_some((score, d.name))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    scored.into_iter().take(n).map(|(_, name)| name).collect()
+}
+
+/// Words that say nothing about which tool a task needs.
+const STOP: &[&str] = &[
+    "the", "and", "for", "with", "that", "this", "from", "what", "which", "then", "tell", "all",
+    "her", "his", "its", "their", "them", "are", "was", "were", "has", "have", "can", "you",
+    "your", "please", "into", "about", "now", "after", "before", "there", "here", "how", "why",
+    "when", "who", "get", "any", "one", "two",
+];
+
 /// Render one action descriptor as a provider tool definition (its full schema).
 pub fn action_tooldef(d: &ActionDescriptor) -> ToolDef {
     ToolDef {
@@ -269,6 +321,54 @@ pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn matching_actions_follow_the_tasks_words() {
+        use ark_core::ActionDescriptor;
+        struct T;
+        #[async_trait::async_trait]
+        impl ark_tools::Adapter for T {
+            fn name(&self) -> &str {
+                "t"
+            }
+            fn actions(&self) -> Vec<ActionDescriptor> {
+                vec![
+                    ActionDescriptor::new(
+                        "crm.find_customer",
+                        "look a customer up by name",
+                        RiskTier::Read,
+                    ),
+                    ActionDescriptor::new("crm.orders", "list a customer's orders", RiskTier::Read),
+                    ActionDescriptor::new(
+                        "weather.current",
+                        "current temperature for a city",
+                        RiskTier::Read,
+                    ),
+                    ActionDescriptor::new("units.convert", "convert between units", RiskTier::Read),
+                ]
+            }
+            async fn run(
+                &self,
+                _: &str,
+                _: serde_json::Value,
+                _: &ark_tools::RunCtx<'_>,
+            ) -> ark_tools::Result<ark_tools::ActionOutput> {
+                unreachable!()
+            }
+        }
+        let mut r = Registry::new();
+        r.register(std::sync::Arc::new(T));
+        assert_eq!(
+            matching_actions(&r, "Find the customer Ada and total her orders", 3),
+            vec!["crm.find_customer", "crm.orders"]
+        );
+        assert_eq!(
+            matching_actions(&r, "What temperature is it in Lima?", 3),
+            vec!["weather.current"]
+        );
+        assert!(matching_actions(&r, "Say hello in French.", 3).is_empty());
+        assert!(matching_actions(&r, "Find the customer", 0).is_empty());
+    }
+
     use super::*;
 
     #[test]

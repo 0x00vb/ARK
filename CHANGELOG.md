@@ -18,6 +18,11 @@ What changed for people building on ARK, per release. Not a commit log.
   (`--faults`, `--seed`, `ark_bench::faults`), record and replay (`--record`, `--replay`,
   `ark_bench::cassette`), per-run traces (`--traces`). `RunRecord.faults_injected` and
   `.replay_diverged`. See `docs/BENCH.md`.
+- Action preloading, off by default: `Harness::preload(n)` (`ARK_PRELOAD_ACTIONS=n`) loads up
+  to `n` actions whose name or summary matches the task's words before the first step
+  (`ark_runtime::catalog::matching_actions`), saving the `load_action` round trips. On by
+  default only if live runs pay for it (ROADMAP, P2).
+- `ark-bench` reports record runtime settings read from the environment (`env.*`).
 
 ### Changed
 - `ark-bench`'s simulated model reads raw JSON results as it reads ARK's cards, and finds

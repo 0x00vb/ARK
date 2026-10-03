@@ -75,6 +75,28 @@ reason: `Interaction::ark_mut`, `App::ark_builder`, `Harness::budget_tokens`,
 `Store::get_session`, `ActionDescriptor::with_output_schema`, `SurfaceRef::with_title`,
 `PendingApproval::is_closed`, `Ark::ask_simple`.
 
+### Capabilities
+
+What "gives it the capabilities it needs" means in the product test: agents and teams use the
+web, a browser, mail, calendars and services, and later the desktop, with no setup that
+names MCP, connectors or scopes. One rule for all of it: **a capability is a source of
+actions behind the existing seams** (`Adapter`, `Registry`, `RiskTier` and the
+`ApprovalGate`, `AgentSpec::tools`, the acquisition seam). There is no second tool or
+permission system. Service details stay in data at the edge.
+
+| # | Step | Builds on | Done means |
+|---|---|---|---|
+| C1 | **Web**: `web.search`, `web.fetch` (ADR 0010) | `Adapter`, `Provider` | done on `main`: every model searches; an agent reads pages; the `web` workload |
+| C2 | **Connections**: `plugins.json` entries grow `url` (remote MCP over HTTP), `auth` (token, OAuth per the MCP spec; secrets in the OS keychain), per-tool risk overrides. A small catalog (data) of known services: label, one line, how to connect. One capability list computed in `ark-interact` (`✓ Web`, `○ Slack · Connect`); `/connect` and Settings › Capabilities, with Tool servers as its advanced view | `Plugins`, `McpAdapter` | Gmail, Calendar and GitHub connect from the list in both front-ends; reading mail runs on its own, sending asks |
+| C3 | **Task-first access**: an agent that lacks a capability asks for it through the acquisition seam, backed by the catalog; the person sees "ARK needs Gmail to finish this · Connect" (an approval request), connects, and the turn continues with the new tools. Approval classes per tool, and grants kept per project | `AcquisitionProvider`, `ApprovalGate` | "research these companies and email me the report" works from an empty setup with one Connect click and one send approval |
+| C4 | **Browser and shared resources**: Browser as a catalog entry (Playwright MCP; no browser code in ARK). A connection says how it may be shared: `shared` (one server for all), `per_agent` (an isolated browser per agent), `exclusive` (the person's logged-in browser: one task holds it, others wait, shown as "waiting for Browser, used by researcher"). The lead sees which capabilities exist when it creates agents | C2, the scheduler | two agents browse at once without collisions; a third waits for the exclusive one; a test drives it with scripted models |
+| C5 | **Desktop / computer use**: a catalog entry with `exclusive` sharing (one screen) and every action gated | C4 | one agent operates an app while others work; nothing else touches the screen |
+
+Order: C1 to C3 make a single agent useful; C4 makes teams safe with resources that cannot be
+shared; C5 last, as the riskiest and least proven. Overlap with the steps above: step 5's saved
+approval rules are C3's grants per project; step 6's remote capabilities are C2's
+connections, run where ARK runs. Where C2 to C5 sit relative to steps 1 to 3 is not decided.
+
 | Kept out on purpose | Until |
 |---|---|
 | Remote MCP servers (HTTP/SSE `url` entries) | a consumer needs one; stdio servers only today |

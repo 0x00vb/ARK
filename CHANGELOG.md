@@ -23,6 +23,9 @@ What changed for people building on ARK, per release. Not a commit log.
   (`ark_runtime::catalog::matching_actions`), saving the `load_action` round trips. On by
   default only if live runs pay for it (ROADMAP, P2).
 - `ark-bench` reports record runtime settings read from the environment (`env.*`).
+- Whole small results, off by default: `DistillerSet::whole_below(tokens)`
+  (`ARK_WHOLE_RESULT_TOKENS`) passes a result no distiller recognizes whole when it is that
+  small, instead of a summary the model may have to open with `get_evidence`.
 
 ### Changed
 - `ark-bench`'s simulated model reads raw JSON results as it reads ARK's cards, and finds

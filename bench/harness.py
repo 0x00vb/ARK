@@ -7,7 +7,8 @@
 Per workload and report: successes over runs, model calls per run, tokens per run and cost per
 successful run (total cost over successes; "failed" when nothing succeeded). Then the totals
 over the workloads every report has, and, for the first report against each other one, the
-workloads where it is cheaper per success, dearer, or the only one to succeed.
+workloads where it is cheaper per success, dearer (beyond 2% either way), or the only one to
+succeed.
 """
 import json, sys
 
@@ -72,9 +73,9 @@ def main(argv):
                 only_first.append(w)
             elif a["cps"] is None:
                 only_other.append(w)
-            elif a["cps"] < b["cps"]:
+            elif a["cps"] < b["cps"] * 0.98:
                 cheaper.append(f"{w} ({a['cps'] / b['cps']:.2f}x)")
-            else:
+            elif a["cps"] > b["cps"] * 1.02:
                 dearer.append(f"{w} ({a['cps'] / b['cps']:.2f}x)")
         print(f"\n{reports[0]['label']} against {r['label']}:")
         print(f"- cheaper per success: {', '.join(cheaper) or 'none'}")

@@ -34,6 +34,16 @@ pub type Distiller =
 pub struct DistillerSet {
     distillers: Vec<Distiller>,
     common: bool,
+    /// A result no distiller recognizes goes whole when its JSON is at most this many tokens
+    /// (`ARK_WHOLE_RESULT_TOKENS`, default 0: always the generic summary).
+    whole_below: u32,
+}
+
+fn whole_below_from_env() -> u32 {
+    std::env::var("ARK_WHOLE_RESULT_TOKENS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
 }
 
 impl Default for DistillerSet {
@@ -48,6 +58,7 @@ impl DistillerSet {
         DistillerSet {
             distillers: Vec::new(),
             common: false,
+            whole_below: whole_below_from_env(),
         }
     }
 
@@ -56,12 +67,20 @@ impl DistillerSet {
         DistillerSet {
             distillers: Vec::new(),
             common: true,
+            whole_below: whole_below_from_env(),
         }
     }
 
     /// Add a distiller (tried after earlier ones, before the common distiller and the fallback).
     pub fn push(&mut self, d: Distiller) {
         self.distillers.push(d);
+    }
+
+    /// Pass a result no distiller recognizes whole when it is at most `tokens` tokens; a
+    /// summary of a small result can cost a `get_evidence` round trip to read it anyway.
+    pub fn whole_below(mut self, tokens: u32) -> Self {
+        self.whole_below = tokens;
+        self
     }
 
     /// Builder form of [`push`](DistillerSet::push).
@@ -83,6 +102,12 @@ impl DistillerSet {
         if self.common {
             if let Some(r) = distill_common(action, out) {
                 return r;
+            }
+        }
+        if self.whole_below > 0 {
+            let whole = out.to_string();
+            if ark_model::estimate_tokens(&whole) <= self.whole_below {
+                return (whole, Vec::new());
             }
         }
         generic_summary(out)
@@ -456,6 +481,23 @@ mod tests {
             &set(),
         );
         assert_eq!(file.summary, "read a.md (3 lines)");
+    }
+
+    #[test]
+    fn a_small_unknown_result_can_go_whole() {
+        let out = json!({ "orders": [{ "id": "O-1", "amount": 120.5 }, { "id": "O-2", "amount": 89.99 }] });
+        let summary =
+            |set: DistillerSet| distill(&inv("crm.orders", json!({}), out.clone()), &set).summary;
+        assert_eq!(
+            summary(DistillerSet::with_common().whole_below(0)),
+            "orders=2 items"
+        );
+        assert!(summary(DistillerSet::with_common().whole_below(200)).contains("\"amount\":89.99"));
+        // Larger than the limit: the summary again.
+        assert_eq!(
+            summary(DistillerSet::with_common().whole_below(5)),
+            "orders=2 items"
+        );
     }
 
     #[test]

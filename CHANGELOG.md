@@ -23,11 +23,22 @@ What changed for people building on ARK, per release. Not a commit log.
   (`ark_runtime::catalog::matching_actions`), saving the `load_action` round trips. On by
   default only if live runs pay for it (ROADMAP, P2).
 - `ark-bench` reports record runtime settings read from the environment (`env.*`).
+- Window: projects are folders. The sidebar lists projects with their chats beneath, folds
+  the ones not current, and renames a project or changes its folder from its menu.
+  `Interaction::{open_project, add_project, rename_project, set_project_folder,
+  project_sessions}`; page methods `open_project`, `add_project`, `rename_project`,
+  `project_folder`, `sessions {project}`.
+- Window: a top bar with tabs for app views and buttons for app panels marked `nav`, and a
+  Settings page whose sections apps register with `ark.setting` (⌘,).
 - Whole small results, off by default: `DistillerSet::whole_below(tokens)`
   (`ARK_WHOLE_RESULT_TOKENS`) passes a result no distiller recognizes whole when it is that
   small, instead of a summary the model may have to open with `get_evidence`.
 
 ### Changed
+- Switching or opening a project returns to its most recent session instead of starting a
+  new one (`Interaction::set_project`).
+- Window: `nav` on `ark.view` and `ark.panel` puts the view in a top-bar tab and the panel
+  on a top-bar button, not in the sidebar. "New session" is "New chat".
 - `ark-bench`'s simulated model reads raw JSON results as it reads ARK's cards, and finds
   the task in a plain transcript. ARK's simulated numbers do not move.
 - `bench/baseline.json` has the `team` workload (14 workloads); `bench/baseline-naive.json`

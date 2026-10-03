@@ -7,6 +7,8 @@ import { markdown } from "./md.js";
 import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
 import { Sidebar } from "./sidebar.js";
+import { Topbar } from "./topbar.js";
+import { SETTINGS, settingsView } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
 import { registry, installApi, dispatchExt, presenterFor } from "./ext.js";
 
@@ -46,6 +48,10 @@ const api = {
   showConversation: () => showConversation(),
   currentView: () => state.view,
   switchProject: (name) => change("switch_project", { name }),
+  openProject: (id) => change("open_project", { id }),
+  // `{ path }` makes a folder a project (or opens the one it is); `{ name }` an empty one.
+  addProject: (params) => change("add_project", params),
+  openSettings: (section) => showView(SETTINGS, section ? { section } : undefined),
   loadEarlier,
   openInvocation: (id) => {
     const key = `inv:${id}`;
@@ -78,13 +84,14 @@ const api = {
       if (!state.extChanged) return;
       state.extChanged = false;
       sidebar?.renderExtensions();
+      topbar?.render();
     });
   },
 };
 
 installApi(api);
 
-let thread, composer, sidebar, pane;
+let thread, composer, sidebar, topbar, pane;
 
 function retitle(key, title) {
   const t = pane.tabs.get(key);
@@ -211,10 +218,9 @@ function applySummary(s) {
   const changed = s.session.id !== state.sessionId;
   state.summary = s;
   state.sessionId = s.session.id;
-  state.title = s.session.title || (s.session.turns ? "Untitled session" : "");
-  if (!state.view) $("#session-title").textContent = state.title;
+  state.title = s.session.title || (s.session.turns ? "Untitled chat" : "");
+  showTitle();
   composer.setModel(s.model);
-  sidebar.setProject(s.project);
   document.title = s.session.title ? `${s.session.title} · ${s.name}` : s.name;
   return changed;
 }
@@ -370,7 +376,7 @@ function present(d) {
 /// Show an app's view in place of the conversation. A view is built once; showing it again
 /// passes new params to `update`, or calls `refresh`.
 function showView(id, params) {
-  const v = registry.views.get(id);
+  const v = id === SETTINGS ? settingsView : registry.views.get(id);
   if (!v) return toast(`No view named ${id}`);
   let entry = views.get(id);
   if (!entry) {
@@ -394,8 +400,9 @@ function showView(id, params) {
   state.view = id;
   appEl.dataset.view = id;
   $("#stage").hidden = false;
-  $("#session-title").textContent = v.title;
+  showTitle();
   sidebar.markView(id);
+  topbar.mark(id);
   reportFocus();
 }
 
@@ -404,10 +411,18 @@ function showConversation() {
   state.view = null;
   delete appEl.dataset.view;
   $("#stage").hidden = true;
-  $("#session-title").textContent = state.title || "";
+  showTitle();
   sidebar.markView(null);
+  topbar.mark(null);
   reportFocus();
   composer.focus();
+}
+
+/// The chat's title over the conversation; over a view of the project (whose tab says which),
+/// the project's name; else the view's title (Settings).
+function showTitle() {
+  const v = state.view && (state.view === SETTINGS ? settingsView : registry.views.get(state.view));
+  $("#session-title").textContent = !v ? state.title || "" : v.nav ? state.summary?.project?.name || "" : v.title;
 }
 
 /// What the person looks at: the view's focus, else the side pane's.
@@ -430,6 +445,7 @@ function palette() {
   const list = h("div.palette-list", { role: "listbox" });
   const items = [
     ...[...registry.views.values()].map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),
+    ...(registry.settings.size ? [{ label: "Settings", hint: "⌘,", run: () => api.openSettings() }] : []),
     ...[...registry.panels.values()].map((p) => ({ label: p.title, hint: "panel", run: () => api.openPanel(p.id) })),
     ...registry.actions.filter((a) => !a.where || a.where === "palette").map((a) => ({ label: a.label, hint: "action", run: () => a.run({}, window.ark) })),
     ...(state.commands || []).map((c) => ({ label: `/${c.name}${c.usage ? " " + c.usage : ""}`, hint: c.summary, run: () => (c.usage && !c.usage.startsWith("[") ? composer.set(`/${c.name} `) : runCommand(`/${c.name}`)) })),
@@ -474,6 +490,7 @@ function keys(e) {
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); return palette(); }
   if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); return api.newSession(); }
+  if (mod && e.key === "," && registry.settings.size) { e.preventDefault(); return api.openSettings(); }
   if (state.view) return;
   if (mod && e.key.toLowerCase() === "b") { e.preventDefault(); return toggleSidebar(); }
   if (mod && e.key.toLowerCase() === "\\") { e.preventDefault(); return pane.toggle(); }
@@ -561,10 +578,12 @@ async function bootOnce(again) {
   state.commands = hello.commands || [];
   composer.commands = state.commands;
   if (state.ui.accent) document.documentElement.style.setProperty("--accent", state.ui.accent);
-  sidebar.brand(hello.summary, state.ui);
   applySummary(hello.summary);
   composer.placeholder = `Ask ${hello.summary.name} anything`;
-  if (!again) sidebar.renderExtensions();
+  if (!again) {
+    sidebar.renderExtensions();
+    topbar.render();
+  }
   await loadSession();
   if (hello.running) {
     thread.begin(hello.running);
@@ -590,6 +609,7 @@ async function start() {
   thread = new Thread($("#thread"), $("#scroller"), api);
   composer = new Composer(api);
   sidebar = new Sidebar(api);
+  topbar = new Topbar(api);
   pane = new Pane(appEl, api);
   fit();
   addEventListener("resize", fit);
@@ -599,7 +619,8 @@ async function start() {
     if (appEl.dataset.drawer !== "open") return;
     const inside = e.target.closest(".sidebar");
     if (e.target.closest("#reveal-sidebar, #toggle-sidebar")) return;
-    if (!inside || e.target.closest("button, a")) appEl.dataset.drawer = "closed";
+    if (e.target.closest(".project-chev, .project-more, #add-project, .chats-more")) return;
+    if (!inside || e.target.closest("button, a, .session")) appEl.dataset.drawer = "closed";
   });
   $("#toggle-sidebar").addEventListener("click", toggleSidebar);
   $("#reveal-sidebar").addEventListener("click", toggleSidebar);

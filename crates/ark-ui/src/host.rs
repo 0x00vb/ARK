@@ -475,6 +475,11 @@ impl Host {
             }
             "sessions" => {
                 let ix = self.idle().await?;
+                // One project's (by id), the current project's, or every project's.
+                let project = s("project");
+                if !project.is_empty() {
+                    return Ok(serde_json::to_value(ix.project_sessions(&project)?)?);
+                }
                 let all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
                 Ok(serde_json::to_value(ix.sessions(all)?)?)
             }
@@ -506,6 +511,35 @@ impl Host {
                 let name = s("name");
                 self.change(move |ix| ix.switch_project(&name).map(|_| ()))
                     .await
+            }
+            "open_project" => {
+                let id = s("id");
+                self.change(move |ix| ix.open_project(&id).map(|_| ()))
+                    .await
+            }
+            // A folder becomes a project (or opens the one it already is); a bare name is
+            // a project with a scratch folder.
+            "add_project" => {
+                let (name, path) = (s("name"), s("path"));
+                self.change(move |ix| {
+                    let dir =
+                        (!path.trim().is_empty()).then(|| std::path::PathBuf::from(path.trim()));
+                    ix.add_project(&name, dir.as_deref()).map(|_| ())
+                })
+                .await
+            }
+            "rename_project" => {
+                let (id, name) = (s("id"), s("name"));
+                self.change(move |ix| ix.rename_project(&id, &name).map(|_| ()))
+                    .await
+            }
+            "project_folder" => {
+                let (id, path) = (s("id"), s("path"));
+                self.change(move |ix| {
+                    ix.set_project_folder(&id, std::path::Path::new(path.trim()))
+                        .map(|_| ())
+                })
+                .await
             }
             // The folder the project's tools work in; `path` changes it.
             "workspace" => {

@@ -32,10 +32,12 @@ serves in a browser without the desktop feature: `writer --serve`.
 |---|---|
 | Conversation | Your messages, streamed answers, and the agent's work as short activity lines ("Reading chapter-04.md"). A work block folds to one line ("Used 3 tools · Reading notes") when the turn ends. A tool row opens on click: arguments, the result the model saw, duration, approval, and what it added to the context. |
 | Composer | Model, and a quiet "24% context" meter that runs `/context` when clicked. The model menu lists models by backend (subscriptions, Ollama, APIs with a key); a backend that is not ready shows its sign-in or install command. |
-| Sidebar | New session, the app's navigation, projects and sessions with times. |
+| Sidebar | New chat, then projects with their chats beneath (times, "Show more" after 8). The current project is unfolded, the others fold; a chevron unfolds one without opening it, and a fold choice lasts until the current project changes. A project's menu renames it and changes its folder; "+" adds a folder as a project, or an empty one. Settings at the bottom. |
+| Top bar | The title (the chat's, or the project's over one of its views). With app views marked `nav`: tabs, "Chat" first. Buttons on the right for app panels marked `nav`. |
 | Side pane | Only domain content the person or the agent asked for: an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
 | Inline reports | `/context`, `/usage`, `/state`, `/trace` and every other command render in the conversation. There is no permanent inspector. |
-| App views | An app's `ark.view` takes the main column in place of the conversation (ARK Desktop's graph, agents and tasks). Choosing a session brings the conversation back. |
+| App views | An app's `ark.view` takes the main column in place of the conversation (ARK Desktop's graph, agents and tasks). The "Chat" tab, or choosing a chat, brings the conversation back. |
+| Settings | One page in the main column for the app's and the account's configuration, with the sections apps register (`ark.setting`). ARK has none of its own, so it shows only once one exists. A project's own settings are in its menu. |
 | Agents' questions | An orchestrated agent's approval waits in a tray at the bottom right, whatever the main column shows. |
 
 Narrow windows (up to 760 px, or up to 1000 px with the pane open) fold the sidebar into a
@@ -50,7 +52,8 @@ drawer opened from the top-left button. Below 760 px an open pane covers the win
 | ⇧↩ | New line |
 | esc | Close the palette, else deny a pending approval, else stop the turn, else close the pane |
 | ⌘K | Command palette |
-| ⌘N | New session |
+| ⌘N | New chat |
+| ⌘, | Settings (when an app registered a section) |
 | ⌘B | Sidebar |
 | ⌘\ | Side pane |
 
@@ -113,8 +116,9 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 
 | Call | Registers |
 |---|---|
-| `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` adds it to the sidebar |
-| `ark.view({ id, title, icon, nav, render })` | A view in the main column, in place of the conversation; `nav: true` adds it to the sidebar. Built once, kept while hidden |
+| `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` adds a button for it to the top bar |
+| `ark.view({ id, title, icon, nav, render })` | A view of the current project in the main column, in place of the conversation; `nav: true` makes it a top-bar tab (a string names the tab). Built once, kept while hidden |
+| `ark.setting({ id, title, icon, render(el, api) })` | A section of the Settings page |
 | `ark.artifactViewer({ id, label, match, primary, presents, wide, render })` | A view of an artifact; when several match, the artifact header switches between them (plus Raw) |
 | `ark.toolRenderer({ match, render })` | How a tool call's full output renders when its row is opened |
 | `ark.action({ id, label, icon, where, when, run })` | A button on an artifact, or an entry in the ⌘K palette |
@@ -163,7 +167,7 @@ front-end uses the same.
 
 | Methods | |
 |---|---|
-| Session | `hello`, `summary`, `sessions`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models` |
+| Session | `hello`, `summary`, `sessions {project?}`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `open_project {id}` (back to its last chat), `add_project {path?, name?}` (a folder becomes a project, or opens the one it is), `rename_project {id, name}`, `project_folder {id, path}`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models` |
 | Turn | `send`, `steer`, `cancel`, `approve`, `command` |
 | Views | `transcript`, `trace`, `call`, `context`, `usage`, `state` |
 | Store | `artifacts`, `artifact` (the project's, or one an orchestrated agent produced), `invocation`, `run_action` |

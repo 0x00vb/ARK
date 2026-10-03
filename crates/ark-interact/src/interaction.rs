@@ -591,13 +591,38 @@ impl Interaction {
 
     pub fn projects(&self) -> anyhow::Result<Vec<ProjectSummary>> {
         Ok(self
+            .top_projects()?
+            .iter()
+            .map(|p| self.project_summary(p))
+            .collect())
+    }
+
+    /// The projects a person works in (not orchestrated agents' child projects), newest first.
+    fn top_projects(&self) -> anyhow::Result<Vec<Project>> {
+        Ok(self
             .engine()
             .store
             .list_projects()
             .map_err(ark_runtime::AgentError::from)?
-            .iter()
+            .into_iter()
             .filter(|p| p.parent.is_none())
-            .map(|p| self.project_summary(p))
+            .collect())
+    }
+
+    fn top_project(&self, id: &str) -> anyhow::Result<Project> {
+        self.top_projects()?
+            .into_iter()
+            .find(|p| p.id.as_str() == id)
+            .ok_or_else(|| anyhow::anyhow!("no project with id `{id}`"))
+    }
+
+    /// The sessions of the project with this id, most recent first.
+    pub fn project_sessions(&self, id: &str) -> anyhow::Result<Vec<SessionSummary>> {
+        let p = self.top_project(id)?;
+        let current = self.session.id().clone();
+        Ok(Session::list(self.engine(), Some(&p.id))?
+            .iter()
+            .map(|r| SessionSummary::of(r, &p.name, r.id == current))
             .collect())
     }
 
@@ -615,18 +640,110 @@ impl Interaction {
         Ok(self.engine().workspace_dir(&self.project.id)?)
     }
 
-    /// Work in another project (created if missing), in a fresh session there.
+    /// Work in another project (created if missing), where its last session left off.
     pub fn switch_project(&mut self, name: &str) -> anyhow::Result<Project> {
         let p = self.ark.find_or_create_project(name.trim(), "")?;
         self.set_project(p.clone())?;
         Ok(p)
     }
 
-    /// Work in `project` from now on, in a fresh session there.
+    /// Work in the project with this id, where its last session left off.
+    pub fn open_project(&mut self, id: &str) -> anyhow::Result<Project> {
+        let p = self.top_project(id)?;
+        self.set_project(p.clone())?;
+        Ok(p)
+    }
+
+    /// Add a project and work in it. With `folder`, the project is that folder, named after
+    /// it unless `name` is given; a folder that already is a project opens that project.
+    /// Without, `name` is opened or created and works in a scratch folder in the store.
+    pub fn add_project(
+        &mut self,
+        name: &str,
+        folder: Option<&std::path::Path>,
+    ) -> anyhow::Result<Project> {
+        let name = name.trim();
+        let Some(dir) = folder else {
+            anyhow::ensure!(!name.is_empty(), "a project needs a name");
+            return self.switch_project(name);
+        };
+        anyhow::ensure!(dir.is_dir(), "{} is not a folder", dir.display());
+        let dir = dir.canonicalize()?;
+        let top = self.top_projects()?;
+        let path = dir.to_string_lossy();
+        let p = match top.iter().find(|p| p.workspace.as_deref() == Some(&*path)) {
+            Some(p) => p.clone(),
+            None => {
+                let base = match name {
+                    "" => dir
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "project".into()),
+                    n => n.to_string(),
+                };
+                let p = self.ark.create_project(&unique_name(&base, &top), "")?;
+                self.engine().set_workspace(&p.id, &dir)?
+            }
+        };
+        self.set_project(p.clone())?;
+        Ok(p)
+    }
+
+    /// Rename the project with this id. Names stay unique, since `/project <name>` finds a
+    /// project by name.
+    pub fn rename_project(&mut self, id: &str, name: &str) -> anyhow::Result<Project> {
+        let name = name.trim();
+        anyhow::ensure!(!name.is_empty(), "a project needs a name");
+        let top = self.top_projects()?;
+        anyhow::ensure!(
+            !top.iter().any(|p| p.name == name && p.id.as_str() != id),
+            "a project named {name} already exists"
+        );
+        let mut p = self.top_project(id)?;
+        p.name = name.to_string();
+        self.engine()
+            .store
+            .put_project(&p)
+            .map_err(ark_runtime::AgentError::from)?;
+        self.project_updated(&p);
+        Ok(p)
+    }
+
+    /// The folder the project with this id works in, from now on.
+    pub fn set_project_folder(
+        &mut self,
+        id: &str,
+        dir: &std::path::Path,
+    ) -> anyhow::Result<Project> {
+        let p = self.top_project(id)?;
+        let p = self.engine().set_workspace(&p.id, dir)?;
+        self.project_updated(&p);
+        Ok(p)
+    }
+
+    fn project_updated(&mut self, p: &Project) {
+        if p.id == self.project.id {
+            self.project = p.clone();
+            self.project_changed();
+        }
+    }
+
+    /// Work in `project` from now on, in its most recent session (a new one if it has none).
     pub fn set_project(&mut self, project: Project) -> anyhow::Result<()> {
+        if project.id == self.project.id {
+            self.project = project;
+            return Ok(());
+        }
+        let latest = self.ark.latest_session(&project.id)?;
         self.project = project;
         self.follow_project()?;
-        self.new_session()?;
+        match latest {
+            Some(s) => {
+                self.session = s;
+                self.reset_turn_state();
+            }
+            None => self.new_session()?,
+        }
         self.refresh_names();
         self.project_changed();
         Ok(())
@@ -994,4 +1111,16 @@ pub fn load_trace(engine: &Engine, session: &str, index: u32) -> Option<TurnReco
         .ok()
         .flatten()
         .and_then(|v| serde_json::from_value(v).ok())
+}
+
+/// `base`, or `base 2`, `base 3` .. when a project already has that name.
+fn unique_name(base: &str, taken: &[Project]) -> String {
+    let free = |n: &str| !taken.iter().any(|p| p.name == n);
+    if free(base) {
+        return base.to_string();
+    }
+    (2..)
+        .map(|i| format!("{base} {i}"))
+        .find(|n| free(n))
+        .unwrap_or_default()
 }

@@ -74,6 +74,9 @@ const PATHS = {
   bolt: '<path d="M9 2L4 9h4l-1 5 5-7H8z"/>',
   play: '<path d="M5 3.5v9l7-4.5z"/>',
   command: '<path d="M6 6V4.5A1.5 1.5 0 1 0 4.5 6H11.5A1.5 1.5 0 1 0 10 4.5V11.5A1.5 1.5 0 1 0 11.5 10H4.5A1.5 1.5 0 1 0 6 11.5z"/>',
+  plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+  more: '<circle cx="4" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r=".9" fill="currentColor" stroke="none"/>',
+  settings: '<path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/>',
 };
 
 export function icon(name, cls = "") {

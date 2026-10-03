@@ -97,7 +97,7 @@ const scenarios = {
     await page.click("#reveal-sidebar");
     await page.waitForTimeout(350);
     assert.deepEqual(await state(), { compact: "true", drawer: "open", sidebarLeft: 0, hscroll: false });
-    await page.locator(".sidebar button", { hasText: "New session" }).click();
+    await page.click("#new-session");
     await page.waitForTimeout(350);
     const closed = await state();
     assert.equal(closed.drawer, "closed");
@@ -190,16 +190,19 @@ const scenarios = {
   },
 };
 
-// An app view replaces the conversation and gives it back; an orchestrated agent's question
-// waits in the tray outside any turn, and esc does not deny it.
+// An app view marked `nav` is a tab in the top bar: it replaces the conversation, and the "Chat"
+// tab gives it back. An orchestrated agent's question waits in the tray outside any turn, and
+// esc does not deny it.
 async function agents(page) {
   await page.evaluate(() => window.ark.view({ id: "board", title: "Board", nav: true, render: (el) => el.append("the board") }));
-  const nav = page.locator('.nav-row[data-view="board"]');
-  await nav.click();
+  const tab = page.locator('.view-tab[data-view="board"]');
+  await tab.click();
   assert.equal(await page.locator("#stage").isVisible(), true);
   assert.equal(await page.locator("#scroller").isVisible(), false);
-  assert.equal(await page.locator("#session-title").innerText(), "Board");
-  assert.equal(await nav.getAttribute("aria-current"), "true");
+  // The tab names the view, so the title names the project.
+  const project = await page.evaluate(async () => (await window.ark.call("projects")).find((p) => p.current).name);
+  assert.equal(await page.locator("#session-title").innerText(), project);
+  assert.equal(await tab.getAttribute("aria-selected"), "true");
 
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:orch", (m) => m.event.type === "task_finished" && ok(m.event.state))));
   await page.evaluate(async () => {
@@ -216,9 +219,10 @@ async function agents(page) {
   assert.equal(await done, "done");
   await card.waitFor({ state: "detached" });
 
-  await page.locator("#new-session").click();
+  await page.locator('.view-tab[data-view=""]').click();
   assert.equal(await page.locator("#stage").isVisible(), false);
   assert.equal(await page.locator("#scroller").isVisible(), true);
+  assert.equal(await tab.getAttribute("aria-selected"), "false");
 }
 scenarios.agents = agents;
 

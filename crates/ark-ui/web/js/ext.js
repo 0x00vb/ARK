@@ -2,8 +2,13 @@
 //
 //   ark.panel({ id, title, icon, nav, presents, wide, fill, render(el, params, api) })
 //   ark.view({ id, title, icon, nav, render(el, params, api) })
-//                      a view in the main column, in place of the conversation; `nav` lists
-//                      it in the sidebar. Choosing a session brings the conversation back.
+//                      a view of the current project in the main column, in place of the
+//                      conversation; `nav` makes it a tab in the top bar beside "Chat".
+//                      Choosing a chat brings the conversation back. A panel's `nav` puts a
+//                      button for it in the top bar.
+//   ark.setting({ id, title, icon, render(el, api) })
+//                      a section of the Settings page: the app's or the account's
+//                      configuration, not one project's. Settings shows once one exists.
 //   ark.artifactViewer({ id, label, match(artifact), primary, presents, wide, render(el, artifact, api, params) })
 //   ark.toolRenderer({ match(action), render(el, call, api) })
 //   ark.action({ id, label, icon, where: "artifact" | "palette", when(ctx), run(ctx, api) })
@@ -23,6 +28,7 @@
 export const registry = {
   panels: new Map(),
   views: new Map(),
+  settings: new Map(),
   viewers: [],
   toolRenderers: [],
   actions: [],
@@ -62,6 +68,11 @@ export function installApi(api) {
     view(v) {
       need(v, ["id", "title", "render"], "view");
       registry.views.set(v.id, v);
+      api._changed();
+    },
+    setting(s) {
+      need(s, ["id", "title", "render"], "setting");
+      registry.settings.set(s.id, s);
       api._changed();
     },
     artifactViewer(v) {

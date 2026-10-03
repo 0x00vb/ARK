@@ -17,7 +17,7 @@ Last updated: 2026-10-03
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | nothing; pins v0.6.0 |
+| ark-desktop | the next tag, for the window's project sidebar, top bar and Settings page (`[Unreleased]`); its uncommitted `ui/` changes use them through the local `[patch]` |
 | SecRes | nothing; pins v0.5.0 |
 
 ## Next

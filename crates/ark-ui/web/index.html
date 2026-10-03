@@ -13,29 +13,26 @@
   </head>
   <body>
     <div id="app" class="app" data-pane="closed" data-sidebar="open">
-      <aside class="sidebar" aria-label="Sessions">
+      <aside class="sidebar" aria-label="Projects">
         <div class="sidebar-top" data-tauri-drag-region>
           <button class="icon-btn" id="toggle-sidebar" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
         </div>
-        <div class="brand">
-          <span class="brand-logo" id="brand-logo"></span>
-          <span class="brand-name" id="brand-name"></span>
-        </div>
         <button class="nav-row new-session" id="new-session">
           <span class="nav-icon" data-icon="compose"></span>
-          <span class="nav-label">New session</span>
+          <span class="nav-label">New chat</span>
           <kbd>⌘N</kbd>
         </button>
-        <nav class="nav-ext" id="nav-ext" aria-label="App"></nav>
         <div class="section-label">
-          <button class="project-switch" id="project-switch" title="Switch project">
-            <span id="project-name"></span>
-            <span class="chev" data-icon="chevron-down"></span>
-          </button>
+          <span>Projects</span>
+          <button class="icon-btn small" id="add-project" title="Add a project" aria-label="Add a project" data-icon="plus"></button>
         </div>
-        <div class="session-list" id="session-list" role="list"></div>
+        <div class="projects" id="projects" role="tree" aria-label="Projects"></div>
         <div class="sidebar-foot">
           <div class="status-ext" id="status-ext"></div>
+          <button class="nav-row" id="open-settings" hidden>
+            <span class="nav-icon" data-icon="settings"></span>
+            <span class="nav-label">Settings</span>
+          </button>
         </div>
       </aside>
 
@@ -43,7 +40,9 @@
         <header class="topbar" data-tauri-drag-region>
           <button class="icon-btn reveal-sidebar" id="reveal-sidebar" title="Show sidebar (⌘B)" aria-label="Show sidebar"></button>
           <div class="title" id="session-title" data-tauri-drag-region></div>
+          <nav class="segs view-tabs" id="view-tabs" role="tablist" aria-label="Views" hidden></nav>
           <div class="top-actions">
+            <span class="panel-launchers" id="panel-launchers"></span>
             <button class="icon-btn" id="toggle-pane" title="Side panel (⌘\\)" aria-label="Side panel"></button>
           </div>
         </header>

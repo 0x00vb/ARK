@@ -1,0 +1,59 @@
+// Settings: the app's and the account's configuration, as one page in the main column. ARK
+// draws the page and lists the sections apps register with `ark.setting`; it has none of its
+// own. A project's own settings (name, folder) are in its menu in the sidebar.
+
+import { h, icon, clear } from "./dom.js";
+import { registry } from "./ext.js";
+
+export const SETTINGS = "ark:settings";
+
+export const settingsView = {
+  id: SETTINGS,
+  title: "Settings",
+  render(el, params) {
+    el.classList.add("settings");
+    const list = h("nav.settings-list", { "aria-label": "Settings" });
+    const body = h("div.settings-body");
+    el.append(list, body);
+    let current = null;
+    let ctl = {};
+
+    const pick = (id) => {
+      const s = registry.settings.get(id) || registry.settings.values().next().value;
+      if (!s) {
+        clear(body).append(h("p.settings-none", "Nothing to set here."));
+        return;
+      }
+      if (current === s.id) return ctl.refresh?.();
+      try { ctl.dispose?.(); } catch (e) { console.error(e); }
+      current = s.id;
+      const host = h("div.settings-section", { "data-id": s.id });
+      clear(body).append(h("h1.settings-title", s.title), host);
+      try {
+        ctl = s.render(host, window.ark) || {};
+      } catch (e) {
+        console.error(e);
+        host.append(h("p.settings-none", String(e)));
+        ctl = {};
+      }
+      mark();
+    };
+
+    // A list only when there is more than one section.
+    const mark = () => {
+      clear(list);
+      list.hidden = registry.settings.size < 2;
+      for (const s of registry.settings.values()) {
+        list.append(h("button.nav-row", { type: "button", "aria-current": String(s.id === current), onclick: () => pick(s.id) },
+          h("span.nav-icon", icon(s.icon || "settings")), h("span.nav-label", s.title)));
+      }
+    };
+
+    pick(params?.section);
+    return {
+      update: (p) => pick(p?.section),
+      refresh: () => { mark(); ctl.refresh?.(); },
+      focus: () => ctl.focus?.() || null,
+    };
+  },
+};

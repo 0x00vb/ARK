@@ -171,6 +171,54 @@ async fn commands_return_structured_reports_and_effects() {
 }
 
 #[tokio::test]
+async fn projects_are_folders_and_reopen_where_they_left_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ix = open(dir.path());
+    let ctl = TurnControl::new();
+    ix.run_turn("read the notes", &ctl, |_, _| {})
+        .await
+        .result
+        .unwrap();
+    let home = ix.project().clone();
+    let chat = ix.session().id().clone();
+
+    // A folder becomes a project named after it; adding it again opens the same project.
+    let folder = tempfile::tempdir().unwrap();
+    let novel = folder.path().join("novel");
+    std::fs::create_dir(&novel).unwrap();
+    let p = ix.add_project("", Some(&novel)).unwrap();
+    assert_eq!(p.name, "novel");
+    assert_ne!(
+        ix.session().id(),
+        &chat,
+        "a project without chats starts one"
+    );
+    assert_eq!(ix.add_project("", Some(&novel)).unwrap().id, p.id);
+    assert!(ix.add_project("", Some(&novel.join("missing"))).is_err());
+
+    // Another folder with the same name gets a free name; renaming onto a taken one fails.
+    let other = folder.path().join("b").join("novel");
+    std::fs::create_dir_all(&other).unwrap();
+    let second = ix.add_project("", Some(&other)).unwrap();
+    assert_eq!(second.name, "novel 2");
+    assert!(ix.rename_project(second.id.as_str(), "novel").is_err());
+    assert_eq!(
+        ix.rename_project(second.id.as_str(), "draft").unwrap().name,
+        "draft"
+    );
+    assert_eq!(ix.project().name, "draft");
+
+    // Opening a project returns to its last chat; its chats are listed by project id.
+    ix.open_project(home.id.as_str()).unwrap();
+    assert_eq!(ix.session().id(), &chat);
+    let chats = ix.project_sessions(home.id.as_str()).unwrap();
+    assert!(chats.iter().any(|s| s.id == chat.as_str() && s.current));
+    assert!(ix.open_project("nope").is_err());
+    let names: Vec<_> = ix.projects().unwrap().into_iter().map(|p| p.name).collect();
+    assert!(names.contains(&"novel".into()) && names.contains(&"draft".into()));
+}
+
+#[tokio::test]
 async fn late_steering_comes_back_undelivered() {
     let dir = tempfile::tempdir().unwrap();
     let mut ix = open(dir.path());

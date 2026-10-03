@@ -347,7 +347,7 @@ impl Graph {
 
     /// The graph as a Mermaid flowchart (an orchestration diagram): one box per agent with
     /// its tasks inside, delegation and dependency edges between tasks. It passes
-    /// [`ark_core::diagram::validate`] for [`ark_core::DiagramKind::Orchestration`].
+    /// [`ark_tools::diagram::validate`] for [`ark_tools::diagram::DiagramKind::Orchestration`].
     pub fn to_mermaid(&self) -> String {
         let mut s = String::from("flowchart LR\n");
         for a in &self.agents {

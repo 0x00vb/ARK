@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ark_core::diagram::{validate, DiagramKind};
 use ark_core::{RuleBinding, RuleScope, RuleSet};
 use ark_model::capacity::Capacity;
 use ark_model::session::mock::{Call, MockSessions};
@@ -14,6 +13,7 @@ use ark_model::session::{SessionBackend, SessionPolicy, SubscriptionRuntime};
 use ark_model::{Completion, Message, Provider, ToolCall, ToolDef, Usage};
 use ark_orchestrate::*;
 use ark_sdk::prelude::*;
+use ark_tools::diagram::{validate, DiagramKind};
 use serde_json::json;
 use tokio::sync::Notify;
 
@@ -873,7 +873,7 @@ async fn diagrams_are_artifacts_that_flow_back_to_the_delegator() {
         .unwrap()
         .unwrap();
     let text = String::from_utf8(f.ark.engine().store.read_blob(&art.id).unwrap()).unwrap();
-    let d = ark_core::Diagram::from_text(&text).unwrap();
+    let d = ark_tools::diagram::Diagram::from_text(&text).unwrap();
     assert_eq!(d.kind, DiagramKind::Sequence);
     assert!(d.validate().is_ok());
     assert!(o.graph().edges.iter().any(|e| e.kind == EdgeKind::Produced));

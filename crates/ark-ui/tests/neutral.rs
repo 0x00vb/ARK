@@ -169,3 +169,35 @@ fn core_types_carry_no_code_concepts() {
         hits.join("\n")
     );
 }
+
+/// The core's code names no file format: formats a tool stores (diagrams, documents) live
+/// with the tool, in `ark-tools` or the app. Comments may name one as an example.
+#[test]
+fn core_names_no_file_format() {
+    let core = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("ark-core/src");
+    let mut hits = Vec::new();
+    for e in std::fs::read_dir(core).unwrap().flatten() {
+        let text = std::fs::read_to_string(e.path()).unwrap().to_lowercase();
+        for (n, line) in text.lines().enumerate() {
+            if line.trim_start().starts_with("#[cfg(test)]") {
+                break;
+            }
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for w in ["mermaid", "markdown", "html", "pdf"] {
+                if line.contains(w) {
+                    hits.push(format!("{}:{}: `{w}`", e.path().display(), n + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "file formats in ark-core:\n{}",
+        hits.join("\n")
+    );
+}

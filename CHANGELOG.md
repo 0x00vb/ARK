@@ -39,7 +39,7 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
   selected per task by `ark_runtime::rules::select`, looked up with the `rules` tool
   (`RulesTool`), and traced (`HarnessEvent::Rules`, `TaskRecord.rules`). Project bindings
   apply to single-agent turns too.
-- **Diagrams**: `ark_core::diagram` (`Diagram`, `DiagramKind`, `validate`) and the opt-in
+- **Diagrams**: `ark_tools::diagram` (`Diagram`, `DiagramKind`, `validate`; not in `ark-core`, which names no file format) and the opt-in
   `ark_tools::diagram::Diagrams` tool (`diagram.create`, `diagram.read`) store validated
   Mermaid diagrams as `diagram` artifacts, with versions.
 - `Registry::filtered` and `ark_tools::action_matches`: a per-agent view of the tools.

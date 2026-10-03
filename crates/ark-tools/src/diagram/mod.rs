@@ -1,11 +1,13 @@
 //! Diagrams as a tool. Register [`Diagrams`] and an agent can store a validated Mermaid
 //! diagram as an artifact (`diagram.create`), revise one (pass `revises`), and read one back
 //! (`diagram.read`), for example to review a diagram another agent produced. Validation and
-//! the stored format are [`ark_core::diagram`]; nothing here renders.
+//! the stored format are in `model` ([`Diagram`], [`validate`]); nothing here renders. They
+//! live here, not in `ark-core`, because the core names no file format.
 
-use ark_core::diagram::{Diagram, DiagramKind, DIAGRAM_KIND};
+mod model;
 use ark_core::{ActionDescriptor, ArtifactKind, RiskTier};
 use async_trait::async_trait;
+pub use model::*;
 use serde_json::{json, Value};
 
 use crate::{arg_artifact, ActionOutput, Adapter, AdapterError, ProducedArtifact, Result, RunCtx};

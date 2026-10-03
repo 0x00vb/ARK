@@ -23,13 +23,11 @@
 //! - [`WorkspaceContext`] / [`Focus`] / [`PresentDirective`] — what the user is looking at,
 //!   and what the agent asks a UI to show.
 //! - [`RuleSet`] / [`RuleBinding`] — a project's standards, versioned and bound to scopes.
-//! - [`Diagram`] — structure as Mermaid text, validated and stored as an artifact.
 
 pub mod action;
 pub mod artifact;
 pub mod capability;
 pub mod context;
-pub mod diagram;
 pub mod error;
 pub mod ids;
 pub mod invocation;
@@ -42,7 +40,6 @@ pub use action::{ActionDescriptor, Reuse, RiskTier};
 pub use artifact::{Artifact, ArtifactKind, Provenance};
 pub use capability::{Capability, CapabilityCatalog, CapabilitySpec};
 pub use context::WorkspaceContext;
-pub use diagram::{Diagram, DiagramIssue, DiagramKind};
 pub use error::{CoreError, Result};
 pub use ids::{ArtifactId, InvocationId, NoteId, ProjectId, SessionId};
 pub use invocation::{Invocation, InvocationStatus};

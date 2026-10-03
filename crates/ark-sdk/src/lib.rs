@@ -39,8 +39,8 @@ pub mod prelude {
     pub use crate::{Settings, TurnOptions};
     pub use ark_core::{
         ActionDescriptor, Artifact, ArtifactId, ArtifactKind, Capability, CapabilityCatalog,
-        CapabilitySpec, Diagram, DiagramKind, Project, ProjectId, Provenance, RiskTier, Rule,
-        RuleBinding, RuleScope, RuleSet, Sniffer,
+        CapabilitySpec, Project, ProjectId, Provenance, RiskTier, Rule, RuleBinding, RuleScope,
+        RuleSet, Sniffer,
     };
     pub use ark_runtime::{
         AcquisitionProvider, AcquisitionResult, AgentProfile, ApprovalDecision, ApprovalGate,
@@ -48,6 +48,7 @@ pub mod prelude {
         FixedApprover, Harness, HarnessEvent, HarnessOutcome, KnowledgeHit, KnowledgeProvider,
         ModelRouter, Prompts, Role, RuleBook, RuleSelection, Session, Steering,
     };
+    pub use ark_tools::diagram::{Diagram, DiagramKind};
     pub use ark_tools::{
         ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArtifact, Registry, RunCtx,
     };

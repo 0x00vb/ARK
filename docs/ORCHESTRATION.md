@@ -186,7 +186,7 @@ single-agent `Ark` too.
 
 An agent with `diagrams(true)` has `diagram.create` (preloaded) and `diagram.read`. A diagram
 is Mermaid text with a kind: `flowchart`, `sequence`, `class`, `state`, `er`, `component`,
-`dependency`, `architecture`, `orchestration`. `ark_core::diagram::validate` checks the
+`dependency`, `architecture`, `orchestration`. `ark_tools::diagram::validate` checks the
 header against the kind, closed blocks, balanced brackets and quotes, and the shape of each
 line, and reports problems by line so the agent can fix them. It is a structural check, not
 the full Mermaid grammar. A stored diagram is an artifact of kind `diagram` whose first line

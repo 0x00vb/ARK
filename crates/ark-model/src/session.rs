@@ -89,8 +89,8 @@ pub trait SessionBackend: Send + Sync {
     ) -> Result<(String, Completion)>;
     /// Continue a vendor session with only what is new.
     async fn resume(&self, vendor: &str, base: Base<'_>, delta: &Delta) -> Result<Completion>;
-    /// Forget a vendor session. Best effort; the default does nothing (the vendor keeps its
-    /// own files under its own retention).
+    /// Forget a vendor session ARK let go: delete what the vendor stored for it. Best effort;
+    /// the default does nothing.
     async fn discard(&self, _vendor: &str) {}
 }
 
@@ -106,6 +106,10 @@ pub struct SessionPolicy {
     pub max_turns: u32,
     /// Release a vendor session unused for this long.
     pub idle_secs: u64,
+    /// Keep the vendor's own files of a session ARK let go (rotated, released, evicted).
+    /// Off: the backend deletes them ([`SessionBackend::discard`]).
+    #[serde(default)]
+    pub keep_files: bool,
 }
 
 impl Default for SessionPolicy {
@@ -115,13 +119,15 @@ impl Default for SessionPolicy {
             max_context_tokens: 64_000,
             max_turns: 100,
             idle_secs: 30 * 60,
+            keep_files: false,
         }
     }
 }
 
 impl SessionPolicy {
     /// The default, overridden by `ARK_SESSION_REUSE` (`0` turns reuse off),
-    /// `ARK_SESSION_MAX_CONTEXT`, `ARK_SESSION_MAX_TURNS` and `ARK_SESSION_IDLE_S`.
+    /// `ARK_SESSION_MAX_CONTEXT`, `ARK_SESSION_MAX_TURNS`, `ARK_SESSION_IDLE_S` and
+    /// `ARK_SESSION_KEEP_FILES` (`1` keeps the vendor's files).
     pub fn from_env() -> Self {
         let d = SessionPolicy::default();
         fn var<T: std::str::FromStr>(k: &str) -> Option<T> {
@@ -134,6 +140,9 @@ impl SessionPolicy {
             max_context_tokens: var("ARK_SESSION_MAX_CONTEXT").unwrap_or(d.max_context_tokens),
             max_turns: var("ARK_SESSION_MAX_TURNS").unwrap_or(d.max_turns),
             idle_secs: var("ARK_SESSION_IDLE_S").unwrap_or(d.idle_secs),
+            keep_files: std::env::var("ARK_SESSION_KEEP_FILES")
+                .map(|v| v.trim() == "1")
+                .unwrap_or(d.keep_files),
         }
     }
 }
@@ -447,7 +456,9 @@ impl ManagedSession {
             self.emit(SessionEventKind::Released {
                 reason: reason.to_string(),
             });
-            self.backend.discard(&v).await;
+            if !self.policy.keep_files {
+                self.backend.discard(&v).await;
+            }
         }
     }
 
@@ -552,7 +563,7 @@ impl ManagedSession {
         };
         let result = match &plan {
             Plan::Open(_) => {
-                if let Some(v) = &old_vendor {
+                if let Some(v) = old_vendor.as_ref().filter(|_| !self.policy.keep_files) {
                     self.backend.discard(v).await;
                 }
                 self.backend
@@ -696,7 +707,7 @@ pub struct SubscriptionRuntime {
 struct RuntimeInner {
     policy: SessionPolicy,
     ledger: Arc<dyn SessionLedger>,
-    capacities: HashMap<String, Capacity>,
+    capacities: Mutex<HashMap<String, Capacity>>,
     accounts: Mutex<HashMap<String, Arc<Account>>>,
     lanes: Mutex<HashMap<String, Arc<ManagedSession>>>,
     factory: BackendFactory,
@@ -741,7 +752,7 @@ impl SubscriptionRuntimeBuilder {
             inner: Arc::new(RuntimeInner {
                 policy: self.policy,
                 ledger: self.ledger,
-                capacities: self.capacities,
+                capacities: Mutex::new(self.capacities),
                 accounts: Mutex::new(HashMap::new()),
                 lanes: Mutex::new(HashMap::new()),
                 factory: self.factory,
@@ -770,6 +781,21 @@ impl SubscriptionRuntime {
         (self.inner.factory)(p, m).is_some()
     }
 
+    /// Set an account's limits on a runtime already built. It takes effect only before the
+    /// account's first use; returns false when the account is already in use.
+    pub fn set_capacity(&self, account: &str, c: Capacity) -> bool {
+        let accounts = self.inner.accounts.lock().unwrap();
+        if accounts.contains_key(account) {
+            return accounts[account].limiter.capacity() == c;
+        }
+        self.inner
+            .capacities
+            .lock()
+            .unwrap()
+            .insert(account.to_string(), c);
+        true
+    }
+
     /// The limiter of an account, created on first use. Stateless calls to the same account
     /// (a planner on the same subscription) should go through it too, see
     /// [`crate::capacity::Limited`].
@@ -785,6 +811,8 @@ impl SubscriptionRuntime {
                 let cap = self
                     .inner
                     .capacities
+                    .lock()
+                    .unwrap()
                     .get(name)
                     .copied()
                     .unwrap_or_else(|| Capacity::for_provider(name));
@@ -862,6 +890,36 @@ impl SubscriptionRuntime {
         let mut v: Vec<SessionSnapshot> = lanes.iter().map(|s| s.snapshot()).collect();
         v.sort_by(|a, b| a.lane.cmp(&b.lane));
         v
+    }
+
+    /// A lane's state as the ledger keeps it, for a lane this process has not used yet (an
+    /// agent loaded after a restart). `None` when the ledger has nothing for it.
+    pub fn stored(&self, lane: &str) -> Option<SessionSnapshot> {
+        if let Some(s) = self.inner.lanes.lock().unwrap().get(lane) {
+            return Some(s.snapshot());
+        }
+        let r = self.inner.ledger.load(lane)?;
+        Some(SessionSnapshot {
+            lane: lane.to_string(),
+            account: split_spec(&r.model).0.to_string(),
+            model: r.model.clone(),
+            state: if r.vendor.is_some() && !r.in_flight {
+                SessionState::Idle
+            } else {
+                SessionState::Closed
+            },
+            vendor: r.vendor.clone(),
+            context_tokens: r.context_tokens,
+            max_context_tokens: self.inner.policy.max_context_tokens,
+            turns: r.turns,
+            calls: r.calls,
+            opens: r.opens,
+            rotations: r.rotations,
+            sent_tokens: r.sent_tokens,
+            saved_tokens: r.saved_tokens,
+            last_used_ms: r.last_used_ms,
+            last_event: None,
+        })
     }
 
     /// Every account's limiter, for display.
@@ -1298,6 +1356,25 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(&backend.calls()[1], Call::Resume { vendor, .. } if vendor == "m-v0"));
+    }
+
+    #[tokio::test]
+    async fn a_lane_not_yet_used_shows_its_stored_state() {
+        let ledger: Arc<dyn SessionLedger> = Arc::new(MemoryLedger::default());
+        let backend = Arc::new(MockSessions::new("m", "acct", vec![reply(10)]));
+        {
+            let rt = SubscriptionRuntime::builder()
+                .ledger(ledger.clone())
+                .build();
+            let s = rt.session_with("a", backend.clone()).await;
+            s.complete("sys", &[Message::user("1")], &[]).await.unwrap();
+        }
+        let rt = SubscriptionRuntime::builder().ledger(ledger).build();
+        assert!(rt.sessions().is_empty(), "nothing live in this process");
+        let snap = rt.stored("a").unwrap();
+        assert_eq!(snap.state, SessionState::Idle);
+        assert_eq!(snap.calls, 1);
+        assert!(rt.stored("b").is_none());
     }
 
     #[tokio::test]

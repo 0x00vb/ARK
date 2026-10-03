@@ -63,6 +63,16 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
 - `ark.view({ id, title, icon, nav, render })`: an app view in the main column, in place of
   the conversation, listed in the sidebar (`ark.openView`, `ark.showConversation`).
 - Labels for ARK's own tools: "Delegating to reader-a: …", "Messaging lead", "Drawing …".
+- A single-agent `Ark` on a subscription keeps one managed vendor session per conversation
+  (`Ark::session_router`, `Ark::subscriptions`, `ArkBuilder::subscriptions`); its state is
+  in the store (`ark_runtime::StoreLedger`), so the next process resumes it. An orchestrator
+  shares the `Ark`'s runtime and capacity. `ARK_SESSION_REUSE=0` restores stateless calls.
+- When ARK lets a vendor session go it deletes the vendor's file for that id
+  (`SessionBackend::discard`; `ARK_SESSION_KEEP_FILES=1` keeps them).
+- `SubscriptionRuntime::stored` and `ModelResolver::stored_session`: the graph shows an
+  agent's stored session before it runs again after a restart.
+- Headless `-p "/command"` runs a slash command and prints its report.
+- `examples/writing-agent`: `/review <n>`, an editor and two readers per manuscript project.
 
 ### Changed
 - Claude Code is told its only tool is `StructuredOutput`. With the earlier wording Sonnet
@@ -70,6 +80,13 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
   and 3,049 input tokens, now 2 turns and 1,384 (measured with `claude -p`, 2 runs each).
 - `ContextReport.rules` and a `Rules` row in `/context`.
 - Results of `rules.*` and `diagram.*` reach the model in full instead of a generic summary.
+- Claude Code gets ARK's tools as bullets ("use them only inside StructuredOutput"), not
+  Markdown headings. With headings Haiku gave up a one-tool task 2 of 2 times; with bullets
+  it made the right call in the minimum 2 turns. Sonnet is unchanged. Probes: `bench/protocol/`.
+- A delegated result clipped in the delegator's evidence card says how to read the rest.
+- Claude Code: a reply that took more than 2 internal turns and asked for no tool, while
+  tools were offered, means the model gave up after refused native calls; ARK asks once more
+  with a one-line correction, in the same vendor session. Seen once in 9 live runs with a Haiku reader.
 
 ### Fixed
 - The window opens artifacts an orchestrated agent produced (they live in its child project).

@@ -216,7 +216,7 @@ fn result_json(t: &TaskRecord) -> Value {
 /// task and artifact ids as identifiers.
 pub(crate) fn distiller() -> Distiller {
     Arc::new(|action: &str, out: &Value| {
-        let one = |t: &Value| -> (String, Vec<String>) {
+        let one = |t: &Value, path: &str| -> (String, Vec<String>) {
             let g = |k: &str| t.get(k).and_then(Value::as_str).unwrap_or("");
             let mut ids = vec![g("task").to_string()];
             let mut line = format!("{} {} task {}", g("agent"), g("state"), g("task"));
@@ -228,6 +228,13 @@ pub(crate) fn distiller() -> Distiller {
                     ": {}",
                     crate::brief::clip(g("result"), RESULT_CHARS)
                 ));
+                let n = g("result").chars().count();
+                if n > RESULT_CHARS {
+                    // Say how to read the rest: a delegator that misses it works from half a result.
+                    line.push_str(&format!(
+                        "\n  (clipped: {RESULT_CHARS} of {n} characters; get_evidence on this invocation with path \"{path}\" reads all of it)"
+                    ));
+                }
             }
             for a in t
                 .get("artifacts")
@@ -246,17 +253,18 @@ pub(crate) fn distiller() -> Distiller {
             (line, ids)
         };
         match action {
-            DELEGATE => Some(one(out)),
+            DELEGATE => Some(one(out, "result")),
             WAIT => {
                 let mut lines = Vec::new();
                 let mut ids = Vec::new();
-                for t in out
+                for (n, t) in out
                     .get("tasks")
                     .and_then(Value::as_array)
                     .into_iter()
                     .flatten()
+                    .enumerate()
                 {
-                    let (l, i) = one(t);
+                    let (l, i) = one(t, &format!("tasks.{n}.result"));
                     lines.push(l);
                     ids.extend(i);
                 }
@@ -273,4 +281,32 @@ pub(crate) fn distiller() -> Distiller {
             _ => None,
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_clipped_result_says_how_to_read_the_rest() {
+        let d = distiller();
+        let long = "x".repeat(RESULT_CHARS + 50);
+        let (card, ids) = d(
+            DELEGATE,
+            &json!({ "task": "t-1", "agent": "w", "state": "done", "result": long }),
+        )
+        .unwrap();
+        assert!(card.contains("path \"result\" reads all of it"), "{card}");
+        assert_eq!(ids, vec!["t-1"]);
+        let (card, _) = d(
+            WAIT,
+            &json!({ "tasks": [
+                { "task": "t-1", "agent": "w", "state": "done", "result": "short" },
+                { "task": "t-2", "agent": "w", "state": "done", "result": "y".repeat(RESULT_CHARS + 1) }
+            ] }),
+        )
+        .unwrap();
+        assert!(card.contains("path \"tasks.1.result\""), "{card}");
+        assert!(!card.contains("tasks.0.result"));
+    }
 }

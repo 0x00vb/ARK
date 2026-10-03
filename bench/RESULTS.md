@@ -163,47 +163,69 @@ running a subprocess, then 300 browser connections dropped). Before the fix, RSS
 
 `examples/agent-team`: a coordinator on `claude:sonnet` delegates two document readings in
 one reply to `reader-a` on `codex` and `reader-b` on `claude:haiku`, then stores a diagram and
-answers. Same binary, run twice back to back: managed vendor sessions on (the default), then
-off (`ARK_SESSION_REUSE=0`: every call opens a fresh vendor session, the earlier behavior).
-One run each, so the time and token figures are indicative only. Records:
-`bench/orchestration/`.
+answers. Managed vendor sessions on (the default) against off (`ARK_SESSION_REUSE=0`: every
+call opens a fresh vendor session, the earlier behavior). Same binary, three rounds, on and
+off alternating. Logs: `bench/orchestration/repeat/`; table: `bench/orchestration/summarize.py`.
 
-| Metric | Sessions on | Sessions off | Delta |
+| Run | Result | Wall time | Model calls | Input tokens | Uncached input | Output |
+|---|---|---:|---:|---:|---:|---:|
+| on 1 | done | 75.9 s | 7 | 67,493 | 37,783 | 3,354 |
+| on 2 | done | 57.6 s | 7 | 62,081 | 30,273 | 3,313 |
+| on 3 | done | 129.1 s | 9 | 148,128 | 56,638 | 6,195 |
+| off 1 | done | 60.2 s | 8 | 81,842 | 73,685 | 5,286 |
+| off 2 | done | 67.8 s | 7 | 67,415 | 59,258 | 4,496 |
+| off 3 | done | 59.3 s | 7 | 61,500 | 53,343 | 3,652 |
+
+| Metric (3 runs) | Sessions on | Sessions off | Delta |
 |---|---:|---:|---:|
-| Task result | done | done | |
-| Wall time | 55.3 s | 67.5 s | -18% |
-| Model calls | 7 | 8 | |
-| Input tokens, provider-reported | 74k | 76k | -3% |
-| Uncached input tokens | 40.0k | 62.2k | -36% |
-| Tokens ARK sent (estimate) | 5.1k | 12.3k | -59% |
-| Brief `reader-a` received | 173 tokens | 161 tokens | |
-
-| Agent | Calls on / off | Uncached input on / off |
-|---|---:|---:|
-| lead (`claude:sonnet`) | 3 / 3 | 5.4k / 6.3k |
-| reader-a (`codex`) | 2 / 2 | 20.9k / 40.8k |
-| reader-b (`claude:haiku`) | 2 / 3 | 13.7k / 15.2k |
+| Tasks done | 3 / 3 | 3 / 3 | |
+| Uncached input, mean | 41.6k | 62.1k | -33% |
+| Uncached input, median | 37.8k | 59.3k | -36% |
+| Input tokens, median | 67.5k | 67.4k | 0% |
+| Wall time, median | 75.9 s | 60.2 s | +26% |
 
 What the numbers say:
 
-- The vendor processes its whole context on every call either way, so total input tokens
-  hardly move. The saving is in uncached input: a resumed Codex session serves its 20k base
-  prompt from cache (20,096 of 20,719 tokens on the reader's second call, 0 without a session).
-- The two readers ran at the same time in both runs; each saw only its brief and its document.
-- Before the protocol change below, two runs of the same program took 102 s and 94 s and the
-  lead used 40k and 41k tokens: Sonnet first tried to call host tools natively and Claude
-  Code refused them, inside the same call.
+- Sessions cut uncached input in every pairing. The vendor reads its whole context on every
+  call either way, so total input does not move; what changes is how much of it is served
+  from cache. A resumed Codex session serves its 20k base prompt from cache (20,096 of 20,719
+  tokens on the reader's second call; 0 without a session).
+- Wall time is not better with sessions on this evidence. "on 3" was slow because the Haiku
+  reader gave up (below) and the lead delegated its document again, to the Codex reader.
+- In every run both readers ran at the same time and each saw only its brief and its document.
+- An earlier single pair (`bench/orchestration/agent-team-sessions-{on,off}.log`) showed
+  40.0k against 62.2k uncached input (69.7k against 70.5k input).
+- Before the protocol changes below, two runs took 102 s and 94 s and the lead used 40k and
+  41k tokens: Sonnet first tried to call host tools natively and Claude Code refused them.
 
-Protocol wording for Claude Code, one delegation request through `claude -p --model sonnet`,
-2 runs each:
+### The Claude Code reply protocol
 
-| Opening of the system prompt | Internal turns | Input tokens |
-|---|---:|---:|
-| "You have no tools of your own" (before) | 4 | 3,049 |
-| "Your only tool is StructuredOutput" (now) | 2 | 1,384 |
+Claude Code returns ARK's structured reply through a `StructuredOutput` tool. A model that
+sees ARK's tools described like native ones tries to call them; Claude Code refuses, inside
+the same call. Probes: `bench/protocol/` (`claude -p`, recorded output in `results.txt`).
 
-`claude:haiku` still tries a refused native call (`doc.read`, `load_action`) before it answers
-in the structured form (seen in its session file of the "on" run); Sonnet no longer does.
+| Change | Model | Internal turns | Input tokens | Result |
+|---|---|---:|---:|---|
+| Opening "You have no tools of your own" (before) | Sonnet | 4 | 3,049 | right call |
+| Opening "Your only tool is StructuredOutput" | Sonnet | 2 | 1,384 | right call |
+| Tools as Markdown headings (before) | Haiku | 4 | 5,500 | gave up, 2 of 2 |
+| Tools as bullets, "use them only inside StructuredOutput" | Haiku | 2 | 1,520 | right call, 2 of 2 |
+| Same, Sonnet | Sonnet | 2 | 1,462 | right call, 2 of 2 |
+| No `--json-schema`, reply as plain JSON text | Haiku | 1 | 1,218 | 0 of 3 (writes fake `<function_calls>`) |
+| No `--json-schema`, reply as plain JSON text | Sonnet | 1 | 1,554 | 3 of 3 |
+
+With bullets, the full agent prompt still made Haiku give up in 1 of 3 runs ("on 3": it tried
+`doc.read`, `search_evidence`, `load_action` and `rules.lookup` natively). So ARK now also
+checks each Claude reply: more than 2 internal turns ending in a plain answer while tools
+were offered means the model gave up, and ARK asks once more in the same vendor session with
+a one-line correction.
+
+Then three more runs with both readers on `claude:haiku` (`bench/orchestration/repeat/haiku-readers-*.log`):
+6 of 6 reader tasks done, 3 of 3 runs done, mean 42.7 s, 7 calls and 24.6k uncached input per
+run. In 3 of the Haiku sessions the session file still shows refused native calls, but the
+model recovered inside the same call; the give-up check never fired. It is covered by a test
+with a scripted CLI (`a_model_that_gave_up_after_refused_native_calls_is_asked_once_more`),
+not yet by a live run.
 
 ## What these numbers do not show
 

@@ -258,22 +258,24 @@ impl CliModel {
         tools: &[ToolDef],
     ) -> Result<Completion> {
         let sys = protocol(Some(self.cli), system, tools, false);
-        let input = match self.cli {
+        let input = |messages: &[Message]| match self.cli {
             Cli::Claude => render_transcript(messages),
             Cli::Codex => format!("{sys}\n\n{}", render_transcript(messages)),
         };
-        self.exec(Mode::OneShot, &sys, input).await.map(|(c, _)| c)
+        let first = self.exec(Mode::OneShot, &sys, input(messages)).await?;
+        if !(first.gave_up && !tools.is_empty()) {
+            return Ok(first.completion);
+        }
+        let mut again = messages.to_vec();
+        again.push(Message::user(GAVE_UP));
+        let second = self.exec(Mode::OneShot, &sys, input(&again)).await?;
+        Ok(second.after(&first))
     }
 
     /// Run the CLI once. `sys` is the full system prompt (Claude takes it as a flag; Codex
     /// reads it from `input`). Returns the completion and the vendor's session id when it
     /// reported one.
-    async fn exec(
-        &self,
-        mode: Mode<'_>,
-        sys: &str,
-        input: String,
-    ) -> Result<(Completion, Option<String>)> {
+    async fn exec(&self, mode: Mode<'_>, sys: &str, input: String) -> Result<Exec> {
         let bin = self.program()?;
         let dir = work_dir()?;
         let (mut cmd, out_file) = match self.cli {
@@ -362,7 +364,17 @@ impl CliModel {
             Cli::Codex => parse_codex(&stdout),
         };
         match parsed {
-            Ok((reply, usage, vendor)) => Ok((self.completion(&reply, usage)?, vendor)),
+            Ok(p) => {
+                let c = self.completion(&p.reply, p.usage)?;
+                // Claude Code refused calls to host tools the model made as native ones, and the
+                // model then answered without asking the host for anything: it gave up.
+                let gave_up = self.cli == Cli::Claude && p.turns > 2 && c.tool_calls.is_empty();
+                Ok(Exec {
+                    completion: c,
+                    vendor: p.vendor,
+                    gave_up,
+                })
+            }
             Err(detail) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let tail = stderr.trim().lines().last().unwrap_or("");
@@ -484,6 +496,44 @@ impl Provider for CliModel {
     }
 }
 
+/// One CLI run.
+struct Exec {
+    completion: Completion,
+    vendor: Option<String>,
+    /// The model answered without asking for any tool after the CLI refused tools it tried
+    /// to call natively (Claude Code reports more than 2 internal turns).
+    gave_up: bool,
+}
+
+impl Exec {
+    /// This run's completion, with the usage of `earlier` (the run it repeats) added.
+    fn after(self, earlier: &Exec) -> Completion {
+        let (a, b) = (earlier.completion.usage, self.completion.usage);
+        let mut c = self.completion;
+        c.usage = Usage {
+            prompt_tokens: a.prompt_tokens + b.prompt_tokens,
+            completion_tokens: a.completion_tokens + b.completion_tokens,
+            measured: a.measured && b.measured,
+            cached_tokens: a.cached_tokens + b.cached_tokens,
+            cache_write_tokens: a.cache_write_tokens + b.cache_write_tokens,
+        };
+        c
+    }
+}
+
+/// Sent once when a model gave up after trying host tools as native ones. Seen with Claude
+/// Haiku in 1 of 3 live runs of `examples/agent-team` (`bench/RESULTS.md`).
+const GAVE_UP: &str = "Your last answer gave up because calling host tools directly failed. Host \
+tools are never called directly. Answer again: to use a tool, return action \"call_tools\" with \
+the call in tool_calls.";
+
+/// [`GAVE_UP`] as the next message of a vendor session.
+fn correction() -> String {
+    format!(
+        "<new_messages>\n<user>\n{GAVE_UP}\n</user>\n</new_messages>\nContinue as the assistant with one action.\n"
+    )
+}
+
 /// How one CLI run relates to a vendor session.
 #[derive(Clone, Copy)]
 enum Mode<'a> {
@@ -521,22 +571,131 @@ impl SessionBackend for CliModel {
             Cli::Claude => render_transcript(messages),
             Cli::Codex => format!("{sys}\n\n{}", render_transcript(messages)),
         };
-        let (c, vendor) = self.exec(Mode::Open(&id), &sys, input).await?;
+        let first = self.exec(Mode::Open(&id), &sys, input).await?;
         let vendor = match self.cli {
-            Cli::Claude => vendor.unwrap_or(id),
-            Cli::Codex => vendor.ok_or_else(|| self.api("codex reported no thread id".into()))?,
+            Cli::Claude => first.vendor.clone().unwrap_or(id),
+            Cli::Codex => first
+                .vendor
+                .clone()
+                .ok_or_else(|| self.api("codex reported no thread id".into()))?,
         };
-        Ok((vendor, c))
+        if !(first.gave_up && !tools.is_empty()) {
+            return Ok((vendor, first.completion));
+        }
+        let second = self.exec(Mode::Resume(&vendor), &sys, correction()).await?;
+        Ok((vendor, second.after(&first)))
+    }
+
+    async fn discard(&self, vendor: &str) {
+        for f in self.session_files(vendor) {
+            let _ = std::fs::remove_file(&f);
+        }
     }
 
     async fn resume(&self, vendor: &str, base: Base<'_>, delta: &Delta) -> Result<Completion> {
         // Claude records the system prompt with the session; it is passed again unchanged so
         // a CLI without that record behaves the same.
         let sys = protocol(Some(self.cli), base.system, base.tools, true);
-        self.exec(Mode::Resume(vendor), &sys, render_delta(delta))
-            .await
-            .map(|(c, _)| c)
+        let first = self
+            .exec(
+                Mode::Resume(vendor),
+                &sys,
+                render_delta_for(Some(self.cli), delta),
+            )
+            .await?;
+        let offered = delta
+            .tools_now
+            .as_ref()
+            .map(|t| !t.is_empty())
+            .unwrap_or(!base.tools.is_empty());
+        if !(first.gave_up && offered) {
+            return Ok(first.completion);
+        }
+        let second = self.exec(Mode::Resume(vendor), &sys, correction()).await?;
+        Ok(second.after(&first))
     }
+}
+
+impl CliModel {
+    /// Where the vendor keeps the file of one of ARK's sessions. Claude Code keeps a session
+    /// in `<config>/projects/<the working directory, every other character a dash>/<id>.jsonl`;
+    /// Codex in `<home>/sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl`. ARK only ever
+    /// looks in its own working directory's folder (Claude) or for the exact id (Codex).
+    fn session_files(&self, vendor: &str) -> Vec<PathBuf> {
+        // Only an id the vendor could have made; never a path or a pattern.
+        if !valid_session_id(vendor) {
+            return Vec::new();
+        }
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        match self.cli {
+            Cli::Claude => {
+                let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+                    .map(PathBuf::from)
+                    .or_else(|| home.map(|h| h.join(".claude")));
+                let (Some(config), Ok(dir)) = (config, work_dir()) else {
+                    return Vec::new();
+                };
+                let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+                vec![claude_session_file(&config, &dir, vendor)]
+            }
+            Cli::Codex => {
+                let codex = std::env::var_os("CODEX_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| home.map(|h| h.join(".codex")));
+                let Some(codex) = codex else {
+                    return Vec::new();
+                };
+                codex_session_files(&codex.join("sessions"), vendor)
+            }
+        }
+    }
+}
+
+/// Claude Code's file for session `id` started in `cwd`.
+fn claude_session_file(config: &Path, cwd: &Path, id: &str) -> PathBuf {
+    let folder: String = cwd
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    config
+        .join("projects")
+        .join(folder)
+        .join(format!("{id}.jsonl"))
+}
+
+/// A vendor session id as Claude Code and Codex make them: hex digits and dashes.
+fn valid_session_id(id: &str) -> bool {
+    id.len() >= 8 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// Codex's files for thread `id`: `rollout-*-<id>.jsonl` under `sessions/<y>/<m>/<d>/`.
+fn codex_session_files(sessions: &Path, id: &str) -> Vec<PathBuf> {
+    if !valid_session_id(id) {
+        return Vec::new();
+    }
+    let suffix = format!("-{id}.jsonl");
+    let mut out = Vec::new();
+    let mut dirs = vec![(sessions.to_path_buf(), 0)];
+    while let Some((dir, depth)) = dirs.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() && depth < 3 {
+                dirs.push((p, depth + 1));
+            } else if e
+                .file_name()
+                .to_string_lossy()
+                .strip_prefix("rollout-")
+                .is_some_and(|n| n.ends_with(&suffix))
+            {
+                out.push(p);
+            }
+        }
+    }
+    out
 }
 
 /// The session backend for a model spec's provider and model, when it is a subscription
@@ -639,14 +798,9 @@ instructions it names.\n",
     if tools.is_empty() {
         s.push_str("\nNo host tools are available in this turn. Use \"reply\".\n");
     } else {
-        s.push_str("\n# Host tools\n");
+        s.push_str(tools_heading(cli));
         for t in tools {
-            s.push_str(&format!(
-                "\n## {}\n{}\nParameters (JSON Schema): {}\n",
-                t.name,
-                t.description.trim(),
-                t.parameters
-            ));
+            s.push_str(&tool_entry(cli, t));
         }
     }
     if !system.trim().is_empty() {
@@ -667,8 +821,42 @@ pub fn render_transcript(messages: &[Message]) -> String {
     s
 }
 
+/// The heading of the tool list.
+fn tools_heading(cli: Option<Cli>) -> &'static str {
+    match cli {
+        Some(Cli::Claude) => "\n# Host tools (use them only inside StructuredOutput.tool_calls)\n",
+        _ => "\n# Host tools\n",
+    }
+}
+
+/// One tool in the list. For Claude Code a bullet: under a Markdown heading of its own with
+/// "Parameters (JSON Schema)", a tool reads as a native one, and Haiku tried to call it,
+/// was refused, and gave up the task (2 of 2 runs; 4 internal turns, 5.5k input tokens).
+/// As a bullet: the right structured call, 2 turns, 1.5k tokens. Sonnet is the same either
+/// way. Measured with `claude -p`, `bench/RESULTS.md`.
+fn tool_entry(cli: Option<Cli>, t: &ToolDef) -> String {
+    match cli {
+        Some(Cli::Claude) => format!(
+            "- `{}`: {}. Arguments: {}\n",
+            t.name,
+            t.description.trim().trim_end_matches('.'),
+            t.parameters
+        ),
+        _ => format!(
+            "\n## {}\n{}\nParameters (JSON Schema): {}\n",
+            t.name,
+            t.description.trim(),
+            t.parameters
+        ),
+    }
+}
+
 /// What a resumed session has not seen: host updates, then the new messages.
 pub fn render_delta(delta: &Delta) -> String {
+    render_delta_for(None, delta)
+}
+
+fn render_delta_for(cli: Option<Cli>, delta: &Delta) -> String {
     let mut s = String::new();
     if delta.tools_now.is_some() || !delta.new_tools.is_empty() {
         s.push_str("<host_update>\n");
@@ -683,12 +871,7 @@ pub fn render_delta(delta: &Delta) -> String {
             }
         }
         for t in &delta.new_tools {
-            s.push_str(&format!(
-                "\n## {}\n{}\nParameters (JSON Schema): {}\n",
-                t.name,
-                t.description.trim(),
-                t.parameters
-            ));
+            s.push_str(&tool_entry(cli, t));
         }
         s.push_str("</host_update>\n");
     }
@@ -735,7 +918,7 @@ fn render_message(s: &mut String, m: &Message) {
 }
 
 /// `claude -p --output-format json`: one result object.
-fn parse_claude(stdout: &str) -> std::result::Result<(Value, Usage, Option<String>), String> {
+fn parse_claude(stdout: &str) -> std::result::Result<Parsed, String> {
     let v: Value = serde_json::from_str(stdout.trim())
         .map_err(|_| format!("unexpected output: {}", clip(stdout)))?;
     if v["is_error"].as_bool() == Some(true) {
@@ -764,11 +947,26 @@ fn parse_claude(stdout: &str) -> std::result::Result<(Value, Usage, Option<Strin
         .with_cached(cached)
         .with_cache_write(written);
     let session = v["session_id"].as_str().map(str::to_string);
-    Ok((reply, usage, session))
+    Ok(Parsed {
+        reply,
+        usage,
+        vendor: session,
+        turns: v["num_turns"].as_u64().unwrap_or(1) as u32,
+    })
+}
+
+/// A CLI reply, parsed.
+struct Parsed {
+    reply: Value,
+    usage: Usage,
+    vendor: Option<String>,
+    /// Internal turns the CLI took: 2 for one structured reply, more when the model first
+    /// tried tools the CLI refused (Claude Code).
+    turns: u32,
 }
 
 /// `codex exec --json`: JSONL events; the last agent message is the reply.
-fn parse_codex(stdout: &str) -> std::result::Result<(Value, Usage, Option<String>), String> {
+fn parse_codex(stdout: &str) -> std::result::Result<Parsed, String> {
     let mut reply = None;
     let mut thread = None;
     let mut usage = Usage::default();
@@ -808,7 +1006,12 @@ fn parse_codex(stdout: &str) -> std::result::Result<(Value, Usage, Option<String
     let text = reply.ok_or_else(|| format!("no reply: {}", clip(stdout)))?;
     let v = serde_json::from_str(text.trim())
         .map_err(|_| format!("reply was not structured: {}", clip(&text)))?;
-    Ok((v, usage, thread))
+    Ok(Parsed {
+        reply: v,
+        usage,
+        vendor: thread,
+        turns: 1,
+    })
 }
 
 fn clip(s: &str) -> String {
@@ -984,7 +1187,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
         assert!(resume.contains("--resume\nS1"), "{resume}");
         assert!(resume.contains("<new_messages>\n<user>\nnext\n</user>"));
         assert!(
-            resume.contains("## fs.list"),
+            resume.contains("- `fs.list`: List files. Arguments:"),
             "a new tool's schema is sent once"
         );
         assert!(
@@ -1025,6 +1228,73 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
             !resume.contains("This conversation continues"),
             "no system prompt again"
         );
+    }
+
+    #[tokio::test]
+    async fn a_model_that_gave_up_after_refused_native_calls_is_asked_once_more() {
+        let gave_up = r#"{"is_error":false,"num_turns":6,"session_id":"S1","structured_output":{"action":"reply","text":"I cannot access the tools.","tool_calls":[]},"usage":{"input_tokens":900,"output_tokens":50}}"#;
+        let called = r#"{"is_error":false,"num_turns":2,"session_id":"S1","structured_output":{"action":"call_tools","text":"","tool_calls":[{"name":"fs.read","arguments":"{}"}]},"usage":{"input_tokens":300,"output_tokens":20}}"#;
+        // The first run gives up; every later one calls the tool.
+        let script = format!(
+            "if [ -f \"$(dirname \"$0\")/ran\" ]; then echo '{called}'; else touch \"$(dirname \"$0\")/ran\"; echo '{gave_up}'; fi"
+        );
+        let (bin, log) = recording("claude-gave-up", &script);
+        let _ = std::fs::remove_file(bin.parent().unwrap().join("ran"));
+        let m = CliModel::new(Cli::Claude, "haiku").with_program(bin.clone());
+        let c = m
+            .complete("sys", &[Message::user("read a")], &tools())
+            .await
+            .unwrap();
+        assert_eq!(c.tool_calls.len(), 1, "asked again, it called the tool");
+        assert_eq!(c.usage.prompt_tokens, 1200, "both runs are counted");
+        let log = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(log.matches("--stdin--").count(), 2);
+        assert!(log.contains("gave up because calling host tools directly failed"));
+
+        // Without tools a plain reply is just the answer: no second run.
+        let _ = std::fs::remove_file(bin.parent().unwrap().join("ran"));
+        let c = m
+            .complete("sys", &[Message::user("hi")], &[])
+            .await
+            .unwrap();
+        assert!(c.tool_calls.is_empty());
+        assert_eq!(c.usage.prompt_tokens, 900);
+    }
+
+    #[test]
+    fn vendor_session_files_are_found_by_exact_id() {
+        let dir = tempfile_dir("files");
+        let f = claude_session_file(
+            &dir,
+            Path::new("/private/var/folders/x/T/ark-cli-model"),
+            "abc-1",
+        );
+        assert!(f.ends_with("projects/-private-var-folders-x-T-ark-cli-model/abc-1.jsonl"));
+
+        let day = dir.join("sessions/2026/10/02");
+        std::fs::create_dir_all(&day).unwrap();
+        let id = "01a0ff32-1294-7f03-bd66-b92382d230d1";
+        let mine = day.join(format!("rollout-2026-10-02T21-37-46-{id}.jsonl"));
+        let fork = day.join(format!(
+            "rollout-2026-10-02T21-38-00-{id}_01a0ff33-0000.jsonl"
+        ));
+        let other =
+            day.join("rollout-2026-10-02T21-39-00-01a0ff34-1111-2222-3333-444455556666.jsonl");
+        for p in [&mine, &fork, &other] {
+            std::fs::write(p, "{}").unwrap();
+        }
+        assert_eq!(codex_session_files(&dir.join("sessions"), id), vec![mine]);
+        assert!(codex_session_files(&dir.join("sessions"), "*").is_empty());
+        assert!(codex_session_files(&dir.join("sessions"), "").is_empty());
+        assert!(!valid_session_id("../../etc"));
+        assert!(valid_session_id("cad16645-11da-4e42-b357-96e8fbfe6865"));
+    }
+
+    fn tempfile_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ark-cli-files-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
     }
 
     #[test]

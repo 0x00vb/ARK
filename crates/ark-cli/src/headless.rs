@@ -1,6 +1,7 @@
 //! Non-interactive runs: `app -p "prompt"`. Same runtime, same session store, no prompt loop.
 //!
 //! - text (default): activity on stderr, the answer on stdout.
+//! - a prompt that starts with `/` runs that command and prints its report.
 //! - `--json`: one JSON object on stdout when the turn ends.
 //! - `--events`: every runtime event as a JSON line on stdout, then a `result` line.
 //!
@@ -51,6 +52,35 @@ pub(crate) async fn run(
     });
 
     let cfg = st.cfg.clone();
+    // A command (`-p "/usage"`) runs as in the shell; its report goes to stdout. A command
+    // that hands text to the agent (`/chapter 4`) then runs that turn.
+    let mut prompt = prompt;
+    if prompt.trim_start().starts_with('/') {
+        let reply = st.ix.execute(prompt.trim()).await;
+        match mode {
+            Mode::Text => {
+                let theme = cfg
+                    .theme
+                    .clone()
+                    .with_color(want_color(std::io::stdout().is_terminal()));
+                let mut o = std::io::stdout().lock();
+                for l in crate::render::render(&reply.report, &theme, 100) {
+                    let _ = writeln!(o, "{l}");
+                }
+            }
+            Mode::Json | Mode::Events => {
+                let mut v = serde_json::json!({ "ok": true, "report": reply.report });
+                if mode == Mode::Events {
+                    v["type"] = serde_json::json!("command");
+                }
+                println!("{v}");
+            }
+        }
+        match reply.effect {
+            Some(ark_interact::Effect::Submit(t)) => prompt = t,
+            _ => return std::process::ExitCode::SUCCESS,
+        }
+    }
     let theme = cfg
         .theme
         .clone()

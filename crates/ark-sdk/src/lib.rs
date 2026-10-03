@@ -24,10 +24,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ark_core::{Focus, Project, ProjectId, RuleScope};
+use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
 use ark_runtime::{
     Agent, AgentProfile, ApprovalGate, CancelToken, ContextReport, Engine, Harness, HarnessEvent,
-    HarnessOutcome, ModelRouter, RuleBook, RuleSelection, RulesTool, Session, Steering,
+    HarnessOutcome, ModelRouter, Role, RuleBook, RuleSelection, RulesTool, Session, Steering,
+    StoreLedger,
 };
 use ark_tools::{Adapter, Registry};
 
@@ -96,6 +98,7 @@ pub struct Settings {
 pub struct Ark {
     engine: Arc<Engine>,
     router: ModelRouter,
+    subscriptions: SubscriptionRuntime,
     profile: AgentProfile,
     max_steps: usize,
     budget: u32,
@@ -172,7 +175,11 @@ impl Ark {
     /// A harness configured from this agent's settings. Front-ends that need more control
     /// than [`ask_session`](Ark::ask_session) start from this.
     pub fn harness(&self) -> Harness {
-        Harness::new(self.router.clone_view())
+        self.harness_with(self.router.clone_view())
+    }
+
+    fn harness_with(&self, router: ModelRouter) -> Harness {
+        Harness::new(router)
             .max_steps(self.max_steps)
             .budget(self.budget)
             .planner(self.planner)
@@ -206,8 +213,9 @@ impl Ark {
     ) -> Result<HarnessOutcome, ArkError> {
         let project = session.project().clone();
         let (engine, rules) = self.with_rules(&project, input)?;
+        let router = self.session_router(session).await;
         let harness = self
-            .harness()
+            .harness_with(router)
             .conversation(session.conversation_digest())
             .approvals(opts.approvals)
             .cancel(opts.cancel)
@@ -230,6 +238,38 @@ impl Ark {
                 Err(e.into())
             }
         }
+    }
+
+    /// The managed vendor sessions of subscription models (see [`ark_model::session`]). An
+    /// orchestrator built on this `Ark` shares it, so every caller respects one capacity per
+    /// account.
+    pub fn subscriptions(&self) -> &SubscriptionRuntime {
+        &self.subscriptions
+    }
+
+    /// The router for one conversation. When the reasoning model is a subscription and
+    /// sessions are on (`ARK_SESSION_REUSE`), reasoning goes through the conversation's own
+    /// managed vendor session, which continues with only what is new; a planner or critic on
+    /// the same model makes stateless calls on the same account. Otherwise the app's router.
+    pub async fn session_router(&self, session: &Session) -> ModelRouter {
+        let strong = self.router.provider(Role::Reason);
+        let spec = strong.model_id();
+        if !self.subscriptions.policy().reuse || !self.subscriptions.manages(&spec) {
+            return self.router.clone_view();
+        }
+        let lane = format!("session/{}", session.id());
+        let Some(managed) = self.subscriptions.session(&lane, &spec).await else {
+            return self.router.clone_view();
+        };
+        let fast = self.router.provider(Role::Plan);
+        let fast = if Arc::ptr_eq(fast, strong) {
+            self.subscriptions
+                .stateless(&spec)
+                .unwrap_or_else(|| fast.clone())
+        } else {
+            fast.clone()
+        };
+        ModelRouter::new(fast, managed)
     }
 
     /// The store's rule sets: put a project's standards here and bind them to the project
@@ -330,6 +370,7 @@ pub struct ArkBuilder {
     planner: bool,
     critic: bool,
     allow_mutate: bool,
+    subscriptions: Option<SubscriptionRuntime>,
 }
 
 impl Default for ArkBuilder {
@@ -349,6 +390,7 @@ impl Default for ArkBuilder {
             planner: true,
             critic: true,
             allow_mutate: false,
+            subscriptions: None,
         }
     }
 }
@@ -412,6 +454,13 @@ impl ArkBuilder {
         self
     }
 
+    /// Use this subscription runtime (capacities, session policy, ledger) instead of the
+    /// default one, which keeps vendor session state in the store.
+    pub fn subscriptions(mut self, s: SubscriptionRuntime) -> Self {
+        self.subscriptions = Some(s);
+        self
+    }
+
     /// Wire everything together. Resolves the model in order: explicit router → explicit
     /// provider → the `ARK_PROVIDER`/`ARK_MODEL` environment (defaulting to Ollama).
     pub fn build(self) -> Result<Ark, ArkError> {
@@ -424,8 +473,15 @@ impl ArkBuilder {
             Some(e) => e,
             None => Engine::open_with(&self.store_root, self.registry)?,
         };
+        let engine = Arc::new(engine);
+        let subscriptions = self.subscriptions.unwrap_or_else(|| {
+            SubscriptionRuntime::builder()
+                .ledger(Arc::new(StoreLedger::new(engine.store.clone())))
+                .build()
+        });
         Ok(Ark {
-            engine: Arc::new(engine),
+            engine,
+            subscriptions,
             router,
             profile: self.profile,
             max_steps: self.max_steps,
@@ -562,5 +618,102 @@ mod tests {
         );
         let preview = ark.context_preview(&session).await.unwrap();
         assert!(preview.rules > 0);
+    }
+
+    #[tokio::test]
+    async fn a_subscription_conversation_keeps_one_vendor_session() {
+        use ark_model::session::mock::{Call, MockSessions};
+        use ark_model::session::{SessionBackend, SessionPolicy, SubscriptionRuntime};
+        let backend = Arc::new(MockSessions::new("fake:m", "fake", vec![]));
+        for t in ["one", "two", "three"] {
+            backend.push(Completion {
+                content: format!("answer {t}"),
+                tool_calls: vec![],
+                usage: Usage::measured(100, 5),
+            });
+        }
+        let b = backend.clone();
+        let subs = |reuse: bool| {
+            let b = b.clone();
+            SubscriptionRuntime::builder()
+                .policy(SessionPolicy {
+                    reuse,
+                    ..Default::default()
+                })
+                .backends(Arc::new(move |p: &str, _m: &str| {
+                    (p == "fake").then(|| b.clone() as Arc<dyn SessionBackend>)
+                }))
+                .build()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        // The app's provider only names the model; the managed session answers.
+        let named: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new("fake:m", vec![]));
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(named.clone())
+            .subscriptions(subs(true))
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("p", "").unwrap();
+        let mut first = ark.start_session(&project.id).unwrap();
+        for q in ["first question", "second question"] {
+            let out = ark
+                .ask_session(&mut first, q, TurnOptions::default(), |_| {})
+                .await
+                .unwrap();
+            assert!(out.answer.starts_with("answer"));
+        }
+        let mut other = ark.start_session(&project.id).unwrap();
+        ark.ask_session(
+            &mut other,
+            "another conversation",
+            TurnOptions::default(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let calls = backend.calls();
+        assert!(matches!(calls[0], Call::Open { .. }));
+        match &calls[1] {
+            Call::Resume { delta, .. } => {
+                let sent: String = delta.messages.iter().map(|m| m.content.clone()).collect();
+                assert!(sent.contains("second question"));
+                assert!(!sent.contains("== TASK ==\nfirst question"), "{sent}");
+            }
+            c => panic!("expected a resume: {c:?}"),
+        }
+        assert!(
+            matches!(&calls[2], Call::Open { vendor, .. } if vendor != "fake:m-v0"),
+            "a second conversation opens its own vendor session"
+        );
+        assert_eq!(ark.subscriptions().sessions().len(), 2);
+
+        // Sessions off: the app's provider is called as before.
+        let dir = tempfile::tempdir().unwrap();
+        let plain = Arc::new(MockProvider::new(
+            "fake:m",
+            vec![Completion {
+                content: "plain".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(10, 1),
+            }],
+        ));
+        let p: Arc<dyn ark_model::Provider> = plain.clone();
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(p)
+            .subscriptions(subs(false))
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("p", "").unwrap();
+        let mut s = ark.start_session(&project.id).unwrap();
+        ark.ask_session(&mut s, "hi", TurnOptions::default(), |_| {})
+            .await
+            .unwrap();
+        assert_eq!(plain.call_count(), 1);
     }
 }

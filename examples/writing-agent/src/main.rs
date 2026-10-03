@@ -17,6 +17,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use ark_cli::ark_interact::ark_orchestrate::{AgentSpec, Budget, Orchestrator, TaskSpec};
 use ark_cli::ark_interact::report::{Cell, Row, Table, Tone};
 use ark_cli::ark_interact::App;
 use ark_cli::{
@@ -541,6 +542,125 @@ impl Command for StyleCmd {
     }
 }
 
+/// `/review <n>`: an editor agent hands the chapter to two readers at once, one tracing
+/// continuity and one measuring the voice, each with only its own tools, then writes one
+/// revision note. `/agents` shows who did what.
+struct ReviewCmd;
+
+/// The review team: names, roles, tools. Spawned the first time `/review` runs in a project.
+const TEAM: &[(&str, &str, &[&str])] = &[
+    (
+        "continuity",
+        "traces characters, places and objects across chapters",
+        &["manuscript.list", "manuscript.read", "craft.continuity"],
+    ),
+    (
+        "voice",
+        "measures and describes the narrator's voice",
+        &["manuscript.list", "manuscript.read", "craft.voice"],
+    ),
+];
+
+async fn review_team(o: &Orchestrator) -> anyhow::Result<()> {
+    if o.agent("editor").is_none() {
+        o.spawn(
+            AgentSpec::new("editor")
+                .role("the developmental editor who writes the revision note")
+                .instructions(
+                    "You lead a chapter review. Delegate in one reply: to continuity, checking \
+                     how the chapter's people, places and objects match the other chapters; to \
+                     voice, measuring the chapter's narrative voice against the whole book. Name \
+                     the chapter file in each objective. Then write one revision note: what \
+                     works, what to fix, citing what the readers found.",
+                )
+                .tools(Vec::<String>::new())
+                .delegates_to(TEAM.iter().map(|(n, _, _)| *n))
+                .planner(false)
+                .critic(false),
+        )
+        .await?;
+    }
+    for (name, role, tools) in TEAM {
+        if o.agent(name).is_none() {
+            o.spawn(
+                AgentSpec::new(*name)
+                    .role(*role)
+                    .tools(tools.iter().copied())
+                    .parent("editor")
+                    .planner(false)
+                    .critic(false)
+                    .budget(Budget::default().steps(6)),
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+#[async_trait::async_trait]
+impl Command for ReviewCmd {
+    fn name(&self) -> &str {
+        "review"
+    }
+    fn summary(&self) -> &str {
+        "Have a continuity reader and a voice reader review a chapter, then the editor sums up"
+    }
+    fn usage(&self) -> &str {
+        "<n>"
+    }
+    fn group(&self) -> &str {
+        "Writing"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let ws = ix.engine().workspace_dir(&ix.project().id)?;
+        let Some(file) = find_chapter(&ws, args) else {
+            return Ok(Report::new()
+                .warning("Which chapter? e.g. /review 4 (see /manuscript)")
+                .into());
+        };
+        let Some(o) = ix.orchestrator().cloned() else {
+            return Ok(Report::new()
+                .warning("No review team in this project.")
+                .into());
+        };
+        review_team(&o).await?;
+        let done = o
+            .run(
+                "editor",
+                TaskSpec::new(format!("Review {file} and write a revision note.")),
+            )
+            .await?;
+        let mut r = Report::titled(format!("Review · {file}"));
+        match (&done.result, &done.error) {
+            (Some(text), _) => r = r.text(text.clone()),
+            (None, Some(e)) => r = r.error(e.clone()),
+            _ => {}
+        }
+        let mut t = Table::with_header(&["agent", "task", "state", "tokens", "time"])
+            .right(3)
+            .right(4);
+        for id in std::iter::once(&done.id).chain(done.children.iter()) {
+            if let Some(task) = o.task(id) {
+                t.push(Row {
+                    cells: vec![
+                        Cell::new(task.owner.clone(), Tone::Accent),
+                        Cell::new(task.id.clone(), Tone::Muted),
+                        Cell::new(task.state.as_str(), Tone::Normal),
+                        Cell::new(task.usage.tokens().to_string(), Tone::Normal),
+                        Cell::new(format!("{:.1}s", task.run_ms as f64 / 1000.0), Tone::Muted),
+                    ],
+                    tone: Tone::Normal,
+                    command: Some(format!("/agents {}", task.id)),
+                });
+            }
+        }
+        Ok(r.heading("Who did what")
+            .table(t)
+            .note(format!("/agents {} shows each step.", done.id))
+            .into())
+    }
+}
+
 /// Show a save as the file it touches and how big the new text is.
 struct SaveLabels;
 impl ToolLabeler for SaveLabels {
@@ -603,6 +723,11 @@ async fn main() -> std::process::ExitCode {
         .command(Arc::new(ManuscriptCmd))
         .command(Arc::new(ChapterCmd))
         .command(Arc::new(StyleCmd))
+        .command(Arc::new(ReviewCmd))
+        // Each manuscript project gets its own review team, built when it is first used.
+        .orchestrate(|ark, project, gate| {
+            Ok(Orchestrator::builder(ark, project).approvals(gate).build()?)
+        })
         .labels(labels())
         .labeler(Arc::new(SaveLabels))
         .status_section("Manuscript", |ark, project| {
@@ -835,6 +960,98 @@ mod tests {
             "distiller summaries: {:?}",
             cards.iter().map(|c| &c.summary).collect::<Vec<_>>()
         );
+    }
+
+    #[tokio::test]
+    async fn review_hands_the_chapter_to_two_readers() {
+        use ark_cli::ark_interact::{ChannelApprover, Start};
+        let dir = tempfile::tempdir().unwrap();
+        let call = |name: &str, args: serde_json::Value, i: usize| ToolCall {
+            id: format!("c{i}"),
+            name: name.into(),
+            arguments: args,
+        };
+        let reply = |text: &str, calls: Vec<ToolCall>| Completion {
+            content: text.into(),
+            tool_calls: calls,
+            usage: Usage::measured(100, 10),
+        };
+        let mock = Arc::new(MockProvider::new("mock", vec![]).with_fallback(move |req| {
+            let who = |n: &str| req.system.contains(&format!("You are the agent \"{n}\""));
+            let answered = req.messages.iter().any(|m| m.tool_call_id.is_some());
+            if who("editor") {
+                if answered {
+                    reply("Revision note: the locket thread holds [inv:1].", vec![])
+                } else {
+                    reply(
+                        "",
+                        vec![
+                            call("agents.delegate", serde_json::json!({"to": "continuity", "objective": "check chapter-04.md"}), 0),
+                            call("agents.delegate", serde_json::json!({"to": "voice", "objective": "measure chapter-04.md"}), 1),
+                        ],
+                    )
+                }
+            } else if who("continuity") {
+                if answered {
+                    reply("CONTINUITY: the locket appears in chapters 1, 2 and 4 [inv:1].", vec![])
+                } else {
+                    reply("", vec![call("craft.continuity", serde_json::json!({"term": "locket"}), 0)])
+                }
+            } else {
+                reply("VOICE: first person, past tense.", vec![])
+            }
+        }));
+        let provider: Arc<dyn ark_model::Provider> = mock.clone();
+        let ark = build_ark(dir.path(), Some(provider)).unwrap();
+        let project = ark.create_project("the-locket", "a debut novel").unwrap();
+        seed_manuscript(&ark.engine().workspace_dir(&project.id).unwrap()).unwrap();
+        let (approver, _rx) = ChannelApprover::channel();
+        let mut ix = App::new("Writer")
+            .ark(ark)
+            .project(move |a| a.find_or_create_project("the-locket", ""))
+            .command(Arc::new(ReviewCmd))
+            .orchestrate(|ark, project, gate| {
+                Ok(Orchestrator::builder(ark, project)
+                    .approvals(gate)
+                    .build()?)
+            })
+            .open(&Start::default(), Arc::new(approver))
+            .unwrap()
+            .interaction;
+        let text = ix.execute("/review 4").await.report.plain_text();
+        assert!(text.contains("Revision note"), "{text}");
+        assert!(
+            text.contains("continuity") && text.contains("voice"),
+            "{text}"
+        );
+
+        // Each reader saw only its own tools; the editor saw none of the manuscript's.
+        for r in mock.recorded() {
+            let names: Vec<&str> = r.tools.iter().map(|t| t.name.as_str()).collect();
+            if r.system.contains("You are the agent \"voice\"") {
+                assert!(!names.contains(&"craft.continuity"), "{names:?}");
+            }
+            if r.system.contains("You are the agent \"editor\"") {
+                assert!(
+                    names.iter().all(|n| !n.starts_with("manuscript.")),
+                    "{names:?}"
+                );
+            }
+        }
+        // The continuity reader found the locket in the shared manuscript folder.
+        let o = ix.orchestrator().unwrap();
+        let cont = o
+            .tasks()
+            .into_iter()
+            .find(|t| t.owner == "continuity")
+            .unwrap();
+        assert_eq!(cont.tool_calls[0].ok, Some(true), "{cont:?}");
+        assert!(ix
+            .execute("/agents")
+            .await
+            .report
+            .plain_text()
+            .contains("editor"));
     }
 
     #[test]

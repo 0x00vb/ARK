@@ -36,9 +36,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Every live benchmark uses one 4B local model (qwen3:4b-instruct through Ollama) | `bench/RESULTS.md` |
 | With qwen3:4b, `tool-lookup` and `approval` fail 3 of 3: the model picks a plausible neighbor tool, or files the note in its own working state | `bench/RESULTS.md` |
 | Time to first token rose 137 to 259 ms (median) with the working state last in the request; cause not proven | `bench/RESULTS.md` |
-| Subscription providers (`claude`, `codex`) start a process per call and do not stream. A plain `Ark` still resends the request on every call; only orchestrated agents use managed sessions | `ark-model`, `ark-sdk` |
-| `claude:haiku` tries host tools natively before answering in the structured form | `bench/RESULTS.md` |
-| Orchestration is measured on one program, one run per setting | `bench/RESULTS.md` |
+| Subscription providers (`claude`, `codex`) start a process per call and do not stream | `ark-model` |
+| `claude:haiku` sometimes tries host tools natively; it recovered in 6 of 6 tasks in the last runs, and a check asks again when it gives up, but that check has only a scripted test | `bench/RESULTS.md` |
+| Orchestration is measured on one program, three runs per setting; managed sessions cut uncached input but not wall time | `bench/RESULTS.md` |
 | The window has no graph view of its own; ARK Desktop draws one from `graph` and `orch` events through `ark.view` | `ark-ui` |
 | Agents created from a window use the app's base profile; a custom `AgentProfile` needs code | `ark-orchestrate`, `ark-ui` |
 | Approval grants are not persisted across processes | CLI, UI |
@@ -50,9 +50,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 In order. Each item should show its value in a benchmark or a consumer before it grows.
 
-1. **Orchestration in a consumer**: run a real multi-agent task through SecRes or the writing
-   agent, then decide on a managed session for the single-agent `Ark` and a graph panel in
-   the window. Add an orchestration workload to `ark-bench` (several runs, cost per success).
+1. **Orchestration in a second consumer**: the writing agent has `/review` (run live on
+   Claude); SecRes is next. Add an orchestration workload to `ark-bench` so cost per success
+   is gated, not only measured by hand.
 2. **Live cache measurement** on Anthropic and OpenAI: run the generic suite with a key and
    record `cached_tokens` and cost per success next to the simulated estimate.
 3. **Small-model tool choice**: find out why `tool-lookup` and `approval` fail live, and fix

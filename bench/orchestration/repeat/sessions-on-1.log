@@ -1,0 +1,139 @@
+store: <store>
+models: lead claude:sonnet · reader-a codex · reader-b claude:haiku
+
+       lead │ created: Compare the spring and summer support reviews: what improved, what did not, and…
+       lead │ started (attempt 1) on claude:sonnet with a 67-token brief
+       lead │ rules: review-writing@1:W1, review-writing@1:W2, review-writing@1:W3, review-writing@1:W4 (1 held back)
+       lead │ model reason · claude:sonnet · 3645 in / 483 out (579 cached) · 5.6s
+       lead │ agents.delegate · {"artifacts":["art:74ae89d31c6e"],"context":"This is for a comparison of spring vs summer support r…
+       lead │ agents.delegate · {"artifacts":["art:f3b31fd6e1f4"],"context":"This is for a comparison of spring vs summer support r…
+   reader-a │ created: Read the spring support review and report its facts: key metrics quoted exactly…
+       lead │ delegated t-f7a65672 to reader-a
+       lead │ waiting for t-f7a65672
+   reader-b │ created: Read the summer support review and report its facts: key metrics quoted exactly…
+   reader-a │ started (attempt 1) on codex:default with a 164-token brief
+       lead │ delegated t-11aaf35f to reader-b
+   reader-a │ rules: review-writing@1:W1, review-writing@1:W2, review-writing@1:W4, review-writing@1:W3 (1 held back)
+       lead │ waiting for t-11aaf35f
+   reader-b │ started (attempt 1) on claude:haiku with a 164-token brief
+   reader-b │ rules: review-writing@1:W1, review-writing@1:W2, review-writing@1:W4, review-writing@1:W3 (1 held back)
+   reader-b │ model reason · claude:haiku · 2797 in / 265 out · 4.5s
+   reader-b │ doc.read · {"artifact":"art:f3b31fd6e1f4"}
+   reader-b │ ✓ # Summer review: support team The team answered 4,610 requests between June and August. M… · 0ms · +196 tokens to context
+   reader-b │ model reason · claude:haiku · 3366 in / 800 out · 9.5s
+   reader-b │ self-check passed · answered; 1 evidence item cited
+   reader-b │ answer (1382 chars, streamed)
+   reader-b │ done
+   reader-a │ model reason · codex:default · 20350 in / 66 out · 24.4s
+   reader-a │ doc.read · {"artifact":"art:74ae89d31c6e"}
+   reader-a │ ✓ # Spring review: support team The team answered 4,120 requests between March and May, up … · 0ms · +190 tokens to context
+   reader-a │ model reason · codex:default · 26036 in / 275 out (20224 cached) · 30.8s
+   reader-a │ self-check passed · answered; 1 evidence item cited
+   reader-a │ answer (1101 chars, streamed)
+   reader-a │ done
+       lead │ continues
+       lead │ ✓ reader-a done task t-f7a65672: Source: **spring-review.md — “Spring review: support team.… · 55207ms · +320 tokens to context
+       lead │ ✓ reader-b done task t-11aaf35f: # Summer Support Review Report **Document:** summer-review… · 13957ms · +390 tokens to context
+       lead │ model reason · claude:sonnet · 5266 in / 539 out (3643 cached) · 6.0s
+       lead │ diagram.create · {"kind":"flowchart","source":"flowchart LR\n S[Spring review] --> V1[Volume: 4,120 requests]\n U[Su…
+       lead │ ✓ stored flowchart diagram "Themes shared by spring and summer support reviews" v1 (19 line… · 67ms · +74 tokens to context
+       lead │ model reason · claude:sonnet · 6033 in / 926 out (5264 cached) · 9.1s
+       lead │ self-check passed · answered; 3 evidence items cited
+       lead │ answer (2638 chars, streamed)
+       lead │ produced themes-shared-by-spring-and-summer-support-reviews.mmd (diagram)
+
+== result (done, 75.9s)
+
+## Spring vs. summer support review
+
+The flowchart of shared themes is stored as art:62f9be1ce989.
+
+### What improved
+- **Volume handled:** The spring review says the team answered "4,120 requests between March and May". The summer review says "4,610 requests" between June and August.
+- **First reply time:** The spring median was "3 hours 10 minutes" against a goal of "2 hours". The summer median is "1 hour 55 minutes", and the summer review says this met the 2 hour goal for the first time.
+- **Account access:** In the spring review, requests "doubled" after the login change on "14 April". The summer review says access requests fell from 610 to 240 a month after five account access articles shipped in June. It describes this as a reduction of approximately 60%.
+- **Weekend coverage:** The spring review relied on "two volunteers". The summer review says a weekend rotation replaced the volunteers and nobody worked more than two weekends.
+
+### What did not improve
+- **Hiring:** The spring review says "two people left in April" and replacements started "only in late May". Its next step was to "hire one more person". The summer review says the hiring plan slipped and the position is still open.
+- **Billing questions:** In spring, help articles cut repeat billing questions "by about a third". In summer, a pricing change in July brought 380 billing questions in one week, because no articles were ready.
+- **Customer satisfaction:** The summer review says nobody measures it today. The spring review doesn't mention it.
+
+### What stayed the same
+- Both documents show the same two pressures: demand spikes caused by business changes (the April login change, the July pricing change) and staffing gaps. Both also show help articles working as the main way to reduce requests.
+- Neither review names an owner for any of its problems. The spring reader noted this explicitly. The summer reader listed next steps but no owners.
+
+### What the team should do next
+No owners are named in the sources, so each item below needs one assigned.
+1. **Fill the open position.** This was first raised in the spring review and is still open. It needs a named owner and a date.
+2. **Prepare help articles before any pricing or product change.** This is the summer review's own next step.
+3. **Start measuring customer satisfaction next quarter.** This is also from the summer review.
+4. **Keep the weekend rotation.** It worked in summer, so it should continue.
+
+Sources: spring-review.md (art:74ae89d31c6e) and summer-review.md (art:f3b31fd6e1f4). The figures above come from the two readers' reports, not from my own reading of the files.
+
+Agents and tasks
+
+Tasks
+  task          agent     state  tokens   time  objective
+  t-1f4d0b35    lead      done      17k  75.9s  Compare the spring and summer support reviews: what improve…
+    t-f7a65672  reader-a  done      47k  55.2s  Read the spring support review and report its facts: key me…
+    t-11aaf35f  reader-b  done     7.2k  14.0s  Read the summer support review and report its facts: key me…
+
+Agents
+  agent     state  model          session         context     tokens  done
+  lead      idle   claude:sonnet  open · 3 turns  7.0k / 64k     17k     1
+  reader-a  idle   codex:default  open · 2 turns  26k / 64k      47k     1
+  reader-b  idle   claude:haiku   open · 2 turns  4.2k / 64k    7.2k     1
+
+Capacity
+  account  in use  waiting  started
+  claude    0 / 2        0        5
+  codex     0 / 2        0        2
+  3 tasks · 71k tokens. `/agents <task>` shows one task's trace.
+
+== model sessions
+  lead      claude:sonnet · vendor session 10e9f0c8 · 3 calls · 1 opened · 0 rotated · context 6959 · sent ~2270 tokens, not resent ~3694
+  reader-a  codex:default · vendor session 01a1001a · 2 calls · 1 opened · 0 rotated · context 26311 · sent ~1390 tokens, not resent ~1204
+  reader-b  claude:haiku · vendor session 68ad2192 · 2 calls · 1 opened · 0 rotated · context 4166 · sent ~1396 tokens, not resent ~1204
+
+== diagram themes-shared-by-spring-and-summer-support-reviews.mmd (by lead)
+%% ark-diagram {"kind":"flowchart","revises":null,"title":"Themes shared by spring and summer support reviews","version":1}
+flowchart LR
+  S[Spring review] --> V1[Volume: 4,120 requests]
+  U[Summer review] --> V2[Volume: 4,610 requests]
+  S --> R1[Reply time 3h10m vs 2h goal]
+  U --> R2[Reply time 1h55m, goal met]
+  S --> A1[Access requests doubled after 14 April]
+  U --> A2[Access requests fell 610 to 240 a month]
+  S --> W1[Weekend volunteers]
+  U --> W2[Weekend rotation]
+  S --> H1[Staffing gap: hire one more]
+  U --> H2[Hiring slipped: position open]
+  V1 --- V2
+  R1 --- R2
+  A1 --- A2
+  W1 --- W2
+  H1 --- H2
+  S --> B1[Help articles cut billing repeats]
+  U --> B2[Pricing change: 380 billing questions in a week]
+  B1 --- B2
+
+
+== orchestration (Mermaid)
+flowchart LR
+  subgraph agent_lead ["lead · claude:sonnet · idle"]
+    task_t_1f4d0b35["t-1f4d0b35 · done<br/>Compare the spring and summer support reviews: w…"]
+  end
+  subgraph agent_reader_a ["reader-a · codex:default · idle"]
+    task_t_f7a65672["t-f7a65672 · done<br/>Read the spring support review and report its fa…"]
+  end
+  subgraph agent_reader_b ["reader-b · claude:haiku · idle"]
+    task_t_11aaf35f["t-11aaf35f · done<br/>Read the summer support review and report its fa…"]
+  end
+  task_t_1f4d0b35 -->|delegated| task_t_f7a65672
+  task_t_1f4d0b35 -->|delegated| task_t_11aaf35f
+  classDef done fill:#e6f4ea,stroke:#2e7d32
+  class task_t_1f4d0b35,task_t_f7a65672,task_t_11aaf35f done
+
+graph: <store>/graph.json

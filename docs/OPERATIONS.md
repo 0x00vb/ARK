@@ -53,13 +53,15 @@ Costs, measured with `minimal-agent` on 2026-10-01 (one question, two tool calls
 | `codex:default` | 34 s | 38.9k |
 
 Codex adds about 18k tokens of its own instructions to every call. No streaming: the answer
-appears when the call ends. `claude:haiku` first tries to call host tools natively, which
-Claude Code refuses, then answers correctly; `sonnet` or larger does not.
+appears when the call ends. For Claude Code, ARK's tools are listed as bullets that say they
+are used only inside the structured reply: as Markdown headings, Haiku tried to call them
+natively and gave up the task (`bench/protocol/`).
 
 ### Managed sessions and capacity
 
-An orchestrated agent on a subscription keeps one vendor session of its own
-(`ark_model::session`). A resumed call sends only what the vendor has not seen; the session
+A conversation (`Session`) on a subscription, and each orchestrated agent, keeps one vendor
+session of its own (`ark_model::session`); the state is in the store, so the next process
+resumes it. A resumed call sends only what the vendor has not seen; the session
 rotates before its context passes the limit and rehydrates from ARK's own request. Measured:
 `bench/RESULTS.md` (orchestration). Details: [`ORCHESTRATION.md`](ORCHESTRATION.md).
 
@@ -69,12 +71,15 @@ rotates before its context passes the limit and rehydrates from ARK's own reques
 | `ARK_SESSION_MAX_CONTEXT` | `64000` | rotate before the vendor context passes this many tokens |
 | `ARK_SESSION_MAX_TURNS` | `100` | rotate after this many calls in one vendor session |
 | `ARK_SESSION_IDLE_S` | `1800` | `sweep_idle` releases a session unused this long |
+| `ARK_SESSION_KEEP_FILES` | `0` | `1`: keep the vendor's file of a session ARK let go |
 | `ARK_<ACCOUNT>_CONCURRENCY` | `2` for `claude`, `codex`; `4` otherwise | requests in flight per account (`ARK_CLAUDE_CONCURRENCY=3`) |
 
 A usage or rate limit reported by a CLI is a temporary error: the account cools down and the
-harness retries. Vendor session files stay under the vendor's own retention
-(`~/.claude/projects/...`, `~/.codex/sessions/...`); ARK releases a session but does not
-delete them.
+harness retries. When ARK lets a vendor session go (rotation, release, eviction) it deletes
+the vendor's file for that session id only: Claude Code's under
+`~/.claude/projects/<ARK's work dir>/`, Codex's `rollout-*-<id>.jsonl` under
+`~/.codex/sessions/`. Sessions still open when the app exits keep their files and are resumed
+next time.
 
 ## When a model call fails
 

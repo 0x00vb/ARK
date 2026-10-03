@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex};
 use ark_model::capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
 use ark_model::session::{SessionLedger, SubscriptionRuntime};
 use ark_model::{ManagedSession, Provider, SessionPolicy, SessionSnapshot};
+pub use ark_runtime::StoreLedger;
 use ark_runtime::{ModelRouter, Role};
-use ark_store::Store;
 
 use crate::OrchError;
 
@@ -54,6 +54,10 @@ pub trait ModelResolver: Send + Sync {
     /// Every managed session, for display.
     fn sessions(&self) -> Vec<SessionSnapshot> {
         Vec::new()
+    }
+    /// A lane's stored session state, for an agent not resolved yet in this process.
+    fn stored_session(&self, _lane: &str) -> Option<SessionSnapshot> {
+        None
     }
     /// The agent on `lane` is gone: release its session.
     async fn close(&self, _lane: &str) {}
@@ -119,16 +123,21 @@ impl ModelsBuilder {
         self.ledger = Some(l);
         self
     }
-    /// Use this subscription runtime (its own backends, ledger and capacities) instead of
-    /// building one. The builder's capacities and policy then do not apply to subscriptions.
+    /// Use this subscription runtime (its own backends, ledger and policy) instead of building
+    /// one. The orchestrator passes the `Ark`'s, so single-agent turns and agents share each
+    /// account's capacity. Capacities set here still apply if the account is not in use yet.
     pub fn subscriptions(mut self, s: SubscriptionRuntime) -> Self {
         self.subs = Some(s);
         self
     }
-    pub(crate) fn has_ledger(&self) -> bool {
-        self.ledger.is_some() || self.subs.is_some()
-    }
     pub fn build(self) -> Models {
+        if let Some(subs) = &self.subs {
+            for (account, c) in &self.capacities {
+                if subs.manages(account) && !subs.set_capacity(account, *c) {
+                    tracing::warn!(%account, "the account is already in use; its capacity stays as it was");
+                }
+            }
+        }
         let subs = self.subs.unwrap_or_else(|| {
             let mut b = SubscriptionRuntime::builder();
             if let Some(p) = self.policy {
@@ -279,45 +288,15 @@ impl ModelResolver for Models {
         self.subs.sessions()
     }
 
+    fn stored_session(&self, lane: &str) -> Option<SessionSnapshot> {
+        self.subs.stored(lane)
+    }
+
     async fn close(&self, lane: &str) {
         self.subs.close(lane).await;
     }
 
     async fn sweep_idle(&self) -> usize {
         self.subs.sweep_idle().await
-    }
-}
-
-/// A [`SessionLedger`] in the ARK store, so vendor sessions survive a restart of the app.
-pub struct StoreLedger {
-    store: Arc<Store>,
-}
-
-impl StoreLedger {
-    pub fn new(store: Arc<Store>) -> Self {
-        StoreLedger { store }
-    }
-}
-
-const LANE: &str = "vendor_session";
-
-impl SessionLedger for StoreLedger {
-    fn load(&self, lane: &str) -> Option<ark_model::session::LaneRecord> {
-        self.store
-            .get_record(LANE, lane)
-            .ok()
-            .flatten()
-            .and_then(|v| serde_json::from_value(v).ok())
-    }
-    fn save(&self, lane: &str, record: &ark_model::session::LaneRecord) {
-        if let Ok(v) = serde_json::to_value(record) {
-            let scope = lane.split('/').next().unwrap_or("");
-            if let Err(e) = self.store.put_record(LANE, lane, scope, &v) {
-                tracing::warn!(%lane, "could not save vendor session state: {e}");
-            }
-        }
-    }
-    fn remove(&self, lane: &str) {
-        let _ = self.store.delete_record(LANE, lane);
     }
 }

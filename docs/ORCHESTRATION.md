@@ -3,7 +3,10 @@
 Several agents working together, built from a few ARK primitives. ARK runs them, keeps
 their contexts apart, schedules them against provider capacity and records everything they
 do. What the agents are (a coordinator and readers, a team, a hierarchy of teams) is the
-application's choice. Crate: `ark-orchestrate`. Example: [`examples/agent-team`](../examples/agent-team).
+application's choice. Crate: `ark-orchestrate`. Examples:
+[`examples/agent-team`](../examples/agent-team) (a coordinator and two readers on Claude and
+ChatGPT subscriptions) and `/review` in [`examples/writing-agent`](../examples/writing-agent)
+(an editor and two readers on a manuscript, one team per project).
 
 ## Primitives
 
@@ -80,8 +83,10 @@ Your answer is returned to the agent that delegated this task as its result. Ans
 ```
 
 The result comes back to the delegator as the result of its `agents.delegate` call: an
-invocation in its store and an evidence card in its context (clipped at 2,400 characters;
-the whole result stays readable with `get_evidence`). Results of tasks in `after` are added
+invocation in its store and an evidence card in its context. A longer result is clipped at
+2,400 characters and the card says so and names the `get_evidence` path that reads the rest
+(added after a live review where the delegator noticed a cut and did not fetch it).
+Results of tasks in `after` are added
 to the brief, clipped at 1,200 characters. Tests in `crates/ark-orchestrate/tests/orchestration.rs` check that a reader's requests contain neither the
 coordinator's context nor the other reader's task.
 
@@ -105,7 +110,15 @@ run(agent, task)
 | anything else (`ollama:*`, `anthropic:*`, `openai:*`) | `ark_model::build` | the same provider |
 | none | the `Ark` router (a subscription router still gets a managed session per agent) | the `Ark` router |
 
-Two agents never share a vendor session, even on the same model.
+Two agents never share a vendor session, even on the same model. The orchestrator uses the
+`Ark`'s `SubscriptionRuntime`, so single-agent turns and agents draw on one capacity per
+account.
+
+A single agent gets the same treatment: when an `Ark`'s reasoning model is a subscription,
+each conversation (`Session`) reasons through its own managed session (lane
+`session/<id>`, `Ark::session_router`). Measured in the writing agent's terminal: two turns of
+one conversation, each in a new process, used one vendor session for 3 calls; the second
+process resumed it from the store.
 
 ### The managed session
 
@@ -121,9 +134,11 @@ ARK's state is canonical; a vendor session is a cache that can be thrown away.
 | Crash recovery | lane state is in the store (`StoreLedger`). A lane found mid-call after a restart, or whose last call failed, rehydrates instead of resuming |
 | Idle cleanup | `Orchestrator::sweep_idle` / `spawn_sweeper` release sessions idle longer than `idle_secs` (30 min) |
 | Session limit | an account keeps at most `max_sessions` (8) open; the least recently used idle one is released |
+| File cleanup | when ARK lets a vendor session go (rotation, release, eviction), it deletes the vendor's file for that id: `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<ARK's work dir>/<id>.jsonl`, or `rollout-*-<id>.jsonl` under `<CODEX_HOME or ~/.codex>/sessions`. Nothing else is touched |
 
 Settings: `ARK_SESSION_REUSE=0` (off: every call is stateless, the earlier behavior),
-`ARK_SESSION_MAX_CONTEXT`, `ARK_SESSION_MAX_TURNS`, `ARK_SESSION_IDLE_S`.
+`ARK_SESSION_MAX_CONTEXT`, `ARK_SESSION_MAX_TURNS`, `ARK_SESSION_IDLE_S`,
+`ARK_SESSION_KEEP_FILES=1` (keep the vendor's files).
 
 ## Capacity
 
@@ -187,6 +202,7 @@ To follow a run: load `graph()`, then apply events after its `seq`.
 | Front-end | Where |
 |---|---|
 | Both | `App::orchestrator(orch)` (one project) or `App::orchestrate(f)` (one orchestrator per project, with the front-end's approval gate) adds `/agents` (the graph) and `/agents <task>` (one task's trace); reports come from `ark_interact::orchestration` and carry the graph as typed data (`view: "orchestration"`) |
+| Terminal, headless | `app -p "/agents"` prints the same report; any slash command runs this way |
 | Window | read: `graph`, `agents`, `tools`, `task`, `task_trace`, `orch_events {after, limit}`. Control: `spawn_agent`, `submit_task`, `cancel_task`, `retry_task`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent`. Live: `{kind: "orch", event, line, tone, activity}`, which page scripts receive as `ark:orch`. With `App::orchestrate` each project has its own orchestrator. Details: [`UI.md`](UI.md#protocol) |
 
 ## Limits
@@ -197,4 +213,4 @@ To follow a run: load `graph()`, then apply events after its `seq`.
 | An agent loaded from the store after a restart has no custom `AgentProfile` | spawn it again with its full spec |
 | A message pushed into a running task is delivered at the next step | the same as steering |
 | Codex adds about 5k input tokens to each resumed turn (mostly cached) | rotation keeps it bounded |
-| Claude Code and Codex keep their session files under their own retention | ARK releases a session; it does not delete the vendor's files |
+| A vendor session still open when the app exits keeps its file | it is resumed next time, from the ledger |

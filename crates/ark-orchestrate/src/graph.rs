@@ -168,7 +168,11 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 current_task: r.current_task.clone(),
                 model: r.model.clone(),
                 account: r.account.clone(),
-                session: sessions.iter().find(|s| s.lane == lane(&r.name)).cloned(),
+                session: sessions
+                    .iter()
+                    .find(|s| s.lane == lane(&r.name))
+                    .cloned()
+                    .or_else(|| inner.models.stored_session(&lane(&r.name))),
                 context: r.last_context.as_ref().map(|c| ContextUse {
                     tokens: c.total,
                     budget: c.budget,

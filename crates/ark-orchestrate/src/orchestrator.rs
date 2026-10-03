@@ -33,7 +33,7 @@ use tokio::sync::{broadcast, watch, OwnedSemaphorePermit, Semaphore};
 
 use crate::brief::{clip, Brief};
 use crate::event::{EventKind, OrchEvent};
-use crate::models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
+use crate::models::{AgentModels, ModelResolver, Models, ModelsBuilder};
 use crate::record::{
     now_ms, AgentRecord, AgentState, ArtifactRef, Mail, Origin, TaskRecord, TaskState,
     ToolCallRecord, Usage, TOOL_CALLS_KEPT,
@@ -93,12 +93,11 @@ impl<'a> OrchestratorBuilder<'a> {
         let models: Arc<dyn ModelResolver> = match self.models {
             Some(m) => m,
             None => {
-                let mut b = Models::builder().default_router(self.ark.router().clone_view());
+                let mut b = Models::builder()
+                    .default_router(self.ark.router().clone_view())
+                    .subscriptions(self.ark.subscriptions().clone());
                 if let Some(f) = self.configure {
                     b = f(b);
-                }
-                if !b.has_ledger() {
-                    b = b.ledger(Arc::new(StoreLedger::new(engine.store.clone())));
                 }
                 Arc::new(b.build())
             }

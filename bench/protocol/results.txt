@@ -1,0 +1,36 @@
+Recorded output of the protocol probes (claude -p, Claude Code 2.1.288).
+Each line: variant, trial, internal turns (num_turns), input tokens (incl. cache), structured reply (clipped).
+
+opening-sonnet.py, 2026-10-03 (A = "You have no tools of your own", B = "Your only tool is StructuredOutput")
+A 0 input 3049 turns 4 {"action": "call_tools", "text": "Delegating both reading tasks in parallel.", "tool_calls": [{"name
+A 1 input 3049 turns 4 {"action": "call_tools", "text": "Delegating both reading tasks in parallel.", "tool_calls": [{"name
+B 0 input 1384 turns 2 {"action": "call_tools", "text": "Delegating both reading tasks in parallel.", "tool_calls": [{"name
+B 1 input 1384 turns 2 {"action": "call_tools", "text": "Delegating both reading tasks in parallel.", "tool_calls": [{"name
+
+tool-list-haiku.py, 2026-10-03
+current 0 turns 4 input 5481 {"action": "reply", "text": "I apologize, but I'm encountering technical issues accessing the document reading
+current 1 turns 4 input 5523 {"action": "reply", "text": "I apologize, but I'm unable to access the document at this moment. The tools need
+bullets 0 turns 2 input 1520 {"action": "call_tools", "text": "Reading the spring-review.md document to identify key figures.", "tool_calls
+bullets 1 turns 2 input 1520 {"action": "call_tools", "text": "Reading the spring-review document to identify key figures.", "tool_calls":
+example 0 turns 3 input 3350 {"action": "call_tools", "text": "Reading the spring review document", "tool_calls": [{"name": "doc.read", "ar
+example 1 turns 3 input 3331 {"action": "call_tools", "text": "Reading the document to extract key figures", "tool_calls": [{"name": "doc.r
+
+tool-list-sonnet.py, 2026-10-03
+current 0 turns 2 input 1452 {"action": "call_tools", "text": "Reading the document.", "tool_calls": [{"name": "doc.read", "arguments": "{\
+current 1 turns 2 input 1452 {"action": "call_tools", "text": "Reading the document first.", "tool_calls": [{"name": "doc.read", "arguments
+bullets 0 turns 2 input 1462 {"action": "call_tools", "text": "Reading the document first.", "tool_calls": [{"name": "doc.read", "arguments
+bullets 1 turns 2 input 1462 {"action": "call_tools", "text": "Reading the document first.", "tool_calls": [{"name": "doc.read", "arguments
+
+structured-vs-text.py, 2026-10-03 (full agent tool list; "ok" = a call_tools reply that asks for doc.read)
+haiku structured 0 turns 2 input 2021 ok ['doc.read']
+haiku structured 1 turns 2 input 2021 ok ['doc.read']
+haiku structured 2 turns 2 input 2021 ok ['doc.read']
+haiku text-json 0 turns 1 input 1218 MISS unparsed: <function_calls> [{"name": "call_tools", "arguments": ""}] </function_calls>  I
+haiku text-json 1 turns 1 input 1218 MISS []
+haiku text-json 2 turns 1 input 1218 MISS unparsed: I'll read the summer review document for you. <function_calls> [{"name": "doc.re
+sonnet structured 0 turns 2 input 2149 ok ['doc.read']
+sonnet structured 1 turns 2 input 2149 ok ['doc.read']
+sonnet structured 2 turns 2 input 2149 ok ['doc.read']
+sonnet text-json 0 turns 1 input 1554 ok ['doc.read']
+sonnet text-json 1 turns 1 input 1554 ok ['doc.read']
+sonnet text-json 2 turns 1 input 1554 ok ['doc.read']

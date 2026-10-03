@@ -16,5 +16,8 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 | `m5/live-qwen3-4b-final.json` | live, v0.4.0, run right after the M4 live run on the same idle machine |
 | `orchestration/agent-team-sessions-{on,off}.log` | live, `examples/agent-team` on Claude and ChatGPT subscriptions, managed sessions on and off (`ARK_SESSION_REUSE=0`); the printed run |
 | `orchestration/agent-team-sessions-{on,off}.graph.json` | the orchestration `Graph` at the end of each of those runs |
+| `orchestration/repeat/sessions-{on,off}-{1,2,3}.log` | the same, three rounds with on and off alternating; `orchestration/summarize.py` makes the table |
+| `orchestration/repeat/haiku-readers-{1,2,3}.log` | the same with both readers on `claude:haiku`, sessions on |
+| `protocol/*.py`, `protocol/results.txt` | `claude -p` probes of the reply protocol wording and their recorded output |
 
 `RESULTS.md` has the tables; `results.py` prints them from two reports.

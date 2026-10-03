@@ -771,6 +771,8 @@ mod tests {
                     input: json!({}),
                     class: "notes.save".into(),
                     preview: "notes.save()".into(),
+                    agent: None,
+                    task: None,
                 },
             },
             HarnessEvent::ApprovalResolved {

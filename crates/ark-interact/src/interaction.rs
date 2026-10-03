@@ -28,6 +28,13 @@ pub type ProjectFn = Box<dyn Fn(&Ark) -> Result<Project, ArkError> + Send + Sync
 pub type StatusFn = Arc<dyn Fn(&Ark, &Project) -> Vec<Block> + Send + Sync>;
 /// Called after the interaction moves to another project.
 pub type ProjectHook = Arc<dyn Fn(&Project) + Send + Sync>;
+/// Builds a project's orchestrator. The gate asks the front-end's approver; its grants last
+/// as long as the interaction.
+pub type OrchestrateFn = Arc<
+    dyn Fn(&Ark, &Project, Arc<ApprovalGate>) -> anyhow::Result<ark_orchestrate::Orchestrator>
+        + Send
+        + Sync,
+>;
 
 /// An ARK application, described once and opened by any front-end.
 pub struct App {
@@ -43,6 +50,7 @@ pub struct App {
     on_project: Option<ProjectHook>,
     pricing: Option<Pricing>,
     orchestrator: Option<ark_orchestrate::Orchestrator>,
+    orchestrate: Option<OrchestrateFn>,
 }
 
 /// How to open an [`App`]: the generic choices a person makes at launch.
@@ -73,6 +81,7 @@ impl App {
             on_project: None,
             pricing: None,
             orchestrator: None,
+            orchestrate: None,
         }
     }
     pub fn name(&self) -> &str {
@@ -155,6 +164,19 @@ impl App {
         self.orchestrator = Some(o);
         self
     }
+    /// The app runs several agents in every project: `f` builds a project's orchestrator the
+    /// first time the interaction works there, with a gate that asks the front-end. Its
+    /// agents' approvals then reach the person like the conversation's own.
+    pub fn orchestrate(
+        mut self,
+        f: impl Fn(&Ark, &Project, Arc<ApprovalGate>) -> anyhow::Result<ark_orchestrate::Orchestrator>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        self.orchestrate = Some(Arc::new(f));
+        self
+    }
     /// Prices for the usage view. Without them (and without `ARK_PRICE`) no cost is shown.
     pub fn pricing(mut self, p: Pricing) -> Self {
         self.pricing = Some(p);
@@ -210,9 +232,12 @@ impl App {
         };
         let mut commands = self.commands;
         commands.extend(crate::builtins::all());
-        if self.orchestrator.is_some() {
+        if self.orchestrator.is_some() || self.orchestrate.is_some() {
             commands.push(crate::builtins::agents());
         }
+        let orchestrate = self
+            .orchestrate
+            .map(|f| (f, Arc::new(ApprovalGate::new(approver.clone()))));
         let mut ix = Interaction {
             info: AppInfo {
                 name: self.name,
@@ -236,8 +261,11 @@ impl App {
             names: HashMap::new(),
             present: false,
             orchestrator: self.orchestrator,
+            orchestrate,
+            orchestrators: HashMap::new(),
         };
         ix.refresh_names();
+        ix.follow_project()?;
         Ok(Opened {
             interaction: ix,
             resumed,
@@ -363,12 +391,35 @@ pub struct Interaction {
     names: HashMap<String, String>,
     present: bool,
     orchestrator: Option<ark_orchestrate::Orchestrator>,
+    orchestrate: Option<(OrchestrateFn, Arc<ApprovalGate>)>,
+    /// Orchestrators built so far, by project id. Work keeps running in a project the
+    /// interaction left; coming back finds the same orchestrator.
+    orchestrators: HashMap<String, ark_orchestrate::Orchestrator>,
 }
 
 impl Interaction {
-    /// The app's orchestrator, when it runs several agents.
+    /// The app's orchestrator, when it runs several agents: the current project's when the
+    /// app builds one per project.
     pub fn orchestrator(&self) -> Option<&ark_orchestrate::Orchestrator> {
         self.orchestrator.as_ref()
+    }
+
+    /// With [`App::orchestrate`], use the current project's orchestrator (built on first use).
+    fn follow_project(&mut self) -> anyhow::Result<()> {
+        let Some((f, gate)) = &self.orchestrate else {
+            return Ok(());
+        };
+        let key = self.project.id.as_str().to_string();
+        let o = match self.orchestrators.get(&key) {
+            Some(o) => o.clone(),
+            None => {
+                let o = f(&self.ark, &self.project, gate.clone())?;
+                self.orchestrators.insert(key, o.clone());
+                o
+            }
+        };
+        self.orchestrator = Some(o);
+        Ok(())
     }
     /// The front-end can show things beside the conversation (see `TurnOptions::present`).
     pub fn set_presentation(&mut self, yes: bool) {
@@ -488,6 +539,7 @@ impl Interaction {
         if s.project() != &self.project.id {
             if let Some(p) = self.engine().store.get_project(s.project())? {
                 self.project = p;
+                self.follow_project()?;
                 self.project_changed();
             }
         }
@@ -558,6 +610,7 @@ impl Interaction {
     /// Work in `project` from now on, in a fresh session there.
     pub fn set_project(&mut self, project: Project) -> anyhow::Result<()> {
         self.project = project;
+        self.follow_project()?;
         self.new_session()?;
         self.refresh_names();
         self.project_changed();

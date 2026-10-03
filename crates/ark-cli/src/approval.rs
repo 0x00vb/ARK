@@ -148,6 +148,8 @@ mod tests {
             input: serde_json::json!({ "file": "ch4.md" }),
             class: "manuscript.save".into(),
             preview: "manuscript.save(file=\"ch4.md\")".into(),
+            agent: None,
+            task: None,
         }
     }
 

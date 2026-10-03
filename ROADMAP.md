@@ -10,7 +10,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 |---|---|
 | Stable release | **v0.5.0** (2026-10-01) |
 | `main` | v0.5.0 plus orchestration, managed vendor sessions, rule sets and diagrams (unreleased; breaking, so the next release is 0.6.0) |
-| Consumers | SecRes (pins v0.5.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; needs 0.6.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b: success 0.85, cost per successful task $0.0298 (v0.4.0, `bench/RESULTS.md`) |
 | Phase | functionally complete for now. No milestone in progress. |
 
@@ -23,7 +23,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Models (`ark-model`) | Ollama, Anthropic and OpenAI APIs, Claude and ChatGPT subscriptions through their CLIs, mock |
 | Interaction (`ark-interact`) | commands, reports, activity, traces, context and usage views shared by both front-ends |
 | Terminal (`ark-cli`) | interactive shell, approvals, steering, resume, headless `-p` |
-| Workspace (`ark-ui`) | Tauri window and loopback browser page; page tested in WebKit |
+| Workspace (`ark-ui`) | Tauri window and loopback browser page; page tested in WebKit; orchestration control in the protocol, app views in the main column |
 | Measurement (`ark-bench`) | 13 generic workloads, simulated and live, regression gate in `scripts/ci.sh` |
 | Release | `scripts/ci.sh`, `scripts/verify-release.sh`, immutable tags, two remotes |
 
@@ -39,7 +39,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Subscription providers (`claude`, `codex`) start a process per call and do not stream. A plain `Ark` still resends the request on every call; only orchestrated agents use managed sessions | `ark-model`, `ark-sdk` |
 | `claude:haiku` tries host tools natively before answering in the structured form | `bench/RESULTS.md` |
 | Orchestration is measured on one program, one run per setting | `bench/RESULTS.md` |
-| The window has no graph view of its own; it serves `graph`, `task_trace` and `orch` events for an app's panel | `ark-ui` |
+| The window has no graph view of its own; ARK Desktop draws one from `graph` and `orch` events through `ark.view` | `ark-ui` |
+| Agents created from a window use the app's base profile; a custom `AgentProfile` needs code | `ark-orchestrate`, `ark-ui` |
 | Approval grants are not persisted across processes | CLI, UI |
 | One `Host` serves one live session; two browser tabs share it | `ark-ui` |
 | `/context` token numbers are estimates; provider numbers are in `/trace` | `ark-interact` |

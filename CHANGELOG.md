@@ -51,6 +51,18 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
   both front-ends. Workspace protocol methods `graph` and `task_trace`, events
   `{kind: "orch"}`.
 - `examples/agent-team`: a coordinator and two readers on different subscriptions.
+- Orchestration from a window: `App::orchestrate(f)` builds one orchestrator per project, the
+  first time the interaction works there, with an approval gate that reaches the front-end.
+  Workspace protocol methods `agents`, `spawn_agent`, `submit_task`, `cancel_task`,
+  `retry_task`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent`, `task`
+  (record and timeline), `orch_events` (stored events) and `tools`. They answer while a
+  conversation turn runs. `orch` events carry the timeline `line` and, for an agent's runtime
+  event, the `activity` the conversation would show. See `docs/UI.md`.
+- `ApprovalRequest.agent` and `.task`: an orchestrated agent's question says who asks. The
+  window shows it in a tray outside the conversation, and a turn's end no longer closes it.
+- `ark.view({ id, title, icon, nav, render })`: an app view in the main column, in place of
+  the conversation, listed in the sidebar (`ark.openView`, `ark.showConversation`).
+- Labels for ARK's own tools: "Delegating to reader-a: …", "Messaging lead", "Drawing …".
 
 ### Changed
 - Claude Code is told its only tool is `StructuredOutput`. With the earlier wording Sonnet
@@ -59,6 +71,10 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
 - `ContextReport.rules` and a `Rules` row in `/context`.
 - Results of `rules.*` and `diagram.*` reach the model in full instead of a generic summary.
 
+### Fixed
+- The window opens artifacts an orchestrated agent produced (they live in its child project).
+- `ark.h` sets CSS custom properties given in `style` (`{ "--hue": 200 }`).
+
 ### Breaking
 - `Engine.store` is an `Arc<Store>`. Method calls are unchanged; code that moved the store
   out of an engine takes a clone of the `Arc`.
@@ -66,6 +82,7 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
 - `ContextReport` has a `rules` field and `Project` a `parent` field: struct literals add
   them (or use `..Default::default()` / `Project::new`).
 - `ark_interact::trace::EntryKind::Rules` is a new variant.
+- `ApprovalRequest` has `agent` and `task` fields: struct literals add `agent: None, task: None`.
 
 ## [0.5.0] - 2026-10-01
 

@@ -27,11 +27,10 @@ impl Adapter for Notes {
         "notes"
     }
     fn actions(&self) -> Vec<ActionDescriptor> {
-        vec![ActionDescriptor::new(
-            "notes.read",
-            "read the notes",
-            RiskTier::Read,
-        )]
+        vec![
+            ActionDescriptor::new("notes.read", "read the notes", RiskTier::Read),
+            ActionDescriptor::new("notes.save", "save the notes", RiskTier::Mutate),
+        ]
     }
     async fn run(&self, _a: &str, _i: Value, _c: &RunCtx<'_>) -> ark_tools::Result<ActionOutput> {
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -64,6 +63,11 @@ fn web_dir() -> PathBuf {
 
 /// Serve an app whose model follows `script`, then drive `scenario` in the page.
 async fn drive(scenario: &str, script: Vec<Completion>, chunk: Duration) {
+    drive_app(scenario, script, chunk, false).await
+}
+
+/// `drive`, with an orchestrator per project when `agents` is set.
+async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, agents: bool) {
     if std::env::var_os("ARK_UI_PAGE_TESTS").is_none() {
         eprintln!("skipped: set ARK_UI_PAGE_TESTS=1 to run the page tests (see the file header)");
         return;
@@ -80,7 +84,17 @@ async fn drive(scenario: &str, script: Vec<Completion>, chunk: Duration) {
         .critic(false)
         .build()
         .unwrap();
-    let (_host, served) = ArkUi::new(App::new("Page test").ark(ark))
+    let mut app = App::new("Page test").ark(ark);
+    if agents {
+        app = app.orchestrate(|ark, project, gate| {
+            Ok(
+                ark_interact::ark_orchestrate::Orchestrator::builder(ark, project)
+                    .approvals(gate)
+                    .build()?,
+            )
+        });
+    }
+    let (_host, served) = ArkUi::new(app)
         .serve_background("127.0.0.1:0")
         .await
         .unwrap();
@@ -179,4 +193,24 @@ async fn a_window_that_reloads_mid_turn_rebuilds_it_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failing_event_stream_backs_off_and_stops() {
     drive("backoff", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_app_view_takes_the_main_column_and_agents_ask_from_the_tray() {
+    let save = Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "notes.save".into(),
+            arguments: json!({}),
+        }],
+        usage: Usage::default(),
+    };
+    drive_app(
+        "agents",
+        vec![save, say("Saved.", false)],
+        Duration::ZERO,
+        true,
+    )
+    .await;
 }

@@ -24,8 +24,8 @@ use ark_core::{Project, ProjectId, RuleBinding, RuleScope};
 use ark_model::estimate_tokens;
 use ark_runtime::rules::{select, RULES_BUDGET};
 use ark_runtime::{
-    AgentProfile, ApprovalGate, CancelToken, Engine, Harness, HarnessEvent, RuleBook, RulesTool,
-    Session, Steering,
+    AgentProfile, ApprovalDecision, ApprovalGate, ApprovalRequest, Approver, CancelToken, Engine,
+    Harness, HarnessEvent, RuleBook, RulesTool, Session, Steering,
 };
 use ark_sdk::Ark;
 use ark_tools::{action_matches, Registry};
@@ -1437,10 +1437,15 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             .planner(spec.planner.unwrap_or(self.planner))
             .critic(spec.critic.unwrap_or(self.critic))
             .allow_mutate(spec.allow_mutate)
-            .approvals(if spec.allow_mutate {
-                None
-            } else {
-                self.approvals.clone()
+            .approvals(match &self.approvals {
+                Some(gate) if !spec.allow_mutate => {
+                    Some(Arc::new(ApprovalGate::new(Arc::new(OnBehalf {
+                        agent: owner.to_string(),
+                        task: id.to_string(),
+                        gate: gate.clone(),
+                    }))))
+                }
+                _ => None,
             })
             .cancel(Some(cancel.clone()))
             .steering(Some(steer.clone()))
@@ -2046,6 +2051,24 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             delivered,
         });
         Ok(delivered)
+    }
+}
+
+/// Asks the orchestrator's gate on behalf of one agent's task, so the person sees who asks.
+/// Grants are kept by the orchestrator's gate.
+struct OnBehalf {
+    agent: String,
+    task: String,
+    gate: Arc<ApprovalGate>,
+}
+
+#[async_trait::async_trait]
+impl Approver for OnBehalf {
+    async fn decide(&self, request: &ApprovalRequest) -> ApprovalDecision {
+        let mut r = request.clone();
+        r.agent = Some(self.agent.clone());
+        r.task = Some(self.task.clone());
+        self.gate.check(&r).await
     }
 }
 

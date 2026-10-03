@@ -27,6 +27,13 @@ pub struct ApprovalRequest {
     pub class: String,
     /// A compact one-line rendering of the call, e.g. `manuscript.save(file="ch4.md", …)`.
     pub preview: String,
+    /// The orchestrated agent asking, when the question does not come from the front-end's
+    /// own conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// That agent's task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
 }
 
 /// A human's answer to an [`ApprovalRequest`].
@@ -164,6 +171,8 @@ mod tests {
             input: serde_json::json!({}),
             class: class.into(),
             preview: "doc.save()".into(),
+            agent: None,
+            task: None,
         }
     }
 

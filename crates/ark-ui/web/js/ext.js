@@ -1,6 +1,9 @@
 // The extension points an app's scripts use, available as `window.ark`:
 //
 //   ark.panel({ id, title, icon, nav, presents, wide, fill, render(el, params, api) })
+//   ark.view({ id, title, icon, nav, render(el, params, api) })
+//                      a view in the main column, in place of the conversation; `nav` lists
+//                      it in the sidebar. Choosing a session brings the conversation back.
 //   ark.artifactViewer({ id, label, match(artifact), primary, presents, wide, render(el, artifact, api, params) })
 //   ark.toolRenderer({ match(action), render(el, call, api) })
 //   ark.action({ id, label, icon, where: "artifact" | "palette", when(ctx), run(ctx, api) })
@@ -16,6 +19,7 @@
 
 export const registry = {
   panels: new Map(),
+  views: new Map(),
   viewers: [],
   toolRenderers: [],
   actions: [],
@@ -50,6 +54,11 @@ export function installApi(api) {
     panel(p) {
       need(p, ["id", "title", "render"], "panel");
       registry.panels.set(p.id, p);
+      api._changed();
+    },
+    view(v) {
+      need(v, ["id", "title", "render"], "view");
+      registry.views.set(v.id, v);
       api._changed();
     },
     artifactViewer(v) {

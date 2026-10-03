@@ -46,11 +46,20 @@ export class Sidebar {
         h("span.session-title", clip(title, 60)),
         h("span.session-time", ago(s.updated_at)));
       row.title = `${title}\n${s.turns} turn${s.turns === 1 ? "" : "s"} · double-click to rename`;
-      row.addEventListener("click", () => s.id !== currentId && this.api.openSession(s.id));
+      row.addEventListener("click", () => this.api.openSession(s.id));
       row.addEventListener("keydown", (e) => e.key === "Enter" && this.api.openSession(s.id));
       row.addEventListener("dblclick", () => this.rename(row, s));
       this.list.append(row);
     });
+  }
+
+  /// Mark the view the main column shows (none: the conversation).
+  markView(id) {
+    this.view = id;
+    for (const row of this.nav.querySelectorAll("[data-view]")) {
+      row.setAttribute("aria-current", String(row.dataset.view === id));
+    }
+    this.list.dataset.dim = String(!!id);
   }
 
   rename(row, s) {
@@ -100,15 +109,22 @@ export class Sidebar {
     });
   }
 
-  /// The app's own navigation (panels marked `nav`) and status items.
+  /// The app's own navigation (views and panels marked `nav`) and status items.
   renderExtensions() {
     clear(this.nav);
+    for (const v of registry.views.values()) {
+      if (!v.nav) continue;
+      const row = h("button.nav-row", { "data-view": v.id, onclick: () => this.api.openView(v.id) },
+        h("span.nav-icon", icon(v.icon || "box")), h("span.nav-label", v.nav === true ? v.title : v.nav));
+      this.nav.append(row);
+    }
     for (const p of registry.panels.values()) {
       if (!p.nav) continue;
       const row = h("button.nav-row", { onclick: () => this.api.openPanel(p.id) },
         h("span.nav-icon", icon(p.icon || "box")), h("span.nav-label", p.nav === true ? p.title : p.nav));
       this.nav.append(row);
     }
+    this.markView(this.view);
     clear(this.status);
     for (const s of registry.statuses) {
       const el = h("div.status-item", { "data-id": s.id });

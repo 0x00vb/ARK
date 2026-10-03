@@ -35,6 +35,8 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Sidebar | New session, the app's navigation, projects and sessions with times. |
 | Side pane | Only domain content the person or the agent asked for: an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
 | Inline reports | `/context`, `/usage`, `/state`, `/trace` and every other command render in the conversation. There is no permanent inspector. |
+| App views | An app's `ark.view` takes the main column in place of the conversation (ARK Desktop's graph, agents and tasks). Choosing a session brings the conversation back. |
+| Agents' questions | An orchestrated agent's approval waits in a tray at the bottom right, whatever the main column shows. |
 
 Narrow windows (up to 760 px, or up to 1000 px with the pane open) fold the sidebar into a
 drawer opened from the top-left button. Below 760 px an open pane covers the window.
@@ -60,6 +62,9 @@ the agent read it. A steer that arrives after the agent's last step becomes the 
 - Approvals come from the runtime's `ApprovalGate` through `ChannelApprover`, the same path
   the shell uses. The card offers Allow once, Allow for session (the approval class is shown)
   and Deny. The window only shows the question.
+- With `App::orchestrate`, the orchestrator's agents ask through the same approver. Their
+  request carries `agent` and `task`; it is answered from the tray and outlives the
+  conversation's turn. esc denies only the conversation's own question.
 - Stop uses the turn's `CancelToken`. A cancelled tool call kills its process group.
 - Opening a session loads its stored turns for display (paged, "Show earlier turns") and
   restores ARK working state. The model still receives only the bounded carry-over: stored
@@ -106,6 +111,7 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 | Call | Registers |
 |---|---|
 | `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` adds it to the sidebar |
+| `ark.view({ id, title, icon, nav, render })` | A view in the main column, in place of the conversation; `nav: true` adds it to the sidebar. Built once, kept while hidden |
 | `ark.artifactViewer({ id, label, match, primary, presents, wide, render })` | A view of an artifact; when several match, the artifact header switches between them (plus Raw) |
 | `ark.toolRenderer({ match, render })` | How a tool call's full output renders when its row is opened |
 | `ark.action({ id, label, icon, where, when, run })` | A button on an artifact, or an entry in the ⌘K palette |
@@ -119,7 +125,8 @@ what the person is looking at.
 
 Helpers on the same object: `ark.h` and `ark.icon` (DOM), `ark.markdown`, `ark.call` (a Host
 method), `ark.ext` (an app handler), `ark.runAction(action, input)`, `ark.command(line)`,
-`ark.openArtifact(id, viewer, params)`, `ark.openPanel(id, params)`, `ark.setPanelTitle`,
+`ark.openArtifact(id, viewer, params)`, `ark.openPanel(id, params)`, `ark.closePanel(id)`,
+`ark.openView(id, params)`, `ark.showConversation()`, `ark.currentView()`, `ark.setPanelTitle`,
 `ark.openInvocation(id)`, `ark.project()`, `ark.setFocus`, `ark.toast`.
 
 A small real panel, SecRes's notebook (`ui/notes.js`, trimmed):
@@ -154,7 +161,9 @@ front-end uses the same.
 | Session | `hello`, `summary`, `sessions`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `model`, `models` |
 | Turn | `send`, `steer`, `cancel`, `approve`, `command` |
 | Views | `transcript`, `trace`, `call`, `context`, `usage`, `state` |
-| Store | `artifacts`, `artifact`, `invocation`, `run_action` |
+| Store | `artifacts`, `artifact` (the project's, or one an orchestrated agent produced), `invocation`, `run_action` |
+| Agents | `graph`, `agents`, `tools`, `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
+| Tasks | `submit_task {agent, task}`, `task {task}` (record and timeline lines), `task_trace`, `cancel_task`, `retry_task`, `orch_events {after, limit}` |
 | Page | `focus`, `ext` (an app handler) |
 
 | Events (`kind`) | |
@@ -163,6 +172,12 @@ front-end uses the same.
 | `approval`, `approval_closed` | A pending approval, and its end (answered, or the turn ended) |
 | `summary` | Session, model, project or context changed |
 | `ext` | An app handler's `emitter.emit` |
+| `orch` | An orchestration event: `event` (an `OrchEvent`), `line` and `tone` (its timeline line, from `ark_interact::orchestration::event_line`), `activity` (for an agent's runtime event, what the conversation would show; none for steps and context reports) |
+
+The agent and task methods need an app with an orchestrator and do not wait for the
+conversation: they answer while a turn runs. `spawn_agent` takes an `AgentSpec` as JSON and
+`submit_task` a `TaskSpec`; both are what the orchestrator stores, so the same definitions
+work wherever the runtime runs. Tests: `tests/orchestration.rs`.
 
 Every event carries `seq`, one higher than the last. `hello` returns `seq` (everything up to
 it is in its answer) and `live`, the running turn's events so far, so a window that opens or

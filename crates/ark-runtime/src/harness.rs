@@ -1248,6 +1248,8 @@ impl Harness {
             input: call.arguments.clone(),
             class: profile.approval_class(&call.name, &call.arguments),
             preview: preview_call(&call.name, &call.arguments),
+            agent: None,
+            task: None,
         };
         if !gate.is_granted(&request.class) {
             on_event(HarnessEvent::ApprovalRequested {

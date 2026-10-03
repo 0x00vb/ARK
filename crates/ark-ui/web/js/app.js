@@ -4,7 +4,7 @@
 import { connect } from "./transport.js";
 import { h, icon, clear, $, hydrateIcons, tokens } from "./dom.js";
 import { markdown } from "./md.js";
-import { Thread } from "./conversation.js";
+import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
 import { Sidebar } from "./sidebar.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
@@ -12,7 +12,9 @@ import { registry, installApi, dispatchExt, presenterFor } from "./ext.js";
 
 const transport = connect();
 const appEl = $("#app");
-const state = { summary: null, ui: {}, sessionId: null, running: false, approvals: new Map(), extChanged: false };
+const state = { summary: null, ui: {}, sessionId: null, running: false, approvals: new Map(), extChanged: false, view: null };
+// Main-column views (`ark.view`), built on first show and kept while hidden.
+const views = new Map();
 
 // ---- the api views and app scripts use ------------------------------------------------------
 
@@ -29,8 +31,17 @@ const api = {
   steer,
   cancel: () => transport.call("cancel").catch(() => {}),
   command: (line) => (line.endsWith(" ") ? composer.set(line) : runCommand(line)),
-  newSession: () => change("new_session"),
-  openSession: (id) => change("open_session", { id }),
+  newSession: () => {
+    showConversation();
+    return change("new_session");
+  },
+  openSession: (id) => {
+    showConversation();
+    if (id !== state.sessionId) return change("open_session", { id });
+  },
+  openView: (id, params) => showView(id, params),
+  showConversation: () => showConversation(),
+  currentView: () => state.view,
   switchProject: (name) => change("switch_project", { name }),
   loadEarlier,
   openInvocation: (id) => {
@@ -56,6 +67,8 @@ const api = {
   toast,
   popover,
   refreshSidebar: () => sidebar.refresh(state.sessionId),
+  // Ask the window to reflect a view's focus again (after its selection changed).
+  reportFocus: () => reportFocus(),
   _changed: () => {
     state.extChanged = true;
     queueMicrotask(() => {
@@ -195,7 +208,8 @@ function applySummary(s) {
   const changed = s.session.id !== state.sessionId;
   state.summary = s;
   state.sessionId = s.session.id;
-  $("#session-title").textContent = s.session.title || (s.session.turns ? "Untitled session" : "");
+  state.title = s.session.title || (s.session.turns ? "Untitled session" : "");
+  if (!state.view) $("#session-title").textContent = state.title;
   composer.setModel(s.model);
   sidebar.setProject(s.project);
   document.title = s.session.title ? `${s.session.title} · ${s.name}` : s.name;
@@ -291,7 +305,10 @@ function onEvent(msg) {
     }
     case "approval":
       state.approvals.set(msg.id, msg);
-      thread.approval(msg, decide);
+      // An orchestrated agent's question is not part of the conversation: it waits in the
+      // tray, whatever the main column shows.
+      if (msg.request?.agent) ask(msg);
+      else thread.approval(msg, decide);
       break;
     case "approval_closed":
       state.approvals.delete(msg.id);
@@ -321,6 +338,11 @@ function onEvent(msg) {
   }
 }
 
+function ask(msg) {
+  if (document.querySelector(`.approval[data-id="${msg.id}"]`)) return;
+  $("#asks").append(approvalCard(msg, decide));
+}
+
 async function decide(id, decision) {
   try {
     await transport.call("approve", { id, decision });
@@ -337,6 +359,62 @@ function present(d) {
   if (d.view === "evidence" && d.locator) return api.openInvocation(d.locator);
 }
 
+// ---- views in the main column ---------------------------------------------------------------
+
+/// Show an app's view in place of the conversation. A view is built once; showing it again
+/// passes new params to `update`, or calls `refresh`.
+function showView(id, params) {
+  const v = registry.views.get(id);
+  if (!v) return toast(`No view named ${id}`);
+  let entry = views.get(id);
+  if (!entry) {
+    const el = h("div.view", { "data-view": id });
+    $("#stage").append(el);
+    entry = { el, ctl: null };
+    views.set(id, entry);
+    try {
+      entry.ctl = v.render(el, params, window.ark) || {};
+    } catch (e) {
+      console.error(e);
+      el.append(h("div.insp-empty", String(e)));
+      entry.ctl = {};
+    }
+  } else if (params !== undefined) {
+    entry.ctl.update?.(params);
+  } else {
+    entry.ctl.refresh?.();
+  }
+  for (const [k, x] of views) x.el.hidden = k !== id;
+  state.view = id;
+  appEl.dataset.view = id;
+  $("#stage").hidden = false;
+  $("#session-title").textContent = v.title;
+  sidebar.markView(id);
+  reportFocus();
+}
+
+function showConversation() {
+  if (!state.view) return;
+  state.view = null;
+  delete appEl.dataset.view;
+  $("#stage").hidden = true;
+  $("#session-title").textContent = state.title || "";
+  sidebar.markView(null);
+  reportFocus();
+  composer.focus();
+}
+
+/// What the person looks at: the view's focus, else the side pane's.
+function reportFocus() {
+  const entry = state.view && views.get(state.view);
+  if (entry) {
+    let focus = null;
+    try { focus = entry.ctl?.focus?.() || null; } catch {}
+    if (focus) return api.setFocus(focus);
+  }
+  pane.reportFocus();
+}
+
 // ---- command palette (⌘K) ------------------------------------------------------------------
 
 function palette() {
@@ -345,6 +423,7 @@ function palette() {
   const input = h("input.palette-input", { placeholder: "Search commands, views and actions", "aria-label": "Search" });
   const list = h("div.palette-list", { role: "listbox" });
   const items = [
+    ...[...registry.views.values()].map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),
     ...[...registry.panels.values()].map((p) => ({ label: p.title, hint: "panel", run: () => api.openPanel(p.id) })),
     ...registry.actions.filter((a) => !a.where || a.where === "palette").map((a) => ({ label: a.label, hint: "action", run: () => a.run({}, window.ark) })),
     ...(state.commands || []).map((c) => ({ label: `/${c.name}${c.usage ? " " + c.usage : ""}`, hint: c.summary, run: () => (c.usage && !c.usage.startsWith("[") ? composer.set(`/${c.name} `) : runCommand(`/${c.name}`)) })),
@@ -389,11 +468,12 @@ function keys(e) {
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); return palette(); }
   if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); return api.newSession(); }
+  if (state.view) return;
   if (mod && e.key.toLowerCase() === "b") { e.preventDefault(); return toggleSidebar(); }
   if (mod && e.key.toLowerCase() === "\\") { e.preventDefault(); return pane.toggle(); }
   if (e.key === "Escape") {
     if (!$("#overlay").hidden) return closePalette();
-    const pending = [...state.approvals.keys()].pop();
+    const pending = [...state.approvals.values()].filter((m) => !m.request?.agent).map((m) => m.id).pop();
     if (pending != null) {
       e.preventDefault();
       document.querySelector(`.approval[data-id="${pending}"]`)?.decide?.("deny");

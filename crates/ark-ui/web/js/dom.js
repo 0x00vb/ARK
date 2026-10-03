@@ -14,7 +14,13 @@ export function h(tag, attrs, ...children) {
     else if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2), v);
     else if (k === "html") el.innerHTML = v;
     else if (k === "dataset") Object.assign(el.dataset, v);
-    else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
+    else if (k === "style" && typeof v === "object") {
+      // Custom properties (`--hue`) need setProperty; Object.assign drops them.
+      for (const [p, x] of Object.entries(v)) {
+        if (p.startsWith("--")) el.style.setProperty(p, x);
+        else el.style[p] = x;
+      }
+    }
     else el.setAttribute(k, v === true ? "" : v);
   }
   append(el, children);

@@ -100,6 +100,7 @@ impl Labels {
         self.labelers
             .iter()
             .find_map(|r| r.call(action, input))
+            .or_else(|| runtime_label(action, input))
             .unwrap_or_else(|| default_label(action, input))
     }
 
@@ -190,6 +191,25 @@ const VERBS: &[(&[&str], &str)] = &[
 
 /// A readable label from an action name and its input: `continuity.search {"term":"locket"}`
 /// becomes `Searching "locket"`.
+/// ARK's own tools that an app may offer (delegation, messages, diagrams), in words.
+fn runtime_label(action: &str, input: &Value) -> Option<String> {
+    let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").trim();
+    Some(match action {
+        ark_orchestrate::DELEGATE => match s("objective") {
+            "" => format!("Delegating to {}", s("to")),
+            o => format!("Delegating to {}: {}", s("to"), clip(o, 60)),
+        },
+        ark_orchestrate::WAIT => "Waiting for delegated work".into(),
+        ark_orchestrate::MESSAGE => format!("Messaging {}", s("to")),
+        "diagram.create" => match s("title") {
+            "" => "Drawing a diagram".into(),
+            t => format!("Drawing \"{}\"", clip(t, 60)),
+        },
+        "diagram.read" => "Reading a diagram".into(),
+        _ => return None,
+    })
+}
+
 pub fn default_label(action: &str, input: &Value) -> String {
     let (ns, verb) = action.split_once('.').unwrap_or((action, action));
     let verb_l = verb.to_ascii_lowercase();
@@ -242,6 +262,26 @@ fn humanize(action: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn runtime_tools_read_naturally() {
+        let l = Labels::new(Vec::new());
+        assert_eq!(
+            l.call_label(
+                "agents.delegate",
+                &json!({ "to": "reader-a", "objective": "read the spring review" })
+            ),
+            "Delegating to reader-a: read the spring review"
+        );
+        assert_eq!(
+            l.call_label("agents.message", &json!({ "to": "lead", "text": "x" })),
+            "Messaging lead"
+        );
+        assert_eq!(
+            l.call_label("diagram.create", &json!({ "title": "Themes" })),
+            "Drawing \"Themes\""
+        );
+    }
 
     #[test]
     fn default_labels_read_naturally() {

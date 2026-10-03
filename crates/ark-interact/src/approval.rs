@@ -72,6 +72,8 @@ mod tests {
             input: serde_json::json!({}),
             class: "notes.save".into(),
             preview: "notes.save()".into(),
+            agent: None,
+            task: None,
         }
     }
 

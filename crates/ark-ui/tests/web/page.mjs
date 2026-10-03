@@ -190,6 +190,38 @@ const scenarios = {
   },
 };
 
+// An app view replaces the conversation and gives it back; an orchestrated agent's question
+// waits in the tray outside any turn, and esc does not deny it.
+async function agents(page) {
+  await page.evaluate(() => window.ark.view({ id: "board", title: "Board", nav: true, render: (el) => el.append("the board") }));
+  const nav = page.locator('.nav-row[data-view="board"]');
+  await nav.click();
+  assert.equal(await page.locator("#stage").isVisible(), true);
+  assert.equal(await page.locator("#scroller").isVisible(), false);
+  assert.equal(await page.locator("#session-title").innerText(), "Board");
+  assert.equal(await nav.getAttribute("aria-current"), "true");
+
+  const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:orch", (m) => m.event.type === "task_finished" && ok(m.event.state))));
+  await page.evaluate(async () => {
+    await window.ark.call("spawn_agent", { spec: { name: "scribe", tools: ["notes.*"] } });
+    await window.ark.call("submit_task", { agent: "scribe", task: { objective: "save the notes" } });
+  });
+  const card = page.locator(".asks .approval");
+  await card.waitFor();
+  assert.match(await card.innerText(), /Allow scribe to run this\?/);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+  assert.equal(await card.isVisible(), true, "esc leaves an agent's question alone");
+  await card.locator("button", { hasText: "Allow once" }).click();
+  assert.equal(await done, "done");
+  await card.waitFor({ state: "detached" });
+
+  await page.locator("#new-session").click();
+  assert.equal(await page.locator("#stage").isVisible(), false);
+  assert.equal(await page.locator("#scroller").isVisible(), true);
+}
+scenarios.agents = agents;
+
 const NARRATION = "Reading the notes slowly, one line at a time, so that a window can reload in between. ".repeat(3).trim();
 
 // Scripts that run before the page, for scenarios that replace a browser API.

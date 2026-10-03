@@ -145,7 +145,7 @@ export class Thread {
   }
 
   approvalClosed(id) {
-    const card = this.root.querySelector(`.approval[data-id="${id}"]`);
+    const card = document.querySelector(`.approval[data-id="${id}"]`);
     if (!card) return;
     card.classList.add("leaving");
     setTimeout(() => card.remove(), 180);
@@ -391,24 +391,7 @@ class TurnView {
   }
 
   approval(msg, onDecide) {
-    const req = msg.request;
-    const decide = (d) => {
-      card.classList.add("decided");
-      for (const b of card.querySelectorAll("button")) b.disabled = true;
-      onDecide(msg.id, d);
-    };
-    const card = h("div.approval", { "data-id": msg.id, tabindex: "-1" },
-      h("div.approval-title", "Allow the agent to run this?"),
-      h("pre.approval-line", msg.line),
-      req.summary ? h("div.approval-summary", req.summary) : null,
-      h("div.approval-actions",
-        h("button.btn.primary", { onclick: () => decide("allow_once") }, "Allow once", h("kbd", "↩")),
-        h("button.btn", { onclick: () => decide("allow_session") }, "Allow for session"),
-        h("button.btn.ghost", { onclick: () => decide("deny") }, "Deny", h("kbd", "esc")),
-      ),
-      req.class && req.class !== req.action ? h("div.approval-class", `“Allow for session” covers ${req.class}`) : null,
-    );
-    card.decide = decide;
+    const card = approvalCard(msg, onDecide);
     this.block = null;
     this.textEl = null;
     this.agent.append(card);
@@ -431,6 +414,32 @@ class TurnView {
     this.footer(msg.footer, msg.index);
     for (const card of this.agent.querySelectorAll(".approval:not(.decided)")) card.remove();
   }
+}
+
+/// The question card for a pending approval. An orchestrated agent's question names the
+/// agent and its task; the conversation's own has the keyboard hints.
+export function approvalCard(msg, onDecide) {
+  const req = msg.request;
+  const own = !req.agent;
+  const decide = (d) => {
+    card.classList.add("decided");
+    for (const b of card.querySelectorAll("button")) b.disabled = true;
+    onDecide(msg.id, d);
+  };
+  const card = h("div.approval", { "data-id": msg.id, tabindex: "-1" },
+    h("div.approval-title", own ? "Allow the agent to run this?" : `Allow ${req.agent} to run this?`),
+    own ? null : h("div.approval-who", req.task ? `task ${req.task}` : ""),
+    h("pre.approval-line", msg.line),
+    req.summary ? h("div.approval-summary", req.summary) : null,
+    h("div.approval-actions",
+      h("button.btn.primary", { onclick: () => decide("allow_once") }, "Allow once", own ? h("kbd", "↩") : null),
+      h("button.btn", { onclick: () => decide("allow_session") }, "Allow for session"),
+      h("button.btn.ghost", { onclick: () => decide("deny") }, "Deny", own ? h("kbd", "esc") : null),
+    ),
+    req.class && req.class !== req.action ? h("div.approval-class", `“Allow for session” covers ${req.class}`) : null,
+  );
+  card.decide = decide;
+  return card;
 }
 
 /// Everything known about one tool call.

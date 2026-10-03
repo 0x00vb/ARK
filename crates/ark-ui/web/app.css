@@ -479,6 +479,25 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .approval-summary { font-size: 12.5px; color: var(--text-2); }
 .approval-class { font-size: 11.5px; color: var(--text-3); margin-top: 10px; }
 .approval-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.approval-who { font-size: 11.5px; color: var(--text-3); margin-top: 2px; }
+
+/* Questions from orchestrated agents: they wait here, whatever the main column shows. */
+.asks {
+  position: absolute; right: 20px; bottom: 92px; z-index: 20;
+  width: min(380px, calc(100% - 40px));
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: calc(100% - 140px); overflow-y: auto;
+}
+.asks:empty { display: none; }
+.app[data-view] .asks { bottom: 20px; }
+
+/* ---- views in the main column (ark.view) -------------------------------------------------- */
+
+.stage { flex: 1; min-height: 0; overflow: auto; position: relative; }
+.app[data-view] .scroller, .app[data-view] .dock { display: none; }
+.view { min-height: 100%; }
+.nav-row[aria-current="true"] { background: var(--active); }
+.session-list[data-dim="true"] .session[aria-current="true"] { background: transparent; color: var(--text-2); }
 
 /* Command results shown in the conversation. */
 .sysmsg { padding: 14px 0; font-size: 13.5px; animation: rise 280ms var(--ease) both; }

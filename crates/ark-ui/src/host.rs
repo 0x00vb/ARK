@@ -13,10 +13,13 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use ark_interact::activity::describe;
+use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec};
 use ark_interact::inspect::{
     ArtifactSummary, ContextSource, ContextView, KeptOut, StateView, UsageView,
 };
 use ark_interact::interaction::load_trace;
+use ark_interact::orchestration::event_line;
 use ark_interact::trace::interpret;
 use ark_interact::{Effect, Interaction, Labels, PendingApproval, TurnControl};
 use ark_sdk::prelude::ark_core::Focus;
@@ -26,12 +29,17 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
-/// Pass the orchestrator's events to every window as `{kind: "orch", event}`. Streamed text
-/// stays out: a window reads results from the graph.
+/// Pass the orchestrator's events to every window as `{kind: "orch", event, line, tone,
+/// activity}`: the line a task's timeline shows for it (none for events a timeline leaves
+/// out), and for an agent's runtime event the activity the conversation would show for it
+/// (none for bookkeeping such as steps and context reports). Streamed text stays out: a
+/// window reads results from the graph.
 async fn forward_orchestration(
     feed: Arc<Feed>,
+    labels: Labels,
     mut rx: broadcast::Receiver<ark_interact::ark_orchestrate::OrchEvent>,
 ) {
+    let names = HashMap::new();
     use ark_interact::ark_orchestrate::EventKind;
     loop {
         match rx.recv().await {
@@ -45,7 +53,7 @@ async fn forward_orchestration(
                 ) {
                     continue;
                 }
-                feed.send(json!({ "kind": "orch", "event": ev }));
+                feed.send(orch_event(&labels, &names, ev));
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 feed.send(json!({ "kind": "orch_lagged", "missed": n }));
@@ -53,6 +61,22 @@ async fn forward_orchestration(
             Err(broadcast::error::RecvError::Closed) => break,
         }
     }
+}
+
+/// `{kind: "orch", event, line, tone, activity}` for one orchestration event (see
+/// [`forward_orchestration`]).
+fn orch_event(
+    labels: &Labels,
+    names: &HashMap<String, String>,
+    ev: ark_interact::ark_orchestrate::OrchEvent,
+) -> Value {
+    use ark_interact::ark_orchestrate::EventKind;
+    let (line, tone) = event_line(&ev.kind).unzip();
+    let activity = match &ev.kind {
+        EventKind::Agent { event, .. } => describe(labels, names, event),
+        _ => None,
+    };
+    json!({ "kind": "orch", "event": ev, "line": line, "tone": tone, "activity": activity })
 }
 
 /// A consumer's backend method, called from its panels as `ark.call("ext", {name, params})`.
@@ -200,7 +224,8 @@ pub struct Host {
     handlers: HashMap<String, Handler>,
     info: UiInfo,
     commands: Value,
-    orchestrator: Option<ark_interact::ark_orchestrate::Orchestrator>,
+    /// The current project's orchestrator, and the task forwarding its events.
+    orch: Mutex<Option<(Orchestrator, tokio::task::JoinHandle<()>)>>,
 }
 
 impl Host {
@@ -230,9 +255,8 @@ impl Host {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
         );
-        let orchestrator = ix.orchestrator().cloned();
         let host = Arc::new(Host {
-            orchestrator: orchestrator.clone(),
+            orch: Mutex::new(None),
             engine: ix.ark().shared_engine(),
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
@@ -248,9 +272,6 @@ impl Host {
         });
         host.refresh().await;
         tokio::spawn(forward_approvals(host.clone(), approvals));
-        if let Some(o) = orchestrator {
-            tokio::spawn(forward_orchestration(host.feed.clone(), o.subscribe()));
-        }
         host
     }
 
@@ -280,6 +301,7 @@ impl Host {
     }
 
     async fn refresh_with(&self, ix: &Interaction) {
+        self.follow_orchestrator(ix.orchestrator());
         let context = ix.context_view().await.ok();
         let kept_out = ix.kept_out().unwrap_or_default();
         let mut s = self.snapshot.lock().unwrap();
@@ -289,6 +311,41 @@ impl Host {
         s.kept_out = kept_out;
         s.project = Some(ix.project().clone());
         s.session = ix.session().id().as_str().to_string();
+    }
+
+    /// Forward the events of the interaction's orchestrator (it changes with the project).
+    fn follow_orchestrator(&self, current: Option<&Orchestrator>) {
+        let mut orch = self.orch.lock().unwrap();
+        let same = match (&*orch, current) {
+            (Some((a, _)), Some(b)) => a.project().id == b.project().id,
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        if let Some((_, task)) = orch.take() {
+            task.abort();
+        }
+        if let Some(o) = current {
+            let task = tokio::spawn(forward_orchestration(
+                self.feed.clone(),
+                self.labels.clone(),
+                o.subscribe(),
+            ));
+            *orch = Some((o.clone(), task));
+        }
+    }
+
+    /// The orchestrator, for the orchestration methods. They do not wait for the
+    /// conversation: agents work on their own.
+    fn orchestrator(&self) -> anyhow::Result<Orchestrator> {
+        self.orch
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(o, _)| o.clone())
+            .ok_or_else(|| anyhow::anyhow!("this app runs a single agent"))
     }
 
     fn project(&self) -> anyhow::Result<Project> {
@@ -479,14 +536,105 @@ impl Host {
             }
             "context" => Ok(serde_json::to_value(self.context().await?)?),
             // The agent and task graph; follow it with `orch` events after its `seq`.
-            "graph" => match &self.orchestrator {
-                Some(o) => Ok(serde_json::to_value(o.graph())?),
-                None => Ok(Value::Null),
+            "graph" => match self.orchestrator() {
+                Ok(o) => Ok(serde_json::to_value(o.graph())?),
+                Err(_) => Ok(Value::Null),
             },
-            "task_trace" => match &self.orchestrator {
-                Some(o) => Ok(serde_json::to_value(o.task_trace(&s("task"))?)?),
-                None => anyhow::bail!("this app runs a single agent"),
-            },
+            "task_trace" => Ok(serde_json::to_value(
+                self.orchestrator()?.task_trace(&s("task"))?,
+            )?),
+            "task" => {
+                let o = self.orchestrator()?;
+                let id = s("task");
+                let task = o
+                    .task(&id)
+                    .ok_or_else(|| anyhow::anyhow!("no task `{id}`"))?;
+                // Each event with the line a timeline shows for it (from ark-interact).
+                let timeline: Vec<Value> = o
+                    .task_trace(&id)?
+                    .into_iter()
+                    .filter_map(|e| {
+                        let (line, tone) = event_line(&e.kind)?;
+                        Some(json!({
+                            "seq": e.seq,
+                            "at_ms": e.at_ms,
+                            "agent": e.kind.agent(),
+                            "line": line,
+                            "tone": tone,
+                            "event": e,
+                        }))
+                    })
+                    .collect();
+                Ok(json!({ "task": task, "timeline": timeline }))
+            }
+            // Stored events after `after`, worded as the live `orch` events are; a window
+            // that opens late reads the recent past with it.
+            "orch_events" => {
+                let names = HashMap::new();
+                let limit = n("limit").unwrap_or(200).min(2000) as usize;
+                let events = self
+                    .orchestrator()?
+                    .events(n("after").unwrap_or(0), limit)?;
+                Ok(Value::Array(
+                    events
+                        .into_iter()
+                        .map(|e| orch_event(&self.labels, &names, e))
+                        .collect(),
+                ))
+            }
+            "agents" => Ok(serde_json::to_value(self.orchestrator()?.agents())?),
+            "spawn_agent" => {
+                let spec: AgentSpec = serde_json::from_value(params["spec"].clone())?;
+                Ok(serde_json::to_value(
+                    self.orchestrator()?.spawn(spec).await?,
+                )?)
+            }
+            "submit_task" => {
+                let spec: TaskSpec = serde_json::from_value(params["task"].clone())?;
+                if spec.objective.trim().is_empty() {
+                    anyhow::bail!("a task needs an objective");
+                }
+                let id = self.orchestrator()?.submit(&s("agent"), spec)?;
+                Ok(json!({ "task": id }))
+            }
+            "cancel_task" => {
+                self.orchestrator()?.cancel(&s("task"))?;
+                Ok(json!({}))
+            }
+            "retry_task" => {
+                self.orchestrator()?.retry(&s("task"))?;
+                Ok(json!({}))
+            }
+            "suspend_agent" => {
+                self.orchestrator()?.suspend(&s("agent"))?;
+                Ok(json!({}))
+            }
+            "resume_agent" => {
+                self.orchestrator()?.resume(&s("agent"))?;
+                Ok(json!({}))
+            }
+            "terminate_agent" => {
+                self.orchestrator()?.terminate(&s("agent")).await?;
+                Ok(json!({}))
+            }
+            // A note from the person: into the agent's running task, else its next one.
+            "message_agent" => {
+                let delivered = self
+                    .orchestrator()?
+                    .message("user", &s("agent"), &s("text"))?;
+                Ok(json!({ "delivered": delivered }))
+            }
+            // The app's actions, which an agent's `tools` patterns choose from.
+            "tools" => {
+                let mut actions = self.engine.registry.actions();
+                actions.sort_by(|a, b| a.name.cmp(&b.name));
+                Ok(Value::Array(
+                    actions
+                        .iter()
+                        .map(|d| json!({ "name": d.name, "summary": d.summary, "risk": d.risk }))
+                        .collect(),
+                ))
+            }
             "usage" => {
                 if !self.is_running() {
                     self.refresh().await;
@@ -608,13 +756,26 @@ impl Host {
             .ok_or_else(|| anyhow::anyhow!("no context yet"))
     }
 
-    fn artifact(&self, id: &str, params: &Value) -> anyhow::Result<Value> {
+    /// An artifact of the project, or of one of its orchestrated agents (each works in a
+    /// child project, and what a task produced stays there).
+    fn find_artifact(&self, id: &str) -> anyhow::Result<ark_sdk::prelude::Artifact> {
         let pid = self.project()?.id;
-        let art = self
-            .engine
-            .store
-            .resolve_artifact(&pid, id)?
-            .ok_or_else(|| anyhow::anyhow!("artifact not found"))?;
+        let store = &self.engine.store;
+        if let Some(a) = store.resolve_artifact(&pid, id)? {
+            return Ok(a);
+        }
+        for p in store.list_projects()? {
+            if p.parent.as_ref() == Some(&pid) {
+                if let Some(a) = store.resolve_artifact(&p.id, id)? {
+                    return Ok(a);
+                }
+            }
+        }
+        anyhow::bail!("artifact not found")
+    }
+
+    fn artifact(&self, id: &str, params: &Value) -> anyhow::Result<Value> {
+        let art = self.find_artifact(id)?;
         let bytes = self.engine.store.read_blob(&art.id)?;
         let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let length = params
@@ -682,14 +843,20 @@ impl Host {
         self.refresh_with(&ix).await;
         drop(ix);
         *self.running.lock().unwrap() = None;
-        // No question outlives its turn; close them before saying the turn ended.
-        let open: Vec<u64> = self
-            .approvals
-            .lock()
-            .unwrap()
-            .drain()
-            .map(|(id, _)| id)
-            .collect();
+        // No question outlives its turn; close them before saying the turn ended. Questions
+        // from orchestrated agents belong to their tasks, not to this turn.
+        let open: Vec<u64> = {
+            let mut approvals = self.approvals.lock().unwrap();
+            let ids: Vec<u64> = approvals
+                .iter()
+                .filter(|(_, (shown, _))| shown["request"]["agent"].is_null())
+                .map(|(id, _)| *id)
+                .collect();
+            for id in &ids {
+                approvals.remove(id);
+            }
+            ids
+        };
         for id in open {
             self.emit(json!({ "kind": "approval_closed", "id": id }));
         }

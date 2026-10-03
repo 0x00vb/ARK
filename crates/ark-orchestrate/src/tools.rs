@@ -8,6 +8,9 @@
 //! - `agents.message(to, text)`: a short note to a permitted agent, delivered into its running
 //!   task or kept for its next one.
 //!
+//! The person's own conversation gets [`ChatTools`] instead: create an agent, hand any agent a
+//! task, wait for tasks. So the person asks in words and the chat decides what becomes a task.
+//!
 //! The calls are ordinary actions: each becomes an invocation in the delegating agent's
 //! store and an evidence card in its context, so a delegation is traced like any tool call
 //! and its result is cited like any evidence.
@@ -20,12 +23,14 @@ use ark_tools::{ActionOutput, Adapter, AdapterError, RunCtx};
 use serde_json::{json, Value};
 
 use crate::orchestrator::Inner;
-use crate::record::TaskRecord;
-use crate::spec::TaskSpec;
+use crate::record::{AgentState, TaskRecord};
+use crate::spec::{AgentSpec, TaskSpec};
+use crate::Orchestrator;
 
 pub const DELEGATE: &str = "agents.delegate";
 pub const WAIT: &str = "agents.wait";
 pub const MESSAGE: &str = "agents.message";
+pub const CREATE: &str = "agents.create";
 
 /// Characters of a delegated task's result in the delegator's evidence card. The full result
 /// stays in the invocation (`get_evidence`).
@@ -200,6 +205,163 @@ impl Adapter for AgentTools {
     }
 }
 
+/// The tools of the person's conversation in an app that runs several agents. Built for one
+/// turn, so the agents it names are the current ones.
+pub(crate) struct ChatTools {
+    pub orch: Orchestrator,
+}
+
+impl ChatTools {
+    fn roster(&self) -> String {
+        let live: Vec<String> = self
+            .orch
+            .agents()
+            .into_iter()
+            .filter(|a| a.state != AgentState::Terminated)
+            .map(|a| match a.spec.role.trim() {
+                "" => a.name,
+                r => format!("{} ({r})", a.name),
+            })
+            .collect();
+        if live.is_empty() {
+            "There are no agents yet; create one first.".into()
+        } else {
+            format!("Agents: {}.", live.join("; "))
+        }
+    }
+
+    fn live(&self, name: &str) -> bool {
+        self.orch
+            .agent(name)
+            .is_some_and(|a| a.state != AgentState::Terminated)
+    }
+}
+
+#[async_trait::async_trait]
+impl Adapter for ChatTools {
+    fn name(&self) -> &str {
+        "agents"
+    }
+
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![
+            ActionDescriptor::new(
+                DELEGATE,
+                format!(
+                    "hand a self-contained task to an agent and get its result. Do quick work yourself; hand off work that is long, can run in parallel, or fits an agent's role. {}",
+                    self.roster()
+                ),
+                RiskTier::Observe,
+            )
+            .volatile()
+            .with_input_schema(json!({
+                "type": "object",
+                "required": ["to", "objective"],
+                "properties": {
+                    "to": { "type": "string", "description": "the agent's name" },
+                    "objective": { "type": "string", "description": "what the agent must achieve" },
+                    "context": { "type": "string", "description": "only what it needs to know; it does not see this conversation" },
+                    "wait": { "type": "boolean", "description": "wait for the result (default true); false returns at once and the task runs on" }
+                }
+            })),
+            ActionDescriptor::new(
+                WAIT,
+                "wait for tasks handed off with wait: false and get their results",
+                RiskTier::Observe,
+            )
+            .volatile()
+            .with_input_schema(json!({
+                "type": "object",
+                "required": ["tasks"],
+                "properties": { "tasks": { "type": "array", "items": { "type": "string" } } }
+            })),
+            ActionDescriptor::new(
+                CREATE,
+                "create an agent when the work needs a role no agent has. It keeps its own context between tasks; actions that change anything still ask the person",
+                RiskTier::Observe,
+            )
+            .volatile()
+            .with_input_schema(json!({
+                "type": "object",
+                "required": ["name", "role"],
+                "properties": {
+                    "name": { "type": "string", "description": "short, lowercase, e.g. reviewer" },
+                    "role": { "type": "string", "description": "one line on what it does" },
+                    "instructions": { "type": "string", "description": "how it works, as a system prompt" }
+                }
+            })),
+        ]
+    }
+
+    async fn run(
+        &self,
+        action: &str,
+        input: Value,
+        _ctx: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").trim();
+        let fail = |e: crate::OrchError| AdapterError::Tool(e.to_string());
+        match action {
+            DELEGATE => {
+                let to = s("to");
+                if !self.live(to) {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        format!("no agent named `{to}`. {}", self.roster()),
+                    ));
+                }
+                let spec = TaskSpec::new(s("objective")).context(s("context"));
+                if spec.objective.is_empty() {
+                    return Err(AdapterError::bad_input(action, "an objective is required"));
+                }
+                let id = self.orch.submit(to, spec).map_err(fail)?;
+                if !input.get("wait").and_then(Value::as_bool).unwrap_or(true) {
+                    return Ok(ActionOutput::json(
+                        json!({ "task": id, "agent": to, "state": "queued" }),
+                    ));
+                }
+                let done = self.orch.wait(&id).await.map_err(fail)?;
+                Ok(ActionOutput::json(result_json(&done)))
+            }
+            WAIT => {
+                let ids: Vec<&str> = input
+                    .get("tasks")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                if ids.is_empty() {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        "name the tasks to wait for",
+                    ));
+                }
+                let mut done = Vec::new();
+                for id in ids {
+                    done.push(result_json(&self.orch.wait(id).await.map_err(fail)?));
+                }
+                Ok(ActionOutput::json(json!({ "tasks": done })))
+            }
+            CREATE => {
+                let name = s("name").to_lowercase().replace(' ', "-");
+                if self.live(&name) {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        format!("`{name}` exists; hand it the task with {DELEGATE}"),
+                    ));
+                }
+                let spec = AgentSpec::new(&name)
+                    .role(s("role"))
+                    .instructions(s("instructions"));
+                let a = self.orch.spawn(spec).await.map_err(fail)?;
+                Ok(ActionOutput::json(
+                    json!({ "agent": a.name, "role": a.spec.role }),
+                ))
+            }
+            other => Err(AdapterError::UnknownAction(other.to_string())),
+        }
+    }
+}
+
 fn result_json(t: &TaskRecord) -> Value {
     json!({
         "task": t.id,
@@ -270,6 +432,14 @@ pub(crate) fn distiller() -> Distiller {
                 }
                 Some((lines.join("\n"), ids))
             }
+            CREATE => Some((
+                format!(
+                    "created agent {}: {}",
+                    out.get("agent").and_then(Value::as_str).unwrap_or(""),
+                    out.get("role").and_then(Value::as_str).unwrap_or("")
+                ),
+                Vec::new(),
+            )),
             MESSAGE => Some((
                 format!(
                     "message to {} {}",

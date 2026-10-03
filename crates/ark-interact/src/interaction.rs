@@ -855,6 +855,7 @@ impl Interaction {
             focus: self.focus.clone(),
             steer: Some(ctl.steer.clone()),
             present: self.present,
+            tools: self.turn_tools(),
         };
         let mut last_context = None;
         let Interaction {
@@ -982,11 +983,17 @@ impl Interaction {
             .collect())
     }
 
+    /// Tools the conversation gets beside the app's: with several agents, the orchestrator's
+    /// chat tools, so the person asks in words and the chat creates agents and tasks.
+    fn turn_tools(&self) -> Vec<ark_sdk::TurnTools> {
+        self.orchestrator.iter().map(|o| o.chat_tools()).collect()
+    }
+
     /// What the model receives, by source, and what ARK kept out.
     pub async fn context_view(&self) -> anyhow::Result<ContextView> {
         let preview = self
             .ark
-            .context_preview_for(&self.session, self.present)
+            .context_preview_with(&self.session, self.present, &self.turn_tools())
             .await?;
         let (report, source, next) = match &self.last_context {
             Some(r) => (r.clone(), ContextSource::LastRequest, Some(preview.total)),

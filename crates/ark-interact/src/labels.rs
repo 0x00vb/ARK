@@ -200,6 +200,7 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
             o => format!("Delegating to {}: {}", s("to"), clip(o, 60)),
         },
         ark_orchestrate::WAIT => "Waiting for delegated work".into(),
+        ark_orchestrate::CREATE => format!("Creating agent {}", s("name")),
         ark_orchestrate::MESSAGE => format!("Messaging {}", s("to")),
         "diagram.create" => match s("title") {
             "" => "Drawing a diagram".into(),

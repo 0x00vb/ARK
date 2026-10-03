@@ -32,6 +32,11 @@ const api = {
   summary: () => state.summary,
   project: () => state.summary?.project,
   send: (text) => submit(text),
+  // Put text in the composer, unsent, with the conversation in view.
+  compose: (text) => {
+    showConversation();
+    composer.set(text);
+  },
   submit: (text) => submit(text),
   steer,
   cancel: () => transport.call("cancel").catch(() => {}),

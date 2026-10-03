@@ -132,6 +132,7 @@ what the person is looking at.
 
 Helpers on the same object: `ark.h` and `ark.icon` (DOM), `ark.markdown`, `ark.call` (a Host
 method), `ark.ext` (an app handler), `ark.runAction(action, input)`, `ark.command(line)`,
+`ark.compose(text)` (puts text in the composer, unsent, so an empty state can suggest a request),
 `ark.openArtifact(id, viewer, params)`, `ark.openPanel(id, params)`, `ark.closePanel(id)`,
 `ark.openView(id, params)`, `ark.showConversation()`, `ark.currentView()`, `ark.setPanelTitle`,
 `ark.openInvocation(id)`, `ark.project()`, `ark.setFocus`, `ark.toast`, and

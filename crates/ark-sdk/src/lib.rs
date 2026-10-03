@@ -27,16 +27,16 @@ use ark_core::{Focus, Project, ProjectId, RuleScope};
 use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
 use ark_runtime::{
-    Agent, AgentProfile, ApprovalGate, CancelToken, ContextReport, Engine, Harness, HarnessEvent,
-    HarnessOutcome, ModelRouter, Role, RuleBook, RuleSelection, RulesTool, Session, Steering,
-    StoreLedger,
+    Agent, AgentProfile, ApprovalGate, CancelToken, ContextReport, Distiller, Engine, Harness,
+    HarnessEvent, HarnessOutcome, ModelRouter, Role, RuleBook, RuleSelection, RulesTool, Session,
+    Steering, StoreLedger,
 };
 use ark_tools::{Adapter, Registry};
 
 /// A convenient, curated prelude for consumers.
 pub mod prelude {
     pub use crate::{Ark, ArkBuilder, ArkError};
-    pub use crate::{Settings, TurnOptions};
+    pub use crate::{Settings, TurnOptions, TurnTools};
     pub use ark_core::{
         ActionDescriptor, Artifact, ArtifactId, ArtifactKind, Capability, CapabilityCatalog,
         CapabilitySpec, Project, ProjectId, Provenance, RiskTier, Rule, RuleBinding, RuleScope,
@@ -81,6 +81,17 @@ pub struct TurnOptions {
     /// The front-end can show things beside the conversation, so the model is offered the
     /// `present` tool.
     pub present: bool,
+    /// Tools for this turn only, beside the app's (see [`TurnTools`]).
+    pub tools: Vec<TurnTools>,
+}
+
+/// Tools a front-end adds to one turn, such as an orchestrator's for the person's own
+/// conversation. Their actions are offered directly, without a discovery step.
+#[derive(Clone)]
+pub struct TurnTools {
+    pub adapter: Arc<dyn Adapter>,
+    /// Writes the evidence cards of the adapter's results.
+    pub distiller: Option<Distiller>,
 }
 
 /// The effective runtime configuration, for display.
@@ -214,6 +225,7 @@ impl Ark {
     ) -> Result<HarnessOutcome, ArkError> {
         let project = session.project().clone();
         let (engine, rules) = self.with_rules(&project, input)?;
+        let (engine, profile) = self.with_tools(engine, &opts.tools);
         let router = self.session_router(session).await;
         let harness = self
             .harness_with(router)
@@ -226,7 +238,7 @@ impl Ark {
             .rules(rules);
         session.begin_turn(&self.engine, input)?;
         match harness
-            .ask(&engine, &self.profile, &project, input, on_event)
+            .ask(&engine, &profile, &project, input, on_event)
             .await
         {
             Ok(outcome) => {
@@ -301,6 +313,35 @@ impl Ark {
         Ok((Arc::new(self.engine.scoped(registry)), Some(selection)))
     }
 
+    /// The engine and profile of a turn with `tools` added: their adapters registered, their
+    /// actions offered directly, their distillers first.
+    fn with_tools(
+        &self,
+        engine: Arc<Engine>,
+        tools: &[TurnTools],
+    ) -> (Arc<Engine>, std::borrow::Cow<'_, AgentProfile>) {
+        if tools.is_empty() {
+            return (engine, std::borrow::Cow::Borrowed(&self.profile));
+        }
+        let mut registry = engine.registry.clone();
+        let mut profile = self.profile.clone();
+        for t in tools {
+            registry = registry.with(t.adapter.clone());
+            for a in t.adapter.actions() {
+                if !profile.core_actions.contains(&a.name) {
+                    profile.core_actions.push(a.name);
+                }
+            }
+            if let Some(d) = &t.distiller {
+                profile.distillers.push(d.clone());
+            }
+        }
+        (
+            Arc::new(engine.scoped(registry)),
+            std::borrow::Cow::Owned(profile),
+        )
+    }
+
     /// What the next turn's first request would contain, by source, without calling a model.
     pub async fn context_preview(&self, session: &Session) -> Result<ContextReport, ArkError> {
         self.context_preview_for(session, false).await
@@ -313,13 +354,24 @@ impl Ark {
         session: &Session,
         present: bool,
     ) -> Result<ContextReport, ArkError> {
+        self.context_preview_with(session, present, &[]).await
+    }
+
+    /// [`context_preview_for`](Ark::context_preview_for) with the turn's [`TurnTools`].
+    pub async fn context_preview_with(
+        &self,
+        session: &Session,
+        present: bool,
+        tools: &[TurnTools],
+    ) -> Result<ContextReport, ArkError> {
         let (engine, rules) = self.with_rules(session.project(), "")?;
+        let (engine, profile) = self.with_tools(engine, tools);
         Ok(self
             .harness()
             .presentation(present)
             .conversation(session.conversation_digest())
             .rules(rules)
-            .preview_context(&engine, &self.profile, session.project(), "")
+            .preview_context(&engine, &profile, session.project(), "")
             .await?)
     }
 

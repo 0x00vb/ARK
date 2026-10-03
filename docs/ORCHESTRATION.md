@@ -15,6 +15,7 @@ ChatGPT subscriptions) and `/review` in [`examples/writing-agent`](../examples/w
 | Agent | `AgentSpec`, `AgentRecord` | name, role, instructions, model, profile, allowed tools, who it may delegate to, parent, default budget, diagram tool on or off |
 | Task | `TaskSpec`, `TaskRecord` | objective, context, artifacts, `after` (dependencies), budget, attempts; state, owner, origin, parent, children, usage, result, outputs, rules applied |
 | Delegation | `agents.delegate`, `agents.wait` | an agent creates a task for an agent it may delegate to, and waits for the result or continues |
+| The person's chat | `Orchestrator::chat_tools`: `agents.create`, `agents.delegate`, `agents.wait` | the conversation creates agents and hands any of them a task ([ADR 0007](adr/0007-the-chat-creates-agents-and-tasks.md)) |
 | Message | `agents.message`, `Orchestrator::message` | a short note into another agent's running task, or its inbox for the next task |
 | Artifact | ARK artifacts | passed explicitly with a task; a task's outputs go back to the delegator |
 | Budget | `Budget` | steps, tokens, model calls, wall time, delegations |
@@ -64,6 +65,21 @@ let done = orch.run("lead", TaskSpec::new("compare the two reviews").artifacts([
 | `cancel(task)` | stops the task and every open task below it |
 | `terminate(agent)` | cancels its tasks, closes its model session, takes no more work |
 | `retry(task)` | runs a failed or cancelled task again |
+
+## From the chat
+
+In an app built with `App::orchestrate` (or `App::orchestrator`), every turn of the person's
+conversation also gets `Orchestrator::chat_tools()`, through `TurnOptions::tools`. The
+person asks in words; the chat decides what becomes an agent or a task.
+
+| Action | Does |
+|---|---|
+| `agents.create {name, role, instructions?}` | adds an agent with every app tool; its state-changing actions still ask the person. An existing name is refused |
+| `agents.delegate {to, objective, context?, wait?}` | hands any live agent a task with `Origin::External`; waits for the result unless `wait: false` |
+| `agents.wait {tasks}` | waits for tasks handed off with `wait: false` |
+
+The `agents.delegate` summary lists the current agents and their roles, so the chat picks one
+without a lookup. An app with no orchestrator offers none of these.
 
 ## Context isolation
 

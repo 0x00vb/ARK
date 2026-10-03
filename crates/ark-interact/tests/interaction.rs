@@ -300,3 +300,97 @@ async fn agents_command_shows_the_graph_and_a_task() {
         .interaction;
     assert!(!solo.commands().iter().any(|c| c.name == "agents"));
 }
+
+/// With several agents, the person asks in words: the chat creates an agent and hands it a
+/// task, and the task is in the graph like any other.
+#[tokio::test]
+async fn the_chat_creates_agents_and_hands_them_tasks() {
+    use ark_interact::ark_orchestrate::{Orchestrator, CREATE, DELEGATE};
+    let dir = tempfile::tempdir().unwrap();
+    let call = |name: &str, args: serde_json::Value| Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: name.into(),
+            name: name.into(),
+            arguments: args,
+        }],
+        usage: Usage::measured(100, 5),
+    };
+    let model: Arc<dyn ark_model::Provider> =
+        Arc::new(MockProvider::new("m", vec![]).with_fallback(move |req| {
+            let text = |c: &str| Completion {
+                content: c.into(),
+                tool_calls: vec![],
+                usage: Usage::measured(100, 5),
+            };
+            if req.system.contains("You are the agent \"reviewer\"") {
+                return text("REVIEWED: two typos.");
+            }
+            let done: Vec<&str> = req
+                .messages
+                .iter()
+                .filter_map(|m| m.tool_call_id.as_deref())
+                .collect();
+            if done.contains(&DELEGATE) {
+                text("The reviewer found two typos.")
+            } else if done.contains(&CREATE) {
+                call(
+                    DELEGATE,
+                    serde_json::json!({ "to": "reviewer", "objective": "review chapter one" }),
+                )
+            } else {
+                call(
+                    CREATE,
+                    serde_json::json!({ "name": "Reviewer", "role": "reviews drafts" }),
+                )
+            }
+        }));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = App::new("Team")
+        .ark(ark)
+        .orchestrate(move |ark, project, gate| {
+            let m = model.clone();
+            Ok(Orchestrator::builder(ark, project)
+                .configure_models(|b| b.provider("m", m).default_model("m"))
+                .approvals(gate)
+                .build()?)
+        })
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+
+    let ctl = TurnControl::new();
+    let mut labels = Vec::new();
+    let end = ix
+        .run_turn("have someone review chapter one", &ctl, |_, a| {
+            if let Some(a) = a {
+                labels.push(a.label.clone());
+            }
+        })
+        .await;
+    assert!(end.result.unwrap().answer.contains("two typos"));
+    assert!(
+        labels.iter().any(|l| l == "Creating agent Reviewer"),
+        "{labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|l| l.starts_with("Delegating to reviewer")),
+        "{labels:?}"
+    );
+    let orch = ix.orchestrator().unwrap();
+    let agent = orch.agent("reviewer").unwrap();
+    assert_eq!(agent.spec.role, "reviews drafts");
+    let tasks = orch.tasks();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].owner, "reviewer");
+    assert!(tasks[0].result.as_deref().unwrap().contains("REVIEWED"));
+}

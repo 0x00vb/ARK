@@ -30,6 +30,12 @@ What changed for people building on ARK, per release. Not a commit log.
   `project_folder`, `sessions {project}`.
 - Window: a top bar with tabs for app views and buttons for app panels marked `nav`, and a
   Settings page whose sections apps register with `ark.setting` (⌘,).
+- The chat creates agents and hands them tasks: in an orchestrating app each turn gets
+  `Orchestrator::chat_tools()` (`agents.create`, `agents.delegate`, `agents.wait`), so a
+  person asks in words instead of filling a form. `TurnOptions::tools` and `TurnTools` add
+  tools to one turn, offered directly; `Ark::context_preview_with` previews them. See
+  `docs/ORCHESTRATION.md`, "From the chat", and ADR 0007.
+- Window: `ark.compose(text)` puts text in the composer, unsent.
 - Whole small results, off by default: `DistillerSet::whole_below(tokens)`
   (`ARK_WHOLE_RESULT_TOKENS`) passes a result no distiller recognizes whole when it is that
   small, instead of a summary the model may have to open with `get_evidence`.

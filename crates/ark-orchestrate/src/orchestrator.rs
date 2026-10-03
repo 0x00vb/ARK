@@ -196,6 +196,16 @@ impl Orchestrator {
         st.agents.get(name).map(|a| a.record.clone())
     }
 
+    /// The tools of the person's own conversation: create an agent, hand one a task, wait
+    /// for tasks (see [`ChatTools`](crate::tools)). Add them to each turn with
+    /// [`TurnOptions::tools`](ark_sdk::TurnOptions::tools); they name the agents of that moment.
+    pub fn chat_tools(&self) -> ark_sdk::TurnTools {
+        ark_sdk::TurnTools {
+            adapter: Arc::new(tools::ChatTools { orch: self.clone() }),
+            distiller: Some(tools::distiller()),
+        }
+    }
+
     /// Every agent, in the order they were spawned.
     pub fn agents(&self) -> Vec<AgentRecord> {
         let st = self.inner.state.lock().unwrap();

@@ -9,6 +9,7 @@
 //! | [`AgentSpec`] | an agent's identity, instructions, tools, permissions and model |
 //! | [`TaskSpec`] / [`TaskRecord`] | an objective, its state, owner, dependencies, artifacts and [`Budget`] |
 //! | delegation | `agents.delegate`: an agent creates a task for an agent it may delegate to |
+//! | the person's chat | [`Orchestrator::chat_tools`]: the conversation creates agents and hands them tasks |
 //! | messages | `agents.message`: a short note into another agent's running task or inbox |
 //! | artifacts | passed explicitly with a task and handed back with its result |
 //! | [`Orchestrator`] | lifecycle (spawn, run, suspend, resume, cancel, terminate) and a capacity-aware scheduler |
@@ -49,7 +50,7 @@ pub use record::{
     Usage,
 };
 pub use spec::{AgentSpec, Budget, TaskSpec};
-pub use tools::{DELEGATE, MESSAGE, WAIT};
+pub use tools::{CREATE, DELEGATE, MESSAGE, WAIT};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OrchError {

@@ -13,6 +13,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0004](0004-ark-state-canonical-vendor-sessions-disposable.md) | ARK's store is canonical; vendor sessions are disposable | Accepted |
 | [0005](0005-delegation-by-brief.md) | A delegated agent receives a brief, never a conversation | Accepted |
 | [0006](0006-release-by-immutable-tag.md) | A release is an immutable git tag; consumers pin it | Accepted |
+| [0007](0007-the-chat-creates-agents-and-tasks.md) | The person's chat creates agents and tasks; forms are not the way in | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

@@ -36,6 +36,11 @@ What changed for people building on ARK, per release. Not a commit log.
   tools to one turn, offered directly; `Ark::context_preview_with` previews them. See
   `docs/ORCHESTRATION.md`, "From the chat", and ADR 0007.
 - Window: `ark.compose(text)` puts text in the composer, unsent.
+- Window: Terminal, Browser and Files in every app, opened from a + menu in the top bar
+  (⌃`, ⌘T, ⌘P) or by the agent's `present` (`terminal`, `browser`, `file`). The terminal is
+  the project's shell in its folder; Files browses, edits and saves files inside the folder.
+  Page methods `term_open`, `term_write`, `term_resize`, `term_close`, `files`, `file_read`,
+  `file_write`; event `term`. A `present` the window cannot show is a toast instead of nothing.
 - Whole small results, off by default: `DistillerSet::whole_below(tokens)`
   (`ARK_WHOLE_RESULT_TOKENS`) passes a result no distiller recognizes whole when it is that
   small, instead of a summary the model may have to open with `get_evidence`.
@@ -44,7 +49,7 @@ What changed for people building on ARK, per release. Not a commit log.
 - Switching or opening a project returns to its most recent session instead of starting a
   new one (`Interaction::set_project`).
 - Window: `nav` on `ark.view` and `ark.panel` puts the view in a top-bar tab and the panel
-  on a top-bar button, not in the sidebar. "New session" is "New chat".
+  in the top bar's + menu, not in the sidebar. "New session" is "New chat".
 - **Action preloading is on by default** (2 actions; `ARK_PRELOAD_ACTIONS=0` turns it off).
   Measured live on qwen3:4b and Claude Haiku (`bench/RESULTS.md`, P1).
 - `ark-bench`'s simulated model reads raw JSON results as it reads ARK's cards, and finds

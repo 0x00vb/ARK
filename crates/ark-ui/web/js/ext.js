@@ -4,8 +4,8 @@
 //   ark.view({ id, title, icon, nav, render(el, params, api) })
 //                      a view of the current project in the main column, in place of the
 //                      conversation; `nav` makes it a tab in the top bar beside "Chat".
-//                      Choosing a chat brings the conversation back. A panel's `nav` puts a
-//                      button for it in the top bar.
+//                      Choosing a chat brings the conversation back. A panel's `nav` lists
+//                      it in the top bar's + menu, after ARK's Terminal, Browser and Files.
 //   ark.setting({ id, title, icon, render(el, api) })
 //                      a section of the Settings page: the app's or the account's
 //                      configuration, not one project's. Settings shows once one exists.
@@ -100,8 +100,10 @@ export function installApi(api) {
 }
 
 /// Who handles a `present` directive for `view`: a panel or an artifact viewer that lists it.
+/// An app's panel comes before ARK's built-in one for the same view.
 export function presenterFor(view) {
-  for (const p of registry.panels.values()) if ((p.presents || []).includes(view)) return { panel: p };
+  const panels = [...registry.panels.values()].sort((a, b) => !!a.builtin - !!b.builtin);
+  for (const p of panels) if ((p.presents || []).includes(view)) return { panel: p };
   for (const v of registry.viewers) if ((v.presents || []).includes(view)) return { viewer: v };
   return null;
 }

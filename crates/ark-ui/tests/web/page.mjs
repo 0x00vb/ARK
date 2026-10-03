@@ -226,6 +226,33 @@ async function agents(page) {
 }
 scenarios.agents = agents;
 
+// The + menu opens the built-in panels. Files edits and saves a file in the project folder;
+// the terminal runs a shell there.
+async function workbench(page) {
+  await page.evaluate(() => window.ark.call("file_write", { path: "draft.md", text: "one" }));
+  await page.locator("#open-menu").click();
+  const items = page.locator(".popover .open-item");
+  assert.deepEqual(await items.allInnerTexts().then((t) => t.map((x) => x.split("\n")[0].trim())), ["Terminal", "Browser", "Files"]);
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await page.locator(".wb-entry", { hasText: "draft.md" }).click();
+  const editor = page.locator(".wb-editor");
+  assert.equal(await editor.inputValue(), "one");
+  assert.equal(await page.locator(".wb-save").isDisabled(), true);
+  await editor.fill("two");
+  await page.locator(".wb-save").click();
+  await page.waitForFunction(async () => (await window.ark.call("file_read", { path: "draft.md" })).text === "two");
+  await assert.rejects(page.evaluate(() => window.ark.call("file_read", { path: "../outside" })));
+
+  await page.evaluate(() => window.ark.openPanel("terminal"));
+  await page.locator(".xterm-helper-textarea").waitFor({ state: "attached" });
+  await page.waitForTimeout(500);
+  await page.locator(".xterm-helper-textarea").type("echo ark-$((40+2))\n");
+  await page.locator(".xterm-rows", { hasText: "ark-42" }).waitFor();
+}
+scenarios.workbench = workbench;
+
 const NARRATION = "Reading the notes slowly, one line at a time, so that a window can reload in between. ".repeat(3).trim();
 
 // Scripts that run before the page, for scenarios that replace a browser API.

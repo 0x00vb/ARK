@@ -28,8 +28,10 @@
 mod assets;
 #[cfg(feature = "desktop")]
 mod desktop;
+mod files;
 pub mod host;
 mod serve;
+mod terminal;
 
 use std::borrow::Cow;
 use std::collections::HashMap;

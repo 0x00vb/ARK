@@ -33,8 +33,11 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Conversation | Your messages, streamed answers, and the agent's work as short activity lines ("Reading chapter-04.md"). A work block folds to one line ("Used 3 tools · Reading notes") when the turn ends. A tool row opens on click: arguments, the result the model saw, duration, approval, and what it added to the context. |
 | Composer | Model, and a quiet "24% context" meter that runs `/context` when clicked. The model menu lists models by backend (subscriptions, Ollama, APIs with a key); a backend that is not ready shows its sign-in or install command. |
 | Sidebar | New chat, then projects with their chats beneath (times, "Show more" after 8). The current project is unfolded, the others fold; a chevron unfolds one without opening it, and a fold choice lasts until the current project changes. A project's menu renames it and changes its folder; "+" adds a folder as a project, or an empty one. Settings at the bottom. |
-| Top bar | The title (the chat's, or the project's over one of its views). With app views marked `nav`: tabs, "Chat" first. Buttons on the right for app panels marked `nav`. |
-| Side pane | Only domain content the person or the agent asked for: an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
+| Top bar | The title (the chat's, or the project's over one of its views). With app views marked `nav`: tabs, "Chat" first. On the right, a + menu: Terminal, Browser, Files, then app panels marked `nav`. |
+| Side pane | What the person or the agent opened, beside the conversation: Terminal, Browser, Files, an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
+| Terminal | The project's shell, in its folder (one per project; closing the tab keeps it, reopening re-attaches with its scrollback). The agent's `present` may type a command at the prompt; the person presses Enter. |
+| Browser | A page in a frame with an address bar; words become a search. Sites that refuse framing show blank: "open in your browser" opens them outside. |
+| Files | The project's folder: browse, open a text file, edit and save it (⌘S). A path outside the folder is refused. Saving is the person's action; the agent's writes still ask. |
 | Inline reports | `/context`, `/usage`, `/state`, `/trace` and every other command render in the conversation. There is no permanent inspector. |
 | App views | An app's `ark.view` takes the main column in place of the conversation (ARK Desktop's graph, agents and tasks). The "Chat" tab, or choosing a chat, brings the conversation back. |
 | Settings | One page in the main column for the app's and the account's configuration, with the sections apps register (`ark.setting`). ARK has none of its own, so it shows only once one exists. A project's own settings are in its menu. |
@@ -56,6 +59,9 @@ drawer opened from the top-left button. Below 760 px an open pane covers the win
 | ⌘, | Settings (when an app registered a section) |
 | ⌘B | Sidebar |
 | ⌘\ | Side pane |
+| ⌃` | Terminal |
+| ⌘T | Browser (in the window; a browser keeps ⌘T for itself) |
+| ⌘P | Files |
 
 A steered message waits above the composer as "Next step" and joins the conversation where
 the agent read it. A steer that arrives after the agent's last step becomes the next prompt.
@@ -116,7 +122,7 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 
 | Call | Registers |
 |---|---|
-| `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` adds a button for it to the top bar |
+| `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` lists it in the top bar's + menu. An app panel with the id `terminal`, `browser` or `files` replaces ARK's, and an app panel's `presents` wins over a built-in one for the same view |
 | `ark.view({ id, title, icon, nav, render })` | A view of the current project in the main column, in place of the conversation; `nav: true` makes it a top-bar tab (a string names the tab). Built once, kept while hidden |
 | `ark.setting({ id, title, icon, render(el, api) })` | A section of the Settings page |
 | `ark.artifactViewer({ id, label, match, primary, presents, wide, render })` | A view of an artifact; when several match, the artifact header switches between them (plus Raw) |
@@ -168,6 +174,7 @@ front-end uses the same.
 
 | Methods | |
 |---|---|
+| Workbench | `term_open {cols, rows}` (the project's shell: `session`, `cwd`, `history`), `term_write {session, data}`, `term_resize`, `term_close`, `files {path?}`, `file_read {path}`, `file_write {path, text}` (inside the project folder) |
 | Session | `hello`, `summary`, `sessions {project?}`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `open_project {id}` (back to its last chat), `add_project {path?, name?}` (a folder becomes a project, or opens the one it is), `rename_project {id, name}`, `project_folder {id, path}`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models` |
 | Turn | `send`, `steer`, `cancel`, `approve`, `command` |
 | Views | `transcript`, `trace`, `call`, `context`, `usage`, `state` |
@@ -179,6 +186,7 @@ front-end uses the same.
 | Events (`kind`) | |
 |---|---|
 | `turn_started`, `text`, `event`, `turn_finished` | A turn. `event` carries the `HarnessEvent` and its described `Activity` |
+| `term` | A terminal's output (`session`, `data`), or `exit: true`. Not replayed to a window that rejoins a turn; `term_open` returns the scrollback |
 | `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`), and its end (answered, or the turn ended) |
 | `summary` | Session, model, project or context changed |
 | `ext` | An app handler's `emitter.emit` |
@@ -229,8 +237,13 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
 
 ## Limits
 
-- The page is plain ES modules with no build step and no CDN. App scripts may load their own
-  libraries (SecRes loads CodeMirror and xterm.js from cdnjs on first use).
+- The page is plain ES modules with no build step and no CDN. xterm.js 5.3 (MIT) ships in
+  `web/vendor/xterm/` for the terminal. App scripts may load their own libraries (SecRes loads
+  CodeMirror from cdnjs on first use).
+- The Browser is a frame: many sites refuse to be framed and show blank. The editor is a plain
+  text area (no highlighting).
+- A `present` directive for a view nothing shows (no panel or viewer lists it) is a toast in
+  the window; the model is still told it was presented.
 - One `Host` serves one live session. Two browser tabs on one server share it.
 - Approval grants are not persisted across processes, as in the shell.
 - There is no macOS WebDriver for the native window; its page is tested in WebKit instead,

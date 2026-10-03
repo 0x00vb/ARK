@@ -30,6 +30,10 @@ fn scan(dir: &Path, code_only: bool, hits: &mut Vec<String>) {
     for e in std::fs::read_dir(dir).unwrap().flatten() {
         let p = e.path();
         if p.is_dir() {
+            // Third-party libraries shipped as they are (xterm.js), not ARK's words.
+            if p.file_name().is_some_and(|n| n == "vendor") {
+                continue;
+            }
             scan(&p, code_only, hits);
             continue;
         }

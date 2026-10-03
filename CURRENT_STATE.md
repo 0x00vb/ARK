@@ -17,7 +17,7 @@ Last updated: 2026-10-03
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | the next tag, for the window's project sidebar, top bar, Settings page, `ark.compose` and the chat's agent tools (`[Unreleased]`); its uncommitted changes use them through the local `[patch]` |
+| ark-desktop | the next tag, for the window's project sidebar, top bar, Settings page, Terminal, Browser and Files, `ark.compose` and the chat's agent tools (`[Unreleased]`); its uncommitted changes use them through the local `[patch]` |
 | SecRes | nothing; pins v0.5.0 |
 
 ## Next

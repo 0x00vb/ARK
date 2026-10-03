@@ -11,6 +11,7 @@ import { Topbar } from "./topbar.js";
 import { SETTINGS, settingsView } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
 import { registry, installApi, dispatchExt, presenterFor } from "./ext.js";
+import { registerBuiltins, BUILTINS } from "./workbench.js";
 
 const transport = connect();
 const appEl = $("#app");
@@ -94,7 +95,8 @@ const api = {
   },
 };
 
-installApi(api);
+// Terminal, Browser and Files first, so an app's panel with the same id replaces one.
+registerBuiltins(installApi(api));
 
 let thread, composer, sidebar, topbar, pane;
 
@@ -118,14 +120,17 @@ function toast(msg) {
   toastTimer = setTimeout(() => (t.dataset.show = "false"), 3200);
 }
 
-function popover(anchor, children, { above = false } = {}) {
+function popover(anchor, children, { above = false, end = false } = {}) {
   document.querySelector(".popover")?.close?.();
   const el = h("div.popover", { role: "menu" }, children);
   document.body.append(el);
   const r = anchor.getBoundingClientRect();
   const w = Math.max(240, r.width);
   el.style.minWidth = `${w}px`;
-  el.style.left = `${Math.min(r.left, window.innerWidth - w - 12)}px`;
+  if (end) {
+    el.style.right = `${Math.max(12, window.innerWidth - r.right)}px`;
+    el.style.transformOrigin = "top right";
+  } else el.style.left = `${Math.min(r.left, window.innerWidth - w - 12)}px`;
   if (above) el.style.bottom = `${window.innerHeight - r.top + 6}px`;
   else el.style.top = `${r.bottom + 6}px`;
   requestAnimationFrame(() => el.classList.add("open"));
@@ -374,6 +379,7 @@ function present(d) {
   if (by?.viewer && d.artifact) return api.openArtifact(d.artifact, by.viewer.id, d);
   if (d.artifact) return api.openArtifact(d.artifact, undefined, d);
   if (d.view === "evidence" && d.locator) return api.openInvocation(d.locator);
+  toast(`The agent asked to show ${d.view === "split" ? "a split view" : `a ${d.view}`}, which this window cannot show.`);
 }
 
 // ---- views in the main column ---------------------------------------------------------------
@@ -496,6 +502,10 @@ function keys(e) {
   if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); return palette(); }
   if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); return api.newSession(); }
   if (mod && e.key === "," && registry.settings.size) { e.preventDefault(); return api.openSettings(); }
+  // The built-in panels' keys, unless an app replaced the panel.
+  for (const b of BUILTINS) {
+    if (b.key(e) && registry.panels.get(b.id)?.builtin) { e.preventDefault(); return api.openPanel(b.id); }
+  }
   if (state.view) return;
   if (mod && e.key.toLowerCase() === "b") { e.preventDefault(); return toggleSidebar(); }
   if (mod && e.key.toLowerCase() === "\\") { e.preventDefault(); return pane.toggle(); }

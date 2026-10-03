@@ -141,7 +141,8 @@ impl Feed {
         if kind == "turn_started" {
             st.live = Some(Vec::new());
         }
-        if let Some(live) = st.live.as_mut() {
+        // A terminal's output is not part of the turn; a window re-attaching reads its scrollback.
+        if let Some(live) = st.live.as_mut().filter(|_| kind != "term") {
             if live.len() < LIVE_EVENTS {
                 live.push(v.clone());
             }
@@ -226,6 +227,8 @@ pub struct Host {
     commands: Value,
     /// The current project's orchestrator, and the task forwarding its events.
     orch: Mutex<Option<(Orchestrator, tokio::task::JoinHandle<()>)>>,
+    /// One shell per project, for the Terminal panel.
+    terminals: crate::terminal::Terminals,
 }
 
 impl Host {
@@ -257,6 +260,7 @@ impl Host {
         );
         let host = Arc::new(Host {
             orch: Mutex::new(None),
+            terminals: Default::default(),
             engine: ix.ark().shared_engine(),
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
@@ -540,6 +544,48 @@ impl Host {
                         .map(|_| ())
                 })
                 .await
+            }
+            // The Terminal panel: the project's shell in its folder (see `terminal`).
+            "term_open" => {
+                let project = self.project()?;
+                let dir = self.engine.workspace_dir(&project.id)?;
+                let size = |k: &str, d: u64| n(k).unwrap_or(d).clamp(2, 1000) as u16;
+                Ok(json!(self.terminals.open(
+                    &self.feed,
+                    project.id.as_str(),
+                    dir,
+                    size("cols", 80),
+                    size("rows", 24)
+                )?))
+            }
+            "term_write" => {
+                self.terminals.write(&s("session"), &s("data"))?;
+                Ok(Value::Null)
+            }
+            "term_resize" => {
+                let size = |k: &str| n(k).unwrap_or(24).clamp(2, 1000) as u16;
+                self.terminals
+                    .resize(&s("session"), size("cols"), size("rows"))?;
+                Ok(Value::Null)
+            }
+            "term_close" => {
+                self.terminals.close(&s("session"));
+                Ok(Value::Null)
+            }
+            // The Files panel: the project's folder (see `files`).
+            "files" => {
+                let dir = self.engine.workspace_dir(&self.project()?.id)?;
+                let (entries, more) = crate::files::list(&dir, &s("path"))?;
+                Ok(json!({ "root": dir, "entries": entries, "more": more }))
+            }
+            "file_read" => {
+                let dir = self.engine.workspace_dir(&self.project()?.id)?;
+                crate::files::read(&dir, &s("path"))
+            }
+            "file_write" => {
+                let dir = self.engine.workspace_dir(&self.project()?.id)?;
+                let path = crate::files::write(&dir, &s("path"), &s("text"))?;
+                Ok(json!({ "path": path }))
             }
             // The folder the project's tools work in; `path` changes it.
             "workspace" => {

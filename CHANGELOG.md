@@ -9,6 +9,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-03
+
 Several agents as compositions of a few primitives, run on subscriptions first.
 Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
 
@@ -77,6 +79,8 @@ Guide: `docs/ORCHESTRATION.md`. Example: `examples/agent-team`.
 - The project folder in ARK: `Engine::set_workspace`, `Interaction::workspace` and
   `::set_workspace`, `/folder [path]` in both front-ends, workspace protocol method
   `workspace` (`{path}` sets it), `ProjectSummary.workspace`.
+- Connection events reach app scripts in a browser: `ark:reconnecting`, `ark:disconnected`
+  (with `retry()`), `ark:connected`.
 - `ark.pickFolder({ title })`: the window's own folder picker (`undefined` in a browser,
   where the page cannot see the runtime's disk).
 - `ark_interact::approval_title`: the approval headline both front-ends show. The terminal

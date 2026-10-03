@@ -8,9 +8,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.5.0** (2026-10-01) |
-| `main` | v0.5.0 plus orchestration, managed vendor sessions, rule sets and diagrams (unreleased; breaking, so the next release is 0.6.0) |
-| Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; needs 0.6.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Stable release | **v0.6.0** (2026-10-03): orchestration, managed vendor sessions, rule sets, diagrams, named profiles, the project folder in ARK |
+| `main` | v0.6.0 |
+| Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; pins v0.6.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b: success 0.85, cost per successful task $0.0298 (v0.4.0, `bench/RESULTS.md`) |
 | Phase | functionally complete for now. No milestone in progress. |
 

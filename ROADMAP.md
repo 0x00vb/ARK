@@ -12,7 +12,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | `main` | v0.6.0 |
 | Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; pins v0.6.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b: success 0.85, cost per successful task $0.0298 (v0.4.0, `bench/RESULTS.md`) |
-| Phase | functionally complete for now. No milestone in progress. |
+| Phase | **Measured runtime** (0.7), P0 in progress. See Next. |
 
 ## State
 
@@ -48,22 +48,46 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 ## Next
 
-In order. Each item should show its value in a benchmark or a consumer before it grows.
+### Milestone: a measured runtime (0.7)
 
-1. **Orchestration in a second consumer**: the writing agent has `/review` (run live on
-   Claude); SecRes is next. Add an orchestration workload to `ark-bench` so cost per success
-   is gated, not only measured by hand.
-2. **Live cache measurement** on Anthropic and OpenAI: run the generic suite with a key and
-   record `cached_tokens` and cost per success next to the simulated estimate.
-3. **Small-model tool choice**: find out why `tool-lookup` and `approval` fail live, and fix
-   it in the request (descriptions, index layout), not with a bigger model. Measure live.
-4. **Native window test**: drive the Tauri IPC path in CI, or document why it cannot be.
-5. **API trim at the next minor**: public items no caller uses (`Interaction::ark_mut`,
-   `App::ark_builder`, `Harness::budget_tokens`, `budget::WorkingSet::round_count`,
-   `Registry::from_adapters`, `Store::get_artifact`, `Store::get_session`,
-   `ActionDescriptor::with_output_schema`, `SurfaceRef::with_title`,
-   `PendingApproval::is_closed`, `Ark::ask_simple`). Remove or keep with a reason; it breaks
-   semver, so it waits for 0.5.
+The claim to prove: agents on ARK do more work, more reliably, for fewer tokens. Each phase
+ends with numbers in `bench/RESULTS.md`; nothing in P2 lands without a before/after.
+
+| Metric | What it says |
+|---|---|
+| success rate, cost per successful task | the headline; tokens alone can hide a lost success |
+| uncached input tokens per success | what a provider bills at full price |
+| wall time per success, parallel speedup | whether delegation and parallel calls pay |
+| recovery rate | runs that hit a fault and still succeeded |
+| interventions per task | approvals, messages and retries a person had to give |
+| variance across repetitions | whether a result is reproducible |
+
+| Phase | Work | Done means |
+|---|---|---|
+| Before P0 | Orchestration control (spawn, submit, pause, resume, end, message, cancel, retry) moves from `ark-ui`'s Host into `ark-interact`, so the terminal can operate agents and an eval driven from it can too | `/agent` and `/task` in both front-ends; the Host forwards |
+| P0 foundations | In `ark-bench`: a naive baseline harness (full transcript every call, every tool offered, raw results, no guards) graded by the same checks; orchestration workloads (a lead and workers); deterministic fault injection (temporary provider errors, malformed calls); record and replay of a live run; a trace per run | `ark-bench run --harness naive`, `--faults`, `--record`/`--replay`, `--traces`; simulated numbers for both harnesses |
+| P1 measure | Live runs of both harnesses on the suite (2 or 3 models, 3 repetitions) | a baseline table in `bench/RESULTS.md`, no harness change |
+| P2 improve | One change at a time, each measured: step checkpoints (resume a task where it stopped), a model routing policy, tool-result compression, a cost model for delegating, recovery rules per failure class | before/after per change |
+| P3 prove | One script and one report: ARK against the naive baseline on the same tasks and models | `bench/RESULTS.md` headline, reproducible |
+
+Folded in from the earlier list:
+
+- **Orchestration workload in `ark-bench`**: P0. ARK Desktop is the second orchestration
+  consumer (agents and tasks through the protocol), so no other app is needed for that.
+- **Live cache measurement** on Anthropic and OpenAI: P1, when an API key is at hand.
+- **Small-model tool choice** (`tool-lookup` and `approval` fail live on qwen3:4b): P2,
+  measured against the P1 baseline.
+
+Outside the milestone:
+
+1. **Native window test**: drive the Tauri IPC path in CI, or document why it cannot be.
+2. **API trim at 0.7** (breaking, so with the milestone's release): public items no caller
+   uses (`Interaction::ark_mut`, `App::ark_builder`, `Harness::budget_tokens`,
+   `budget::WorkingSet::round_count`, `Registry::from_adapters`, `Store::get_artifact`,
+   `Store::get_session`, `ActionDescriptor::with_output_schema`, `SurfaceRef::with_title`,
+   `PendingApproval::is_closed`, `Ark::ask_simple`). Remove, or keep with a reason.
+3. **ark-cli in its own repo**: not before 0.8. First orchestration control in
+   `ark-interact`, then one or two releases without a breaking `ark-interact` change.
 
 ## Worth investigating
 

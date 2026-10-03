@@ -60,6 +60,17 @@ pub struct OrchestratorBuilder<'a> {
     configure: Option<Box<dyn FnOnce(ModelsBuilder) -> ModelsBuilder + 'a>>,
     approvals: Option<Arc<ApprovalGate>>,
     max_parallel: usize,
+    profiles: Vec<NamedProfile>,
+}
+
+/// A profile an application offers by name: agents choose it with
+/// [`AgentSpec::profile_name`], from code or from a front-end.
+#[derive(Clone)]
+pub struct NamedProfile {
+    pub name: String,
+    /// One line on what an agent on it is good for, shown where a profile is chosen.
+    pub summary: String,
+    pub profile: AgentProfile,
 }
 
 impl<'a> OrchestratorBuilder<'a> {
@@ -78,6 +89,23 @@ impl<'a> OrchestratorBuilder<'a> {
     /// skips it; without a gate they are refused).
     pub fn approvals(mut self, gate: Arc<ApprovalGate>) -> Self {
         self.approvals = Some(gate);
+        self
+    }
+    /// Offer `profile` under `name`. Agents start from `ark`'s profile unless their spec
+    /// names one of these (or carries a profile of its own).
+    pub fn profile(
+        mut self,
+        name: impl Into<String>,
+        summary: impl Into<String>,
+        profile: AgentProfile,
+    ) -> Self {
+        let name = name.into();
+        self.profiles.retain(|p| p.name != name);
+        self.profiles.push(NamedProfile {
+            name,
+            summary: summary.into(),
+            profile,
+        });
         self
     }
     /// Tasks running at once across all accounts (default 8).
@@ -110,6 +138,7 @@ impl<'a> OrchestratorBuilder<'a> {
             stream: format!("orch:{}", project.id),
             engine,
             base: self.ark.profile().clone(),
+            profiles: self.profiles,
             context_budget: settings.context_budget,
             max_steps: settings.max_steps,
             planner: settings.planner,
@@ -140,7 +169,13 @@ impl Orchestrator {
             configure: None,
             approvals: None,
             max_parallel: 8,
+            profiles: Vec::new(),
         }
+    }
+
+    /// The profiles agents may name (see [`OrchestratorBuilder::profile`]).
+    pub fn profiles(&self) -> &[NamedProfile] {
+        &self.inner.profiles
     }
 
     pub fn project(&self) -> &Project {
@@ -338,6 +373,7 @@ pub(crate) struct Inner {
     me: Weak<Inner>,
     pub engine: Arc<Engine>,
     base: AgentProfile,
+    profiles: Vec<NamedProfile>,
     context_budget: u32,
     max_steps: usize,
     planner: bool,
@@ -601,6 +637,19 @@ impl Inner {
                 spec.name
             )));
         }
+        if let Some(name) = &spec.profile_name {
+            if !self.profiles.iter().any(|p| &p.name == name) {
+                let offered: Vec<&str> = self.profiles.iter().map(|p| p.name.as_str()).collect();
+                return Err(OrchError::NotAllowed(format!(
+                    "no profile `{name}` (offered: {})",
+                    if offered.is_empty() {
+                        "none".to_string()
+                    } else {
+                        offered.join(", ")
+                    }
+                )));
+            }
+        }
         let models = Arc::new(
             self.models
                 .resolve(&self.lane(&spec.name), spec.model.as_deref())
@@ -637,10 +686,9 @@ impl Inner {
                 r
             }
             None => {
-                let workspace = self.engine.workspace_dir(&self.project.id)?;
-                let mut scope =
+                // No folder of its own: it works in the project's (see `workspace_dir`).
+                let scope =
                     Project::new(&spec.name, &spec.role).with_parent(self.project.id.clone());
-                scope.workspace = Some(workspace.display().to_string());
                 self.engine.store.put_project(&scope)?;
                 AgentRecord {
                     name: spec.name.clone(),
@@ -1280,7 +1328,15 @@ impl Inner {
     }
 
     fn agent_profile(&self, spec: &AgentSpec, delegates: &[(String, String)]) -> AgentProfile {
-        let mut p = spec.profile.clone().unwrap_or_else(|| self.base.clone());
+        let named = spec
+            .profile_name
+            .as_ref()
+            .and_then(|n| self.profiles.iter().find(|p| &p.name == n));
+        let mut p = match (&spec.profile, named) {
+            (Some(p), _) => p.clone(),
+            (None, Some(n)) => n.profile.clone(),
+            (None, None) => self.base.clone(),
+        };
         if !spec.instructions.trim().is_empty() {
             p.prompts.instructions = spec.instructions.clone();
         }

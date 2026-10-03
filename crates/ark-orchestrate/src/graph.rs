@@ -49,6 +49,9 @@ pub struct AgentNode {
     pub tasks_failed: u32,
     pub delegates_to: Vec<String>,
     pub tools: Vec<String>,
+    /// The named profile it starts from; `None`: the base profile.
+    #[serde(default)]
+    pub profile: Option<String>,
     /// Messages waiting for its next task.
     pub inbox: usize,
 }
@@ -182,6 +185,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 tasks_failed: r.tasks_failed,
                 delegates_to: r.spec.delegates_to.clone(),
                 tools: r.spec.tools.clone(),
+                profile: r.spec.profile_name.clone(),
                 inbox: r.inbox.len(),
             }
         })

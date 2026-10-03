@@ -111,17 +111,48 @@ impl Engine {
 
     /// The on-disk workspace directory for a project's tools: the project's configured
     /// `workspace` if set, else a per-project scratch dir under the store root. Created if
-    /// absent.
+    /// absent. A child project (an orchestrated agent's) works in its top-level project's
+    /// folder, so changing that folder moves its agents too.
     pub fn workspace_dir(&self, project: &ProjectId) -> Result<std::path::PathBuf, AgentError> {
-        let configured = self
-            .store
-            .get_project(project)?
-            .and_then(|p| p.workspace)
-            .map(std::path::PathBuf::from);
-        let dir = configured
-            .unwrap_or_else(|| self.store.root().join("workspaces").join(project.as_str()));
+        let mut id = project.clone();
+        let mut p = self.store.get_project(&id)?;
+        // Bounded: a parent chain is one or two levels deep.
+        for _ in 0..8 {
+            match p.as_ref().and_then(|x| x.parent.clone()) {
+                Some(parent) => {
+                    p = self.store.get_project(&parent)?;
+                    id = parent;
+                }
+                None => break,
+            }
+        }
+        let configured = p.and_then(|p| p.workspace).map(std::path::PathBuf::from);
+        let dir =
+            configured.unwrap_or_else(|| self.store.root().join("workspaces").join(id.as_str()));
         std::fs::create_dir_all(&dir)?;
         Ok(dir)
+    }
+
+    /// Set the folder a top-level project's tools work in (and its agents'). The folder must
+    /// exist; it is stored canonical.
+    pub fn set_workspace(
+        &self,
+        project: &ProjectId,
+        dir: &std::path::Path,
+    ) -> Result<Project, AgentError> {
+        if !dir.is_dir() {
+            return Err(AgentError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{} is not a folder", dir.display()),
+            )));
+        }
+        let mut p = self
+            .store
+            .get_project(project)?
+            .ok_or_else(|| AgentError::ProjectNotFound(project.to_string()))?;
+        p.workspace = Some(dir.canonicalize()?.to_string_lossy().into_owned());
+        self.store.put_project(&p)?;
+        Ok(p)
     }
 
     // ---- ingest -----------------------------------------------------------

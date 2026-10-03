@@ -671,6 +671,51 @@ async fn rules_are_selected_per_task_and_traced() {
 }
 
 #[tokio::test]
+async fn a_named_profile_is_chosen_by_name_and_survives_a_restart() {
+    let f = fixture();
+    let m = Script::new("m", vec![answer("one"), answer("two")]);
+    let open = || {
+        Orchestrator::builder(&f.ark, &f.project)
+            .configure_models({
+                let m = m.clone();
+                move |b| b.provider("m", m as Arc<dyn Provider>)
+            })
+            .profile(
+                "terse",
+                "answers in one line",
+                AgentProfile::builder()
+                    .instructions("PROFILE-TERSE: answer in one line.")
+                    .build(),
+            )
+            .build()
+            .unwrap()
+    };
+    {
+        let o = open();
+        assert_eq!(o.profiles()[0].name, "terse");
+        let err = o
+            .spawn(AgentSpec::new("x").model("m").profile_named("nope"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("offered: terse"), "{err}");
+        o.spawn(AgentSpec::new("w").model("m").profile_named("terse"))
+            .await
+            .unwrap();
+        assert_eq!(o.graph().agents[0].profile.as_deref(), Some("terse"));
+        o.run("w", TaskSpec::new("first")).await.unwrap();
+    }
+    // A new process: the agent comes back from the store with its profile.
+    let o = open();
+    o.run("w", TaskSpec::new("second")).await.unwrap();
+    let texts = m.texts();
+    assert_eq!(texts.len(), 2);
+    assert!(
+        texts.iter().all(|t| t.contains("PROFILE-TERSE")),
+        "{texts:?}"
+    );
+}
+
+#[tokio::test]
 async fn interrupted_tasks_are_marked_and_can_run_again() {
     let f = fixture();
     let m = Script::new("m", vec![answer("recovered")]);

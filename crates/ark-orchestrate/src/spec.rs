@@ -48,6 +48,11 @@ pub struct AgentSpec {
     pub planner: Option<bool>,
     #[serde(default)]
     pub critic: Option<bool>,
+    /// A profile the application registered with
+    /// [`OrchestratorBuilder::profile`](crate::OrchestratorBuilder::profile), by name. Unlike
+    /// `profile` it is stored, so a front-end can choose it and it survives a restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_name: Option<String>,
     /// A full profile (capabilities, distillers, knowledge) instead of the orchestrator's
     /// base profile. `instructions` still replaces its persona when set. Not persisted.
     #[serde(skip)]
@@ -63,6 +68,7 @@ impl std::fmt::Debug for AgentSpec {
             .field("tools", &self.tools)
             .field("delegates_to", &self.delegates_to)
             .field("parent", &self.parent)
+            .field("profile_name", &self.profile_name)
             .finish_non_exhaustive()
     }
 }
@@ -86,6 +92,7 @@ impl AgentSpec {
             diagrams: false,
             planner: None,
             critic: None,
+            profile_name: None,
             profile: None,
         }
     }
@@ -136,6 +143,11 @@ impl AgentSpec {
     }
     pub fn profile(mut self, p: AgentProfile) -> Self {
         self.profile = Some(p);
+        self
+    }
+    /// Start from the profile the application registered under `name`.
+    pub fn profile_named(mut self, name: impl Into<String>) -> Self {
+        self.profile_name = Some(name.into());
         self
     }
 

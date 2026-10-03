@@ -12,13 +12,19 @@ ChatGPT subscriptions) and `/review` in [`examples/writing-agent`](../examples/w
 
 | Primitive | Type | What it holds |
 |---|---|---|
-| Agent | `AgentSpec`, `AgentRecord` | name, role, instructions, model, allowed tools, who it may delegate to, parent, default budget, diagram tool on or off |
+| Agent | `AgentSpec`, `AgentRecord` | name, role, instructions, model, profile, allowed tools, who it may delegate to, parent, default budget, diagram tool on or off |
 | Task | `TaskSpec`, `TaskRecord` | objective, context, artifacts, `after` (dependencies), budget, attempts; state, owner, origin, parent, children, usage, result, outputs, rules applied |
 | Delegation | `agents.delegate`, `agents.wait` | an agent creates a task for an agent it may delegate to, and waits for the result or continues |
 | Message | `agents.message`, `Orchestrator::message` | a short note into another agent's running task, or its inbox for the next task |
 | Artifact | ARK artifacts | passed explicitly with a task; a task's outputs go back to the delegator |
 | Budget | `Budget` | steps, tokens, model calls, wall time, delegations |
 | Graph | `Graph`, `OrchEvent` | the live state and the full trace |
+
+An agent starts from the `Ark`'s profile. An app can offer other profiles by name
+(`OrchestratorBuilder::profile(name, summary, profile)`); a spec picks one with
+`profile_name`, which is stored, so a front-end can choose it (`profiles` in the workspace
+protocol) and it survives a restart. `AgentSpec::profile` (a profile value) still works from
+code but is not stored.
 
 A team, a department or a manager is a composition: agents whose `delegates_to` and
 `parent` say who works for whom.
@@ -62,8 +68,9 @@ let done = orch.run("lead", TaskSpec::new("compare the two reviews").artifacts([
 ## Context isolation
 
 Each agent works in a child project of the orchestrator's project. Its working state,
-evidence cards, invocations, notes and conversation are its own. It shares the parent
-project's workspace directory, so file tools see the same files.
+evidence cards, invocations, notes and conversation are its own. It has no folder of its
+own: file tools work in the top-level project's folder, read when it runs, so changing the
+project's folder (`/folder`, `workspace`) moves its agents too.
 
 A delegated agent gets a brief and nothing else from the delegator:
 

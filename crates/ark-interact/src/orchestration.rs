@@ -87,7 +87,14 @@ pub fn graph_report(g: &Graph) -> Report {
             cells: vec![
                 Cell::new(n.name.clone(), Tone::Normal),
                 Cell::new(agent_word(n.state), tone),
-                Cell::new(n.model.clone(), Tone::Muted),
+                // The profile it starts from, when the app's and not the base one.
+                Cell::new(
+                    match &n.profile {
+                        Some(p) => format!("{} · {p}", n.model),
+                        None => n.model.clone(),
+                    },
+                    Tone::Muted,
+                ),
                 Cell::new(session, Tone::Muted),
                 Cell::new(context, Tone::Muted),
                 Cell::new(tokens(n.usage.tokens()), Tone::Normal),

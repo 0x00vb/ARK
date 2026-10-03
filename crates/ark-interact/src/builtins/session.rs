@@ -169,6 +169,35 @@ impl Command for ProjectCmd {
     }
 }
 
+pub struct Folder;
+#[async_trait::async_trait]
+impl Command for Folder {
+    meta!(
+        "folder",
+        "Show the folder this project's tools work in, or change it: /folder <path>"
+    );
+    fn usage(&self) -> &str {
+        "[path]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let arg = args.trim();
+        if arg.is_empty() {
+            let (dir, chosen) = ix.workspace()?;
+            let r = Report::new().field("folder", dir.display().to_string());
+            return Ok(if chosen {
+                r
+            } else {
+                r.note("A scratch folder in the store. Choose one with /folder <path>.")
+            }
+            .into());
+        }
+        let dir = ix.set_workspace(std::path::Path::new(arg))?;
+        Ok(Report::new()
+            .success(format!("tools work in {}", dir.display()))
+            .into())
+    }
+}
+
 pub struct Model;
 #[async_trait::async_trait]
 impl Command for Model {

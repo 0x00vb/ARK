@@ -392,7 +392,7 @@ impl Host {
                     .lock()
                     .unwrap()
                     .iter()
-                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"] }))
+                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"] }))
                     .collect();
                 let running = self
                     .running
@@ -497,6 +497,19 @@ impl Host {
                 let name = s("name");
                 self.change(move |ix| ix.switch_project(&name).map(|_| ()))
                     .await
+            }
+            // The folder the project's tools work in; `path` changes it.
+            "workspace" => {
+                let path = s("path");
+                if !path.trim().is_empty() {
+                    let dir = std::path::PathBuf::from(path.trim());
+                    self.change(move |ix| ix.set_workspace(&dir).map(|_| ()))
+                        .await?;
+                }
+                // Read without waiting for a running turn.
+                let project = self.project()?;
+                let dir = self.engine.workspace_dir(&project.id)?;
+                Ok(json!({ "path": dir, "chosen": project.workspace.is_some() }))
             }
             "model" => {
                 let spec = s("spec");
@@ -624,6 +637,14 @@ impl Host {
                     .message("user", &s("agent"), &s("text"))?;
                 Ok(json!({ "delivered": delivered }))
             }
+            // The profiles the app offers, which an agent's `profile_name` chooses from.
+            "profiles" => Ok(Value::Array(
+                self.orchestrator()?
+                    .profiles()
+                    .iter()
+                    .map(|p| json!({ "name": p.name, "summary": p.summary }))
+                    .collect(),
+            )),
             // The app's actions, which an agent's `tools` patterns choose from.
             "tools" => {
                 let mut actions = self.engine.registry.actions();
@@ -882,13 +903,14 @@ async fn forward_approvals(host: Arc<Host>, mut rx: mpsc::UnboundedReceiver<Pend
         let id = host.next_id.fetch_add(1, Ordering::SeqCst);
         let line = host.labels.approval_line(&pending.request);
         let (reply, answer) = oneshot::channel();
-        let shown = json!({ "request": pending.request, "line": line });
+        let title = ark_interact::approval_title(&pending.request);
+        let shown = json!({ "request": pending.request, "line": line, "title": title });
         host.approvals
             .lock()
             .unwrap()
             .insert(id, (shown.clone(), reply));
         host.emit(
-            json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line }),
+            json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line, "title": shown["title"] }),
         );
         let h = host.clone();
         tokio::spawn(async move {

@@ -573,6 +573,9 @@ pub struct ProjectSummary {
     pub name: String,
     pub target: String,
     pub current: bool,
+    /// The folder its tools work in, when one was chosen (else a scratch folder in the store).
+    #[serde(default)]
+    pub workspace: Option<String>,
 }
 
 /// One stored exchange for display, with its activity when a trace was kept.

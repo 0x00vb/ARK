@@ -510,6 +510,7 @@ impl Interaction {
             name: p.name.clone(),
             target: p.target.clone(),
             current: p.id == self.project.id,
+            workspace: p.workspace.clone(),
         }
     }
 
@@ -598,6 +599,20 @@ impl Interaction {
             .filter(|p| p.parent.is_none())
             .map(|p| self.project_summary(p))
             .collect())
+    }
+
+    /// The folder this project's tools (and its agents') work in, and whether it was chosen
+    /// (else it is a scratch folder in the store).
+    pub fn workspace(&self) -> anyhow::Result<(std::path::PathBuf, bool)> {
+        let dir = self.engine().workspace_dir(&self.project.id)?;
+        Ok((dir, self.project.workspace.is_some()))
+    }
+
+    /// Work in `dir` from now on: this project's tools and its agents' read and write there.
+    pub fn set_workspace(&mut self, dir: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
+        self.project = self.engine().set_workspace(&self.project.id, dir)?;
+        self.project_changed();
+        Ok(self.engine().workspace_dir(&self.project.id)?)
     }
 
     /// Work in another project (created if missing), in a fresh session there.

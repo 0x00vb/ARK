@@ -427,8 +427,8 @@ export function approvalCard(msg, onDecide) {
     onDecide(msg.id, d);
   };
   const card = h("div.approval", { "data-id": msg.id, tabindex: "-1" },
-    h("div.approval-title", own ? "Allow the agent to run this?" : `Allow ${req.agent} to run this?`),
-    own ? null : h("div.approval-who", req.task ? `task ${req.task}` : ""),
+    // The headline comes from ark-interact, as the terminal's does.
+    h("div.approval-title", msg.title || (own ? "The agent wants to run:" : `${req.agent} wants to run:`)),
     h("pre.approval-line", msg.line),
     req.summary ? h("div.approval-summary", req.summary) : null,
     h("div.approval-actions",

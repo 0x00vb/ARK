@@ -8,6 +8,15 @@
 use ark_sdk::prelude::{ApprovalDecision, ApprovalRequest, Approver};
 use tokio::sync::{mpsc, oneshot};
 
+/// The question's headline, the same in every front-end: who asks, and for which task.
+pub fn approval_title(req: &ApprovalRequest) -> String {
+    match (&req.agent, &req.task) {
+        (Some(a), Some(t)) => format!("{a} (task {t}) wants to run:"),
+        (Some(a), None) => format!("{a} wants to run:"),
+        _ => "The agent wants to run:".into(),
+    }
+}
+
 /// A question waiting for a person. Dropping it answers "deny".
 pub struct PendingApproval {
     pub request: ApprovalRequest,

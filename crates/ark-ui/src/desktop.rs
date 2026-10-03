@@ -3,6 +3,7 @@
 //!
 //! - `ark_call(method, params)` forwards to [`Host::call`].
 //! - `ark_subscribe(channel)` streams host events to the window.
+//! - `ark_pick_folder(title)` asks with the system's folder picker (`ark.pickFolder`).
 //!
 //! The page is served through the app's own asset origin, so Tauri treats it as a local page.
 //! Files in the consumer's `frontendDist` stay reachable as a fallback.
@@ -86,6 +87,22 @@ fn ark_subscribe(state: tauri::State<'_, State>, channel: tauri::ipc::Channel<Va
     });
 }
 
+/// The system's folder picker. `None` when the person dismisses it.
+#[tauri::command]
+async fn ark_pick_folder(app: tauri::AppHandle, title: Option<String>) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file();
+    if let Some(t) = title {
+        dialog = dialog.set_title(t);
+    }
+    dialog.pick_folder(move |p| {
+        let _ = tx.send(p);
+    });
+    let path = rx.await.ok().flatten()?.into_path().ok()?;
+    Some(path.display().to_string())
+}
+
 pub(crate) fn run(
     host: Arc<Host>,
     assets: Arc<Assets>,
@@ -99,7 +116,12 @@ pub(crate) fn run(
     }));
     let result = tauri::Builder::default()
         .manage(State(host))
-        .invoke_handler(tauri::generate_handler![ark_call, ark_subscribe])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            ark_call,
+            ark_subscribe,
+            ark_pick_folder
+        ])
         .setup(move |app| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();

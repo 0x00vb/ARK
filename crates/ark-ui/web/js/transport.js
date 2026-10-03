@@ -15,6 +15,7 @@ export function connect() {
         ch.onmessage = fn;
         tauri.core.invoke("ark_subscribe", { channel: ch });
       },
+      pickFolder: (title) => tauri.core.invoke("ark_pick_folder", { title: title || null }),
     };
   }
   const url = new URL(location.href);
@@ -29,6 +30,8 @@ export function connect() {
   }
   return {
     kind: "browser",
+    // A page in a browser cannot see the runtime's disk: no native picker.
+    pickFolder: async () => undefined,
     async call(method, params = {}) {
       const r = await fetch("/rpc", {
         method: "POST",

@@ -104,7 +104,7 @@ impl Menu {
             format!(
                 "{} {}",
                 theme.yellow(&theme.glyphs.warn),
-                theme.bold("The agent wants to run:")
+                theme.bold(&ark_interact::approval_title(req))
             ),
             String::new(),
             format!("    {}", theme.accented(&self.call_line)),

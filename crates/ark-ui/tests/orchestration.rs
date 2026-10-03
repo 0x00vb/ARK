@@ -333,3 +333,48 @@ async fn what_an_agent_produced_opens_in_the_window() {
         .unwrap();
     assert!(art["text"].as_str().unwrap().contains("a --> b"), "{art}");
 }
+
+#[tokio::test]
+async fn the_project_folder_is_set_once_and_its_agents_follow_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let before = host.call("workspace", json!({})).await.unwrap();
+    assert_eq!(before["chosen"], false);
+    // An agent created before the folder is chosen.
+    let agent = host
+        .call("spawn_agent", json!({ "spec": { "name": "w" } }))
+        .await
+        .unwrap();
+
+    let err = host
+        .call("workspace", json!({ "path": "/no/such/folder" }))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not a folder"), "{err}");
+    let set = host
+        .call("workspace", json!({ "path": folder.path() }))
+        .await
+        .unwrap();
+    let want = folder.path().canonicalize().unwrap();
+    assert_eq!(set["chosen"], true);
+    assert_eq!(set["path"], json!(want));
+    let summary = host.call("summary", json!({})).await.unwrap();
+    assert_eq!(summary["project"]["workspace"], json!(want));
+
+    // The terminal's command reads the same setting.
+    let shown = host
+        .call("command", json!({ "line": "/folder" }))
+        .await
+        .unwrap();
+    assert!(
+        shown.to_string().contains(&*want.to_string_lossy()),
+        "{shown}"
+    );
+
+    // The agent's own project works in the new folder too.
+    drop(host);
+    let ark = Ark::builder().store_root(dir.path()).build().unwrap();
+    let scope: ProjectId = serde_json::from_value(agent["scope"].clone()).unwrap();
+    assert_eq!(ark.engine().workspace_dir(&scope).unwrap(), want);
+}

@@ -65,6 +65,9 @@ the agent read it. A steer that arrives after the agent's last step becomes the 
 - With `App::orchestrate`, the orchestrator's agents ask through the same approver. Their
   request carries `agent` and `task`; it is answered from the tray and outlives the
   conversation's turn. esc denies only the conversation's own question.
+- The headline is `ark_interact::approval_title`, the same in the terminal and the window:
+  "The agent wants to run:" for the conversation's own question, "reader-a (task t-…) wants
+  to run:" for an agent's.
 - Stop uses the turn's `CancelToken`. A cancelled tool call kills its process group.
 - Opening a session loads its stored turns for display (paged, "Show earlier turns") and
   restores ARK working state. The model still receives only the bounded carry-over: stored
@@ -116,7 +119,7 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 | `ark.toolRenderer({ match, render })` | How a tool call's full output renders when its row is opened |
 | `ark.action({ id, label, icon, where, when, run })` | A button on an artifact, or an entry in the ⌘K palette |
 | `ark.status({ id, render })` | A line at the bottom of the sidebar |
-| `ark.on(name, fn)` | App events, and ARK's own as `ark:<kind>` (`ark:turn_finished`, `ark:event`, ...) |
+| `ark.on(name, fn)` | App events, and ARK's own as `ark:<kind>` (`ark:turn_finished`, `ark:event`, ...; in a browser also `ark:reconnecting`, `ark:disconnected` with `retry()`, `ark:connected`) |
 
 `render(el, params, api)` may return `{ update(params), refresh(), focus(), dispose() }`.
 `presents` lists the `PresentDirective` views it handles, so an agent's "show this" opens
@@ -127,7 +130,9 @@ Helpers on the same object: `ark.h` and `ark.icon` (DOM), `ark.markdown`, `ark.c
 method), `ark.ext` (an app handler), `ark.runAction(action, input)`, `ark.command(line)`,
 `ark.openArtifact(id, viewer, params)`, `ark.openPanel(id, params)`, `ark.closePanel(id)`,
 `ark.openView(id, params)`, `ark.showConversation()`, `ark.currentView()`, `ark.setPanelTitle`,
-`ark.openInvocation(id)`, `ark.project()`, `ark.setFocus`, `ark.toast`.
+`ark.openInvocation(id)`, `ark.project()`, `ark.setFocus`, `ark.toast`, and
+`ark.pickFolder({ title })`: the window's own folder picker (a path, `null` if dismissed,
+`undefined` in a browser, which cannot see the runtime's disk; ask for a typed path then).
 
 A small real panel, SecRes's notebook (`ui/notes.js`, trimmed):
 
@@ -158,18 +163,18 @@ front-end uses the same.
 
 | Methods | |
 |---|---|
-| Session | `hello`, `summary`, `sessions`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `model`, `models` |
+| Session | `hello`, `summary`, `sessions`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models` |
 | Turn | `send`, `steer`, `cancel`, `approve`, `command` |
 | Views | `transcript`, `trace`, `call`, `context`, `usage`, `state` |
 | Store | `artifacts`, `artifact` (the project's, or one an orchestrated agent produced), `invocation`, `run_action` |
-| Agents | `graph`, `agents`, `tools`, `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
+| Agents | `graph`, `agents`, `tools`, `profiles` (what `AgentSpec.profile_name` may name), `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
 | Tasks | `submit_task {agent, task}`, `task {task}` (record and timeline lines), `task_trace`, `cancel_task`, `retry_task`, `orch_events {after, limit}` |
 | Page | `focus`, `ext` (an app handler) |
 
 | Events (`kind`) | |
 |---|---|
 | `turn_started`, `text`, `event`, `turn_finished` | A turn. `event` carries the `HarnessEvent` and its described `Activity` |
-| `approval`, `approval_closed` | A pending approval, and its end (answered, or the turn ended) |
+| `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`), and its end (answered, or the turn ended) |
 | `summary` | Session, model, project or context changed |
 | `ext` | An app handler's `emitter.emit` |
 | `orch` | An orchestration event: `event` (an `OrchEvent`), `line` and `tone` (its timeline line, from `ark_interact::orchestration::event_line`), `activity` (for an agent's runtime event, what the conversation would show; none for steps and context reports) |

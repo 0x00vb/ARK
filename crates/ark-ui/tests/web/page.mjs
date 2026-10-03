@@ -208,7 +208,7 @@ async function agents(page) {
   });
   const card = page.locator(".asks .approval");
   await card.waitFor();
-  assert.match(await card.innerText(), /Allow scribe to run this\?/);
+  assert.match(await card.innerText(), /scribe \(task t-[0-9a-f]+\) wants to run:/);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   assert.equal(await card.isVisible(), true, "esc leaves an agent's question alone");

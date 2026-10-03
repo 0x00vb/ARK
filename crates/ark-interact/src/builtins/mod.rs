@@ -33,6 +33,7 @@ pub(crate) fn all() -> Vec<Arc<dyn Command>> {
         Arc::new(session::Sessions),
         Arc::new(session::Rename),
         Arc::new(session::ProjectCmd),
+        Arc::new(session::Folder),
         Arc::new(session::Model),
         Arc::new(views::Context),
         Arc::new(views::Usage),

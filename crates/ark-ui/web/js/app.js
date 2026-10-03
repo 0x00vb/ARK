@@ -24,6 +24,9 @@ const api = {
   ext: (name, params = {}) => transport.call("ext", { name, params }),
   runAction: (action, input = {}, approved = false) => transport.call("run_action", { action, input, approved }),
   setFocus: (focus) => transport.call("focus", { focus }).catch(() => {}),
+  // The system's folder picker in the window: a path, or null when dismissed. Undefined
+  // where there is none (a browser), so the caller asks for a typed path instead.
+  pickFolder: ({ title } = {}) => transport.pickFolder(title),
   summary: () => state.summary,
   project: () => state.summary?.project,
   send: (text) => submit(text),
@@ -282,7 +285,10 @@ function connection(msg) {
 }
 
 function onEvent(msg) {
-  if (msg.kind === "reconnecting" || msg.kind === "disconnected" || msg.kind === "connected") return connection(msg);
+  if (msg.kind === "reconnecting" || msg.kind === "disconnected" || msg.kind === "connected") {
+    dispatchExt(`ark:${msg.kind}`, msg);
+    return connection(msg);
+  }
   // App scripts can follow the same stream: `ark.on("ark:turn_finished", fn)`.
   if (msg.kind !== "ext" && msg.kind !== "text") dispatchExt(`ark:${msg.kind}`, msg);
   switch (msg.kind) {

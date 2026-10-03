@@ -8,11 +8,11 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.6.0** (2026-10-03): orchestration, managed vendor sessions, rule sets, diagrams, named profiles, the project folder in ARK |
-| `main` | v0.6.0 |
+| Stable release | **v0.7.0** (2026-10-03): the measured runtime P0 to P2 (naive baseline, team workloads, faults, record and replay; preloading, the ready list, small arrays whole, planner off), the window's projects, top bar, Settings, Terminal, Browser and Files, and the chat that creates agents |
+| `main` | v0.7.0 |
 | Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; pins v0.6.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b: success 0.85, cost per successful task $0.0298 (v0.4.0, `bench/RESULTS.md`) |
-| Phase | **Measured runtime** (0.7): P0 and P1 done (`bench/RESULTS.md`); P2 under way (preloading, tool selection, planner off). See Next. |
+| Phase | **Measured runtime**: P0 to P2 shipped in v0.7.0, measured live on qwen3:4b. Still open: the Haiku regression check of the P2 defaults (not run for v0.7.0), and overhead on `parallel` and `team` (about 1.4 times the naive loop per success on qwen3:4b). See Next. |
 
 ## State
 
@@ -24,7 +24,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Interaction (`ark-interact`) | commands, reports, activity, traces, context and usage views shared by both front-ends |
 | Terminal (`ark-cli`) | interactive shell, approvals, steering, resume, headless `-p` |
 | Workspace (`ark-ui`) | Tauri window and loopback browser page; page tested in WebKit; orchestration control in the protocol, app views in the main column |
-| Measurement (`ark-bench`) | 13 generic workloads, simulated and live, regression gate in `scripts/ci.sh` |
+| Measurement (`ark-bench`) | 14 generic workloads (one orchestrated team), simulated and live, a naive baseline loop, faults, record and replay; regression gate in `scripts/ci.sh` |
 | Release | `scripts/ci.sh`, `scripts/verify-release.sh`, immutable tags, two remotes |
 
 ## Known limitations

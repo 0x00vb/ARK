@@ -9,6 +9,16 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-03
+
+The measured runtime, phases P0 to P2, and the window that apps build on: projects as folders,
+a top bar with tabs, a Settings page, Terminal, Browser and Files, and a chat that creates
+agents and hands them tasks. New runtime defaults: action preloading, the ready-to-call list,
+small arrays shown whole, and the planner off. They were measured live on qwen3:4b
+(`bench/RESULTS.md`, P2). They were not re-measured on Claude Haiku for this release; only
+preloading has a partial Haiku run (P1). On qwen3:4b, `parallel` and `team` still cost about
+1.4 times the naive loop per success.
+
 ### Added
 - `/agent` and `/task` in both front-ends: add, pause, resume, end and message agents, hand
   out, cancel and retry tasks. `ark_interact::orchestration::{Control, ControlOutcome,

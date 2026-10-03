@@ -72,6 +72,8 @@ export function installApi(api) {
     },
     setting(s) {
       need(s, ["id", "title", "render"], "setting");
+      // An app's section keeps its id: ARK's own, registered later, does not replace it.
+      if (s.builtin && registry.settings.has(s.id) && !registry.settings.get(s.id).builtin) return;
       registry.settings.set(s.id, s);
       api._changed();
     },

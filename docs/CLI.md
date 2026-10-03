@@ -80,6 +80,7 @@ Every app has these. Apps add their own (`/device`, `/chapter`, ...), listed fir
 | `/context` | What the model receives, by source, and what ARK kept out |
 | `/usage` | Tokens, model calls and tool calls for this session |
 | `/tools` | Every action, its risk tier, and whether it is preloaded |
+| `/plugin` | MCP servers: list; `add <name> [KEY=VALUE…] <command> [args…]` (or a pasted `mcpServers` snippet), `remove <name>`, `restart <name>`. A change applies from the next turn ([`EXTENSION.md`](EXTENSION.md#mcp-plugins)) |
 | `/trace [n]` | The last turn step by step; `/trace 2` shows call 2's input and output |
 | `/state` | The working state the agent carries between turns |
 | `/status` | Model, project, session, context use, approvals, app sections |

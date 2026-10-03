@@ -117,7 +117,7 @@ setting: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 | Builder method | Default | Purpose |
 |---|---|---|
-| `.store_root(path)` | `./ark-workspace` | store location; also loads `<root>/plugins.json` |
+| `.store_root(path)` | `./ark-workspace` | store location; also connects the MCP plugins of `<root>/plugins.json` |
 | `.tool(adapter)` / `.registry(r)` | empty | the application's tools |
 | `.profile(AgentProfile)` | generic assistant | persona, capabilities, distillers, knowledge, core actions |
 | `.provider(p)` / `.router(r)` | from the environment | one model, or a fast and a strong tier |

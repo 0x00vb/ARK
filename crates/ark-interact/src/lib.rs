@@ -26,6 +26,7 @@ pub mod interaction;
 pub mod labels;
 pub mod logging;
 pub mod orchestration;
+pub mod plugins;
 pub mod report;
 pub mod trace;
 

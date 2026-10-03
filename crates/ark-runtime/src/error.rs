@@ -25,4 +25,8 @@ pub enum AgentError {
 
     #[error("serde: {0}")]
     Serde(#[from] serde_json::Error),
+
+    /// A plugin could not be added, removed or started.
+    #[error("{0}")]
+    Plugin(String),
 }

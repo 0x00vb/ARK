@@ -102,6 +102,12 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         .arg("page.mjs")
         .arg(scenario)
         .arg(&served.url)
+        // A small MCP server for the `plugins` scenario.
+        .env(
+            "ARK_TEST_MCP",
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../ark-tools/tests/fixtures/mcp_echo.py"),
+        )
         .current_dir(web_dir())
         .output()
         .await
@@ -149,6 +155,11 @@ async fn the_plus_menu_opens_files_and_a_terminal_in_the_project_folder() {
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_sections_show_and_compose_fills_the_composer_unsent() {
     drive("settings", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tool_servers_are_added_and_removed_in_settings() {
+    drive("plugins", vec![], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

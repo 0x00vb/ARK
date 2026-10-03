@@ -9,6 +9,26 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- MCP plugins change while the engine runs: `Engine::plugins()` (`ark_runtime::Plugins`:
+  `list`, `remove`, `restart`), `Engine::add_plugin(PluginSpec)`, `PluginStatus`. A change
+  applies from the next turn or task ([`EXTENSION.md`](docs/EXTENSION.md#mcp-plugins)).
+- `/plugin` in both front-ends (list, add, remove, restart; `add` takes words or a pasted
+  `mcpServers` snippet), `ark_interact::plugins`, and Settings › Tool servers in the window
+  (methods `plugins`, `plugin_add`, `plugin_remove`, `plugin_restart`).
+- `Engine::tools()` (the registry plus the plugins connected now) and `Engine::for_turn()`.
+- `McpAdapter::connect_within`, `McpClient::connect_within`, `McpAdapter::running`.
+
+### Changed
+- An MCP server has 20 s to answer `initialize` and `tools/list` (`mcp::HANDSHAKE_TIMEOUT`);
+  a server whose connection is dropped is stopped.
+- A plugin that fails to start at open stays listed with its error instead of being skipped.
+
+### Breaking
+- `Engine::registry` no longer holds MCP plugins. Code that read or ran plugin actions
+  through it uses `Engine::tools()`; `Engine::run_action` and the SDK's turns already do.
+- `AgentError` has a new variant, `Plugin(String)`; a `match` over it needs an arm.
+
 ## [0.7.0] - 2026-10-03
 
 The measured runtime, phases P0 to P2, and the window that apps build on: projects as folders,

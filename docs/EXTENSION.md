@@ -92,16 +92,38 @@ let distillers = DistillerSet::with_common().with(d);
 | Seam | Use it to |
 |---|---|
 | `ark_core::Sniffer`, `engine.register_sniffer(..)` | classify ingested bytes as `ArtifactKind::Other("...")` |
-| `<store_root>/plugins.json` | add MCP servers in any language; each tool becomes `<name>.<tool>`, risk from MCP annotations or `x-ark-risk` |
+| `<store_root>/plugins.json` | add MCP servers in any language; each tool becomes `<name>.<tool>`, risk from MCP annotations or `x-ark-risk`. See [MCP plugins](#mcp-plugins) |
 | `Provider` | add a model backend; `ModelRouter::new(fast, strong)` splits planning from reasoning |
 | `KnowledgeProvider` | give the agent a reference corpus it cites apart from observations |
 | `Command` (`ark-interact`) | add a slash command that returns a `Report`; both front-ends render it |
 | `ActivityLabels`, `ToolLabeler` (`ark-interact`) | say how your tools read in activity lines and approvals |
 | `ArkUi::handler`, `window.ark` | add backend methods, panels and viewers to the workspace ([`UI.md`](UI.md)) |
 
+### MCP plugins
+
+A plugin is a local MCP server (stdio). `<store_root>/plugins.json` lists them; the engine
+connects each when it opens and keeps them in `Engine::plugins()`. They can be added, removed
+and restarted while it runs.
+
 ```json
-{ "plugins": [ { "name": "entropy", "command": "python3", "args": ["entropy_server.py"] } ] }
+{ "plugins": [ { "name": "entropy", "command": "python3", "args": ["entropy_server.py"],
+                 "env": { "KEY": "value" } } ] }
 ```
+
+| Who | How |
+|---|---|
+| Terminal | `/plugin` lists them; `/plugin add <name> [KEY=VALUE…] <command> [args…]`, `/plugin remove <name>`, `/plugin restart <name>`. `add` also takes a pasted `{"mcpServers": {…}}` snippet |
+| Window | Settings › Tool servers (when the app was opened on a store root) |
+| Code | `Engine::add_plugin(PluginSpec)`, `engine.plugins()?.remove(name)`, `.restart(name)`, `.list()`; `ark_interact::plugins` words them for both front-ends |
+
+| Rule | Why |
+|---|---|
+| A change applies from the next turn or task | A turn takes `Engine::tools()` (the app's registry plus the plugins connected then) when it starts, so its tool list never moves mid-turn |
+| Agents still choose | An orchestrated agent gets a plugin's tools only when its `tools` patterns match (`entropy.*`) |
+| Only the person adds one | It starts a process. No agent tool adds, removes or restarts a plugin |
+| A server has 20 s to answer `initialize` and `tools/list` | A server that hangs is refused (and stopped), not waited on |
+| A plugin's name is not one of the app's own adapters | `<name>.<tool>` must stay unambiguous |
+| Local servers only | A `url` (remote) entry is refused |
 
 ## Reuse of results
 

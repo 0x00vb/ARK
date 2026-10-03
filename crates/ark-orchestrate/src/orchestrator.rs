@@ -1450,9 +1450,10 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         contacts.sort();
 
         // Its tools: the allowed app actions, its agent tools, diagrams, rules.
+        // The app's tools and the plugins connected now, as this agent may use them.
         let mut registry: Registry = self
             .engine
-            .registry
+            .tools()
             .filtered(|a| spec.tools.iter().any(|p| action_matches(p, a)));
         if !delegates.is_empty() || !contacts.is_empty() {
             registry.register(Arc::new(AgentTools {

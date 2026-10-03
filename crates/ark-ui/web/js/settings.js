@@ -18,8 +18,14 @@ export const settingsView = {
     let current = null;
     let ctl = {};
 
+    // The app's sections first, then ARK's own (Tool servers).
+    const ordered = () => {
+      const all = [...registry.settings.values()];
+      return [...all.filter((s) => !s.builtin), ...all.filter((s) => s.builtin)];
+    };
+
     const pick = (id) => {
-      const s = registry.settings.get(id) || registry.settings.values().next().value;
+      const s = registry.settings.get(id) || ordered()[0];
       if (!s) {
         clear(body).append(h("p.settings-none", "Nothing to set here."));
         return;
@@ -47,7 +53,7 @@ export const settingsView = {
     const mark = () => {
       clear(list);
       list.hidden = registry.settings.size < 2;
-      for (const s of registry.settings.values()) {
+      for (const s of ordered()) {
         list.append(h("button.nav-row", { type: "button", "aria-current": String(s.id === current), onclick: () => pick(s.id) },
           h("span.nav-icon", icon(s.icon || "settings")), h("span.nav-label", s.title)));
       }

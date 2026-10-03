@@ -291,26 +291,32 @@ impl Ark {
         RuleBook::new(&self.engine.store)
     }
 
+    /// The engine a turn starts with: the app's tools and the MCP plugins connected now. A
+    /// plugin added or removed later changes the next turn, not this one.
+    fn turn_engine(&self) -> Arc<Engine> {
+        match self.engine.plugins() {
+            Some(p) if !p.adapters().is_empty() => Arc::new(self.engine.for_turn()),
+            _ => self.engine.clone(),
+        }
+    }
+
     /// The rules bound to `project`, selected for `input`, and the engine to run with: the
-    /// usual one, or a view of it that also offers the `rules` tool when rules are bound.
+    /// turn's, or a view of it that also offers the `rules` tool when rules are bound.
     fn with_rules(
         &self,
         project: &ProjectId,
         input: &str,
     ) -> Result<(Arc<Engine>, Option<RuleSelection>), ArkError> {
+        let engine = self.turn_engine();
         let sets = self
             .rule_book()
             .resolve(&[RuleScope::Project(project.to_string())])?;
         if sets.is_empty() {
-            return Ok((self.engine.clone(), None));
+            return Ok((engine, None));
         }
         let selection = ark_runtime::rules::select(&sets, input, ark_runtime::rules::RULES_BUDGET);
-        let registry = self
-            .engine
-            .registry
-            .clone()
-            .with(Arc::new(RulesTool::new(sets)));
-        Ok((Arc::new(self.engine.scoped(registry)), Some(selection)))
+        let registry = engine.registry.clone().with(Arc::new(RulesTool::new(sets)));
+        Ok((Arc::new(engine.scoped(registry)), Some(selection)))
     }
 
     /// The engine and profile of a turn with `tools` added: their adapters registered, their
@@ -389,7 +395,7 @@ impl Ark {
     ) -> Result<HarnessOutcome, ArkError> {
         Ok(self
             .harness()
-            .ask(&self.engine, &self.profile, project, task, on_event)
+            .ask(&self.turn_engine(), &self.profile, project, task, on_event)
             .await?)
     }
 
@@ -404,7 +410,7 @@ impl Ark {
             .max_steps(self.max_steps)
             .allow_mutate(self.allow_mutate);
         let outcome = agent
-            .ask(&self.engine, &self.profile, project, task, |_| {})
+            .ask(&self.turn_engine(), &self.profile, project, task, |_| {})
             .await?;
         Ok(outcome.answer)
     }

@@ -18,12 +18,18 @@ use ark_tools::{Registry, RunCtx};
 
 use crate::blobs::StoreBlobs;
 use crate::error::AgentError;
+use crate::plugins::{PluginSpec, PluginStatus, Plugins};
 
 pub struct Engine {
     /// Shared with every engine made by [`scoped`](Engine::scoped).
     pub store: Arc<Store>,
+    /// The app's own adapters. MCP plugins are apart, in [`plugins`](Engine::plugins), because
+    /// they change while the engine runs; [`tools`](Engine::tools) puts the two together.
     pub registry: Registry,
     sniffers: Vec<Arc<dyn Sniffer>>,
+    /// The MCP plugins of `<root>/plugins.json`, for an engine opened on a root. A scoped engine
+    /// has none of its own: its registry is exactly what it was given.
+    plugins: Option<Arc<Plugins>>,
 }
 
 impl Engine {
@@ -33,6 +39,7 @@ impl Engine {
             store: Arc::new(store),
             registry,
             sniffers: Vec::new(),
+            plugins: None,
         }
     }
 
@@ -44,18 +51,64 @@ impl Engine {
             store: self.store.clone(),
             registry,
             sniffers: self.sniffers.clone(),
+            plugins: None,
         }
     }
 
-    /// Open a workspace at `root` with the given registry, then append any out-of-process MCP
-    /// plugins declared in `<root>/plugins.json`.
+    /// Everything this engine can run right now: its registry and the plugins connected at
+    /// this moment. A turn or task takes this once, when it starts, and keeps it.
+    pub fn tools(&self) -> Registry {
+        let mut registry = self.registry.clone();
+        if let Some(p) = &self.plugins {
+            let own: Vec<String> = registry
+                .adapters()
+                .iter()
+                .map(|a| a.name().to_string())
+                .collect();
+            for a in p.adapters() {
+                if !own.iter().any(|n| n == a.name()) {
+                    registry.register(a);
+                }
+            }
+        }
+        registry
+    }
+
+    /// An engine for one turn: this one, with the plugins connected now in its registry.
+    pub fn for_turn(&self) -> Engine {
+        self.scoped(self.tools())
+    }
+
+    /// The MCP plugins, when this engine was opened on a root (they live in its
+    /// `plugins.json`).
+    pub fn plugins(&self) -> Option<&Arc<Plugins>> {
+        self.plugins.as_ref()
+    }
+
+    /// Connect a plugin and save it. Its name may not be one of the app's own adapters.
+    pub fn add_plugin(&self, spec: PluginSpec) -> Result<PluginStatus, AgentError> {
+        let plugins = self.plugins.as_ref().ok_or_else(|| {
+            AgentError::Plugin("this app was not opened on a store root; it has no plugins".into())
+        })?;
+        let taken: Vec<String> = self
+            .registry
+            .adapters()
+            .iter()
+            .map(|a| a.name().to_string())
+            .collect();
+        plugins.add(spec, &taken)
+    }
+
+    /// Open a workspace at `root` with the given registry, and connect the MCP plugins
+    /// `<root>/plugins.json` lists ([`Plugins`]).
     pub fn open_with(
         root: impl AsRef<std::path::Path>,
-        mut registry: Registry,
+        registry: Registry,
     ) -> Result<Self, AgentError> {
         let root = root.as_ref().to_path_buf();
-        load_plugins(&root, &mut registry);
-        let engine = Engine::new(Store::open(root)?, registry);
+        let plugins = Plugins::load(&root);
+        let mut engine = Engine::new(Store::open(root)?, registry);
+        engine.plugins = Some(Arc::new(plugins));
         engine.recover_interrupted()?;
         Ok(engine)
     }
@@ -219,8 +272,9 @@ impl Engine {
         input: serde_json::Value,
         allow_mutate: bool,
     ) -> Result<Invocation, AgentError> {
-        let desc = self
-            .registry
+        // A turn's engine has its plugins in its registry already; the root engine adds them.
+        let registry = self.tools();
+        let desc = registry
             .descriptor(action)
             .ok_or_else(|| AgentError::UnknownAction(action.to_string()))?;
 
@@ -245,7 +299,7 @@ impl Engine {
         let blobs = StoreBlobs(&self.store);
         let ctx = RunCtx::new(&blobs).with_workspace(self.workspace_dir(project)?);
 
-        match self.registry.run(action, input, &ctx).await {
+        match registry.run(action, input, &ctx).await {
             Ok(out) => {
                 inv.command = out.command;
                 for prod in out.produced {
@@ -303,82 +357,5 @@ impl Engine {
             input["artifact"] = serde_json::Value::String(a.id.as_str().to_string());
         }
         input
-    }
-}
-
-/// Load out-of-process MCP plugins declared in `<root>/plugins.json` and register each as an
-/// adapter. Best-effort: a plugin that fails to connect is skipped with a warning so a broken
-/// plugin never blocks startup. Schema:
-/// `{ "plugins": [ { "name": "demo", "command": "python3", "args": ["srv.py"],
-///    "env": { "K": "V" } } ] }`. Relative `args`/`command` resolve against `root`.
-fn load_plugins(root: &std::path::Path, registry: &mut Registry) {
-    let path = root.join("plugins.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(_) => return, // no plugins file is the normal case
-    };
-    let doc: serde_json::Value = match serde_json::from_str(&text) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("plugins.json is not valid JSON: {e}");
-            return;
-        }
-    };
-    let plugins = doc
-        .get("plugins")
-        .and_then(|p| p.as_array())
-        .cloned()
-        .unwrap_or_default();
-    for p in plugins {
-        let name = p
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let command = p
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if name.is_empty() || command.is_empty() {
-            tracing::warn!("plugin entry missing name/command; skipped");
-            continue;
-        }
-        let args: Vec<String> = p
-            .get("args")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str())
-                    .map(|s| {
-                        let pb = std::path::Path::new(s);
-                        if pb.is_relative()
-                            && (s.contains('/') || s.ends_with(".py") || s.ends_with(".js"))
-                        {
-                            root.join(pb).display().to_string()
-                        } else {
-                            s.to_string()
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let env: std::collections::HashMap<String, String> = p
-            .get("env")
-            .and_then(|v| v.as_object())
-            .map(|m| {
-                m.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        match ark_tools::McpAdapter::connect(&name, &command, &args, &env) {
-            Ok(adapter) => {
-                tracing::info!("loaded MCP plugin `{name}`");
-                registry.register(std::sync::Arc::new(adapter));
-            }
-            Err(e) => tracing::warn!("MCP plugin `{name}` failed to load: {e}"),
-        }
     }
 }

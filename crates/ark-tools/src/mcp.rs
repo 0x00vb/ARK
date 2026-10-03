@@ -17,8 +17,10 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use ark_core::{ActionDescriptor, RiskTier};
 use async_trait::async_trait;
@@ -40,9 +42,23 @@ pub struct McpTool {
 struct McpConn {
     child: Child,
     stdin: ChildStdin,
-    reader: BufReader<ChildStdout>,
+    /// The server's stdout, line by line, from a reader thread: a request can wait with a
+    /// deadline instead of blocking on a server that never answers.
+    lines: Receiver<String>,
     next_id: i64,
 }
+
+/// A server that is no longer used is stopped, not left running.
+impl Drop for McpConn {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// How long a server has to answer `initialize` and `tools/list`. A tool call has no limit
+/// here; the turn's own budget and cancellation bound it.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct McpClient {
     conn: Mutex<McpConn>,
@@ -56,6 +72,16 @@ impl McpClient {
         command: &str,
         args: &[String],
         env: &HashMap<String, String>,
+    ) -> crate::Result<Self> {
+        Self::connect_within(command, args, env, HANDSHAKE_TIMEOUT)
+    }
+
+    /// [`connect`](Self::connect) with another limit on `initialize` and `tools/list`.
+    pub fn connect_within(
+        command: &str,
+        args: &[String],
+        env: &HashMap<String, String>,
+        limit: Duration,
     ) -> crate::Result<Self> {
         let mut cmd = Command::new(command);
         cmd.args(args)
@@ -74,10 +100,19 @@ impl McpClient {
             .stdout
             .take()
             .ok_or_else(|| AdapterError::Tool("no stdout".into()))?;
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
         let conn = McpConn {
             child,
             stdin,
-            reader: BufReader::new(stdout),
+            lines,
             next_id: 0,
         };
         let client = McpClient {
@@ -85,7 +120,8 @@ impl McpClient {
             server_info: Mutex::new(String::new()),
         };
 
-        let init = client.request(
+        let init = client.request_within(
+            Some(limit),
             "initialize",
             json!({
                 "protocolVersion": "2024-11-05",
@@ -104,6 +140,17 @@ impl McpClient {
 
     /// One blocking JSON-RPC request/response. Skips notifications/unrelated ids.
     fn request(&self, method: &str, params: Value) -> crate::Result<Value> {
+        self.request_within(None, method, params)
+    }
+
+    /// [`request`](Self::request), failing when no answer comes within `limit`.
+    fn request_within(
+        &self,
+        limit: Option<Duration>,
+        method: &str,
+        params: Value,
+    ) -> crate::Result<Value> {
+        let deadline = limit.map(|l| std::time::Instant::now() + l);
         let mut c = self.conn.lock().unwrap();
         c.next_id += 1;
         let id = c.next_id;
@@ -113,16 +160,26 @@ impl McpClient {
 
         // Read lines until we see the response for our id (or an error).
         loop {
-            let mut line = String::new();
-            let n = c
-                .reader
-                .read_line(&mut line)
-                .map_err(|e| AdapterError::Tool(format!("read: {e}")))?;
-            if n == 0 {
-                return Err(AdapterError::Tool(format!(
-                    "MCP server closed the stream during `{method}`"
-                )));
-            }
+            let next = match deadline {
+                None => c.lines.recv().map_err(|_| RecvTimeoutError::Disconnected),
+                Some(d) => c
+                    .lines
+                    .recv_timeout(d.saturating_duration_since(std::time::Instant::now())),
+            };
+            let line = match next {
+                Ok(l) => l,
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(AdapterError::Tool(format!(
+                        "MCP server closed the stream during `{method}`"
+                    )))
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    return Err(AdapterError::Tool(format!(
+                        "MCP server did not answer `{method}` within {}s",
+                        limit.unwrap_or_default().as_secs()
+                    )))
+                }
+            };
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -150,7 +207,11 @@ impl McpClient {
     }
 
     pub fn list_tools(&self) -> crate::Result<Vec<McpTool>> {
-        let result = self.request("tools/list", json!({}))?;
+        self.list_tools_within(HANDSHAKE_TIMEOUT)
+    }
+
+    fn list_tools_within(&self, limit: Duration) -> crate::Result<Vec<McpTool>> {
+        let result = self.request_within(Some(limit), "tools/list", json!({}))?;
         let tools = result
             .get("tools")
             .and_then(|t| t.as_array())
@@ -242,9 +303,20 @@ impl McpAdapter {
         args: &[String],
         env: &HashMap<String, String>,
     ) -> crate::Result<Self> {
-        let client = Arc::new(McpClient::connect(command, args, env)?);
+        Self::connect_within(namespace, command, args, env, HANDSHAKE_TIMEOUT)
+    }
+
+    /// [`connect`](Self::connect) with another limit on the handshake.
+    pub fn connect_within(
+        namespace: &str,
+        command: &str,
+        args: &[String],
+        env: &HashMap<String, String>,
+        limit: Duration,
+    ) -> crate::Result<Self> {
+        let client = Arc::new(McpClient::connect_within(command, args, env, limit)?);
         let label = client.server_info();
-        let tools = client.list_tools()?;
+        let tools = client.list_tools_within(limit)?;
         let actions = tools
             .into_iter()
             .map(|t| {
@@ -258,6 +330,13 @@ impl McpAdapter {
             actions,
             label,
         })
+    }
+}
+
+impl McpAdapter {
+    /// Whether its server process is still running.
+    pub fn running(&self) -> bool {
+        self.client.alive()
     }
 }
 

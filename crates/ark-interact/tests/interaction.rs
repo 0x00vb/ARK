@@ -394,3 +394,124 @@ async fn the_chat_creates_agents_and_hands_them_tasks() {
     assert_eq!(tasks[0].owner, "reviewer");
     assert!(tasks[0].result.as_deref().unwrap().contains("REVIEWED"));
 }
+
+fn echo_server() -> Option<String> {
+    let ok = std::process::Command::new("python3")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !ok {
+        eprintln!("python3 not found: skipped");
+        return None;
+    }
+    let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../ark-tools/tests/fixtures/mcp_echo.py");
+    Some(p.canonicalize().unwrap().display().to_string())
+}
+
+/// A model that calls `action` once, then answers with what the call returned.
+fn caller(action: &'static str) -> Arc<dyn ark_model::Provider> {
+    Arc::new(MockProvider::new("m", vec![]).with_fallback(move |req| {
+        let returned: Vec<String> = req
+            .messages
+            .iter()
+            .filter(|m| m.tool_call_id.is_some())
+            .map(|m| m.content.clone())
+            .collect();
+        if returned.is_empty() {
+            Completion {
+                content: String::new(),
+                tool_calls: vec![ToolCall {
+                    id: "c1".into(),
+                    name: action.into(),
+                    arguments: serde_json::json!({ "text": "echoed back" }),
+                }],
+                usage: Usage::measured(100, 5),
+            }
+        } else {
+            Completion {
+                content: format!("GOT: {}", returned.join(" | ")),
+                tool_calls: vec![],
+                usage: Usage::measured(100, 5),
+            }
+        }
+    }))
+}
+
+/// `/plugin add` starts an MCP server while the app runs; the next turn can call its tools,
+/// and an orchestrated agent gets them only when its `tools` allow.
+#[tokio::test]
+async fn a_plugin_added_by_command_serves_the_next_turn_and_the_agents_it_is_given_to() {
+    use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec};
+    let Some(srv) = echo_server() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let model = caller("echo.echo");
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = App::new("Test")
+        .ark(ark)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+
+    let none = ix.execute("/plugin").await.report.plain_text();
+    assert!(none.contains("No plugins"), "{none}");
+    let added = ix
+        .execute(&format!("/plugin add echo python3 \"{srv}\""))
+        .await
+        .report
+        .plain_text();
+    assert!(added.contains("Added echo (2 tools)"), "{added}");
+    assert!(added.contains("echo.echo, echo.stamp"), "{added}");
+    let tools = ix.execute("/tools").await.report.plain_text();
+    assert!(tools.contains("echo.echo"), "{tools}");
+
+    let ctl = TurnControl::new();
+    let end = ix.run_turn("say it back", &ctl, |_, _| {}).await;
+    let answer = end.result.unwrap().answer;
+    assert!(answer.contains("echoed back"), "{answer}");
+
+    // Agents: one may use the server, one may not.
+    let project = ix.project().clone();
+    let orch = Orchestrator::builder(ix.ark(), &project)
+        .configure_models(|b| b.provider("m", model.clone()).default_model("m"))
+        .build()
+        .unwrap();
+    orch.spawn(AgentSpec::new("allowed").tools(["echo.*"]))
+        .await
+        .unwrap();
+    orch.spawn(AgentSpec::new("other").tools(["files.*"]))
+        .await
+        .unwrap();
+    let ok = orch
+        .run("allowed", TaskSpec::new("say it back"))
+        .await
+        .unwrap();
+    assert!(
+        ok.result.as_deref().unwrap().contains("echoed back"),
+        "{ok:?}"
+    );
+    let no = orch
+        .run("other", TaskSpec::new("say it back"))
+        .await
+        .unwrap();
+    assert!(
+        !no.result
+            .as_deref()
+            .unwrap_or_default()
+            .contains("echoed back"),
+        "an agent without the server's tools cannot call them: {no:?}"
+    );
+
+    let removed = ix.execute("/plugin remove echo").await.report.plain_text();
+    assert!(
+        removed.contains("Removed echo") && removed.contains("No plugins"),
+        "{removed}"
+    );
+}

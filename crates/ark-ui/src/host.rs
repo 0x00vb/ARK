@@ -739,9 +739,42 @@ impl Host {
                     .map(|p| json!({ "name": p.name, "summary": p.summary }))
                     .collect(),
             )),
+            // MCP plugins: the engine's, worded and run off the async runtime by ark-interact,
+            // as `/plugin` is. None waits for a running turn; a change applies from the next.
+            // `plugins` is null when the app has none (it was not opened on a store root).
+            "plugins" => {
+                if !ark_interact::plugins::supported(&self.engine) {
+                    return Ok(Value::Null);
+                }
+                Ok(serde_json::to_value(ark_interact::plugins::list(
+                    &self.engine,
+                ))?)
+            }
+            // `spec`: one plugin; `text`: what `/plugin add` takes (words or a JSON snippet).
+            // Answers with the plugins added.
+            "plugin_add" => {
+                let added = match params.get("spec") {
+                    Some(v) if v.is_object() => vec![
+                        ark_interact::plugins::add(
+                            self.engine.clone(),
+                            serde_json::from_value(v.clone())?,
+                        )
+                        .await?,
+                    ],
+                    _ => ark_interact::plugins::add_text(self.engine.clone(), &s("text")).await?,
+                };
+                Ok(serde_json::to_value(added)?)
+            }
+            "plugin_remove" => {
+                ark_interact::plugins::remove(self.engine.clone(), s("name")).await?;
+                Ok(json!({}))
+            }
+            "plugin_restart" => Ok(serde_json::to_value(
+                ark_interact::plugins::restart(self.engine.clone(), s("name")).await?,
+            )?),
             // The app's actions, which an agent's `tools` patterns choose from.
             "tools" => {
-                let mut actions = self.engine.registry.actions();
+                let mut actions = self.engine.tools().actions();
                 actions.sort_by(|a, b| a.name.cmp(&b.name));
                 Ok(Value::Array(
                     actions

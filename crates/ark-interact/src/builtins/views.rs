@@ -113,7 +113,7 @@ pub struct Tools;
 impl Command for Tools {
     meta!("tools", "The tools this agent can use");
     async fn run(&self, ix: &mut Interaction, _args: &str) -> anyhow::Result<Reply> {
-        let mut actions = ix.engine().registry.actions();
+        let mut actions = ix.engine().tools().actions();
         actions.sort_by(|a, b| a.name.cmp(&b.name));
         let core = ix.ark().profile().core_actions.clone();
         let mut t = Table::plain(3);
@@ -145,6 +145,59 @@ impl Command for Tools {
                 actions.len()
             ))
             .into())
+    }
+}
+
+pub struct Plugin;
+#[async_trait::async_trait]
+impl Command for Plugin {
+    meta!(
+        "plugin",
+        "MCP servers whose tools the agents can use: list, add, remove, restart"
+    );
+    fn usage(&self) -> &str {
+        "[add <name> [KEY=VALUE…] <command> [args…] | remove <name> | restart <name>]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let engine = ix.ark().shared_engine();
+        if !crate::plugins::supported(&engine) {
+            return Ok(Report::new().note("This app has no plugins.").into());
+        }
+        let (verb, rest) = args.trim().split_once(' ').unwrap_or((args.trim(), ""));
+        let rest = rest.trim();
+        let done = match verb {
+            "" | "list" => None,
+            "add" => {
+                let added = crate::plugins::add_text(engine.clone(), rest).await?;
+                let names: Vec<String> = added
+                    .iter()
+                    .map(|p| format!("{} ({} tools)", p.name, p.tools.len()))
+                    .collect();
+                Some(format!(
+                    "Added {}. Agents may use them from the next turn.",
+                    names.join(", ")
+                ))
+            }
+            "remove" if !rest.is_empty() => {
+                crate::plugins::remove(engine.clone(), rest.to_string()).await?;
+                Some(format!("Removed {rest}."))
+            }
+            "restart" if !rest.is_empty() => {
+                let p = crate::plugins::restart(engine.clone(), rest.to_string()).await?;
+                Some(match p.error {
+                    None => format!("Restarted {rest}."),
+                    Some(e) => format!("{rest} did not start: {e}"),
+                })
+            }
+            _ => anyhow::bail!("usage: /plugin {}", self.usage()),
+        };
+        let list = crate::plugins::report(&crate::plugins::list(&engine));
+        let mut r = match done {
+            Some(d) => Report::new().success(d),
+            None => Report::new(),
+        };
+        r.blocks.extend(list.blocks);
+        Ok(r.into())
     }
 }
 

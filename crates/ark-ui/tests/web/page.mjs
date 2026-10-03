@@ -262,17 +262,22 @@ async function workbench(page) {
 }
 scenarios.workbench = workbench;
 
-// An app's Settings sections: one shows alone, two get a list to pick from. `ark.compose`
-// fills the composer from any view and sends nothing.
+// An app's Settings sections come first, ARK's own (Tool servers) after; a section added
+// while Settings is open joins the list. `ark.compose` fills the composer from any view and
+// sends nothing.
 async function settings(page) {
+  // Tool servers registers once the page is connected: wait for its Settings entry.
+  await page.locator("#open-settings:not([hidden])").waitFor();
   await page.evaluate(() => window.ark.setting({ id: "keys", title: "Keys", render: (el) => el.append("the keys") }));
   await page.locator("#open-settings").click();
-  assert.equal(await page.locator(".settings-title").innerText(), "Keys");
+  assert.equal(await page.locator(".settings-title").innerText(), "Keys", "the app's section opens first");
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
-  assert.equal(await page.locator(".settings-list").isVisible(), false, "one section needs no list");
+  const rows = page.locator(".settings-list .nav-row");
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Tool servers"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Tool servers"]);
   await page.locator(".settings-list .nav-row", { hasText: "Look" }).click();
   assert.equal(await page.locator(".settings-title").innerText(), "Look");
   assert.equal(await page.locator(".settings-section").innerText(), "the look");
@@ -284,6 +289,37 @@ async function settings(page) {
   assert.equal(await page.locator(".user").count(), 0, "nothing was sent");
 }
 scenarios.settings = settings;
+
+// Settings › Tool servers: an MCP server is added from a typed command, shows its tools,
+// joins the app's tools, and is removed with a second click. One that cannot start says why.
+async function plugins(page) {
+  await page.locator("#open-settings").click();
+  await page.locator(".settings-title", { hasText: "Tool servers" }).waitFor();
+  assert.equal(await page.locator(".plugin-list").innerText(), "No servers yet.");
+
+  const input = page.locator(".plugin-input");
+  await input.fill(`echo python3 "${process.env.ARK_TEST_MCP}"`);
+  await page.locator(".plugin-add .btn.primary").click();
+  const row = page.locator('.plugin-row[data-name="echo"]');
+  await row.waitFor();
+  assert.equal(await row.locator(".plugin-detail").innerText(), "2 tools: echo, stamp");
+  assert.equal(await input.inputValue(), "", "the field empties once added");
+  const tools = await page.evaluate(async () => (await window.ark.call("tools")).map((t) => t.name));
+  assert.ok(tools.includes("echo.echo"), tools.join(","));
+
+  await input.fill("bad /no/such/server");
+  await page.locator(".plugin-add .btn.primary").click();
+  await page.locator(".plugin-why", { hasText: "did not start" }).waitFor();
+  assert.equal(await page.locator(".plugin-row").count(), 1, "a server that failed is not listed");
+
+  const remove = row.locator(".plugin-remove");
+  await remove.click();
+  assert.equal(await remove.innerText(), "Remove?");
+  await remove.click();
+  await row.waitFor({ state: "detached" });
+  assert.equal(await page.locator(".plugin-list").innerText(), "No servers yet.");
+}
+scenarios.plugins = plugins;
 
 const NARRATION = "Reading the notes slowly, one line at a time, so that a window can reload in between. ".repeat(3).trim();
 

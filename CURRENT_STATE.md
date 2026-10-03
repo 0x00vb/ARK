@@ -22,7 +22,9 @@ Last updated: 2026-10-03
 
 ## Next
 
-After v0.7.0: the `Next` list in [`ROADMAP.md`](ROADMAP.md).
+Prove ARK as a product, in this order ([`ROADMAP.md`](ROADMAP.md) › Next): v0.8.0 (API trim,
+cleanup, SecRes upgraded), Claude Code and Codex first-class, ARK Desktop public, hosted-model
+evidence (time-boxed), persistent headless ARK, ARK Cloud on the same runtime.
 
 ## Working notes
 

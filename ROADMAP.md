@@ -10,9 +10,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 |---|---|
 | Stable release | **v0.7.0** (2026-10-03): the measured runtime P0 to P2 (naive baseline, team workloads, faults, record and replay; preloading, the ready list, small arrays whole, planner off), the window's projects, top bar, Settings, Terminal, Browser and Files, and the chat that creates agents |
 | `main` | v0.7.0 |
-| Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; pins v0.6.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Consumers | SecRes (pins v0.5.0), ARK Desktop (`ark-desktop` repo; pins v0.7.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
-| Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: the capability and product roadmap. |
+| Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 
 ## State
 
@@ -48,8 +48,32 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 ## Next
 
-The capability and product roadmap comes next; it is not written here yet. Done toward it
-since v0.7.0: MCP servers added while ARK runs, and skills read on demand (ADR 0009).
+The runtime works and is measured. The next phase proves ARK as a product. Steps run in
+this order; each ends when its "Done means" holds.
+
+The product test: **a non-expert installs ARK, picks the model or provider they already
+have, creates or uses an agent or team, gives it the capabilities it needs, and gets real
+work done without knowing what MCP, skills, harnesses, providers or context management
+are.** Advanced controls stay, behind simple primitives (progressive disclosure).
+
+| # | Step | Done means |
+|---|---|---|
+| 1 | **v0.8.0**: the API trim that was planned for 0.7 and never shipped (below), cleanup and stabilization, stale docs fixed. Since v0.7.0 on `main`: MCP servers added while ARK runs, skills read on demand (ADR 0009) | v0.8.0 tagged; SecRes upgraded from v0.5.0 and running a real task on it |
+| 2 | **Claude Code and Codex first-class**: the main execution path. Persistent agent sessions, streaming output, cancellation, clear errors, and the UX around them | no process per call; output streams; cancel stops the work; failures say what to do; a long task feels as good as the vendor CLI |
+| 3 | **ARK Desktop public**: signed and notarized release, aiark.dev live, a real download flow, onboarding that asks almost nothing | a non-expert passes the product test above on a clean machine |
+| 4 | **Prove the advantage** on hosted models and real workflows: the hosted-model runs and P3 (ARK against the naive loop). Metrics: task success, tokens, cost, latency, retries, context growth. Time-boxed: enough evidence to state the thesis, not an open milestone | headline numbers in `bench/RESULTS.md`, reproducible, usable on aiark.dev |
+| 5 | **Persistent, headless ARK**: runs without a window. Several sessions, persistence, real auth, saved approval and policy rules, background execution, scheduled tasks. A runtime primitive, not Desktop infrastructure | Desktop and the CLI connect to a running ARK as clients; a scheduled task runs with no window open |
+| 6 | **ARK Cloud**: managed ARK on the same runtime, not a second one. Cloud adds hosted execution, auth, persistence, remote capabilities (MCP, connectors), scheduling, observability, billing | Cloud runs the step 5 runtime unchanged; ARK still self-hosts with no cloud dependency |
+
+Throughout: one runtime, many clients. Desktop, CLI, Cloud and domain products use the same
+ARK capabilities; prefer a reusable primitive in the right layer over a feature-specific
+implementation.
+
+API trim for v0.8.0 (breaking): public items no caller uses. Remove each, or keep it with a
+reason: `Interaction::ark_mut`, `App::ark_builder`, `Harness::budget_tokens`,
+`budget::WorkingSet::round_count`, `Registry::from_adapters`, `Store::get_artifact`,
+`Store::get_session`, `ActionDescriptor::with_output_schema`, `SurfaceRef::with_title`,
+`PendingApproval::is_closed`, `Ark::ask_simple`.
 
 | Kept out on purpose | Until |
 |---|---|
@@ -59,8 +83,8 @@ since v0.7.0: MCP servers added while ARK runs, and skills read on demand (ADR 0
 
 ### Deferred: measured runtime
 
-Left open when the milestone closed at v0.7.0. Not scheduled. Pick one up only with a
-before/after in `bench/RESULTS.md`.
+Left open when the milestone closed at v0.7.0. Step 4 of Next takes the Haiku check and
+P3; the rest is not scheduled. Pick one up only with a before/after in `bench/RESULTS.md`.
 
 | Item | What is known |
 |---|---|
@@ -105,11 +129,7 @@ Folded in from the earlier list:
 Outside the milestone:
 
 1. **Native window test**: drive the Tauri IPC path in CI, or document why it cannot be.
-2. **API trim at 0.7** (breaking, so with the milestone's release): public items no caller
-   uses (`Interaction::ark_mut`, `App::ark_builder`, `Harness::budget_tokens`,
-   `budget::WorkingSet::round_count`, `Registry::from_adapters`, `Store::get_artifact`,
-   `Store::get_session`, `ActionDescriptor::with_output_schema`, `SurfaceRef::with_title`,
-   `PendingApproval::is_closed`, `Ark::ask_simple`). Remove, or keep with a reason.
+2. **API trim at 0.7**: did not ship with 0.7. Moved to v0.8.0 (Next, step 1).
 3. **ark-cli in its own repo**: not before 0.8. First orchestration control in
    `ark-interact`, then one or two releases without a breaking `ark-interact` change.
 

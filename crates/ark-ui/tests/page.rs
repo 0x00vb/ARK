@@ -147,6 +147,11 @@ async fn the_plus_menu_opens_files_and_a_terminal_in_the_project_folder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn settings_sections_show_and_compose_fills_the_composer_unsent() {
+    drive("settings", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_narrow_window_keeps_the_sidebar_reachable() {
     drive("narrow", vec![], Duration::ZERO).await;
 }

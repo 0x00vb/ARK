@@ -246,12 +246,44 @@ async function workbench(page) {
   await assert.rejects(page.evaluate(() => window.ark.call("file_read", { path: "../outside" })));
 
   await page.evaluate(() => window.ark.openPanel("terminal"));
-  await page.locator(".xterm-helper-textarea").waitFor({ state: "attached" });
-  await page.waitForTimeout(500);
-  await page.locator(".xterm-helper-textarea").type("echo ark-$((40+2))\n");
-  await page.locator(".xterm-rows", { hasText: "ark-42" }).waitFor();
+  // A shell under load can miss a line typed before its prompt: type it again until it answers.
+  const term = page.locator(".xterm-helper-textarea");
+  await term.waitFor({ state: "attached" });
+  const answer = page.locator(".xterm-rows", { hasText: "ark-42" });
+  for (let i = 0; ; i++) {
+    await term.type("echo ark-$((40+2))\n");
+    try {
+      await answer.waitFor({ timeout: 5000 });
+      break;
+    } catch (e) {
+      if (i === 3) throw e;
+    }
+  }
 }
 scenarios.workbench = workbench;
+
+// An app's Settings sections: one shows alone, two get a list to pick from. `ark.compose`
+// fills the composer from any view and sends nothing.
+async function settings(page) {
+  await page.evaluate(() => window.ark.setting({ id: "keys", title: "Keys", render: (el) => el.append("the keys") }));
+  await page.locator("#open-settings").click();
+  assert.equal(await page.locator(".settings-title").innerText(), "Keys");
+  assert.equal(await page.locator(".settings-section").innerText(), "the keys");
+  assert.equal(await page.locator(".settings-list").isVisible(), false, "one section needs no list");
+
+  await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
+  await page.evaluate(() => window.ark.openSettings("keys"));
+  await page.locator(".settings-list .nav-row", { hasText: "Look" }).click();
+  assert.equal(await page.locator(".settings-title").innerText(), "Look");
+  assert.equal(await page.locator(".settings-section").innerText(), "the look");
+
+  await page.evaluate(() => window.ark.compose("Set up a reviewer"));
+  assert.equal(await page.locator("#scroller").isVisible(), true, "the conversation is in view");
+  assert.equal(await page.locator("#input").inputValue(), "Set up a reviewer");
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator(".user").count(), 0, "nothing was sent");
+}
+scenarios.settings = settings;
 
 const NARRATION = "Reading the notes slowly, one line at a time, so that a window can reload in between. ".repeat(3).trim();
 

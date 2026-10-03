@@ -78,6 +78,7 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Fixed
 - A task waiting on a paused agent ends as soon as it is cancelled (it noticed within 250 ms).
+- A Settings section an app registers while Settings is open joins its list.
 
 ## [0.6.0] - 2026-10-03
 

@@ -24,7 +24,11 @@ export const settingsView = {
         clear(body).append(h("p.settings-none", "Nothing to set here."));
         return;
       }
-      if (current === s.id) return ctl.refresh?.();
+      // The same section again: a section added since still joins the list.
+      if (current === s.id) {
+        mark();
+        return ctl.refresh?.();
+      }
       try { ctl.dispose?.(); } catch (e) { console.error(e); }
       current = s.id;
       const host = h("div.settings-section", { "data-id": s.id });

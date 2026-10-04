@@ -116,8 +116,9 @@ fn unreachable_page(url: &str, error: &str) -> String {
     let html = format!(
         "<!doctype html><meta charset=utf-8><title>ARK</title>\
 <body style=\"font:15px system-ui;max-width:34em;margin:4em auto;padding:0 1em;color:#1d2433\">\
-<h2>Cannot open the ARK runtime</h2><p><b>{}</b></p><p>{}</p>\
-<p>Check that it is running and that the access token is valid, then open ARK again.</p>",
+<h2>ARK on the other computer isn't answering</h2>\
+<p>Check that the other computer is on and ARK is open there, then open ARK again.</p>\
+<details style=\"color:#6b7280\"><summary>Details</summary><p>{}</p><p>{}</p></details>",
         esc(url),
         esc(error)
     );

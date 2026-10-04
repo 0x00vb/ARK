@@ -46,13 +46,13 @@ pub mod prelude {
         CapabilitySpec, Project, ProjectId, Provenance, RiskTier, Rule, RuleBinding, RuleScope,
         RuleSet, Sniffer,
     };
+    pub use ark_runtime::router::CurrentModel;
     pub use ark_runtime::{
         AcquisitionProvider, AcquisitionResult, AgentProfile, ApprovalDecision, ApprovalGate,
         ApprovalRequest, Approver, CancelToken, ContextReport, Distiller, DistillerSet, Engine,
         FixedApprover, Harness, HarnessEvent, HarnessOutcome, KnowledgeHit, KnowledgeProvider,
         ModelRouter, Prompts, Role, RuleBook, RuleSelection, Session, Steering,
     };
-    pub use ark_runtime::router::CurrentModel;
     pub use ark_tools::diagram::{Diagram, DiagramKind};
     pub use ark_tools::{
         ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArtifact, Registry, RunCtx,

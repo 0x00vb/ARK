@@ -105,6 +105,12 @@ impl Entry {
     }
 }
 
+impl ark_tools::ToolSource for Plugins {
+    fn adapters(&self) -> Vec<Arc<dyn Adapter>> {
+        Plugins::adapters(self)
+    }
+}
+
 /// The engine's plugins: what `plugins.json` lists, each connected or with the reason it is not.
 pub struct Plugins {
     root: PathBuf,

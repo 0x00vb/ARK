@@ -88,7 +88,7 @@ permission system. Service details stay in data at the edge.
 | # | Step | Builds on | Done means |
 |---|---|---|---|
 | C1 | **Web**: `web.search`, `web.fetch` (ADR 0010) | `Adapter`, `Provider` | done on `main`: every model searches; an agent reads pages; the `web` workload |
-| C2 | **Connections**: `plugins.json` entries grow `url` (remote MCP over HTTP), `auth` (token, OAuth per the MCP spec; secrets in the OS keychain), per-tool risk overrides. A small catalog (data) of known services: label, one line, how to connect. One capability list computed in `ark-interact` (`✓ Web`, `○ Slack · Connect`); `/connect` and Settings › Capabilities, with Tool servers as its advanced view | `Plugins`, `McpAdapter` | Gmail, Calendar and GitHub connect from the list in both front-ends; reading mail runs on its own, sending asks |
+| C2 | **Connections** (ADR 0011): ARK owns the account. `ark-connect`: a catalog (data) of providers and capabilities, OAuth with PKCE, tokens in the OS keychain, revoke on disconnect, neutral tool names. One capability list in `ark-interact` (`/connect`, Settings › Capabilities; Tool servers stays the advanced view). Done on `main`: the foundation, Mail (send) and Calendar on Google, tested against a fake provider in WebKit. Left: ARK's Google client and Google's review (`docs/GOOGLE.md`), a live run with a real account. Later, on the same accounts: remote MCP servers (`url`) and third-party sign-in | `ToolSource`, `Adapter`, `ApprovalGate` | Mail and Calendar connect from the list in both front-ends with a real Google account; reading runs on its own, sending asks |
 | C3 | **Task-first access**: an agent that lacks a capability asks for it through the acquisition seam, backed by the catalog; the person sees "ARK needs Gmail to finish this · Connect" (an approval request), connects, and the turn continues with the new tools. Approval classes per tool, and grants kept per project | `AcquisitionProvider`, `ApprovalGate` | "research these companies and email me the report" works from an empty setup with one Connect click and one send approval |
 | C4 | **Browser and shared resources**: Browser as a catalog entry (Playwright MCP; no browser code in ARK). A connection says how it may be shared: `shared` (one server for all), `per_agent` (an isolated browser per agent), `exclusive` (the person's logged-in browser: one task holds it, others wait, shown as "waiting for Browser, used by researcher"). The lead sees which capabilities exist when it creates agents | C2, the scheduler | two agents browse at once without collisions; a third waits for the exclusive one; a test drives it with scripted models |
 | C5 | **Desktop / computer use**: a catalog entry with `exclusive` sharing (one screen) and every action gated | C4 | one agent operates an app while others work; nothing else touches the screen |
@@ -96,7 +96,13 @@ permission system. Service details stay in data at the edge.
 Order: C1 to C3 make a single agent useful; C4 makes teams safe with resources that cannot be
 shared; C5 last, as the riskiest and least proven. Overlap with the steps above: step 5's saved
 approval rules are C3's grants per project; step 6's remote capabilities are C2's
-connections, run where ARK runs. Where C2 to C5 sit relative to steps 1 to 3 is not decided.
+connections, run where ARK runs.
+
+Placement (the owner, 2026-10-03): the capability foundation is built after v0.8.0, beside
+step 2, and before step 3. The first public ARK Desktop ships a few capabilities done well
+(Web, Files, Mail, Calendar), not a large set of integrations. It proves one loop: tell ARK
+what you want, ARK finds what it needs, you connect or approve it simply, the agent or team
+does the work. Google's review of ARK's sign-in may gate step 3 (`docs/GOOGLE.md`).
 
 | Kept out on purpose | Until |
 |---|---|

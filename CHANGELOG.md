@@ -9,7 +9,23 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- Capabilities that need an account, owned by ARK (ADR 0011): the new crate `ark-connect`
+  (`Catalog`, `Capability`, `Provider`, `Connections`, `Account`, `CapabilityStatus`,
+  `Secrets`, `Keychain`, `MemorySecrets`, `oauth`), on with `ArkBuilder::connections(true)` or
+  `connections_with(..)`. First capabilities: Mail (send) and Calendar (see and add events) on
+  a Google account; sign-in in the person's browser (OAuth with PKCE), tokens in the OS
+  keychain, revoked on disconnect ([`EXTENSION.md`](docs/EXTENSION.md#capabilities-and-accounts),
+  [`GOOGLE.md`](docs/GOOGLE.md)).
+- `/connect [capability]` and `/disconnect <capability>` in both front-ends
+  (`ark_interact::capabilities`), and Settings › Capabilities in the window (methods
+  `capabilities`, `capability_connect`, `capability_disconnect`).
+- `ark_tools::ToolSource`, `Engine::add_source`, `Engine::has_sources`: tools that come and
+  go while ARK runs; MCP plugins are one.
+- `Ark::tools()` and `ark_sdk::offered_tools`: every action a turn would be offered.
+
 ### Fixed
+- `/tools` and the window's `tools` list the web's actions.
 - An empty command line (`command` in the window protocol) no longer starts an empty turn.
 
 ## [0.8.0] - 2026-10-03

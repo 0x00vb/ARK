@@ -636,3 +636,59 @@ async fn the_conversation_reads_a_skill_and_agents_get_the_ones_they_are_given()
         "an agent without skills gets no catalog"
     );
 }
+
+/// `/connect` lists what ARK can use in a person's words: the web is ready, Mail and Calendar
+/// say why this build cannot connect them (no sign-in client), and `/tools` lists the web.
+#[tokio::test]
+async fn connect_lists_capabilities_and_says_why_one_cannot_connect() {
+    use ark_sdk::prelude::ark_connect::{Catalog, Connections, MemorySecrets};
+    let dir = tempfile::tempdir().unwrap();
+    let mut catalog = Catalog::builtin();
+    for p in &mut catalog.providers {
+        p.oauth.client_id.clear();
+        p.oauth.client_id_env = None;
+    }
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(caller("web.search"))
+        .web(true)
+        .connections_with(Connections::open(
+            dir.path(),
+            catalog,
+            Arc::new(MemorySecrets::default()),
+        ))
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = App::new("Test")
+        .ark(ark)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    let list = ix.execute("/connect").await.report.plain_text();
+    let line = |name: &str| {
+        list.lines()
+            .find(|l| l.contains(name))
+            .unwrap_or("")
+            .to_string()
+    };
+    assert!(line("Web").trim_start().starts_with('✓'), "{list}");
+    assert!(line("Mail").trim_start().starts_with('!'), "{list}");
+    assert!(list.contains("cannot sign in to Google yet"), "{list}");
+    let refused = ix.execute("/connect mail").await;
+    assert!(
+        refused
+            .report
+            .plain_text()
+            .contains("no sign-in for Google"),
+        "{}",
+        refused.report.plain_text()
+    );
+    let tools = ix.execute("/tools").await.report.plain_text();
+    assert!(
+        tools.contains("web.search") && tools.contains("web.fetch"),
+        "{tools}"
+    );
+}

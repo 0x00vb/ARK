@@ -113,7 +113,7 @@ pub struct Tools;
 impl Command for Tools {
     meta!("tools", "The tools this agent can use");
     async fn run(&self, ix: &mut Interaction, _args: &str) -> anyhow::Result<Reply> {
-        let mut actions = ix.engine().tools().actions();
+        let mut actions = ix.ark().tools().actions();
         actions.sort_by(|a, b| a.name.cmp(&b.name));
         let core = ix.ark().profile().core_actions.clone();
         let mut t = Table::plain(3);
@@ -145,6 +145,59 @@ impl Command for Tools {
                 actions.len()
             ))
             .into())
+    }
+}
+
+pub struct Connect;
+#[async_trait::async_trait]
+impl Command for Connect {
+    meta!(
+        "connect",
+        "What ARK can use (Web, Mail, Calendar, …); connect one with /connect <name>"
+    );
+    fn usage(&self) -> &str {
+        "[capability]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let which = args.trim();
+        let mut r = Report::new();
+        if !which.is_empty() {
+            let url = crate::capabilities::connect(ix.ark().connections(), which).await?;
+            r = if crate::capabilities::open_in_browser(&url) {
+                r.success("Opened the sign-in in your browser. Once you allow it there, the capability is ready for the next turn.")
+            } else {
+                r.text(format!("Open this page to sign in, then come back:\n{url}"))
+            };
+        }
+        r.blocks
+            .extend(crate::capabilities::report(&crate::capabilities::list(ix.ark())).blocks);
+        Ok(r.into())
+    }
+}
+
+pub struct Disconnect;
+#[async_trait::async_trait]
+impl Command for Disconnect {
+    meta!(
+        "disconnect",
+        "Disconnect an account: revoke ARK's access and forget it"
+    );
+    fn usage(&self) -> &str {
+        "<capability>"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let which = args.trim();
+        if which.is_empty() {
+            anyhow::bail!("usage: /disconnect {}", self.usage());
+        }
+        let account = crate::capabilities::disconnect(ix.ark().connections(), which).await?;
+        let mut r = Report::new().success(format!(
+            "Disconnected {}. ARK's access is revoked; every capability it served needs connecting again.",
+            account.name
+        ));
+        r.blocks
+            .extend(crate::capabilities::report(&crate::capabilities::list(ix.ark())).blocks);
+        Ok(r.into())
     }
 }
 

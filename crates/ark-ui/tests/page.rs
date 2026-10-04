@@ -84,15 +84,37 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     }
     let model: Arc<dyn ark_model::Provider> =
         Arc::new(MockProvider::new("m", script).with_chunk_delay(chunk));
-    let ark = Ark::builder()
+    let mut builder = Ark::builder()
         .store_root(dir.path())
         .tool(Arc::new(Notes))
         .profile(AgentProfile::builder().core_actions(["notes.read"]).build())
         .provider(model)
         .planner(false)
-        .critic(false)
-        .build()
-        .unwrap();
+        .critic(false);
+    if scenario == "capabilities" {
+        // Sign-in against a provider on loopback that approves at once; tokens in memory.
+        let provider = fake_provider().await;
+        let mut catalog = ark_connect::Catalog::builtin();
+        let google = catalog
+            .providers
+            .iter_mut()
+            .find(|p| p.id == "google")
+            .unwrap();
+        google.oauth.auth_url = format!("{provider}/auth");
+        google.oauth.token_url = format!("{provider}/token");
+        google.oauth.revoke_url = Some(format!("{provider}/revoke"));
+        google.oauth.client_id = "page-test".into();
+        google.oauth.client_id_env = None;
+        let conns = ark_connect::Connections::open(
+            dir.path(),
+            catalog,
+            Arc::new(ark_connect::MemorySecrets::default()),
+        );
+        builder = builder
+            .connections_with(conns)
+            .web_with(ark_tools::web::WebAdapter::new().backends(vec![]));
+    }
+    let ark = builder.build().unwrap();
     let mut app = App::new("Page test").ark(ark);
     if agents {
         app = app.orchestrate(|ark, project, gate| {
@@ -169,6 +191,67 @@ async fn settings_sections_show_and_compose_fills_the_composer_unsent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn tool_servers_are_added_and_removed_in_settings() {
     drive("plugins", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn capabilities_connect_through_the_browser_and_disconnect() {
+    drive("capabilities", vec![], Duration::ZERO).await;
+}
+
+/// An OAuth provider on loopback: its sign-in page sends the browser straight back with a
+/// code, its token endpoint answers for `ada@example.com` with Mail's scope.
+async fn fake_provider() -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 16384];
+                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let reply = if path.starts_with("/auth") {
+                    let url = reqwest_url(&path);
+                    let get = |k: &str| {
+                        url.split('&')
+                            .find_map(|kv| kv.strip_prefix(&format!("{k}=")))
+                            .map(|v| v.replace("%3A", ":").replace("%2F", "/"))
+                            .unwrap_or_default()
+                    };
+                    format!(
+                        "HTTP/1.1 302 Found\r\nlocation: {}?code=c0de&state={}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                        get("redirect_uri"),
+                        get("state")
+                    )
+                } else {
+                    let body = if path.starts_with("/token") {
+                        json!({
+                            "access_token": "a", "refresh_token": "r", "expires_in": 3600,
+                            "scope": "openid email https://www.googleapis.com/auth/gmail.send",
+                            "id_token": "e30.eyJlbWFpbCI6ImFkYUBleGFtcGxlLmNvbSJ9.sig"
+                        })
+                    } else {
+                        json!({})
+                    }
+                    .to_string();
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                };
+                let _ = sock.write_all(reply.as_bytes()).await;
+            });
+        }
+    });
+    base
+}
+
+/// The query of a request path.
+fn reqwest_url(path: &str) -> String {
+    path.split_once('?')
+        .map(|(_, q)| q.to_string())
+        .unwrap_or_default()
 }
 
 #[tokio::test(flavor = "multi_thread")]

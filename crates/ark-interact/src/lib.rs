@@ -19,6 +19,7 @@
 pub mod activity;
 pub mod approval;
 mod builtins;
+pub mod capabilities;
 pub mod command;
 pub mod fmt;
 pub mod inspect;

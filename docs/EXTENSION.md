@@ -158,6 +158,25 @@ each orchestrated agent whose `tools` patterns allow them (`web.*`, `web.search`
 
 Why no key, and what each source does: [ADR 0010](adr/0010-web-search-without-a-key.md).
 
+### Capabilities and accounts
+
+`ArkBuilder::connections(true)` lets people connect accounts, and the capabilities they give
+join every turn (and agents whose `tools` allow them). The person sees capabilities, never
+scopes or servers: `/connect` lists them (`✓` ready, `○` one sign-in away, `!` unavailable and
+why), `/connect mail` opens the provider's sign-in in their browser, `/disconnect mail`
+revokes and forgets the account. The window has the same list in Settings › Capabilities.
+
+| Part | What |
+|---|---|
+| Catalog (`ark-connect/src/catalog.json`) | Providers (how to sign in) and capabilities (label, one line, tool namespaces, provider, scopes, service). An app can bring its own (`Connections::open`) |
+| Account | One signed-in account; record in the store root's `connections.json`, refresh token in the OS keychain, access token in memory |
+| Tools | Neutral names: `mail.send` (Mutate), `calendar.events` (Observe), `calendar.create` (Mutate). Another provider can back the same capability |
+| Consent | Each capability asks for its own scopes, added to the provider's account |
+| Without a client id | The capability shows as unavailable: "this build of ARK cannot sign in to Google yet" |
+
+Why ARK owns the connection: [ADR 0011](adr/0011-capabilities-and-connections.md). Google's
+side (client, review, privacy policy): [`GOOGLE.md`](GOOGLE.md).
+
 ## Reuse of results
 
 An identical successful call may be served from an earlier result.

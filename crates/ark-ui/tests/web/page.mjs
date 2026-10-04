@@ -274,11 +274,11 @@ async function settings(page) {
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
   const rows = page.locator(".settings-list .nav-row");
   await rows.nth(2).waitFor();
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Capabilities", "Skills", "Tool servers"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Capabilities", "Skills", "Tool servers"]);
   await page.locator(".settings-list .nav-row", { hasText: "Look" }).click();
   assert.equal(await page.locator(".settings-title").innerText(), "Look");
   assert.equal(await page.locator(".settings-section").innerText(), "the look");
@@ -322,6 +322,35 @@ async function plugins(page) {
   assert.equal(await page.locator(".plugin-list").innerText(), "No servers yet.");
 }
 scenarios.plugins = plugins;
+
+// Settings › Capabilities: Web is ready, Mail and Calendar are one sign-in away. Connect opens
+// the provider's page (here it approves at once), the row turns ready with the account, and
+// Disconnect (two clicks) makes it connectable again. `tools` then lists the web too.
+async function capabilities(page) {
+  await page.locator("#open-settings:not([hidden])").waitFor();
+  await page.evaluate(() => window.ark.openSettings("capabilities"));
+  await page.locator(".settings-title", { hasText: "Capabilities" }).waitFor();
+  const row = (id) => page.locator(`.capability-row[data-id="${id}"]`);
+  await row("mail").waitFor();
+  assert.deepEqual(await page.locator(".capability-row .plugin-name").allInnerTexts(), ["Web", "Mail", "Calendar"]);
+  assert.equal(await row("web").getAttribute("class"), "plugin-row capability-row");
+  assert.match(await row("mail").getAttribute("class"), /off/);
+
+  await row("mail").locator(".btn.primary").click();
+  await page.waitForFunction(() => !document.querySelector('.capability-row[data-id="mail"]')?.classList.contains("off"), null, { timeout: 15000 });
+  assert.match(await row("mail").locator(".plugin-detail").innerText(), /ada@example\.com/);
+  assert.match(await row("calendar").getAttribute("class"), /off/, "Calendar needs its own scope");
+
+  const off = row("mail").locator(".plugin-remove");
+  await off.click();
+  assert.equal(await off.innerText(), "Disconnect Google?");
+  await off.click();
+  await page.waitForFunction(() => document.querySelector('.capability-row[data-id="mail"]')?.classList.contains("off"));
+
+  const tools = await page.evaluate(async () => (await window.ark.call("tools")).map((t) => t.name));
+  assert.ok(tools.includes("web.search"), tools.join(","));
+}
+scenarios.capabilities = capabilities;
 
 // Settings › Skills lists the store's skill, and Add opens the Terminal in the project folder
 // with the install command typed, unsent.

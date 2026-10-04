@@ -14,7 +14,7 @@ use ark_core::{
     InvocationStatus, Project, ProjectId, Provenance, RiskTier, Sniffer,
 };
 use ark_store::Store;
-use ark_tools::{Registry, RunCtx};
+use ark_tools::{Registry, RunCtx, ToolSource};
 
 use crate::blobs::StoreBlobs;
 use crate::error::AgentError;
@@ -30,6 +30,8 @@ pub struct Engine {
     /// The MCP plugins of `<root>/plugins.json`, for an engine opened on a root. A scoped engine
     /// has none of its own: its registry is exactly what it was given.
     plugins: Option<Arc<Plugins>>,
+    /// Other sources of tools that change while the engine runs (connected accounts).
+    sources: Vec<Arc<dyn ToolSource>>,
 }
 
 impl Engine {
@@ -40,6 +42,7 @@ impl Engine {
             registry,
             sniffers: Vec::new(),
             plugins: None,
+            sources: Vec::new(),
         }
     }
 
@@ -52,26 +55,43 @@ impl Engine {
             registry,
             sniffers: self.sniffers.clone(),
             plugins: None,
+            sources: Vec::new(),
         }
     }
 
-    /// Everything this engine can run right now: its registry and the plugins connected at
-    /// this moment. A turn or task takes this once, when it starts, and keeps it.
+    /// Everything this engine can run right now: its registry, then the plugins and the other
+    /// sources as they are at this moment. A turn or task takes this once, when it starts, and
+    /// keeps it. A source's adapter whose name is taken is left out.
     pub fn tools(&self) -> Registry {
         let mut registry = self.registry.clone();
-        if let Some(p) = &self.plugins {
-            let own: Vec<String> = registry
-                .adapters()
-                .iter()
-                .map(|a| a.name().to_string())
-                .collect();
-            for a in p.adapters() {
-                if !own.iter().any(|n| n == a.name()) {
+        let mut taken: Vec<String> = registry
+            .adapters()
+            .iter()
+            .map(|a| a.name().to_string())
+            .collect();
+        let plugins = self
+            .plugins
+            .iter()
+            .map(|p| p.clone() as Arc<dyn ToolSource>);
+        for source in plugins.chain(self.sources.iter().cloned()) {
+            for a in source.adapters() {
+                if !taken.iter().any(|n| n == a.name()) {
+                    taken.push(a.name().to_string());
                     registry.register(a);
                 }
             }
         }
         registry
+    }
+
+    /// Add a source of tools that change while the engine runs ([`ToolSource`]).
+    pub fn add_source(&mut self, source: Arc<dyn ToolSource>) {
+        self.sources.push(source);
+    }
+
+    /// Whether a turn's tools can differ from the registry (plugins or other sources).
+    pub fn has_sources(&self) -> bool {
+        self.plugins.is_some() || !self.sources.is_empty()
     }
 
     /// An engine for one turn: this one, with the plugins connected now in its registry.

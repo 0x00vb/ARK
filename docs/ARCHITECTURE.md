@@ -63,7 +63,8 @@ Arrows point from a dependency to its user. There are no cycles.
 | `ark-core` | `Artifact`, `ArtifactKind` (+ `Other(String)`), `ActionDescriptor`, `RiskTier`, `Reuse`, `Invocation`, `Capability`, `CapabilityCatalog`, `EvidenceCard`, `ResearchState`, `WorkspaceContext`, `Focus`, `RuleSet`, `RuleBinding`. No tool or domain name. |
 | `ark-model` | `Provider`, `Completion`, `Usage`, `ProviderError`, `RetryPolicy`, `MockProvider`; Anthropic, OpenAI, Ollama, `CliModel` (Claude Code, Codex), `catalog`; `Capacity`, `Limiter`; `SubscriptionRuntime`, `ManagedSession` |
 | `ark-store` | `Store`: content-addressed blobs (blake3), SQLite metadata (WAL), Tantivy full-text index |
-| `ark-tools` | `Adapter`, `Registry` (ships empty), `RunCtx`, `ActionOutput`, `subprocess`, `McpAdapter`; the generic `diagram` adapter (`Diagram`) and `web` adapter (search and fetch, off unless the app turns it on) |
+| `ark-tools` | `Adapter`, `Registry` (ships empty), `ToolSource`, `RunCtx`, `ActionOutput`, `subprocess`, `McpAdapter`; the generic `diagram` adapter (`Diagram`) and `web` adapter (search and fetch, off unless the app turns it on) |
+| `ark-connect` | capabilities that need an account: `Catalog` (providers and capabilities, as data), `Connections` (accounts, a `ToolSource`), OAuth with PKCE, `Secrets` (OS keychain), the Mail and Calendar services. The only crate that names a service. Details: [`GOOGLE.md`](GOOGLE.md) |
 | `ark-runtime` | `Harness` (the loop), `Engine` (ingest, run actions, approval gate), `Session`, `AgentProfile`, `ModelRouter`, `DistillerSet`, `ApprovalGate`, `CancelToken`, `Steering`, `ContextReport`, `Metrics`; `Agent`, a plain ReAct loop |
 | `ark-sdk` | `Ark`, `Ark::builder()`, `TurnOptions`, `prelude` |
 | `ark-orchestrate` | `Orchestrator`, `AgentSpec`, `TaskSpec`, `TaskRecord`, `Budget`, `Models`, `ModelResolver`, `Graph`, `OrchEvent`. Details: [`ORCHESTRATION.md`](ORCHESTRATION.md) |

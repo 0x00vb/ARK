@@ -23,6 +23,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ark_connect::Connections;
 use ark_core::{Focus, Project, ProjectId, RuleScope};
 use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
@@ -56,7 +57,7 @@ pub mod prelude {
     };
     // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
     // with `ark_model::from_env_arc()`, etc., from the prelude alone.
-    pub use {ark_core, ark_model, ark_runtime, ark_tools};
+    pub use {ark_connect, ark_core, ark_model, ark_runtime, ark_tools};
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -123,6 +124,19 @@ pub struct Ark {
     skills: Vec<String>,
     /// The `web` tool, when the app turned it on ([`ArkBuilder::web`]).
     web: Option<WebAdapter>,
+    /// Capabilities that need an account, when the app turned them on
+    /// ([`ArkBuilder::connections`]).
+    connections: Option<Connections>,
+}
+
+/// Every action a turn would be offered now: the engine's tools (the app's, the plugins and
+/// the connected capabilities) and the web. For lists such as `/tools`; a turn builds its own.
+pub fn offered_tools(engine: &Engine, web: Option<&WebAdapter>) -> Registry {
+    let mut tools = engine.tools();
+    if let Some(w) = web {
+        tools.register(Arc::new(w.clone()));
+    }
+    tools
 }
 
 impl Ark {
@@ -309,9 +323,10 @@ impl Ark {
     /// The engine a turn starts with: the app's tools and the MCP plugins connected now. A
     /// plugin added or removed later changes the next turn, not this one.
     fn turn_engine(&self) -> Arc<Engine> {
-        match self.engine.plugins() {
-            Some(p) if !p.adapters().is_empty() => Arc::new(self.engine.for_turn()),
-            _ => self.engine.clone(),
+        if self.engine.has_sources() {
+            Arc::new(self.engine.for_turn())
+        } else {
+            self.engine.clone()
         }
     }
 
@@ -369,6 +384,16 @@ impl Ark {
             &skills::discover(&skills::dirs(&self.engine, project)),
             &self.skills,
         )
+    }
+
+    /// Every action a turn would be offered now ([`offered_tools`]).
+    pub fn tools(&self) -> Registry {
+        offered_tools(&self.engine, self.web.as_ref())
+    }
+
+    /// The accounts and capabilities this app can connect; `None` unless it turned them on.
+    pub fn connections(&self) -> Option<&Connections> {
+        self.connections.as_ref()
     }
 
     /// The app's `web` tool before it is put on a model; `None` unless the app turned it on.
@@ -501,6 +526,13 @@ pub struct ArkBuilder {
     subscriptions: Option<SubscriptionRuntime>,
     skills: Vec<String>,
     web: Option<WebAdapter>,
+    connections: Option<ConnectionsChoice>,
+}
+
+enum ConnectionsChoice {
+    /// The built-in catalog, tokens in the OS keychain, records in the store root.
+    Default,
+    Given(Connections),
 }
 
 impl Default for ArkBuilder {
@@ -523,6 +555,7 @@ impl Default for ArkBuilder {
             subscriptions: None,
             skills: vec!["*".into()],
             web: None,
+            connections: None,
         }
     }
 }
@@ -601,6 +634,21 @@ impl ArkBuilder {
         self
     }
 
+    /// Offer capabilities that need an account (Mail, Calendar; [`ark_connect`]). Their records
+    /// go in the store root's `connections.json`, their tokens in the OS keychain. A connected
+    /// capability's tools join every turn, and agents whose `tools` allow them. Off by default.
+    pub fn connections(mut self, yes: bool) -> Self {
+        self.connections = yes.then_some(ConnectionsChoice::Default);
+        self
+    }
+
+    /// [`connections`](ArkBuilder::connections) with a set the app opened: its own catalog or
+    /// secret store.
+    pub fn connections_with(mut self, c: Connections) -> Self {
+        self.connections = Some(ConnectionsChoice::Given(c));
+        self
+    }
+
     /// [`web`](ArkBuilder::web) with an adapter set up by the app: its own search backends,
     /// or private addresses allowed for an intranet.
     pub fn web_with(mut self, web: WebAdapter) -> Self {
@@ -623,10 +671,25 @@ impl ArkBuilder {
             (None, Some(p)) => ModelRouter::single(p),
             (None, None) => ModelRouter::from_env()?,
         };
-        let engine = match self.engine {
+        let mut engine = match self.engine {
             Some(e) => e,
             None => Engine::open_with(&self.store_root, self.registry)?,
         };
+        let connections = self.connections.map(|c| match c {
+            ConnectionsChoice::Given(c) => c,
+            ConnectionsChoice::Default => Connections::open(
+                engine.store.root(),
+                ark_connect::Catalog::builtin(),
+                Arc::new(ark_connect::Keychain),
+            ),
+        });
+        let mut profile = self.profile;
+        if let Some(c) = &connections {
+            engine.add_source(Arc::new(c.clone()));
+            profile
+                .distillers
+                .push(Arc::new(ark_connect::services::distill));
+        }
         let engine = Arc::new(engine);
         let subscriptions = self.subscriptions.unwrap_or_else(|| {
             SubscriptionRuntime::builder()
@@ -637,7 +700,7 @@ impl ArkBuilder {
             engine,
             subscriptions,
             router,
-            profile: self.profile,
+            profile,
             max_steps: self.max_steps,
             budget: self.budget,
             planner: self.planner,
@@ -645,6 +708,7 @@ impl ArkBuilder {
             allow_mutate: self.allow_mutate,
             skills: self.skills,
             web: self.web,
+            connections,
         })
     }
 }

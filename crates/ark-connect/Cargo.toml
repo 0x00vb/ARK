@@ -1,0 +1,27 @@
+[package]
+name = "ark-connect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK capabilities that need an account: providers, sign-in, accounts, and the service tools they give."
+
+[dependencies]
+ark-core.workspace = true
+ark-tools.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "time", "sync"] }
+reqwest.workspace = true
+uuid.workspace = true
+time.workspace = true
+tracing.workspace = true
+sha2 = "0.10"
+base64 = "0.22"
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true

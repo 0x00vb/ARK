@@ -217,6 +217,8 @@ pub struct Host {
     engine: Arc<Engine>,
     /// The names the conversation's skills are chosen by (`Ark::skill_names`).
     chat_skills: Vec<String>,
+    /// What lists and connects capabilities while a turn holds the interaction.
+    caps: ark_interact::capabilities::Parts,
     labels: Labels,
     feed: Arc<Feed>,
     running: Mutex<Option<Running>>,
@@ -265,6 +267,7 @@ impl Host {
             terminals: Default::default(),
             engine: ix.ark().shared_engine(),
             chat_skills: ix.ark().skill_names().to_vec(),
+            caps: ark_interact::capabilities::Parts::of(ix.ark()),
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
             ix: tokio::sync::Mutex::new(ix),
@@ -742,6 +745,22 @@ impl Host {
                     .map(|p| json!({ "name": p.name, "summary": p.summary }))
                     .collect(),
             )),
+            // What ARK can use: one list with the terminal's `/connect`. Connecting answers the
+            // sign-in page for the page to open; it finishes in the background.
+            "capabilities" => Ok(serde_json::to_value(
+                ark_interact::capabilities::list_parts(&self.caps),
+            )?),
+            "capability_connect" => Ok(json!({
+                "url": ark_interact::capabilities::connect(
+                    self.caps.connections.as_ref(),
+                    &s("id"),
+                )
+                .await?
+            })),
+            "capability_disconnect" => Ok(serde_json::to_value(
+                ark_interact::capabilities::disconnect(self.caps.connections.as_ref(), &s("id"))
+                    .await?,
+            )?),
             // Skills of the project folder and the store; `chat` says whether the conversation
             // may read each (agents choose their own in their spec).
             "skills" => {
@@ -785,9 +804,10 @@ impl Host {
             "plugin_restart" => Ok(serde_json::to_value(
                 ark_interact::plugins::restart(self.engine.clone(), s("name")).await?,
             )?),
-            // The app's actions, which an agent's `tools` patterns choose from.
+            // The actions a turn is offered, which an agent's `tools` patterns choose from.
             "tools" => {
-                let mut actions = self.engine.tools().actions();
+                let mut actions =
+                    ark_sdk::offered_tools(&self.engine, self.caps.web.as_ref()).actions();
                 actions.sort_by(|a, b| a.name.cmp(&b.name));
                 Ok(Value::Array(
                     actions

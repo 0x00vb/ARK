@@ -17,6 +17,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0008](0008-planner-off-by-default.md) | The planner is off by default | Accepted |
 | [0009](0009-skills-load-on-demand.md) | Skills: names in context, instructions on demand | Accepted |
 | [0010](0010-web-search-without-a-key.md) | Web search: the model's own first, keyless after, no key | Accepted |
+| [0011](0011-capabilities-and-connections.md) | Capabilities people see, connections ARK owns | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

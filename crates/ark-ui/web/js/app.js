@@ -12,6 +12,7 @@ import { SETTINGS, settingsView } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
 import { registry, installApi, dispatchExt, presenterFor } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
+import { registerCapabilities } from "./capabilities.js";
 import { registerPlugins } from "./plugins.js";
 import { registerSkills } from "./skills.js";
 
@@ -601,6 +602,7 @@ async function bootOnce(again) {
     sidebar.renderExtensions();
     topbar.render();
     // Settings › Tool servers and Skills, ARK's own sections.
+    registerCapabilities(window.ark);
     registerPlugins(window.ark);
     registerSkills(window.ark);
   }

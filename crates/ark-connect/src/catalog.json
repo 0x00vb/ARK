@@ -1,0 +1,32 @@
+{
+  "providers": [
+    {
+      "id": "google",
+      "label": "Google",
+      "oauth": {
+        "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "revoke_url": "https://oauth2.googleapis.com/revoke",
+        "client_id": "",
+        "client_id_env": "ARK_GOOGLE_CLIENT_ID",
+        "client_secret_env": "ARK_GOOGLE_CLIENT_SECRET",
+        "identity_scopes": ["openid", "email"],
+        "params": { "access_type": "offline", "prompt": "consent", "include_granted_scopes": "true" }
+      }
+    }
+  ],
+  "capabilities": [
+    { "id": "web", "label": "Web", "says": "search the web and read pages", "tools": ["web"] },
+    { "id": "files", "label": "Files", "says": "read and write files in the project folder", "tools": ["files"] },
+    {
+      "id": "mail", "label": "Mail", "says": "send email from your account", "tools": ["mail"],
+      "provider": "google", "service": "google.mail",
+      "scopes": ["https://www.googleapis.com/auth/gmail.send"]
+    },
+    {
+      "id": "calendar", "label": "Calendar", "says": "see your events and add new ones", "tools": ["calendar"],
+      "provider": "google", "service": "google.calendar",
+      "scopes": ["https://www.googleapis.com/auth/calendar.events"]
+    }
+  ]
+}

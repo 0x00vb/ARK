@@ -11,6 +11,7 @@ serde.workspace = true
 ark-core.workspace = true
 ark-model.workspace = true
 ark-tools.workspace = true
+ark-connect.workspace = true
 ark-runtime.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true

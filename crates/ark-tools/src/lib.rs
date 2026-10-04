@@ -178,6 +178,13 @@ impl AdapterHealth {
     }
 }
 
+/// Adapters that come and go while ARK runs: MCP plugins, connected accounts. The engine asks
+/// every source when a turn starts and keeps the answer for that turn.
+pub trait ToolSource: Send + Sync {
+    /// The adapters available right now.
+    fn adapters(&self) -> Vec<Arc<dyn Adapter>>;
+}
+
 /// The set of adapters available in a session. This is what the agent enumerates as its
 /// tool list — one registry, one discovery mechanism for human and agent. ARK ships it
 /// **empty**: the consumer registers the adapters their domain needs.

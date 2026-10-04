@@ -542,6 +542,8 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .plugin-cmd { font: 11.5px var(--mono); color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-actions { display: flex; gap: 2px; flex: none; }
 .plugin-remove.sure { color: var(--err); }
+.plugin-row.off .plugin-dot { background: var(--text-3); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-3) 14%, transparent); }
+.capability-row .plugin-actions { align-self: center; }
 .plugin-add { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
 .plugin-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
 .plugin-label .ico { width: 14px; height: 14px; color: var(--text-3); }

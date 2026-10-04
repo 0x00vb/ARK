@@ -372,6 +372,8 @@ fn build_ark(
         .tool(Arc::new(Craft))
         // A writer checks facts: places, dates, how things worked.
         .web(true)
+        // Send a chapter to an editor, put a deadline on the calendar.
+        .connections(true)
         .profile(writer_profile());
     if let Some(p) = provider {
         b = b.provider(p);

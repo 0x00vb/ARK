@@ -832,7 +832,7 @@ impl Host {
             // The actions a turn is offered, which an agent's `tools` patterns choose from.
             "tools" => {
                 let mut actions =
-                    ark_sdk::offered_tools(&self.engine, self.caps.web.as_ref()).actions();
+                    ark_sdk::offered_tools(&self.engine, &self.caps.per_agent).actions();
                 actions.sort_by(|a, b| a.name.cmp(&b.name));
                 Ok(Value::Array(
                     actions

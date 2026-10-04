@@ -9,7 +9,6 @@
 use std::time::Duration;
 
 use ark_sdk::prelude::ark_connect::{Account, CapabilityStatus, Catalog, Connections, State};
-use ark_sdk::prelude::ark_tools::web::WebAdapter;
 use ark_sdk::prelude::{ApprovalDecision, ApprovalRequest, Approver, Ark, Engine};
 use serde::Serialize;
 
@@ -32,7 +31,7 @@ pub struct Listed {
 #[derive(Clone)]
 pub struct Parts {
     pub engine: std::sync::Arc<Engine>,
-    pub web: Option<WebAdapter>,
+    pub per_agent: Vec<std::sync::Arc<dyn ark_sdk::prelude::ark_runtime::per_agent::PerAgent>>,
     pub connections: Option<Connections>,
 }
 
@@ -40,7 +39,7 @@ impl Parts {
     pub fn of(ark: &Ark) -> Parts {
         Parts {
             engine: ark.shared_engine(),
-            web: ark.web_adapter().cloned(),
+            per_agent: ark.per_agent().to_vec(),
             connections: ark.connections().cloned(),
         }
     }
@@ -53,7 +52,7 @@ pub fn list(ark: &Ark) -> Vec<Listed> {
 
 /// [`list`] from [`Parts`].
 pub fn list_parts(p: &Parts) -> Vec<Listed> {
-    let tools: Vec<String> = ark_sdk::offered_tools(&p.engine, p.web.as_ref())
+    let tools: Vec<String> = ark_sdk::offered_tools(&p.engine, &p.per_agent)
         .adapters()
         .iter()
         .map(|a| a.name().to_string())

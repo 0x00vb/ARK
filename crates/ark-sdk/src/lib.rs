@@ -27,6 +27,7 @@ use ark_connect::Connections;
 use ark_core::{Focus, Project, ProjectId, RuleScope};
 use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
+use ark_runtime::per_agent::{Owner, PerAgent};
 use ark_runtime::router::CurrentModel;
 use ark_runtime::skills;
 use ark_runtime::{
@@ -59,7 +60,7 @@ pub mod prelude {
     };
     // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
     // with `ark_model::from_env_arc()`, etc., from the prelude alone.
-    pub use {ark_connect, ark_core, ark_model, ark_runtime, ark_tools};
+    pub use {ark_browser, ark_connect, ark_core, ark_model, ark_runtime, ark_tools};
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -126,19 +127,21 @@ pub struct Ark {
     allow_mutate: bool,
     /// The skills the conversation may read (`*`, names; empty: none).
     skills: Vec<String>,
-    /// The `web` tool, when the app turned it on ([`ArkBuilder::web`]).
-    web: Option<WebAdapter>,
+    /// Tools each agent gets its own of: the web, the browser ([`ArkBuilder::web`],
+    /// [`ArkBuilder::browser`]).
+    per_agent: Vec<Arc<dyn PerAgent>>,
     /// Capabilities that need an account, when the app turned them on
     /// ([`ArkBuilder::connections`]).
     connections: Option<Connections>,
 }
 
 /// Every action a turn would be offered now: the engine's tools (the app's, the plugins and
-/// the connected capabilities) and the web. For lists such as `/tools`; a turn builds its own.
-pub fn offered_tools(engine: &Engine, web: Option<&WebAdapter>) -> Registry {
+/// the connected capabilities) and the per-agent ones (the web, the browser). For lists such as
+/// `/tools`; a turn builds its own.
+pub fn offered_tools(engine: &Engine, per_agent: &[Arc<dyn PerAgent>]) -> Registry {
     let mut tools = engine.tools();
-    if let Some(w) = web {
-        tools.register(Arc::new(w.clone()));
+    for p in per_agent {
+        tools.register(p.listing());
     }
     tools
 }
@@ -260,7 +263,8 @@ impl Ark {
         let router = self.session_router(session).await;
         let (engine, rules) = self.with_rules(&project, input)?;
         let (engine, catalog) = self.with_skills(engine, &project);
-        let tools = self.turn_tools(&opts.tools, &router);
+        let owner = format!("session:{}", session.id());
+        let tools = self.turn_tools(&opts.tools, &router, &owner);
         let (engine, mut profile) = self.with_tools(engine, &tools);
         if catalog.is_some() {
             // The catalog says to call it, so it is loaded, not left to discovery.
@@ -401,7 +405,7 @@ impl Ark {
 
     /// Every action a turn would be offered now ([`offered_tools`]).
     pub fn tools(&self) -> Registry {
-        offered_tools(&self.engine, self.web.as_ref())
+        offered_tools(&self.engine, &self.per_agent)
     }
 
     /// The accounts and capabilities this app can connect; `None` unless it turned them on.
@@ -409,26 +413,31 @@ impl Ark {
         self.connections.as_ref()
     }
 
-    /// The app's `web` tool before it is put on a model; `None` unless the app turned it on.
-    pub fn web_adapter(&self) -> Option<&WebAdapter> {
-        self.web.as_ref()
+    /// The sources of per-agent tools the app turned on (the web, the browser).
+    pub fn per_agent(&self) -> &[Arc<dyn PerAgent>] {
+        &self.per_agent
     }
 
-    /// The `web` tool on `model`: its own search first ([`ark_runtime::web`]). `None` unless
-    /// the app turned the web on. An orchestrator gives each agent one on the agent's model.
-    pub fn web_tools(&self, model: &Arc<dyn Provider>) -> Option<TurnTools> {
-        let base = self.web.as_ref()?;
-        Some(TurnTools {
-            adapter: Arc::new(ark_runtime::web::on_model(base, model)),
-            distiller: Some(ark_runtime::web::distiller()),
-        })
+    /// The per-agent tools of one owner: its web search on its model, its own browser. An
+    /// orchestrator asks for each agent's at each task.
+    pub fn agent_tools(&self, owner: &Owner) -> Vec<TurnTools> {
+        self.per_agent
+            .iter()
+            .map(|p| TurnTools {
+                adapter: p.for_owner(owner),
+                distiller: p.distiller(),
+            })
+            .collect()
     }
 
-    /// A turn's tools: the front-end's, and the web on the turn's planning model (a search
-    /// needs no reasoning).
-    fn turn_tools(&self, tools: &[TurnTools], router: &ModelRouter) -> Vec<TurnTools> {
+    /// A turn's tools: the front-end's, and the owner's per-agent ones on the turn's planning
+    /// model (a search needs no reasoning).
+    fn turn_tools(&self, tools: &[TurnTools], router: &ModelRouter, owner: &str) -> Vec<TurnTools> {
         let mut all = tools.to_vec();
-        all.extend(self.web_tools(router.provider(Role::Plan)));
+        all.extend(self.agent_tools(&Owner {
+            name: owner,
+            model: router.provider(Role::Plan),
+        }));
         all
     }
 
@@ -485,7 +494,8 @@ impl Ark {
     ) -> Result<ContextReport, ArkError> {
         let (engine, rules) = self.with_rules(session.project(), "")?;
         let (engine, catalog) = self.with_skills(engine, session.project());
-        let tools = self.turn_tools(tools, &self.router);
+        let owner = format!("session:{}", session.id());
+        let tools = self.turn_tools(tools, &self.router, &owner);
         let (engine, mut profile) = self.with_tools(engine, &tools);
         if catalog.is_some() {
             let p = profile.to_mut();
@@ -514,7 +524,7 @@ impl Ark {
         task: &str,
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
-        let tools = self.turn_tools(&[], &self.router);
+        let tools = self.turn_tools(&[], &self.router, "ark");
         let (engine, profile) = self.with_tools(self.turn_engine(), &tools);
         Ok(self
             .harness()
@@ -539,7 +549,14 @@ pub struct ArkBuilder {
     subscriptions: Option<SubscriptionRuntime>,
     skills: Vec<String>,
     web: Option<WebAdapter>,
+    browser: Option<BrowserChoice>,
     connections: Option<ConnectionsChoice>,
+}
+
+enum BrowserChoice {
+    /// The installed Chrome, Edge or Brave, profiles in the store root's `browser` folder.
+    Default,
+    Given(Arc<ark_browser::BrowserService>),
 }
 
 enum ConnectionsChoice {
@@ -568,6 +585,7 @@ impl Default for ArkBuilder {
             subscriptions: None,
             skills: vec!["*".into()],
             web: None,
+            browser: None,
             connections: None,
         }
     }
@@ -662,6 +680,20 @@ impl ArkBuilder {
         self
     }
 
+    /// Offer the Browser (`browser.open`, `read`, `click`, `type`, `back`; [`ark_browser`]): the
+    /// installed Chrome, Edge or Brave, a context of its own per agent, and a signed-in browser
+    /// one agent uses at a time. Off by default.
+    pub fn browser(mut self, yes: bool) -> Self {
+        self.browser = yes.then_some(BrowserChoice::Default);
+        self
+    }
+
+    /// [`browser`](ArkBuilder::browser) with a service the app set up (tests, its own profiles).
+    pub fn browser_with(mut self, service: Arc<ark_browser::BrowserService>) -> Self {
+        self.browser = Some(BrowserChoice::Given(service));
+        self
+    }
+
     /// [`web`](ArkBuilder::web) with an adapter set up by the app: its own search backends,
     /// or private addresses allowed for an intranet.
     pub fn web_with(mut self, web: WebAdapter) -> Self {
@@ -707,6 +739,17 @@ impl ArkBuilder {
                 profile.acquisition = Some(Arc::new(c.clone()));
             }
         }
+        let mut per_agent: Vec<Arc<dyn PerAgent>> = Vec::new();
+        if let Some(w) = self.web {
+            per_agent.push(Arc::new(ark_runtime::web::Web(w)));
+        }
+        match self.browser {
+            Some(BrowserChoice::Default) => per_agent.push(Arc::new(ark_browser::Browsers(
+                ark_browser::BrowserService::new(engine.store.root().join("browser")),
+            ))),
+            Some(BrowserChoice::Given(svc)) => per_agent.push(Arc::new(ark_browser::Browsers(svc))),
+            None => {}
+        }
         let engine = Arc::new(engine);
         let subscriptions = self.subscriptions.unwrap_or_else(|| {
             SubscriptionRuntime::builder()
@@ -725,7 +768,7 @@ impl ArkBuilder {
             critic: self.critic,
             allow_mutate: self.allow_mutate,
             skills: self.skills,
-            web: self.web,
+            per_agent,
             connections,
         })
     }

@@ -183,6 +183,26 @@ sign-in page cannot open in a browser on the machine ARK runs on. Why:
 
 Why ARK owns the connection: [ADR 0011](adr/0011-capabilities-and-connections.md).
 
+### The browser
+
+`ArkBuilder::browser(true)` gives agents the browser the person has (Chrome, Edge or Brave),
+driven over the DevTools protocol ([ADR 0015](adr/0015-a-native-browser-shared-safely.md)).
+
+| Action | What |
+|---|---|
+| `browser.open {url, signed_in}` | Open a page: its text and a numbered list of elements (links, buttons, fields). `signed_in: true` uses ARK's own signed-in profile |
+| `browser.read`, `browser.back` | The current page again; the previous page |
+| `browser.click {ref}`, `browser.type {ref, text, submit}` | Act on an element by its number. Mutate: they go through the approval gate |
+
+Each agent (and the conversation) has its own fresh browser context, so agents browse at once
+without sharing cookies. The signed-in browser is one at a time: an agent that wants it waits
+until the one using it has been idle for a minute. Addresses on this machine and private
+networks are refused. Profiles live in the store root's `browser` folder; `ARK_BROWSER_BIN`
+picks another browser.
+
+Tools each agent gets its own of (the web on its model, the browser) are `PerAgent` sources
+(`ark_runtime::per_agent`); an app adds one the same way.
+
 ### Approvals that last
 
 Every approval offers Allow once, Allow for this session, Always in this project, and Deny

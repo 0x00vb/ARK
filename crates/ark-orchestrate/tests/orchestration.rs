@@ -1280,3 +1280,62 @@ async fn moving_off_a_subscription_releases_the_agents_vendor_session() {
     assert_eq!(local.texts().len(), 1);
     assert!(o.graph().agent("w").unwrap().session.is_none());
 }
+
+#[tokio::test]
+async fn an_agent_gets_its_own_browser_when_its_tools_allow_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Arc::new(ark_model::MockProvider::new("unused", vec![])))
+        .browser_with(ark_sdk::prelude::ark_browser::BrowserService::new(
+            dir.path().join("browser"),
+        ))
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("p", "").unwrap();
+    let browsing = Arc::new(Searcher {
+        script: Script::new("browsing", vec![answer("looked")]),
+        tools: Mutex::new(Vec::new()),
+    });
+    let writing = Arc::new(Searcher {
+        script: Script::new("writing", vec![answer("wrote")]),
+        tools: Mutex::new(Vec::new()),
+    });
+    let (b, w) = (browsing.clone(), writing.clone());
+    let o = Orchestrator::builder(&ark, &project)
+        .configure_models(move |m| {
+            m.provider("browsing", b as Arc<dyn Provider>)
+                .provider("writing", w as Arc<dyn Provider>)
+        })
+        .build()
+        .unwrap();
+    o.spawn(
+        AgentSpec::new("researcher")
+            .model("browsing")
+            .tools(["browser.*"]),
+    )
+    .await
+    .unwrap();
+    o.spawn(AgentSpec::new("writer").model("writing").tools(["notes.*"]))
+        .await
+        .unwrap();
+    o.run("researcher", TaskSpec::new("look")).await.unwrap();
+    o.run("writer", TaskSpec::new("write")).await.unwrap();
+    let offered = browsing.tools.lock().unwrap()[0].clone();
+    for a in [
+        "browser.open",
+        "browser.read",
+        "browser.click",
+        "browser.type",
+        "browser.back",
+    ] {
+        assert!(offered.contains(&a.to_string()), "{a} in {offered:?}");
+    }
+    let offered = writing.tools.lock().unwrap()[0].clone();
+    assert!(
+        !offered.iter().any(|t| t.starts_with("browser.")),
+        "{offered:?}"
+    );
+}

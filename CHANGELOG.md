@@ -53,6 +53,12 @@ project.
   `tools_of`, `ark_interact::capabilities::Connector`, `App::sign_in`.
 - `ark_interact::approval_choices` (and `Choice`): the answers both front-ends offer for an
   approval; the window's `approval` event carries them as `choices`.
+- The Browser (ADR 0015): the new crate `ark-browser` drives the installed Chrome, Edge or Brave
+  over the DevTools protocol; `browser.open`, `read`, `back`, `click`, `type`; a fresh context
+  per agent, and a signed-in browser one agent uses at a time. `ArkBuilder::browser(true)` or
+  `browser_with(service)` ([`EXTENSION.md`](docs/EXTENSION.md#the-browser)).
+- `ark_runtime::per_agent::{PerAgent, Owner}`: tools each agent gets its own of (the web on its
+  model, the browser). `Ark::per_agent`, `Ark::agent_tools`; `ark_runtime::web::Web`.
 - "Always in this project": `ApprovalDecision::AllowAlways`, kept per project in the store
   (`ApprovalGate::keep_in`, `ark_runtime::{lasting_grants, remove_lasting_grant,
   LastingGrant}`); `/grants` in both front-ends, Settings › Permissions in the window
@@ -73,6 +79,9 @@ project.
 - `AcquisitionResult` has a new field, `tools`; build it with `info`, `changed` or
   `with_tools` instead of a struct literal.
 - `ApprovalDecision` has a new variant, `AllowAlways`; a `match` over it needs an arm.
+- `ark_sdk::offered_tools(engine, per_agent)` takes the per-agent sources
+  (`Ark::per_agent()`) instead of the web adapter. `Ark::web_adapter` and `Ark::web_tools` are
+  gone: use `Ark::per_agent` and `Ark::agent_tools(&Owner { name, model })`.
 - `CapacitySnapshot` has a new field, `usage`; a struct literal of it needs `usage: None`.
 
 ### Fixed

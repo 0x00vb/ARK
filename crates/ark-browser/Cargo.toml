@@ -1,0 +1,24 @@
+[package]
+name = "ark-browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK's Browser capability: drives an installed Chromium-family browser (Chrome, Edge, Brave) over the DevTools protocol."
+
+[dependencies]
+ark-core.workspace = true
+ark-tools.workspace = true
+ark-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["process", "net", "time", "sync", "fs", "io-util", "macros", "rt"] }
+tokio-tungstenite = "0.30"
+reqwest.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true

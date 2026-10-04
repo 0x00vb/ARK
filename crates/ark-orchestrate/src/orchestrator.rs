@@ -148,7 +148,7 @@ impl<'a> OrchestratorBuilder<'a> {
             project,
             models,
             approvals: self.approvals,
-            web: self.ark.web_adapter().cloned(),
+            per_agent: self.ark.per_agent().to_vec(),
             max_parallel: self.max_parallel,
             global: Arc::new(Semaphore::new(self.max_parallel)),
             accounts: Mutex::new(HashMap::new()),
@@ -396,8 +396,9 @@ pub(crate) struct Inner {
     pub project: Project,
     pub models: Arc<dyn ModelResolver>,
     approvals: Option<Arc<ApprovalGate>>,
-    /// The app's `web` tool, when it turned the web on; each agent searches on its own model.
-    web: Option<ark_tools::web::WebAdapter>,
+    /// Tools each agent gets its own of (the web on its model, its own browser), built at each
+    /// task from the agent's current model.
+    per_agent: Vec<Arc<dyn ark_runtime::per_agent::PerAgent>>,
     pub max_parallel: usize,
     global: Arc<Semaphore>,
     accounts: Mutex<HashMap<String, Arc<Semaphore>>>,
@@ -1488,20 +1489,34 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         if spec.diagrams {
             registry.register(Arc::new(ark_tools::diagram::Diagrams));
         }
-        let web: Vec<&str> = match &self.web {
-            Some(_) => ark_runtime::web::ACTIONS
-                .into_iter()
-                .filter(|a| spec.tools.iter().any(|p| action_matches(p, a)))
-                .collect(),
-            None => Vec::new(),
-        };
-        if let (Some(base), false) = (&self.web, web.is_empty()) {
+        // Its own web search and browser, as far as its `tools` allow.
+        let owner_name = format!("{}/{}", self.project.id, owner);
+        let mut per_agent_actions: Vec<String> = Vec::new();
+        let mut per_agent_distillers = Vec::new();
+        for p in &self.per_agent {
             let model = models.router.provider(ark_runtime::Role::Plan);
-            let adapter = Arc::new(ark_runtime::web::on_model(base, model));
-            let allowed = Registry::new().with(adapter).filtered(|a| web.contains(&a));
-            for a in allowed.adapters() {
+            let adapter = p.for_owner(&ark_runtime::per_agent::Owner {
+                name: &owner_name,
+                model,
+            });
+            let allowed: Vec<String> = adapter
+                .actions()
+                .into_iter()
+                .map(|d| d.name)
+                .filter(|a| spec.tools.iter().any(|pat| action_matches(pat, a)))
+                .collect();
+            if allowed.is_empty() {
+                continue;
+            }
+            for a in Registry::new()
+                .with(adapter)
+                .filtered(|a| allowed.iter().any(|x| x == a))
+                .adapters()
+            {
                 registry.register(a.clone());
             }
+            per_agent_actions.extend(allowed);
+            per_agent_distillers.extend(p.distiller());
         }
         let sets = self.rules_for(&task);
         let objective = format!("{}\n{}", task.objective, task.context);
@@ -1529,12 +1544,10 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             profile.distillers.push(skills::distiller());
             profile.core_actions.push(skills::READ.into());
         }
-        if !web.is_empty() {
-            profile.distillers.push(ark_runtime::web::distiller());
-            profile
-                .core_actions
-                .extend(web.iter().map(|a| a.to_string()));
+        for d in per_agent_distillers {
+            profile.distillers.push(d);
         }
+        profile.core_actions.extend(per_agent_actions);
         let scope = ProjectId(agent.scope.clone());
 
         let dep_refs: Vec<&TaskRecord> = deps.iter().collect();

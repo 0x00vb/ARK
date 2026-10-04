@@ -49,6 +49,21 @@ pub fn distiller() -> Distiller {
     Arc::new(ark_tools::web::distill)
 }
 
+/// The web as a per-agent tool: each owner searches on its own model.
+pub struct Web(pub WebAdapter);
+
+impl crate::per_agent::PerAgent for Web {
+    fn listing(&self) -> Arc<dyn ark_tools::Adapter> {
+        Arc::new(self.0.clone())
+    }
+    fn for_owner(&self, owner: &crate::per_agent::Owner) -> Arc<dyn ark_tools::Adapter> {
+        Arc::new(on_model(&self.0, owner.model))
+    }
+    fn distiller(&self) -> Option<Distiller> {
+        Some(distiller())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

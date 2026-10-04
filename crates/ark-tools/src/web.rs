@@ -354,6 +354,26 @@ fn plain_error(e: &reqwest::Error) -> String {
     msg
 }
 
+/// Refuse `url` when its host is this machine or a private network, by name, literal address
+/// or what the name resolves to. For tools that open addresses with another client (a browser).
+pub async fn check_public(url: &reqwest::Url) -> std::result::Result<(), String> {
+    if let Some(why) = local_host(url) {
+        return Err(why);
+    }
+    let host = url.host_str().unwrap_or("");
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| format!("{host}: {e}"))?
+        .collect();
+    if addrs.iter().any(|a| private_ip(a.ip())) {
+        return Err(format!(
+            "refused: {host} is this machine or a private network"
+        ));
+    }
+    Ok(())
+}
+
 /// Why `url` names this machine or a private network, when it does by its host alone.
 fn local_host(url: &reqwest::Url) -> Option<String> {
     let host = url.host_str()?;

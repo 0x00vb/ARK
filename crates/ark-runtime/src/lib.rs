@@ -31,6 +31,7 @@ pub mod knowledge;
 pub mod ledger;
 pub mod metrics;
 pub mod notebook;
+pub mod per_agent;
 pub mod plugins;
 mod process;
 pub mod profile;

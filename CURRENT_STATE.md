@@ -13,6 +13,7 @@ Last updated: 2026-10-04 (v0.9.0, browser on `main`)
 | Latest tag | v0.9.0 (2026-10-04), on `origin` and `github` |
 | Step 2 | Done in v0.9.0: Claude Code and Codex kept running per session, streamed answers, cancel, usage limits with their reset time (ADR 0012); subscription usage for apps (`ark_model::subscription_usage`, window method `subscription_usage`); agents follow the session's model (ADR 0014). A longer live task passed on each CLI (`bench/RESULTS.md`). Deferred: start the CLI before the first call, deeper provider telemetry |
 | In progress | Next step 3, ARK Desktop public. Capabilities beside it (ROADMAP › Capabilities): C2 and C3 are in v0.9.0, grants per project included; C4 (Browser, ADR 0015) is on `main` since v0.9.0; ARK Desktop gets it with `.browser(true)` on the next tag |
+| Step 5 | On branch `next/remote`: a runtime other machines connect to (ADR 0016), saved access tokens, `ark_ui::remote`, a window on a remote runtime ([`docs/REMOTE.md`](docs/REMOTE.md)). Dogfooded with ARK Desktop's server build. Scheduled tasks and several live conversations: another session, `next/background` |
 
 ## Waiting on this repo
 

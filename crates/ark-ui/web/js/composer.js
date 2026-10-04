@@ -220,7 +220,8 @@ export class Composer {
       const menu = this.api.popover(this.model, [el], { above: true });
       menu.classList.add("models-pop");
       try {
-        picker.render(el, { close: () => menu.close() });
+        // Closing returns to the message, so Enter sends what waited for a model.
+        picker.render(el, { close: () => { menu.close(); this.focus(); } });
       } catch (e) {
         console.error(e);
         el.append(h("div.menu-sub.pad", String(e)));

@@ -756,7 +756,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   padding: 7px 10px; border-radius: 8px;
   font-size: 13.5px; cursor: pointer;
 }
-.menu-item:hover { background: var(--hover); }
+.menu-item:hover, .menu-item:focus-visible { background: var(--hover); outline: none; }
 .menu-item[aria-current="true"]::after { content: "✓"; color: var(--text-3); font-size: 12px; }
 .menu-sub { font-size: 12px; color: var(--text-3); }
 .menu-sub.pad { padding: 0 10px 8px; font-family: var(--mono); font-size: 11.5px; }

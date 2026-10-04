@@ -23,6 +23,8 @@
 //   ark.status({ id, render(el, api) })
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
+//   ark.isLocal()      true when the runtime runs on this computer; false for a runtime
+//                      elsewhere. Also `<html data-runtime="local|remote">`, for styles
 //   ark.on(name, fn)   an app handler's events, and ARK's own as `ark:<kind>` (in a browser
 //                      also `ark:reconnecting`, `ark:disconnected` with `retry()`, `ark:connected`)
 //                      (`ark:turn_finished`, `ark:event`, `ark:summary`, ...)

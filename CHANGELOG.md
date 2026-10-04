@@ -30,6 +30,8 @@ What changed for people building on ARK, per release. Not a commit log.
   revocable without a restart) and accepts any `Host`, for a TLS proxy in front.
   `ark_ui::remote::Client` calls a served runtime; `remote::run_window` opens a native window
   on one. `GET /health` answers without a token ([`REMOTE.md`](docs/REMOTE.md)).
+- Window: `ark.isLocal()` and `<html data-runtime="local|remote">`: whether the runtime runs on
+  the computer showing the page, so apps offer machine-bound actions only there.
 
 ### Changed
 - The HTTP server takes the token from `Authorization: Bearer` as well, and drops a client

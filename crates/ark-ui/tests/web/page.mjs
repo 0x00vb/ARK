@@ -227,8 +227,11 @@ async function agents(page) {
 scenarios.agents = agents;
 
 // The + menu opens the built-in panels. Files edits and saves a file in the project folder;
-// the terminal runs a shell there.
+// the terminal runs a shell there. A page on this machine's loopback address says its runtime
+// is local.
 async function workbench(page) {
+  assert.equal(await page.evaluate(() => window.ark.isLocal()), true);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.runtime), "local");
   await page.evaluate(() => window.ark.call("file_write", { path: "draft.md", text: "one" }));
   await page.locator("#open-menu").click();
   const items = page.locator(".popover .open-item");

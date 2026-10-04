@@ -18,6 +18,7 @@ import { registerPlugins } from "./plugins.js";
 import { registerSkills } from "./skills.js";
 
 const transport = connect();
+document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
 const appEl = $("#app");
 const state = { summary: null, ui: {}, sessionId: null, running: false, approvals: new Map(), extChanged: false, view: null };
 // Main-column views (`ark.view`), built on first show and kept while hidden.
@@ -34,6 +35,10 @@ const api = {
   // The system's folder picker in the window: a path, or null when dismissed. Undefined
   // where there is none (a browser), so the caller asks for a typed path instead.
   pickFolder: ({ title } = {}) => transport.pickFolder(title),
+  // True when the runtime runs on the computer showing this page (the window's own runtime,
+  // or a browser on this machine). False for a runtime elsewhere: its files, programs and
+  // sign-ins are on that machine, so actions that need this one should not be offered.
+  isLocal: () => transport.local,
   summary: () => state.summary,
   project: () => state.summary?.project,
   send: (text) => submit(text),

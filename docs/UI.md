@@ -150,7 +150,11 @@ method), `ark.ext` (an app handler), `ark.runAction(action, input)`, `ark.comman
 `ark.openView(id, params)`, `ark.showConversation()`, `ark.currentView()`, `ark.setPanelTitle`,
 `ark.openInvocation(id)`, `ark.project()`, `ark.setFocus`, `ark.toast`, and
 `ark.pickFolder({ title })`: the window's own folder picker (a path, `null` if dismissed,
-`undefined` in a browser, which cannot see the runtime's disk; ask for a typed path then).
+`undefined` in a browser, which cannot see the runtime's disk; ask for a typed path then). `ark.isLocal()`: true when the runtime runs on the computer
+showing the page (the window's own runtime, or a browser on this machine's loopback address),
+false for a runtime elsewhere; `<html data-runtime="local|remote">` says the same for styles.
+Offer actions that need the person's own computer (open a local app, a native picker, "on
+this Mac") only when it is true.
 
 A small real panel, SecRes's notebook (`ui/notes.js`, trimmed):
 

@@ -14,6 +14,7 @@ export function connect() {
   if (tauri && tauri.core && ownPage()) {
     return {
       kind: "desktop",
+      local: true,
       call: (method, params = {}) =>
         tauri.core.invoke("ark_call", { method, params }).catch((e) => {
           throw new Error(typeof e === "string" ? e : e?.message || String(e));
@@ -38,6 +39,9 @@ export function connect() {
   }
   return {
     kind: "browser",
+    // A browser on this machine's loopback address reaches a runtime on this machine; any other
+    // address is a runtime elsewhere (ADR 0016).
+    local: ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname),
     // A page in a browser cannot see the runtime's disk: no native picker.
     pickFolder: async () => undefined,
     async call(method, params = {}) {

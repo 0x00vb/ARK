@@ -155,6 +155,7 @@ mod tests {
             preview: "manuscript.save(file=\"ch4.md\")".into(),
             agent: None,
             task: None,
+            ask_each_time: false,
         }
     }
 

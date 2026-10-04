@@ -209,6 +209,9 @@ front-end uses the same.
 | `ext` | An app handler's `emitter.emit` |
 | `orch` | An orchestration event: `event` (an `OrchEvent`), `line` and `tone` (its timeline line, from `ark_interact::orchestration::event_line`), `activity` (for an agent's runtime event, what the conversation would show; none for steps and context reports) |
 
+App scripts following these with `ark.on("ark:…")` see every chat's turn events, the ones in
+the background too: compare `msg.session` with `ark.summary().session.id` to keep to the open chat.
+
 The agent and task methods need an app with an orchestrator and do not wait for the
 conversation: they answer while a turn runs. The ones that change something build an
 `ark_interact::orchestration::Control`, the same one the terminal's `/agent` and `/task`

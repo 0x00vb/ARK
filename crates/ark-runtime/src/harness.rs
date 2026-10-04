@@ -1338,8 +1338,9 @@ impl Harness {
             preview: preview_call(&call.name, &call.arguments),
             agent: None,
             task: None,
+            ask_each_time: desc.ask_each_time,
         };
-        if !gate.is_granted(&request.class) {
+        if request.ask_each_time || !gate.is_granted(&request.class) {
             on_event(HarnessEvent::ApprovalRequested {
                 request: request.clone(),
             });

@@ -75,6 +75,11 @@ pub struct ActionDescriptor {
     /// actions are never reused, whatever this says.
     #[serde(default)]
     pub reuse: Reuse,
+    /// Every call asks the person, whatever they allowed before: no "for this session" or
+    /// "always" answer covers it. For actions nobody should run unattended (using the
+    /// person's computer).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ask_each_time: bool,
 }
 
 impl ActionDescriptor {
@@ -89,7 +94,14 @@ impl ActionDescriptor {
             output_schema: serde_json::json!({ "type": "object" }),
             capabilities: Vec::new(),
             reuse: Reuse::Auto,
+            ask_each_time: false,
         }
+    }
+
+    /// Ask the person at every call; no earlier answer covers it ([`Self::ask_each_time`]).
+    pub fn ask_each_time(mut self) -> Self {
+        self.ask_each_time = true;
+        self
     }
 
     /// The output depends only on the input: reuse it across turns ([`Reuse::Stable`]).

@@ -352,7 +352,9 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
             format!("{agent} runs {says}: {}", clip(objective, 80)),
             Tone::Accent,
         ),
-        EventKind::Unscheduled { schedule } => (format!("stopped {schedule}"), Tone::Muted),
+        EventKind::Unscheduled { agent, says, .. } => {
+            (format!("{agent} no longer runs {says}"), Tone::Muted)
+        }
         EventKind::AgentSpawned { .. }
         | EventKind::AgentState { .. }
         | EventKind::Session { .. } => return None,

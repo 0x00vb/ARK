@@ -504,7 +504,7 @@ fn schedule_json(s: &crate::ScheduleRecord) -> Value {
         "agent": s.agent,
         "objective": s.task.objective,
         "when": s.says,
-        "next_ms": s.next_ms,
+        "next": s.next_ms.map(crate::schedule::local_label),
     })
 }
 

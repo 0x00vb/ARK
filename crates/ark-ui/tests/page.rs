@@ -495,7 +495,10 @@ async fn the_person_sees_who_uses_the_computer_and_takes_it_back() {
     };
     let script = vec![
         call("computer.look", json!({ "app": "Notes" })),
-        call("computer.click", json!({ "app": "Notes", "ref": 2 })),
+        call(
+            "computer.click",
+            json!({ "app": "Notes", "ref": 2, "name": "Save" }),
+        ),
         say(
             "You took the computer back, so I did not save the note.",
             false,

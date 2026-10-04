@@ -243,6 +243,8 @@ struct About {
     session: String,
     title: String,
     project: String,
+    /// Its project's orchestrator, to follow when it comes forward while busy.
+    orch: Option<Orchestrator>,
     /// What `summary` answers for it.
     summary: Value,
 }
@@ -282,6 +284,7 @@ impl About {
             session: ix.session().id().as_str().to_string(),
             title: rec.title.clone(),
             project: ix.project().id.as_str().to_string(),
+            orch: ix.orchestrator().cloned(),
             summary: serde_json::to_value(ix.summary()).unwrap_or_default(),
         }
     }
@@ -312,6 +315,9 @@ pub struct Host {
     background: Mutex<Vec<Arc<Conv>>>,
     /// Opens another live conversation of the app.
     siblings: ark_interact::Siblings,
+    /// Held while the windows move to another chat and while a turn ends, so the two never
+    /// interleave (a chat is never opened twice, nor left behind).
+    switching: tokio::sync::Mutex<()>,
     engine: Arc<Engine>,
     /// The names the conversation's skills are chosen by (`Ark::skill_names`).
     chat_skills: Vec<String>,
@@ -372,6 +378,7 @@ impl Host {
             siblings: ix.siblings(),
             computer: ix.ark().computer().cloned(),
             current: Mutex::new(Conv::new(ix)),
+            switching: tokio::sync::Mutex::new(()),
             background: Mutex::new(Vec::new()),
             feed: Feed::new(),
             approvals: Mutex::new(HashMap::new()),
@@ -637,6 +644,7 @@ impl Host {
                 if text.trim().is_empty() {
                     anyhow::bail!("nothing to send");
                 }
+                let _quiet = self.switching.lock().await;
                 self.start_turn(text)?;
                 Ok(json!({ "started": true }))
             }
@@ -1194,6 +1202,7 @@ impl Host {
         target: Target,
         f: impl FnOnce(&mut Interaction) -> anyhow::Result<()>,
     ) -> anyhow::Result<Value> {
+        let _one = self.switching.lock().await;
         if let Target::Session(id) = &target {
             if self.cur().session() == *id {
                 return Ok(self.summary());
@@ -1203,18 +1212,25 @@ impl Host {
             }
         }
         let cur = self.cur();
+        let before = cur.about.lock().unwrap().project.clone();
         let conv = if cur.is_running() {
             let project = self.project()?.id;
             let conv = match &target {
                 // Straight into the chat asked for.
                 Target::Session(id) => self.open_sibling(Some(id), &project)?,
+                // Opened on the running chat's session only to move away from it at once, so
+                // no empty chat is stored; it never writes there.
                 Target::Change => {
-                    let conv = self.open_sibling(None, &project)?;
+                    let conv = self.open_sibling(Some(&cur.session()), &project)?;
                     f(&mut *conv.ix.lock().await)?;
                     conv
                 }
             };
             conv.note(&*conv.ix.lock().await);
+            if conv.session() == cur.session() {
+                // The change did not move: the running chat stays where it is.
+                return Ok(self.summary());
+            }
             conv
         } else {
             let mut ix = cur.ix.lock().await;
@@ -1233,13 +1249,28 @@ impl Host {
         }
         if !Arc::ptr_eq(&conv, &cur) {
             self.background.lock().unwrap().push(cur);
-            *self.current.lock().unwrap() = conv;
+            *self.current.lock().unwrap() = conv.clone();
+            // A conversation opened straight on a chat did not tell the app about its project.
+            if matches!(target, Target::Session(_)) {
+                self.announce_project(&before, &conv);
+            }
         }
         self.refresh().await;
         let summary = self.summary();
         self.emit(json!({ "kind": "summary", "summary": summary }));
         self.emit_working();
         Ok(summary)
+    }
+
+    /// Tell the app (`App::on_project_change`) when the chat windows show is in another project.
+    fn announce_project(&self, before: &str, now: &Arc<Conv>) {
+        let project = now.about.lock().unwrap().project.clone();
+        if project == before {
+            return;
+        }
+        if let Ok(Some(p)) = self.engine.store.get_project(&ProjectId(project)) {
+            self.siblings.project_changed(&p);
+        }
     }
 
     fn take_background(&self, session: &str) -> Option<Arc<Conv>> {
@@ -1251,14 +1282,18 @@ impl Host {
     /// Make `live` the current chat; the current one stays live only while it runs.
     async fn bring_forward(self: &Arc<Self>, live: Arc<Conv>) -> anyhow::Result<Value> {
         let old = std::mem::replace(&mut *self.current.lock().unwrap(), live.clone());
+        let before = old.about.lock().unwrap().project.clone();
         if old.is_running() {
             self.background.lock().unwrap().push(old);
         }
+        self.announce_project(&before, &live);
         if !live.is_running() {
             live.ix.lock().await.follow_model();
             self.refresh().await;
         } else {
-            // Its interaction is busy: the views follow once its turn ends.
+            // Its interaction is busy: its project's agents now, the rest once its turn ends.
+            let orch = live.about.lock().unwrap().orch.clone();
+            self.follow_orchestrator(orch.as_ref());
             let mut snap = self.snapshot.lock().unwrap();
             if let Ok(Some(p)) = self
                 .engine
@@ -1403,6 +1438,8 @@ impl Host {
             Err(e) => (false, false, Some(e.to_string()), String::new(), 0),
         };
         conv.note(&ix);
+        // Not while the windows move to another chat: this decides whether it stays live.
+        let one = self.switching.lock().await;
         let current = self.is_current(&conv);
         if current {
             self.refresh_with(&ix).await;
@@ -1416,6 +1453,7 @@ impl Host {
                 .unwrap()
                 .retain(|c| !Arc::ptr_eq(c, &conv));
         }
+        drop(one);
         // No question outlives its turn; close them before saying the turn ended. Questions
         // from orchestrated agents belong to their tasks, not to this turn.
         let open: Vec<u64> = {

@@ -98,7 +98,7 @@ orch.unschedule("s-1a2b3c4d")?;
 
 | `When` | Runs |
 |---|---|
-| `every_minutes: 30` | every 30 minutes from when it was made |
+| `every_minutes: 30` | every 30 minutes from when it was made (5 at least) |
 | `at: "09:00"` | every day at 09:00, local time |
 | `at: "09:00", days: ["mon", "wed"]` (or `weekdays`, `weekends`) | on those days |
 | `once: true` | one time (at the next `at`, or after `every_minutes`), then it ends |
@@ -108,6 +108,7 @@ orch.unschedule("s-1a2b3c4d")?;
 | The orchestrator's timer looks every 20 s; it starts when `build` runs inside a tokio runtime | no window or chat needs to be open |
 | A run missed while the process was down runs once when it is back | the morning report still comes, once |
 | A run is skipped while the schedule's previous task is open (`skipped` counts them) | runs never pile up on one agent |
+| Ending an agent (`terminate`) ends its schedules | an ended agent runs nothing |
 | An app with `App::orchestrate` opens the orchestrator of every project with active schedules when it starts (`scheduled_projects`) | scheduled work runs in projects nobody has open |
 
 The chat schedules with `agents.schedule`, the terminal lists them with `/schedules` and

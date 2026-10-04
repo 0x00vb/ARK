@@ -1462,7 +1462,7 @@ async fn a_scheduled_run_is_skipped_while_the_last_one_is_still_open() {
     let o = orch(&f, vec![("m", m)], vec![]);
     o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
     let s = o
-        .schedule("w", TaskSpec::new("poll"), When::every_minutes(1))
+        .schedule("w", TaskSpec::new("poll"), When::every_minutes(5))
         .unwrap();
     assert_eq!(
         scheduled_projects(&f.ark.engine().store),
@@ -1472,7 +1472,7 @@ async fn a_scheduled_run_is_skipped_while_the_last_one_is_still_open() {
     let first = o.tick_schedules(t0);
     assert_eq!(first.len(), 1);
     // Still running at the next time: skipped, and the time moves on.
-    assert!(o.tick_schedules(t0 + 60_000).is_empty());
+    assert!(o.tick_schedules(t0 + 5 * 60_000).is_empty());
     let now = o.schedules()[0].clone();
     assert_eq!((now.runs, now.skipped), (1, 1));
     gate.notify_one();
@@ -1485,6 +1485,28 @@ async fn a_scheduled_run_is_skipped_while_the_last_one_is_still_open() {
     assert!(o
         .schedule("nobody", TaskSpec::new("x"), When::every_minutes(5))
         .is_err());
+    // Standing work no more often than every 5 minutes.
+    let e = o
+        .schedule("w", TaskSpec::new("x"), When::every_minutes(1))
+        .unwrap_err();
+    assert!(e.to_string().contains("at least 5"), "{e}");
+    // A stopped schedule stays stopped, also when it was due; an ended agent's schedules end.
+    let due = o
+        .schedule("w", TaskSpec::new("again"), When::every_minutes(5))
+        .unwrap();
+    o.unschedule(&due.id).unwrap();
+    assert!(o.tick_schedules(due.next_ms.unwrap()).is_empty());
+    assert_eq!(o.schedules().len(), 1);
+    o.terminate("w").await.unwrap();
+    assert!(o.schedules().is_empty());
+    assert!(scheduled_projects(&f.ark.engine().store).is_empty());
+    let stopped = o
+        .events(0, 500)
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(&e.kind, EventKind::Unscheduled { agent, .. } if agent == "w"))
+        .count();
+    assert_eq!(stopped, 2);
 }
 
 #[tokio::test]

@@ -44,6 +44,8 @@ What changed for people building on ARK, per release. Not a commit log.
   `computer_with(service)`; `Ark::computer()`. Window: "‹who› is using your computer · Stop"
   (`computer` event, `computer_stop`). A "Computer" capability in the catalog.
 - `impl Clone for Ark` (a handle on the same agent); `Ark::follow_current_model`.
+- `ActionDescriptor::ask_each_time()`: every call asks, Allow once or Deny; no grant covers it
+  and no answer is remembered (`ApprovalRequest::ask_each_time`). The Computer's actions use it.
 - Window: Settings › Appearance (Light, Dark, System), kept per window; `ArkUi::theme(Theme)` sets
   the default. Dark is `:root[data-theme="dark"]` now, not a media query
   ([`UI.md`](docs/UI.md#what-the-workspace-shows)).
@@ -80,6 +82,8 @@ What changed for people building on ARK, per release. Not a commit log.
 - Window: an app stylesheet that set dark colours inside `@media (prefers-color-scheme: dark)`
   now loses to ARK's `:root[data-theme="dark"]`. Put them under `:root[data-theme="dark"]`, and
   give light overrides `:root, :root[data-theme]` so they win in both themes.
+- `ActionDescriptor` and `ApprovalRequest` have a new public field, `ask_each_time`: a struct
+  literal needs `ask_each_time: false` (or build the descriptor with `ActionDescriptor::new`).
 - `ark_orchestrate::EventKind` has two new variants (`Scheduled`, `Unscheduled`): an exhaustive
   `match` needs an arm or `_`. `Graph` and `TaskNode` have a new field each (`schedules`,
   `schedule`): add it where you build them; deserializing fills a default.

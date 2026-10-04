@@ -190,12 +190,21 @@ const VERBS: &[(&[&str], &str)] = &[
     (&["extract"], "Extracting"),
 ];
 
-/// An element number as given (`3` or `"[3]"`).
+/// An element as the person reads it: its name, which the tool checks against the number
+/// (`“Send”`), or its number when it has no name.
 fn element(input: &Value) -> String {
+    let name = input
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if !name.is_empty() {
+        return format!("“{}”", clip(name.trim_matches(['"', '“', '”']), 60));
+    }
     match input.get("ref") {
-        Some(Value::Number(n)) => n.to_string(),
-        Some(Value::String(s)) => s.trim_matches(['[', ']']).to_string(),
-        _ => "?".into(),
+        Some(Value::Number(n)) => format!("element {n}"),
+        Some(Value::String(s)) => format!("element {}", s.trim_matches(['[', ']'])),
+        _ => "an element".into(),
     }
 }
 
@@ -229,13 +238,13 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
         )
         .trim_end()
         .to_string(),
-        ark_orchestrate::UNSCHEDULE => format!("Stopping scheduled task {}", s("schedule")),
+        ark_orchestrate::UNSCHEDULE => "Stopping a scheduled task".into(),
         "computer.apps" => "Listing the open apps".into(),
         "computer.look" => format!("Looking at {}", s("app")),
         "computer.open" => format!("Opening {}", s("app")),
-        "computer.click" => format!("Clicking element {} in {}", element(input), s("app")),
+        "computer.click" => format!("Clicking {} in {}", element(input), s("app")),
         "computer.type" => format!(
-            "Typing \"{}\" into element {} in {}{}",
+            "Typing \"{}\" into {} in {}{}",
             clip(s("text"), 60),
             element(input),
             s("app"),
@@ -321,12 +330,22 @@ mod tests {
         assert_eq!(
             l.call_label(
                 "computer.type",
-                &json!({ "app": "Notes", "ref": 3, "text": "Plan", "submit": true })
+                &json!({ "app": "Notes", "ref": 3, "name": "Title", "text": "Plan", "submit": true })
             ),
-            "Typing \"Plan\" into element 3 in Notes, then Return"
+            "Typing \"Plan\" into “Title” in Notes, then Return"
         );
         assert_eq!(
-            l.call_label("computer.click", &json!({ "app": "Mail", "ref": "[2]" })),
+            l.call_label(
+                "computer.click",
+                &json!({ "app": "Mail", "ref": "[2]", "name": "Send" })
+            ),
+            "Clicking “Send” in Mail"
+        );
+        assert_eq!(
+            l.call_label(
+                "computer.click",
+                &json!({ "app": "Mail", "ref": 2, "name": "" })
+            ),
             "Clicking element 2 in Mail"
         );
     }

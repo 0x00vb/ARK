@@ -21,6 +21,10 @@ struct Inner {
     front: Option<String>,
     allowed: bool,
     asked: bool,
+    /// Fields refuse text set directly (it must be typed).
+    no_set_text: bool,
+    /// Opening an app does not bring it to the front.
+    stuck_front: bool,
     person_typed: Option<Instant>,
 }
 
@@ -78,6 +82,18 @@ impl FakeScreen {
         self
     }
 
+    /// Fields take no text set directly: it is typed into the focus instead.
+    pub fn fields_refuse_text(self) -> Self {
+        self.inner.lock().unwrap().no_set_text = true;
+        self
+    }
+
+    /// Opening an app leaves another one in front (another window took the focus).
+    pub fn front_stays_elsewhere(self) -> Self {
+        self.inner.lock().unwrap().stuck_front = true;
+        self
+    }
+
     /// The person touches the keyboard now.
     pub fn person_types(&self) {
         self.inner.lock().unwrap().person_typed = Some(Instant::now());
@@ -118,6 +134,9 @@ impl Control for FakeControl {
         Ok(())
     }
     fn set_text(&self, text: &str) -> Result<(), String> {
+        if self.screen.inner.lock().unwrap().no_set_text {
+            return Err("this field takes typing only".into());
+        }
         let name = {
             let mut i = self.screen.inner.lock().unwrap();
             let (_, controls) = i
@@ -154,7 +173,10 @@ impl Screen for FakeScreen {
             .map(|(n, (a, _))| App {
                 name: a.clone(),
                 pid: 100 + n as i32,
-                front: i.front.as_deref() == Some(a),
+                front: i
+                    .front
+                    .as_deref()
+                    .is_some_and(|f| f.eq_ignore_ascii_case(a)),
             })
             .collect())
     }
@@ -202,7 +224,9 @@ impl Screen for FakeScreen {
         if !i.apps.iter().any(|(a, _)| a.eq_ignore_ascii_case(app)) {
             i.apps.push((app.to_string(), Vec::new()));
         }
-        i.front = Some(app.to_string());
+        if !i.stuck_front {
+            i.front = Some(app.to_string());
+        }
         drop(i);
         self.record(format!("open {app}"));
         Ok(())

@@ -56,7 +56,7 @@ async fn an_agent_reads_a_window_and_acts_on_it_by_number() {
     let after = run(
         &a,
         TYPE,
-        json!({ "app": "Notes", "ref": 1, "text": "Plan" }),
+        json!({ "app": "Notes", "ref": 1, "name": "Title", "text": "Plan" }),
     )
     .await
     .unwrap();
@@ -64,35 +64,97 @@ async fn an_agent_reads_a_window_and_acts_on_it_by_number() {
         after["elements"][0]["value"], "Plan",
         "the answer is the window after"
     );
-    run(&a, CLICK, json!({ "app": "Notes", "ref": "[2]" }))
-        .await
-        .unwrap();
+    run(
+        &a,
+        CLICK,
+        json!({ "app": "Notes", "ref": "[2]", "name": "“Save”" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         *screen.log.lock().unwrap(),
         vec!["set Notes/Title = \"Plan\"", "press Notes/Save"]
     );
+    // The name must be the number's: what the approval showed is what is pressed.
+    let e = run(
+        &a,
+        CLICK,
+        json!({ "app": "Notes", "ref": 1, "name": "Save" }),
+    )
+    .await
+    .unwrap_err();
+    assert!(e.contains("is the text field “Title”, not “Save”"), "{e}");
     // Numbers belong to the last look and its app.
-    let e = run(&a, CLICK, json!({ "app": "Mail", "ref": 1 }))
-        .await
-        .unwrap_err();
+    let e = run(
+        &a,
+        CLICK,
+        json!({ "app": "Mail", "ref": 1, "name": "Send" }),
+    )
+    .await
+    .unwrap_err();
     assert!(e.contains("last look, at Notes"), "{e}");
-    let e = run(&a, CLICK, json!({ "app": "Notes", "ref": 9 }))
+    let e = run(&a, CLICK, json!({ "app": "Notes", "ref": 9, "name": "x" }))
         .await
         .unwrap_err();
     assert!(e.contains("no element [9]"), "{e}");
     // The card an agent reads.
     let (card, _) = distill(LOOK, &look).unwrap();
     assert!(card.contains("[2] button \"Save\""), "{card}");
-    // Every action but the list asks first.
+    // Every action but the list asks first, each time: no earlier answer covers it.
     let risky: Vec<String> = a
         .actions()
         .into_iter()
-        .filter(|d| !d.risk.auto_runs())
+        .filter(|d| !d.risk.auto_runs() && d.ask_each_time)
         .map(|d| d.name)
         .collect();
     assert_eq!(risky, vec![LOOK, OPEN, CLICK, TYPE, KEYS]);
     drop(a);
     assert_eq!(svc.holder(), None, "the screen is free when the turn ends");
+}
+
+/// Keys go to whatever is in front, so they are sent only once the approved app is there.
+#[tokio::test]
+async fn typed_keys_go_only_to_the_approved_app_in_front() {
+    let screen = notes().fields_refuse_text();
+    let svc = service(&screen);
+    let a = svc.for_owner("p/a");
+    run(&a, LOOK, json!({ "app": "Notes" })).await.unwrap();
+    let typed =
+        json!({ "app": "Notes", "ref": 1, "name": "Title", "text": "Plan", "submit": true });
+    run(&a, TYPE, typed).await.unwrap();
+    let log = screen.log.lock().unwrap().clone();
+    assert_eq!(
+        log,
+        vec![
+            "press Notes/Title",
+            "open Notes",
+            "type \"Plan\"",
+            "open Notes",
+            "keys return"
+        ]
+    );
+
+    // Another window keeps the front: nothing is typed and the agent is told why.
+    let screen = notes().fields_refuse_text().front_stays_elsewhere();
+    let svc = service(&screen);
+    let a = svc.for_owner("p/a");
+    run(&a, LOOK, json!({ "app": "Notes" })).await.unwrap();
+    let typed = json!({ "app": "Notes", "ref": 1, "name": "Title", "text": "Plan" });
+    let e = run(&a, TYPE, typed).await.unwrap_err();
+    assert!(
+        e.contains("did not come to the front, so nothing was typed"),
+        "{e}"
+    );
+    let e = run(&a, KEYS, json!({ "app": "Notes", "keys": "cmd+s" }))
+        .await
+        .unwrap_err();
+    assert!(e.contains("nothing was typed"), "{e}");
+    let log = screen.log.lock().unwrap().clone();
+    assert!(
+        !log.iter()
+            .any(|l| l.starts_with("type") || l.starts_with("keys")),
+        "{log:?}"
+    );
 }
 
 #[tokio::test]
@@ -129,9 +191,13 @@ async fn an_idle_holder_gives_way_and_must_look_again() {
     run(&b, LOOK, json!({ "app": "Mail" })).await.unwrap();
     assert_eq!(svc.holder().as_deref(), Some("p/b"));
     drop(b);
-    let e = run(&a, CLICK, json!({ "app": "Notes", "ref": 2 }))
-        .await
-        .unwrap_err();
+    let e = run(
+        &a,
+        CLICK,
+        json!({ "app": "Notes", "ref": 2, "name": "Save" }),
+    )
+    .await
+    .unwrap_err();
     assert!(e.contains("look at Notes first"), "{e}");
 }
 
@@ -152,9 +218,13 @@ async fn the_person_comes_first_and_can_take_the_computer_back() {
     assert_eq!(svc.take_back().as_deref(), Some("session:s1"));
     watch.changed().await.unwrap();
     assert_eq!(*watch.borrow(), None);
-    let e = run(&a, CLICK, json!({ "app": "Notes", "ref": 2 }))
-        .await
-        .unwrap_err();
+    let e = run(
+        &a,
+        CLICK,
+        json!({ "app": "Notes", "ref": 2, "name": "Save" }),
+    )
+    .await
+    .unwrap_err();
     assert!(e.contains("took the computer back"), "{e}");
     assert!(screen.log.lock().unwrap().is_empty(), "nothing was pressed");
     // A new turn may ask again.

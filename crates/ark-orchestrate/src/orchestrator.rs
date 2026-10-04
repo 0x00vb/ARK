@@ -155,6 +155,7 @@ impl<'a> OrchestratorBuilder<'a> {
             accounts: Mutex::new(HashMap::new()),
             state: Mutex::new(State::default()),
             events,
+            ticks: Mutex::new(()),
         });
         inner.load()?;
         let orch = Orchestrator { inner };
@@ -310,7 +311,20 @@ impl Orchestrator {
     /// Cancel everything `agent` has open, close its model session, and take no more work
     /// for it. Its records and store stay.
     pub async fn terminate(&self, agent: &str) -> Result<(), OrchError> {
-        self.inner.terminate(agent).await
+        self.inner.terminate(agent).await?;
+        // An ended agent runs nothing on a schedule either.
+        let mine: Vec<String> = {
+            let st = self.inner.state.lock().unwrap();
+            st.schedules
+                .values()
+                .filter(|s| s.agent == agent)
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        for id in mine {
+            self.inner.drop_schedule(&id);
+        }
+        Ok(())
     }
 
     /// Run a failed or cancelled task again (one more attempt).
@@ -424,19 +438,9 @@ impl Orchestrator {
 
     /// Stop a schedule. A run already started goes on (cancel its task to stop it).
     pub fn unschedule(&self, id: &str) -> Result<ScheduleRecord, OrchError> {
-        let rec = self
-            .inner
-            .state
-            .lock()
-            .unwrap()
-            .schedules
-            .remove(id)
-            .ok_or_else(|| OrchError::NotAllowed(format!("no schedule `{id}`")))?;
-        let _ = self.inner.engine.store.delete_record(SCHEDULE, &rec.id);
-        self.inner.emit(EventKind::Unscheduled {
-            schedule: rec.id.clone(),
-        });
-        Ok(rec)
+        self.inner
+            .drop_schedule(id)
+            .ok_or_else(|| OrchError::NotAllowed(format!("no schedule `{id}`")))
     }
 
     /// Start every schedule due at `now_ms`; returns the tasks started. The orchestrator's
@@ -525,6 +529,8 @@ pub(crate) struct Inner {
     pub state: Mutex<State>,
     events: broadcast::Sender<OrchEvent>,
     stream: String,
+    /// Held while schedules are ticked: one tick at a time.
+    ticks: Mutex<()>,
 }
 
 enum Attempt {
@@ -658,9 +664,28 @@ impl Inner {
         }
     }
 
+    /// Remove a schedule, from memory and the store under one lock, so a tick running at the
+    /// same moment cannot put it back.
+    fn drop_schedule(&self, id: &str) -> Option<ScheduleRecord> {
+        let rec = {
+            let mut st = self.state.lock().unwrap();
+            let rec = st.schedules.remove(id)?;
+            let _ = self.engine.store.delete_record(SCHEDULE, &rec.id);
+            rec
+        };
+        self.emit(EventKind::Unscheduled {
+            schedule: rec.id.clone(),
+            agent: rec.agent.clone(),
+            says: rec.says.clone(),
+        });
+        Some(rec)
+    }
+
     /// Start the schedules due at `now`. A schedule whose last run is still open skips this
-    /// one; a run missed while the process was down runs once.
+    /// one; a run missed while the process was down runs once. One tick at a time; a schedule
+    /// stopped meanwhile stays stopped.
     fn tick_schedules(&self, now: u64) -> Vec<String> {
+        let _one = self.ticks.lock().unwrap();
         let due: Vec<ScheduleRecord> = {
             let st = self.state.lock().unwrap();
             st.schedules
@@ -671,6 +696,9 @@ impl Inner {
         };
         let mut started = Vec::new();
         for mut s in due {
+            if !self.state.lock().unwrap().schedules.contains_key(&s.id) {
+                continue;
+            }
             let busy = s.last_task.as_ref().is_some_and(|t| {
                 let st = self.state.lock().unwrap();
                 st.tasks.get(t).is_some_and(|t| !t.record.state.is_final())
@@ -694,11 +722,15 @@ impl Inner {
                 }
             }
             s.advance(now);
-            self.save_schedule(&s);
             let mut st = self.state.lock().unwrap();
+            if !st.schedules.contains_key(&s.id) {
+                continue;
+            }
             if s.active() {
+                self.save_schedule(&s);
                 st.schedules.insert(s.id.clone(), s);
             } else {
+                let _ = self.engine.store.delete_record(SCHEDULE, &s.id);
                 st.schedules.remove(&s.id);
             }
         }

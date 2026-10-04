@@ -481,6 +481,15 @@ pub struct Siblings {
 }
 
 impl Siblings {
+    /// Tell the app the conversation windows show is now in `project` (what
+    /// [`App::on_project_change`] gets), when a front-end brings forward a conversation that is
+    /// already open there.
+    pub fn project_changed(&self, project: &Project) {
+        if let Some(f) = &self.on_project {
+            f(project);
+        }
+    }
+
     /// Another live conversation: in session `session` (an id), or a new session in `project`.
     /// `approver` gets its questions (each conversation's own, so a front-end knows which
     /// conversation asks).

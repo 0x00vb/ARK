@@ -123,12 +123,15 @@ pub trait Screen: Send + Sync {
     fn since_input(&self) -> Option<Duration>;
 }
 
+/// A control as the owner's last look listed it, and the handle to act on it.
+type Seen = (Element, Arc<dyn Control>);
+
 #[derive(Default)]
 struct State {
     /// Who holds the screen, and when they last acted.
     lease: Option<(String, Instant)>,
     /// Each owner's last look: the app and its controls by number.
-    looks: HashMap<String, (String, Vec<Arc<dyn Control>>)>,
+    looks: HashMap<String, (String, Vec<Seen>)>,
     /// When this process last sent keys, so its own input does not count as the person's.
     own_input: Option<Instant>,
     /// Owners the person took the screen from: refused until their turn or task ends.
@@ -379,8 +382,9 @@ impl Computer {
         Ok(())
     }
 
-    /// The control numbered `n` in this owner's last look at `app`.
-    fn control(&self, action: &str, app: &str, n: usize) -> Result<Arc<dyn Control>> {
+    /// The control numbered `n` in this owner's last look at `app`, which must be the one named
+    /// `name`: the approval showed that name, and a window that changed since is caught here.
+    fn control(&self, action: &str, app: &str, n: usize, name: &str) -> Result<Arc<dyn Control>> {
         let st = self.svc.state.lock().unwrap();
         let Some((seen, controls)) = st.looks.get(&self.owner) else {
             return Err(AdapterError::bad_input(
@@ -394,15 +398,25 @@ impl Computer {
                 format!("element numbers are from your last look, at {seen}; look at {app} first"),
             ));
         }
-        n.checked_sub(1)
+        let (el, c) = n
+            .checked_sub(1)
             .and_then(|i| controls.get(i))
-            .cloned()
             .ok_or_else(|| {
                 AdapterError::bad_input(
                     action,
                     format!("no element [{n}] in {app}; computer.look lists them"),
                 )
-            })
+            })?;
+        if !same_name(&el.name, name) {
+            return Err(AdapterError::bad_input(
+                action,
+                format!(
+                    "element [{n}] in {app} is the {} “{}”, not “{name}”; look again if the window changed",
+                    el.role, el.name
+                ),
+            ));
+        }
+        Ok(c.clone())
     }
 
     async fn look(&self, app: &str) -> Result<ActionOutput> {
@@ -419,12 +433,13 @@ impl Computer {
             "lines": look.text.lines().count(),
             "elements": look.elements,
         });
-        self.svc
-            .state
-            .lock()
-            .unwrap()
-            .looks
-            .insert(self.owner.clone(), (look.app.clone(), look.controls));
+        self.svc.state.lock().unwrap().looks.insert(
+            self.owner.clone(),
+            (
+                look.app.clone(),
+                look.elements.into_iter().zip(look.controls).collect(),
+            ),
+        );
         self.svc.touch(&self.owner);
         Ok(ActionOutput::json(out))
     }
@@ -439,6 +454,7 @@ impl Adapter for Computer {
     fn actions(&self) -> Vec<ActionDescriptor> {
         let app = || json!({ "type": "string", "description": "the app's name, as computer.apps lists it" });
         let el = || json!({ "type": "integer", "description": "the element's number from your last computer.look" });
+        let named = || json!({ "type": "string", "description": "the element's name as computer.look listed it (empty if it has none)" });
         vec![
             ActionDescriptor::new(APPS, "list the apps open on this computer", RiskTier::Observe).volatile(),
             ActionDescriptor::new(
@@ -447,24 +463,29 @@ impl Adapter for Computer {
                 RiskTier::Mutate,
             )
             .volatile()
+            .ask_each_time()
             .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
             ActionDescriptor::new(OPEN, "start an app, or bring it to the front", RiskTier::Mutate)
+                .ask_each_time()
                 .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
-            ActionDescriptor::new(CLICK, "press an element of an app (a button, a checkbox, a link), by its number", RiskTier::Mutate)
+            ActionDescriptor::new(CLICK, "press an element of an app (a button, a checkbox, a link), by its number and name", RiskTier::Mutate)
+                .ask_each_time()
                 .with_input_schema(json!({
-                    "type": "object", "required": ["app", "ref"],
-                    "properties": { "app": app(), "ref": el() }
+                    "type": "object", "required": ["app", "ref", "name"],
+                    "properties": { "app": app(), "ref": el(), "name": named() }
                 })),
-            ActionDescriptor::new(TYPE, "type into a field of an app, by its number; submit presses Return", RiskTier::Mutate)
+            ActionDescriptor::new(TYPE, "type into a field of an app, by its number and name; submit presses Return", RiskTier::Mutate)
+                .ask_each_time()
                 .with_input_schema(json!({
-                    "type": "object", "required": ["app", "ref", "text"],
+                    "type": "object", "required": ["app", "ref", "name", "text"],
                     "properties": {
-                        "app": app(), "ref": el(),
+                        "app": app(), "ref": el(), "name": named(),
                         "text": { "type": "string", "description": "replaces what the field holds" },
                         "submit": { "type": "boolean" }
                     }
                 })),
             ActionDescriptor::new(KEYS, "press a key or shortcut in an app: return, escape, tab, cmd+s, cmd+shift+n", RiskTier::Mutate)
+                .ask_each_time()
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "keys"],
                     "properties": { "app": app(), "keys": { "type": "string" } }
@@ -495,28 +516,36 @@ impl Adapter for Computer {
             }
             CLICK => {
                 let n = number(action, &input)?;
-                let c = self.control(action, &app, n)?;
+                let c = self.control(action, &app, n, name_of(&input))?;
                 self.svc.blocking(move |_| c.press()).await.map_err(tool)?;
                 tokio::time::sleep(Duration::from_millis(300)).await;
                 self.look(&app).await
             }
             TYPE => {
                 let n = number(action, &input)?;
-                let c = self.control(action, &app, n)?;
+                let c = self.control(action, &app, n, name_of(&input))?;
                 let text = input["text"].as_str().unwrap_or("").to_string();
-                let t = text.clone();
+                let submit = input["submit"].as_bool().unwrap_or(false);
+                let name = app.clone();
+                // A field that takes its text directly is changed in place. Otherwise the
+                // keys go to the focused field, and Return to the app in front: only once the
+                // approved app is that app.
                 self.svc
-                    .blocking(move |s| c.set_text(&t).or_else(|_| s.type_text(&t)))
+                    .blocking(move |s| {
+                        if c.set_text(&text).is_err() {
+                            c.press()?;
+                            in_front(s, &name)?;
+                            s.type_text(&text)?;
+                        }
+                        if submit {
+                            in_front(s, &name)?;
+                            s.keys("return")?;
+                        }
+                        Ok(())
+                    })
                     .await
                     .map_err(tool)?;
                 self.svc.sent_input();
-                if input["submit"].as_bool().unwrap_or(false) {
-                    self.svc
-                        .blocking(|s| s.keys("return"))
-                        .await
-                        .map_err(tool)?;
-                    self.svc.sent_input();
-                }
                 tokio::time::sleep(Duration::from_millis(300)).await;
                 self.look(&app).await
             }
@@ -528,12 +557,11 @@ impl Adapter for Computer {
                         "`keys` is a key or shortcut, e.g. cmd+s",
                     ));
                 }
-                // Keys go to the app in front: bring this one forward first.
+                // Keys go to the app in front: only once the approved app is that app.
                 let name = app.clone();
                 self.svc
                     .blocking(move |s| {
-                        s.open(&name)?;
-                        std::thread::sleep(Duration::from_millis(300));
+                        in_front(s, &name)?;
                         s.keys(&keys)
                     })
                     .await
@@ -545,6 +573,42 @@ impl Adapter for Computer {
             _ => unreachable!("checked above"),
         }
     }
+}
+
+/// Bring `app` to the front and make sure it is there, before keys that go to whatever is in
+/// front. Nothing is sent when it is not.
+fn in_front(s: &dyn Screen, app: &str) -> std::result::Result<(), String> {
+    s.open(app)?;
+    for _ in 0..10 {
+        std::thread::sleep(Duration::from_millis(150));
+        if let Some(front) = s.apps()?.into_iter().find(|a| a.front) {
+            if same_app(&front.name, app) {
+                return Ok(());
+            }
+        }
+    }
+    Err(format!(
+        "{app} did not come to the front, so nothing was typed"
+    ))
+}
+
+fn same_app(listed: &str, asked: &str) -> bool {
+    let (l, a) = (listed.trim().to_lowercase(), asked.trim().to_lowercase());
+    !a.is_empty() && (l == a || l.contains(&a))
+}
+
+fn same_name(listed: &str, given: &str) -> bool {
+    let clean = |x: &str| {
+        x.trim()
+            .trim_matches(['"', '“', '”', '\''])
+            .trim()
+            .to_lowercase()
+    };
+    clean(listed) == clean(given)
+}
+
+fn name_of(input: &Value) -> &str {
+    input["name"].as_str().unwrap_or("")
 }
 
 fn number(action: &str, input: &Value) -> Result<usize> {

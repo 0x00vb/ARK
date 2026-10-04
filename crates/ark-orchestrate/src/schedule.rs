@@ -18,8 +18,8 @@ use crate::spec::TaskSpec;
 /// The record kind schedules are stored under, per project.
 pub(crate) const SCHEDULE: &str = "orch_schedule";
 
-/// Shortest interval between runs.
-pub const MIN_INTERVAL_MINUTES: u32 = 1;
+/// Shortest interval between runs: each run spends model time with nobody watching.
+pub const MIN_INTERVAL_MINUTES: u32 = 5;
 
 const MINUTE_MS: u64 = 60_000;
 const DAY_SECS: i64 = 86_400;

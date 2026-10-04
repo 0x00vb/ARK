@@ -552,8 +552,10 @@ async function computer(page) {
   await look.waitFor();
   assert.match(await look.innerText(), /Looking at Notes/);
   await look.locator("button", { hasText: "Allow once" }).click();
-  const click = page.locator("#thread .approval:not(.decided)", { hasText: "Clicking element 2 in Notes" });
+  const click = page.locator("#thread .approval:not(.decided)", { hasText: "Clicking “Save” in Notes" });
   await click.waitFor();
+  // Using the computer is asked each time: no answer covers later calls.
+  assert.deepEqual(await click.locator(".approval-actions button").allInnerTexts().then((t) => t.map((x) => x.split("\n")[0].trim())), ["Allow once", "Deny"]);
   await pill.waitFor();
   assert.match(await pill.innerText(), /ARK is using your computer/);
   await pill.locator("button", { hasText: "Stop" }).click();

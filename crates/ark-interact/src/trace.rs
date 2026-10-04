@@ -774,6 +774,7 @@ mod tests {
                     preview: "notes.save()".into(),
                     agent: None,
                     task: None,
+                    ask_each_time: false,
                 },
             },
             HarnessEvent::ApprovalResolved {

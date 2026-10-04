@@ -123,8 +123,13 @@ pub enum EventKind {
         objective: String,
         says: String,
     },
+    /// A schedule stopped (asked to, or its agent ended).
     Unscheduled {
         schedule: String,
+        #[serde(default)]
+        agent: String,
+        #[serde(default)]
+        says: String,
     },
 }
 

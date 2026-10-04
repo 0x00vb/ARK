@@ -519,6 +519,18 @@ async fn a_chat_keeps_working_while_the_window_moves_to_another() {
     let moved = host.call("new_session", json!({})).await.unwrap();
     let second = moved["session"]["id"].as_str().unwrap().to_string();
     assert_ne!(first, second);
+    // Two chats, no empty one left behind by the move.
+    let chats = host.call("sessions", json!({})).await.unwrap();
+    assert_eq!(chats.as_array().unwrap().len(), 2, "{chats}");
+    assert_eq!(
+        chats
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["working"] == true)
+            .count(),
+        1
+    );
     assert_eq!(moved["running"], false);
     let working = host.call("working", json!({})).await.unwrap();
     assert_eq!(working[0]["session"], first.as_str());

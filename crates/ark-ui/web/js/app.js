@@ -330,7 +330,8 @@ function showComputer(user) {
   el.hidden = !user;
   if (!user) return;
   const who = h("button.computer-who", { type: "button", title: user.session ? "Open the chat" : "" },
-    h("span.working-dot"), `${user.who} is using your computer`);
+    // On a runtime elsewhere it is not the person's own computer.
+    h("span.working-dot"), `${user.who} is using ${(window.ark?.isLocal?.() ?? true) ? "your computer" : "the computer ARK runs on"}`);
   if (user.session) who.onclick = () => api.openSession(user.session);
   const stop = h("button.computer-stop", { type: "button", title: "Take the computer back" }, "Stop");
   stop.onclick = () => transport.call("computer_stop").catch((e) => toast(e.message));

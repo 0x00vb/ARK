@@ -20,16 +20,19 @@
 //! ```
 //!
 //! Two transports carry the same page and protocol: the native window (feature `desktop`,
-//! Tauri) and a local browser server ([`ArkUi::serve`]). Neither holds agent logic; both
+//! Tauri) and an HTTP server ([`ArkUi::serve`]): local with a one-time token, or a runtime
+//! other machines connect to with saved [`access::Tokens`] ([`remote`], ADR 0016). Neither holds agent logic; both
 //! drive a [`Host`] over one `Interaction`. Consumers extend the page with their own scripts
 //! (panels, artifact viewers, tool renderers, actions, navigation, inspector sections; see
 //! `docs/UI.md`) and back them with [`ArkUi::handler`] methods.
 
+pub mod access;
 mod assets;
 #[cfg(feature = "desktop")]
 mod desktop;
 mod files;
 pub mod host;
+pub mod remote;
 mod serve;
 mod terminal;
 
@@ -43,7 +46,7 @@ use serde_json::Value;
 
 pub use assets::Assets;
 pub use host::{Emitter, Handler, HandlerCtx, Host, Theme, UiInfo, Welcome};
-pub use serve::Served;
+pub use serve::{Access, Served};
 
 /// Builds the workspace for an app. See the crate docs.
 pub struct ArkUi {
@@ -52,6 +55,7 @@ pub struct ArkUi {
     files: HashMap<String, Cow<'static, [u8]>>,
     handlers: HashMap<String, Handler>,
     start: Start,
+    access: Access,
 }
 
 impl ArkUi {
@@ -62,6 +66,7 @@ impl ArkUi {
             files: HashMap::new(),
             handlers: HashMap::new(),
             start: Start::default(),
+            access: Access::default(),
         }
     }
     /// The accent colour, any CSS colour.
@@ -126,6 +131,13 @@ impl ArkUi {
         self
     }
 
+    /// Who may call [`serve`](Self::serve): the one-time token (default, this machine only) or
+    /// saved [`access::Tokens`] for a runtime other machines connect to (ADR 0016).
+    pub fn access(mut self, access: Access) -> Self {
+        self.access = access;
+        self
+    }
+
     /// Open the app and wrap it in a [`Host`]. Transports and tests start here.
     pub async fn open(self) -> anyhow::Result<(Arc<Host>, Arc<Assets>)> {
         let title = self.app.name().to_string();
@@ -146,11 +158,20 @@ impl ArkUi {
         Ok((host, assets))
     }
 
-    /// Serve the workspace to a local browser at `addr` (e.g. `127.0.0.1:0`) until ctrl+c.
-    /// Prints the URL, which carries the access token.
+    /// Serve the workspace at `addr` (e.g. `127.0.0.1:0`) until ctrl+c. Prints the URL, which
+    /// carries the one-time token unless [`access`](Self::access) gave saved tokens.
     pub async fn serve(self, addr: &str) -> anyhow::Result<()> {
+        let access = self.access.clone();
         let (host, assets) = self.open().await?;
-        let (served, task) = serve::serve(host, assets, addr).await?;
+        if let Access::Tokens(tokens) = &access {
+            if tokens.list()?.is_empty() {
+                eprintln!(
+                    "no access tokens in {} yet: create one, or every client is refused",
+                    tokens.path().display()
+                );
+            }
+        }
+        let (served, task) = serve::serve(host, assets, addr, access).await?;
         println!("{}", served.url);
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {}
@@ -161,8 +182,9 @@ impl ArkUi {
 
     /// Start serving and return at once (tests, embedding).
     pub async fn serve_background(self, addr: &str) -> anyhow::Result<(Arc<Host>, Served)> {
+        let access = self.access.clone();
         let (host, assets) = self.open().await?;
-        let (served, _task) = serve::serve(host.clone(), assets, addr).await?;
+        let (served, _task) = serve::serve(host.clone(), assets, addr, access).await?;
         Ok((host, served))
     }
 

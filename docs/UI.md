@@ -22,6 +22,7 @@ the same thing in both. It holds no agent logic: one `Interaction` drives the on
 | Native window | `ArkUi::new(app).run_desktop(tauri::generate_context!())` | feature `desktop` (default), Tauri |
 | Local browser | `ArkUi::new(app).serve("127.0.0.1:0").await` prints a URL with a token | nothing extra (`default-features = false`) |
 | Your own front-end | `ArkUi::new(app).open().await` gives a `Host`; call it and subscribe to its events | nothing extra |
+| A runtime elsewhere | `ArkUi::new(app).access(Access::Tokens(..)).serve(addr)` on a server; clients use `remote::Client` or `remote::run_window(url, token, ctx)` | saved access tokens, a TLS proxy ([`REMOTE.md`](REMOTE.md)) |
 
 A headless consumer depends on `ark-sdk` alone and never compiles Tauri. The writer example
 serves in a browser without the desktop feature: `writer --serve`.
@@ -213,9 +214,12 @@ reconnects mid-turn rebuilds the turn and then follows it; the page drops events
 already shown and reloads on a gap. In a browser the stream reconnects with backoff (1 s
 doubling to 30 s) and stops after ten failures with a Retry button.
 
-The HTTP server binds 127.0.0.1, requires the per-run token on every request except static
-files, and rejects a `Host` header that is not the loopback address, so another local
-process or a web page cannot drive the agent.
+Locally, the HTTP server requires the per-run token on every request except static files
+and `GET /health`, and rejects a `Host` header that is not the loopback address, so another
+local process or a web page cannot drive the agent. With saved access tokens
+(`Access::Tokens`) it accepts any `Host` and checks the token instead: a runtime other machines
+connect to ([`REMOTE.md`](REMOTE.md), ADR 0016). A token is read from `Authorization: Bearer`,
+`X-Ark-Token` or `?token=` (the page's `EventSource`).
 
 ## Developing the page
 
@@ -252,7 +256,8 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
   text area (no highlighting).
 - A `present` directive for a view nothing shows (no panel or viewer lists it) is a toast in
   the window; the model is still told it was presented.
-- One `Host` serves one live session. Two browser tabs on one server share it.
+- One `Host` serves one live session. Two browser tabs on one server, or a window and a
+  browser on a remote runtime, share it.
 - "Always in this project" grants last until removed in Settings › Permissions (or
   `/grants`); "for this session" grants end with the process, as in the shell.
 - There is no macOS WebDriver for the native window; its page is tested in WebKit instead,

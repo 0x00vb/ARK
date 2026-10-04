@@ -1,10 +1,12 @@
-//! The workspace in a local browser: a small HTTP server on 127.0.0.1. It serves the same page
-//! as the desktop window, answers `POST /rpc` with [`Host::call`], and streams events on
-//! `GET /events` (server-sent events).
+//! The workspace over HTTP. It serves the same page as the desktop window, answers
+//! `POST /rpc` with [`Host::call`], streams events on `GET /events` (server-sent events), and
+//! answers `GET /health` (no token: `{ok, version}`, for supervisors and proxies).
 //!
-//! Every request except the page's static files needs the per-run token printed at start, and
-//! the `Host` header must name the loopback address, so another local process or a web page
-//! cannot drive the agent.
+//! Every other request except the page's static files needs a token ([`Access`]). With the
+//! one-time token (local use) the `Host` header must also name the loopback address, so
+//! another local process or a web page cannot drive the agent. With saved tokens (a runtime
+//! other machines connect to, ADR 0016) any `Host` is accepted: a reverse proxy in front
+//! terminates TLS and passes its own name.
 
 use std::sync::Arc;
 
@@ -12,29 +14,68 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::access::Tokens;
 use crate::assets::Assets;
 use crate::host::Host;
 
+/// Who may call the server.
+#[derive(Clone, Debug, Default)]
+pub enum Access {
+    /// A token made at start and printed in the URL; only requests addressed to the loopback
+    /// host are answered. For a browser on the same machine.
+    #[default]
+    OneTime,
+    /// The saved tokens ([`Tokens`]); any address and `Host`. For a runtime other machines
+    /// connect to, behind a TLS proxy or on a private network.
+    Tokens(Tokens),
+}
+
 /// A running server.
 pub struct Served {
+    /// The page's address: with the one-time token in it, or bare with saved tokens.
     pub url: String,
+    /// The one-time token; empty with saved tokens.
     pub token: String,
     pub port: u16,
+}
+
+/// How long a client may take to send a request's head and body.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+enum Check {
+    OneTime(String),
+    Tokens(Tokens),
 }
 
 pub(crate) async fn serve(
     host: Arc<Host>,
     assets: Arc<Assets>,
     addr: &str,
+    access: Access,
 ) -> anyhow::Result<(Served, tokio::task::JoinHandle<()>)> {
     let listener = TcpListener::bind(addr).await?;
-    let port = listener.local_addr()?.port();
-    let token = uuid::Uuid::new_v4().simple().to_string();
-    let served = Served {
-        url: format!("http://127.0.0.1:{port}/?token={token}"),
-        token: token.clone(),
-        port,
+    let local = listener.local_addr()?;
+    let port = local.port();
+    let (served, check) = match access {
+        Access::OneTime => {
+            let token = uuid::Uuid::new_v4().simple().to_string();
+            let served = Served {
+                url: format!("http://127.0.0.1:{port}/?token={token}"),
+                token: token.clone(),
+                port,
+            };
+            (served, Check::OneTime(token))
+        }
+        Access::Tokens(tokens) => {
+            let served = Served {
+                url: format!("http://{local}/"),
+                token: String::new(),
+                port,
+            };
+            (served, Check::Tokens(tokens))
+        }
     };
+    let check = Arc::new(check);
     let task = tokio::spawn(async move {
         loop {
             let Ok((sock, _)) = listener.accept().await else {
@@ -42,9 +83,9 @@ pub(crate) async fn serve(
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 continue;
             };
-            let (host, assets, token) = (host.clone(), assets.clone(), token.clone());
+            let (host, assets, check) = (host.clone(), assets.clone(), check.clone());
             tokio::spawn(async move {
-                let _ = handle(sock, host, assets, &token, port).await;
+                let _ = handle(sock, host, assets, &check, port).await;
             });
         }
     });
@@ -144,29 +185,56 @@ async fn respond(
     Ok(())
 }
 
+impl Request {
+    /// The token the client sent: `Authorization: Bearer`, `X-Ark-Token`, or `?token=` (an
+    /// `EventSource` cannot set headers).
+    fn token(&self) -> &str {
+        self.header("authorization")
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .or_else(|| self.header("x-ark-token"))
+            .or_else(|| self.query("token"))
+            .unwrap_or("")
+    }
+}
+
 async fn handle(
     mut sock: TcpStream,
     host: Arc<Host>,
     assets: Arc<Assets>,
-    token: &str,
+    check: &Check,
     port: u16,
 ) -> anyhow::Result<()> {
-    let req = read_request(&mut sock).await?;
-    let host_ok = matches!(
-        req.header("host"),
-        Some(h) if h == format!("127.0.0.1:{port}") || h == format!("localhost:{port}")
-    );
-    if !host_ok {
-        return respond(
-            &mut sock,
-            "421 Misdirected Request",
-            "text/plain",
-            b"wrong host",
-        )
-        .await;
-    }
-    let authed = req.header("x-ark-token") == Some(token) || req.query("token") == Some(token);
+    let req = tokio::time::timeout(READ_TIMEOUT, read_request(&mut sock)).await??;
+    let authed = match check {
+        Check::OneTime(token) => {
+            let host_ok = matches!(
+                req.header("host"),
+                Some(h) if h == format!("127.0.0.1:{port}") || h == format!("localhost:{port}")
+            );
+            if !host_ok {
+                return respond(
+                    &mut sock,
+                    "421 Misdirected Request",
+                    "text/plain",
+                    b"wrong host",
+                )
+                .await;
+            }
+            req.token() == token
+        }
+        Check::Tokens(tokens) => tokens.check(req.token()).is_some(),
+    };
     match (req.method.as_str(), req.path.as_str()) {
+        ("GET", "/health") => {
+            let body = json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") });
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
         ("POST", "/rpc") => {
             if !authed {
                 return respond(&mut sock, "401 Unauthorized", "text/plain", b"token").await;

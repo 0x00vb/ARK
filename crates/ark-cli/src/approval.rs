@@ -207,7 +207,7 @@ mod tests {
         let (m, _task) = menu().await;
         let theme = Theme::default().with_color(false);
         let text = m.render(&theme).join("\n");
-        assert!(text.contains("The agent wants to run:"));
+        assert!(text.contains("ARK wants to:"));
         assert!(text.contains("manuscript.save(file=\"ch4.md\")"));
         assert!(text.contains("› 1. Allow once"));
         assert!(text.contains("Allow for this session"));

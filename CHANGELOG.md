@@ -9,6 +9,18 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-04
+
+Fixes for ARK Desktop 0.1.0, from v0.8.0 only.
+
+### Changed
+- The approval headline says who asks, not which task: "writer wants to:" ("ARK wants to:"
+  for the conversation). The line under it says what (an app's `ToolLabeler::approval`).
+
+### Fixed
+- The window's markdown no longer throws on a table that is still streaming in.
+- The Files panel no longer prints `null` under a folder's list.
+
 ## [0.8.0] - 2026-10-03
 
 Capabilities an app turns on without code of its own: MCP servers added while ARK runs,

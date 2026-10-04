@@ -8,12 +8,12 @@
 use ark_sdk::prelude::{ApprovalDecision, ApprovalRequest, Approver};
 use tokio::sync::{mpsc, oneshot};
 
-/// The question's headline, the same in every front-end: who asks, and for which task.
+/// The question's headline, the same in every front-end: who asks. The line under it says
+/// what (an app's `ToolLabeler::approval`, else the call); the task stays in the request.
 pub fn approval_title(req: &ApprovalRequest) -> String {
-    match (&req.agent, &req.task) {
-        (Some(a), Some(t)) => format!("{a} (task {t}) wants to run:"),
-        (Some(a), None) => format!("{a} wants to run:"),
-        _ => "The agent wants to run:".into(),
+    match &req.agent {
+        Some(a) => format!("{a} wants to:"),
+        None => "ARK wants to:".into(),
     }
 }
 

@@ -30,7 +30,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 
 | Area | Contents |
 |---|---|
-| Conversation | Your messages, streamed answers, and the agent's work as short activity lines ("Reading chapter-04.md"). A work block folds to one line ("Used 3 tools · Reading notes") when the turn ends. A tool row opens on click: arguments, the result the model saw, duration, approval, and what it added to the context. |
+| Conversation | Your messages, streamed answers, and the agent's work as short activity lines ("Reading chapter-04.md"). A work block folds to one line ("Reading notes and 2 more steps") when the turn ends. A tool row opens on click: arguments, the result the model saw, duration, approval, and what it added to the context. |
 | Composer | Model, and a quiet "24% context" meter that runs `/context` when clicked. The model menu lists models by backend (subscriptions, Ollama, APIs with a key); a backend that is not ready shows its sign-in or install command. An app can draw this menu itself (`ark.modelPicker`); then, while the app says no model is chosen, the button asks for one and sending opens the menu with the text kept. |
 | Sidebar | New chat, then projects with their chats beneath (times, "Show more" after 8). The current project is unfolded, the others fold; a chevron unfolds one without opening it, and a fold choice lasts until the current project changes. A project's menu renames it and changes its folder; "+" adds a folder as a project, or an empty one. Settings at the bottom. |
 | Top bar | The title (the chat's, or the project's over one of its views). With app views marked `nav`: tabs, "Chat" first. On the right, a + menu: Terminal, Browser, Files, then app panels marked `nav`. |

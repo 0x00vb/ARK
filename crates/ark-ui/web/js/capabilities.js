@@ -18,10 +18,12 @@ function section(el, ark) {
     }
     for (const c of all) {
       const actions = h("div.plugin-actions");
-      let detail = c.says;
-      if (c.state === "ready" && c.account) detail = `${c.says} · ${c.account}`;
-      if (c.state === "unavailable") detail = `${c.says} · ${c.why}`;
-      if (c.added) detail = `${c.says} · managed in Tool servers`;
+      const says = c.says.charAt(0).toUpperCase() + c.says.slice(1);
+      let detail = says;
+      if (c.state === "ready" && c.account) detail = `${says} · ${c.account}`;
+      if (c.added) detail = `${says} · managed in Tool servers`;
+      // Why it cannot be used is for the curious: on hover.
+      if (c.state === "unavailable") actions.append(h("span.plugin-hint", { title: c.why }, "Not available yet"));
       if (c.state === "connect") {
         const go = h("button.btn.primary.small", { type: "button" }, waiting === c.id ? "Waiting for sign-in…" : `Connect ${c.provider || ""}`.trim());
         go.disabled = waiting === c.id;
@@ -42,7 +44,7 @@ function section(el, ark) {
         };
         actions.append(off);
       }
-      const state = c.state === "ready" ? "" : c.state === "connect" ? ".off" : ".down";
+      const state = c.state === "ready" ? "" : ".off";
       list.append(h(`div.plugin-row.capability-row${state}`, { "data-id": c.id },
         h("span.plugin-dot", { title: c.state === "ready" ? "Ready" : c.state === "connect" ? "Not connected" : "Unavailable" }),
         h("div.plugin-main",

@@ -31,6 +31,14 @@ What changed for people building on ARK, per release. Not a commit log.
   Permissions, Skills and Tool servers. Welcome suggestions go through the same checks as a
   typed message.
 - Window: the send button stays at the right of the composer when the context meter is hidden.
+- Window: an approval shows its sentence, then what it would write in a separate block; the
+  card carries `data-action`. A finished work block reads "Reading notes and 2 more steps"
+  instead of "Used 3 tools". Capabilities that cannot be used say "Not available yet" (why, on
+  hover) instead of an error. "Choose a folder…" and "New project…" in the sidebar's + menu.
+
+### Fixed
+- Window: a question still waiting after a reload keeps all its answers ("Always in this
+  project" was missing).
 
 ### Breaking
 - `ark_sdk::offered_tools(engine, per_agent)` takes the per-agent sources

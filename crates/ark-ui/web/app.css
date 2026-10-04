@@ -490,9 +490,10 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 }
 .approval.leaving { opacity: 0; translate: 0 -4px; }
 .approval.decided { opacity: 0.6; }
-.approval-title { font-size: 13.5px; font-weight: 600; }
-.approval-line {
-  margin: 10px 0 6px;
+.approval-title { font-size: 12.5px; font-weight: 500; color: var(--text-2); }
+.approval-line { margin: 4px 0 6px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; text-wrap: pretty; }
+.approval-preview {
+  margin: 8px 0 6px;
   font: 12.5px/1.5 var(--mono);
   background: var(--code-bg);
   border-radius: 8px; padding: 8px 10px;

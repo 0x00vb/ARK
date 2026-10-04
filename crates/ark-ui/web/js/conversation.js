@@ -237,7 +237,9 @@ class TurnView {
       const n = Number(b.dataset.tools || 0);
       const first = b.dataset.firstTool || b.dataset.first || "";
       const s = b.querySelector(".work-summary");
-      s.textContent = n > 0 ? `Used ${n} tool${n === 1 ? "" : "s"}` + (first ? ` · ${clip(first, 60)}` : "") : clip(first, 80);
+      // What it did first, in the app's words, and how many steps followed.
+      const rest = n > 1 ? ` and ${n - 1} more step${n === 2 ? "" : "s"}` : "";
+      s.textContent = first ? clip(first, 60) + rest : n > 0 ? `${n} step${n === 1 ? "" : "s"}` : "";
       if (s.textContent) b.dataset.summary = "";
       else delete b.dataset.summary;
       b.dataset.open = "false";
@@ -426,10 +428,15 @@ export function approvalCard(msg, onDecide) {
     for (const b of card.querySelectorAll("button")) b.disabled = true;
     onDecide(msg.id, d);
   };
-  const card = h("div.approval", { "data-id": msg.id, tabindex: "-1" },
+  // The line's first row says what; the rest, if any, is what it would write (a preview).
+  const [what, ...more] = String(msg.line || "").split("\n");
+  const indent = Math.min(...more.filter((l) => l.trim()).map((l) => l.match(/^ */)[0].length));
+  const preview = more.map((l) => l.slice(Number.isFinite(indent) ? indent : 0)).join("\n").trim();
+  const card = h("div.approval", { "data-id": msg.id, "data-action": req.action || null, tabindex: "-1" },
     // The headline comes from ark-interact, as the terminal's does.
     h("div.approval-title", msg.title || (own ? "ARK wants to:" : `${req.agent} wants to:`)),
-    h("pre.approval-line", msg.line),
+    h("div.approval-line", what),
+    preview ? h("pre.approval-preview", preview) : null,
     req.summary ? h("div.approval-summary", req.summary) : null,
     // The answers come from ark-interact, as the terminal's do: the first is the default.
     h("div.approval-actions", ...(msg.choices || [

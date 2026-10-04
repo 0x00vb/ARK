@@ -433,7 +433,7 @@ impl Host {
                     .lock()
                     .unwrap()
                     .iter()
-                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"] }))
+                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"] }))
                     .collect();
                 let running = self
                     .running

@@ -64,7 +64,7 @@ export class Sidebar {
     const open = this.unfolded(p);
     const row = h("div.project-row", {
       role: "treeitem", tabindex: "0", "aria-expanded": String(open), "aria-current": p.current ? "true" : null,
-      title: p.workspace || "No folder yet: files go to a scratch folder",
+      title: p.workspace || "No folder yet",
     },
       h("button.project-chev", { type: "button", tabindex: "-1", "aria-label": open ? "Fold" : "Unfold", onclick: (e) => { e.stopPropagation(); this.fold(p, !open); } }, icon("chevron-right")),
       h("span.project-name", p.name),
@@ -176,13 +176,13 @@ export class Sidebar {
   }
 
   addMenu(anchor) {
-    const name = h("input.menu-input", { placeholder: "New empty project…", "aria-label": "New project name" });
+    const name = h("input.menu-input", { placeholder: "New project…", "aria-label": "New project name" });
     const menu = this.api.popover(anchor, [
       h("button.menu-item", { type: "button", onclick: async () => {
         menu.close();
         const path = await this.folder(anchor, "Open a folder as a project");
         if (path) this.api.addProject({ path });
-      } }, h("span", "Open folder…")),
+      } }, h("span", "Choose a folder…")),
       h("div.menu-sep"),
       name,
     ]);

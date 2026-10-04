@@ -44,7 +44,7 @@ const scenarios = {
     const live = await shape(page);
     assert.deepEqual(live, [
       "text: Reading the notes now.",
-      "work: Used 1 tool · Reading notes",
+      "work: Reading notes",
       "answer: The notes mention a locket.",
     ]);
     // The head shows through an attribute, not :has(:empty), which the macOS web view does
@@ -165,7 +165,7 @@ const scenarios = {
     const after = await shape(page);
     assert.deepEqual(after, [
       `text: ${NARRATION}`,
-      "work: Used 1 tool · Reading notes",
+      "work: Reading notes",
       "answer: The notes mention a locket.",
     ]);
     assert.equal(await page.locator(".turn").count(), 1, "one turn, not a copy");

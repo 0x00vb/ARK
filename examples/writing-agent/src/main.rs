@@ -714,6 +714,20 @@ async fn main() -> std::process::ExitCode {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".writer")
         });
+    let cli = <Cli as clap::Parser>::parse();
+    let tokens = ark_ui::access::Tokens::in_store(&root);
+    if let Some(name) = &cli.new_token {
+        return match tokens.create(name) {
+            Ok(t) => {
+                println!("{t}");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("writer: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let ark = match build_ark(root, None) {
         Ok(a) => a,
         Err(e) => {
@@ -748,7 +762,6 @@ async fn main() -> std::process::ExitCode {
                 .field("folder", ws.display().to_string())
                 .blocks
         });
-    let cli = <Cli as clap::Parser>::parse();
     if let Some(addr) = cli.serve {
         // The same app in a browser window.
         let start = ark_cli::ark_interact::Start {
@@ -757,8 +770,14 @@ async fn main() -> std::process::ExitCode {
             session: cli.ark.session.clone(),
             resume: cli.ark.resume,
         };
+        let access = if cli.tokens {
+            ark_ui::Access::Tokens(tokens)
+        } else {
+            ark_ui::Access::OneTime
+        };
         let ui = ark_ui::ArkUi::new(app)
             .start(start)
+            .access(access)
             .accent("#b0418f")
             .welcome(
                 "What are we revising?",
@@ -798,6 +817,13 @@ struct Cli {
     /// Open the workspace in a browser instead of the terminal (e.g. --serve 127.0.0.1:0)
     #[arg(long, value_name = "ADDR", num_args = 0..=1, default_missing_value = "127.0.0.1:0")]
     serve: Option<String>,
+    /// With --serve: accept the saved access tokens from any host, for other machines behind a
+    /// TLS proxy (docs/REMOTE.md), instead of a one-time link
+    #[arg(long, requires = "serve")]
+    tokens: bool,
+    /// Create an access token with this name, print it once, and exit
+    #[arg(long, value_name = "NAME")]
+    new_token: Option<String>,
 }
 
 // ---- helpers ---------------------------------------------------------------

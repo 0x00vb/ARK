@@ -209,6 +209,32 @@ impl Orchestrator {
         }
     }
 
+    /// The tool namespaces an agent can be given (`web`, `browser`, `mail`, the app's own), in
+    /// the order the app offers them. What `agents.create` lists as capabilities.
+    pub fn capabilities(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        let listed = self
+            .inner
+            .engine
+            .tools()
+            .adapters()
+            .iter()
+            .map(|a| a.name().to_string())
+            .chain(
+                self.inner
+                    .per_agent
+                    .iter()
+                    .map(|p| p.listing().name().to_string()),
+            )
+            .collect::<Vec<_>>();
+        for n in listed {
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+        names
+    }
+
     /// Every agent, in the order they were spawned.
     pub fn agents(&self) -> Vec<AgentRecord> {
         let st = self.inner.state.lock().unwrap();

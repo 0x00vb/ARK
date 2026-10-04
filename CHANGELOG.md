@@ -57,6 +57,8 @@ project.
   over the DevTools protocol; `browser.open`, `read`, `back`, `click`, `type`; a fresh context
   per agent, and a signed-in browser one agent uses at a time. `ArkBuilder::browser(true)` or
   `browser_with(service)` ([`EXTENSION.md`](docs/EXTENSION.md#the-browser)).
+- `agents.create` takes `capabilities` (`["web", "browser"]`): the agent gets only those tool
+  namespaces; its description lists them (`Orchestrator::capabilities`).
 - `ark_runtime::per_agent::{PerAgent, Owner}`: tools each agent gets its own of (the web on its
   model, the browser). `Ark::per_agent`, `Ark::agent_tools`; `ark_runtime::web::Web`.
 - "Always in this project": `ApprovalDecision::AllowAlways`, kept per project in the store

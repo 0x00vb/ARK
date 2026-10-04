@@ -1339,3 +1339,62 @@ async fn an_agent_gets_its_own_browser_when_its_tools_allow_it() {
         "{offered:?}"
     );
 }
+
+/// The conversation creates a researcher with only the web and the browser; a capability
+/// that does not exist is refused with the ones that do.
+#[tokio::test]
+async fn the_conversation_gives_a_new_agent_only_the_capabilities_its_role_needs() {
+    let dir = tempfile::tempdir().unwrap();
+    let chat = Script::new(
+        "chat",
+        vec![
+            calls(vec![(
+                "agents.create",
+                json!({"name": "researcher", "role": "finds things on the web", "capabilities": ["web", "browser"]}),
+            )]),
+            calls(vec![(
+                "agents.create",
+                json!({"name": "pilot", "role": "flies", "capabilities": ["teleport"]}),
+            )]),
+            answer("made a researcher [inv:1]"),
+        ],
+    );
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(chat.clone() as Arc<dyn Provider>)
+        .web_with(ark_tools::web::WebAdapter::new().backends(vec![]))
+        .browser_with(ark_sdk::prelude::ark_browser::BrowserService::new(
+            dir.path().join("browser"),
+        ))
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "").unwrap();
+    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    let caps = o.capabilities();
+    assert!(
+        caps.contains(&"web".to_string()) && caps.contains(&"browser".to_string()),
+        "{caps:?}"
+    );
+
+    let mut session = ark.start_session(&project.id).unwrap();
+    let opts = TurnOptions {
+        tools: vec![o.chat_tools()],
+        ..Default::default()
+    };
+    ark.ask_session(&mut session, "make a researcher", opts, |_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        o.agent("researcher").unwrap().spec.tools,
+        vec!["web.*".to_string(), "browser.*".to_string()]
+    );
+    assert!(o.agent("pilot").is_none());
+    let seen = chat.texts();
+    assert!(
+        seen[2].contains("no capability `teleport`; one of:"),
+        "{}",
+        seen[2]
+    );
+}

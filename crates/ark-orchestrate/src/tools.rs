@@ -288,7 +288,11 @@ impl Adapter for ChatTools {
                     "name": { "type": "string", "description": "short, lowercase, e.g. reviewer" },
                     "role": { "type": "string", "description": "one line on what it does" },
                     "instructions": { "type": "string", "description": "how it works, as a system prompt" },
-                    "skills": { "type": "array", "items": { "type": "string" }, "description": "skills it may read, by name from the SKILLS list" }
+                    "skills": { "type": "array", "items": { "type": "string" }, "description": "skills it may read, by name from the SKILLS list" },
+                    "capabilities": {
+                        "type": "array", "items": { "type": "string" },
+                        "description": format!("what it may use, only what its role needs; default: all. One of: {}", self.orch.capabilities().join(", "))
+                    }
                 }
             })),
         ]
@@ -360,13 +364,34 @@ impl Adapter for ChatTools {
                             .collect()
                     })
                     .unwrap_or_default();
-                let spec = AgentSpec::new(&name)
+                let known = self.orch.capabilities();
+                let mut tools: Vec<String> = Vec::new();
+                for c in input
+                    .get("capabilities")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                {
+                    let c = c.trim().trim_end_matches(".*").to_lowercase();
+                    if !known.contains(&c) {
+                        return Err(AdapterError::bad_input(
+                            action,
+                            format!("no capability `{c}`; one of: {}", known.join(", ")),
+                        ));
+                    }
+                    tools.push(format!("{c}.*"));
+                }
+                let mut spec = AgentSpec::new(&name)
                     .role(s("role"))
                     .instructions(s("instructions"))
                     .skills(skills);
+                if !tools.is_empty() {
+                    spec = spec.tools(tools);
+                }
                 let a = self.orch.spawn(spec).await.map_err(fail)?;
                 Ok(ActionOutput::json(
-                    json!({ "agent": a.name, "role": a.spec.role }),
+                    json!({ "agent": a.name, "role": a.spec.role, "tools": a.spec.tools }),
                 ))
             }
             other => Err(AdapterError::UnknownAction(other.to_string())),

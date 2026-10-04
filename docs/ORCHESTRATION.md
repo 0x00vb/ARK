@@ -74,7 +74,7 @@ person asks in words; the chat decides what becomes an agent or a task.
 
 | Action | Does |
 |---|---|
-| `agents.create {name, role, instructions?, skills?}` | adds an agent with every app tool and the skills named (none by default); its state-changing actions still ask the person. An existing name is refused |
+| `agents.create {name, role, instructions?, skills?, capabilities?}` | adds an agent with the skills named (none by default) and the capabilities named (`["web", "browser"]`, from `Orchestrator::capabilities`; every app tool when none are named); its state-changing actions still ask the person. An existing name or an unknown capability is refused |
 | `agents.delegate {to, objective, context?, wait?}` | hands any live agent a task with `Origin::External`; waits for the result unless `wait: false` |
 | `agents.wait {tasks}` | waits for tasks handed off with `wait: false` |
 

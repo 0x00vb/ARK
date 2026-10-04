@@ -9,6 +9,14 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-04
+
+Claude Code and Codex are first-class: their CLI keeps running per session and the answer
+streams; cancel drops the vendor session; usage limits say when they reset, and the usage the
+CLIs report is available to apps. Agents follow the session's model. Capabilities that need
+an account (Mail, Calendar on Google), asked for mid-task, and approvals that last in a
+project.
+
 ### Added
 - Claude Code and Codex sessions keep their CLI running between calls and stream the answer
   while it is written (ADR 0012): Claude Code over streaming JSON, Codex as `codex app-server`

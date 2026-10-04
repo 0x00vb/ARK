@@ -3,6 +3,37 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Subscription CLIs kept running (2026-10-04)
+
+A managed vendor session keeps its CLI running: Claude Code with streaming JSON in and out,
+Codex as `codex app-server` (ADR 0012). Before: v0.8.0, one process per call. Reports in
+`bench/cli-live/`: `--only simple,tool-lookup,multi-step --reps 3` on `claude:haiku`;
+`--only simple,multi-step --reps 1` on `codex:default`. Each run is a new session, so only
+its resumed calls (1 in `tool-lookup`, 3 in `multi-step`) skip the start-up.
+
+| `claude:haiku`, 9 runs each | v0.8.0 | Running process |
+|---|---:|---:|
+| Success | 9/9 | 9/9 |
+| Time to first token (median) | 4,966 ms | 2,049 ms |
+| Turn time (median) | 10,968 ms | 11,413 ms |
+| Turn time (p95) | 48,844 ms | 23,256 ms |
+| Total tokens per run | 16,656 | 13,080 |
+| Cost per success | $0.0332 | $0.0304 |
+
+| `codex:default`, 1 run each | v0.8.0 (`codex exec`) | App server |
+|---|---:|---:|
+| `simple` (1 call) | 16.1 s | 23.0 s |
+| `multi-step` (4 calls) | 97.8 s | 38.9 s |
+
+The median turn did not move: it is dominated by single-run noise in the model's own time
+(the same workload took 5 s or 23 s). The p95 and time to first token are the gain. Codex's
+first call is slower: a new thread starts the MCP servers of the Codex setup on the machine.
+
+Outside the bench (`writer --serve` on `claude:haiku`, driven through the page protocol): a
+story request streamed in pieces and was cancelled after 5 of them; its process stopped; the
+next question ("What is 7 times 6?") got "42" (a cancelled vendor session is never resumed);
+the one after reused the process, 2.3 s.
+
 ## The web (2026-10-03)
 
 The `web` workload: find a page with `web.search`, read it with `web.fetch`, answer a fact that

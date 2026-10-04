@@ -312,6 +312,140 @@ pub(crate) fn parse_args(provider: &str, tool: &str, text: &str) -> Result<Value
     })
 }
 
+/// Streams one top-level string field out of a JSON object that arrives in pieces: a
+/// structured reply's `text` while the model is still writing it. Each [`push`] returns the
+/// field's newly decoded characters. Escapes split across pieces are held until complete;
+/// the same name inside a nested object or inside another string is ignored.
+///
+/// [`push`]: JsonTextField::push
+pub(crate) struct JsonTextField {
+    field: &'static str,
+    depth: u32,
+    in_string: bool,
+    /// What the string being read is: a key at the top level, the field's value, or other.
+    role: Role,
+    key: String,
+    /// At the top level, between a key and its value.
+    after_colon: bool,
+    last_key: String,
+    /// The escape being read: `\` alone, or `\u` and up to four hex digits.
+    escape: Option<String>,
+    /// A high surrogate waiting for its low half.
+    high: Option<u16>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Role {
+    Key,
+    Field,
+    Other,
+}
+
+impl JsonTextField {
+    pub(crate) fn new(field: &'static str) -> Self {
+        JsonTextField {
+            field,
+            depth: 0,
+            in_string: false,
+            role: Role::Other,
+            key: String::new(),
+            after_colon: false,
+            last_key: String::new(),
+            escape: None,
+            high: None,
+        }
+    }
+
+    pub(crate) fn push(&mut self, piece: &str) -> String {
+        let mut out = String::new();
+        for c in piece.chars() {
+            if self.in_string {
+                self.string_char(c, &mut out);
+                continue;
+            }
+            match c {
+                '{' | '[' => self.depth += 1,
+                '}' | ']' => self.depth = self.depth.saturating_sub(1),
+                ':' if self.depth == 1 => self.after_colon = true,
+                ',' if self.depth == 1 => self.after_colon = false,
+                '"' => {
+                    self.in_string = true;
+                    self.role = if self.depth != 1 {
+                        Role::Other
+                    } else if !self.after_colon {
+                        self.key.clear();
+                        Role::Key
+                    } else if self.last_key == self.field {
+                        Role::Field
+                    } else {
+                        Role::Other
+                    };
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    fn string_char(&mut self, c: char, out: &mut String) {
+        if let Some(esc) = self.escape.as_mut() {
+            esc.push(c);
+            let decoded = match esc.as_str() {
+                e if e.starts_with("\\u") && e.len() < 6 => return,
+                e if e.starts_with("\\u") => {
+                    let unit = u16::from_str_radix(&e[2..], 16).unwrap_or(0xFFFD);
+                    self.escape = None;
+                    self.unit(unit, out);
+                    return;
+                }
+                "\\n" => '\n',
+                "\\t" => '\t',
+                "\\r" => '\r',
+                "\\b" => '\u{8}',
+                "\\f" => '\u{c}',
+                e => e.chars().nth(1).unwrap_or(c),
+            };
+            self.escape = None;
+            self.emit(decoded, out);
+            return;
+        }
+        match c {
+            '\\' => self.escape = Some("\\".into()),
+            '"' => {
+                self.in_string = false;
+                if self.role == Role::Key {
+                    self.last_key = std::mem::take(&mut self.key);
+                }
+                self.role = Role::Other;
+            }
+            _ => self.emit(c, out),
+        }
+    }
+
+    /// One UTF-16 code unit from a `\u` escape.
+    fn unit(&mut self, unit: u16, out: &mut String) {
+        if (0xD800..0xDC00).contains(&unit) {
+            self.high = Some(unit);
+            return;
+        }
+        let c = match self.high.take() {
+            Some(high) if (0xDC00..0xE000).contains(&unit) => {
+                char::decode_utf16([high, unit]).next().and_then(|r| r.ok())
+            }
+            _ => char::from_u32(unit as u32),
+        };
+        self.emit(c.unwrap_or('\u{FFFD}'), out);
+    }
+
+    fn emit(&mut self, c: char, out: &mut String) {
+        match self.role {
+            Role::Key => self.key.push(c),
+            Role::Field => out.push(c),
+            Role::Other => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,5 +583,48 @@ mod tests {
         assert_eq!(*seen.lock().unwrap(), "The answer.");
         assert_eq!(c.tool_calls[0].name, "clock.now");
         assert_eq!(c.usage, Usage::measured(80, 6));
+    }
+
+    // The pieces are the ones Claude Code streamed for a structured reply (2026-10-03,
+    // `claude -p --output-format stream-json --include-partial-messages`).
+    #[test]
+    fn a_reply_field_streams_from_partial_json() {
+        let mut f = JsonTextField::new("text");
+        let pieces = [
+            "",
+            "{\"action\": \"reply",
+            "\", \"text\": \"Hello",
+            ",",
+            " how are you today",
+            "?",
+            "\", \"tool_calls\": []",
+            "}",
+        ];
+        let out: String = pieces.iter().map(|p| f.push(p)).collect();
+        assert_eq!(out, "Hello, how are you today?");
+    }
+
+    #[test]
+    fn escapes_split_across_pieces_decode_once() {
+        let mut f = JsonTextField::new("text");
+        let mut out = String::new();
+        for p in [
+            "{\"text\":\"a\\",
+            "nb \\\"q\\",
+            "\" \\u00",
+            "e9 \\ud83d",
+            "\\ude00\"}",
+        ] {
+            out.push_str(&f.push(p));
+        }
+        assert_eq!(out, "a\nb \"q\" é 😀");
+    }
+
+    #[test]
+    fn the_field_name_elsewhere_is_ignored() {
+        let mut f = JsonTextField::new("text");
+        let json = r#"{"action":"call_tools","tool_calls":[{"name":"x","arguments":"{\"text\":\"no\"}"}],"note":"text","text":"yes"}"#;
+        let out: String = json.chars().map(|c| f.push(&c.to_string())).collect();
+        assert_eq!(out, "yes");
     }
 }

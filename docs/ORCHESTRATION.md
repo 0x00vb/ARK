@@ -123,7 +123,7 @@ run(agent, task)
   -> Models::resolve(lane = "<project>/<agent>", spec = "claude:sonnet")
   -> SubscriptionRuntime::session(lane, spec)    one managed vendor session per agent
   -> ManagedSession (a Provider)                 open, resume with a delta, rotate, release
-  -> CliModel                                    claude -p --session-id / --resume, codex exec / exec resume
+  -> CliModel                                    a running claude (stream-json) or codex app-server per session
 ```
 
 | Spec | Reasoning calls | Planner and critic calls |

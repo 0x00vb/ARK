@@ -11,21 +11,30 @@
 //! As a plain [`Provider`], each call starts a process and resends the whole transcript. As a
 //! [`SessionBackend`], driven by a [`crate::session::ManagedSession`], a vendor session is
 //! opened once (Claude `--session-id`, Codex `exec`) and continued with only what is new
-//! (Claude `--resume`, Codex `exec resume`). No streaming: text arrives when the reply is
-//! complete.
+//! (Claude `--resume`, Codex `exec resume`).
+//!
+//! Claude Code runs with streaming JSON in and out: the reply's text reaches `on_text` while
+//! the model writes it, and a vendor session keeps its process between calls ([`crate::live`]),
+//! so a call skips the CLI's start-up. Codex runs once per call and its text arrives when the
+//! reply is complete.
 
+use crate::codex_app::{AppError, CodexApp};
+use crate::live::{LiveProcess, ReadError};
 use crate::session::{Base, Delta, SessionBackend};
+use crate::stream::JsonTextField;
 use crate::{
-    Completion, Message, Provider, ProviderError, Result, Role, ToolCall, ToolDef, Usage, WebHit,
+    Completion, Message, Provider, ProviderError, Result, Role, TextSink, ToolCall, ToolDef, Usage,
+    WebHit,
 };
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 
 /// How long one completion may take before the CLI is stopped.
@@ -217,6 +226,13 @@ pub struct CliModel {
     model: String,
     program: Option<PathBuf>,
     calls: AtomicU64,
+    /// Claude Code processes kept for vendor sessions, by session id. Only idle ones are
+    /// here: a call takes its process out and puts it back after a complete reply.
+    live: Mutex<HashMap<String, LiveProcess>>,
+    /// The Codex app server holding this model's threads, when idle (taken the same way).
+    app: Mutex<Option<CodexApp>>,
+    /// The app server could not be started: Codex sessions run `codex exec` instead.
+    no_app: std::sync::atomic::AtomicBool,
 }
 
 impl CliModel {
@@ -231,6 +247,9 @@ impl CliModel {
             },
             program: None,
             calls: AtomicU64::new(0),
+            live: Mutex::new(HashMap::new()),
+            app: Mutex::new(None),
+            no_app: Default::default(),
         }
     }
 
@@ -258,38 +277,251 @@ impl CliModel {
         system: &str,
         messages: &[Message],
         tools: &[ToolDef],
+        on_text: Option<TextSink<'_>>,
     ) -> Result<Completion> {
         let sys = protocol(Some(self.cli), system, tools, false);
-        let input = |messages: &[Message]| match self.cli {
-            Cli::Claude => render_transcript(messages),
-            Cli::Codex => format!("{sys}\n\n{}", render_transcript(messages)),
-        };
-        let first = self.exec(Mode::OneShot, &sys, input(messages)).await?;
+        let input = |messages: &[Message]| render_transcript(messages);
+        let first = self
+            .exec(Mode::OneShot, &sys, input(messages), on_text)
+            .await?;
         if !(first.gave_up && !tools.is_empty()) {
             return Ok(first.completion);
         }
         let mut again = messages.to_vec();
         again.push(Message::user(GAVE_UP));
-        let second = self.exec(Mode::OneShot, &sys, input(&again)).await?;
+        let second = self
+            .exec(Mode::OneShot, &sys, input(&again), on_text)
+            .await?;
         Ok(second.after(&first))
     }
 
-    /// Run the CLI once for a completion. `sys` is the full system prompt (Claude takes it as
-    /// a flag; Codex reads it from `input`). Returns the completion and the vendor's session id
-    /// when it reported one.
-    async fn exec(&self, mode: Mode<'_>, sys: &str, input: String) -> Result<Exec> {
+    /// Run the CLI for one completion. `sys` is the full system prompt; `input` what this
+    /// call adds. Returns the completion and the vendor's session id when it reported one.
+    async fn exec(
+        &self,
+        mode: Mode<'_>,
+        sys: &str,
+        input: String,
+        on_text: Option<TextSink<'_>>,
+    ) -> Result<Exec> {
+        if self.cli == Cli::Claude {
+            return self.claude(mode, sys, &input, on_text).await;
+        }
+        if !matches!(mode, Mode::OneShot) && !self.no_app.load(Ordering::Relaxed) {
+            if let Some(e) = self.codex_app(mode, sys, &input, on_text).await {
+                return e;
+            }
+        }
+        // `codex exec` reads the system prompt from its input; a resumed thread has it.
+        let input = match mode {
+            Mode::Resume(_) => input,
+            _ => format!("{sys}\n\n{input}"),
+        };
         let p = self
             .invoke(mode, Some(sys), input, REPLY_SCHEMA, false)
             .await?;
         let c = self.completion(&p.reply, p.usage)?;
-        // Claude Code refused calls to host tools the model made as native ones, and the
-        // model then answered without asking the host for anything: it gave up.
-        let gave_up = self.cli == Cli::Claude && p.turns > 2 && c.tool_calls.is_empty();
+        if let Some(f) = on_text.filter(|_| !c.content.is_empty()) {
+            f(&c.content);
+        }
         Ok(Exec {
             completion: c,
             vendor: p.vendor,
+            gave_up: false,
+        })
+    }
+
+    /// One Claude Code completion over streaming JSON. A session's process is reused when one
+    /// is running for it, and kept after a complete reply; a one-shot process ends with the
+    /// call. Text reaches `on_text` while the model writes it.
+    async fn claude(
+        &self,
+        mode: Mode<'_>,
+        sys: &str,
+        input: &str,
+        on_text: Option<TextSink<'_>>,
+    ) -> Result<Exec> {
+        let running = match mode {
+            Mode::Resume(id) => self.take_live(id),
+            _ => None,
+        };
+        let mut proc = match running {
+            Some(p) => p,
+            None => {
+                let mut cmd = command(&self.program()?);
+                cmd.args(claude_stream_args(
+                    mode,
+                    &self.model,
+                    Some(sys),
+                    REPLY_SCHEMA,
+                ))
+                .current_dir(work_dir()?);
+                LiveProcess::spawn(cmd).map_err(|e| self.api(format!("could not start: {e}")))?
+            }
+        };
+        let message = json!({"type": "user", "message": {"role": "user", "content": input}});
+        if let Err(e) = proc.send(&message.to_string()).await {
+            return Err(self.stopped(&proc, &e.to_string()));
+        }
+        let deadline = Instant::now() + CALL_TIMEOUT;
+        let mut reply = ClaudeReply::default();
+        // When the account is out of capacity, the rate-limit event says when it resets.
+        let mut reset: Option<u64> = None;
+        let result = loop {
+            let wait = deadline.saturating_duration_since(Instant::now());
+            let line = match proc.next_line(wait).await {
+                Ok(l) => l,
+                Err(ReadError::TimedOut) => {
+                    proc.stop().await;
+                    return Err(self.api(format!("no reply within {}s", CALL_TIMEOUT.as_secs())));
+                }
+                Err(ReadError::Closed) => return Err(self.stopped(&proc, "it stopped")),
+                Err(ReadError::Io(e)) => return Err(self.stopped(&proc, &e.to_string())),
+            };
+            let Ok(ev) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            match ev["type"].as_str() {
+                Some("stream_event") => reply.feed(&ev["event"], on_text),
+                Some("rate_limit_event") => {
+                    let info = &ev["rate_limit_info"];
+                    if info["status"].as_str().is_some_and(|s| s != "allowed") {
+                        reset = info["resetsAt"].as_u64();
+                    }
+                }
+                Some("result") => break ev,
+                _ => {}
+            }
+        };
+        let p = parse_claude_result(&result)
+            .map_err(|d| self.classify_with(self.signed_out_hint(d), reset))?;
+        let c = self.completion(&p.reply, p.usage)?;
+        let gave_up = p.turns > 2 && c.tool_calls.is_empty();
+        if let (Some(f), false) = (on_text, gave_up) {
+            // What the stream did not show (text after a refused native call, or a reply not
+            // streamed at all) is sent now. A run that gave up shows nothing: it is asked again.
+            if let Some(rest) = c.content.strip_prefix(reply.shown.as_str()) {
+                if !rest.is_empty() {
+                    f(rest);
+                }
+            }
+        }
+        let vendor = p.vendor.clone().or(match mode {
+            Mode::Open(id) | Mode::Resume(id) => Some(id.to_string()),
+            Mode::OneShot => None,
+        });
+        if let (Some(v), false) = (&vendor, matches!(mode, Mode::OneShot)) {
+            self.live.lock().unwrap().insert(v.clone(), proc);
+        }
+        Ok(Exec {
+            completion: c,
+            vendor,
             gave_up,
         })
+    }
+
+    /// One Codex completion on the app server: `Open` starts a thread with `sys` as its
+    /// instructions, `Resume` continues one (loading it first when this process does not hold
+    /// it). `None` when the app server cannot be started: the caller runs `codex exec`.
+    async fn codex_app(
+        &self,
+        mode: Mode<'_>,
+        sys: &str,
+        input: &str,
+        on_text: Option<TextSink<'_>>,
+    ) -> Option<Result<Exec>> {
+        let bin = match self.program() {
+            Ok(b) => b,
+            Err(e) => return Some(Err(e)),
+        };
+        let idle = self.app.lock().unwrap().take();
+        let mut app = match idle.and_then(|mut a| a.running().then_some(a)) {
+            Some(a) => a,
+            None => match CodexApp::start(&bin, env!("CARGO_PKG_VERSION")).await {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::warn!(error = %self.app_error(&e, ""), "codex app-server unavailable; using codex exec");
+                    self.no_app.store(true, Ordering::Relaxed);
+                    return None;
+                }
+            },
+        };
+        let dir = match work_dir() {
+            Ok(d) => d,
+            Err(e) => return Some(Err(e)),
+        };
+        let model = (self.model != "default").then_some(self.model.as_str());
+        let thread = match mode {
+            Mode::Open(_) => app.start_thread(&dir, model, sys).await,
+            Mode::Resume(id) if app.has_thread(id) => Ok(id.to_string()),
+            Mode::Resume(id) => app
+                .resume_thread(&dir, model, id)
+                .await
+                .map(|_| id.to_string()),
+            Mode::OneShot => unreachable!("one-shot calls run codex exec"),
+        };
+        let schema: Value = serde_json::from_str(REPLY_SCHEMA).expect("reply schema");
+        let turn = match thread {
+            Ok(t) => app
+                .turn(&t, input, &schema, CALL_TIMEOUT, on_text)
+                .await
+                .map(|turn| (t, turn)),
+            Err(e) => Err(e),
+        };
+        let (thread, turn) = match turn {
+            Ok(x) => x,
+            Err(e) => {
+                let err = self.app_error(&e, &app.stderr_tail());
+                // A Codex error leaves the process usable; anything else ends it.
+                if matches!(e, AppError::Failed(_)) {
+                    *self.app.lock().unwrap() = Some(app);
+                }
+                return Some(Err(err));
+            }
+        };
+        *self.app.lock().unwrap() = Some(app);
+        let reply: Value = match serde_json::from_str(turn.text.trim()) {
+            Ok(v) => v,
+            Err(_) => {
+                return Some(Err(ProviderError::Malformed {
+                    provider: self.cli.name().into(),
+                    detail: format!("reply was not structured: {}", clip(&turn.text)),
+                }))
+            }
+        };
+        Some(self.completion(&reply, turn.usage).map(|c| Exec {
+            completion: c,
+            vendor: Some(thread),
+            gave_up: false,
+        }))
+    }
+
+    /// `tail`: the app server's last line on stderr, which says why it stopped.
+    fn app_error(&self, e: &AppError, tail: &str) -> ProviderError {
+        let detail = match e {
+            AppError::Broken(d) if !tail.is_empty() => format!("codex app-server: {d} ({tail})"),
+            AppError::Broken(d) => format!("codex app-server: {d}"),
+            AppError::Failed(d) => d.clone(),
+            AppError::TimedOut => format!("no reply within {}s", CALL_TIMEOUT.as_secs()),
+        };
+        self.classify(self.signed_out_hint(detail))
+    }
+
+    /// The running process of vendor session `id`, if there is one that has not exited.
+    fn take_live(&self, id: &str) -> Option<LiveProcess> {
+        let mut p = self.live.lock().unwrap().remove(id)?;
+        p.running().then_some(p)
+    }
+
+    /// The process of a call stopped answering: why, with the CLI's last words.
+    fn stopped(&self, proc: &LiveProcess, why: &str) -> ProviderError {
+        let tail = proc.stderr_tail();
+        let detail = if tail.is_empty() {
+            format!("{} {why}", self.cli.program())
+        } else {
+            format!("{} {why} ({tail})", self.cli.program())
+        };
+        self.classify(self.signed_out_hint(detail))
     }
 
     /// One search with the CLI's own web search on, and nothing else: Claude Code's
@@ -419,16 +651,27 @@ impl CliModel {
         }
     }
 
-    /// A usage or rate limit is temporary: the account recovers, so the call may be retried
-    /// after a wait. Anything else stays a plain error.
+    /// A rate limit or an overloaded service passes within seconds, so the call may be
+    /// retried after a wait. A subscription's usage limit lasts until its window resets
+    /// (hours): retrying inside a turn cannot help, so it is a plain error that says when the
+    /// limit resets. Anything else stays a plain error.
     fn classify(&self, detail: String) -> ProviderError {
+        self.classify_with(detail, None)
+    }
+
+    /// [`classify`](Self::classify), with the reset time (Unix seconds) the CLI reported
+    /// outside the error text.
+    fn classify_with(&self, detail: String, reset: Option<u64>) -> ProviderError {
         let d = detail.to_lowercase();
+        if d.contains("usage limit") || d.contains("limit reached") {
+            return self.api(self.usage_limit(&detail, reset));
+        }
         if [
             "rate limit",
-            "usage limit",
             "too many requests",
             "overloaded",
             "429",
+            "529",
         ]
         .iter()
         .any(|k| d.contains(k))
@@ -440,6 +683,21 @@ impl CliModel {
         } else {
             self.api(detail)
         }
+    }
+
+    /// What to tell the person when the account's usage limit is reached. Claude Code ends
+    /// the error with `|<reset time>`; its rate-limit event carries the same time.
+    fn usage_limit(&self, detail: &str, reset: Option<u64>) -> String {
+        let (text, stamp) = match detail.rsplit_once('|') {
+            Some((t, n)) => (t.trim(), n.trim().parse::<u64>().ok()),
+            None => (detail.trim(), None),
+        };
+        let mut s = format!("{}: {}", self.cli.label(), text.trim_end_matches('.'));
+        if let Some(wait) = stamp.or(reset).and_then(until) {
+            s.push_str(&format!(". It resets in {wait}"));
+        }
+        s.push_str(". Use another model meanwhile (/model).");
+        s
     }
 
     fn api(&self, detail: String) -> ProviderError {
@@ -515,7 +773,17 @@ impl Provider for CliModel {
         messages: &[Message],
         tools: &[ToolDef],
     ) -> Result<Completion> {
-        self.run(system, messages, tools).await
+        self.run(system, messages, tools, None).await
+    }
+
+    async fn complete_streaming(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+        on_text: TextSink<'_>,
+    ) -> Result<Completion> {
+        self.run(system, messages, tools, Some(on_text)).await
     }
 
     async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
@@ -562,6 +830,81 @@ const GAVE_UP: &str = "Your last answer gave up because calling host tools direc
 tools are never called directly. Answer again: to use a tool, return action \"call_tools\" with \
 the call in tool_calls.";
 
+/// Claude Code's flags for streaming JSON in and out: its own tools off, no project settings,
+/// the reply shaped by `schema`.
+fn claude_stream_args(mode: Mode<'_>, model: &str, sys: Option<&str>, schema: &str) -> Vec<String> {
+    let mut a: Vec<String> = [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--include-partial-messages",
+        "--verbose",
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
+    ]
+    .map(String::from)
+    .to_vec();
+    match mode {
+        Mode::OneShot => a.push("--no-session-persistence".into()),
+        Mode::Open(id) => a.extend(["--session-id".into(), id.into()]),
+        Mode::Resume(id) => a.extend(["--resume".into(), id.into()]),
+    }
+    a.extend(["--model".into(), model.into()]);
+    if let Some(sys) = sys {
+        a.extend(["--system-prompt".into(), sys.into()]);
+    }
+    a.extend(["--json-schema".into(), schema.into()]);
+    a
+}
+
+/// What Claude Code's stream events showed of one reply. The structured reply arrives as the
+/// input of its `StructuredOutput` tool, in pieces; its `text` field goes to `on_text` as it
+/// is decoded. A native tool call the CLI refuses means the model may give up and be asked
+/// again, so from then on nothing more is shown of this run.
+#[derive(Default)]
+struct ClaudeReply {
+    field: Option<JsonTextField>,
+    /// The structured output's content block index.
+    block: Option<u64>,
+    refused: bool,
+    /// The text sent to `on_text` so far.
+    shown: String,
+}
+
+impl ClaudeReply {
+    fn feed(&mut self, ev: &Value, on_text: Option<TextSink<'_>>) {
+        match ev["type"].as_str() {
+            Some("content_block_start") if ev["content_block"]["type"] == "tool_use" => {
+                if ev["content_block"]["name"] == "StructuredOutput" {
+                    self.block = ev["index"].as_u64();
+                    self.field = Some(JsonTextField::new("text"));
+                } else {
+                    self.refused = true;
+                }
+            }
+            Some("content_block_delta") if ev["delta"]["type"] == "input_json_delta" => {
+                if ev["index"].as_u64() != self.block || self.refused {
+                    return;
+                }
+                let (Some(field), Some(f)) = (self.field.as_mut(), on_text) else {
+                    return;
+                };
+                let text = field.push(ev["delta"]["partial_json"].as_str().unwrap_or(""));
+                if !text.is_empty() {
+                    f(&text);
+                    self.shown.push_str(&text);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// [`GAVE_UP`] as the next message of a vendor session.
 fn correction() -> String {
     format!(
@@ -604,13 +947,69 @@ impl SessionBackend for CliModel {
         tools: &[ToolDef],
         messages: &[Message],
     ) -> Result<(String, Completion)> {
+        self.open_session(system, tools, messages, None).await
+    }
+
+    async fn open_streaming(
+        &self,
+        system: &str,
+        tools: &[ToolDef],
+        messages: &[Message],
+        on_text: TextSink<'_>,
+    ) -> Result<(String, Completion)> {
+        self.open_session(system, tools, messages, Some(on_text))
+            .await
+    }
+
+    async fn discard(&self, vendor: &str) {
+        let running = self.live.lock().unwrap().remove(vendor);
+        if let Some(p) = running {
+            p.stop().await;
+        }
+        let app = {
+            let mut a = self.app.lock().unwrap();
+            if a.as_ref().is_some_and(|a| a.has_thread(vendor)) {
+                a.take()
+            } else {
+                None
+            }
+        };
+        if let Some(a) = app {
+            a.stop().await;
+        }
+        for f in self.session_files(vendor) {
+            let _ = std::fs::remove_file(&f);
+        }
+    }
+
+    async fn resume(&self, vendor: &str, base: Base<'_>, delta: &Delta) -> Result<Completion> {
+        self.resume_session(vendor, base, delta, None).await
+    }
+
+    async fn resume_streaming(
+        &self,
+        vendor: &str,
+        base: Base<'_>,
+        delta: &Delta,
+        on_text: TextSink<'_>,
+    ) -> Result<Completion> {
+        self.resume_session(vendor, base, delta, Some(on_text))
+            .await
+    }
+}
+
+impl CliModel {
+    async fn open_session(
+        &self,
+        system: &str,
+        tools: &[ToolDef],
+        messages: &[Message],
+        on_text: Option<TextSink<'_>>,
+    ) -> Result<(String, Completion)> {
         let sys = protocol(Some(self.cli), system, tools, true);
         let id = new_session_id();
-        let input = match self.cli {
-            Cli::Claude => render_transcript(messages),
-            Cli::Codex => format!("{sys}\n\n{}", render_transcript(messages)),
-        };
-        let first = self.exec(Mode::Open(&id), &sys, input).await?;
+        let input = render_transcript(messages);
+        let first = self.exec(Mode::Open(&id), &sys, input, on_text).await?;
         let vendor = match self.cli {
             Cli::Claude => first.vendor.clone().unwrap_or(id),
             Cli::Codex => first
@@ -621,17 +1020,19 @@ impl SessionBackend for CliModel {
         if !(first.gave_up && !tools.is_empty()) {
             return Ok((vendor, first.completion));
         }
-        let second = self.exec(Mode::Resume(&vendor), &sys, correction()).await?;
+        let second = self
+            .exec(Mode::Resume(&vendor), &sys, correction(), on_text)
+            .await?;
         Ok((vendor, second.after(&first)))
     }
 
-    async fn discard(&self, vendor: &str) {
-        for f in self.session_files(vendor) {
-            let _ = std::fs::remove_file(&f);
-        }
-    }
-
-    async fn resume(&self, vendor: &str, base: Base<'_>, delta: &Delta) -> Result<Completion> {
+    async fn resume_session(
+        &self,
+        vendor: &str,
+        base: Base<'_>,
+        delta: &Delta,
+        on_text: Option<TextSink<'_>>,
+    ) -> Result<Completion> {
         // Claude records the system prompt with the session; it is passed again unchanged so
         // a CLI without that record behaves the same.
         let sys = protocol(Some(self.cli), base.system, base.tools, true);
@@ -640,6 +1041,7 @@ impl SessionBackend for CliModel {
                 Mode::Resume(vendor),
                 &sys,
                 render_delta_for(Some(self.cli), delta),
+                on_text,
             )
             .await?;
         let offered = delta
@@ -650,7 +1052,9 @@ impl SessionBackend for CliModel {
         if !(first.gave_up && offered) {
             return Ok(first.completion);
         }
-        let second = self.exec(Mode::Resume(vendor), &sys, correction()).await?;
+        let second = self
+            .exec(Mode::Resume(vendor), &sys, correction(), on_text)
+            .await?;
         Ok(second.after(&first))
     }
 }
@@ -755,7 +1159,7 @@ fn new_session_id() -> String {
 
 /// A command with the executable's own directory first on `PATH`: Codex is a Node script,
 /// and `node` usually sits next to it.
-fn command(bin: &Path) -> tokio::process::Command {
+pub(crate) fn command(bin: &Path) -> tokio::process::Command {
     let mut c = tokio::process::Command::new(bin);
     if let Some(dir) = bin.parent() {
         let mut paths = vec![dir.to_path_buf()];
@@ -774,6 +1178,22 @@ fn work_dir() -> Result<PathBuf> {
     let d = std::env::temp_dir().join("ark-cli-model");
     std::fs::create_dir_all(&d).map_err(io_err)?;
     Ok(d)
+}
+
+/// How long until Unix time `at`, in words ("2 h 10 min"). `None` when it has passed.
+fn until(at: u64) -> Option<String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    let secs = at.checked_sub(now)?;
+    let (h, m) = (secs / 3600, (secs % 3600).div_ceil(60));
+    Some(match (h, m) {
+        (0, 0) => "under a minute".into(),
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    })
 }
 
 fn io_err(e: std::io::Error) -> ProviderError {
@@ -960,6 +1380,12 @@ fn render_message(s: &mut String, m: &Message) {
 fn parse_claude(stdout: &str) -> std::result::Result<Parsed, String> {
     let v: Value = serde_json::from_str(stdout.trim())
         .map_err(|_| format!("unexpected output: {}", clip(stdout)))?;
+    parse_claude_result(&v)
+}
+
+/// Claude Code's result object: the whole output of `--output-format json`, the last event of
+/// `stream-json`.
+fn parse_claude_result(v: &Value) -> std::result::Result<Parsed, String> {
     if v["is_error"].as_bool() == Some(true) {
         return Err(v["result"]
             .as_str()
@@ -1066,11 +1492,21 @@ fn clip(s: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A fake CLI that reads all of stdin, then runs `script`.
     fn fake(name: &str, script: &str) -> PathBuf {
+        fake_raw(name, &format!("cat > /dev/null\n{script}"))
+    }
+
+    /// A fake CLI that runs `script` as it is.
+    fn fake_raw(name: &str, script: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ark-cli-test-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join(name);
-        std::fs::write(&p, format!("#!/bin/sh\ncat > /dev/null\n{script}\n")).unwrap();
+        std::fs::write(
+            &p,
+            format!("#!/bin/sh\n[ \"$1\" = app-server ] && exit 1\n{script}\n"),
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1085,6 +1521,76 @@ mod tests {
             description: "Read a file".into(),
             parameters: json!({"type":"object","properties":{"path":{"type":"string"}}}),
         }]
+    }
+
+    /// The events Claude Code streams for one structured reply (shapes from a live
+    /// `claude -p --output-format stream-json --include-partial-messages` run, trimmed): the
+    /// reply in three pieces, then the result.
+    fn stream_reply(structured: Value, result: Value) -> String {
+        let text = structured.to_string();
+        let cut = text.len() / 3;
+        let (a, rest) = text.split_at(cut);
+        let (b, c) = rest.split_at(cut);
+        let mut lines = vec![
+            json!({"type":"system","subtype":"init","session_id":result["session_id"]}),
+            json!({"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"StructuredOutput","input":{}}}}),
+        ];
+        for piece in [a, b, c] {
+            lines.push(json!({"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":piece}}}));
+        }
+        let mut r = result;
+        r["type"] = json!("result");
+        r["structured_output"] = structured;
+        lines.push(r);
+        lines.iter().map(|l| format!("{l}\n")).collect()
+    }
+
+    /// A fake `claude` speaking streaming JSON. It logs its arguments once per start and each
+    /// line it reads, and answers the n-th line (counted across starts) with `replies[n]`, the
+    /// last one again when they run out. Returns the program and its log.
+    fn claude_stream(name: &str, replies: &[String]) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ark-cli-live-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (i, r) in replies.iter().enumerate() {
+            std::fs::write(dir.join(format!("reply-{i}")), r).unwrap();
+        }
+        let last = replies.len() - 1;
+        let log = dir.join("log");
+        let p = dir.join(name);
+        std::fs::write(
+            &p,
+            format!(
+                r#"#!/bin/sh
+d=$(dirname "$0")
+echo "--start--" >> "$d/log"
+printf '%s\n' "$@" >> "$d/log"
+while IFS= read -r line; do
+  echo "--line--" >> "$d/log"
+  printf '%s\n' "$line" >> "$d/log"
+  n=$(cat "$d/count" 2>/dev/null || echo 0)
+  echo $((n + 1)) > "$d/count"
+  [ "$n" -gt {last} ] && n={last}
+  cat "$d/reply-$n"
+done
+"#
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        (p, log)
+    }
+
+    fn reply(text: &str) -> Value {
+        json!({"action":"reply","text":text,"tool_calls":[]})
+    }
+
+    fn usage(session: &str, turns: u32, input: u32) -> Value {
+        json!({"is_error":false,"num_turns":turns,"session_id":session,"usage":{"input_tokens":input,"output_tokens":2}})
     }
 
     #[test]
@@ -1134,11 +1640,13 @@ mod tests {
         assert!(!parse_status(Cli::Codex, false, "Not logged in\n").0);
     }
 
-    // The JSON below has the shape of real `claude -p --output-format json` output, trimmed.
     #[tokio::test]
     async fn claude_tool_calls_become_ark_calls() {
-        let out = r#"{"type":"result","is_error":false,"result":"","structured_output":{"action":"call_tools","text":"","tool_calls":[{"name":"fs.read","arguments":"{\"path\": \"a\"}"}]},"usage":{"input_tokens":5,"cache_read_input_tokens":100,"cache_creation_input_tokens":20,"output_tokens":7}}"#;
-        let bin = fake("claude", &format!("echo '{out}'"));
+        let out = stream_reply(
+            json!({"action":"call_tools","text":"","tool_calls":[{"name":"fs.read","arguments":"{\"path\": \"a\"}"}]}),
+            json!({"is_error":false,"result":"","usage":{"input_tokens":5,"cache_read_input_tokens":100,"cache_creation_input_tokens":20,"output_tokens":7}}),
+        );
+        let (bin, _) = claude_stream("claude-calls", &[out]);
         let m = CliModel::new(Cli::Claude, "").with_program(bin);
         let c = m
             .complete("sys", &[Message::user("hi")], &tools())
@@ -1177,7 +1685,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
         std::fs::write(
             &p,
             format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" >> {log}\necho '--stdin--' >> {log}\ncat >> {log}\necho '--end--' >> {log}\n{out}\n",
+                "#!/bin/sh\n[ \"$1\" = app-server ] && exit 1\nprintf '%s\\n' \"$@\" >> {log}\necho '--stdin--' >> {log}\ncat >> {log}\necho '--end--' >> {log}\n{out}\n",
                 log = log.display()
             ),
         )
@@ -1234,8 +1742,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
 
     #[tokio::test]
     async fn claude_sessions_open_with_an_id_and_resume_with_a_delta() {
-        let out = r#"echo '{"is_error":false,"session_id":"S1","structured_output":{"action":"reply","text":"ok","tool_calls":[]},"usage":{"input_tokens":10,"output_tokens":2}}'"#;
-        let (bin, log) = recording("claude", out);
+        let (bin, log) = claude_stream("claude", &[stream_reply(reply("ok"), usage("S1", 2, 10))]);
         let m = CliModel::new(Cli::Claude, "haiku").with_program(bin);
         let (vendor, c) = SessionBackend::open(&m, "Be terse.", &tools(), &[Message::user("hi")])
             .await
@@ -1261,20 +1768,41 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
             .await
             .unwrap();
         let log = std::fs::read_to_string(log).unwrap();
-        let (open, resume) = log.split_once("--end--").unwrap();
+        assert_eq!(
+            log.matches("--start--").count(),
+            1,
+            "the session kept its process"
+        );
+        let (open, resume) = log.rsplit_once("--line--").unwrap();
         assert!(open.contains("--session-id"), "{open}");
+        assert!(open.contains("--input-format\nstream-json"), "{open}");
         assert!(!open.contains("--no-session-persistence"));
-        assert!(open.contains("<user>\nhi\n</user>"));
-        assert!(resume.contains("--resume\nS1"), "{resume}");
-        assert!(resume.contains("<new_messages>\n<user>\nnext\n</user>"));
+        assert!(open.contains(r"<user>\nhi\n</user>"), "{open}");
+        assert!(
+            resume.contains(r"<new_messages>\n<user>\nnext\n</user>"),
+            "{resume}"
+        );
         assert!(
             resume.contains("- `fs.list`: List files. Arguments:"),
             "a new tool's schema is sent once"
         );
         assert!(
-            !resume.contains("<user>\nhi"),
+            !resume.contains(r"<user>\nhi"),
             "nothing already sent is resent"
         );
+
+        // Without a running process (discarded, or ARK restarted) the session resumes by id.
+        SessionBackend::discard(&m, "S1").await;
+        SessionBackend::resume(&m, "S1", base, &delta)
+            .await
+            .unwrap();
+        let log = std::fs::read_to_string(m.program().unwrap().with_file_name("log")).unwrap();
+        assert_eq!(log.matches("--start--").count(), 2);
+        assert!(log
+            .rsplit_once("--start--")
+            .unwrap()
+            .1
+            .contains("--resume\nS1"));
     }
 
     #[tokio::test]
@@ -1311,35 +1839,200 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
         );
     }
 
+    /// A fake `codex app-server`: answers the handshake, starts thread T1, and answers each
+    /// turn with `reply` in pieces, after sending one request of its own (to be declined).
+    /// It logs its arguments and every line it reads.
+    fn codex_app(name: &str, reply: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("ark-codex-app-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = serde_json::to_string(reply).unwrap();
+        let (a, b) = reply.split_at(reply.len() / 2);
+        let delta = |d: &str| {
+            json!({"method":"item/agentMessage/delta","params":{"threadId":"T1","turnId":"u1","itemId":"i1","delta":d}})
+                .to_string()
+        };
+        let turn = [
+            json!({"id":"r1","method":"item/commandExecution/requestApproval","params":{"threadId":"T1"}}).to_string(),
+            delta(a),
+            delta(b),
+            format!(r#"{{"method":"item/completed","params":{{"threadId":"T1","item":{{"type":"agentMessage","id":"i1","text":{text}}}}}}}"#),
+            json!({"method":"thread/tokenUsage/updated","params":{"threadId":"T1","turnId":"u1","tokenUsage":{"last":{"inputTokens":900,"cachedInputTokens":800,"outputTokens":12}}}}).to_string(),
+            json!({"method":"turn/completed","params":{"threadId":"T1","turn":{"id":"u1","status":"completed"}}}).to_string(),
+        ];
+        std::fs::write(dir.join("turn"), turn.join("\n") + "\n").unwrap();
+        let p = dir.join(name);
+        std::fs::write(
+            &p,
+            r#"#!/bin/sh
+d=$(dirname "$0")
+echo "--start--" >> "$d/log"
+printf '%s\n' "$@" >> "$d/log"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$d/log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) echo "{\"id\":$id,\"result\":{}}" ;;
+    *'"method":"thread/start"'*) echo "{\"id\":$id,\"result\":{\"thread\":{\"id\":\"T1\"}}}" ;;
+    *'"method":"thread/resume"'*) echo "{\"id\":$id,\"result\":{}}" ;;
+    *'"method":"turn/start"'*) echo "{\"id\":$id,\"result\":{\"turn\":{\"id\":\"u1\"}}}"; cat "$d/turn" ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        (p, dir.join("log"))
+    }
+
+    #[tokio::test]
+    async fn codex_sessions_run_on_one_app_server_and_stream() {
+        let answer = r#"{"action":"reply","text":"Hello there.","tool_calls":[]}"#;
+        let (bin, log) = codex_app("codex", answer);
+        let m = CliModel::new(Cli::Codex, "").with_program(bin);
+        let shown = Mutex::new(Vec::<String>::new());
+        let sink = |t: &str| shown.lock().unwrap().push(t.to_string());
+        let (vendor, c) = SessionBackend::open_streaming(
+            &m,
+            "Be terse.",
+            &tools(),
+            &[Message::user("hi")],
+            &sink,
+        )
+        .await
+        .unwrap();
+        assert_eq!(vendor, "T1");
+        assert_eq!(c.content, "Hello there.");
+        assert_eq!(c.usage, Usage::measured(900, 12).with_cached(800));
+        let shown = shown.into_inner().unwrap();
+        assert!(shown.len() > 1, "{shown:?}");
+        assert_eq!(shown.concat(), "Hello there.");
+
+        let delta = Delta {
+            messages: vec![Message::user("next")],
+            ..Default::default()
+        };
+        let tools = tools();
+        let base = Base {
+            system: "Be terse.",
+            tools: &tools,
+        };
+        SessionBackend::resume(&m, "T1", base, &delta)
+            .await
+            .unwrap();
+        let log = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(log.matches("--start--").count(), 1, "one process: {log}");
+        assert!(log.contains("app-server\n-c\nsandbox_mode"), "{log}");
+        assert!(log.contains(r#""approvalPolicy":"never""#), "{log}");
+        assert!(
+            log.contains(r#""baseInstructions":"#),
+            "the protocol is the thread's instructions"
+        );
+        assert!(log.contains(r#""outputSchema":"#));
+        assert!(
+            log.contains(r#""id":"r1""#) && log.contains("-32601"),
+            "Codex's own request is declined: {log}"
+        );
+        assert_eq!(log.matches(r#""method":"turn/start""#).count(), 2);
+        assert!(
+            !log.contains("thread/resume"),
+            "the process holds the thread"
+        );
+
+        // After a discard the process is gone; the thread is loaded again before its turn.
+        SessionBackend::discard(&m, "T1").await;
+        SessionBackend::resume(&m, "T1", base, &delta)
+            .await
+            .unwrap();
+        let log = std::fs::read_to_string(m.program().unwrap().with_file_name("log")).unwrap();
+        assert_eq!(log.matches("--start--").count(), 2);
+        assert!(log.contains("thread/resume"));
+    }
+
     #[tokio::test]
     async fn a_model_that_gave_up_after_refused_native_calls_is_asked_once_more() {
-        let gave_up = r#"{"is_error":false,"num_turns":6,"session_id":"S1","structured_output":{"action":"reply","text":"I cannot access the tools.","tool_calls":[]},"usage":{"input_tokens":900,"output_tokens":50}}"#;
-        let called = r#"{"is_error":false,"num_turns":2,"session_id":"S1","structured_output":{"action":"call_tools","text":"","tool_calls":[{"name":"fs.read","arguments":"{}"}]},"usage":{"input_tokens":300,"output_tokens":20}}"#;
-        // The first run gives up; every later one calls the tool.
-        let script = format!(
-            "if [ -f \"$(dirname \"$0\")/ran\" ]; then echo '{called}'; else touch \"$(dirname \"$0\")/ran\"; echo '{gave_up}'; fi"
+        // The first run tries a native call, is refused and gives up; the next calls the tool.
+        let refused = json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"fs.read","input":{}}}});
+        let gave_up = format!(
+            "{refused}\n{}",
+            stream_reply(reply("I cannot access the tools."), usage("S1", 6, 900))
         );
-        let (bin, log) = recording("claude-gave-up", &script);
-        let _ = std::fs::remove_file(bin.parent().unwrap().join("ran"));
+        let called = stream_reply(
+            json!({"action":"call_tools","text":"","tool_calls":[{"name":"fs.read","arguments":"{}"}]}),
+            usage("S1", 2, 300),
+        );
+        let (bin, log) = claude_stream("claude-gave-up", &[gave_up.clone(), called]);
         let m = CliModel::new(Cli::Claude, "haiku").with_program(bin.clone());
+        let shown = Mutex::new(String::new());
+        let sink = |t: &str| shown.lock().unwrap().push_str(t);
         let c = m
-            .complete("sys", &[Message::user("read a")], &tools())
+            .complete_streaming("sys", &[Message::user("read a")], &tools(), &sink)
             .await
             .unwrap();
         assert_eq!(c.tool_calls.len(), 1, "asked again, it called the tool");
         assert_eq!(c.usage.prompt_tokens, 1200, "both runs are counted");
+        assert_eq!(
+            *shown.lock().unwrap(),
+            "",
+            "the run that gave up showed nothing"
+        );
         let log = std::fs::read_to_string(&log).unwrap();
-        assert_eq!(log.matches("--stdin--").count(), 2);
+        assert_eq!(log.matches("--line--").count(), 2);
         assert!(log.contains("gave up because calling host tools directly failed"));
 
         // Without tools a plain reply is just the answer: no second run.
-        let _ = std::fs::remove_file(bin.parent().unwrap().join("ran"));
+        let (bin, _) = claude_stream("claude-gave-up-2", &[gave_up]);
+        let m = CliModel::new(Cli::Claude, "haiku").with_program(bin);
         let c = m
             .complete("sys", &[Message::user("hi")], &[])
             .await
             .unwrap();
         assert!(c.tool_calls.is_empty());
         assert_eq!(c.usage.prompt_tokens, 900);
+    }
+
+    #[tokio::test]
+    async fn claude_text_streams_while_the_reply_is_written() {
+        let answer = "Line one.\nLine \"two\".";
+        let (bin, log) = claude_stream(
+            "claude-stream",
+            &[stream_reply(reply(answer), usage("S1", 2, 10))],
+        );
+        let m = CliModel::new(Cli::Claude, "haiku").with_program(bin);
+        let pieces = Mutex::new(Vec::<String>::new());
+        let sink = |t: &str| pieces.lock().unwrap().push(t.to_string());
+        let c = m
+            .complete_streaming("sys", &[Message::user("hi")], &[], &sink)
+            .await
+            .unwrap();
+        assert_eq!(c.content, answer);
+        let pieces = pieces.into_inner().unwrap();
+        assert!(pieces.len() > 1, "{pieces:?}");
+        assert_eq!(pieces.concat(), answer);
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(
+            log.contains("--no-session-persistence"),
+            "a one-shot call keeps nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_claude_process_that_stops_mid_reply_is_an_error_with_its_last_words() {
+        let bin = fake_raw(
+            "claude-dies",
+            "read l; echo '{\"type\":\"system\",\"subtype\":\"init\"}'; echo 'API Error: 529 overloaded' >&2; sleep 0.2; exit 1",
+        );
+        let m = CliModel::new(Cli::Claude, "").with_program(bin);
+        let e = m
+            .complete("", &[Message::user("hi")], &[])
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("529 overloaded"), "{e}");
+        assert!(e.is_transient(), "an overloaded account is retried later");
     }
 
     #[test]
@@ -1379,19 +2072,39 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
     }
 
     #[test]
-    fn rate_and_usage_limits_are_temporary() {
+    fn overload_is_retried_and_a_usage_limit_says_when_it_resets() {
         let m = CliModel::new(Cli::Claude, "");
         assert!(m
-            .classify("Claude usage limit reached".into())
+            .classify("API Error: 529 overloaded".into())
             .is_transient());
         assert!(!m.classify("bad flag".into()).is_transient());
+        let in_two_hours = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 2 * 3600
+            + 600;
+        let e = m.classify(format!("Claude AI usage limit reached|{in_two_hours}"));
+        assert!(!e.is_transient(), "hours away: not retried inside a turn");
+        let text = e.to_string();
+        assert!(
+            text.contains("Claude subscription: Claude AI usage limit reached"),
+            "{text}"
+        );
+        assert!(text.contains("resets in 2 h 10 min"), "{text}");
+        assert!(text.contains("/model"), "{text}");
+        let e = m.classify_with("You've hit your usage limit.".into(), Some(in_two_hours));
+        assert!(e.to_string().contains("resets in 2 h"), "{e}");
     }
 
     #[tokio::test]
     async fn bad_arguments_are_malformed_and_retryable() {
-        let out = r#"{"is_error":false,"structured_output":{"action":"call_tools","text":"","tool_calls":[{"name":"fs.read","arguments":"{path"}]},"usage":{}}"#;
-        let m = CliModel::new(Cli::Claude, "")
-            .with_program(fake("claude-bad", &format!("echo '{out}'")));
+        let out = stream_reply(
+            json!({"action":"call_tools","text":"","tool_calls":[{"name":"fs.read","arguments":"{path"}]}),
+            json!({"is_error":false,"usage":{}}),
+        );
+        let (bin, _) = claude_stream("claude-bad", &[out]);
+        let m = CliModel::new(Cli::Claude, "").with_program(bin);
         let e = m
             .complete("", &[Message::user("hi")], &tools())
             .await
@@ -1402,9 +2115,12 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
 
     #[tokio::test]
     async fn signed_out_error_says_how_to_sign_in() {
-        let out = r#"{"is_error":true,"result":"Not logged in · Please run /login"}"#;
-        let m = CliModel::new(Cli::Claude, "")
-            .with_program(fake("claude-out", &format!("echo '{out}'; exit 1")));
+        let out =
+            r#"{"type":"result","is_error":true,"result":"Not logged in · Please run /login"}"#;
+        let m = CliModel::new(Cli::Claude, "").with_program(fake_raw(
+            "claude-out",
+            &format!("read l; echo '{out}'; exit 1"),
+        ));
         let e = m
             .complete("", &[Message::user("hi")], &[])
             .await

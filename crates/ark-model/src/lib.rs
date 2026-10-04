@@ -16,6 +16,8 @@ mod anthropic;
 pub mod capacity;
 mod catalog;
 pub mod cli;
+mod codex_app;
+mod live;
 pub mod mock;
 mod ollama;
 mod openai;

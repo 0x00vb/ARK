@@ -34,7 +34,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::capacity::{rate_limit_wait, Capacity, CapacitySnapshot, Limiter};
 use crate::{
-    estimate_tokens, Completion, Message, Provider, ProviderError, Result, Role, ToolDef, WebHit,
+    estimate_tokens, Completion, Message, Provider, ProviderError, Result, Role, TextSink, ToolDef,
+    WebHit,
 };
 
 /// What a resumed vendor session has not seen yet.
@@ -91,6 +92,35 @@ pub trait SessionBackend: Send + Sync {
     ) -> Result<(String, Completion)>;
     /// Continue a vendor session with only what is new.
     async fn resume(&self, vendor: &str, base: Base<'_>, delta: &Delta) -> Result<Completion>;
+    /// [`open`](SessionBackend::open), delivering answer text to `on_text` as it arrives. The
+    /// default sends the whole text once the reply is complete.
+    async fn open_streaming(
+        &self,
+        system: &str,
+        tools: &[ToolDef],
+        messages: &[Message],
+        on_text: TextSink<'_>,
+    ) -> Result<(String, Completion)> {
+        let (vendor, c) = self.open(system, tools, messages).await?;
+        if !c.content.is_empty() {
+            on_text(&c.content);
+        }
+        Ok((vendor, c))
+    }
+    /// [`resume`](SessionBackend::resume), delivering answer text to `on_text` as it arrives.
+    async fn resume_streaming(
+        &self,
+        vendor: &str,
+        base: Base<'_>,
+        delta: &Delta,
+        on_text: TextSink<'_>,
+    ) -> Result<Completion> {
+        let c = self.resume(vendor, base, delta).await?;
+        if !c.content.is_empty() {
+            on_text(&c.content);
+        }
+        Ok(c)
+    }
     /// Forget a vendor session ARK let go: delete what the vendor stored for it. Best effort;
     /// the default does nothing.
     async fn discard(&self, _vendor: &str) {}
@@ -167,6 +197,8 @@ pub enum OpenReason {
     Idle,
     /// The previous call failed, so the vendor's state is unknown.
     AfterFailure,
+    /// The previous call was cancelled before its reply was complete.
+    Cancelled,
     /// The process stopped during the previous call.
     Recovered,
     /// The request held nothing the vendor had not seen (a repeat), so it starts clean.
@@ -548,6 +580,7 @@ impl ManagedSession {
         system: &str,
         messages: &[Message],
         tools: &[ToolDef],
+        on_text: Option<TextSink<'_>>,
     ) -> Result<Completion> {
         let _one = self.call.lock().await;
         let plan = self.plan(system, messages, tools);
@@ -567,15 +600,27 @@ impl ManagedSession {
                 st.record.base_tools.clone(),
             )
         };
+        // Until the reply is complete, dropping this future (a cancelled turn) leaves the
+        // vendor session in an unknown state: the guard then drops it.
+        let guard = Unfinished {
+            session: self,
+            vendor: old_vendor.clone(),
+            done: false,
+        };
         let result = match &plan {
             Plan::Open(_) => {
                 if let Some(v) = old_vendor.as_ref().filter(|_| !self.policy.keep_files) {
                     self.backend.discard(v).await;
                 }
-                self.backend
-                    .open(system, tools, messages)
-                    .await
-                    .map(|(v, c)| (Some(v), c))
+                match on_text {
+                    Some(f) => {
+                        self.backend
+                            .open_streaming(system, tools, messages, f)
+                            .await
+                    }
+                    None => self.backend.open(system, tools, messages).await,
+                }
+                .map(|(v, c)| (Some(v), c))
             }
             Plan::Resume(delta) => {
                 let vendor = old_vendor.as_deref().unwrap_or_default();
@@ -583,12 +628,14 @@ impl ManagedSession {
                     system: &base_system,
                     tools: &base_tools,
                 };
-                self.backend
-                    .resume(vendor, base, delta)
-                    .await
-                    .map(|c| (None, c))
+                match on_text {
+                    Some(f) => self.backend.resume_streaming(vendor, base, delta, f).await,
+                    None => self.backend.resume(vendor, base, delta).await,
+                }
+                .map(|c| (None, c))
             }
         };
+        guard.finish();
         let event = {
             let mut st = self.state.lock().unwrap();
             st.busy = false;
@@ -688,7 +735,17 @@ impl Provider for ManagedSession {
         messages: &[Message],
         tools: &[ToolDef],
     ) -> Result<Completion> {
-        self.call(system, messages, tools).await
+        self.call(system, messages, tools, None).await
+    }
+
+    async fn complete_streaming(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+        on_text: TextSink<'_>,
+    ) -> Result<Completion> {
+        self.call(system, messages, tools, Some(on_text)).await
     }
 
     async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
@@ -701,6 +758,54 @@ impl Provider for ManagedSession {
 
     fn model_id(&self) -> String {
         self.backend.model()
+    }
+}
+
+/// Held while a lane's call waits for the vendor. Dropped without [`finish`], the call was
+/// cancelled: the vendor session is dropped (and discarded off this task, since a drop cannot
+/// wait), so the next call opens a new one instead of resuming a reply cut off halfway.
+///
+/// [`finish`]: Unfinished::finish
+struct Unfinished<'a> {
+    session: &'a ManagedSession,
+    vendor: Option<String>,
+    done: bool,
+}
+
+impl Unfinished<'_> {
+    fn finish(mut self) {
+        self.done = true;
+    }
+}
+
+impl Drop for Unfinished<'_> {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        let s = self.session;
+        {
+            let mut st = s.state.lock().unwrap();
+            st.busy = false;
+            let r = &mut st.record;
+            r.in_flight = false;
+            r.vendor = None;
+            r.reopen = Some(OpenReason::Cancelled);
+            r.context_tokens = 0;
+            r.turns = 0;
+            r.seen.clear();
+            r.last_used_ms = now_ms();
+            s.ledger.save(&s.lane, &st.record);
+        }
+        s.emit(SessionEventKind::Released {
+            reason: "cancelled".into(),
+        });
+        if let (Some(v), false) = (self.vendor.take(), s.policy.keep_files) {
+            let backend = s.backend.clone();
+            if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                rt.spawn(async move { backend.discard(&v).await });
+            }
+        }
     }
 }
 
@@ -1016,6 +1121,20 @@ impl Provider for OneShot {
         self.backend.discard(&vendor).await;
         Ok(c)
     }
+    async fn complete_streaming(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+        on_text: TextSink<'_>,
+    ) -> Result<Completion> {
+        let (vendor, c) = self
+            .backend
+            .open_streaming(system, tools, messages, on_text)
+            .await?;
+        self.backend.discard(&vendor).await;
+        Ok(c)
+    }
     async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
         self.backend.web_search(query, limit).await
     }
@@ -1112,6 +1231,7 @@ pub mod mock {
         replies: Mutex<std::collections::VecDeque<Result<Completion>>>,
         calls: Mutex<Vec<Call>>,
         opened: std::sync::atomic::AtomicU64,
+        hang: std::sync::atomic::AtomicBool,
     }
 
     impl MockSessions {
@@ -1122,6 +1242,16 @@ pub mod mock {
                 replies: Mutex::new(replies.into_iter().map(Ok).collect()),
                 calls: Mutex::new(Vec::new()),
                 opened: Default::default(),
+                hang: Default::default(),
+            }
+        }
+        /// The next open or resume never answers (a call to cancel).
+        pub fn hang_next(&self) {
+            self.hang.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        async fn wait_if_hung(&self) {
+            if self.hang.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                std::future::pending::<()>().await;
             }
         }
         /// Queue a failure as the next reply.
@@ -1171,6 +1301,7 @@ pub mod mock {
                 tools: tools.iter().map(|t| t.name.clone()).collect(),
                 messages: messages.to_vec(),
             });
+            self.wait_if_hung().await;
             self.next().map(|c| (vendor, c))
         }
         async fn resume(&self, vendor: &str, _base: Base<'_>, delta: &Delta) -> Result<Completion> {
@@ -1178,6 +1309,7 @@ pub mod mock {
                 vendor: vendor.into(),
                 delta: delta.clone(),
             });
+            self.wait_if_hung().await;
             self.next()
         }
         async fn discard(&self, vendor: &str) {
@@ -1254,6 +1386,55 @@ mod tests {
         assert!(snap.saved_tokens > 0);
         assert_eq!(snap.context_tokens, 155, "measured prompt plus reply");
         assert_eq!(snap.state, SessionState::Idle);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_call_drops_the_vendor_session_and_the_next_one_opens() {
+        let rt = runtime(SessionPolicy::default());
+        let backend = Arc::new(MockSessions::new("m", "acct", vec![reply(100), reply(120)]));
+        let s = rt.session_with("agent-c", backend.clone()).await;
+        s.complete("sys", &[Message::user("one")], &[])
+            .await
+            .unwrap();
+
+        // The turn is cancelled while the vendor is still answering: the future is dropped.
+        backend.hang_next();
+        let msgs = [Message::user("one"), Message::user("two")];
+        let call = s.complete("sys", &msgs, &[]);
+        assert!(tokio::time::timeout(Duration::from_millis(50), call)
+            .await
+            .is_err());
+        let snap = s.snapshot();
+        assert_eq!(snap.state, SessionState::Closed, "{snap:?}");
+        assert!(snap.vendor.is_none());
+        tokio::task::yield_now().await;
+        assert!(backend
+            .calls()
+            .iter()
+            .any(|c| matches!(c, Call::Discard { vendor } if vendor == "m-v0")));
+
+        let shown = Mutex::new(String::new());
+        let sink = |t: &str| shown.lock().unwrap().push_str(t);
+        s.complete_streaming("sys", &[Message::user("three")], &[], &sink)
+            .await
+            .unwrap();
+        assert_eq!(
+            *shown.lock().unwrap(),
+            "ok",
+            "a session backend's text streams"
+        );
+        let calls = backend.calls();
+        assert!(
+            matches!(calls.last(), Some(Call::Open { .. })),
+            "the next call opens a new vendor session: {calls:?}"
+        );
+        assert!(matches!(
+            s.snapshot().last_event.map(|e| e.kind),
+            Some(SessionEventKind::Opened {
+                reason: OpenReason::Cancelled,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]

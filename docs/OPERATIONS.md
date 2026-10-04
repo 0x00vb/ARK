@@ -43,11 +43,19 @@ ARK never reads their credentials.
 | `claude` | Claude Code (`claude`) | `claude auth login` | `sonnet` (also `opus`, `fable`) |
 | `codex` | Codex (`codex`) | `codex login` | Codex's own default (`-m` when a model is named) |
 
-How a call works: the CLI runs once per completion with its own tools off (`claude --tools ""`;
-`codex exec -s read-only`), in an empty directory, with no user settings or MCP servers. ARK's
-tools and the app prompt go in the system prompt, the transcript goes on stdin, and the reply
-is JSON checked against `ark_model::cli::REPLY_SCHEMA` (`reply` with text, or `call_tools`).
-ARK's loop runs the calls, so approvals, traces and budgets behave as with an API.
+How a call works: the CLI runs with its own tools off (`claude --tools ""`; Codex read-only,
+told it has none), in an empty directory. ARK's tools and the app prompt go in the system
+prompt, and the reply is JSON checked against `ark_model::cli::REPLY_SCHEMA` (`reply` with
+text, or `call_tools`). ARK's loop runs the calls, so approvals, traces and budgets behave as
+with an API.
+
+A conversation or agent on a subscription keeps its CLI running between calls
+([ADR 0012](adr/0012-vendor-cli-processes-live-with-their-session.md)): Claude Code with
+streaming JSON in and out, Codex as `codex app-server` holding the session's thread. The
+answer streams while the model writes it. A cancelled turn stops the process, and the next
+turn opens a new vendor session from ARK's own request. Stateless calls (planner, critic,
+search) start the CLI once. If `codex app-server` cannot start, Codex falls back to
+`codex exec` (a warning in the log).
 
 Costs, measured with `minimal-agent` on 2026-10-01 (one question, two tool calls):
 
@@ -56,8 +64,10 @@ Costs, measured with `minimal-agent` on 2026-10-01 (one question, two tool calls
 | `claude:sonnet` | 15 s | 8.8k |
 | `codex:default` | 34 s | 38.9k |
 
-Codex adds about 18k tokens of its own instructions to every call. No streaming: the answer
-appears when the call ends. For Claude Code, ARK's tools are listed as bullets that say they
+Codex adds about 15k to 18k tokens of its own instructions and skills to every call. On a
+running process a call skips the CLI's start-up (Claude Code 2.7 s to 0.7 s, Codex 23 s to
+1.7 s for a short reply, 2026-10-04). A subscription's usage limit fails the turn at once with
+the time it resets; an overloaded service is retried. For Claude Code, ARK's tools are listed as bullets that say they
 are used only inside the structured reply: as Markdown headings, Haiku tried to call them
 natively and gave up the task (`bench/protocol/`).
 

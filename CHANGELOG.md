@@ -10,6 +10,12 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- Claude Code and Codex sessions keep their CLI running between calls and stream the answer
+  while it is written (ADR 0012): Claude Code over streaming JSON, Codex as `codex app-server`
+  (`codex exec` when the app server cannot start). Live on `claude:haiku`: time to first token
+  -59%, p95 turn time -52%; a 4-call Codex task 98 s to 39 s (`bench/RESULTS.md`).
+- `SessionBackend::open_streaming` and `resume_streaming` (default: the whole text at the
+  end); `ManagedSession` and `CliModel` stream through `Provider::complete_streaming`.
 - Capabilities that need an account, owned by ARK (ADR 0011): the new crate `ark-connect`
   (`Catalog`, `Capability`, `Provider`, `Connections`, `Account`, `CapabilityStatus`,
   `Secrets`, `Keychain`, `MemorySecrets`, `oauth`), on with `ArkBuilder::connections(true)` or
@@ -23,6 +29,15 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark_tools::ToolSource`, `Engine::add_source`, `Engine::has_sources`: tools that come and
   go while ARK runs; MCP plugins are one.
 - `Ark::tools()` and `ark_sdk::offered_tools`: every action a turn would be offered.
+
+### Changed
+- A cancelled call on a managed vendor session drops that session (`OpenReason::Cancelled`):
+  the next call opens a new one instead of resuming a reply cut off halfway.
+- A subscription's usage limit fails the turn at once and says when it resets; it was
+  retried like an overloaded service.
+
+### Breaking
+- `OpenReason` has a new variant, `Cancelled`; a `match` over it needs an arm.
 
 ### Fixed
 - `/tools` and the window's `tools` list the web's actions.

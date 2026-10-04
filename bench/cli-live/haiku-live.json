@@ -1,0 +1,849 @@
+{
+  "schema_version": 1,
+  "label": "live-process",
+  "ark_version": "0.8.0",
+  "created_at": "2026-10-04T03:15:06.505063Z",
+  "mode": "live",
+  "model": "claude:haiku",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "300"
+  },
+  "workloads": [
+    {
+      "name": "simple",
+      "class": "simple",
+      "description": "say hello in French; no tool needed",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 1.0,
+        "input_tokens": 2740.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 2740.0,
+        "output_tokens": 233.66666666666666,
+        "total_tokens": 2973.6666666666665,
+        "cost_usd": 0.007816666666666666,
+        "cost_per_success_usd": 0.007816666666666666,
+        "tool_calls": 0.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 1.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 3921.0,
+        "p95_turn_ms": 4422.0,
+        "median_first_token_ms": 3535.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "simple",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Bonjour! (Hello in French)",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 2959
+          },
+          "calls_by_model": {
+            "claude:haiku": 1
+          },
+          "input_tokens": 2740,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 2740,
+          "cache_write_tokens": 0,
+          "output_tokens": 219,
+          "total_tokens": 2959,
+          "tokens_measured": true,
+          "cost_usd": 0.00767,
+          "wall_ms": 3921,
+          "turn_ms": [
+            3921
+          ],
+          "first_token_ms": [
+            3629
+          ],
+          "model_latency_ms": [
+            3920
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "simple",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Bonjour! 👋\n\nThat's \"hello\" in French. Informally, you might also say \"Salut!\" \n\nIs there anything else you'd like help with?",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 2969
+          },
+          "calls_by_model": {
+            "claude:haiku": 1
+          },
+          "input_tokens": 2740,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 2740,
+          "cache_write_tokens": 0,
+          "output_tokens": 229,
+          "total_tokens": 2969,
+          "tokens_measured": true,
+          "cost_usd": 0.00777,
+          "wall_ms": 3439,
+          "turn_ms": [
+            3439
+          ],
+          "first_token_ms": [
+            2708
+          ],
+          "model_latency_ms": [
+            3437
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "simple",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Bonjour! 👋\n\n\"Bonjour\" is the standard French greeting meaning \"hello\" or \"good day.\"",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 2993
+          },
+          "calls_by_model": {
+            "claude:haiku": 1
+          },
+          "input_tokens": 2740,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 2740,
+          "cache_write_tokens": 0,
+          "output_tokens": 253,
+          "total_tokens": 2993,
+          "tokens_measured": true,
+          "cost_usd": 0.00801,
+          "wall_ms": 4422,
+          "turn_ms": [
+            4422
+          ],
+          "first_token_ms": [
+            3535
+          ],
+          "model_latency_ms": [
+            4421
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "tool-lookup",
+      "class": "tool-lookup",
+      "description": "convert currency with a tool found among 25 actions; only the tool knows the rate",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 2.0,
+        "input_tokens": 14185.0,
+        "cached_input_tokens": 1525.3333333333333,
+        "uncached_input_tokens": 12659.666666666666,
+        "output_tokens": 1062.3333333333333,
+        "total_tokens": 15247.333333333334,
+        "cost_usd": 0.03624773333333333,
+        "cost_per_success_usd": 0.03624773333333333,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 2.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 12489.0,
+        "p95_turn_ms": 23256.0,
+        "median_first_token_ms": 2049.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "tool-lookup",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**250 US dollars = 230.0 euros** at the current exchange rate.",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 6541
+          },
+          "calls_by_model": {
+            "claude:haiku": 2
+          },
+          "input_tokens": 6159,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 6159,
+          "cache_write_tokens": 0,
+          "output_tokens": 382,
+          "total_tokens": 6541,
+          "tokens_measured": true,
+          "cost_usd": 0.016138,
+          "wall_ms": 4956,
+          "turn_ms": [
+            4956
+          ],
+          "first_token_ms": [
+            2471,
+            1577
+          ],
+          "model_latency_ms": [
+            3023,
+            1930
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 524,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 26,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 56,
+            "Tool results": 40,
+            "Tool schemas": 1262,
+            "Working state": 54,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 1,
+          "result_context_tokens": 40,
+          "result_raw_tokens": 14,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "tool-lookup",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**250 US dollars = 230.0 euros** at the current exchange rate.\n\nThis conversion is based on today's live exchange rate between USD and EUR.",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 24565
+          },
+          "calls_by_model": {
+            "claude:haiku": 2
+          },
+          "input_tokens": 22788,
+          "cached_input_tokens": 4576,
+          "uncached_input_tokens": 18212,
+          "cache_write_tokens": 0,
+          "output_tokens": 1777,
+          "total_tokens": 24565,
+          "tokens_measured": true,
+          "cost_usd": 0.0551092,
+          "wall_ms": 23256,
+          "turn_ms": [
+            23256
+          ],
+          "first_token_ms": [
+            20326,
+            1610
+          ],
+          "model_latency_ms": [
+            20997,
+            2256
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 524,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 26,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 56,
+            "Tool results": 40,
+            "Tool schemas": 1262,
+            "Working state": 54,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 1,
+          "result_context_tokens": 40,
+          "result_raw_tokens": 14,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "tool-lookup",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**250 US dollars = €230.00**\n\nAt the converter's current exchange rate, 250 USD converts to 230 euros.",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 14636
+          },
+          "calls_by_model": {
+            "claude:haiku": 2
+          },
+          "input_tokens": 13608,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 13608,
+          "cache_write_tokens": 0,
+          "output_tokens": 1028,
+          "total_tokens": 14636,
+          "tokens_measured": true,
+          "cost_usd": 0.037496,
+          "wall_ms": 12489,
+          "turn_ms": [
+            12489
+          ],
+          "first_token_ms": [
+            9810,
+            2049
+          ],
+          "model_latency_ms": [
+            9810,
+            2677
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 524,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 26,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 56,
+            "Tool results": 40,
+            "Tool schemas": 1262,
+            "Working state": 54,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 1,
+          "result_context_tokens": 40,
+          "result_raw_tokens": 14,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "multi-step",
+      "class": "multi-step",
+      "description": "find a customer, list her orders, add the amounts",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 4.0,
+        "input_tokens": 19740.0,
+        "cached_input_tokens": 2882.6666666666665,
+        "uncached_input_tokens": 16857.333333333332,
+        "output_tokens": 1280.0,
+        "total_tokens": 21020.0,
+        "cost_usd": 0.0470912,
+        "cost_per_success_usd": 0.0470912,
+        "tool_calls": 3.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 15553.0,
+        "p95_turn_ms": 19539.0,
+        "median_first_token_ms": 1719.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "multi-step",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Customer Found:** Ada Lovelace (ID: C-1042, Tier: Gold)\n\n**Orders:**\n- Order O-1: $120.50\n- Order O-2: $89.99\n- Order O-3: $310.00\n- Order O-4: $45.25\n\n**Total Amount:** $565.74",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 15253
+          },
+          "calls_by_model": {
+            "claude:haiku": 4
+          },
+          "input_tokens": 14251,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 14251,
+          "cache_write_tokens": 0,
+          "output_tokens": 1002,
+          "total_tokens": 15253,
+          "tokens_measured": true,
+          "cost_usd": 0.038522,
+          "wall_ms": 11413,
+          "turn_ms": [
+            11413
+          ],
+          "first_token_ms": [
+            3148,
+            1531,
+            1719,
+            1801
+          ],
+          "model_latency_ms": [
+            3764,
+            2095,
+            2835,
+            2713
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 1092,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 136,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 289,
+            "Tool schemas": 2520,
+            "Working state": 148,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 3,
+          "result_context_tokens": 145,
+          "result_raw_tokens": 64,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "multi-step",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "I found the customer Ada Lovelace (ID: C-1042, tier: gold) and retrieved all her orders:\n\n- Order O-1: $120.50\n- Order O-2: $89.99\n- Order O-3: $310.00\n- Order O-4: $45.25\n\n**Total amount of all orders: $565.74**",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 24042
+          },
+          "calls_by_model": {
+            "claude:haiku": 4
+          },
+          "input_tokens": 22602,
+          "cached_input_tokens": 4364,
+          "uncached_input_tokens": 18238,
+          "cache_write_tokens": 0,
+          "output_tokens": 1440,
+          "total_tokens": 24042,
+          "tokens_measured": true,
+          "cost_usd": 0.051748800000000005,
+          "wall_ms": 15553,
+          "turn_ms": [
+            15553
+          ],
+          "first_token_ms": [
+            9531,
+            1496,
+            1664,
+            1325
+          ],
+          "model_latency_ms": [
+            9531,
+            1830,
+            2126,
+            2060
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 1092,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 136,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 289,
+            "Tool schemas": 2520,
+            "Working state": 148,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 3,
+          "result_context_tokens": 145,
+          "result_raw_tokens": 64,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "multi-step",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Customer Found:** Ada Lovelace (ID: C-1042, Tier: Gold)\n\n**Orders:**\n- Order O-1: $120.50\n- Order O-2: $89.99\n- Order O-3: $310.00\n- Order O-4: $45.25\n\n**Total Amount:** $565.74",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 23765
+          },
+          "calls_by_model": {
+            "claude:haiku": 4
+          },
+          "input_tokens": 22367,
+          "cached_input_tokens": 4284,
+          "uncached_input_tokens": 18083,
+          "cache_write_tokens": 0,
+          "output_tokens": 1398,
+          "total_tokens": 23765,
+          "tokens_measured": true,
+          "cost_usd": 0.0510028,
+          "wall_ms": 19539,
+          "turn_ms": [
+            19539
+          ],
+          "first_token_ms": [
+            11903,
+            1385,
+            1908,
+            2083
+          ],
+          "model_latency_ms": [
+            11903,
+            1959,
+            2691,
+            2981
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 1092,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 136,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 289,
+            "Tool schemas": 2520,
+            "Working state": 148,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 3,
+          "result_context_tokens": 145,
+          "result_raw_tokens": 64,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 9,
+    "successes": 9,
+    "success_rate": 1.0,
+    "model_calls": 2.3333333333333335,
+    "input_tokens": 12221.666666666666,
+    "cached_input_tokens": 1469.3333333333333,
+    "uncached_input_tokens": 10752.333333333334,
+    "output_tokens": 858.6666666666666,
+    "total_tokens": 13080.333333333334,
+    "cost_usd": 0.0303852,
+    "cost_per_success_usd": 0.0303852,
+    "tool_calls": 1.3333333333333333,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 2.3333333333333335,
+    "peak_context_tokens": 0.0,
+    "mean_context_tokens": 0.0,
+    "tool_schema_tokens": 0.0,
+    "prefix_reuse_tokens": 0.0,
+    "median_turn_ms": 11413.0,
+    "p95_turn_ms": 23256.0,
+    "median_first_token_ms": 2049.0,
+    "stall_stops": 0.0
+  }
+}

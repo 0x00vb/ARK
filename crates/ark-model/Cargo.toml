@@ -14,7 +14,8 @@ async-trait.workspace = true
 reqwest.workspace = true
 futures.workspace = true
 uuid.workspace = true
-tokio = { workspace = true, features = ["time", "process", "io-util"] }
+tracing.workspace = true
+tokio = { workspace = true, features = ["time", "process", "io-util", "rt"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

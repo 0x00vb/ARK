@@ -21,6 +21,9 @@ Last updated: 2026-10-04 (v0.9.0; `main` has the browser, step 5 and C5, untagge
 |---|---|
 | Rename "Allow for this session" in approvals | the owner decides the words |
 | Turn the Computer off when an example serves other machines with tokens | remote work (`examples/writing-agent`) |
+| Keep a runtime running after its window closes, as a generic `ark-ui` option | ARK Desktop asks for it (a menu-bar item) |
+| API keys in ARK's secret store, so apps stop keeping their own | ARK Desktop moves to it |
+| A paid-model run of scheduling: qwen3:4b claims schedules it never made | needs the owner's OK |
 
 ## Waiting on this repo
 

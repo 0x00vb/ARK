@@ -1,9 +1,17 @@
-// One protocol, two carriers: the desktop window (Tauri IPC) or a local browser (HTTP + SSE).
+// One protocol, two carriers: the desktop window (Tauri IPC) or a browser (HTTP + SSE).
 // Views only see `call(method, params)` and `subscribe(fn)`.
+
+// The window's own page comes from the app's asset protocol (`tauri:` on macOS and Linux,
+// `http://tauri.localhost` on Windows). A window opened on a runtime elsewhere (ADR 0016) loads
+// that runtime's page over HTTP: Tauri still defines `__TAURI__` there, but the runtime is not
+// in this process, so the page uses HTTP like any browser.
+function ownPage() {
+  return location.protocol === "tauri:" || location.hostname === "tauri.localhost";
+}
 
 export function connect() {
   const tauri = window.__TAURI__;
-  if (tauri && tauri.core) {
+  if (tauri && tauri.core && ownPage()) {
     return {
       kind: "desktop",
       call: (method, params = {}) =>

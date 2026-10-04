@@ -115,6 +115,14 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             .connections_with(conns)
             .web_with(ark_tools::web::WebAdapter::new().backends(vec![]));
     }
+    // A screen in memory for the `computer` scenario: what was pressed is checked after.
+    let screen = ark_sdk::prelude::ark_computer::fake::FakeScreen::new()
+        .app("Notes", &[("text field", "Title"), ("button", "Save")]);
+    if scenario == "computer" {
+        builder = builder.computer_with(
+            ark_sdk::prelude::ark_computer::ComputerService::with_screen(Arc::new(screen.clone())),
+        );
+    }
     let ark = builder.build().unwrap();
     let mut app = App::new("Page test").ark(ark);
     if scenario == "connect-mid-task" {
@@ -155,6 +163,13 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     let text =
         String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{scenario} failed:\n{text}");
+    if scenario == "computer" {
+        let log = screen.log.lock().unwrap().clone();
+        assert!(
+            !log.iter().any(|l| l.starts_with("press")),
+            "taken back before the click: {log:?}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -444,4 +459,47 @@ async fn an_app_view_takes_the_main_column_and_agents_ask_from_the_tray() {
         true,
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chat_keeps_working_in_the_background_while_another_runs() {
+    let save = Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "notes.save".into(),
+            arguments: json!({}),
+        }],
+        usage: Usage::default(),
+    };
+    // In call order: the first chat asks to save and waits; the second answers; then the
+    // first finishes once allowed.
+    let script = vec![
+        save,
+        say("Second answer.", false),
+        say("Saved the notes.", false),
+    ];
+    drive("background", script, Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_person_sees_who_uses_the_computer_and_takes_it_back() {
+    let call = |name: &str, args: Value| Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: name.into(),
+            name: name.into(),
+            arguments: args,
+        }],
+        usage: Usage::default(),
+    };
+    let script = vec![
+        call("computer.look", json!({ "app": "Notes" })),
+        call("computer.click", json!({ "app": "Notes", "ref": 2 })),
+        say(
+            "You took the computer back, so I did not save the note.",
+            false,
+        ),
+    ];
+    drive("computer", script, Duration::ZERO).await;
 }

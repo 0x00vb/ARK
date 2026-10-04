@@ -429,6 +429,16 @@ async fn terminal_commands_and_window_methods_share_one_control() {
     assert!(cmd("/agent message scribe use the short form")
         .await
         .contains("kept for scribe's next task"));
+    // Schedules: the terminal's list and the window's stop share one control.
+    assert!(cmd("/schedules").await.contains("Nothing is scheduled"));
+    let e = host
+        .call("unschedule", json!({ "schedule": "s-nope" }))
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("no schedule `s-nope`"), "{e}");
+    assert!(cmd("/schedules stop s-nope")
+        .await
+        .contains("no schedule `s-nope`"));
     assert!(cmd("/agent resume scribe").await.contains("scribe resumed"));
     assert!(cmd("/agent end scribe").await.contains("scribe ended"));
     assert_eq!(state("scribe").await.as_deref(), Some("terminated"));

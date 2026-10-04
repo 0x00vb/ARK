@@ -254,9 +254,13 @@ impl App {
         if self.orchestrator.is_some() || self.orchestrate.is_some() {
             commands.extend(crate::builtins::agents());
         }
-        let orchestrate = self
-            .orchestrate
-            .map(|f| (f, Arc::new(ApprovalGate::new(approver.clone()))));
+        let orchs = self.orchestrate.map(|build| {
+            Arc::new(Orchestrators {
+                build,
+                approver: approver.clone(),
+                built: std::sync::Mutex::new(HashMap::new()),
+            })
+        });
         let mut ix = Interaction {
             info: AppInfo {
                 name: self.name,
@@ -280,15 +284,260 @@ impl App {
             names: HashMap::new(),
             present: false,
             orchestrator: self.orchestrator,
-            orchestrate,
-            orchestrators: HashMap::new(),
+            orchs,
+            sign_in: self.sign_in,
         };
         ix.refresh_names();
         ix.follow_project()?;
+        // Projects with scheduled work get their orchestrator now, so it runs with no window
+        // or chat open there.
+        if let Some(o) = &ix.orchs {
+            o.wake_scheduled(&ix.ark);
+        }
         Ok(Opened {
             interaction: ix,
             resumed,
         })
+    }
+}
+
+/// The projects a person works in (not orchestrated agents' child projects), newest first.
+fn top_projects(engine: &Engine) -> anyhow::Result<Vec<Project>> {
+    Ok(engine
+        .store
+        .list_projects()
+        .map_err(ark_runtime::AgentError::from)?
+        .into_iter()
+        .filter(|p| p.parent.is_none())
+        .collect())
+}
+
+/// [`Interaction::projects`] without the interaction: read from the store while a turn runs.
+pub fn list_projects(engine: &Engine, current: &ProjectId) -> anyhow::Result<Vec<ProjectSummary>> {
+    Ok(top_projects(engine)?
+        .into_iter()
+        .map(|p| ProjectSummary {
+            id: p.id.as_str().to_string(),
+            current: &p.id == current,
+            name: p.name,
+            target: p.target,
+            workspace: p.workspace,
+        })
+        .collect())
+}
+
+/// Sessions, most recent first, of one project or all (`scope: None`); `current` is marked.
+pub fn list_sessions(
+    engine: &Engine,
+    scope: Option<&ProjectId>,
+    current: &str,
+) -> anyhow::Result<Vec<SessionSummary>> {
+    let names: HashMap<String, String> = engine
+        .store
+        .list_projects()
+        .map_err(ark_runtime::AgentError::from)?
+        .into_iter()
+        .map(|p| (p.id.as_str().to_string(), p.name))
+        .collect();
+    Ok(Session::list(engine, scope)?
+        .iter()
+        .map(|r| {
+            let pname = names.get(r.project.as_str()).cloned().unwrap_or_default();
+            SessionSummary::of(r, &pname, r.id.as_str() == current)
+        })
+        .collect())
+}
+
+/// [`Interaction::project_sessions`] without the interaction.
+pub fn project_sessions(
+    engine: &Engine,
+    id: &str,
+    current: &str,
+) -> anyhow::Result<Vec<SessionSummary>> {
+    let p = top_projects(engine)?
+        .into_iter()
+        .find(|p| p.id.as_str() == id)
+        .ok_or_else(|| anyhow::anyhow!("no project with id `{id}`"))?;
+    Ok(Session::list(engine, Some(&p.id))?
+        .iter()
+        .map(|r| SessionSummary::of(r, &p.name, r.id.as_str() == current))
+        .collect())
+}
+
+/// [`Interaction::transcript`] of any stored session, without its interaction: a window reads a
+/// chat while that chat's turn runs.
+pub fn transcript(
+    engine: &Engine,
+    labels: &Labels,
+    session: &str,
+    before: Option<u32>,
+    limit: usize,
+) -> anyhow::Result<Vec<TranscriptTurn>> {
+    let s =
+        Session::open(engine, session)?.ok_or_else(|| anyhow::anyhow!("no session `{session}`"))?;
+    let names = engine
+        .store
+        .list_artifacts(s.project())
+        .map(|a| inspect::artifact_names(&a))
+        .unwrap_or_default();
+    transcript_page(engine, labels, &names, &s, before, limit)
+}
+
+fn transcript_page(
+    engine: &Engine,
+    labels: &Labels,
+    names: &HashMap<String, String>,
+    session: &Session,
+    before: Option<u32>,
+    limit: usize,
+) -> anyhow::Result<Vec<TranscriptTurn>> {
+    let sid = session.id().as_str().to_string();
+    Ok(session
+        .transcript_page(engine, before, limit)?
+        .iter()
+        .map(|t| {
+            let rec = load_trace(engine, &sid, t.index);
+            // Replay in order: narration (the recorder merges a step's text into one
+            // event) where it was written, steering where it was read.
+            let answer = t.answer.trim();
+            let activity = rec
+                .as_ref()
+                .map(|r| {
+                    r.events
+                        .iter()
+                        .filter_map(|e| match &e.event {
+                            HarnessEvent::TextDelta { text }
+                                if !text.trim().is_empty() && text.trim() != answer =>
+                            {
+                                Some(Activity::new(ActivityKind::Narration, text.trim()))
+                            }
+                            ev => activity::describe(labels, names, ev),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            TranscriptTurn::of(t, activity, rec.is_some())
+        })
+        .collect())
+}
+
+/// The orchestrators of an app that runs agents in every project ([`App::orchestrate`]), one per
+/// project, shared by all of the app's live conversations: work keeps running in a project no
+/// conversation has open, and coming back finds the same orchestrator. Each has its own approval
+/// gate, kept in its project, so "Always in this project" means that agent's project.
+pub(crate) struct Orchestrators {
+    build: OrchestrateFn,
+    approver: Arc<dyn Approver>,
+    built: std::sync::Mutex<HashMap<String, ark_orchestrate::Orchestrator>>,
+}
+
+impl Orchestrators {
+    fn get(&self, ark: &Ark, project: &Project) -> anyhow::Result<ark_orchestrate::Orchestrator> {
+        let mut built = self.built.lock().unwrap();
+        if let Some(o) = built.get(project.id.as_str()) {
+            return Ok(o.clone());
+        }
+        let gate = Arc::new(ApprovalGate::new(self.approver.clone()));
+        gate.keep_in(ark.engine().store.clone(), project.id.as_str());
+        let o = (self.build)(ark, project, gate)?;
+        built.insert(project.id.as_str().to_string(), o.clone());
+        Ok(o)
+    }
+
+    /// Open the orchestrators of the projects that have schedules still running.
+    fn wake_scheduled(&self, ark: &Ark) {
+        let store = &ark.engine().store;
+        for id in ark_orchestrate::scheduled_projects(store) {
+            match store.get_project(&ProjectId(id.clone())) {
+                Ok(Some(p)) => {
+                    if let Err(e) = self.get(ark, &p) {
+                        tracing::warn!(project = %id, "scheduled work cannot run: {e:#}");
+                    }
+                }
+                _ => tracing::warn!(project = %id, "a schedule names a project that is gone"),
+            }
+        }
+    }
+}
+
+/// Opens more live conversations of the same app: a window keeps one chat working while the
+/// person starts or opens another. They share the agent (store, tools, the model chosen last,
+/// capabilities), the orchestrators and lasting grants; each has its own session, its own
+/// answers "for this session", and its own turns.
+#[derive(Clone)]
+pub struct Siblings {
+    info: AppInfo,
+    ark: Ark,
+    commands: Vec<Arc<dyn Command>>,
+    labels: Labels,
+    status: Vec<(String, StatusFn)>,
+    on_project: Option<ProjectHook>,
+    pricing: Option<Pricing>,
+    keys: Vec<(String, String)>,
+    present: bool,
+    orchestrator: Option<ark_orchestrate::Orchestrator>,
+    orchs: Option<Arc<Orchestrators>>,
+    sign_in: Option<crate::capabilities::Opener>,
+}
+
+impl Siblings {
+    /// Another live conversation: in session `session` (an id), or a new session in `project`.
+    /// `approver` gets its questions (each conversation's own, so a front-end knows which
+    /// conversation asks).
+    pub fn open(
+        &self,
+        session: Option<&str>,
+        project: &ProjectId,
+        approver: Arc<dyn Approver>,
+    ) -> anyhow::Result<Interaction> {
+        let mut ark = self.ark.clone();
+        ark.follow_current_model();
+        let session = match session {
+            Some(id) => ark
+                .open_session(id)?
+                .ok_or_else(|| anyhow::anyhow!("no session matches `{id}`"))?,
+            None => ark.start_session(project)?,
+        };
+        let project = ark
+            .engine()
+            .store
+            .get_project(session.project())?
+            .ok_or_else(|| anyhow::anyhow!("the session's project is gone"))?;
+        let approver: Arc<dyn Approver> = match ark.connections() {
+            Some(c) => {
+                let mut connector = crate::capabilities::Connector::new(approver, c.clone());
+                if let Some(open) = &self.sign_in {
+                    connector = connector.opener(open.clone());
+                }
+                Arc::new(connector)
+            }
+            None => approver,
+        };
+        let mut ix = Interaction {
+            info: self.info.clone(),
+            ark,
+            project,
+            session,
+            gate: Arc::new(ApprovalGate::new(approver)),
+            commands: self.commands.clone(),
+            labels: self.labels.clone(),
+            status: self.status.clone(),
+            on_project: self.on_project.clone(),
+            pricing: self.pricing,
+            keys: self.keys.clone(),
+            history: Vec::new(),
+            last_context: None,
+            detail: false,
+            focus: None,
+            names: HashMap::new(),
+            present: self.present,
+            orchestrator: self.orchestrator.clone(),
+            orchs: self.orchs.clone(),
+            sign_in: self.sign_in.clone(),
+        };
+        ix.refresh_names();
+        ix.follow_project()?;
+        Ok(ix)
     }
 }
 
@@ -410,10 +659,9 @@ pub struct Interaction {
     names: HashMap<String, String>,
     present: bool,
     orchestrator: Option<ark_orchestrate::Orchestrator>,
-    orchestrate: Option<(OrchestrateFn, Arc<ApprovalGate>)>,
-    /// Orchestrators built so far, by project id. Work keeps running in a project the
-    /// interaction left; coming back finds the same orchestrator.
-    orchestrators: HashMap<String, ark_orchestrate::Orchestrator>,
+    /// With [`App::orchestrate`]: every project's orchestrator, shared with sibling conversations.
+    orchs: Option<Arc<Orchestrators>>,
+    sign_in: Option<crate::capabilities::Opener>,
 }
 
 impl Interaction {
@@ -452,24 +700,34 @@ impl Interaction {
     fn follow_project(&mut self) -> anyhow::Result<()> {
         // "Always in this project" grants are kept and read for the project now open.
         let store = self.ark.engine().store.clone();
-        self.gate.keep_in(store.clone(), self.project.id.as_str());
-        if let Some((_, gate)) = &self.orchestrate {
-            gate.keep_in(store, self.project.id.as_str());
+        self.gate.keep_in(store, self.project.id.as_str());
+        if let Some(o) = &self.orchs {
+            self.orchestrator = Some(o.get(&self.ark, &self.project)?);
         }
-        let Some((f, gate)) = &self.orchestrate else {
-            return Ok(());
-        };
-        let key = self.project.id.as_str().to_string();
-        let o = match self.orchestrators.get(&key) {
-            Some(o) => o.clone(),
-            None => {
-                let o = f(&self.ark, &self.project, gate.clone())?;
-                self.orchestrators.insert(key, o.clone());
-                o
-            }
-        };
-        self.orchestrator = Some(o);
         Ok(())
+    }
+
+    /// Opens more live conversations of this app (see [`Siblings`]).
+    pub fn siblings(&self) -> Siblings {
+        Siblings {
+            info: self.info.clone(),
+            ark: self.ark.clone(),
+            commands: self.commands.clone(),
+            labels: self.labels.clone(),
+            status: self.status.clone(),
+            on_project: self.on_project.clone(),
+            pricing: self.pricing,
+            keys: self.keys.clone(),
+            present: self.present,
+            orchestrator: self.orchestrator.clone().filter(|_| self.orchs.is_none()),
+            orchs: self.orchs.clone(),
+            sign_in: self.sign_in.clone(),
+        }
+    }
+
+    /// Run on the model chosen last in any of this app's conversations.
+    pub fn follow_model(&mut self) {
+        self.ark.follow_current_model();
     }
     /// The front-end can show things beside the conversation (see `TurnOptions::present`).
     pub fn set_presentation(&mut self, yes: bool) {
@@ -599,23 +857,8 @@ impl Interaction {
 
     /// Sessions, most recent first: this project's, or every project's.
     pub fn sessions(&self, all_projects: bool) -> anyhow::Result<Vec<SessionSummary>> {
-        let names: HashMap<String, String> = self
-            .engine()
-            .store
-            .list_projects()
-            .map_err(ark_runtime::AgentError::from)?
-            .into_iter()
-            .map(|p| (p.id.as_str().to_string(), p.name))
-            .collect();
         let scope = (!all_projects).then_some(&self.project.id);
-        let current = self.session.id().clone();
-        Ok(Session::list(self.engine(), scope)?
-            .iter()
-            .map(|r| {
-                let pname = names.get(r.project.as_str()).cloned().unwrap_or_default();
-                SessionSummary::of(r, &pname, r.id == current)
-            })
-            .collect())
+        list_sessions(self.engine(), scope, self.session.id().as_str())
     }
 
     /// Rename a session (the current one when `id` is `None`). False when none matches.
@@ -637,23 +880,12 @@ impl Interaction {
     }
 
     pub fn projects(&self) -> anyhow::Result<Vec<ProjectSummary>> {
-        Ok(self
-            .top_projects()?
-            .iter()
-            .map(|p| self.project_summary(p))
-            .collect())
+        list_projects(self.engine(), &self.project.id)
     }
 
     /// The projects a person works in (not orchestrated agents' child projects), newest first.
     fn top_projects(&self) -> anyhow::Result<Vec<Project>> {
-        Ok(self
-            .engine()
-            .store
-            .list_projects()
-            .map_err(ark_runtime::AgentError::from)?
-            .into_iter()
-            .filter(|p| p.parent.is_none())
-            .collect())
+        top_projects(self.engine())
     }
 
     fn top_project(&self, id: &str) -> anyhow::Result<Project> {
@@ -665,12 +897,7 @@ impl Interaction {
 
     /// The sessions of the project with this id, most recent first.
     pub fn project_sessions(&self, id: &str) -> anyhow::Result<Vec<SessionSummary>> {
-        let p = self.top_project(id)?;
-        let current = self.session.id().clone();
-        Ok(Session::list(self.engine(), Some(&p.id))?
-            .iter()
-            .map(|r| SessionSummary::of(r, &p.name, r.id == current))
-            .collect())
+        project_sessions(self.engine(), id, self.session.id().as_str())
     }
 
     /// The folder this project's tools (and its agents') work in, and whether it was chosen
@@ -1003,35 +1230,14 @@ impl Interaction {
         before: Option<u32>,
         limit: usize,
     ) -> anyhow::Result<Vec<TranscriptTurn>> {
-        let sid = self.session.id().as_str().to_string();
-        Ok(self
-            .session
-            .transcript_page(self.engine(), before, limit)?
-            .iter()
-            .map(|t| {
-                let rec = load_trace(self.engine(), &sid, t.index);
-                // Replay in order: narration (the recorder merges a step's text into one
-                // event) where it was written, steering where it was read.
-                let answer = t.answer.trim();
-                let activity = rec
-                    .as_ref()
-                    .map(|r| {
-                        r.events
-                            .iter()
-                            .filter_map(|e| match &e.event {
-                                HarnessEvent::TextDelta { text }
-                                    if !text.trim().is_empty() && text.trim() != answer =>
-                                {
-                                    Some(Activity::new(ActivityKind::Narration, text.trim()))
-                                }
-                                ev => self.describe(ev),
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                TranscriptTurn::of(t, activity, rec.is_some())
-            })
-            .collect())
+        transcript_page(
+            self.engine(),
+            &self.labels,
+            &self.names,
+            &self.session,
+            before,
+            limit,
+        )
     }
 
     /// Tools the conversation gets beside the app's: with several agents, the orchestrator's

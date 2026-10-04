@@ -9,7 +9,8 @@
 //!   task or kept for its next one.
 //!
 //! The person's own conversation gets [`ChatTools`] instead: create an agent, hand any agent a
-//! task, wait for tasks. So the person asks in words and the chat decides what becomes a task.
+//! task, wait for tasks, have an agent run a task at set times. So the person asks in words and
+//! the chat decides what becomes a task.
 //!
 //! The calls are ordinary actions: each becomes an invocation in the delegating agent's
 //! store and an evidence card in its context, so a delegation is traced like any tool call
@@ -31,6 +32,8 @@ pub const DELEGATE: &str = "agents.delegate";
 pub const WAIT: &str = "agents.wait";
 pub const MESSAGE: &str = "agents.message";
 pub const CREATE: &str = "agents.create";
+pub const SCHEDULE: &str = "agents.schedule";
+pub const UNSCHEDULE: &str = "agents.unschedule";
 
 /// Characters of a delegated task's result in the delegator's evidence card. The full result
 /// stays in the invocation (`get_evidence`).
@@ -230,6 +233,27 @@ impl ChatTools {
         }
     }
 
+    /// The schedules running now, for the schedule tools' descriptions.
+    fn scheduled(&self) -> String {
+        let all = self.orch.schedules();
+        if all.is_empty() {
+            return "Nothing is scheduled.".into();
+        }
+        let list: Vec<String> = all
+            .iter()
+            .map(|s| {
+                format!(
+                    "{} ({}, {}: {})",
+                    s.id,
+                    s.agent,
+                    s.says,
+                    crate::brief::clip(&s.task.objective, 60)
+                )
+            })
+            .collect();
+        format!("Scheduled: {}.", list.join("; "))
+    }
+
     fn live(&self, name: &str) -> bool {
         self.orch
             .agent(name)
@@ -294,6 +318,40 @@ impl Adapter for ChatTools {
                         "description": format!("what it may use, only what its role needs; default: all. One of: {}", self.orch.capabilities().join(", "))
                     }
                 }
+            })),
+            // Standing work spends model time with nobody watching: the person agrees to it.
+            ActionDescriptor::new(
+                SCHEDULE,
+                format!(
+                    "have an agent run a task on its own at set times (every weekday at 09:00, every 30 minutes) or once later (in 2 hours, at 18:00). Each run is a new task; it runs whether or not this chat is open. {}",
+                    self.roster()
+                ),
+                RiskTier::Mutate,
+            )
+            .volatile()
+            .with_input_schema(json!({
+                "type": "object",
+                "required": ["to", "objective"],
+                "properties": {
+                    "to": { "type": "string", "description": "the agent's name" },
+                    "objective": { "type": "string", "description": "what each run must achieve" },
+                    "context": { "type": "string", "description": "only what it needs to know; it does not see this conversation" },
+                    "at": { "type": "string", "description": "local time of day, HH:MM (24-hour)" },
+                    "days": { "type": "array", "items": { "type": "string" }, "description": "with at: mon .. sun, weekdays or weekends; default every day" },
+                    "every_minutes": { "type": "integer", "description": "instead of at: run every this many minutes" },
+                    "once": { "type": "boolean", "description": "run one time (at the next `at`, or after `every_minutes`) and stop" }
+                }
+            })),
+            ActionDescriptor::new(
+                UNSCHEDULE,
+                format!("stop a scheduled task. {}", self.scheduled()),
+                RiskTier::Observe,
+            )
+            .volatile()
+            .with_input_schema(json!({
+                "type": "object",
+                "required": ["schedule"],
+                "properties": { "schedule": { "type": "string", "description": "its id, s-…" } }
             })),
         ]
     }
@@ -394,9 +452,60 @@ impl Adapter for ChatTools {
                     json!({ "agent": a.name, "role": a.spec.role, "tools": a.spec.tools }),
                 ))
             }
+            SCHEDULE => {
+                let to = s("to");
+                if !self.live(to) {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        format!("no agent named `{to}`. {}", self.roster()),
+                    ));
+                }
+                let when = crate::schedule::When {
+                    every_minutes: input
+                        .get("every_minutes")
+                        .and_then(Value::as_u64)
+                        .map(|m| m.min(u32::MAX as u64) as u32),
+                    at: Some(s("at")).filter(|a| !a.is_empty()).map(str::to_string),
+                    days: input
+                        .get("days")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                    once: input.get("once").and_then(Value::as_bool).unwrap_or(false),
+                };
+                let task = TaskSpec::new(s("objective")).context(s("context"));
+                let rec = self
+                    .orch
+                    .schedule(to, task, when)
+                    .map_err(|e| AdapterError::bad_input(action, e.to_string()))?;
+                Ok(ActionOutput::json(schedule_json(&rec)))
+            }
+            UNSCHEDULE => {
+                let rec = self.orch.unschedule(s("schedule")).map_err(|e| {
+                    AdapterError::bad_input(action, format!("{e}. {}", self.scheduled()))
+                })?;
+                let mut v = schedule_json(&rec);
+                v["stopped"] = json!(true);
+                Ok(ActionOutput::json(v))
+            }
             other => Err(AdapterError::UnknownAction(other.to_string())),
         }
     }
+}
+
+fn schedule_json(s: &crate::ScheduleRecord) -> Value {
+    json!({
+        "schedule": s.id,
+        "agent": s.agent,
+        "objective": s.task.objective,
+        "when": s.says,
+        "next_ms": s.next_ms,
+    })
 }
 
 fn result_json(t: &TaskRecord) -> Value {
@@ -477,6 +586,24 @@ pub(crate) fn distiller() -> Distiller {
                 ),
                 Vec::new(),
             )),
+            SCHEDULE | UNSCHEDULE => {
+                let g = |k: &str| out.get(k).and_then(Value::as_str).unwrap_or("");
+                let verb = if action == UNSCHEDULE {
+                    "stopped"
+                } else {
+                    "scheduled"
+                };
+                Some((
+                    format!(
+                        "{verb} {}: {} runs \"{}\" {}",
+                        g("schedule"),
+                        g("agent"),
+                        crate::brief::clip(g("objective"), 120),
+                        g("when")
+                    ),
+                    vec![g("schedule").to_string()],
+                ))
+            }
             MESSAGE => Some((
                 format!(
                     "message to {} {}",

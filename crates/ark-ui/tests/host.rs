@@ -464,10 +464,13 @@ async fn events_are_numbered_and_a_late_window_gets_the_running_turn() {
         live[0]["kind"], "turn_started",
         "the replay starts at the turn"
     );
-    assert_eq!(live.last().unwrap()["seq"].as_u64().unwrap(), seq);
+    // Every event of the turn up to `seq` is in the replay.
+    let turn_seen = seen.iter().rfind(|e| !e["session"].is_null()).unwrap();
+    assert!(live.last().unwrap()["seq"].as_u64().unwrap() >= turn_seen["seq"].as_u64().unwrap());
+    assert!(live.last().unwrap()["seq"].as_u64().unwrap() <= seq);
     assert!(
-        live.len() >= seen.len(),
-        "everything this window saw is in the replay"
+        live.len() >= seen.iter().filter(|e| !e["session"].is_null()).count(),
+        "everything of the turn this window saw is in the replay"
     );
     // The rest of the turn arrives after `seq`, numbered one by one.
     let mut last = seen.last().unwrap()["seq"].as_u64().unwrap();
@@ -483,10 +486,115 @@ async fn events_are_numbered_and_a_late_window_gets_the_running_turn() {
             break;
         }
     }
+    // Then the list of working chats changes.
+    let working = next(&mut rx, "working").await;
+    assert_eq!(working["seq"].as_u64().unwrap(), last + 1);
+    last += 1;
     let after = host.call("hello", json!({})).await.unwrap();
     assert!(
         after["live"].as_array().unwrap().is_empty(),
         "nothing to replay between turns"
     );
     assert_eq!(after["seq"].as_u64().unwrap(), last);
+}
+
+/// Moving to another chat while one works leaves it working in the background: its question
+/// waits, the window starts and finishes a turn in the new chat, and going back finds the first
+/// one still running. Events and questions say which chat they belong to.
+#[tokio::test]
+async fn a_chat_keeps_working_while_the_window_moves_to_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let saves = Arc::new(AtomicUsize::new(0));
+    let host = open(dir.path(), "notes.save", saves.clone()).await;
+    let mut rx = host.subscribe();
+    host.call("send", json!({ "text": "save the notes" }))
+        .await
+        .unwrap();
+    let started = next(&mut rx, "turn_started").await;
+    let first = started["session"].as_str().unwrap().to_string();
+    let ask = next(&mut rx, "approval").await;
+    assert_eq!(ask["session"], first.as_str());
+
+    // A new chat while the first one waits for an answer.
+    let moved = host.call("new_session", json!({})).await.unwrap();
+    let second = moved["session"]["id"].as_str().unwrap().to_string();
+    assert_ne!(first, second);
+    assert_eq!(moved["running"], false);
+    let working = host.call("working", json!({})).await.unwrap();
+    assert_eq!(working[0]["session"], first.as_str());
+    assert_eq!(working[0]["input"], "save the notes");
+    let hello = host.call("hello", json!({})).await.unwrap();
+    assert!(hello["running"].is_null() && hello["live"].as_array().unwrap().is_empty());
+    assert_eq!(
+        hello["approvals"][0]["session"],
+        first.as_str(),
+        "its question waits, marked"
+    );
+    // Lists answer while a turn runs.
+    assert!(host.call("projects", json!({})).await.is_ok());
+
+    // Back to the first: it is still running, and a window rebuilds its turn.
+    let back = host
+        .call("open_session", json!({ "id": first }))
+        .await
+        .unwrap();
+    assert_eq!(back["session"]["id"], first.as_str());
+    assert_eq!(back["running"], true);
+    let hello = host.call("hello", json!({})).await.unwrap();
+    assert_eq!(hello["running"], "save the notes");
+    assert!(!hello["live"].as_array().unwrap().is_empty());
+    // And away again, to the second chat, which runs a turn of its own meanwhile.
+    host.call("open_session", json!({ "id": second }))
+        .await
+        .unwrap();
+    host.call("send", json!({ "text": "save the other notes" }))
+        .await
+        .unwrap();
+    let other = next(&mut rx, "approval").await;
+    assert_eq!(other["session"], second.as_str());
+    host.call(
+        "approve",
+        json!({ "id": other["id"], "decision": "allow_once" }),
+    )
+    .await
+    .unwrap();
+    let done = next(&mut rx, "turn_finished").await;
+    assert_eq!(done["session"], second.as_str());
+    assert!(done["summary"].is_object(), "the chat on screen");
+
+    // The first chat's answer finishes it in the background.
+    host.call(
+        "approve",
+        json!({ "id": ask["id"], "decision": "allow_once" }),
+    )
+    .await
+    .unwrap();
+    let done = next(&mut rx, "turn_finished").await;
+    assert_eq!(done["session"], first.as_str());
+    assert!(done["summary"].is_null(), "not the chat on screen");
+    assert_eq!(saves.load(Ordering::SeqCst), 2);
+    assert!(host
+        .call("working", json!({}))
+        .await
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let turns = host
+        .call("transcript", json!({ "session": first }))
+        .await
+        .unwrap();
+    assert_eq!(turns.as_array().unwrap().len(), 1);
+    host.call("open_session", json!({ "id": first }))
+        .await
+        .unwrap();
+    assert_eq!(
+        host.call("transcript", json!({}))
+            .await
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 }

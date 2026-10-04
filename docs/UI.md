@@ -81,6 +81,12 @@ the agent read it. A steer that arrives after the agent's last step becomes the 
   "The agent wants to run:" for the conversation's own question, "reader-a (task t-…) wants
   to run:" for an agent's.
 - Stop uses the turn's `CancelToken`. A cancelled tool call kills its process group.
+- Several chats can work at once (ADR 0017). Moving to another chat while a turn runs leaves
+  it running in the background: the sidebar marks it with a dot, its questions wait in the
+  tray under "In ‹chat›", and opening it again shows its turn as it goes. A chat in the
+  background ends with its turn; its session is stored as usual.
+- While an agent uses the person's computer (ADR 0018), the top bar shows "‹who› is using your
+  computer · Stop". Stop takes the screen back; nothing shows otherwise.
 - Opening a session loads its stored turns for display (paged, "Show earlier turns") and
   restores ARK working state. The model still receives only the bounded carry-over: stored
   transcript is not model context.
@@ -184,18 +190,21 @@ front-end uses the same.
 | Plugins | `plugins` (each: `name`, `command`, `args`, `env_keys`, `running`, `tools`, `error`; null when the app has none), `plugin_add {text}` or `{spec}` (answers the plugins added), `plugin_remove {name}`, `plugin_restart {name}`. None waits for a running turn |
 | Workbench | `term_open {cols, rows}` (the project's shell: `session`, `cwd`, `history`), `term_write {session, data}`, `term_resize`, `term_close`, `files {path?}`, `file_read {path}`, `file_write {path, text}` (inside the project folder) |
 | Session | `hello`, `summary`, `sessions {project?}`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `open_project {id}` (back to its last chat), `add_project {path?, name?}` (a folder becomes a project, or opens the one it is), `rename_project {id, name}`, `project_folder {id, path}`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models`, `subscription_usage` (each subscription's limits as its CLI last reported them: `[{account, plan?, windows: [{minutes, used_percent, resets_at}], limited, reported_ms}]`) |
-| Turn | `send`, `steer`, `cancel`, `approve`, `command` |
-| Views | `transcript`, `trace`, `call`, `context`, `usage`, `state` |
+| Turn | `send`, `steer`, `cancel` (both take `session` for a chat in the background), `approve`, `command`, `working` (the chats running a turn: `[{session, title, project, input}]`) |
+| Views | `transcript {session?}`, `trace`, `call`, `context`, `usage`, `state` |
+| Computer | `computer_stop` (take the screen back from the agent using it) |
 | Store | `artifacts`, `artifact` (the project's, or one an orchestrated agent produced), `invocation`, `run_action` |
 | Agents | `graph`, `agents`, `tools`, `profiles` (what `AgentSpec.profile_name` may name), `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
-| Tasks | `submit_task {agent, task}`, `task {task}` (record and timeline lines), `task_trace`, `cancel_task`, `retry_task`, `orch_events {after, limit}` |
+| Tasks | `submit_task {agent, task}`, `task {task}` (record and timeline lines), `task_trace`, `cancel_task`, `retry_task`, `unschedule {schedule}`, `orch_events {after, limit}` |
 | Page | `focus`, `ext` (an app handler) |
 
 | Events (`kind`) | |
 |---|---|
-| `turn_started`, `text`, `event`, `turn_finished` | A turn. `event` carries the `HarnessEvent` and its described `Activity` |
+| `turn_started`, `text`, `event`, `turn_finished` | A turn, with its chat's `session`. `event` carries the `HarnessEvent` and its described `Activity`. `turn_finished` carries `summary` only for the chat windows show |
+| `working` | The chats running a turn changed (`working`, as the method answers) |
+| `computer` | Who uses the screen changed (`user`: `{owner, who, session}` or null) |
 | `term` | A terminal's output (`session`, `data`), or `exit: true`. Not replayed to a window that rejoins a turn; `term_open` returns the scrollback |
-| `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`), and its end (answered, or the turn ended) |
+| `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`, and for a chat's question `session` and `chat`, its title), and its end (answered, or the turn ended) |
 | `summary` | Session, model, project or context changed |
 | `ext` | An app handler's `emitter.emit` |
 | `orch` | An orchestration event: `event` (an `OrchEvent`), `line` and `tone` (its timeline line, from `ark_interact::orchestration::event_line`), `activity` (for an agent's runtime event, what the conversation would show; none for steps and context reports) |
@@ -208,7 +217,7 @@ build, and only shape the answer. `spawn_agent` takes an `AgentSpec` as JSON and
 work wherever the runtime runs. Tests: `tests/orchestration.rs`.
 
 Every event carries `seq`, one higher than the last. `hello` returns `seq` (everything up to
-it is in its answer) and `live`, the running turn's events so far, so a window that opens or
+it is in its answer), `working`, `computer`, and `live`, the open chat's running turn's events so far, so a window that opens or
 reconnects mid-turn rebuilds the turn and then follows it; the page drops events it has
 already shown and reloads on a gap. In a browser the stream reconnects with backoff (1 s
 doubling to 30 s) and stops after ten failures with a Retry button.
@@ -252,7 +261,8 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
   text area (no highlighting).
 - A `present` directive for a view nothing shows (no panel or viewer lists it) is a toast in
   the window; the model is still told it was presented.
-- One `Host` serves one live session. Two browser tabs on one server share it.
+- Windows on one `Host` show one chat, the same one: two browser tabs on one server move
+  together. Other chats can be working in the background.
 - "Always in this project" grants last until removed in Settings › Permissions (or
   `/grants`); "for this session" grants end with the process, as in the shell.
 - There is no macOS WebDriver for the native window; its page is tested in WebKit instead,

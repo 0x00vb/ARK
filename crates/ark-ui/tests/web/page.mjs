@@ -508,6 +508,64 @@ const inits = {
   },
 };
 
+// A chat keeps working when the person opens another: its question waits in the tray with the
+// chat's name, the sidebar marks it, the new chat runs its own turn, and the first one's answer
+// is there when the person goes back.
+async function background(page) {
+  await page.locator("#input").fill("Save the notes for later, please");
+  await page.keyboard.press("Enter");
+  const question = page.locator("#thread .approval");
+  await question.waitFor();
+  const first = await page.evaluate(() => window.ark.summary().session.id);
+
+  await page.locator("#new-session").click();
+  await page.waitForFunction((id) => window.ark.summary().session.id !== id, first);
+  const tray = page.locator("#asks .approval");
+  await tray.waitFor();
+  assert.match(await tray.innerText(), /^In /, "the tray says which chat asks");
+  assert.equal(await page.locator("#thread .approval").count(), 0);
+  await page.locator(`.session[data-id="${first}"] .working-dot`).waitFor();
+  assert.equal(await page.locator("#app").getAttribute("data-running"), "false", "the new chat is free");
+
+  await finished(page, () => page.locator("#input").fill("And a second question?").then(() => page.keyboard.press("Enter")));
+  assert.deepEqual(await shape(page), ["answer: Second answer."]);
+
+  await tray.locator("button", { hasText: "Allow once" }).click();
+  await page.locator(`.session[data-id="${first}"] .session-time`).waitFor();
+  assert.equal(await page.locator("#asks .approval").count(), 0);
+  assert.deepEqual(await shape(page), ["answer: Second answer."], "the other chat's answer stays out");
+
+  await page.locator(`.session[data-id="${first}"]`).click();
+  await page.waitForFunction((id) => window.ark.summary().session.id === id, first);
+  await page.locator(".turn.stored .answer", { hasText: "Saved the notes." }).waitFor();
+}
+scenarios.background = background;
+
+// An agent using the computer shows who, and Stop takes it back: the click it then asks for
+// fails, and the pill goes away.
+async function computer(page) {
+  const pill = page.locator("#computer-use");
+  assert.equal(await pill.isVisible(), false, "nothing shows while nobody uses it");
+  await page.locator("#input").fill("Save my note in Notes, please");
+  await page.keyboard.press("Enter");
+  const look = page.locator("#thread .approval:not(.decided)");
+  await look.waitFor();
+  assert.match(await look.innerText(), /Looking at Notes/);
+  await look.locator("button", { hasText: "Allow once" }).click();
+  const click = page.locator("#thread .approval:not(.decided)", { hasText: "Clicking element 2 in Notes" });
+  await click.waitFor();
+  await pill.waitFor();
+  assert.match(await pill.innerText(), /ARK is using your computer/);
+  await pill.locator("button", { hasText: "Stop" }).click();
+  await pill.waitFor({ state: "hidden" });
+  const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
+  await click.locator("button", { hasText: "Allow once" }).click();
+  await done;
+  await page.locator(".answer", { hasText: "took the computer back" }).waitFor();
+  assert.equal(await pill.isVisible(), false);
+}
+scenarios.computer = computer;
+
 const run = scenarios[scenario];
 if (!run) {
   console.error(`unknown scenario ${scenario}`);

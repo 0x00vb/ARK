@@ -1,0 +1,24 @@
+[package]
+name = "ark-computer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK's Computer capability: agents use the apps on this computer through its accessibility interface, one at a time, every action asked."
+
+[dependencies]
+ark-core.workspace = true
+ark-tools.workspace = true
+ark-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+
+[dev-dependencies]
+ark-core.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

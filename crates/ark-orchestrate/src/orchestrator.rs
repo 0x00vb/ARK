@@ -39,6 +39,7 @@ use crate::record::{
     now_ms, AgentRecord, AgentState, ArtifactRef, Mail, Origin, TaskRecord, TaskState,
     ToolCallRecord, Usage, TOOL_CALLS_KEPT,
 };
+use crate::schedule::{ScheduleRecord, When, SCHEDULE};
 use crate::spec::{AgentSpec, TaskSpec};
 use crate::tools::{self, AgentTools};
 use crate::OrchError;
@@ -156,9 +157,17 @@ impl<'a> OrchestratorBuilder<'a> {
             events,
         });
         inner.load()?;
-        Ok(Orchestrator { inner })
+        let orch = Orchestrator { inner };
+        // Schedules fire whether or not anything else runs: no window needs to be open.
+        if tokio::runtime::Handle::try_current().is_ok() {
+            orch.spawn_schedule_timer(SCHEDULE_TICK);
+        }
+        Ok(orch)
     }
 }
+
+/// How often the timer looks for schedules that are due.
+const SCHEDULE_TICK: Duration = Duration::from_secs(20);
 
 impl Orchestrator {
     /// An orchestrator over `ark`'s store, tools and settings, working in `project`. Agents
@@ -365,6 +374,90 @@ impl Orchestrator {
             }
         })
     }
+
+    // ---- schedules ---------------------------------------------------------------------
+
+    /// Hand `agent` this task at the times `when` says, from now on, until
+    /// [`unschedule`](Self::unschedule) (see [`crate::schedule`]). Each run is a task like any
+    /// other; its state-changing actions ask, as the agent's always do.
+    pub fn schedule(
+        &self,
+        agent: &str,
+        task: TaskSpec,
+        when: When,
+    ) -> Result<ScheduleRecord, OrchError> {
+        let when = when.normalized().map_err(OrchError::NotAllowed)?;
+        match self.agent(agent) {
+            None => return Err(OrchError::UnknownAgent(agent.into())),
+            Some(a) if a.state == AgentState::Terminated => {
+                return Err(OrchError::Terminated(agent.into()))
+            }
+            _ => {}
+        }
+        if task.objective.trim().is_empty() {
+            return Err(OrchError::NotAllowed("a task needs an objective".into()));
+        }
+        let rec = ScheduleRecord::new(self.inner.project.id.as_str(), agent, task, when);
+        self.inner.save_schedule(&rec);
+        self.inner
+            .state
+            .lock()
+            .unwrap()
+            .schedules
+            .insert(rec.id.clone(), rec.clone());
+        self.inner.emit(EventKind::Scheduled {
+            schedule: rec.id.clone(),
+            agent: agent.to_string(),
+            objective: clip(&rec.task.objective, 300),
+            says: rec.says.clone(),
+        });
+        Ok(rec)
+    }
+
+    /// The schedules that still run, soonest first.
+    pub fn schedules(&self) -> Vec<ScheduleRecord> {
+        let st = self.inner.state.lock().unwrap();
+        let mut v: Vec<ScheduleRecord> = st.schedules.values().cloned().collect();
+        v.sort_by_key(|s| (s.next_ms, s.created_ms));
+        v
+    }
+
+    /// Stop a schedule. A run already started goes on (cancel its task to stop it).
+    pub fn unschedule(&self, id: &str) -> Result<ScheduleRecord, OrchError> {
+        let rec = self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .schedules
+            .remove(id)
+            .ok_or_else(|| OrchError::NotAllowed(format!("no schedule `{id}`")))?;
+        let _ = self.inner.engine.store.delete_record(SCHEDULE, &rec.id);
+        self.inner.emit(EventKind::Unscheduled {
+            schedule: rec.id.clone(),
+        });
+        Ok(rec)
+    }
+
+    /// Start every schedule due at `now_ms`; returns the tasks started. The orchestrator's
+    /// timer calls this; an app with its own clock (or a test) can too.
+    pub fn tick_schedules(&self, now_ms: u64) -> Vec<String> {
+        self.inner.tick_schedules(now_ms)
+    }
+
+    /// Run [`tick_schedules`](Self::tick_schedules) every `every` while the orchestrator lives.
+    /// [`OrchestratorBuilder::build`] starts one when it runs inside a tokio runtime.
+    pub fn spawn_schedule_timer(&self, every: Duration) -> tokio::task::JoinHandle<()> {
+        let weak = Arc::downgrade(&self.inner);
+        tokio::spawn(async move {
+            loop {
+                let Some(inner) = weak.upgrade() else { break };
+                inner.tick_schedules(now_ms());
+                drop(inner);
+                tokio::time::sleep(every).await;
+            }
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -408,6 +501,7 @@ pub(crate) struct State {
     pub agents: HashMap<String, AgentRt>,
     pub tasks: HashMap<String, TaskRt>,
     pub messages: Vec<crate::graph::MessageEdge>,
+    pub schedules: HashMap<String, ScheduleRecord>,
 }
 
 pub(crate) struct Inner {
@@ -549,6 +643,68 @@ impl Inner {
         }
     }
 
+    fn save_schedule(&self, r: &ScheduleRecord) {
+        match serde_json::to_value(r) {
+            Ok(v) => {
+                if let Err(e) =
+                    self.engine
+                        .store
+                        .put_record(SCHEDULE, &r.id, self.project.id.as_str(), &v)
+                {
+                    tracing::warn!(schedule = %r.id, "could not save the schedule: {e}");
+                }
+            }
+            Err(e) => tracing::warn!("could not encode a schedule: {e}"),
+        }
+    }
+
+    /// Start the schedules due at `now`. A schedule whose last run is still open skips this
+    /// one; a run missed while the process was down runs once.
+    fn tick_schedules(&self, now: u64) -> Vec<String> {
+        let due: Vec<ScheduleRecord> = {
+            let st = self.state.lock().unwrap();
+            st.schedules
+                .values()
+                .filter(|s| s.due(now))
+                .cloned()
+                .collect()
+        };
+        let mut started = Vec::new();
+        for mut s in due {
+            let busy = s.last_task.as_ref().is_some_and(|t| {
+                let st = self.state.lock().unwrap();
+                st.tasks.get(t).is_some_and(|t| !t.record.state.is_final())
+            });
+            if busy {
+                s.skipped += 1;
+            } else {
+                match self.create_task(&s.agent, s.task.clone(), Origin::External, None) {
+                    Ok(id) => {
+                        self.update_task(&id, |t| t.schedule = Some(s.id.clone()));
+                        self.start(&id);
+                        s.runs += 1;
+                        s.last_ms = Some(now);
+                        s.last_task = Some(id.clone());
+                        started.push(id);
+                    }
+                    Err(e) => {
+                        tracing::warn!(schedule = %s.id, "a scheduled run could not start: {e}");
+                        s.skipped += 1;
+                    }
+                }
+            }
+            s.advance(now);
+            self.save_schedule(&s);
+            let mut st = self.state.lock().unwrap();
+            if s.active() {
+                st.schedules.insert(s.id.clone(), s);
+            } else {
+                st.schedules.remove(&s.id);
+            }
+        }
+        started
+    }
+
     /// Change a task under the lock, then store it.
     fn update_task(&self, id: &str, f: impl FnOnce(&mut TaskRecord)) -> Option<TaskRecord> {
         let rec = {
@@ -656,6 +812,13 @@ impl Inner {
             for v in store.list_records(MESSAGE, Some(self.project.id.as_str()))? {
                 if let Ok(m) = serde_json::from_value(v) {
                     st.messages.push(m);
+                }
+            }
+            for v in store.list_records(SCHEDULE, Some(self.project.id.as_str()))? {
+                if let Ok(s) = serde_json::from_value::<ScheduleRecord>(v) {
+                    if s.active() {
+                        st.schedules.insert(s.id.clone(), s);
+                    }
                 }
             }
         }
@@ -985,6 +1148,7 @@ impl Inner {
             finished_ms: None,
             run_ms: 0,
             pid: None,
+            schedule: None,
         };
         let parent_rec = {
             let mut st = self.state.lock().unwrap();

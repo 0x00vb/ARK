@@ -13,6 +13,7 @@
 //! | messages | `agents.message`: a short note into another agent's running task or inbox |
 //! | artifacts | passed explicitly with a task and handed back with its result |
 //! | [`Orchestrator`] | lifecycle (spawn, run, suspend, resume, cancel, terminate) and a capacity-aware scheduler |
+//! | [`ScheduleRecord`] / [`When`] | a task an agent runs on its own at set times (`every weekday at 09:00`) |
 //! | [`Graph`] / [`OrchEvent`] | the live state and the full trace, for any front-end |
 //!
 //! Each agent works in its own child project, so its working state, evidence and
@@ -37,6 +38,7 @@ mod graph;
 pub mod models;
 mod orchestrator;
 mod record;
+pub mod schedule;
 mod spec;
 mod tools;
 
@@ -49,8 +51,9 @@ pub use record::{
     AgentRecord, AgentState, ArtifactRef, Mail, Origin, TaskRecord, TaskState, ToolCallRecord,
     Usage,
 };
+pub use schedule::{scheduled_projects, ScheduleRecord, When};
 pub use spec::{AgentSpec, Budget, TaskSpec};
-pub use tools::{CREATE, DELEGATE, MESSAGE, WAIT};
+pub use tools::{CREATE, DELEGATE, MESSAGE, SCHEDULE, UNSCHEDULE, WAIT};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OrchError {

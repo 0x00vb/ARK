@@ -115,6 +115,7 @@ impl Labels {
         self.labelers
             .iter()
             .find_map(|r| r.approval(request))
+            .or_else(|| runtime_label(&request.action, &request.input))
             .unwrap_or_else(|| request.preview.clone())
     }
 
@@ -189,6 +190,24 @@ const VERBS: &[(&[&str], &str)] = &[
     (&["extract"], "Extracting"),
 ];
 
+/// An element number as given (`3` or `"[3]"`).
+fn element(input: &Value) -> String {
+    match input.get("ref") {
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::String(s)) => s.trim_matches(['[', ']']).to_string(),
+        _ => "?".into(),
+    }
+}
+
+/// When a schedule runs, in words, from the `agents.schedule` input.
+fn when_words(input: &Value) -> String {
+    let when: ark_orchestrate::When = serde_json::from_value(input.clone()).unwrap_or_default();
+    match when.normalized() {
+        Ok(w) => w.describe(),
+        Err(_) => String::new(),
+    }
+}
+
 /// A readable label from an action name and its input: `continuity.search {"term":"locket"}`
 /// becomes `Searching "locket"`.
 /// ARK's own tools that an app may offer (delegation, messages, diagrams), in words.
@@ -202,6 +221,31 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
         ark_orchestrate::WAIT => "Waiting for delegated work".into(),
         ark_orchestrate::CREATE => format!("Creating agent {}", s("name")),
         ark_orchestrate::MESSAGE => format!("Messaging {}", s("to")),
+        ark_orchestrate::SCHEDULE => format!(
+            "Scheduling {} to {} {}",
+            s("to"),
+            clip(s("objective"), 60),
+            when_words(input)
+        )
+        .trim_end()
+        .to_string(),
+        ark_orchestrate::UNSCHEDULE => format!("Stopping scheduled task {}", s("schedule")),
+        "computer.apps" => "Listing the open apps".into(),
+        "computer.look" => format!("Looking at {}", s("app")),
+        "computer.open" => format!("Opening {}", s("app")),
+        "computer.click" => format!("Clicking element {} in {}", element(input), s("app")),
+        "computer.type" => format!(
+            "Typing \"{}\" into element {} in {}{}",
+            clip(s("text"), 60),
+            element(input),
+            s("app"),
+            if input.get("submit").and_then(Value::as_bool) == Some(true) {
+                ", then Return"
+            } else {
+                ""
+            }
+        ),
+        "computer.keys" => format!("Pressing {} in {}", s("keys"), s("app")),
         "diagram.create" => match s("title") {
             "" => "Drawing a diagram".into(),
             t => format!("Drawing \"{}\"", clip(t, 60)),
@@ -263,6 +307,29 @@ fn humanize(action: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn scheduling_and_the_computer_read_naturally() {
+        let l = Labels::new(Vec::new());
+        assert_eq!(
+            l.call_label(
+                "agents.schedule",
+                &json!({ "to": "news", "objective": "summarize the news", "at": "8:30", "days": ["weekdays"] })
+            ),
+            "Scheduling news to summarize the news every weekday at 08:30"
+        );
+        assert_eq!(
+            l.call_label(
+                "computer.type",
+                &json!({ "app": "Notes", "ref": 3, "text": "Plan", "submit": true })
+            ),
+            "Typing \"Plan\" into element 3 in Notes, then Return"
+        );
+        assert_eq!(
+            l.call_label("computer.click", &json!({ "app": "Mail", "ref": "[2]" })),
+            "Clicking element 2 in Mail"
+        );
+    }
 
     #[test]
     fn runtime_tools_read_naturally() {

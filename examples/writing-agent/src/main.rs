@@ -376,6 +376,8 @@ fn build_ark(
         .connections(true)
         // Look things up on sites that need clicking through, in the installed Chrome.
         .browser(true)
+        // Work in the writer's own apps: paste a chapter into Pages, file notes in Notes.
+        .computer(true)
         .profile(writer_profile());
     if let Some(p) = provider {
         b = b.provider(p);

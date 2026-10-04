@@ -18,7 +18,32 @@ What changed for people building on ARK, per release. Not a commit log.
   namespaces; its description lists them (`Orchestrator::capabilities`).
 - `ark_runtime::per_agent::{PerAgent, Owner}`: tools each agent gets its own of (the web on its
   model, the browser). `Ark::per_agent`, `Ark::agent_tools`; `ark_runtime::web::Web`.
-- `examples/writing-agent` turns the browser on.
+- `examples/writing-agent` turns the browser and the computer on.
+- Work that runs without the window (ADR 0017):
+  - **Several live chats**: `Interaction::siblings()` opens another live conversation of the same
+    app. In the window, moving to another chat while a turn runs leaves it working. Its questions
+    wait in the tray with the chat's name, and the sidebar marks working chats.
+  - **Protocol, additive**: turn events and approvals carry `session` (approvals also `chat`);
+    new `working` method and event; `steer`, `cancel` and `transcript` take an optional `session`.
+  - **Lists while a turn runs**: `ark_interact::interaction::{list_projects, list_sessions,
+    project_sessions, transcript}` read the store without the interaction, so `sessions`,
+    `projects` and `transcript` answer while turns run.
+- Schedules (ADR 0017):
+  - **API**: `Orchestrator::schedule(agent, TaskSpec, When)`, `schedules`, `unschedule`,
+    `tick_schedules`, `spawn_schedule_timer`.
+  - **When**: every N minutes, or at a local time on given days, or once.
+  - **Runs**: each run is an ordinary task (`TaskRecord::schedule`). `Graph::schedules`,
+    `EventKind::{Scheduled, Unscheduled}`, `ark_orchestrate::scheduled_projects`.
+  - **Asked in words and on the command line**: the chat's `agents.schedule` and
+    `agents.unschedule`; `/schedules` and `/schedules stop <id>`; `/agents` lists them;
+    `Control::Unschedule` ([`ORCHESTRATION.md`](docs/ORCHESTRATION.md#schedules)).
+- The Computer (ADR 0018): the new crate `ark-computer`. Agents use the apps on this computer
+  through macOS's accessibility interface: `computer.apps`, `look`, `open`, `click`, `type`,
+  `keys`. One agent holds the screen at a time, every action but `apps` asks, actions wait for
+  the person to pause, and the person can take the screen back. `ArkBuilder::computer(true)` or
+  `computer_with(service)`; `Ark::computer()`. Window: "‹who› is using your computer · Stop"
+  (`computer` event, `computer_stop`). A "Computer" capability in the catalog.
+- `impl Clone for Ark` (a handle on the same agent); `Ark::follow_current_model`.
 - Window: Settings › Appearance (Light, Dark, System), kept per window; `ArkUi::theme(Theme)` sets
   the default. Dark is `:root[data-theme="dark"]` now, not a media query
   ([`UI.md`](docs/UI.md#what-the-workspace-shows)).
@@ -27,6 +52,14 @@ What changed for people building on ARK, per release. Not a commit log.
   can take it; `ark.setting({ advanced: true })` lists a section under Advanced.
 
 ### Changed
+- With `App::orchestrate`, the orchestrators are shared by all of an app's conversations.
+  Each one's approval gate keeps "Always in this project" grants in its own project; before,
+  one gate followed whichever project the chat had open. When the app opens, projects with
+  schedules get their orchestrator.
+- Window: `new_session`, `open_session`, `switch_project`, `open_project` and `add_project` no
+  longer refuse while a turn runs: the running chat goes on in the background.
+- Approval lines for ARK's own tools are in words ("Scheduling digest to … every day at 18:00",
+  "Clicking element 2 in Mail") rather than the call's preview.
 - Window: Settings lists Skills and Tool servers under Advanced; shorter copy in Capabilities,
   Permissions, Skills and Tool servers. Welcome suggestions go through the same checks as a
   typed message.
@@ -47,6 +80,9 @@ What changed for people building on ARK, per release. Not a commit log.
 - Window: an app stylesheet that set dark colours inside `@media (prefers-color-scheme: dark)`
   now loses to ARK's `:root[data-theme="dark"]`. Put them under `:root[data-theme="dark"]`, and
   give light overrides `:root, :root[data-theme]` so they win in both themes.
+- `ark_orchestrate::EventKind` has two new variants (`Scheduled`, `Unscheduled`): an exhaustive
+  `match` needs an arm or `_`. `Graph` and `TaskNode` have a new field each (`schedules`,
+  `schedule`): add it where you build them; deserializing fills a default.
 
 ## [0.9.0] - 2026-10-04
 

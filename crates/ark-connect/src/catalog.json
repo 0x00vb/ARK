@@ -19,6 +19,7 @@
     { "id": "web", "label": "Web", "says": "search the web and read pages", "tools": ["web"] },
     { "id": "files", "label": "Files", "says": "read and write files in the project folder", "tools": ["files"] },
     { "id": "browser", "label": "Browser", "says": "open sites, click and type in them", "tools": ["browser"] },
+    { "id": "computer", "label": "Computer", "says": "use the apps on this computer, one agent at a time", "tools": ["computer"] },
     {
       "id": "mail", "label": "Mail", "says": "send email from your account", "tools": ["mail"],
       "provider": "google", "service": "google.mail",

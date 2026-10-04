@@ -203,6 +203,24 @@ picks another browser.
 Tools each agent gets its own of (the web on its model, the browser) are `PerAgent` sources
 (`ark_runtime::per_agent`); an app adds one the same way.
 
+### The computer
+
+`ArkBuilder::computer(true)` lets agents use the apps on this computer (macOS for now; not
+offered elsewhere), read through the accessibility interface: a window is its text and a
+numbered list of controls, as a page is in the browser ([ADR 0018](adr/0018-the-computer-one-screen-every-action-asked.md)).
+
+| Action | What |
+|---|---|
+| `computer.apps` | The open apps. Runs on its own |
+| `computer.look {app}` | The app's front window: text and numbered controls. Asks first |
+| `computer.open {app}`, `computer.click {app, ref}`, `computer.type {app, ref, text, submit}`, `computer.keys {app, keys}` | Start or bring forward an app; press a control; type into a field; a key or shortcut (`cmd+s`). Each asks first and answers with the window after |
+
+One agent (or chat) holds the screen at a time; another waits until its turn or task ends or
+it has been idle for 30 s. Every action waits until the person has left the keyboard and
+mouse alone for 1.5 s. `ComputerService::take_back` (the window's Stop) ends the holder's use
+for its turn or task. The first action asks macOS for the Accessibility permission and waits
+for the person to allow it. `computer_with(ComputerService::with_screen(..))` puts another
+`Screen` underneath; `ark_computer::fake::FakeScreen` is one for tests.
 ### Approvals that last
 
 Every approval offers Allow once, Allow for this session, Always in this project, and Deny

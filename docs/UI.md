@@ -31,7 +31,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Area | Contents |
 |---|---|
 | Conversation | Your messages, streamed answers, and the agent's work as short activity lines ("Reading chapter-04.md"). A work block folds to one line ("Used 3 tools · Reading notes") when the turn ends. A tool row opens on click: arguments, the result the model saw, duration, approval, and what it added to the context. |
-| Composer | Model, and a quiet "24% context" meter that runs `/context` when clicked. The model menu lists models by backend (subscriptions, Ollama, APIs with a key); a backend that is not ready shows its sign-in or install command. |
+| Composer | Model, and a quiet "24% context" meter that runs `/context` when clicked. The model menu lists models by backend (subscriptions, Ollama, APIs with a key); a backend that is not ready shows its sign-in or install command. An app can draw this menu itself (`ark.modelPicker`); then, while the app says no model is chosen, the button asks for one and sending opens the menu with the text kept. |
 | Sidebar | New chat, then projects with their chats beneath (times, "Show more" after 8). The current project is unfolded, the others fold; a chevron unfolds one without opening it, and a fold choice lasts until the current project changes. A project's menu renames it and changes its folder; "+" adds a folder as a project, or an empty one. Settings at the bottom. |
 | Top bar | The title (the chat's, or the project's over one of its views). With app views marked `nav`: tabs, "Chat" first. On the right, a + menu: Terminal, Browser, Files, then app panels marked `nav`. |
 | Side pane | What the person or the agent opened, beside the conversation: Terminal, Browser, Files, an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
@@ -110,7 +110,7 @@ ui.run_desktop(tauri::generate_context!())
 | `new(app)`, `.start(Start)` | The app, and model/project/session choices as the shell's flags give them |
 | `.accent(css)`, `.logo(asset)` | Theme colour and logo |
 | `.theme(Theme::Light)` | The theme until the person picks one in Settings › Appearance (default `Theme::System`) |
-| `.welcome(title, line)`, `.suggestion(label, prompt)` | The empty-session screen |
+| `.welcome(title, line)`, `.suggestion(label, prompt)` | The empty-session screen; an empty `line` shows no line (without `.welcome`, the tagline) |
 | `.asset(path, bytes)` | A file the page can load, served at `ext/<path>` |
 | `.script(asset)`, `.stylesheet(asset)` | Load an asset as a module or stylesheet after ARK's own |
 | `.handler(name, f)` | A backend method the app's scripts call with `ark.ext(name, params)` |
@@ -129,6 +129,8 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 | `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` lists it in the top bar's + menu. An app panel with the id `terminal`, `browser` or `files` replaces ARK's, and an app panel's `presents` wins over a built-in one for the same view |
 | `ark.view({ id, title, icon, nav, render })` | A view of the current project in the main column, in place of the conversation; `nav: true` makes it a top-bar tab (a string names the tab). Built once, kept while hidden |
 | `ark.setting({ id, title, icon, advanced, render(el, api) })` | A section of the Settings page; `advanced: true` lists it under Advanced |
+| `ark.modelPicker({ label(model), render(el, { close }) })` | The app draws the composer's model menu. `label` gets the host's model ("claude sonnet") and returns the button's text, or `{ text, missing: true }` while nothing is chosen. `ark.refreshModel()` asks again after the app's state changed |
+| `ark.onSubmit(fn)` | `fn(text)` sees each message before it is sent (typed, queued or a suggestion; not `/commands`). Returning true (or a promise of true) means the app took it and nothing is sent |
 | `ark.artifactViewer({ id, label, match, primary, presents, wide, render })` | A view of an artifact; when several match, the artifact header switches between them (plus Raw) |
 | `ark.toolRenderer({ match, render })` | How a tool call's full output renders when its row is opened |
 | `ark.action({ id, label, icon, where, when, run })` | A button on an artifact, or an entry in the ⌘K palette |

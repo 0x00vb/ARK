@@ -4,6 +4,7 @@
 // in early or removed.
 
 import { h, icon, clear, clip, $ } from "./dom.js";
+import { registry } from "./ext.js";
 
 export class Composer {
   constructor(api) {
@@ -57,8 +58,24 @@ export class Composer {
     this.input.placeholder = on ? "Queue a message · ⌘↩ sends it now" : this.placeholder || "Ask anything";
   }
 
+  /// Name the model on its button: the app's words when it draws the picker. With nothing
+  /// chosen yet the button asks for a choice, and sending opens the menu.
   setModel(desc) {
-    this.model.textContent = desc || "model";
+    let label = desc || "model";
+    let missing = false;
+    const p = registry.modelPicker;
+    if (p) {
+      try {
+        const l = p.label(desc);
+        label = typeof l === "string" ? l : l?.text || "";
+        missing = typeof l === "object" && !!l?.missing;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    this.model.textContent = label;
+    this.model.dataset.missing = String(missing);
+    this.missing = missing;
   }
 
   key(e) {
@@ -195,9 +212,25 @@ export class Composer {
   /// that is not ready shows the command that fixes it. The list is fetched on every open, so
   /// signing in elsewhere shows up the next time the menu opens.
   async modelMenu() {
+    const open = document.querySelector(".popover.models-pop.open");
+    if (open) return open.close();
+    const picker = registry.modelPicker;
+    if (picker) {
+      const el = h("div.model-picker");
+      const menu = this.api.popover(this.model, [el], { above: true });
+      menu.classList.add("models-pop");
+      try {
+        picker.render(el, { close: () => menu.close() });
+      } catch (e) {
+        console.error(e);
+        el.append(h("div.menu-sub.pad", String(e)));
+      }
+      return;
+    }
     const body = h("div.models");
     const input = h("input.menu-input", { placeholder: "Other model, e.g. ollama:qwen3:4b", "aria-label": "Model" });
     const menu = this.api.popover(this.model, [body, h("div.menu-sep"), input], { above: true });
+    menu.classList.add("models-pop");
     const pick = async (spec) => {
       menu.close();
       try {

@@ -86,6 +86,7 @@ const api = {
   toast,
   popover,
   refreshSidebar: () => sidebar.refresh(state.sessionId),
+  refreshModel: () => composer.setModel(state.summary?.model),
   // Ask the window to reflect a view's focus again (after its selection changed).
   reportFocus: () => reportFocus(),
   _changed: () => {
@@ -95,6 +96,7 @@ const api = {
       state.extChanged = false;
       sidebar?.renderExtensions();
       topbar?.render();
+      composer?.setModel(state.summary?.model);
     });
   },
 };
@@ -135,8 +137,11 @@ function popover(anchor, children, { above = false, end = false } = {}) {
     el.style.right = `${Math.max(12, window.innerWidth - r.right)}px`;
     el.style.transformOrigin = "top right";
   } else el.style.left = `${Math.min(r.left, window.innerWidth - w - 12)}px`;
-  if (above) el.style.bottom = `${window.innerHeight - r.top + 6}px`;
-  else el.style.top = `${r.bottom + 6}px`;
+  if (above) {
+    el.style.bottom = `${window.innerHeight - r.top + 6}px`;
+    el.classList.add("above");
+    el.style.transformOrigin = end ? "bottom right" : "bottom left";
+  } else el.style.top = `${r.bottom + 6}px`;
   requestAnimationFrame(() => el.classList.add("open"));
   const onDown = (e) => { if (!el.contains(e.target) && e.target !== anchor) close(); };
   const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
@@ -161,6 +166,18 @@ async function submit(text) {
   if (!text) return;
   if (text.startsWith("/")) return runCommand(text);
   if (state.running) return composer.enqueue(text);
+  // No model chosen yet: the text waits in the composer while the person picks one.
+  if (composer.missing) {
+    composer.set(text);
+    return composer.modelMenu();
+  }
+  for (const hook of registry.submitHooks) {
+    try {
+      if (await hook(text)) return;
+    } catch (e) {
+      return toast(e.message || String(e));
+    }
+  }
   thread.begin(text).local = true;
   setRunning(true);
   try {
@@ -253,7 +270,8 @@ async function loadSession() {
 function showWelcome() {
   const w = state.ui.welcome || {};
   thread.welcome(
-    { title: w.title, subtitle: w.subtitle || state.summary?.tagline, logo: state.ui.logo },
+    // An empty subtitle from the app means none; no subtitle at all shows the tagline.
+    { title: w.title, subtitle: w.subtitle ?? state.summary?.tagline, logo: state.ui.logo },
     w.suggestions || [],
     (prompt) => submit(prompt),
   );

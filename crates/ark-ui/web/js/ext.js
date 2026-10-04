@@ -6,12 +6,20 @@
 //                      conversation; `nav` makes it a tab in the top bar beside "Chat".
 //                      Choosing a chat brings the conversation back. A panel's `nav` lists
 //                      it in the top bar's + menu, after ARK's Terminal, Browser and Files.
-//   ark.setting({ id, title, icon, render(el, api) })
+//   ark.setting({ id, title, icon, advanced, render(el, api) })
 //                      a section of the Settings page: the app's or the account's
-//                      configuration, not one project's. Settings shows once one exists.
+//                      configuration, not one project's. `advanced` lists it under Advanced.
+//   ark.modelPicker({ label(model), render(el, { close }) })
+//                      the app draws the composer's model menu and names the model on its
+//                      button. `label` gets the host's model ("claude sonnet") and returns
+//                      the text, or `{ text, missing: true }` while nothing is chosen: then
+//                      sending opens the menu instead. `ark.refreshModel()` asks again.
 //   ark.artifactViewer({ id, label, match(artifact), primary, presents, wide, render(el, artifact, api, params) })
 //   ark.toolRenderer({ match(action), render(el, call, api) })
 //   ark.action({ id, label, icon, where: "artifact" | "palette", when(ctx), run(ctx, api) })
+//   ark.onSubmit(fn)  `fn(text)` sees each message before it is sent (typed, queued or a
+//                      suggestion; not commands). Return true, or a promise of true, when the
+//                      app took it; the conversation then sends nothing.
 //   ark.status({ id, render(el, api) })
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
@@ -33,6 +41,8 @@ export const registry = {
   toolRenderers: [],
   actions: [],
   statuses: [],
+  modelPicker: null,
+  submitHooks: [],
 };
 
 const listeners = new Map();
@@ -88,6 +98,14 @@ export function installApi(api) {
     action(a) {
       need(a, ["id", "label", "run"], "action");
       registry.actions.push(a);
+    },
+    modelPicker(p) {
+      need(p, ["label", "render"], "modelPicker");
+      registry.modelPicker = p;
+      api._changed();
+    },
+    onSubmit(fn) {
+      registry.submitHooks.push(fn);
     },
     status(s) {
       need(s, ["id", "render"], "status");

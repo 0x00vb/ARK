@@ -22,11 +22,15 @@ What changed for people building on ARK, per release. Not a commit log.
 - Window: Settings › Appearance (Light, Dark, System), kept per window; `ArkUi::theme(Theme)` sets
   the default. Dark is `:root[data-theme="dark"]` now, not a media query
   ([`UI.md`](docs/UI.md#what-the-workspace-shows)).
-- Window: `ark.setting({ advanced: true })` lists a section under Advanced.
+- Window: `ark.modelPicker({ label, render })` lets an app draw the composer's model menu and
+  ask for a model before the first message; `ark.onSubmit(fn)` sees each message first and
+  can take it; `ark.setting({ advanced: true })` lists a section under Advanced.
 
 ### Changed
 - Window: Settings lists Skills and Tool servers under Advanced; shorter copy in Capabilities,
-  Permissions, Skills and Tool servers.
+  Permissions, Skills and Tool servers. Welcome suggestions go through the same checks as a
+  typed message.
+- Window: the send button stays at the right of the composer when the context meter is hidden.
 
 ### Breaking
 - `ark_sdk::offered_tools(engine, per_agent)` takes the per-agent sources

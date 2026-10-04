@@ -309,6 +309,47 @@ async function settings(page) {
 }
 scenarios.settings = settings;
 
+// An app that draws the model picker: until a model is chosen the button asks for one, and
+// sending opens the menu with the text kept. `ark.onSubmit` sees each message first and can
+// take it; one it lets through is sent.
+async function picker(page) {
+  await page.evaluate(() => {
+    window.picked = null;
+    window.taken = [];
+    window.ark.modelPicker({
+      label: (model) => (window.picked ? `Picked ${window.picked}` : { text: "Choose model", missing: true }),
+      render: (el, { close }) => el.append(window.ark.h("button.pick-m", { onclick: () => { window.picked = "m"; close(); window.ark.refreshModel(); } }, "m")),
+    });
+    window.ark.onSubmit((text) => {
+      if (!text.startsWith("@")) return false;
+      window.taken.push(text);
+      return true;
+    });
+  });
+  const chip = page.locator("#model-chip");
+  await page.waitForFunction(() => document.getElementById("model-chip").textContent === "Choose model");
+  assert.equal(await chip.getAttribute("data-missing"), "true");
+
+  await page.locator("#input").fill("What do the notes say?");
+  await page.keyboard.press("Enter");
+  await page.locator(".popover .pick-m").waitFor();
+  assert.equal(await page.locator("#input").inputValue(), "What do the notes say?", "the text waits");
+  assert.equal(await page.locator(".user").count(), 0, "nothing was sent");
+
+  await page.locator(".popover .pick-m").click();
+  assert.equal(await chip.textContent(), "Picked m");
+  assert.equal(await chip.getAttribute("data-missing"), "false");
+
+  await page.locator("#input").fill("@writer draft it");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => window.taken.length === 1);
+  assert.equal(await page.locator(".user").count(), 0, "the app took it");
+
+  await finished(page, () => page.locator("#input").fill("What do the notes say?").then(() => page.keyboard.press("Enter")));
+  assert.equal(await page.locator(".user").count(), 1);
+}
+scenarios.picker = picker;
+
 // Settings › Tool servers: an MCP server is added from a typed command, shows its tools,
 // joins the app's tools, and is removed with a second click. One that cannot start says why.
 async function plugins(page) {

@@ -198,6 +198,16 @@ async fn settings_sections_show_and_compose_fills_the_composer_unsent() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_app_model_picker_asks_for_a_model_and_on_submit_takes_messages() {
+    drive(
+        "picker",
+        vec![say("The notes list a locket.", false)],
+        Duration::ZERO,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn tool_servers_are_added_and_removed_in_settings() {
     drive("plugins", vec![], Duration::ZERO).await;
 }

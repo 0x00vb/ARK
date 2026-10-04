@@ -40,7 +40,8 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Files | The project's folder: browse, open a text file, edit and save it (⌘S). A path outside the folder is refused. Saving is the person's action; the agent's writes still ask. |
 | Inline reports | `/context`, `/usage`, `/state`, `/trace` and every other command render in the conversation. There is no permanent inspector. |
 | App views | An app's `ark.view` takes the main column in place of the conversation (ARK Desktop's graph, agents and tasks). The "Chat" tab, or choosing a chat, brings the conversation back. |
-| Settings | One page in the main column for the app's and the account's configuration, with the sections apps register (`ark.setting`), then ARK's own. A project's own settings are in its menu. |
+| Settings | One page in the main column for the app's and the account's configuration, with the sections apps register (`ark.setting`), then ARK's own (Appearance, Capabilities, Permissions). Sections marked `advanced` (the app's, then Skills and Tool servers) are listed under Advanced. A project's own settings are in its menu. |
+| Settings › Appearance | ARK's own section: Light, Dark or System. The choice is kept in the page's storage and set on `<html data-theme>` before the first paint; until the person chooses, the app's `.theme(...)` applies. Pages that draw their own colours read `data-theme` and listen for `ark:theme` on `window` |
 | Settings › Skills | ARK's own section: the skills of the project folder and the store (name, "This project" or "All projects", description). Add skills opens the Terminal in the project folder with `npx skills add <package>` typed; Enter is the person's |
 | Settings › Tool servers | ARK's own section, when the app has plugins: the MCP servers (running or why not, their tools, the command), Add (a name and a command, or a pasted `mcpServers` snippet), Restart, Remove (a second click confirms). The same as `/plugin`. An app section with the id `plugins` replaces it |
 | Agents' questions | An orchestrated agent's approval waits in a tray at the bottom right, whatever the main column shows. |
@@ -108,6 +109,7 @@ ui.run_desktop(tauri::generate_context!())
 |---|---|
 | `new(app)`, `.start(Start)` | The app, and model/project/session choices as the shell's flags give them |
 | `.accent(css)`, `.logo(asset)` | Theme colour and logo |
+| `.theme(Theme::Light)` | The theme until the person picks one in Settings › Appearance (default `Theme::System`) |
 | `.welcome(title, line)`, `.suggestion(label, prompt)` | The empty-session screen |
 | `.asset(path, bytes)` | A file the page can load, served at `ext/<path>` |
 | `.script(asset)`, `.stylesheet(asset)` | Load an asset as a module or stylesheet after ARK's own |
@@ -126,7 +128,7 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 |---|---|
 | `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` lists it in the top bar's + menu. An app panel with the id `terminal`, `browser` or `files` replaces ARK's, and an app panel's `presents` wins over a built-in one for the same view |
 | `ark.view({ id, title, icon, nav, render })` | A view of the current project in the main column, in place of the conversation; `nav: true` makes it a top-bar tab (a string names the tab). Built once, kept while hidden |
-| `ark.setting({ id, title, icon, render(el, api) })` | A section of the Settings page |
+| `ark.setting({ id, title, icon, advanced, render(el, api) })` | A section of the Settings page; `advanced: true` lists it under Advanced |
 | `ark.artifactViewer({ id, label, match, primary, presents, wide, render })` | A view of an artifact; when several match, the artifact header switches between them (plus Raw) |
 | `ark.toolRenderer({ match, render })` | How a tool call's full output renders when its row is opened |
 | `ark.action({ id, label, icon, where, when, run })` | A button on an artifact, or an entry in the ⌘K palette |

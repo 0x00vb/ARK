@@ -19,11 +19,22 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark_runtime::per_agent::{PerAgent, Owner}`: tools each agent gets its own of (the web on its
   model, the browser). `Ark::per_agent`, `Ark::agent_tools`; `ark_runtime::web::Web`.
 - `examples/writing-agent` turns the browser on.
+- Window: Settings › Appearance (Light, Dark, System), kept per window; `ArkUi::theme(Theme)` sets
+  the default. Dark is `:root[data-theme="dark"]` now, not a media query
+  ([`UI.md`](docs/UI.md#what-the-workspace-shows)).
+- Window: `ark.setting({ advanced: true })` lists a section under Advanced.
+
+### Changed
+- Window: Settings lists Skills and Tool servers under Advanced; shorter copy in Capabilities,
+  Permissions, Skills and Tool servers.
 
 ### Breaking
 - `ark_sdk::offered_tools(engine, per_agent)` takes the per-agent sources
   (`Ark::per_agent()`) instead of the web adapter. `Ark::web_adapter` and `Ark::web_tools` are
   gone: use `Ark::per_agent` and `Ark::agent_tools(&Owner { name, model })`.
+- Window: an app stylesheet that set dark colours inside `@media (prefers-color-scheme: dark)`
+  now loses to ARK's `:root[data-theme="dark"]`. Put them under `:root[data-theme="dark"]`, and
+  give light overrides `:root, :root[data-theme]` so they win in both themes.
 
 ## [0.9.0] - 2026-10-04
 

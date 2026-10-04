@@ -94,10 +94,7 @@ function section(el, ark) {
     await load();
   }
 
-  el.append(
-    h("p.settings-lead", "What ARK's agents can use. Connecting signs in with the account's own page; ARK keeps the sign-in on this machine and you can disconnect at any time."),
-    list,
-    why);
+  el.append(list, why);
   load();
   return { refresh: load, dispose: () => { waiting = null; } };
 }
@@ -105,5 +102,5 @@ function section(el, ark) {
 /// Offer the section when the host lists capabilities.
 export async function registerCapabilities(ark) {
   const has = await ark.call("capabilities").then(Array.isArray, () => false);
-  if (has) ark.setting({ id: "capabilities", title: "Capabilities", icon: "box", builtin: true, render: (el) => section(el, ark) });
+  if (has) ark.setting({ id: "capabilities", title: "Capabilities", icon: "plug", builtin: true, render: (el) => section(el, ark) });
 }

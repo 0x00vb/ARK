@@ -42,7 +42,7 @@ use ark_interact::{App, ChannelApprover, Start};
 use serde_json::Value;
 
 pub use assets::Assets;
-pub use host::{Emitter, Handler, HandlerCtx, Host, UiInfo, Welcome};
+pub use host::{Emitter, Handler, HandlerCtx, Host, Theme, UiInfo, Welcome};
 pub use serve::Served;
 
 /// Builds the workspace for an app. See the crate docs.
@@ -67,6 +67,12 @@ impl ArkUi {
     /// The accent colour, any CSS colour.
     pub fn accent(mut self, css: impl Into<String>) -> Self {
         self.info.accent = Some(css.into());
+        self
+    }
+    /// The colours the window opens with until the person chooses in Settings › Appearance
+    /// (default: follow the system).
+    pub fn theme(mut self, theme: Theme) -> Self {
+        self.info.theme = theme;
         self
     }
     /// A logo image among the app's assets (`.asset("logo.svg", …)` then `.logo("logo.svg")`).
@@ -134,6 +140,7 @@ impl ArkUi {
             self.files,
             self.info.scripts.clone(),
             self.info.styles.clone(),
+            self.info.theme,
         ));
         let host = Host::new(opened.interaction, approvals, self.info, self.handlers).await;
         Ok((host, assets))

@@ -90,7 +90,7 @@ function servers(el, ark) {
   });
 
   el.append(
-    h("p.settings-lead", "Agents can use the tools of these MCP servers. Each agent chooses which; a change applies from its next turn."),
+    h("p.settings-lead", "MCP servers whose tools agents can use."),
     list,
     h("div.plugin-add",
       h("label.plugin-label", icon("plus"), "Add a server"),
@@ -104,5 +104,5 @@ function servers(el, ark) {
 /// Offer the section when the app has plugins (`plugins` answers null when it has none).
 export async function registerPlugins(ark) {
   const has = await ark.call("plugins").then((v) => v !== null, () => false);
-  if (has) ark.setting({ id: "plugins", title: "Tool servers", icon: "box", builtin: true, render: (el) => servers(el, ark) });
+  if (has) ark.setting({ id: "plugins", title: "Tool servers", icon: "box", builtin: true, advanced: true, render: (el) => servers(el, ark) });
 }

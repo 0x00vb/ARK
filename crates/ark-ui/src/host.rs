@@ -186,10 +186,32 @@ pub struct Welcome {
     pub suggestions: Vec<(String, String)>,
 }
 
+/// The window's colours until the person chooses in Settings › Appearance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    Light,
+    Dark,
+    /// Follow the operating system.
+    #[default]
+    System,
+}
+
+impl Theme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Theme::Light => "light",
+            Theme::Dark => "dark",
+            Theme::System => "system",
+        }
+    }
+}
+
 /// Presentation settings sent to the page.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct UiInfo {
     pub accent: Option<String>,
+    pub theme: Theme,
     pub logo: Option<String>,
     pub welcome: Welcome,
     pub scripts: Vec<String>,

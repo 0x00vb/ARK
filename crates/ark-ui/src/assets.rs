@@ -7,6 +7,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::host::Theme;
+
 include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 
 pub struct Assets {
@@ -14,6 +16,7 @@ pub struct Assets {
     consumer: HashMap<String, Cow<'static, [u8]>>,
     scripts: Vec<String>,
     styles: Vec<String>,
+    theme: Theme,
     web_dir: Option<PathBuf>,
     asset_dir: Option<PathBuf>,
 }
@@ -24,12 +27,14 @@ impl Assets {
         consumer: HashMap<String, Cow<'static, [u8]>>,
         scripts: Vec<String>,
         styles: Vec<String>,
+        theme: Theme,
     ) -> Self {
         Assets {
             title,
             consumer,
             scripts,
             styles,
+            theme,
             web_dir: std::env::var_os("ARK_UI_WEB").map(PathBuf::from),
             asset_dir: std::env::var_os("ARK_UI_ASSETS").map(PathBuf::from),
         }
@@ -94,6 +99,7 @@ impl Assets {
             .map(|s| format!("    <script type=\"module\" src=\"ext/{s}\"></script>\n"))
             .collect();
         raw.replace("<!--ark:title-->", &escape(&self.title))
+            .replace("<!--ark:theme-->", self.theme.as_str())
             .replace("    <!--ark:styles-->\n", &styles)
             .replace("    <!--ark:scripts-->\n", &scripts)
     }
@@ -131,11 +137,13 @@ mod tests {
             HashMap::from([("demo.js".to_string(), Cow::Borrowed(&b"export {}"[..]))]),
             vec!["demo.js".into()],
             vec!["demo.css".into()],
+            Theme::Light,
         );
         let (html, mime) = a.get("/").unwrap();
         let html = String::from_utf8(html.into_owned()).unwrap();
         assert!(mime.starts_with("text/html"));
         assert!(html.contains("<title>Demo &lt;1&gt;</title>"), "{html}");
+        assert!(html.contains(r#"data-theme-default="light""#), "{html}");
         let ark = html.find("js/app.js").unwrap();
         let ext = html.find("ext/demo.js").unwrap();
         assert!(ext > ark, "consumer scripts load after ARK's");

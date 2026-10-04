@@ -12,7 +12,7 @@ function section(el, ark) {
   const draw = (all) => {
     clear(list);
     if (!all.length) {
-      list.append(h("p.settings-none", "Agents ask before anything that changes something. Answer “Always in this project” to stop the questions for one kind of action."));
+      list.append(h("p.settings-none", "Agents ask before they change anything."));
       return;
     }
     for (const g of all) {
@@ -37,7 +37,7 @@ function section(el, ark) {
 
   const load = async () => draw((await ark.call("grants").catch(() => [])) || []);
   el.append(
-    h("p.settings-lead", "What agents may do in this project without asking you first. Remove one and they ask again."),
+    h("p.settings-lead", "What agents may do in this project without asking."),
     list,
     why);
   load();
@@ -47,5 +47,5 @@ function section(el, ark) {
 /// Offer the section when the host keeps grants.
 export async function registerGrants(ark) {
   const has = await ark.call("grants").then(Array.isArray, () => false);
-  if (has) ark.setting({ id: "permissions", title: "Permissions", icon: "check", builtin: true, render: (el) => section(el, ark) });
+  if (has) ark.setting({ id: "permissions", title: "Permissions", icon: "shield", builtin: true, render: (el) => section(el, ark) });
 }

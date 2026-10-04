@@ -31,32 +31,33 @@
 
   --seg-0: #8e9aaf; --seg-1: #b8a07e; --seg-2: #7fa7a0; --seg-3: #6f8fd6; --seg-4: #b98bb3;
   --seg-5: #c9a24a; --seg-6: #9aa66b; --seg-7: #d08770; --seg-8: #7ab8d6;
-  color-scheme: light dark;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1b1b1b;
-    --sidebar: #151515;
-    --pane: #181818;
-    --card: #232323;
-    --seg-on: rgba(255, 255, 255, 0.13);
-    --sunken: rgba(255, 255, 255, 0.03);
-    --code-bg: rgba(255, 255, 255, 0.045);
-    --bubble: #2a2a2a;
-    --text: #ececeb;
-    --text-2: #a8a8a5;
-    --text-3: #6f6f6c;
-    --hover: rgba(255, 255, 255, 0.05);
-    --active: rgba(255, 255, 255, 0.085);
-    --hair: rgba(255, 255, 255, 0.08);
-    --accent: #5b8def;
-    --ok: #5fb383;
-    --warn: #d6a24e;
-    --err: #e5736f;
-    --shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 10px 30px rgba(0, 0, 0, 0.35);
-    --shadow-menu: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 34px rgba(0, 0, 0, 0.5);
-  }
+/* Dark when the person or the system says so: js/theme.js sets `data-theme` before the first
+   paint (Settings › Appearance). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1b1b1b;
+  --sidebar: #151515;
+  --pane: #181818;
+  --card: #232323;
+  --seg-on: rgba(255, 255, 255, 0.13);
+  --sunken: rgba(255, 255, 255, 0.03);
+  --code-bg: rgba(255, 255, 255, 0.045);
+  --bubble: #2a2a2a;
+  --text: #ececeb;
+  --text-2: #a8a8a5;
+  --text-3: #6f6f6c;
+  --hover: rgba(255, 255, 255, 0.05);
+  --active: rgba(255, 255, 255, 0.085);
+  --hair: rgba(255, 255, 255, 0.08);
+  --accent: #5b8def;
+  --ok: #5fb383;
+  --warn: #d6a24e;
+  --err: #e5736f;
+  --shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-menu: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 34px rgba(0, 0, 0, 0.5);
 }
 
 * { box-sizing: border-box; }
@@ -523,6 +524,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 /* Settings: the sections apps register, one at a time. */
 .settings { display: flex; gap: 28px; max-width: 980px; margin: 0 auto; padding: 24px 32px 48px; }
 .settings-list { width: 180px; flex: none; display: flex; flex-direction: column; gap: 1px; }
+.settings-group { margin: 18px 0 4px; padding: 0 8px; font-size: 12px; font-weight: 500; color: var(--text-3); }
 .settings-body { flex: 1; min-width: 0; }
 .settings-title { margin: 0 0 18px; font-size: 20px; font-weight: 600; letter-spacing: -0.015em; }
 .settings-none { color: var(--text-3); }
@@ -543,7 +545,8 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .plugin-actions { display: flex; gap: 2px; flex: none; }
 .plugin-remove.sure { color: var(--err); }
 .plugin-row.off .plugin-dot { background: var(--text-3); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-3) 14%, transparent); }
-.capability-row .plugin-actions { align-self: center; }
+.capability-row .plugin-actions, .setting-row .plugin-actions { align-self: center; }
+.setting-row { align-items: center; min-height: 52px; }
 .plugin-add { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
 .plugin-label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
 .plugin-label .ico { width: 14px; height: 14px; color: var(--text-3); }

@@ -8,7 +8,7 @@ import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
 import { Sidebar } from "./sidebar.js";
 import { Topbar } from "./topbar.js";
-import { SETTINGS, settingsView } from "./settings.js";
+import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
 import { registry, installApi, dispatchExt, presenterFor } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
@@ -602,7 +602,8 @@ async function bootOnce(again) {
   if (!again) {
     sidebar.renderExtensions();
     topbar.render();
-    // Settings › Tool servers and Skills, ARK's own sections.
+    // ARK's own Settings sections.
+    registerAppearance(window.ark);
     registerCapabilities(window.ark);
     registerGrants(window.ark);
     registerPlugins(window.ark);

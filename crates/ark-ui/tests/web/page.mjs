@@ -262,9 +262,10 @@ async function workbench(page) {
 }
 scenarios.workbench = workbench;
 
-// An app's Settings sections come first, ARK's own (Tool servers) after; a section added
-// while Settings is open joins the list. `ark.compose` fills the composer from any view and
-// sends nothing.
+// An app's Settings sections come first, ARK's own after; advanced ones (the app's, then
+// ARK's Skills and Tool servers) under Advanced. A section added while Settings is open joins
+// the list. Appearance › Dark darkens the page and is remembered. `ark.compose` fills the
+// composer from any view and sends nothing.
 async function settings(page) {
   // ARK's own sections register once the page is connected: wait for the Settings entry.
   await page.locator("#open-settings:not([hidden])").waitFor();
@@ -274,11 +275,28 @@ async function settings(page) {
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
   const rows = page.locator(".settings-list .nav-row");
   await rows.nth(2).waitFor();
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Capabilities", "Permissions", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Capabilities", "Permissions", "Skills", "Tool servers"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
+  await page.evaluate(() => window.ark.setting({ id: "debug", title: "Debug", advanced: true, render: (el) => el.append("the debug") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Capabilities", "Permissions", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Capabilities", "Permissions", "Debug", "Skills", "Tool servers"]);
+  assert.deepEqual(await page.locator(".settings-list > *").evaluateAll((els) => els.map((e) => e.textContent).slice(4, 6)), ["Permissions", "Advanced"]);
+
+  // The test page opens light (no app default, a light system); Dark is kept across a reload.
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
+  await page.locator(".settings-list .nav-row", { hasText: "Appearance" }).click();
+  await page.locator(".settings-section .seg", { hasText: "Dark" }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+  const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  assert.equal(await bg(), "rgb(27, 27, 27)");
+  await page.reload();
+  await page.locator("#open-settings:not([hidden])").waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+  await page.evaluate(() => window.arkTheme.set("system"));
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
+  await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
+  await page.evaluate(() => window.ark.openSettings("look"));
   await page.locator(".settings-list .nav-row", { hasText: "Look" }).click();
   assert.equal(await page.locator(".settings-title").innerText(), "Look");
   assert.equal(await page.locator(".settings-section").innerText(), "the look");

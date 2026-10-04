@@ -37,7 +37,7 @@ function section(el, ark) {
   again.onclick = load;
 
   el.append(
-    h("p.settings-lead", "Instructions for kinds of work. Only their names reach the model until a task needs one. The conversation reads any of them; each agent reads the ones it is given."),
+    h("p.settings-lead", "Instructions for kinds of work, read when a task needs one."),
     list,
     h("div.plugin-add",
       h("label.plugin-label", "Add skills"),
@@ -52,5 +52,5 @@ function section(el, ark) {
 /// Offer the section when the host has skills (an ARK host always answers `skills`).
 export async function registerSkills(ark) {
   const has = await ark.call("skills").then(Array.isArray, () => false);
-  if (has) ark.setting({ id: "skills", title: "Skills", icon: "layers", builtin: true, render: (el) => section(el, ark) });
+  if (has) ark.setting({ id: "skills", title: "Skills", icon: "layers", builtin: true, advanced: true, render: (el) => section(el, ark) });
 }

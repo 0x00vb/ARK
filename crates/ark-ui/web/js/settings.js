@@ -1,11 +1,24 @@
 // Settings: the app's and the account's configuration, as one page in the main column. ARK
-// draws the page and lists the sections apps register with `ark.setting`; it has none of its
-// own. A project's own settings (name, folder) are in its menu in the sidebar.
+// draws the page, lists the sections apps register with `ark.setting`, and adds its own
+// (Appearance, and the runtime's when the host has them). A section marked `advanced` is
+// listed under Advanced, after the others. A project's own settings (name, folder) are in its
+// menu in the sidebar.
 
 import { h, icon, clear } from "./dom.js";
 import { registry } from "./ext.js";
 
 export const SETTINGS = "ark:settings";
+
+/// The app's sections first, as registered, then ARK's by title; advanced ones after both.
+function ordered() {
+  const all = [...registry.settings.values()];
+  const group = (advanced) => {
+    const in_ = all.filter((s) => !!s.advanced === advanced);
+    const own = in_.filter((s) => s.builtin).sort((a, b) => a.title.localeCompare(b.title));
+    return [...in_.filter((s) => !s.builtin), ...own];
+  };
+  return [...group(false), ...group(true)];
+}
 
 export const settingsView = {
   id: SETTINGS,
@@ -17,13 +30,6 @@ export const settingsView = {
     el.append(list, body);
     let current = null;
     let ctl = {};
-
-    // The app's sections first, as registered; then ARK's own (Skills, Tool servers) by title.
-    const ordered = () => {
-      const all = [...registry.settings.values()];
-      const own = all.filter((s) => s.builtin).sort((a, b) => a.title.localeCompare(b.title));
-      return [...all.filter((s) => !s.builtin), ...own];
-    };
 
     const pick = (id) => {
       const s = registry.settings.get(id) || ordered()[0];
@@ -54,7 +60,12 @@ export const settingsView = {
     const mark = () => {
       clear(list);
       list.hidden = registry.settings.size < 2;
+      let advanced = false;
       for (const s of ordered()) {
+        if (s.advanced && !advanced) {
+          advanced = true;
+          list.append(h("div.settings-group", "Advanced"));
+        }
         list.append(h("button.nav-row", { type: "button", "aria-current": String(s.id === current), onclick: () => pick(s.id) },
           h("span.nav-icon", icon(s.icon || "settings")), h("span.nav-label", s.title)));
       }
@@ -68,3 +79,30 @@ export const settingsView = {
     };
   },
 };
+
+/// A row of a settings list: what it is on the left, its control on the right.
+export function settingRow(title, detail, ...controls) {
+  return h("div.plugin-row.setting-row",
+    h("div.plugin-main", h("div.plugin-name", title), detail ? h("div.plugin-detail", detail) : null),
+    h("div.plugin-actions", ...controls));
+}
+
+/// Settings › Appearance: the window's theme (see js/theme.js).
+export function registerAppearance(ark) {
+  ark.setting({
+    id: "appearance",
+    title: "Appearance",
+    icon: "sun",
+    builtin: true,
+    render(el) {
+      const segs = h("div.segs", { role: "radiogroup", "aria-label": "Theme" });
+      const draw = () => {
+        const now = window.arkTheme?.choice() || "system";
+        clear(segs).append(...[["light", "Light"], ["dark", "Dark"], ["system", "System"]].map(([id, label]) =>
+          h("button.seg", { type: "button", role: "radio", "aria-checked": String(now === id), "aria-pressed": String(now === id), onclick: () => { window.arkTheme?.set(id); draw(); } }, label)));
+      };
+      draw();
+      el.append(h("div.plugin-list", settingRow("Theme", null, segs)));
+    },
+  });
+}

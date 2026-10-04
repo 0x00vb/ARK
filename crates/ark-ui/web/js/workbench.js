@@ -105,9 +105,8 @@ function terminal(el, params, ark) {
 
   const ro = new ResizeObserver(() => fit());
   ro.observe(el);
-  const scheme = matchMedia("(prefers-color-scheme: dark)");
   const retheme = () => s.term && (s.term.options.theme = theme());
-  scheme.addEventListener("change", retheme);
+  addEventListener("ark:theme", retheme);
   return {
     focus: () => ({ surface: { kind_tag: "terminal", title: "Terminal" } }),
     update: (p) => p?.locator && write(typedCommand(p.locator)),
@@ -115,7 +114,7 @@ function terminal(el, params, ark) {
     // Closing the tab keeps the shell; reopening re-attaches with its scrollback.
     dispose: () => {
       ro.disconnect();
-      scheme.removeEventListener("change", retheme);
+      removeEventListener("ark:theme", retheme);
       for (const off of s.offs) off();
       s.term?.dispose();
     },

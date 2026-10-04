@@ -96,6 +96,19 @@ project.
   to a local model still got new agents on the first model (for example Claude Sonnet). An
   agent created before the switch moves to the new model from its next task.
 
+## [0.8.1] - 2026-10-04
+
+A patch from v0.8.0 only (branch `release/0.8.1`), for ARK Desktop 0.1.0. The same fixes are in
+v0.9.0.
+
+### Changed
+- The approval headline says who asks, not which task: "writer wants to:" ("ARK wants to:"
+  for the conversation). The line under it says what (an app's `ToolLabeler::approval`).
+
+### Fixed
+- The window's markdown no longer throws on a table that is still streaming in.
+- The Files panel no longer prints `null` under a folder's list.
+
 ## [0.8.0] - 2026-10-03
 
 Capabilities an app turns on without code of its own: MCP servers added while ARK runs,

@@ -18,7 +18,7 @@ Last updated: 2026-10-04 (v0.9.0, browser on `main`)
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | 0.1.0 ships on v0.8.1 (no capabilities). Its 0.2.0 turns on Mail, Calendar and Browser (`.connections(true)`, `.browser(true)`) and drops `choice::Follow` (ADR 0014); it needs the next ARK tag, the first with the browser (ark-desktop `ROADMAP.md` › Next) |
+| ark-desktop | 0.1.0 ships on v0.8.1 (no capabilities). Its 0.2.0 turns on Mail, Calendar and Browser (`.connections(true)`, `.browser(true)`) and drops `choice::Follow` (ADR 0014); it needs the next ARK tag, the first with the browser (ark-desktop `ROADMAP.md` › Next). Its UX pass (branch `ux/simplify`) also needs `ArkUi::theme`, `ark.modelPicker` and `ark.onSubmit`, on `main` since d7c9910..4e18d35 |
 | SecRes | nothing; pins v0.8.0. v0.9.0 is an optional upgrade (`Breaking` in `CHANGELOG.md`) |
 | Mail and Calendar for anyone | ARK's Google OAuth client and Google's review: owner steps in [`docs/GOOGLE.md`](docs/GOOGLE.md). Until then they show as unavailable, or work with `ARK_GOOGLE_CLIENT_ID` for test users |
 

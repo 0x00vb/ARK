@@ -22,6 +22,8 @@ function inline(s) {
 }
 
 function table(rows) {
+  // A table still streaming in may have its header and no complete separator row yet.
+  if (rows.length < 2) return `<p>${inline(rows[0] || "")}</p>`;
   const cells = (r) => r.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
   const head = cells(rows[0]);
   const aligns = cells(rows[1]).map((c) => (c.endsWith(":") ? (c.startsWith(":") ? "center" : "right") : ""));

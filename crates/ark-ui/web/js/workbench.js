@@ -196,7 +196,8 @@ function files(el, params, ark) {
           h("button.wb-entry", { type: "button", onclick: () => (e.dir ? list(e.path) : open(e.path)) },
             icon(e.dir ? "folder" : "file"), h("span.wb-name", e.name), e.dir ? null : h("span.wb-size", size(e.size)))))
         : h("div.wb-empty", "This folder is empty."),
-      r.more ? h("div.wb-note", `${r.more} more not shown`) : null,
+      // `append` prints null as text: an empty string adds nothing.
+      r.more ? h("div.wb-note", `${r.more} more not shown`) : "",
     );
     ark.reportFocus();
   }

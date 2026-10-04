@@ -4,7 +4,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-04 (v0.9.0)
+Last updated: 2026-10-04 (v0.9.0, browser on `main`)
 
 ## Release
 
@@ -18,7 +18,7 @@ Last updated: 2026-10-04 (v0.9.0)
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | nothing; pins v0.8.0 (0.1.0 may ship on a v0.8.1 patch). Can pin v0.9.0 for streaming providers and usage; `choice::Follow` can go, ARK's resolver now follows the model (ADR 0014) |
+| ark-desktop | 0.1.0 ships on v0.8.1 (no capabilities). Its 0.2.0 turns on Mail, Calendar and Browser (`.connections(true)`, `.browser(true)`) and drops `choice::Follow` (ADR 0014); it needs the next ARK tag, the first with the browser (ark-desktop `ROADMAP.md` › Next) |
 | SecRes | nothing; pins v0.8.0. v0.9.0 is an optional upgrade (`Breaking` in `CHANGELOG.md`) |
 | Mail and Calendar for anyone | ARK's Google OAuth client and Google's review: owner steps in [`docs/GOOGLE.md`](docs/GOOGLE.md). Until then they show as unavailable, or work with `ARK_GOOGLE_CLIENT_ID` for test users |
 

@@ -374,6 +374,8 @@ fn build_ark(
         .web(true)
         // Send a chapter to an editor, put a deadline on the calendar.
         .connections(true)
+        // Look things up on sites that need clicking through, in the installed Chrome.
+        .browser(true)
         .profile(writer_profile());
     if let Some(p) = provider {
         b = b.provider(p);

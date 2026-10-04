@@ -34,6 +34,30 @@ story request streamed in pieces and was cancelled after 5 of them; its process 
 next question ("What is 7 times 6?") got "42" (a cancelled vendor session is never resumed);
 the one after reused the process, 2.3 s.
 
+### A longer live task on each CLI (2026-10-04)
+
+`bench/cli-live/long-task/long_task.py` drives `writer --serve` through the window protocol on
+the sample novel: (1) where the locket appears, with tools; (2) a follow-up that needs turn 1;
+(3) a 400-word scene, cancelled after a few streamed pieces; (4) recall of turn 2 after the
+cancel; (5) `/review 2`, an editor agent delegating to two readers; (6) a short question on
+the running process; then `subscription_usage`. Logs in `bench/cli-live/long-task/`.
+
+| Step | `claude:sonnet` | `claude:haiku` | `codex:default` |
+|---|---|---|---|
+| 1 tools (time, first text) | 18.8 s, 2.2 s; list, read, continuity | 19.6 s, 2.6 s; read, continuity | 34.0 s, 12.2 s; list, read, continuity |
+| 2 follow-up | 2.6 s | 4.1 s | 4.9 s |
+| 3 cancelled after N pieces | 9, `cancelled` | 5, `cancelled`, 0 CLI processes left | 4, `cancelled`, 0 left |
+| 4 recall after cancel | 3.1 s, correct | 3.6 s, correct | 14.1 s, correct |
+| 5 `/review 2` | 56 s, 3/3 tasks done | 85 s, 3/3 done | 75 s, 3/3 done |
+| 6 reused process | 8.2 s (a tool call) | 3.4 s (a tool call) | 6.0 s (a tool call) |
+| CLI processes: after turn 2, review, exit | | 1, 4, 0 | 2, 8, 0 (Codex runs as two processes) |
+| Usage reported | 5 h 39%, week 27% | 5 h 39%, week 27% | plan plus, 5 h 11%, week 16% |
+
+From the stores afterwards: every agent ran on the session's model (`claude:sonnet`,
+`claude:haiku`, `codex:default`) with one vendor session each (`opens` 1); the conversation's
+vendor session opened twice, the second time after the cancel. Codex's slow first text and
+its slower recall are the app server and a new thread starting (the start-up ROADMAP lists).
+
 ## The web (2026-10-03)
 
 The `web` workload: find a page with `web.search`, read it with `web.fetch`, answer a fact that

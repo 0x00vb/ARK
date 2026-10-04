@@ -7,6 +7,7 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 |---|---|
 | `baseline.json` | the simulated report of `main` (16 workloads since the web workload; the 15 older ones did not move with it); `scripts/ci.sh` compares against it. Regenerate it in the commit that moves the numbers on purpose |
 | `cli-live/haiku-v0.8.0.json`, `cli-live/haiku-live.json`, `cli-live/codex-v0.8.0.json`, `cli-live/codex-app-server.json` | live, the subscription CLIs before (v0.8.0, a process per call) and after (kept running per session) |
+| `cli-live/long-task/{claude-sonnet,claude-haiku,codex-default}.jsonl`, `long_task.py` | live, one longer task per CLI through `writer --serve` and the window protocol (2026-10-04): tools, a follow-up, a cancelled scene, recovery, `/review 2` with three agents, a reused process, `subscription_usage`. The `claude-sonnet` run counted CLI processes machine-wide, so its `cli_procs` values mean nothing; the other two count the writer's own |
 | `skills/qwen-skill.json` | live, the `skill` and `simple` workloads on qwen3:4b-instruct, 3 repetitions |
 | `web/qwen-web.json`, `web/qwen-web-naive.json` | live, the `web` workload (and `simple`) on qwen3:4b-instruct, 3 repetitions, ARK and the naive loop |
 | `baseline-naive.json` | the same suite through the naive loop (`--harness naive`), for "ARK against a naive loop" in `RESULTS.md` |

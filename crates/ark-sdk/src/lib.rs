@@ -27,6 +27,7 @@ use ark_connect::Connections;
 use ark_core::{Focus, Project, ProjectId, RuleScope};
 use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
+use ark_runtime::router::CurrentModel;
 use ark_runtime::skills;
 use ark_runtime::{
     AgentProfile, ApprovalGate, CancelToken, ContextReport, Distiller, Engine, Harness,
@@ -51,6 +52,7 @@ pub mod prelude {
         FixedApprover, Harness, HarnessEvent, HarnessOutcome, KnowledgeHit, KnowledgeProvider,
         ModelRouter, Prompts, Role, RuleBook, RuleSelection, Session, Steering,
     };
+    pub use ark_runtime::router::CurrentModel;
     pub use ark_tools::diagram::{Diagram, DiagramKind};
     pub use ark_tools::{
         ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArtifact, Registry, RunCtx,
@@ -113,6 +115,8 @@ pub struct Settings {
 pub struct Ark {
     engine: Arc<Engine>,
     router: ModelRouter,
+    /// The same router, shared with what follows it (agents without a model of their own).
+    current: CurrentModel,
     subscriptions: SubscriptionRuntime,
     profile: AgentProfile,
     max_steps: usize,
@@ -188,9 +192,18 @@ impl Ark {
         &self.router
     }
 
-    /// Swap the model(s) used from the next turn on.
+    /// Swap the model(s) used from the next turn on. Agents that have no model of their own
+    /// follow it ([`current_model`](Ark::current_model)).
     pub fn set_router(&mut self, router: ModelRouter) {
+        self.current.set(router.clone_view());
         self.router = router;
+    }
+
+    /// The model this `Ark` runs on now, as a handle that sees later
+    /// [`set_router`](Ark::set_router) calls. An orchestrator resolves agents that have no
+    /// model of their own from it.
+    pub fn current_model(&self) -> CurrentModel {
+        self.current.clone()
     }
 
     pub fn settings(&self) -> Settings {
@@ -703,6 +716,7 @@ impl ArkBuilder {
         Ok(Ark {
             engine,
             subscriptions,
+            current: CurrentModel::new(router.clone_view()),
             router,
             profile,
             max_steps: self.max_steps,

@@ -122,8 +122,9 @@ impl<'a> OrchestratorBuilder<'a> {
         let models: Arc<dyn ModelResolver> = match self.models {
             Some(m) => m,
             None => {
+                // Agents without a model of their own follow the app's model as it changes.
                 let mut b = Models::builder()
-                    .default_router(self.ark.router().clone_view())
+                    .follow(self.ark.current_model())
                     .subscriptions(self.ark.subscriptions().clone());
                 if let Some(f) = self.configure {
                     b = f(b);
@@ -362,6 +363,8 @@ pub(crate) struct AgentRt {
     status: watch::Sender<AgentState>,
     steering: Option<Steering>,
     pub models: Option<Arc<AgentModels>>,
+    /// The resolver's default version when `models` was resolved.
+    default_version: u64,
 }
 
 pub(crate) struct TaskRt {
@@ -590,6 +593,7 @@ impl Inner {
                         status,
                         steering: None,
                         models: None,
+                        default_version: 0,
                     },
                 );
             }
@@ -664,6 +668,7 @@ impl Inner {
                 )));
             }
         }
+        let default_version = self.models.default_version();
         let models = Arc::new(
             self.models
                 .resolve(&self.lane(&spec.name), spec.model.as_deref())
@@ -730,6 +735,7 @@ impl Inner {
                 Some(a) => {
                     a.record = record.clone();
                     a.models = Some(models.clone());
+                    a.default_version = default_version;
                     a.status.send_replace(record.state);
                 }
                 None => {
@@ -742,6 +748,7 @@ impl Inner {
                             status,
                             steering: None,
                             models: Some(models.clone()),
+                            default_version,
                         },
                     );
                 }
@@ -757,18 +764,28 @@ impl Inner {
     }
 
     async fn models_for(&self, agent: &str) -> Result<Arc<AgentModels>, OrchError> {
-        let (have, spec) = {
+        let (have, spec, version) = {
             let st = self.state.lock().unwrap();
             let a = st
                 .agents
                 .get(agent)
                 .ok_or_else(|| OrchError::UnknownAgent(agent.into()))?;
-            (a.models.clone(), a.record.spec.clone())
+            (a.models.clone(), a.record.spec.clone(), a.default_version)
         };
-        if let Some(m) = have {
-            return Ok(m);
+        match have {
+            // An agent without a model of its own follows the default: when it changed (the
+            // person chose another model), the agent moves before its next task, and a vendor
+            // session on the old model is released.
+            Some(m) if spec.model.is_none() && version != self.models.default_version() => {
+                if m.session.is_some() {
+                    self.models.close(&self.lane(agent)).await;
+                }
+            }
+            Some(m) => return Ok(m),
+            None => {}
         }
-        // Loaded from the store: resolve, and wire the session events, as spawn does.
+        // Loaded from the store, or moving to the new default: resolve, and wire the session
+        // events, as spawn does.
         self.spawn(spec).await?;
         let st = self.state.lock().unwrap();
         st.agents

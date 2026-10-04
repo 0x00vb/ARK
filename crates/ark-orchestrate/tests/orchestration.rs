@@ -1147,3 +1147,136 @@ async fn each_agent_searches_the_web_on_its_own_model_when_its_tools_allow_it() 
         "{offered:?}"
     );
 }
+
+// ---- the session's model reaches the agents it creates (ADR 0014) ----------------------
+
+/// The person starts on an external model ("cloud") and switches the conversation to a local
+/// one. An agent the conversation then creates, and one created before the switch, both run
+/// on the local model: the external one is never called again.
+#[tokio::test]
+async fn agents_without_a_model_follow_the_sessions_model_when_it_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let cloud = Script::new("cloud", vec![]);
+    let mut ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(cloud.clone() as Arc<dyn Provider>)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "a test").unwrap();
+    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    let early = o.spawn(AgentSpec::new("early")).await.unwrap();
+    assert_eq!(early.model, "cloud");
+
+    let local = Script::new(
+        "local",
+        vec![
+            calls(vec![(
+                "agents.create",
+                json!({"name": "helper", "role": "checks one thing"}),
+            )]),
+            calls(vec![delegate("helper", "check it")]),
+            answer("checked [inv:1]"),
+            answer("the helper checked it [inv:1]"),
+            answer("early is done [inv:1]"),
+        ],
+    );
+    ark.set_router(ModelRouter::single(local.clone() as Arc<dyn Provider>));
+
+    let mut session = ark.start_session(&project.id).unwrap();
+    let opts = TurnOptions {
+        tools: vec![o.chat_tools()],
+        ..Default::default()
+    };
+    ark.ask_session(&mut session, "get the helper to check it", opts, |_| {})
+        .await
+        .unwrap();
+    let helper = o.agent("helper").expect("the conversation created it");
+    assert_eq!(helper.model, "local");
+    assert_eq!(helper.account, "local");
+
+    // Created before the switch: it moves to the new model before its next task.
+    let t = o.run("early", TaskSpec::new("finish")).await.unwrap();
+    assert_eq!(t.state, TaskState::Done, "{:?}", t.error);
+    assert_eq!(o.agent("early").unwrap().model, "local");
+
+    assert!(
+        cloud.texts().is_empty(),
+        "the external model was called after the person chose a local one: {:?}",
+        cloud.texts()
+    );
+    assert_eq!(local.texts().len(), 5);
+}
+
+/// The person's explicit choice for one agent wins over the session's model, and the agent
+/// keeps it when the session's model changes.
+#[tokio::test]
+async fn an_agents_own_model_is_kept_when_the_sessions_model_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = Script::new("local", vec![]);
+    let other = Script::new("other", vec![answer("done [inv:1]")]);
+    let mut ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Script::new("first", vec![]) as Arc<dyn Provider>)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "a test").unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .configure_models(move |b| b.provider("other", other as Arc<dyn Provider>))
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("pinned").model("other"))
+        .await
+        .unwrap();
+    ark.set_router(ModelRouter::single(local.clone() as Arc<dyn Provider>));
+    let t = o.run("pinned", TaskSpec::new("work")).await.unwrap();
+    assert_eq!(t.state, TaskState::Done, "{:?}", t.error);
+    assert_eq!(o.agent("pinned").unwrap().model, "other");
+    assert!(local.texts().is_empty());
+}
+
+/// An agent on the session's subscription model leaves its vendor session when the person
+/// switches to a local model: the session is released and the subscription is not called.
+#[tokio::test]
+async fn moving_off_a_subscription_releases_the_agents_vendor_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let vendor = Arc::new(MockSessions::new(
+        "fake:cloud",
+        "fake",
+        vec![answer("first [inv:1]")],
+    ));
+    let subs = fake_sessions(vec![("cloud", vendor.clone())], SessionPolicy::default());
+    let mut ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Script::new("fake:cloud", vec![]) as Arc<dyn Provider>)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "a test").unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .configure_models(|b| b.subscriptions(subs))
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("w")).await.unwrap();
+    let one = o.run("w", TaskSpec::new("first")).await.unwrap();
+    assert_eq!(one.state, TaskState::Done, "{:?}", one.error);
+    assert_eq!(o.agent("w").unwrap().account, "fake");
+    let before = vendor.calls().len();
+
+    let local = Script::new("local", vec![answer("second [inv:1]")]);
+    ark.set_router(ModelRouter::single(local.clone() as Arc<dyn Provider>));
+    let two = o.run("w", TaskSpec::new("second")).await.unwrap();
+    assert_eq!(two.state, TaskState::Done, "{:?}", two.error);
+    assert_eq!(o.agent("w").unwrap().model, "local");
+    let after: Vec<Call> = vendor.calls()[before..].to_vec();
+    assert!(
+        after.iter().all(|c| matches!(c, Call::Discard { .. })),
+        "only the release reached the subscription: {after:?}"
+    );
+    assert_eq!(local.texts().len(), 1);
+    assert!(o.graph().agent("w").unwrap().session.is_none());
+}

@@ -16,6 +16,8 @@ What changed for people building on ARK, per release. Not a commit log.
   -59%, p95 turn time -52%; a 4-call Codex task 98 s to 39 s (`bench/RESULTS.md`).
 - `SessionBackend::open_streaming` and `resume_streaming` (default: the whole text at the
   end); `ManagedSession` and `CliModel` stream through `Provider::complete_streaming`.
+- `CurrentModel` (`ark_runtime::router`), `Ark::current_model`, `ModelsBuilder::follow`,
+  `ModelResolver::default_version`: the session's model as a shared handle (ADR 0014).
 - Capabilities that need an account, owned by ARK (ADR 0011): the new crate `ark-connect`
   (`Catalog`, `Capability`, `Provider`, `Connections`, `Account`, `CapabilityStatus`,
   `Secrets`, `Keychain`, `MemorySecrets`, `oauth`), on with `ArkBuilder::connections(true)` or
@@ -63,6 +65,10 @@ What changed for people building on ARK, per release. Not a commit log.
 - A script added under `ark-ui/web/js/` is embedded in the next build; before, the build
   script missed it and the page that imports it stayed blank.
 - An empty command line (`command` in the window protocol) no longer starts an empty turn.
+- An agent without a model of its own runs on the session's model as it is now, not as it was
+  when the orchestrator was built (ADR 0014). Before, a person who switched the conversation
+  to a local model still got new agents on the first model (for example Claude Sonnet). An
+  agent created before the switch moves to the new model from its next task.
 
 ## [0.8.0] - 2026-10-03
 

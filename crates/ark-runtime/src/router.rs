@@ -124,6 +124,37 @@ impl ModelRouter {
     }
 }
 
+/// The model a session runs on now, shared by everything that should follow it. The
+/// conversation's model can change between turns (`/model`); agents created without a model
+/// of their own read it here when they are resolved, never a copy taken earlier. So a person
+/// who chooses a local model is never moved to another provider by an agent they did not
+/// configure (ADR 0014).
+#[derive(Clone)]
+pub struct CurrentModel(Arc<std::sync::RwLock<(ModelRouter, u64)>>);
+
+impl CurrentModel {
+    pub fn new(router: ModelRouter) -> Self {
+        CurrentModel(Arc::new(std::sync::RwLock::new((router, 0))))
+    }
+
+    /// The current router (a view sharing its providers).
+    pub fn get(&self) -> ModelRouter {
+        self.0.read().unwrap().0.clone_view()
+    }
+
+    /// Change it. Everything following it sees the new router on its next read.
+    pub fn set(&self, router: ModelRouter) {
+        let mut g = self.0.write().unwrap();
+        g.0 = router;
+        g.1 += 1;
+    }
+
+    /// Goes up by one on every change: a reader compares it to know its copy is stale.
+    pub fn version(&self) -> u64 {
+        self.0.read().unwrap().1
+    }
+}
+
 /// Build one tier from `ARK_{PROVIDER,MODEL}_{suffix}` if either is set.
 fn tier_from_env(suffix: &str) -> Option<Result<Arc<dyn Provider>, ProviderError>> {
     let provider = std::env::var(format!("ARK_PROVIDER_{suffix}")).ok();
@@ -143,6 +174,18 @@ fn tier_from_env(suffix: &str) -> Option<Result<Arc<dyn Provider>, ProviderError
 mod tests {
     use super::*;
     use ark_model::MockProvider;
+
+    #[test]
+    fn the_current_model_is_shared_and_versioned() {
+        let a: Arc<dyn Provider> = Arc::new(MockProvider::new("a", vec![]));
+        let b: Arc<dyn Provider> = Arc::new(MockProvider::new("b", vec![]));
+        let current = CurrentModel::new(ModelRouter::single(a));
+        let follower = current.clone();
+        assert_eq!(follower.get().model_id(Role::Reason), "a");
+        current.set(ModelRouter::single(b));
+        assert_eq!(follower.get().model_id(Role::Reason), "b");
+        assert_eq!(follower.version(), 1);
+    }
 
     #[test]
     fn single_tier_routes_all_roles_to_one_provider() {

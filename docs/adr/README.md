@@ -20,6 +20,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0011](0011-capabilities-and-connections.md) | Capabilities people see, connections ARK owns | Accepted |
 | [0012](0012-vendor-cli-processes-live-with-their-session.md) | A vendor CLI's process lives as long as its session | Accepted |
 | [0013](0013-asking-for-a-capability-mid-task.md) | Asking for a capability mid-task | Accepted |
+| [0014](0014-agents-follow-the-sessions-model.md) | Agents follow the session's model unless the person sets one | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use ark_model::capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
 use ark_model::session::{SessionLedger, SubscriptionRuntime};
 use ark_model::{ManagedSession, Provider, SessionPolicy, SessionSnapshot};
+use ark_runtime::router::CurrentModel;
 pub use ark_runtime::StoreLedger;
 use ark_runtime::{ModelRouter, Role};
 
@@ -43,6 +44,13 @@ pub trait ModelResolver: Send + Sync {
     /// The models for the agent on `lane` (unique per agent), asking for `spec` (`None`: the
     /// default model).
     async fn resolve(&self, lane: &str, spec: Option<&str>) -> Result<AgentModels, OrchError>;
+    /// Changes whenever the default model changes. The orchestrator resolves an agent that has
+    /// no model of its own again before its next task when this moved since it was resolved,
+    /// so the agent follows the session's model. A resolver whose default never changes
+    /// keeps the default 0.
+    fn default_version(&self) -> u64 {
+        0
+    }
     /// The capacity of an account (for scheduling).
     fn capacity_of(&self, account: &str) -> Capacity {
         Capacity::for_provider(account)
@@ -70,7 +78,7 @@ pub trait ModelResolver: Send + Sync {
 /// The default resolver.
 pub struct Models {
     subs: SubscriptionRuntime,
-    default: Option<ModelRouter>,
+    default: Option<CurrentModel>,
     default_spec: Option<String>,
     named: HashMap<String, Arc<dyn Provider>>,
     capacities: HashMap<String, Capacity>,
@@ -80,7 +88,7 @@ pub struct Models {
 /// Builder for [`Models`].
 #[derive(Default)]
 pub struct ModelsBuilder {
-    default: Option<ModelRouter>,
+    default: Option<CurrentModel>,
     default_spec: Option<String>,
     named: HashMap<String, Arc<dyn Provider>>,
     capacities: HashMap<String, Capacity>,
@@ -90,9 +98,16 @@ pub struct ModelsBuilder {
 }
 
 impl ModelsBuilder {
-    /// The router agents without a model spec use (usually the app's `Ark` router).
+    /// The router agents without a model spec use, fixed. To follow the app's model as it
+    /// changes, use [`follow`](Self::follow).
     pub fn default_router(mut self, r: ModelRouter) -> Self {
-        self.default = Some(r);
+        self.default = Some(CurrentModel::new(r));
+        self
+    }
+    /// Agents without a model spec run on `current` as it is when they are resolved (the
+    /// orchestrator passes its `Ark`'s [`current_model`](ark_sdk::Ark::current_model)).
+    pub fn follow(mut self, current: CurrentModel) -> Self {
+        self.default = Some(current);
         self
     }
     /// A spec agents without one use, instead of a router (`claude:sonnet`).
@@ -213,7 +228,7 @@ impl ModelResolver for Models {
     async fn resolve(&self, lane: &str, spec: Option<&str>) -> Result<AgentModels, OrchError> {
         let spec = match spec.or(self.default_spec.as_deref()) {
             Some(s) => s.to_string(),
-            None => match &self.default {
+            None => match self.default.as_ref().map(CurrentModel::get) {
                 Some(r) => {
                     let id = r.model_id(Role::Reason);
                     // The app's own model is a subscription CLI: the agent still gets a
@@ -265,6 +280,13 @@ impl ModelResolver for Models {
         let p = ark_model::build(provider, (!model.is_empty()).then(|| model.to_string()))?;
         let model = p.model_id();
         Ok(self.single(p, provider, model))
+    }
+
+    fn default_version(&self) -> u64 {
+        match (&self.default_spec, &self.default) {
+            (None, Some(c)) => c.version(),
+            _ => 0,
+        }
     }
 
     fn capacity_of(&self, account: &str) -> Capacity {

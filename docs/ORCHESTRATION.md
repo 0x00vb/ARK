@@ -133,6 +133,11 @@ run(agent, task)
 | anything else (`ollama:*`, `anthropic:*`, `openai:*`) | `ark_model::build` | the same provider |
 | none | the `Ark` router (a subscription router still gets a managed session per agent) | the `Ark` router |
 
+An agent with no spec follows the session's model: the resolver reads `Ark::current_model`
+each time, so after `/model` (or the window's model choice) new agents run on the new model,
+and an existing agent moves to it before its next task, releasing its vendor session on the
+old one. A spec the person gave an agent always wins (ADR 0014).
+
 Two agents never share a vendor session, even on the same model. The orchestrator uses the
 `Ark`'s `SubscriptionRuntime`, so single-agent turns and agents draw on one capacity per
 account.

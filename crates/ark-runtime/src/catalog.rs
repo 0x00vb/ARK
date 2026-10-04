@@ -324,12 +324,13 @@ pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
         });
         tools.push(ToolDef {
             name: ACQUIRE_CAPABILITY.into(),
-            description: "Acquire a provider proposed by propose_capability, by its id. This CHANGES the \
-                environment and therefore needs human approval: without approval it returns the exact plan and \
-                does nothing.".into(),
+            description: "Ask for a capability this agent does not have yet: one listed under CAN BE ADDED, or \
+                one find_capability or propose_capability named. It changes what the agent can do, so the person is \
+                asked first; without their yes nothing changes and you get the plan. Once added, its tools are \
+                ready to call.".into(),
             parameters: serde_json::json!({
-                "type": "object", "required": ["id"],
-                "properties": { "id": { "type": "string" } }
+                "type": "object", "required": ["need"],
+                "properties": { "need": { "type": "string", "description": "the capability to add, by its name or id" } }
             }),
         });
     }

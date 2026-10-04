@@ -10,11 +10,52 @@ use tokio::sync::{mpsc, oneshot};
 
 /// The question's headline, the same in every front-end: who asks, and for which task.
 pub fn approval_title(req: &ApprovalRequest) -> String {
+    if req.action == "acquire_capability" {
+        return match &req.agent {
+            Some(a) => format!("{a} needs this to finish:"),
+            None => "ARK needs this to finish:".into(),
+        };
+    }
     match (&req.agent, &req.task) {
         (Some(a), Some(t)) => format!("{a} (task {t}) wants to run:"),
         (Some(a), None) => format!("{a} wants to run:"),
         _ => "The agent wants to run:".into(),
     }
+}
+
+/// One answer a person can give, as both front-ends show it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Choice {
+    pub label: String,
+    pub decision: ApprovalDecision,
+    /// A short note beside the label (what "for this session" covers).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+/// The answers to offer, in order; the first is the default. A request to connect a capability
+/// gets "Connect" and "Not now": connecting is one sign-in, not a grant to remember.
+pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
+    let choice = |label: &str, decision, hint: Option<String>| Choice {
+        label: label.into(),
+        decision,
+        hint,
+    };
+    if req.action == "acquire_capability" {
+        return vec![
+            choice("Connect", ApprovalDecision::AllowOnce, None),
+            choice("Not now", ApprovalDecision::Deny, None),
+        ];
+    }
+    vec![
+        choice("Allow once", ApprovalDecision::AllowOnce, None),
+        choice(
+            "Allow for this session",
+            ApprovalDecision::AllowSession,
+            Some(format!("don't ask again for `{}`", req.class)),
+        ),
+        choice("Deny", ApprovalDecision::Deny, None),
+    ]
 }
 
 /// A question waiting for a person. Dropping it answers "deny".

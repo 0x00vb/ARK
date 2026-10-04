@@ -175,6 +175,7 @@ name = "ark-connect"
 version = "0.8.0"
 dependencies = [
  "ark-core",
+ "ark-runtime",
  "ark-tools",
  "async-trait",
  "base64 0.22.1",
@@ -211,6 +212,7 @@ dependencies = [
  "ark-orchestrate",
  "ark-sdk",
  "async-trait",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tempfile",

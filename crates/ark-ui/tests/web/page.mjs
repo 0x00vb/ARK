@@ -352,6 +352,27 @@ async function capabilities(page) {
 }
 scenarios.capabilities = capabilities;
 
+// An agent asks for Mail mid-task: the card names the need and offers Connect or Not now;
+// connecting signs in (the test plays the browser) and the turn goes on to the send, which
+// asks as usual, then answers.
+async function connectMidTask(page) {
+  await page.locator("#input").fill("Email Bob that the report is ready");
+  await page.keyboard.press("Enter");
+  const card = page.locator(".approval").first();
+  await card.waitFor();
+  assert.equal(await card.locator(".approval-title").innerText(), "ARK needs this to finish:");
+  assert.match(await card.locator(".approval-summary").innerText(), /^Connect Google so ARK can send email from your account/);
+  const buttons = (await card.locator(".approval-actions button").allInnerTexts()).map((t) => t.split("\n")[0]);
+  assert.deepEqual(buttons, ["Connect", "Not now"]);
+  await card.locator('button[data-decision="allow_once"]').click();
+  const send = page.locator(".approval:not(.decided)");
+  await send.waitFor({ timeout: 15000 });
+  assert.match(await send.locator(".approval-line").innerText(), /mail\.send|Send|bob@example\.com/i);
+  await send.locator('button[data-decision="allow_once"]').click();
+  await page.locator(".agent", { hasText: "Sent the report to Bob." }).waitFor({ timeout: 15000 });
+}
+scenarios["connect-mid-task"] = connectMidTask;
+
 // Settings › Skills lists the store's skill, and Add opens the Terminal in the project folder
 // with the install command typed, unsent.
 async function skills(page) {

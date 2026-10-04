@@ -431,12 +431,17 @@ export function approvalCard(msg, onDecide) {
     h("div.approval-title", msg.title || (own ? "The agent wants to run:" : `${req.agent} wants to run:`)),
     h("pre.approval-line", msg.line),
     req.summary ? h("div.approval-summary", req.summary) : null,
-    h("div.approval-actions",
-      h("button.btn.primary", { onclick: () => decide("allow_once") }, "Allow once", own ? h("kbd", "↩") : null),
-      h("button.btn", { onclick: () => decide("allow_session") }, "Allow for session"),
-      h("button.btn.ghost", { onclick: () => decide("deny") }, "Deny", own ? h("kbd", "esc") : null),
-    ),
-    req.class && req.class !== req.action ? h("div.approval-class", `“Allow for session” covers ${req.class}`) : null,
+    // The answers come from ark-interact, as the terminal's do: the first is the default.
+    h("div.approval-actions", ...(msg.choices || [
+      { label: "Allow once", decision: "allow_once" },
+      { label: "Allow for session", decision: "allow_session" },
+      { label: "Deny", decision: "deny" },
+    ]).map((c, i) => h(i === 0 ? "button.btn.primary" : c.decision === "deny" ? "button.btn.ghost" : "button.btn",
+      { onclick: () => decide(c.decision), "data-decision": c.decision },
+      c.label,
+      own && i === 0 ? h("kbd", "↩") : null,
+      own && c.decision === "deny" ? h("kbd", "esc") : null))),
+    req.class && req.class !== req.action && req.action !== "acquire_capability" ? h("div.approval-class", `“Allow for session” covers ${req.class}`) : null,
   );
   card.decide = decide;
   return card;

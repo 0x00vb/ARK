@@ -689,6 +689,10 @@ impl ArkBuilder {
             profile
                 .distillers
                 .push(Arc::new(ark_connect::services::distill));
+            // An agent that needs a capability not connected yet can ask for it mid-task.
+            if profile.acquisition.is_none() {
+                profile.acquisition = Some(Arc::new(c.clone()));
+            }
         }
         let engine = Arc::new(engine);
         let subscriptions = self.subscriptions.unwrap_or_else(|| {

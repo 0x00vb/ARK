@@ -29,8 +29,18 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark_tools::ToolSource`, `Engine::add_source`, `Engine::has_sources`: tools that come and
   go while ARK runs; MCP plugins are one.
 - `Ark::tools()` and `ark_sdk::offered_tools`: every action a turn would be offered.
+- An agent asks for a capability mid-task (ADR 0013): with connections on, the first message
+  lists what can be added, `acquire_capability {need}` asks the person ("ARK needs this to
+  finish: Connect Google…", Connect or Not now), the sign-in runs in their browser, and the
+  capability's tools join the running turn. `AcquisitionProvider::active` and `offer`,
+  `AcquisitionResult::tools` and `with_tools`, `Connections::capability_for`, `connectable`,
+  `tools_of`, `ark_interact::capabilities::Connector`, `App::sign_in`.
+- `ark_interact::approval_choices` (and `Choice`): the answers both front-ends offer for an
+  approval; the window's `approval` event carries them as `choices`.
 
 ### Changed
+- `acquire_capability` takes `need`, as the runtime always read it (its schema said `id`).
+- Each acquisition is its own approval class (`acquire_capability:<need>`).
 - A cancelled call on a managed vendor session drops that session (`OpenReason::Cancelled`):
   the next call opens a new one instead of resuming a reply cut off halfway.
 - A subscription's usage limit fails the turn at once and says when it resets; it was
@@ -38,6 +48,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Breaking
 - `OpenReason` has a new variant, `Cancelled`; a `match` over it needs an arm.
+- `AcquisitionResult` has a new field, `tools`; build it with `info`, `changed` or
+  `with_tools` instead of a struct literal.
 
 ### Fixed
 - `/tools` and the window's `tools` list the web's actions.

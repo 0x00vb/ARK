@@ -1064,13 +1064,15 @@ async fn forward_approvals(host: Arc<Host>, mut rx: mpsc::UnboundedReceiver<Pend
         let line = host.labels.approval_line(&pending.request);
         let (reply, answer) = oneshot::channel();
         let title = ark_interact::approval_title(&pending.request);
-        let shown = json!({ "request": pending.request, "line": line, "title": title });
+        let choices = ark_interact::approval_choices(&pending.request);
+        let shown =
+            json!({ "request": pending.request, "line": line, "title": title, "choices": choices });
         host.approvals
             .lock()
             .unwrap()
             .insert(id, (shown.clone(), reply));
         host.emit(
-            json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line, "title": shown["title"] }),
+            json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line, "title": shown["title"], "choices": shown["choices"] }),
         );
         let h = host.clone();
         tokio::spawn(async move {

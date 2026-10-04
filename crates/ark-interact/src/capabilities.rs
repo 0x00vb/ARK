@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use ark_sdk::prelude::ark_connect::{Account, CapabilityStatus, Catalog, Connections, State};
 use ark_sdk::prelude::ark_tools::web::WebAdapter;
-use ark_sdk::prelude::{Ark, Engine};
+use ark_sdk::prelude::{ApprovalDecision, ApprovalRequest, Approver, Ark, Engine};
 use serde::Serialize;
 
 use crate::report::{Cell, Report, Row, Table, Tone};
@@ -126,6 +126,86 @@ pub async fn connect(conns: Option<&Connections>, capability: &str) -> anyhow::R
         }
     });
     Ok(url)
+}
+
+/// Asks the person before an agent's `acquire_capability`, in capability words ("Connect
+/// Google so ARK can send email"), and on a yes runs the sign-in in their browser and waits for
+/// it. Every other question goes to the front-end's approver unchanged.
+pub struct Connector {
+    inner: std::sync::Arc<dyn Approver>,
+    conns: Connections,
+    open: Opener,
+}
+
+/// Shows the person a sign-in page. Answers whether it could.
+pub type Opener = std::sync::Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+impl Connector {
+    pub fn new(inner: std::sync::Arc<dyn Approver>, conns: Connections) -> Self {
+        Connector {
+            inner,
+            conns,
+            open: std::sync::Arc::new(open_in_browser),
+        }
+    }
+
+    /// Show sign-in pages another way (a test, a front-end that opens them itself).
+    pub fn opener(mut self, open: Opener) -> Self {
+        self.open = open;
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl Approver for Connector {
+    async fn decide(&self, request: &ApprovalRequest) -> ApprovalDecision {
+        if request.action != "acquire_capability" {
+            return self.inner.decide(request).await;
+        }
+        let need = request.input["need"].as_str().unwrap_or("");
+        let Some(cap) = self.conns.capability_for(need).cloned() else {
+            return self.inner.decide(request).await;
+        };
+        if self.conns.account_for(&cap).is_some() {
+            return ApprovalDecision::AllowOnce;
+        }
+        let provider = cap
+            .provider
+            .as_deref()
+            .and_then(|p| self.conns.catalog().provider(p))
+            .map(|p| p.label.clone())
+            .unwrap_or_default();
+        let mut ask = request.clone();
+        ask.summary = format!(
+            "Connect {provider} so ARK can {}. You sign in on {provider}'s own page.",
+            cap.says
+        );
+        ask.preview = format!("Connect {}", cap.label);
+        if !self.inner.decide(&ask).await.allows() {
+            return ApprovalDecision::Deny;
+        }
+        let connecting = match self.conns.begin(&cap.id).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("{} not connected: {e}", cap.label);
+                return ApprovalDecision::Deny;
+            }
+        };
+        if !(self.open)(connecting.url()) {
+            tracing::warn!(
+                "open this page to connect {}: {}",
+                cap.label,
+                connecting.url()
+            );
+        }
+        match connecting.finish(SIGN_IN_TIME).await {
+            Ok(_) => ApprovalDecision::AllowOnce,
+            Err(e) => {
+                tracing::warn!("{} not connected: {e}", cap.label);
+                ApprovalDecision::Deny
+            }
+        }
+    }
 }
 
 /// Disconnect the account behind a capability (or an account id): revoked and forgotten.

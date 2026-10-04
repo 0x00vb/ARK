@@ -91,7 +91,7 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         .provider(model)
         .planner(false)
         .critic(false);
-    if scenario == "capabilities" {
+    if scenario == "capabilities" || scenario == "connect-mid-task" {
         // Sign-in against a provider on loopback that approves at once; tokens in memory.
         let provider = fake_provider().await;
         let mut catalog = ark_connect::Catalog::builtin();
@@ -109,13 +109,22 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             dir.path(),
             catalog,
             Arc::new(ark_connect::MemorySecrets::default()),
-        );
+        )
+        .with_base("google.mail", &provider);
         builder = builder
             .connections_with(conns)
             .web_with(ark_tools::web::WebAdapter::new().backends(vec![]));
     }
     let ark = builder.build().unwrap();
     let mut app = App::new("Page test").ark(ark);
+    if scenario == "connect-mid-task" {
+        // The person's browser: follow the sign-in page back to ARK, without a real browser.
+        app = app.sign_in(Arc::new(|url: &str| {
+            let url = url.to_string();
+            std::thread::spawn(move || follow(&url));
+            true
+        }));
+    }
     if agents {
         app = app.orchestrate(|ark, project, gate| {
             Ok(
@@ -207,8 +216,29 @@ async fn fake_provider() -> String {
     tokio::spawn(async move {
         while let Ok((mut sock, _)) = listener.accept().await {
             tokio::spawn(async move {
+                // Read the whole request (head and body) before answering: closing a socket
+                // with unread data resets it, and the client may lose the reply.
                 let mut buf = vec![0u8; 16384];
-                let n = sock.read(&mut buf).await.unwrap_or(0);
+                let mut n = 0;
+                loop {
+                    let k = sock.read(&mut buf[n..]).await.unwrap_or(0);
+                    n += k;
+                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let done = text.find("\r\n\r\n").is_some_and(|end| {
+                        let len = text[..end]
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                            })
+                            .unwrap_or(0);
+                        n >= end + 4 + len
+                    });
+                    if done || k == 0 {
+                        break;
+                    }
+                }
                 let head = String::from_utf8_lossy(&buf[..n]).to_string();
                 let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
                 let reply = if path.starts_with("/auth") {
@@ -247,11 +277,60 @@ async fn fake_provider() -> String {
     base
 }
 
+/// GET `url` and the place it redirects to, as a browser would (plain HTTP on loopback).
+fn follow(url: &str) {
+    use std::io::{Read, Write};
+    let mut url = url.to_string();
+    for _ in 0..3 {
+        let rest = url.trim_start_matches("http://");
+        let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let Ok(mut s) = std::net::TcpStream::connect(host) else {
+            return;
+        };
+        let _ = write!(
+            s,
+            "GET /{path} HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+        );
+        let mut reply = String::new();
+        let _ = s.read_to_string(&mut reply);
+        match reply.lines().find_map(|l| l.strip_prefix("location: ")) {
+            Some(next) => url = next.trim().to_string(),
+            None => return,
+        }
+    }
+}
+
 /// The query of a request path.
 fn reqwest_url(path: &str) -> String {
     path.split_once('?')
         .map(|(_, q)| q.to_string())
         .unwrap_or_default()
+}
+
+/// The agent needs Mail mid-task: the card says what for and offers Connect; after the
+/// sign-in the same turn sends, which the person approves as usual.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_agent_asks_to_connect_mail_and_the_turn_goes_on() {
+    let acquire = Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "acquire_capability".into(),
+            arguments: json!({ "need": "mail" }),
+        }],
+        usage: Usage::measured(50, 5),
+    };
+    let send = Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "c2".into(),
+            name: "mail.send".into(),
+            arguments: json!({ "to": ["bob@example.com"], "subject": "Report", "body": "Ready." }),
+        }],
+        usage: Usage::measured(50, 5),
+    };
+    let script = vec![acquire, send, say("Sent the report to Bob.", false)];
+    drive("connect-mid-task", script, Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

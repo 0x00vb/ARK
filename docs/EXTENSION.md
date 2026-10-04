@@ -174,6 +174,13 @@ revokes and forgets the account. The window has the same list in Settings › Ca
 | Consent | Each capability asks for its own scopes, added to the provider's account |
 | Without a client id | The capability shows as unavailable: "this build of ARK cannot sign in to Google yet" |
 
+An agent that needs a capability mid-task asks for it: the turn's first message lists what
+can be added, the agent calls `acquire_capability {need}`, the person sees "ARK needs this to
+finish: Connect Google so ARK can send email from your account" with Connect or Not now, and
+after the sign-in the capability's tools join the same turn. Set `App::sign_in` when the
+sign-in page cannot open in a browser on the machine ARK runs on. Why:
+[ADR 0013](adr/0013-asking-for-a-capability-mid-task.md).
+
 Why ARK owns the connection: [ADR 0011](adr/0011-capabilities-and-connections.md). Google's
 side (client, review, privacy policy): [`GOOGLE.md`](GOOGLE.md).
 

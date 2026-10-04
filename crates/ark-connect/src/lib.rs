@@ -14,6 +14,7 @@ pub mod oauth;
 pub mod secrets;
 pub mod services;
 
+mod acquire;
 mod connections;
 
 pub use catalog::{Capability, Catalog, OAuth, Provider};

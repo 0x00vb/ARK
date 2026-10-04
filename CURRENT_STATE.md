@@ -11,7 +11,7 @@ Last updated: 2026-10-04
 | | |
 |---|---|
 | Latest tag | v0.8.0 (2026-10-03), on `origin` and `github` |
-| In progress | Next step 2: Claude Code and Codex first-class. Step 1 (v0.8.0) is done: SecRes and ark-desktop pin it. Capability work runs in parallel (ROADMAP › Capabilities): C2's foundation is on `main` (`ark-connect`, `/connect`, Settings › Capabilities; Mail and Calendar on Google); C3 (an agent asks for a capability mid-task) is next |
+| In progress | Next step 2: Claude Code and Codex first-class. Step 1 (v0.8.0) is done: SecRes and ark-desktop pin it. Capability work runs in parallel (ROADMAP › Capabilities): C2's foundation is on `main` (`ark-connect`, `/connect`, Settings › Capabilities; Mail and Calendar on Google); C3 (an agent asks for a capability mid-task) is in too (ADR 0013). Next: Files as a capability in ARK, grants kept per project, then Browser (C4) |
 
 ## Waiting on this repo
 

@@ -300,6 +300,28 @@ impl Connections {
         self.inner.tokens.lock().unwrap().remove(account);
     }
 
+    /// The capabilities one sign-in away now: they need an account this app can sign in to,
+    /// and none is connected.
+    pub fn connectable(&self) -> Vec<&Capability> {
+        let cat = &self.inner.catalog;
+        cat.capabilities
+            .iter()
+            .filter(|c| {
+                c.provider
+                    .as_deref()
+                    .and_then(|p| cat.provider(p))
+                    .is_some_and(|p| p.oauth.client_id().is_some())
+                    && self.account_for(c).is_none()
+            })
+            .collect()
+    }
+
+    /// The tools a capability gives once connected. `None`: not connected, or no service.
+    pub fn tools_of(&self, cap: &Capability) -> Option<Arc<dyn Adapter>> {
+        let account = self.account_for(cap)?;
+        services::adapter(cap.service.as_deref()?, self.clone(), account.id)
+    }
+
     pub(crate) fn http(&self) -> &reqwest::Client {
         &self.inner.http
     }
@@ -388,10 +410,7 @@ impl ToolSource for Connections {
             .catalog
             .capabilities
             .iter()
-            .filter_map(|c| {
-                let account = self.account_for(c)?;
-                services::adapter(c.service.as_deref()?, self.clone(), account.id)
-            })
+            .filter_map(|c| self.tools_of(c))
             .collect()
     }
 }

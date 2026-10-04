@@ -51,6 +51,7 @@ pub struct App {
     pricing: Option<Pricing>,
     orchestrator: Option<ark_orchestrate::Orchestrator>,
     orchestrate: Option<OrchestrateFn>,
+    sign_in: Option<crate::capabilities::Opener>,
 }
 
 /// How to open an [`App`]: the generic choices a person makes at launch.
@@ -82,7 +83,14 @@ impl App {
             pricing: None,
             orchestrator: None,
             orchestrate: None,
+            sign_in: None,
         }
+    }
+    /// How a sign-in page is shown when an agent asks to connect a capability. Default: the
+    /// person's browser on this machine.
+    pub fn sign_in(mut self, open: crate::capabilities::Opener) -> Self {
+        self.sign_in = Some(open);
+        self
     }
     pub fn name(&self) -> &str {
         &self.name
@@ -229,6 +237,17 @@ impl App {
                 .unwrap_or(project)
         } else {
             project
+        };
+        // A yes to "ARK needs Mail" connects it before the turn goes on.
+        let approver: Arc<dyn Approver> = match ark.connections() {
+            Some(c) => {
+                let mut connector = crate::capabilities::Connector::new(approver, c.clone());
+                if let Some(open) = self.sign_in.take() {
+                    connector = connector.opener(open);
+                }
+                Arc::new(connector)
+            }
+            None => approver,
         };
         let mut commands = self.commands;
         commands.extend(crate::builtins::all());

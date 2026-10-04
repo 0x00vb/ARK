@@ -692,3 +692,207 @@ async fn connect_lists_capabilities_and_says_why_one_cannot_connect() {
         "{tools}"
     );
 }
+
+/// A provider and a mail API on loopback. The sign-in page sends the browser straight back
+/// with a code; the token endpoint answers for `ada@example.com` with Mail's scope; the API
+/// records each message it is asked to send.
+async fn fake_google() -> (String, String, Arc<std::sync::Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let sent: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let log = sent.clone();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let log = log.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 65536];
+                let mut n = 0;
+                // Read the head and, for a POST, its body.
+                loop {
+                    let k = sock.read(&mut buf[n..]).await.unwrap_or(0);
+                    n += k;
+                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let Some(end) = text.find("\r\n\r\n") else {
+                        if k == 0 {
+                            break;
+                        } else {
+                            continue;
+                        }
+                    };
+                    let len = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                        })
+                        .unwrap_or(0);
+                    if n >= end + 4 + len || k == 0 {
+                        break;
+                    }
+                }
+                let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = text.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let body = text.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+                let reply = if path.starts_with("/auth") {
+                    let url = reqwest::Url::parse(&format!("http://x{path}")).unwrap();
+                    let get = |k: &str| {
+                        url.query_pairs()
+                            .find(|(n, _)| n == k)
+                            .unwrap()
+                            .1
+                            .to_string()
+                    };
+                    format!(
+                        "HTTP/1.1 302 Found\r\nlocation: {}?code=c0de&state={}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                        get("redirect_uri"),
+                        get("state")
+                    )
+                } else {
+                    let out = if path.starts_with("/token") {
+                        serde_json::json!({
+                            "access_token": "a", "refresh_token": "r", "expires_in": 3600,
+                            "scope": "openid email https://www.googleapis.com/auth/gmail.send",
+                            "id_token": "e30.eyJlbWFpbCI6ImFkYUBleGFtcGxlLmNvbSJ9.sig"
+                        })
+                    } else if path.ends_with("/messages/send") {
+                        log.lock().unwrap().push(body);
+                        serde_json::json!({ "id": "m1" })
+                    } else {
+                        serde_json::json!({})
+                    }
+                    .to_string();
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{out}",
+                        out.len()
+                    )
+                };
+                let _ = sock.write_all(reply.as_bytes()).await;
+            });
+        }
+    });
+    (base.clone(), base, sent)
+}
+
+fn call(name: &str, args: serde_json::Value) -> Completion {
+    Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: format!("c-{name}"),
+            name: name.into(),
+            arguments: args,
+        }],
+        usage: Usage::measured(50, 5),
+    }
+}
+
+/// The loop the product is about: the agent needs Mail, which is not connected; it asks; the
+/// person sees "Connect Google so ARK can send email", says yes, signs in; the same turn goes on
+/// and sends the mail, which the person approves as usual.
+#[tokio::test]
+async fn an_agent_asks_for_mail_mid_task_and_sends_once_it_is_connected() {
+    use ark_sdk::prelude::ark_connect::{Catalog, Connections, MemorySecrets};
+    let (provider, api, sent) = fake_google().await;
+    let dir = tempfile::tempdir().unwrap();
+    let mut catalog = Catalog::builtin();
+    let g = catalog
+        .providers
+        .iter_mut()
+        .find(|p| p.id == "google")
+        .unwrap();
+    g.oauth.auth_url = format!("{provider}/auth");
+    g.oauth.token_url = format!("{provider}/token");
+    g.oauth.revoke_url = None;
+    g.oauth.client_id = "test".into();
+    g.oauth.client_id_env = None;
+    let conns = Connections::open(dir.path(), catalog, Arc::new(MemorySecrets::default()))
+        .with_base("google.mail", &api);
+    let model = Arc::new(MockProvider::new(
+        "m",
+        vec![
+            call("acquire_capability", serde_json::json!({ "need": "mail" })),
+            call(
+                "mail.send",
+                serde_json::json!({ "to": ["bob@example.com"], "subject": "Report", "body": "It is ready." }),
+            ),
+            Completion {
+                content: "Sent the report to Bob.".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(60, 6),
+            },
+        ],
+    ));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model.clone())
+        .connections_with(conns)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, mut rx) = ChannelApprover::channel();
+    // The person: says yes to everything, and remembers what they were asked.
+    let asked: Arc<std::sync::Mutex<Vec<(String, String)>>> = Arc::default();
+    let seen = asked.clone();
+    tokio::spawn(async move {
+        while let Some(p) = rx.recv().await {
+            seen.lock().unwrap().push((
+                ark_interact::approval_title(&p.request),
+                p.request.summary.clone(),
+            ));
+            p.answer(ApprovalDecision::AllowOnce);
+        }
+    });
+    // The browser: follows the sign-in page back to ARK.
+    let browser: ark_interact::capabilities::Opener = Arc::new(|url: &str| {
+        let url = url.to_string();
+        tokio::spawn(async move { reqwest::get(url).await.map(|_| ()) });
+        true
+    });
+    let mut ix = App::new("Test")
+        .ark(ark)
+        .sign_in(browser)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+
+    let end = ix
+        .run_turn(
+            "Email bob@example.com that the report is ready",
+            &TurnControl::new(),
+            |_, _| {},
+        )
+        .await;
+    let answer = end.result.unwrap().answer;
+    assert!(answer.contains("Sent"), "{answer}");
+
+    let asked = asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 2, "{asked:?}");
+    assert_eq!(asked[0].0, "ARK needs this to finish:");
+    assert!(
+        asked[0]
+            .1
+            .starts_with("Connect Google so ARK can send email from your account"),
+        "{asked:?}"
+    );
+    assert_eq!(sent.lock().unwrap().len(), 1, "the mail went out once");
+
+    let requests = model.recorded();
+    let first = &requests[0].messages[0].content;
+    assert!(
+        first.contains("== CAN BE ADDED ==") && first.contains("- mail: send email"),
+        "{first}"
+    );
+    assert!(!requests[0].tools.iter().any(|t| t.name == "mail.send"));
+    assert!(
+        requests[1].tools.iter().any(|t| t.name == "mail.send"),
+        "Mail joined the turn"
+    );
+    let list = ix.execute("/connect").await.report.plain_text();
+    let mail = list.lines().find(|l| l.contains("Mail")).unwrap_or("");
+    assert!(
+        mail.trim_start().starts_with('✓') && mail.contains("ada@example.com"),
+        "{list}"
+    );
+}

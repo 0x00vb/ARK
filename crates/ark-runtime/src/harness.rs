@@ -232,6 +232,8 @@ struct FirstTurn {
     rules: Option<String>,
     /// The skills catalog ([`crate::skills::catalog`]).
     skills: Option<String>,
+    /// What the agent can ask to be added ([`crate::AcquisitionProvider::offer`]).
+    can_add: Option<String>,
     /// The actions already loaded, one line each, so a model calls them instead of looking
     /// for others in the index.
     ready: Option<String>,
@@ -252,6 +254,9 @@ impl FirstTurn {
         }
         if let Some(k) = &self.skills {
             let _ = write!(s, "== SKILLS ==\n{k}\n\n");
+        }
+        if let Some(c) = &self.can_add {
+            let _ = write!(s, "== CAN BE ADDED ==\n{c}\n\n");
         }
         if let Some(r) = &self.ready {
             let _ = write!(s, "== READY TO CALL ==\n{r}\n\n");
@@ -442,7 +447,7 @@ impl Harness {
         let system = sys.render();
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
-            acquisition: profile.acquisition.is_some(),
+            acquisition: acquisition_on(profile),
             present: self.presentation,
         };
 
@@ -463,6 +468,7 @@ impl Harness {
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
             skills: self.skills.clone(),
+            can_add: can_add(profile),
             ready: self.ready_block(engine, &loaded),
             task: question.to_string(),
         };
@@ -496,8 +502,27 @@ impl Harness {
         let mut fresh_meta: u32 = 0;
         let mut corrected_text_call = false;
         let mut steered: Vec<String> = Vec::new();
+        // Tools an acquisition added this turn, and the turn's engine once it has them.
+        let outer = engine;
+        let mut added: Vec<Arc<dyn ark_tools::Adapter>> = Vec::new();
+        let mut grown: Option<Engine> = None;
 
         for _ in 0..self.max_steps {
+            if !added.is_empty() {
+                let cur = grown.as_ref().unwrap_or(outer);
+                let mut registry = cur.registry.clone();
+                for a in added.drain(..) {
+                    for d in a.actions() {
+                        if !loaded.contains(&d.name) {
+                            loaded.push(d.name);
+                        }
+                    }
+                    registry.register(a);
+                }
+                let next = cur.scoped(registry);
+                grown = Some(next);
+            }
+            let engine: &Engine = grown.as_ref().unwrap_or(outer);
             if cancelled || self.is_cancelled() {
                 cancelled = true;
                 break;
@@ -630,6 +655,7 @@ impl Harness {
                             project,
                             call,
                             &mut loaded,
+                            &mut added,
                             &mut state,
                             tally.metrics,
                             &mut on_event,
@@ -955,6 +981,7 @@ impl Harness {
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
             skills: self.skills.clone(),
+            can_add: can_add(profile),
             ready: self.ready_block(engine, &loaded),
             task: task.to_string(),
         };
@@ -967,7 +994,7 @@ impl Harness {
         let (_, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
-            acquisition: profile.acquisition.is_some(),
+            acquisition: acquisition_on(profile),
             present: self.presentation,
         };
         let tools = self.tool_set(engine, &loaded, meta_cfg);
@@ -1005,7 +1032,8 @@ impl Harness {
         // The runtime's own lines: the rules after the instructions, and the project block.
         let project = (estimate_tokens(&sys.rules) + estimate_tokens(&sys.project))
             .saturating_sub(instructions);
-        let ready = first.ready.as_deref().map(estimate_tokens).unwrap_or(0);
+        let ready = first.ready.as_deref().map(estimate_tokens).unwrap_or(0)
+            + first.can_add.as_deref().map(estimate_tokens).unwrap_or(0);
         let capability_index =
             estimate_tokens(&sys.index) + if ws.last_compressed == 0 { ready } else { 0 };
         let working_state = WorkingSet::message_tokens(&state_message(state_digest));
@@ -1348,6 +1376,7 @@ impl Harness {
         project: &ProjectId,
         call: &ark_model::ToolCall,
         loaded: &mut Vec<String>,
+        added: &mut Vec<Arc<dyn ark_tools::Adapter>>,
         state: &mut ResearchState,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
@@ -1536,14 +1565,14 @@ impl Harness {
                             catalog::PROPOSE_CAPABILITY => {
                                 ("propose_capability", acq.propose(&need).await)
                             }
-                            // Acquisition is gated by the same approval as a Mutate action.
+                            // Acquisition is gated by the same approval as a Mutate action. Its
+                            // tools join this turn from the next step.
                             _ => {
                                 let approved = self.allow_mutate
                                     || self.approve_acquisition(profile, &need, on_event).await;
-                                (
-                                    "acquire_capability",
-                                    acq.acquire(&need, approved).await.summary,
-                                )
+                                let got = acq.acquire(&need, approved).await;
+                                added.extend(got.tools);
+                                ("acquire_capability", got.summary)
                             }
                         };
                         on_event(HarnessEvent::Capability {
@@ -1623,7 +1652,21 @@ impl Harness {
             name: catalog::ACQUIRE_CAPABILITY.into(),
             arguments: json!({ "need": need }),
         };
-        matches!(self.request_approval(profile, &desc, &call, on_event).await, Some(Some(d)) if d.allows())
+        // Each need is its own question: a yes for one capability is not a yes for another.
+        let mut profile = profile.clone();
+        let base = profile.approval_classifier.take();
+        profile.approval_classifier =
+            Some(Arc::new(move |action: &str, input: &serde_json::Value| {
+                let class = match &base {
+                    Some(f) => f(action, input),
+                    None => action.to_string(),
+                };
+                match input.get("need").and_then(|v| v.as_str()) {
+                    Some(n) => format!("{class}:{}", n.trim().to_lowercase()),
+                    None => class,
+                }
+            }));
+        matches!(self.request_approval(&profile, &desc, &call, on_event).await, Some(Some(d)) if d.allows())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1925,6 +1968,20 @@ impl Harness {
 }
 
 /// The profile's core actions that exist in the registry, in the profile's order.
+/// Whether the turn is offered the acquisition tools: a provider with something to acquire.
+fn acquisition_on(profile: &AgentProfile) -> bool {
+    profile.acquisition.as_ref().is_some_and(|a| a.active())
+}
+
+fn can_add(profile: &AgentProfile) -> Option<String> {
+    profile
+        .acquisition
+        .as_ref()
+        .filter(|a| a.active())
+        .and_then(|a| a.offer())
+        .filter(|t| !t.trim().is_empty())
+}
+
 fn core_loaded(engine: &Engine, profile: &AgentProfile) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     for a in &profile.core_actions {

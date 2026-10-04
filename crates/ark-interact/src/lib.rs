@@ -33,7 +33,7 @@ pub mod skills;
 pub mod trace;
 
 pub use activity::{Activity, ActivityKind};
-pub use approval::{approval_title, ChannelApprover, PendingApproval};
+pub use approval::{approval_choices, approval_title, ChannelApprover, Choice, PendingApproval};
 pub use builtins::{call_report, trace_report, SESSION_GROUP};
 pub use command::{Command, CommandInfo, Effect, Reply};
 pub use inspect::Pricing;

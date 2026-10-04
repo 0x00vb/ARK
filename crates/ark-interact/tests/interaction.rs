@@ -987,3 +987,100 @@ async fn an_always_grant_lasts_until_removed_with_grants() {
         .await;
     assert_eq!(n(), 2, "asked again after the grant was removed");
 }
+
+/// Two live conversations of one app at once: their own sessions and turns, the same agents.
+/// A project with scheduled work gets its orchestrator when the app opens, with no chat there.
+#[tokio::test]
+async fn sibling_conversations_share_the_agents_and_scheduled_work_wakes_at_open() {
+    use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec, When};
+    use std::sync::Mutex;
+    let dir = tempfile::tempdir().unwrap();
+    let model: Arc<dyn ark_model::Provider> = Arc::new(
+        MockProvider::new("m", vec![]).with_fallback(|req| Completion {
+            content: format!(
+                "answer to: {}",
+                req.messages
+                    .last()
+                    .map(|m| m.content.as_str())
+                    .unwrap_or("")
+            ),
+            tool_calls: vec![],
+            usage: Usage::measured(50, 5),
+        }),
+    );
+    let built: Arc<Mutex<Vec<String>>> = Arc::default();
+    let app = |model: Arc<dyn ark_model::Provider>, built: Arc<Mutex<Vec<String>>>| {
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(model.clone())
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        App::new("Team")
+            .ark(ark)
+            .orchestrate(move |ark, project, gate| {
+                built.lock().unwrap().push(project.name.clone());
+                let m = model.clone();
+                Ok(Orchestrator::builder(ark, project)
+                    .configure_models(|b| b.provider("m", m).default_model("m"))
+                    .approvals(gate)
+                    .build()?)
+            })
+    };
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut a = app(model.clone(), built.clone())
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    let (approver2, _rx2) = ChannelApprover::channel();
+    let mut b = a
+        .siblings()
+        .open(None, &a.project().id, Arc::new(approver2))
+        .unwrap();
+    assert_ne!(a.session().id(), b.session().id());
+    assert_eq!(a.project().id, b.project().id);
+    // Both run at once, each in its own session.
+    let (ca, cb) = (TurnControl::new(), TurnControl::new());
+    let (ea, eb) = tokio::join!(
+        a.run_turn("first chat", &ca, |_, _| {}),
+        b.run_turn("second chat", &cb, |_, _| {})
+    );
+    assert!(ea.result.unwrap().answer.contains("first chat"));
+    assert!(eb.result.unwrap().answer.contains("second chat"));
+    assert_eq!((a.session().turn_count(), b.session().turn_count()), (1, 1));
+    // One orchestrator per project, whichever conversation asks.
+    a.orchestrator()
+        .unwrap()
+        .spawn(AgentSpec::new("digest"))
+        .await
+        .unwrap();
+    assert!(b.orchestrator().unwrap().agent("digest").is_some());
+    assert_eq!(built.lock().unwrap().len(), 1);
+
+    // Schedule work in another project, then open the app again in the first one.
+    b.switch_project("evenings").unwrap();
+    let o = b.orchestrator().unwrap().clone();
+    o.spawn(AgentSpec::new("digest")).await.unwrap();
+    o.schedule(
+        "digest",
+        TaskSpec::new("sum up the day"),
+        When::daily_at("18:00"),
+    )
+    .unwrap();
+    let report = b.execute("/schedules").await.report.plain_text();
+    assert!(report.contains("every day at 18:00"), "{report}");
+    drop((a, b, o));
+    built.lock().unwrap().clear();
+    let (approver, _rx) = ChannelApprover::channel();
+    let start = Start {
+        project: Some("team".into()),
+        ..Default::default()
+    };
+    let _ix = app(model, built.clone())
+        .open(&start, Arc::new(approver))
+        .unwrap()
+        .interaction;
+    let woke = built.lock().unwrap().clone();
+    assert!(woke.contains(&"evenings".to_string()), "{woke:?}");
+}

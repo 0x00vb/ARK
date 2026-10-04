@@ -31,6 +31,34 @@ fn agent_word(s: AgentState) -> &'static str {
     }
 }
 
+/// Tasks agents run on their own: when, the next run, what.
+pub fn schedules_table(g: &Graph) -> Table {
+    let mut t = Table::with_header(&["schedule", "agent", "when", "next", "runs", "task"]).right(4);
+    for s in &g.schedules {
+        t = t.row([
+            s.id.clone(),
+            s.agent.clone(),
+            s.says.clone(),
+            s.next_ms
+                .map(ark_orchestrate::schedule::local_label)
+                .unwrap_or_else(|| "-".into()),
+            s.runs.to_string(),
+            clip(&s.task.objective, 60),
+        ]);
+    }
+    t
+}
+
+/// What runs on its own in this project (`/schedules`).
+pub fn schedules_report(g: &Graph) -> Report {
+    let r = Report::titled("Scheduled");
+    if g.schedules.is_empty() {
+        return r.note("Nothing is scheduled. Ask in words: \"every weekday at 9, have the researcher summarize the news\".");
+    }
+    r.table(schedules_table(g))
+        .note("Stop one with /schedules stop <schedule>, or ask in words.")
+}
+
 /// The whole graph: tasks as a tree (who delegated what to whom), agents with their model,
 /// session and context use, and each account's capacity.
 pub fn graph_report(g: &Graph) -> Report {
@@ -105,6 +133,9 @@ pub fn graph_report(g: &Graph) -> Report {
         });
     }
     r = r.heading("Agents").table(a);
+    if !g.schedules.is_empty() {
+        r = r.heading("Scheduled").table(schedules_table(g));
+    }
     if !g.accounts.is_empty() {
         let mut c = Table::with_header(&["account", "in use", "waiting", "started"])
             .right(1)
@@ -312,6 +343,18 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
             },
             task_tone(*state),
         ),
+        EventKind::Scheduled {
+            agent,
+            objective,
+            says,
+            ..
+        } => (
+            format!("{agent} runs {says}: {}", clip(objective, 80)),
+            Tone::Accent,
+        ),
+        EventKind::Unscheduled { agent, says, .. } => {
+            (format!("{agent} no longer runs {says}"), Tone::Muted)
+        }
         EventKind::AgentSpawned { .. }
         | EventKind::AgentState { .. }
         | EventKind::Session { .. } => return None,
@@ -355,6 +398,10 @@ pub enum Control {
     Message {
         agent: String,
         text: String,
+    },
+    /// Stop a schedule (a run already started goes on).
+    Unschedule {
+        schedule: String,
     },
 }
 
@@ -432,6 +479,14 @@ pub async fn control(
             }
             let delivered = o.message("user", &agent, &text)?;
             ControlOutcome::Messaged { agent, delivered }
+        }
+        Control::Unschedule { schedule } => {
+            let s = o.unschedule(&schedule)?;
+            ControlOutcome::Done(format!(
+                "{} no longer runs \"{}\"",
+                s.agent,
+                clip(&s.task.objective, 60)
+            ))
         }
     })
 }

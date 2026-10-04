@@ -37,7 +37,7 @@ pub use approval::{approval_choices, approval_title, ChannelApprover, Choice, Pe
 pub use builtins::{call_report, trace_report, SESSION_GROUP};
 pub use command::{Command, CommandInfo, Effect, Reply};
 pub use inspect::Pricing;
-pub use interaction::{App, Interaction, Opened, Start, Summary, TurnControl, TurnEnd};
+pub use interaction::{App, Interaction, Opened, Siblings, Start, Summary, TurnControl, TurnEnd};
 pub use labels::{default_label, ActivityLabels, Labels, ToolLabeler};
 pub use report::{Block, Report, Tone};
 pub use trace::{Trace, TurnRecord};

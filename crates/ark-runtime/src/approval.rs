@@ -39,6 +39,10 @@ pub struct ApprovalRequest {
     /// That agent's task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,
+    /// The action asks at every call (`ActionDescriptor::ask_each_time`): no grant covers it,
+    /// and an answer is never remembered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ask_each_time: bool,
 }
 
 /// A human's answer to an [`ApprovalRequest`].
@@ -159,6 +163,13 @@ impl ApprovalGate {
     /// Resolve a request: a granted class passes without asking; otherwise the approver
     /// decides, and an `AllowSession` answer is remembered.
     pub async fn check(&self, request: &ApprovalRequest) -> ApprovalDecision {
+        if request.ask_each_time {
+            // Only this call, whatever the answer said.
+            return match self.approver.decide(request).await {
+                ApprovalDecision::Deny => ApprovalDecision::Deny,
+                _ => ApprovalDecision::AllowOnce,
+            };
+        }
         if self.grants.lock().unwrap().contains(&request.class) {
             return ApprovalDecision::AllowSession;
         }
@@ -270,6 +281,7 @@ mod tests {
             preview: "doc.save()".into(),
             agent: None,
             task: None,
+            ask_each_time: false,
         }
     }
 
@@ -301,6 +313,30 @@ mod tests {
         );
         gate.revoke_all();
         assert!(!gate.is_granted("doc.save"));
+    }
+
+    #[tokio::test]
+    async fn an_action_that_asks_each_time_is_never_covered_or_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(dir.path()).unwrap());
+        let approver = Arc::new(Counting(AtomicUsize::new(0), ApprovalDecision::AllowAlways));
+        let gate = ApprovalGate::new(approver.clone());
+        gate.keep_in(store.clone(), "p");
+        // A grant for the class exists (the person allowed it before the rule, say).
+        gate.check(&req("screen")).await;
+        assert!(gate.is_granted("screen"));
+        let mut each = req("screen");
+        each.ask_each_time = true;
+        assert_eq!(gate.check(&each).await, ApprovalDecision::AllowOnce);
+        assert_eq!(gate.check(&each).await, ApprovalDecision::AllowOnce);
+        assert_eq!(approver.0.load(Ordering::SeqCst), 3, "asked every time");
+        let mut other = req("screen.other");
+        other.ask_each_time = true;
+        gate.check(&other).await;
+        assert!(
+            !gate.is_granted("screen.other") && lasting_grants(&store, "p").len() == 1,
+            "an 'always' answer to it is not kept"
+        );
     }
 
     #[tokio::test]

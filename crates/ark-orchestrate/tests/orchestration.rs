@@ -1398,3 +1398,174 @@ async fn the_conversation_gives_a_new_agent_only_the_capabilities_its_role_needs
         seen[2]
     );
 }
+
+#[tokio::test]
+async fn a_schedule_runs_its_task_at_its_times_and_survives_a_restart() {
+    let f = fixture();
+    let m = Script::new("m", vec![answer("first digest"), answer("caught up")]);
+    let id = {
+        let o = orch(&f, vec![("m", m.clone())], vec![]);
+        o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+        let s = o
+            .schedule(
+                "w",
+                TaskSpec::new("write the digest"),
+                When::every_minutes(10),
+            )
+            .unwrap();
+        assert_eq!(s.says, "every 10 minutes");
+        let next = s.next_ms.unwrap();
+        // Not due yet.
+        assert!(o.tick_schedules(next - 1).is_empty());
+        let started = o.tick_schedules(next);
+        assert_eq!(started.len(), 1);
+        let done = o.wait(&started[0]).await.unwrap();
+        assert_eq!(done.result.as_deref(), Some("first digest"));
+        assert_eq!(done.schedule.as_deref(), Some(s.id.as_str()));
+        let after = o.schedules()[0].clone();
+        assert_eq!((after.runs, after.next_ms), (1, Some(next + 10 * 60_000)));
+        assert_eq!(o.graph().schedules.len(), 1);
+        assert_eq!(
+            o.graph().task(&started[0]).unwrap().schedule,
+            Some(s.id.clone())
+        );
+        s.id
+    };
+    // A restart keeps it; runs missed while the process was down run once, not once each.
+    let o = orch(&f, vec![("m", m.clone())], vec![]);
+    let s = o.schedules();
+    assert_eq!(s.len(), 1);
+    let late = s[0].next_ms.unwrap() + 5 * 60 * 60_000;
+    let started = o.tick_schedules(late);
+    assert_eq!(started.len(), 1);
+    assert!(o.tick_schedules(late).is_empty());
+    o.wait(&started[0]).await.unwrap();
+    assert_eq!(o.schedules()[0].next_ms, Some(late + 10 * 60_000));
+    // Stopped for good, also after a restart.
+    o.unschedule(&id).unwrap();
+    assert!(o.schedules().is_empty() && o.graph().schedules.is_empty());
+    assert!(scheduled_projects(&f.ark.engine().store).is_empty());
+    drop(o);
+    assert!(orch(&f, vec![("m", m)], vec![]).schedules().is_empty());
+}
+
+#[tokio::test]
+async fn a_scheduled_run_is_skipped_while_the_last_one_is_still_open() {
+    let f = fixture();
+    let gate = Arc::new(Notify::new());
+    let m = Script::with(
+        "m",
+        vec![answer("slow")],
+        Duration::ZERO,
+        Some(gate.clone()),
+    );
+    let o = orch(&f, vec![("m", m)], vec![]);
+    o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+    let s = o
+        .schedule("w", TaskSpec::new("poll"), When::every_minutes(5))
+        .unwrap();
+    assert_eq!(
+        scheduled_projects(&f.ark.engine().store),
+        vec![f.project.id.to_string()]
+    );
+    let t0 = s.next_ms.unwrap();
+    let first = o.tick_schedules(t0);
+    assert_eq!(first.len(), 1);
+    // Still running at the next time: skipped, and the time moves on.
+    assert!(o.tick_schedules(t0 + 5 * 60_000).is_empty());
+    let now = o.schedules()[0].clone();
+    assert_eq!((now.runs, now.skipped), (1, 1));
+    gate.notify_one();
+    assert_eq!(o.wait(&first[0]).await.unwrap().state, TaskState::Done);
+    // Bad times are refused with words the model can act on.
+    let e = o
+        .schedule("w", TaskSpec::new("x"), When::daily_at("9am"))
+        .unwrap_err();
+    assert!(e.to_string().contains("HH:MM"), "{e}");
+    assert!(o
+        .schedule("nobody", TaskSpec::new("x"), When::every_minutes(5))
+        .is_err());
+    // Standing work no more often than every 5 minutes.
+    let e = o
+        .schedule("w", TaskSpec::new("x"), When::every_minutes(1))
+        .unwrap_err();
+    assert!(e.to_string().contains("at least 5"), "{e}");
+    // A stopped schedule stays stopped, also when it was due; an ended agent's schedules end.
+    let due = o
+        .schedule("w", TaskSpec::new("again"), When::every_minutes(5))
+        .unwrap();
+    o.unschedule(&due.id).unwrap();
+    assert!(o.tick_schedules(due.next_ms.unwrap()).is_empty());
+    assert_eq!(o.schedules().len(), 1);
+    o.terminate("w").await.unwrap();
+    assert!(o.schedules().is_empty());
+    assert!(scheduled_projects(&f.ark.engine().store).is_empty());
+    let stopped = o
+        .events(0, 500)
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(&e.kind, EventKind::Unscheduled { agent, .. } if agent == "w"))
+        .count();
+    assert_eq!(stopped, 2);
+}
+
+#[tokio::test]
+async fn the_conversation_schedules_work_and_stops_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let chat = Script::new(
+        "chat",
+        vec![
+            calls(vec![(
+                "agents.schedule",
+                json!({"to": "news", "objective": "summarize the news", "at": "08:30", "days": ["weekdays"]}),
+            )]),
+            answer("scheduled [inv:1]"),
+        ],
+    );
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(chat.clone() as Arc<dyn Provider>)
+        .allow_mutate(true)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "").unwrap();
+    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    o.spawn(AgentSpec::new("news").role("reads the news"))
+        .await
+        .unwrap();
+    let mut session = ark.start_session(&project.id).unwrap();
+    let opts = || TurnOptions {
+        tools: vec![o.chat_tools()],
+        ..Default::default()
+    };
+    ark.ask_session(
+        &mut session,
+        "every weekday at 8:30 have news summarize the news",
+        opts(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+    let s = o.schedules();
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].says, "every weekday at 08:30");
+    assert!(chat.texts()[1].contains("every weekday at 08:30"));
+    // The next turn's tools list what runs, so the chat can stop it by id.
+    chat.replies.lock().unwrap().extend([
+        calls(vec![("agents.unschedule", json!({ "schedule": s[0].id }))]),
+        answer("stopped"),
+    ]);
+    ark.ask_session(&mut session, "stop the news digest", opts(), |_| {})
+        .await
+        .unwrap();
+    assert!(o.schedules().is_empty());
+    let events = o.events(0, 100).unwrap();
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::Scheduled { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::Unscheduled { .. })));
+}

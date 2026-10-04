@@ -77,9 +77,44 @@ person asks in words; the chat decides what becomes an agent or a task.
 | `agents.create {name, role, instructions?, skills?, capabilities?}` | adds an agent with the skills named (none by default) and the capabilities named (`["web", "browser"]`, from `Orchestrator::capabilities`; every app tool when none are named); its state-changing actions still ask the person. An existing name or an unknown capability is refused |
 | `agents.delegate {to, objective, context?, wait?}` | hands any live agent a task with `Origin::External`; waits for the result unless `wait: false` |
 | `agents.wait {tasks}` | waits for tasks handed off with `wait: false` |
+| `agents.schedule {to, objective, context?, at?, days?, every_minutes?, once?}` | has an agent run the task at set times ([Schedules](#schedules)). `Mutate`: the person agrees to standing work once |
+| `agents.unschedule {schedule}` | stops a schedule; its description lists the ones running |
 
 The `agents.delegate` summary lists the current agents and their roles, so the chat picks one
 without a lookup. An app with no orchestrator offers none of these.
+
+## Schedules
+
+An agent can run a task on its own at set times: "every weekday at 09:00", "every 30
+minutes", "once at 18:00", "once, in 2 hours". A schedule is a record in the orchestrator's
+store (ADR 0017). Each run is an ordinary task, submitted the way `submit` does it, so it is
+queued, approved, traced and shown like any other. It carries `TaskRecord::schedule`.
+
+```rust
+orch.schedule("digest", TaskSpec::new("summarize what changed today"), When::daily_at("18:00").on(["weekdays"]))?;
+orch.schedules();          // soonest first; also Graph::schedules
+orch.unschedule("s-1a2b3c4d")?;
+```
+
+| `When` | Runs |
+|---|---|
+| `every_minutes: 30` | every 30 minutes from when it was made (5 at least) |
+| `at: "09:00"` | every day at 09:00, local time |
+| `at: "09:00", days: ["mon", "wed"]` (or `weekdays`, `weekends`) | on those days |
+| `once: true` | one time (at the next `at`, or after `every_minutes`), then it ends |
+
+| Rule | Why |
+|---|---|
+| The orchestrator's timer looks every 20 s; it starts when `build` runs inside a tokio runtime | no window or chat needs to be open |
+| A run missed while the process was down runs once when it is back | the morning report still comes, once |
+| A run is skipped while the schedule's previous task is open (`skipped` counts them) | runs never pile up on one agent |
+| Ending an agent (`terminate`) ends its schedules | an ended agent runs nothing |
+| An app with `App::orchestrate` opens the orchestrator of every project with active schedules when it starts (`scheduled_projects`) | scheduled work runs in projects nobody has open |
+
+The chat schedules with `agents.schedule`, the terminal lists them with `/schedules` and
+stops one with `/schedules stop <id>`, and `/agents` shows them under "Scheduled". A run that
+needs an approval waits for an answer like any agent's question. "Always in this project"
+lets it run unattended.
 
 ## Context isolation
 
@@ -250,5 +285,6 @@ To follow a run: load `graph()`, then apply events after its `seq`.
 | Delegations from one model reply run at most 4 at a time | the harness's parallel tool limit; more queue |
 | An agent loaded from the store after a restart has no custom `AgentProfile` | spawn it again with its full spec |
 | A message pushed into a running task is delivered at the next step | the same as steering |
+| A schedule cannot be edited; its runs do not report into a chat | stop it and ask again; the runs are in the agent's work |
 | Codex adds about 5k input tokens to each resumed turn (mostly cached) | rotation keeps it bounded |
 | A vendor session still open when the app exits keeps its file | it is resumed next time, from the ledger |

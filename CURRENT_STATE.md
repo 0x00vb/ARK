@@ -4,7 +4,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-04 (v0.9.0, browser on `main`)
+Last updated: 2026-10-04 (v0.9.0; browser on `main`; step 5 and C5 on branches)
 
 ## Release
 
@@ -12,6 +12,7 @@ Last updated: 2026-10-04 (v0.9.0, browser on `main`)
 |---|---|
 | Latest tag | v0.9.0 (2026-10-04), on `origin` and `github` |
 | Step 2 | Done in v0.9.0: Claude Code and Codex kept running per session, streamed answers, cancel, usage limits with their reset time (ADR 0012); subscription usage for apps (`ark_model::subscription_usage`, window method `subscription_usage`); agents follow the session's model (ADR 0014). A longer live task passed on each CLI (`bench/RESULTS.md`). Deferred: start the CLI before the first call, deeper provider telemetry |
+| Step 5 and C5 (branches, unreleased, no tag) | `next/remote` (worktree `../ark-remote`, aiengineering-84): a runtime clients connect to with saved access tokens (ADR 0016). `next/background` (worktree `../ark-background`): several live chats, orchestrators that outlive chats, schedules (ADR 0017), and the Computer, `ark-computer` (ADR 0018). The owner wants both, plus the Desktop branches, integrated into one 0.2 product after an integration review. Nothing is pushed, tagged or released |
 | In progress | Next step 3, ARK Desktop public. Capabilities beside it (ROADMAP › Capabilities): C2 and C3 are in v0.9.0, grants per project included; C4 (Browser, ADR 0015) is on `main` since v0.9.0; ARK Desktop gets it with `.browser(true)` on the next tag |
 
 ## Waiting on this repo

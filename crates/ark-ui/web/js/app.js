@@ -19,7 +19,7 @@ import { registerSkills } from "./skills.js";
 
 const transport = connect();
 const appEl = $("#app");
-const state = { summary: null, ui: {}, sessionId: null, running: false, approvals: new Map(), extChanged: false, view: null };
+const state = { summary: null, ui: {}, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, view: null };
 // Main-column views (`ark.view`), built on first show and kept while hidden.
 const views = new Map();
 
@@ -219,8 +219,8 @@ async function runCommand(line) {
   thread.report(line, reply);
 }
 
+// Moving to another chat never waits: a chat that is working goes on in the background.
 async function change(method, params) {
-  if (state.running) return toast("The agent is working. Stop it or wait for the turn to finish.");
   try {
     await transport.call(method, params);
   } catch (e) {
@@ -322,6 +322,35 @@ function connection(msg) {
   el.dataset.show = "true";
 }
 
+/// While an agent uses the person's computer: who, and a way to take it back. Nothing shows
+/// otherwise.
+function showComputer(user) {
+  const el = $("#computer-use");
+  clear(el);
+  el.hidden = !user;
+  if (!user) return;
+  const who = h("button.computer-who", { type: "button", title: user.session ? "Open the chat" : "" },
+    // On a runtime elsewhere it is not the person's own computer.
+    h("span.working-dot"), `${user.who} is using ${(window.ark?.isLocal?.() ?? true) ? "your computer" : "the computer ARK runs on"}`);
+  if (user.session) who.onclick = () => api.openSession(user.session);
+  const stop = h("button.computer-stop", { type: "button", title: "Take the computer back" }, "Stop");
+  stop.onclick = () => transport.call("computer_stop").catch((e) => toast(e.message));
+  el.append(who, stop);
+}
+
+/// Another chat's turn: it works in the background. Its question waits in the tray; the
+/// sidebar marks it while it works.
+function elsewhere(msg) {
+  if (msg.kind === "approval") {
+    state.approvals.set(msg.id, msg);
+    ask(msg);
+  } else if (msg.kind === "approval_closed") {
+    state.approvals.delete(msg.id);
+  } else if (msg.kind === "turn_finished") {
+    sidebar.refresh(state.sessionId);
+  }
+}
+
 function onEvent(msg) {
   if (msg.kind === "reconnecting" || msg.kind === "disconnected" || msg.kind === "connected") {
     dispatchExt(`ark:${msg.kind}`, msg);
@@ -329,6 +358,8 @@ function onEvent(msg) {
   }
   // App scripts can follow the same stream: `ark.on("ark:turn_finished", fn)`.
   if (msg.kind !== "ext" && msg.kind !== "text") dispatchExt(`ark:${msg.kind}`, msg);
+  // A question an orchestrated agent asks belongs to no chat (`session` is empty).
+  if (msg.session && msg.session !== state.sessionId) return elsewhere(msg);
   switch (msg.kind) {
     case "turn_started":
       if (!thread.live) {
@@ -357,6 +388,14 @@ function onEvent(msg) {
     case "approval_closed":
       state.approvals.delete(msg.id);
       thread.approvalClosed(msg.id);
+      document.querySelector(`#asks .approval[data-id="${msg.id}"]`)?.remove();
+      break;
+    case "working":
+      state.working = msg.working || [];
+      sidebar.setWorking(state.working);
+      break;
+    case "computer":
+      showComputer(msg.user);
       break;
     case "turn_finished": {
       thread.finish(msg);
@@ -370,7 +409,8 @@ function onEvent(msg) {
       break;
     }
     case "summary":
-      if (applySummary(msg.summary)) loadSession();
+      // Another chat: rebuild from the host, which knows whether it is working.
+      if (applySummary(msg.summary)) boot(true);
       else sidebar.refresh(state.sessionId);
       break;
     case "ext":
@@ -384,7 +424,14 @@ function onEvent(msg) {
 
 function ask(msg) {
   if (document.querySelector(`.approval[data-id="${msg.id}"]`)) return;
-  $("#asks").append(approvalCard(msg, decide));
+  const card = approvalCard(msg, decide);
+  // Another chat's question says which chat, and opens it.
+  if (msg.session && !msg.request?.agent) {
+    card.dataset.chat = msg.session;
+    card.prepend(h("button.approval-chat", { type: "button", onclick: () => api.openSession(msg.session) },
+      `In ${msg.chat || "another chat"}`));
+  }
+  $("#asks").append(card);
 }
 
 async function decide(id, decision) {
@@ -533,7 +580,7 @@ function keys(e) {
   if (mod && e.key.toLowerCase() === "\\") { e.preventDefault(); return pane.toggle(); }
   if (e.key === "Escape") {
     if (!$("#overlay").hidden) return closePalette();
-    const pending = [...state.approvals.values()].filter((m) => !m.request?.agent).map((m) => m.id).pop();
+    const pending = [...state.approvals.values()].filter((m) => !m.request?.agent && (!m.session || m.session === state.sessionId)).map((m) => m.id).pop();
     if (pending != null) {
       e.preventDefault();
       document.querySelector(`.approval[data-id="${pending}"]`)?.decide?.("deny");
@@ -628,6 +675,12 @@ async function bootOnce(again) {
     registerSkills(window.ark);
   }
   await loadSession();
+  state.working = hello.working || [];
+  sidebar.setWorking(state.working);
+  showComputer(hello.computer);
+  // Questions are placed again below: the current chat's in the thread, others' in the tray.
+  for (const el of document.querySelectorAll("#asks .approval[data-chat]")) el.remove();
+  state.approvals.clear();
   if (hello.running) {
     thread.begin(hello.running);
     setRunning(true);

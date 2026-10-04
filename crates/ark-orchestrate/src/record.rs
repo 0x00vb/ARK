@@ -250,6 +250,9 @@ pub struct TaskRecord {
     /// The process running it, while it runs.
     #[serde(default)]
     pub pid: Option<u32>,
+    /// The schedule that started it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
 }
 
 fn one() -> u32 {

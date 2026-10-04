@@ -22,9 +22,21 @@ export class Sidebar {
     this.folds = {};
     this.current = null;
     this.all = new Set();
+    // Chats running a turn now, and their projects (`working` from the host).
+    this.working = new Set();
+    this.workingProjects = new Set();
     $("#new-session").addEventListener("click", () => api.newSession());
     $("#add-project").addEventListener("click", (e) => this.addMenu(e.currentTarget));
     this.settings.addEventListener("click", () => api.openSettings());
+  }
+
+  /// Mark the chats that are working; a folded project shows it on its row.
+  setWorking(list) {
+    const ids = new Set(list.map((w) => w.session));
+    const same = ids.size === this.working.size && [...ids].every((x) => this.working.has(x));
+    this.working = ids;
+    this.workingProjects = new Set(list.map((w) => w.project));
+    if (!same) this.refresh();
   }
 
   unfolded(p) {
@@ -68,6 +80,7 @@ export class Sidebar {
     },
       h("button.project-chev", { type: "button", tabindex: "-1", "aria-label": open ? "Fold" : "Unfold", onclick: (e) => { e.stopPropagation(); this.fold(p, !open); } }, icon("chevron-right")),
       h("span.project-name", p.name),
+      !open && this.workingProjects.has(p.id) ? h("span.working-dot", { title: "Working", "aria-label": "Working" }) : null,
       h("button.icon-btn.small.project-more", { type: "button", title: "Project", "aria-label": `${p.name}: options`, onclick: (e) => { e.stopPropagation(); this.projectMenu(e.currentTarget, p); } }, icon("more")));
     // The current project folds; another one opens where it left off.
     const pick = () => (p.current ? this.fold(p, !open) : this.openProject(p));
@@ -78,7 +91,8 @@ export class Sidebar {
   }
 
   chats(p, sessions) {
-    const shown = sessions.filter((s) => s.turns > 0);
+    // A chat shows once it has a turn, or while its first one runs.
+    const shown = sessions.filter((s) => s.turns > 0 || s.working || this.working.has(s.id));
     if (!shown.length) return null;
     const box = h("div.chats", { role: "group" });
     const all = this.all.has(p.id);
@@ -97,7 +111,10 @@ export class Sidebar {
       style: { "--i": Math.min(i, 12) },
     },
       h("span.session-title", clip(title, 60)),
-      h("span.session-time", ago(s.updated_at)));
+      // A chat working in the background: a dot where its time would be.
+      s.working || this.working.has(s.id)
+        ? h("span.working-dot", { title: "Working", "aria-label": "Working" })
+        : h("span.session-time", ago(s.updated_at)));
     row.title = `${title}\n${s.turns} turn${s.turns === 1 ? "" : "s"} · double-click to rename`;
     row.addEventListener("click", () => this.api.openSession(s.id));
     row.addEventListener("keydown", (e) => e.key === "Enter" && this.api.openSession(s.id));

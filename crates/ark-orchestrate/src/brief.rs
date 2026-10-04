@@ -169,6 +169,7 @@ mod tests {
             finished_ms: None,
             run_ms: 0,
             pid: None,
+            schedule: None,
         }
     }
 

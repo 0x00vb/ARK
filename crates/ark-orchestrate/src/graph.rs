@@ -28,6 +28,9 @@ pub struct Graph {
     pub accounts: Vec<CapacitySnapshot>,
     /// All tasks together.
     pub usage: Usage,
+    /// Tasks agents run on their own at set times, soonest first.
+    #[serde(default)]
+    pub schedules: Vec<crate::ScheduleRecord>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,6 +72,9 @@ pub struct TaskNode {
     pub owner: String,
     pub objective: String,
     pub origin: Origin,
+    /// The schedule that started it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<String>,
     pub parent: Option<String>,
     pub children: Vec<String>,
     pub after: Vec<String>,
@@ -203,6 +209,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 owner: r.owner.clone(),
                 objective: r.objective.clone(),
                 origin: r.origin.clone(),
+                schedule: r.schedule.clone(),
                 parent: r.parent.clone(),
                 children: r.children.clone(),
                 after: r.after.clone(),
@@ -312,6 +319,8 @@ pub(crate) fn build(inner: &Inner) -> Graph {
             label: m.task.clone(),
         });
     }
+    let mut schedules: Vec<crate::ScheduleRecord> = st.schedules.values().cloned().collect();
+    schedules.sort_by_key(|s| (s.next_ms, s.created_ms));
     Graph {
         project: inner.project.id.to_string(),
         seq,
@@ -321,6 +330,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
         edges,
         accounts,
         usage,
+        schedules,
     }
 }
 

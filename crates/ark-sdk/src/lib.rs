@@ -60,7 +60,7 @@ pub mod prelude {
     };
     // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
     // with `ark_model::from_env_arc()`, etc., from the prelude alone.
-    pub use {ark_browser, ark_connect, ark_core, ark_model, ark_runtime, ark_tools};
+    pub use {ark_browser, ark_computer, ark_connect, ark_core, ark_model, ark_runtime, ark_tools};
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -133,6 +133,32 @@ pub struct Ark {
     /// Capabilities that need an account, when the app turned them on
     /// ([`ArkBuilder::connections`]).
     connections: Option<Connections>,
+    /// The Computer, when the app turned it on ([`ArkBuilder::computer`]).
+    computer: Option<Arc<ark_computer::ComputerService>>,
+}
+
+/// Another handle on the same agent: the store, tools, model sessions and capabilities are
+/// shared; the clone's model can be changed on its own ([`Ark::set_router`] also moves what
+/// follows [`Ark::current_model`]). One app runs several live conversations this way.
+impl Clone for Ark {
+    fn clone(&self) -> Self {
+        Ark {
+            engine: self.engine.clone(),
+            router: self.router.clone_view(),
+            current: self.current.clone(),
+            subscriptions: self.subscriptions.clone(),
+            profile: self.profile.clone(),
+            max_steps: self.max_steps,
+            budget: self.budget,
+            planner: self.planner,
+            critic: self.critic,
+            allow_mutate: self.allow_mutate,
+            skills: self.skills.clone(),
+            per_agent: self.per_agent.clone(),
+            connections: self.connections.clone(),
+            computer: self.computer.clone(),
+        }
+    }
 }
 
 /// Every action a turn would be offered now: the engine's tools (the app's, the plugins and
@@ -200,6 +226,17 @@ impl Ark {
     pub fn set_router(&mut self, router: ModelRouter) {
         self.current.set(router.clone_view());
         self.router = router;
+    }
+
+    /// Run on the shared model again ([`current_model`](Ark::current_model)), after another
+    /// handle on this agent changed it.
+    pub fn follow_current_model(&mut self) {
+        self.router = self.current.get();
+    }
+
+    /// The Computer, when the app offers it: who uses the screen, and taking it back.
+    pub fn computer(&self) -> Option<&Arc<ark_computer::ComputerService>> {
+        self.computer.as_ref()
     }
 
     /// The model this `Ark` runs on now, as a handle that sees later
@@ -550,7 +587,14 @@ pub struct ArkBuilder {
     skills: Vec<String>,
     web: Option<WebAdapter>,
     browser: Option<BrowserChoice>,
+    computer: Option<ComputerChoice>,
     connections: Option<ConnectionsChoice>,
+}
+
+enum ComputerChoice {
+    /// This computer, where ARK can use apps (macOS).
+    Native,
+    Given(Arc<ark_computer::ComputerService>),
 }
 
 enum BrowserChoice {
@@ -586,6 +630,7 @@ impl Default for ArkBuilder {
             skills: vec!["*".into()],
             web: None,
             browser: None,
+            computer: None,
             connections: None,
         }
     }
@@ -688,6 +733,21 @@ impl ArkBuilder {
         self
     }
 
+    /// Offer the Computer (`computer.apps`, `look`, `open`, `click`, `type`, `keys`;
+    /// [`ark_computer`]): agents use the apps on this computer, one agent at a time, every
+    /// action asked. Where the platform has no support (only macOS for now) it is not offered.
+    /// Off by default.
+    pub fn computer(mut self, yes: bool) -> Self {
+        self.computer = yes.then_some(ComputerChoice::Native);
+        self
+    }
+
+    /// [`computer`](ArkBuilder::computer) with a service the app set up (tests, another screen).
+    pub fn computer_with(mut self, service: Arc<ark_computer::ComputerService>) -> Self {
+        self.computer = Some(ComputerChoice::Given(service));
+        self
+    }
+
     /// [`browser`](ArkBuilder::browser) with a service the app set up (tests, its own profiles).
     pub fn browser_with(mut self, service: Arc<ark_browser::BrowserService>) -> Self {
         self.browser = Some(BrowserChoice::Given(service));
@@ -750,6 +810,14 @@ impl ArkBuilder {
             Some(BrowserChoice::Given(svc)) => per_agent.push(Arc::new(ark_browser::Browsers(svc))),
             None => {}
         }
+        let computer = match self.computer {
+            Some(ComputerChoice::Native) => ark_computer::ComputerService::native(),
+            Some(ComputerChoice::Given(svc)) => Some(svc),
+            None => None,
+        };
+        if let Some(svc) = &computer {
+            per_agent.push(Arc::new(ark_computer::Computers(svc.clone())));
+        }
         let engine = Arc::new(engine);
         let subscriptions = self.subscriptions.unwrap_or_else(|| {
             SubscriptionRuntime::builder()
@@ -770,6 +838,7 @@ impl ArkBuilder {
             skills: self.skills,
             per_agent,
             connections,
+            computer,
         })
     }
 }

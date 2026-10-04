@@ -46,6 +46,13 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
             choice("Not now", ApprovalDecision::Deny, None),
         ];
     }
+    // Nothing covers it ahead: each call is its own question.
+    if req.ask_each_time {
+        return vec![
+            choice("Allow once", ApprovalDecision::AllowOnce, None),
+            choice("Deny", ApprovalDecision::Deny, None),
+        ];
+    }
     vec![
         choice("Allow once", ApprovalDecision::AllowOnce, None),
         choice(
@@ -124,6 +131,7 @@ mod tests {
             preview: "notes.save()".into(),
             agent: None,
             task: None,
+            ask_each_time: false,
         }
     }
 

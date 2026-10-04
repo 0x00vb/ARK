@@ -61,6 +61,34 @@ impl Command for AgentCmd {
     }
 }
 
+/// `/schedules`: what agents run on their own, and stopping one.
+pub struct Schedules;
+#[async_trait::async_trait]
+impl Command for Schedules {
+    meta!("schedules", "Tasks agents run on their own at set times");
+    fn usage(&self) -> &str {
+        "[stop <schedule>]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let Some(o) = ix.orchestrator() else {
+            return Ok(Report::new().note("This app runs a single agent.").into());
+        };
+        let args = args.trim();
+        if args.is_empty() {
+            return Ok(crate::orchestration::schedules_report(&o.graph()).into());
+        }
+        let parsed = match args.split_once(char::is_whitespace) {
+            Some(("stop", id)) if !id.trim().is_empty() => {
+                Ok(crate::orchestration::Control::Unschedule {
+                    schedule: id.trim().to_string(),
+                })
+            }
+            _ => Err("usage: /schedules [stop <schedule>]".to_string()),
+        };
+        control_cmd(ix, parsed).await
+    }
+}
+
 pub struct TaskCmd;
 #[async_trait::async_trait]
 impl Command for TaskCmd {

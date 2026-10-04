@@ -2,10 +2,15 @@
 //! (the desktop window, the local browser server, tests) call [`Host::call`] and subscribe to
 //! [`Host::subscribe`]; none of them holds agent logic.
 //!
-//! A turn runs in its own task and holds the interaction for its duration. Requests that only
-//! read the store (working state, artifacts, invocations, stored traces) are served from the
-//! shared engine while it runs; the rest answer from a snapshot taken after the last change, or
-//! say the agent is busy.
+//! A turn runs in its own task and holds its conversation's interaction for its duration.
+//! Requests that only read the store (projects, chats, transcripts, working state, artifacts,
+//! invocations, stored traces) are served from the shared engine while it runs; the rest answer
+//! from a snapshot taken after the last change, or say the agent is busy.
+//!
+//! Several conversations can be live at once (ADR 0017). Windows show one, the current one;
+//! moving to another chat while a turn runs leaves that turn working in the background, and
+//! coming back finds it. Each turn's events, and each question it asks, carry its `session`, so a
+//! window shows the current chat's and lists the others as working (`working`).
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -119,8 +124,8 @@ pub(crate) struct Feed {
 #[derive(Default)]
 struct FeedState {
     seq: u64,
-    /// Events since the running turn started; `None` between turns.
-    live: Option<Vec<Value>>,
+    /// Each running turn's events since it started, by session.
+    live: HashMap<String, Vec<Value>>,
 }
 
 impl Feed {
@@ -138,25 +143,27 @@ impl Feed {
         st.seq += 1;
         v["seq"] = json!(st.seq);
         let kind = v["kind"].as_str().unwrap_or_default().to_string();
-        if kind == "turn_started" {
-            st.live = Some(Vec::new());
-        }
-        // A terminal's output is not part of the turn; a window re-attaching reads its scrollback.
-        if let Some(live) = st.live.as_mut().filter(|_| kind != "term") {
-            if live.len() < LIVE_EVENTS {
-                live.push(v.clone());
+        // Only a turn's own events (they carry its session) rebuild it.
+        if let Some(session) = v["session"].as_str().map(str::to_string) {
+            if kind == "turn_started" {
+                st.live.insert(session.clone(), Vec::new());
             }
-        }
-        if kind == "turn_finished" {
-            st.live = None;
+            if let Some(live) = st.live.get_mut(&session) {
+                if live.len() < LIVE_EVENTS {
+                    live.push(v.clone());
+                }
+            }
+            if kind == "turn_finished" {
+                st.live.remove(&session);
+            }
         }
         let _ = self.tx.send(v);
     }
 
-    /// The last sequence number sent, and the running turn's events so far.
-    pub(crate) fn position(&self) -> (u64, Vec<Value>) {
+    /// The last sequence number sent, and `session`'s running turn's events so far.
+    pub(crate) fn position(&self, session: &str) -> (u64, Vec<Value>) {
         let st = self.state.lock().unwrap();
-        (st.seq, st.live.clone().unwrap_or_default())
+        (st.seq, st.live.get(session).cloned().unwrap_or_default())
     }
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<Value> {
@@ -223,19 +230,94 @@ struct Running {
     input: String,
 }
 
+/// One live conversation: its interaction, and the turn it runs.
+struct Conv {
+    ix: Arc<tokio::sync::Mutex<Interaction>>,
+    running: Mutex<Option<Running>>,
+    /// What lists show for it, kept for while its interaction is busy.
+    about: Mutex<About>,
+}
+
+#[derive(Clone, Default)]
+struct About {
+    session: String,
+    title: String,
+    project: String,
+    /// Its project's orchestrator, to follow when it comes forward while busy.
+    orch: Option<Orchestrator>,
+    /// What `summary` answers for it.
+    summary: Value,
+}
+
+impl Conv {
+    fn new(ix: Interaction) -> Arc<Conv> {
+        let about = About::of(&ix);
+        Arc::new(Conv {
+            ix: Arc::new(tokio::sync::Mutex::new(ix)),
+            running: Mutex::new(None),
+            about: Mutex::new(about),
+        })
+    }
+    fn is_running(&self) -> bool {
+        self.running.lock().unwrap().is_some()
+    }
+    fn session(&self) -> String {
+        self.about.lock().unwrap().session.clone()
+    }
+    fn note(&self, ix: &Interaction) {
+        *self.about.lock().unwrap() = About::of(ix);
+    }
+    /// `{session, title, project, input}` while it works.
+    fn working(&self) -> Option<Value> {
+        let input = self.running.lock().unwrap().as_ref()?.input.clone();
+        let a = self.about.lock().unwrap().clone();
+        Some(
+            json!({ "session": a.session, "title": a.title, "project": a.project, "input": input }),
+        )
+    }
+}
+
+impl About {
+    fn of(ix: &Interaction) -> About {
+        let rec = ix.session().record();
+        About {
+            session: ix.session().id().as_str().to_string(),
+            title: rec.title.clone(),
+            project: ix.project().id.as_str().to_string(),
+            orch: ix.orchestrator().cloned(),
+            summary: serde_json::to_value(ix.summary()).unwrap_or_default(),
+        }
+    }
+}
+
+/// Where a change of chat lands.
+enum Target {
+    /// A session by id: a live one is brought forward.
+    Session(String),
+    /// Wherever the change leaves the conversation (a new chat, another project).
+    Change,
+}
+
 /// Cached views, refreshed whenever the interaction is free.
 #[derive(Default)]
 struct Snapshot {
-    summary: Value,
     usage: Option<UsageView>,
     context: Option<ContextView>,
     kept_out: KeptOut,
     project: Option<Project>,
-    session: String,
 }
 
 pub struct Host {
-    ix: tokio::sync::Mutex<Interaction>,
+    /// The conversation windows show.
+    current: Mutex<Arc<Conv>>,
+    /// Conversations still running a turn that windows no longer show. One ends when its turn
+    /// does (its session is stored) unless it became current again.
+    background: Mutex<Vec<Arc<Conv>>>,
+    /// Opens another live conversation of the app.
+    siblings: ark_interact::Siblings,
+    /// Held while the windows move to another chat and while a turn ends, so the two never
+    /// interleave (a chat is never opened twice, nor left behind).
+    switching: tokio::sync::Mutex<()>,
     engine: Arc<Engine>,
     /// The names the conversation's skills are chosen by (`Ark::skill_names`).
     chat_skills: Vec<String>,
@@ -243,7 +325,6 @@ pub struct Host {
     caps: ark_interact::capabilities::Parts,
     labels: Labels,
     feed: Arc<Feed>,
-    running: Mutex<Option<Running>>,
     approvals: Mutex<HashMap<u64, (Value, oneshot::Sender<ApprovalDecision>)>>,
     next_id: AtomicU64,
     focus: Mutex<Option<Option<Focus>>>,
@@ -255,6 +336,8 @@ pub struct Host {
     orch: Mutex<Option<(Orchestrator, tokio::task::JoinHandle<()>)>>,
     /// One shell per project, for the Terminal panel.
     terminals: crate::terminal::Terminals,
+    /// The Computer, when the app offers it.
+    computer: Option<Arc<ark_sdk::prelude::ark_computer::ComputerService>>,
 }
 
 impl Host {
@@ -292,9 +375,12 @@ impl Host {
             caps: ark_interact::capabilities::Parts::of(ix.ark()),
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
-            ix: tokio::sync::Mutex::new(ix),
+            siblings: ix.siblings(),
+            computer: ix.ark().computer().cloned(),
+            current: Mutex::new(Conv::new(ix)),
+            switching: tokio::sync::Mutex::new(()),
+            background: Mutex::new(Vec::new()),
             feed: Feed::new(),
-            running: Mutex::new(None),
             approvals: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             focus: Mutex::new(None),
@@ -303,8 +389,90 @@ impl Host {
             info,
         });
         host.refresh().await;
-        tokio::spawn(forward_approvals(host.clone(), approvals));
+        let first = Arc::downgrade(&host.cur());
+        tokio::spawn(forward_approvals(host.clone(), approvals, first));
+        if let Some(c) = &host.computer {
+            tokio::spawn(forward_computer(Arc::downgrade(&host), c.watch()));
+        }
         host
+    }
+
+    /// Who uses the screen, as a window shows it: `{owner, who, session}`: `who` is the agent's
+    /// name, or ARK for a chat (`session` says which); null when nobody does.
+    fn computer_user(&self) -> Value {
+        let Some(owner) = self.computer.as_ref().and_then(|c| c.holder()) else {
+            return Value::Null;
+        };
+        match owner.strip_prefix("session:") {
+            Some(id) => json!({ "owner": owner, "who": "ARK", "session": id }),
+            None => {
+                let who = owner.rsplit('/').next().unwrap_or(&owner).to_string();
+                json!({ "owner": owner, "who": who, "session": null })
+            }
+        }
+    }
+
+    /// The conversation windows show.
+    fn cur(&self) -> Arc<Conv> {
+        self.current.lock().unwrap().clone()
+    }
+
+    fn is_current(&self, conv: &Arc<Conv>) -> bool {
+        Arc::ptr_eq(&self.cur(), conv)
+    }
+
+    /// The live conversation of `session`: the current one or one working in the background.
+    fn conv_of(&self, session: &str) -> Option<Arc<Conv>> {
+        let cur = self.cur();
+        if cur.session() == session {
+            return Some(cur);
+        }
+        self.background
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|c| c.session() == session)
+            .cloned()
+    }
+
+    /// The conversation a request names (`session`), else the current one.
+    fn conv_for(&self, params: &Value) -> Arc<Conv> {
+        params["session"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .and_then(|s| self.conv_of(s))
+            .unwrap_or_else(|| self.cur())
+    }
+
+    /// Every conversation running a turn now, the current one first.
+    fn working(&self) -> Vec<Value> {
+        let mut v: Vec<Value> = self.cur().working().into_iter().collect();
+        v.extend(
+            self.background
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|c| c.working()),
+        );
+        v
+    }
+
+    fn emit_working(&self) {
+        self.emit(json!({ "kind": "working", "working": self.working() }));
+    }
+
+    /// A new live conversation (session `session`, or a new one in `project`), with its own
+    /// approval questions.
+    fn open_sibling(
+        self: &Arc<Self>,
+        session: Option<&str>,
+        project: &ProjectId,
+    ) -> anyhow::Result<Arc<Conv>> {
+        let (approver, rx) = ark_interact::ChannelApprover::channel();
+        let ix = self.siblings.open(session, project, Arc::new(approver))?;
+        let conv = Conv::new(ix);
+        tokio::spawn(forward_approvals(self.clone(), rx, Arc::downgrade(&conv)));
+        Ok(conv)
     }
 
     /// Every event from now on, each with a `seq` one higher than the last.
@@ -322,27 +490,29 @@ impl Host {
         self.feed.send(v);
     }
 
+    /// Whether the conversation windows show is running a turn.
     pub fn is_running(&self) -> bool {
-        self.running.lock().unwrap().is_some()
+        self.cur().is_running()
     }
 
-    /// Rebuild the cached views from the interaction (call while it is free).
+    /// Rebuild the cached views from the current interaction (call while it is free).
     async fn refresh(&self) {
-        let ix = self.ix.lock().await;
+        let conv = self.cur();
+        let ix = conv.ix.lock().await;
         self.refresh_with(&ix).await;
     }
 
+    /// Call with the current conversation's interaction.
     async fn refresh_with(&self, ix: &Interaction) {
+        self.cur().note(ix);
         self.follow_orchestrator(ix.orchestrator());
         let context = ix.context_view().await.ok();
         let kept_out = ix.kept_out().unwrap_or_default();
         let mut s = self.snapshot.lock().unwrap();
-        s.summary = serde_json::to_value(ix.summary()).unwrap_or_default();
         s.usage = Some(ix.usage_view());
         s.context = context;
         s.kept_out = kept_out;
         s.project = Some(ix.project().clone());
-        s.session = ix.session().id().as_str().to_string();
     }
 
     /// Forward the events of the interaction's orchestrator (it changes with the project).
@@ -399,21 +569,23 @@ impl Host {
     }
 
     fn session_id(&self) -> String {
-        self.snapshot.lock().unwrap().session.clone()
+        self.cur().session()
     }
 
     fn summary(&self) -> Value {
-        let mut v = self.snapshot.lock().unwrap().summary.clone();
-        v["running"] = json!(self.is_running());
+        let cur = self.cur();
+        let mut v = cur.about.lock().unwrap().summary.clone();
+        v["running"] = json!(cur.is_running());
         v
     }
 
-    /// Lock the interaction for a request that changes it; refuse while a turn runs.
-    async fn idle(&self) -> anyhow::Result<tokio::sync::MutexGuard<'_, Interaction>> {
-        if self.is_running() {
+    /// Lock the current interaction for a request that changes it; refuse while a turn runs.
+    async fn idle(&self) -> anyhow::Result<tokio::sync::OwnedMutexGuard<Interaction>> {
+        let conv = self.cur();
+        if conv.is_running() {
             anyhow::bail!("the agent is working; wait for the turn to finish or stop it");
         }
-        Ok(self.ix.lock().await)
+        Ok(conv.ix.clone().lock_owned().await)
     }
 
     /// Handle one request. Errors become `{ "error": … }` at the transport.
@@ -433,9 +605,10 @@ impl Host {
                     .lock()
                     .unwrap()
                     .iter()
-                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"] }))
+                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"], "session": req["session"], "chat": req["chat"] }))
                     .collect();
-                let running = self
+                let cur = self.cur();
+                let running = cur
                     .running
                     .lock()
                     .unwrap()
@@ -443,7 +616,7 @@ impl Host {
                     .map(|r| r.input.clone());
                 // Everything up to `seq` is in this answer: stored turns through `summary`,
                 // the running turn through `live`. A window ignores events at or below it.
-                let (seq, live) = self.feed.position();
+                let (seq, live) = self.feed.position(&cur.session());
                 Ok(json!({
                     "summary": self.summary(),
                     "ui": self.info,
@@ -452,21 +625,33 @@ impl Host {
                     "live": live,
                     "seq": seq,
                     "approvals": pending,
+                    "working": self.working(),
+                    "computer": self.computer_user(),
                     "version": env!("CARGO_PKG_VERSION"),
                 }))
             }
+            // The person takes the screen back from the agent using it: its next action there
+            // fails and it carries on without it.
+            "computer_stop" => match &self.computer {
+                Some(c) => Ok(json!({ "stopped": c.take_back() })),
+                None => anyhow::bail!("this app does not use the computer"),
+            },
+            // Every chat running a turn now (`{session, title, project, input}`).
+            "working" => Ok(Value::Array(self.working())),
             "summary" => Ok(self.summary()),
             "send" => {
                 let text = s("text");
                 if text.trim().is_empty() {
                     anyhow::bail!("nothing to send");
                 }
+                let _quiet = self.switching.lock().await;
                 self.start_turn(text)?;
                 Ok(json!({ "started": true }))
             }
+            // `session` names a chat working in the background; default the current one.
             "steer" => {
                 let text = s("text");
-                match self.running.lock().unwrap().as_ref() {
+                match self.conv_for(&params).running.lock().unwrap().as_ref() {
                     Some(r) => {
                         r.ctl.steer.push(text);
                         Ok(json!({ "queued": true }))
@@ -475,7 +660,7 @@ impl Host {
                 }
             }
             "cancel" => {
-                if let Some(r) = self.running.lock().unwrap().as_ref() {
+                if let Some(r) = self.conv_for(&params).running.lock().unwrap().as_ref() {
                     r.ctl.cancel.cancel();
                 }
                 Ok(json!({}))
@@ -505,17 +690,39 @@ impl Host {
                 self.emit(json!({ "kind": "summary", "summary": self.summary() }));
                 Ok(serde_json::to_value(reply)?)
             }
+            // Read from the store, so lists stay current while turns run. A chat running a turn
+            // now says `working: true`.
             "sessions" => {
-                let ix = self.idle().await?;
+                use ark_interact::interaction::{list_sessions, project_sessions};
+                let current = self.session_id();
                 // One project's (by id), the current project's, or every project's.
                 let project = s("project");
-                if !project.is_empty() {
-                    return Ok(serde_json::to_value(ix.project_sessions(&project)?)?);
+                let list = if !project.is_empty() {
+                    project_sessions(&self.engine, &project, &current)?
+                } else {
+                    let all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let here = self.project()?.id;
+                    list_sessions(&self.engine, (!all).then_some(&here), &current)?
+                };
+                let working: Vec<String> = self
+                    .working()
+                    .iter()
+                    .filter_map(|w| w["session"].as_str().map(str::to_string))
+                    .collect();
+                let mut v = serde_json::to_value(list)?;
+                for row in v.as_array_mut().into_iter().flatten() {
+                    if row["id"]
+                        .as_str()
+                        .is_some_and(|id| working.iter().any(|w| w == id))
+                    {
+                        row["working"] = json!(true);
+                    }
                 }
-                let all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
-                Ok(serde_json::to_value(ix.sessions(all)?)?)
+                Ok(v)
             }
-            "projects" => Ok(serde_json::to_value(self.idle().await?.projects()?)?),
+            "projects" => Ok(serde_json::to_value(
+                ark_interact::interaction::list_projects(&self.engine, &self.project()?.id)?,
+            )?),
             "models" => Ok(serde_json::to_value(
                 ark_interact::ark_sdk::prelude::ark_model::catalog().await,
             )?),
@@ -523,10 +730,20 @@ impl Host {
             "subscription_usage" => Ok(serde_json::to_value(
                 ark_interact::ark_sdk::prelude::ark_model::subscription_usage(),
             )?),
-            "new_session" => self.change(|ix| ix.new_session()).await,
+            // Moving to another chat never waits for a turn: a running one goes on in the
+            // background (see `switch`).
+            "new_session" => self.switch(Target::Change, |ix| ix.new_session()).await,
             "open_session" => {
                 let id = s("id");
-                self.change(move |ix| {
+                let target = self
+                    .engine
+                    .store
+                    .resolve_session(&id)
+                    .ok()
+                    .flatten()
+                    .and_then(|r| r["id"].as_str().map(str::to_string))
+                    .unwrap_or_else(|| id.clone());
+                self.switch(Target::Session(target), move |ix| {
                     if ix.resume(&id)? {
                         Ok(())
                     } else {
@@ -537,6 +754,14 @@ impl Host {
             }
             "rename_session" => {
                 let (id, title) = (s("id"), s("title"));
+                let current = id.is_empty() || self.session_id().starts_with(&id);
+                if !current {
+                    if let Some(c) = self.conv_of(&id) {
+                        if c.is_running() {
+                            anyhow::bail!("this chat is working; rename it when it finishes");
+                        }
+                    }
+                }
                 self.change(move |ix| {
                     let target = (!id.is_empty()).then_some(id.as_str());
                     ix.rename_session(target, &title).map(|_| ())
@@ -545,19 +770,21 @@ impl Host {
             }
             "switch_project" => {
                 let name = s("name");
-                self.change(move |ix| ix.switch_project(&name).map(|_| ()))
-                    .await
+                self.switch(Target::Change, move |ix| {
+                    ix.switch_project(&name).map(|_| ())
+                })
+                .await
             }
             "open_project" => {
                 let id = s("id");
-                self.change(move |ix| ix.open_project(&id).map(|_| ()))
+                self.switch(Target::Change, move |ix| ix.open_project(&id).map(|_| ()))
                     .await
             }
             // A folder becomes a project (or opens the one it already is); a bare name is
             // a project with a scratch folder.
             "add_project" => {
                 let (name, path) = (s("name"), s("path"));
-                self.change(move |ix| {
+                self.switch(Target::Change, move |ix| {
                     let dir =
                         (!path.trim().is_empty()).then(|| std::path::PathBuf::from(path.trim()));
                     ix.add_project(&name, dir.as_deref()).map(|_| ())
@@ -637,11 +864,22 @@ impl Host {
                 self.change(move |ix| ix.switch_model(&spec).map(|_| ()))
                     .await
             }
+            // The current chat's stored turns (`session`: another chat's), while turns run too.
             "transcript" => {
-                let ix = self.idle().await?;
                 let before = n("before").map(|b| b as u32);
                 let limit = n("limit").unwrap_or(30) as usize;
-                Ok(serde_json::to_value(ix.transcript(before, limit)?)?)
+                let session = Some(s("session"))
+                    .filter(|x| !x.is_empty())
+                    .unwrap_or_else(|| self.session_id());
+                Ok(serde_json::to_value(
+                    ark_interact::interaction::transcript(
+                        &self.engine,
+                        &self.labels,
+                        &session,
+                        before,
+                        limit,
+                    )?,
+                )?)
             }
             "trace" => Ok(serde_json::to_value(
                 self.trace(n("index").map(|i| i as u32)).await?,
@@ -741,6 +979,13 @@ impl Host {
             }
             "cancel_task" => self.control_done(Control::Cancel { task: s("task") }).await,
             "retry_task" => self.control_done(Control::Retry { task: s("task") }).await,
+            // Stop a task an agent runs at set times (the graph's `schedules`).
+            "unschedule" => {
+                self.control_done(Control::Unschedule {
+                    schedule: s("schedule"),
+                })
+                .await
+            }
             "suspend_agent" => {
                 self.control_done(Control::Suspend { agent: s("agent") })
                     .await
@@ -941,6 +1186,7 @@ impl Host {
     ) -> anyhow::Result<Value> {
         let mut ix = self.idle().await?;
         f(&mut ix)?;
+        self.cur().note(&ix);
         self.refresh_with(&ix).await;
         drop(ix);
         let summary = self.summary();
@@ -948,19 +1194,136 @@ impl Host {
         Ok(summary)
     }
 
+    /// Move the windows to another chat. A chat running a turn stays live in the background and
+    /// a new conversation takes its place; a chat already live (`target`, or wherever `f` lands)
+    /// is brought forward as it is, so no session is ever open twice.
+    async fn switch(
+        self: &Arc<Self>,
+        target: Target,
+        f: impl FnOnce(&mut Interaction) -> anyhow::Result<()>,
+    ) -> anyhow::Result<Value> {
+        let _one = self.switching.lock().await;
+        if let Target::Session(id) = &target {
+            if self.cur().session() == *id {
+                return Ok(self.summary());
+            }
+            if let Some(live) = self.take_background(id) {
+                return self.bring_forward(live).await;
+            }
+        }
+        let cur = self.cur();
+        let before = cur.about.lock().unwrap().project.clone();
+        let conv = if cur.is_running() {
+            let project = self.project()?.id;
+            let conv = match &target {
+                // Straight into the chat asked for.
+                Target::Session(id) => self.open_sibling(Some(id), &project)?,
+                // Opened on the running chat's session only to move away from it at once, so
+                // no empty chat is stored; it never writes there.
+                Target::Change => {
+                    let conv = self.open_sibling(Some(&cur.session()), &project)?;
+                    f(&mut *conv.ix.lock().await)?;
+                    conv
+                }
+            };
+            conv.note(&*conv.ix.lock().await);
+            if conv.session() == cur.session() {
+                // The change did not move: the running chat stays where it is.
+                return Ok(self.summary());
+            }
+            conv
+        } else {
+            let mut ix = cur.ix.lock().await;
+            f(&mut ix)?;
+            ix.follow_model();
+            cur.note(&ix);
+            drop(ix);
+            cur.clone()
+        };
+        // The change landed on a chat that is live in the background: that one comes forward.
+        if let Some(live) = self.take_background(&conv.session()) {
+            if cur.is_running() {
+                self.background.lock().unwrap().push(cur);
+            }
+            return self.bring_forward(live).await;
+        }
+        if !Arc::ptr_eq(&conv, &cur) {
+            self.background.lock().unwrap().push(cur);
+            *self.current.lock().unwrap() = conv.clone();
+            // A conversation opened straight on a chat did not tell the app about its project.
+            if matches!(target, Target::Session(_)) {
+                self.announce_project(&before, &conv);
+            }
+        }
+        self.refresh().await;
+        let summary = self.summary();
+        self.emit(json!({ "kind": "summary", "summary": summary }));
+        self.emit_working();
+        Ok(summary)
+    }
+
+    /// Tell the app (`App::on_project_change`) when the chat windows show is in another project.
+    fn announce_project(&self, before: &str, now: &Arc<Conv>) {
+        let project = now.about.lock().unwrap().project.clone();
+        if project == before {
+            return;
+        }
+        if let Ok(Some(p)) = self.engine.store.get_project(&ProjectId(project)) {
+            self.siblings.project_changed(&p);
+        }
+    }
+
+    fn take_background(&self, session: &str) -> Option<Arc<Conv>> {
+        let mut bg = self.background.lock().unwrap();
+        let i = bg.iter().position(|c| c.session() == session)?;
+        Some(bg.remove(i))
+    }
+
+    /// Make `live` the current chat; the current one stays live only while it runs.
+    async fn bring_forward(self: &Arc<Self>, live: Arc<Conv>) -> anyhow::Result<Value> {
+        let old = std::mem::replace(&mut *self.current.lock().unwrap(), live.clone());
+        let before = old.about.lock().unwrap().project.clone();
+        if old.is_running() {
+            self.background.lock().unwrap().push(old);
+        }
+        self.announce_project(&before, &live);
+        if !live.is_running() {
+            live.ix.lock().await.follow_model();
+            self.refresh().await;
+        } else {
+            // Its interaction is busy: its project's agents now, the rest once its turn ends.
+            let orch = live.about.lock().unwrap().orch.clone();
+            self.follow_orchestrator(orch.as_ref());
+            let mut snap = self.snapshot.lock().unwrap();
+            if let Ok(Some(p)) = self
+                .engine
+                .store
+                .get_project(&ProjectId(live.about.lock().unwrap().project.clone()))
+            {
+                snap.project = Some(p);
+            }
+        }
+        let summary = self.summary();
+        self.emit(json!({ "kind": "summary", "summary": summary }));
+        self.emit_working();
+        Ok(summary)
+    }
+
     async fn trace(&self, index: Option<u32>) -> anyhow::Result<Option<ark_interact::Trace>> {
         if let Some(i) = index {
             return Ok(load_trace(&self.engine, &self.session_id(), i).map(|r| interpret(&r)));
         }
-        if let Some(r) = self.running.lock().unwrap().as_ref() {
+        let conv = self.cur();
+        if let Some(r) = conv.running.lock().unwrap().as_ref() {
             let rec = r.ctl.recorder.lock().unwrap().snapshot();
             return Ok(Some(interpret(&rec)));
         }
-        Ok(self.ix.lock().await.trace(None))
+        let t = conv.ix.lock().await.trace(None);
+        Ok(t)
     }
 
     async fn context(&self) -> anyhow::Result<ContextView> {
-        if let Some(r) = self.running.lock().unwrap().as_ref() {
+        if let Some(r) = self.cur().running.lock().unwrap().as_ref() {
             // The running turn's latest request, with the store measurements from before it.
             let t = interpret(&r.ctl.recorder.lock().unwrap().snapshot());
             if let Some(report) = t.requests.last() {
@@ -1031,9 +1394,10 @@ impl Host {
     }
 
     fn start_turn(self: &Arc<Self>, input: String) -> anyhow::Result<()> {
+        let conv = self.cur();
         let ctl = TurnControl::new();
         {
-            let mut running = self.running.lock().unwrap();
+            let mut running = conv.running.lock().unwrap();
             if running.is_some() {
                 anyhow::bail!("the agent is already working");
             }
@@ -1043,23 +1407,28 @@ impl Host {
             });
         }
         let host = self.clone();
-        tokio::spawn(async move { host.run_turn(input, ctl).await });
+        tokio::spawn(async move { host.run_turn(conv, input, ctl).await });
         Ok(())
     }
 
-    async fn run_turn(self: Arc<Self>, input: String, ctl: TurnControl) {
-        self.emit(json!({ "kind": "turn_started", "input": input }));
-        let mut ix = self.ix.lock().await;
+    async fn run_turn(self: Arc<Self>, conv: Arc<Conv>, input: String, ctl: TurnControl) {
+        let session = conv.session();
+        self.emit(json!({ "kind": "turn_started", "input": input, "session": session }));
+        self.emit_working();
+        let mut ix = conv.ix.lock().await;
         if let Some(focus) = self.focus.lock().unwrap().take() {
             ix.set_focus(focus);
         }
         let feed = self.feed.clone();
+        let sid = session.clone();
         let end = ix
             .run_turn(&input, &ctl, |ev, a| {
                 // Text arrives in small pieces; everything else carries its description.
                 let v = match ev {
-                    HarnessEvent::TextDelta { text } => json!({ "kind": "text", "text": text }),
-                    _ => json!({ "kind": "event", "event": ev, "activity": a }),
+                    HarnessEvent::TextDelta { text } => {
+                        json!({ "kind": "text", "text": text, "session": sid })
+                    }
+                    _ => json!({ "kind": "event", "event": ev, "activity": a, "session": sid }),
                 };
                 feed.send(v);
             })
@@ -1068,16 +1437,32 @@ impl Host {
             Ok(o) => (true, o.cancelled, None, o.answer.clone(), o.steps),
             Err(e) => (false, false, Some(e.to_string()), String::new(), 0),
         };
-        self.refresh_with(&ix).await;
+        conv.note(&ix);
+        // Not while the windows move to another chat: this decides whether it stays live.
+        let one = self.switching.lock().await;
+        let current = self.is_current(&conv);
+        if current {
+            self.refresh_with(&ix).await;
+        }
         drop(ix);
-        *self.running.lock().unwrap() = None;
+        *conv.running.lock().unwrap() = None;
+        // A chat in the background ends with its turn; its session is stored.
+        if !current {
+            self.background
+                .lock()
+                .unwrap()
+                .retain(|c| !Arc::ptr_eq(c, &conv));
+        }
+        drop(one);
         // No question outlives its turn; close them before saying the turn ended. Questions
         // from orchestrated agents belong to their tasks, not to this turn.
         let open: Vec<u64> = {
             let mut approvals = self.approvals.lock().unwrap();
             let ids: Vec<u64> = approvals
                 .iter()
-                .filter(|(_, (shown, _))| shown["request"]["agent"].is_null())
+                .filter(|(_, (shown, _))| {
+                    shown["request"]["agent"].is_null() && shown["session"] == json!(session)
+                })
                 .map(|(id, _)| *id)
                 .collect();
             for id in &ids {
@@ -1090,6 +1475,7 @@ impl Host {
         }
         self.emit(json!({
             "kind": "turn_finished",
+            "session": session,
             "ok": ok,
             "cancelled": cancelled,
             "error": error,
@@ -1099,27 +1485,53 @@ impl Host {
             "index": end.index,
             "elapsed_ms": end.elapsed_ms,
             "undelivered": end.undelivered,
-            "summary": self.summary(),
+            "summary": current.then(|| self.summary()),
         }));
+        self.emit_working();
     }
 }
 
-/// Move each approval question to the windows, and each answer back.
-async fn forward_approvals(host: Arc<Host>, mut rx: mpsc::UnboundedReceiver<PendingApproval>) {
+/// Tell windows who uses the screen whenever that changes (`{kind: "computer", user}`).
+async fn forward_computer(
+    host: std::sync::Weak<Host>,
+    mut rx: tokio::sync::watch::Receiver<Option<String>>,
+) {
+    while rx.changed().await.is_ok() {
+        let Some(h) = host.upgrade() else { break };
+        h.emit(json!({ "kind": "computer", "user": h.computer_user() }));
+    }
+}
+
+/// Move each approval question of one conversation to the windows, and each answer back. A
+/// question says which chat asks (`session`, `chat`: its title), so a window shows another
+/// chat's question apart from the one it shows.
+async fn forward_approvals(
+    host: Arc<Host>,
+    mut rx: mpsc::UnboundedReceiver<PendingApproval>,
+    conv: std::sync::Weak<Conv>,
+) {
     while let Some(mut pending) = rx.recv().await {
         let id = host.next_id.fetch_add(1, Ordering::SeqCst);
         let line = host.labels.approval_line(&pending.request);
         let (reply, answer) = oneshot::channel();
         let title = ark_interact::approval_title(&pending.request);
         let choices = ark_interact::approval_choices(&pending.request);
-        let shown =
-            json!({ "request": pending.request, "line": line, "title": title, "choices": choices });
+        // An orchestrated agent's question belongs to its task, not to a chat.
+        let about = conv
+            .upgrade()
+            .filter(|_| pending.request.agent.is_none())
+            .map(|c| c.about.lock().unwrap().clone());
+        let (session, chat) = match &about {
+            Some(a) => (json!(a.session), json!(a.title)),
+            None => (Value::Null, Value::Null),
+        };
+        let shown = json!({ "request": pending.request, "line": line, "title": title, "choices": choices, "session": session, "chat": chat });
         host.approvals
             .lock()
             .unwrap()
             .insert(id, (shown.clone(), reply));
         host.emit(
-            json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line, "title": shown["title"], "choices": shown["choices"] }),
+            json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line, "title": shown["title"], "choices": shown["choices"], "session": session, "chat": chat }),
         );
         let h = host.clone();
         tokio::spawn(async move {

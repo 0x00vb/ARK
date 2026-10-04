@@ -116,6 +116,21 @@ pub enum EventKind {
         usage: Usage,
         run_ms: u64,
     },
+    /// `agent` runs `objective` on a schedule from now on (`says`: when, in words).
+    Scheduled {
+        schedule: String,
+        agent: String,
+        objective: String,
+        says: String,
+    },
+    /// A schedule stopped (asked to, or its agent ended).
+    Unscheduled {
+        schedule: String,
+        #[serde(default)]
+        agent: String,
+        #[serde(default)]
+        says: String,
+    },
 }
 
 impl EventKind {
@@ -153,6 +168,7 @@ impl EventKind {
             | EventKind::Agent { agent, .. }
             | EventKind::Session { agent, .. }
             | EventKind::ArtifactProduced { agent, .. }
+            | EventKind::Scheduled { agent, .. }
             | EventKind::TaskStarted { agent, .. } => Some(agent),
             EventKind::TaskCreated { owner, .. } => Some(owner),
             EventKind::Delegated { from_agent, .. } => Some(from_agent),

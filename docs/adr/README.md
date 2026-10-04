@@ -22,6 +22,8 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0013](0013-asking-for-a-capability-mid-task.md) | Asking for a capability mid-task | Accepted |
 | [0014](0014-agents-follow-the-sessions-model.md) | Agents follow the session's model unless the person sets one | Accepted |
 | [0015](0015-a-native-browser-shared-safely.md) | A native browser, shared safely between agents | Accepted |
+| [0017](0017-work-runs-without-the-window.md) | Work runs without the window: live conversations and schedules | Accepted |
+| [0018](0018-the-computer-one-screen-every-action-asked.md) | The Computer: one screen, one agent, every action asked | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

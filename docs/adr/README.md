@@ -22,6 +22,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0013](0013-asking-for-a-capability-mid-task.md) | Asking for a capability mid-task | Accepted |
 | [0014](0014-agents-follow-the-sessions-model.md) | Agents follow the session's model unless the person sets one | Accepted |
 | [0015](0015-a-native-browser-shared-safely.md) | A native browser, shared safely between agents | Accepted |
+| [0016](0016-a-runtime-serves-its-clients.md) | A runtime serves its clients; a window is one of them | Accepted |
 | [0017](0017-work-runs-without-the-window.md) | Work runs without the window: live conversations and schedules | Accepted |
 | [0018](0018-the-computer-one-screen-every-action-asked.md) | The Computer: one screen, one agent, every action asked | Accepted |
 

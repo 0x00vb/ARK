@@ -1,11 +1,20 @@
-// One protocol, two carriers: the desktop window (Tauri IPC) or a local browser (HTTP + SSE).
+// One protocol, two carriers: the desktop window (Tauri IPC) or a browser (HTTP + SSE).
 // Views only see `call(method, params)` and `subscribe(fn)`.
+
+// The window's own page comes from the app's asset protocol (`tauri:` on macOS and Linux,
+// `http://tauri.localhost` on Windows). A window opened on a runtime elsewhere (ADR 0016) loads
+// that runtime's page over HTTP: Tauri still defines `__TAURI__` there, but the runtime is not
+// in this process, so the page uses HTTP like any browser.
+function ownPage() {
+  return location.protocol === "tauri:" || location.hostname === "tauri.localhost";
+}
 
 export function connect() {
   const tauri = window.__TAURI__;
-  if (tauri && tauri.core) {
+  if (tauri && tauri.core && ownPage()) {
     return {
       kind: "desktop",
+      local: true,
       call: (method, params = {}) =>
         tauri.core.invoke("ark_call", { method, params }).catch((e) => {
           throw new Error(typeof e === "string" ? e : e?.message || String(e));
@@ -30,6 +39,9 @@ export function connect() {
   }
   return {
     kind: "browser",
+    // A browser on this machine's loopback address reaches a runtime on this machine; any other
+    // address is a runtime elsewhere (ADR 0016).
+    local: ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname),
     // A page in a browser cannot see the runtime's disk: no native picker.
     pickFolder: async () => undefined,
     async call(method, params = {}) {

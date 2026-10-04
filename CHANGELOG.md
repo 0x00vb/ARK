@@ -52,6 +52,13 @@ What changed for people building on ARK, per release. Not a commit log.
 - Window: `ark.modelPicker({ label, render })` lets an app draw the composer's model menu and
   ask for a model before the first message; `ark.onSubmit(fn)` sees each message first and
   can take it; `ark.setting({ advanced: true })` lists a section under Advanced.
+- A runtime other machines connect to (ADR 0016): `ArkUi::access(Access::Tokens(..))` serves
+  with saved access tokens (`ark_ui::access::Tokens`: named, hashed in `<store>/access.json`,
+  revocable without a restart) and accepts any `Host`, for a TLS proxy in front.
+  `ark_ui::remote::Client` calls a served runtime; `remote::run_window` opens a native window
+  on one. `GET /health` answers without a token ([`REMOTE.md`](docs/REMOTE.md)).
+- Window: `ark.isLocal()` and `<html data-runtime="local|remote">`: whether the runtime runs on
+  the computer showing the page, so apps offer machine-bound actions only there.
 
 ### Changed
 - With `App::orchestrate`, the orchestrators are shared by all of an app's conversations.
@@ -61,7 +68,9 @@ What changed for people building on ARK, per release. Not a commit log.
 - Window: `new_session`, `open_session`, `switch_project`, `open_project` and `add_project` no
   longer refuse while a turn runs: the running chat goes on in the background.
 - Approval lines for ARK's own tools are in words ("Scheduling digest to … every day at 18:00",
-  "Clicking element 2 in Mail") rather than the call's preview.
+  "Clicking “Send” in Mail") rather than the call's preview.
+- The HTTP server takes the token from `Authorization: Bearer` as well, and drops a client
+  that takes over 30 s to send its request.
 - Window: Settings lists Skills and Tool servers under Advanced; shorter copy in Capabilities,
   Permissions, Skills and Tool servers. Welcome suggestions go through the same checks as a
   typed message.

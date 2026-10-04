@@ -20,6 +20,8 @@ tokio.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
 portable-pty.workspace = true
+reqwest.workspace = true
+sha2 = "0.10"
 tauri = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 

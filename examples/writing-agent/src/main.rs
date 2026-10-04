@@ -362,9 +362,12 @@ pub fn writer_profile() -> AgentProfile {
         .build()
 }
 
+/// `computer`: the writer's own apps. Off when serving other machines with tokens: the screen
+/// would be the server's, and nobody sits at it (docs/REMOTE.md).
 fn build_ark(
     store_root: impl Into<PathBuf>,
     provider: Option<Arc<dyn ark_model::Provider>>,
+    computer: bool,
 ) -> Result<Ark, ArkError> {
     let mut b = Ark::builder()
         .store_root(store_root)
@@ -377,7 +380,7 @@ fn build_ark(
         // Look things up on sites that need clicking through, in the installed Chrome.
         .browser(true)
         // Work in the writer's own apps: paste a chapter into Pages, file notes in Notes.
-        .computer(true)
+        .computer(computer)
         .profile(writer_profile());
     if let Some(p) = provider {
         b = b.provider(p);
@@ -716,7 +719,21 @@ async fn main() -> std::process::ExitCode {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".writer")
         });
-    let ark = match build_ark(root, None) {
+    let cli = <Cli as clap::Parser>::parse();
+    let tokens = ark_ui::access::Tokens::in_store(&root);
+    if let Some(name) = &cli.new_token {
+        return match tokens.create(name) {
+            Ok(t) => {
+                println!("{t}");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("writer: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
+    let ark = match build_ark(root, None, !cli.tokens) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("writer: {e}");
@@ -750,7 +767,6 @@ async fn main() -> std::process::ExitCode {
                 .field("folder", ws.display().to_string())
                 .blocks
         });
-    let cli = <Cli as clap::Parser>::parse();
     if let Some(addr) = cli.serve {
         // The same app in a browser window.
         let start = ark_cli::ark_interact::Start {
@@ -759,8 +775,14 @@ async fn main() -> std::process::ExitCode {
             session: cli.ark.session.clone(),
             resume: cli.ark.resume,
         };
+        let access = if cli.tokens {
+            ark_ui::Access::Tokens(tokens)
+        } else {
+            ark_ui::Access::OneTime
+        };
         let ui = ark_ui::ArkUi::new(app)
             .start(start)
+            .access(access)
             .accent("#b0418f")
             .welcome(
                 "What are we revising?",
@@ -800,6 +822,13 @@ struct Cli {
     /// Open the workspace in a browser instead of the terminal (e.g. --serve 127.0.0.1:0)
     #[arg(long, value_name = "ADDR", num_args = 0..=1, default_missing_value = "127.0.0.1:0")]
     serve: Option<String>,
+    /// With --serve: accept the saved access tokens from any host, for other machines behind a
+    /// TLS proxy (docs/REMOTE.md), instead of a one-time link
+    #[arg(long, requires = "serve")]
+    tokens: bool,
+    /// Create an access token with this name, print it once, and exit
+    #[arg(long, value_name = "NAME")]
+    new_token: Option<String>,
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -938,7 +967,7 @@ mod tests {
                 usage: Usage::measured(240, 30),
             },
         ];
-        let ark = build_ark(dir.path(), mock(script)).unwrap();
+        let ark = build_ark(dir.path(), mock(script), true).unwrap();
         let project = ark.create_project("the-locket", "a debut novel").unwrap();
         seed_manuscript(&ark.engine().workspace_dir(&project.id).unwrap()).unwrap();
 
@@ -1004,7 +1033,7 @@ mod tests {
             }
         }));
         let provider: Arc<dyn ark_model::Provider> = mock.clone();
-        let ark = build_ark(dir.path(), Some(provider)).unwrap();
+        let ark = build_ark(dir.path(), Some(provider), true).unwrap();
         let project = ark.create_project("the-locket", "a debut novel").unwrap();
         seed_manuscript(&ark.engine().workspace_dir(&project.id).unwrap()).unwrap();
         let (approver, _rx) = ChannelApprover::channel();
@@ -1095,7 +1124,7 @@ mod tests {
                 usage: Usage::measured(90, 9),
             },
         ];
-        let ark = build_ark(dir.path(), mock(script)).unwrap();
+        let ark = build_ark(dir.path(), mock(script), true).unwrap();
         let project = ark.create_project("t", "").unwrap();
         let _ = ark.ask(&project.id, "save a new chapter").await.unwrap();
         let ws = ark.engine().workspace_dir(&project.id).unwrap();
@@ -1125,7 +1154,7 @@ mod tests {
                 usage: Usage::measured(90, 9),
             },
         ];
-        let ark = build_ark(dir.path(), mock(script)).unwrap();
+        let ark = build_ark(dir.path(), mock(script), true).unwrap();
         let project = ark.create_project("t", "").unwrap();
         let mut session = ark.start_session(&project.id).unwrap();
         let gate = Arc::new(ApprovalGate::new(Arc::new(FixedApprover(

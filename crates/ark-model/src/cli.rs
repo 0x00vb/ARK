@@ -385,6 +385,9 @@ impl CliModel {
                 Some("stream_event") => reply.feed(&ev["event"], on_text),
                 Some("rate_limit_event") => {
                     let info = &ev["rate_limit_info"];
+                    if let Some(u) = crate::usage::from_claude(info) {
+                        crate::usage::record(u);
+                    }
                     if info["status"].as_str().is_some_and(|s| s != "allowed") {
                         reset = info["resetsAt"].as_u64();
                     }

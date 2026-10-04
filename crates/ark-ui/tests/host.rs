@@ -131,6 +131,12 @@ async fn approvals_travel_through_the_protocol() {
         .await
         .is_err());
     assert!(host.call("state", json!({})).await.is_ok());
+    // Subscription usage is a read: a list, empty until a CLI reports.
+    assert!(host
+        .call("subscription_usage", json!({}))
+        .await
+        .unwrap()
+        .is_array());
     let hello = host.call("hello", json!({})).await.unwrap();
     assert_eq!(
         hello["approvals"].as_array().unwrap().len(),

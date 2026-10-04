@@ -16,6 +16,12 @@ What changed for people building on ARK, per release. Not a commit log.
   -59%, p95 turn time -52%; a 4-call Codex task 98 s to 39 s (`bench/RESULTS.md`).
 - `SessionBackend::open_streaming` and `resume_streaming` (default: the whole text at the
   end); `ManagedSession` and `CliModel` stream through `Provider::complete_streaming`.
+- Subscription usage: `ark_model::subscription_usage()` and `usage_of(account)` return what
+  Claude Code and Codex last reported about the account's limits (`SubscriptionUsage`: plan,
+  windows with whole-percent use and reset time, `limited`). Claude Code reports it with each
+  reply, Codex when its app server starts and during turns. `CapacitySnapshot::usage` carries
+  it, so the orchestration graph's `accounts` show it; the window protocol's method
+  `subscription_usage` returns the list.
 - `CurrentModel` (`ark_runtime::router`), `Ark::current_model`, `ModelsBuilder::follow`,
   `ModelResolver::default_version`: the session's model as a shared handle (ADR 0014).
 - Capabilities that need an account, owned by ARK (ADR 0011): the new crate `ark-connect`
@@ -59,6 +65,7 @@ What changed for people building on ARK, per release. Not a commit log.
 - `AcquisitionResult` has a new field, `tools`; build it with `info`, `changed` or
   `with_tools` instead of a struct literal.
 - `ApprovalDecision` has a new variant, `AllowAlways`; a `match` over it needs an arm.
+- `CapacitySnapshot` has a new field, `usage`; a struct literal of it needs `usage: None`.
 
 ### Fixed
 - `/tools` and the window's `tools` list the web's actions.

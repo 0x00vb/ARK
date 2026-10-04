@@ -82,6 +82,10 @@ pub struct CapacitySnapshot {
     /// Milliseconds left in a cool-down the provider asked for (0 when none).
     #[serde(default)]
     pub cooling_ms: u64,
+    /// The subscription's usage limits, as its CLI last reported them
+    /// ([`crate::usage`]). `None` for other accounts, or before the first report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::usage::SubscriptionUsage>,
 }
 
 /// One account's limits, shared by every caller of that account.
@@ -178,6 +182,7 @@ impl Limiter {
             waiting: self.waiting.load(Ordering::SeqCst),
             started: self.started.load(Ordering::SeqCst),
             cooling_ms,
+            usage: crate::usage::usage_of(&self.account),
         }
     }
 }

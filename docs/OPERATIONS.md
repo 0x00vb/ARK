@@ -67,7 +67,9 @@ Costs, measured with `minimal-agent` on 2026-10-01 (one question, two tool calls
 Codex adds about 15k to 18k tokens of its own instructions and skills to every call. On a
 running process a call skips the CLI's start-up (Claude Code 2.7 s to 0.7 s, Codex 23 s to
 1.7 s for a short reply, 2026-10-04). A subscription's usage limit fails the turn at once with
-the time it resets; an overloaded service is retried. For Claude Code, ARK's tools are listed as bullets that say they
+the time it resets; an overloaded service is retried. What each CLI last reported about the
+account's limits (a five-hour and a weekly window: share used, reset time) is in
+`ark_model::subscription_usage()` and in the orchestration graph's `accounts`. For Claude Code, ARK's tools are listed as bullets that say they
 are used only inside the structured reply: as Markdown headings, Haiku tried to call them
 natively and gave up the task (`bench/protocol/`).
 

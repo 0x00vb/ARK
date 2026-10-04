@@ -24,6 +24,7 @@ mod openai;
 pub mod resilience;
 pub mod session;
 mod stream;
+pub mod usage;
 
 pub use anthropic::Anthropic;
 pub use capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
@@ -37,6 +38,7 @@ pub use session::{
     ManagedSession, SessionBackend, SessionEvent, SessionEventKind, SessionPolicy, SessionSnapshot,
     SessionState, SubscriptionRuntime,
 };
+pub use usage::{subscription_usage, SubscriptionUsage, UsageWindow};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {

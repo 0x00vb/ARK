@@ -60,6 +60,14 @@ impl CodexApp {
         )
         .await?;
         app.notify("initialized").await?;
+        // The account's usage limits, before any turn. A sign-in without them (an API key)
+        // answers with an error, which changes nothing.
+        if let Ok(r) = app
+            .request("account/rateLimits/read", Value::Null, SETUP_TIMEOUT)
+            .await
+        {
+            record_limits(&r["rateLimits"]);
+        }
         Ok(app)
     }
 
@@ -157,6 +165,7 @@ impl CodexApp {
                 Some("item/completed") if params["item"]["type"] == "agentMessage" => {
                     text = params["item"]["text"].as_str().map(str::to_string);
                 }
+                Some("account/rateLimits/updated") => record_limits(&params["rateLimits"]),
                 Some("thread/tokenUsage/updated") => {
                     usage = turn_usage(&params["tokenUsage"]["last"]);
                 }
@@ -271,6 +280,12 @@ fn thread_settings(cwd: &Path, model: Option<&str>) -> Value {
         p["model"] = json!(m);
     }
     p
+}
+
+fn record_limits(limits: &Value) {
+    if let Some(u) = crate::usage::from_codex(limits) {
+        crate::usage::record(u);
+    }
 }
 
 /// A turn's token counts. Codex counts cached input inside `inputTokens`.

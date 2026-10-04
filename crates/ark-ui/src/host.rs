@@ -497,6 +497,10 @@ impl Host {
             "models" => Ok(serde_json::to_value(
                 ark_interact::ark_sdk::prelude::ark_model::catalog().await,
             )?),
+            // What the subscription CLIs last reported about their accounts' usage limits.
+            "subscription_usage" => Ok(serde_json::to_value(
+                ark_interact::ark_sdk::prelude::ark_model::subscription_usage(),
+            )?),
             "new_session" => self.change(|ix| ix.new_session()).await,
             "open_session" => {
                 let id = s("id");

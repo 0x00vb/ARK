@@ -249,7 +249,8 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
 - A `present` directive for a view nothing shows (no panel or viewer lists it) is a toast in
   the window; the model is still told it was presented.
 - One `Host` serves one live session. Two browser tabs on one server share it.
-- Approval grants are not persisted across processes, as in the shell.
+- "Always in this project" grants last until removed in Settings › Permissions (or
+  `/grants`); "for this session" grants end with the process, as in the shell.
 - There is no macOS WebDriver for the native window; its page is tested in WebKit instead,
   and an app's bundle can be checked through its browser transport (SecRes:
   `scripts/verify-desktop.sh`).

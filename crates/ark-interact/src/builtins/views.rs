@@ -175,6 +175,77 @@ impl Command for Connect {
     }
 }
 
+pub struct Grants;
+#[async_trait::async_trait]
+impl Command for Grants {
+    meta!(
+        "grants",
+        "What agents may do without asking; remove one with /grants remove <name>"
+    );
+    fn usage(&self) -> &str {
+        "[remove <name>]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let (verb, rest) = args.trim().split_once(' ').unwrap_or((args.trim(), ""));
+        let mut r = Report::new();
+        match verb {
+            "" | "list" => {}
+            "remove" if !rest.trim().is_empty() => {
+                r = if ix.remove_grant(rest) {
+                    r.success(format!(
+                        "Removed. Agents ask again before `{}`.",
+                        rest.trim()
+                    ))
+                } else {
+                    r.warning(format!(
+                        "No lasting grant named `{}` in this project.",
+                        rest.trim()
+                    ))
+                };
+            }
+            _ => anyhow::bail!("usage: /grants {}", self.usage()),
+        }
+        let (session, lasting) = ix.grants_view();
+        if session.is_empty() && lasting.is_empty() {
+            return Ok(r
+                .note("Nothing runs without asking. Approvals offer \"for this session\" and \"always in this project\".")
+                .into());
+        }
+        if !lasting.is_empty() {
+            let mut t = Table::plain(3);
+            for g in &lasting {
+                t.push(crate::report::Row {
+                    cells: vec![
+                        Cell::new(g.class.clone(), Tone::Normal),
+                        Cell::new(g.preview.clone(), Tone::Muted),
+                        Cell::new(
+                            g.granted_at.get(..10).unwrap_or("").to_string(),
+                            Tone::Muted,
+                        ),
+                    ],
+                    tone: Tone::Normal,
+                    command: Some(format!("/grants remove {}", g.class)),
+                });
+            }
+            r = r.heading("Always in this project").table(t);
+        }
+        let only_session: Vec<&String> = session
+            .iter()
+            .filter(|c| !lasting.iter().any(|g| &g.class == *c))
+            .collect();
+        if !only_session.is_empty() {
+            r = r.heading("For this session").text(
+                only_session
+                    .iter()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+        Ok(r.into())
+    }
+}
+
 pub struct Disconnect;
 #[async_trait::async_trait]
 impl Command for Disconnect {

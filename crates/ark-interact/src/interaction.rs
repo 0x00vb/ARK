@@ -424,7 +424,38 @@ impl Interaction {
     }
 
     /// With [`App::orchestrate`], use the current project's orchestrator (built on first use).
+    /// What may run without asking: the session's grants and the open project's lasting ones.
+    pub fn grants_view(
+        &self,
+    ) -> (
+        Vec<String>,
+        Vec<ark_sdk::prelude::ark_runtime::LastingGrant>,
+    ) {
+        (
+            self.gate.grants(),
+            ark_sdk::prelude::ark_runtime::lasting_grants(
+                &self.ark.engine().store,
+                self.project.id.as_str(),
+            ),
+        )
+    }
+
+    /// Remove a lasting grant of the open project (its class). Returns whether there was one.
+    pub fn remove_grant(&self, class: &str) -> bool {
+        ark_sdk::prelude::ark_runtime::remove_lasting_grant(
+            &self.ark.engine().store,
+            self.project.id.as_str(),
+            class.trim(),
+        )
+    }
+
     fn follow_project(&mut self) -> anyhow::Result<()> {
+        // "Always in this project" grants are kept and read for the project now open.
+        let store = self.ark.engine().store.clone();
+        self.gate.keep_in(store.clone(), self.project.id.as_str());
+        if let Some((_, gate)) = &self.orchestrate {
+            gate.keep_in(store, self.project.id.as_str());
+        }
         let Some((f, gate)) = &self.orchestrate else {
             return Ok(());
         };

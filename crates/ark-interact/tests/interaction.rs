@@ -896,3 +896,94 @@ async fn an_agent_asks_for_mail_mid_task_and_sends_once_it_is_connected() {
         "{list}"
     );
 }
+
+struct Drafts;
+#[async_trait::async_trait]
+impl Adapter for Drafts {
+    fn name(&self) -> &str {
+        "drafts"
+    }
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            "drafts.save",
+            "save a draft",
+            RiskTier::Mutate,
+        )]
+    }
+    async fn run(
+        &self,
+        _a: &str,
+        _i: serde_json::Value,
+        _c: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        Ok(ActionOutput::json(serde_json::json!({ "saved": true })))
+    }
+}
+
+/// "Always in this project" lasts across sessions of the project and shows in `/grants`; removed
+/// there, the next save asks again.
+#[tokio::test]
+async fn an_always_grant_lasts_until_removed_with_grants() {
+    let dir = tempfile::tempdir().unwrap();
+    let saver = Arc::new(MockProvider::new("m", vec![]).with_fallback(|req| {
+        if req
+            .messages
+            .last()
+            .is_some_and(|m| m.tool_call_id.is_some())
+        {
+            Completion {
+                content: "Saved.".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(50, 5),
+            }
+        } else {
+            call("drafts.save", serde_json::json!({}))
+        }
+    }));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .tool(Arc::new(Drafts))
+        .provider(saver)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, mut rx) = ChannelApprover::channel();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = asked.clone();
+    tokio::spawn(async move {
+        while let Some(p) = rx.recv().await {
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            p.answer(ApprovalDecision::AllowAlways);
+        }
+    });
+    let mut ix = App::new("Test")
+        .ark(ark)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    let n = || asked.load(std::sync::atomic::Ordering::SeqCst);
+
+    ix.run_turn("save the draft", &TurnControl::new(), |_, _| {})
+        .await;
+    assert_eq!(n(), 1);
+    ix.execute("/new").await;
+    ix.run_turn("save it again", &TurnControl::new(), |_, _| {})
+        .await;
+    assert_eq!(n(), 1, "a new session of the project did not ask");
+    let list = ix.execute("/grants").await.report.plain_text();
+    assert!(
+        list.contains("Always in this project") && list.contains("drafts.save"),
+        "{list}"
+    );
+
+    let removed = ix
+        .execute("/grants remove drafts.save")
+        .await
+        .report
+        .plain_text();
+    assert!(removed.contains("Removed"), "{removed}");
+    ix.run_turn("and once more", &TurnControl::new(), |_, _| {})
+        .await;
+    assert_eq!(n(), 2, "asked again after the grant was removed");
+}

@@ -349,5 +349,6 @@ resume) in CI or through a pty.
 - A steer that arrives after the agent's last step is not lost: it becomes the next prompt.
 - The Markdown styling is light: headings, bold, inline code, fences, bullets.
 - Token numbers in `/context` are estimates. Measured provider numbers are in `/trace`.
-- Approval grants are not persisted across processes.
+- "Always in this project" grants last until removed with `/grants remove <name>`; "for this
+  session" grants end with the process.
 - Shift+Enter inserts a newline only in terminals that report it; alt+enter and ctrl+j always work.

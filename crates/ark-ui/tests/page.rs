@@ -333,6 +333,30 @@ async fn an_agent_asks_to_connect_mail_and_the_turn_goes_on() {
     drive("connect-mid-task", script, Duration::ZERO).await;
 }
 
+/// "Always in this project": the next turn's save runs without a card, Settings › Permissions
+/// lists the grant, and removing it brings the question back.
+#[tokio::test(flavor = "multi_thread")]
+async fn always_in_this_project_stops_the_question_until_removed() {
+    let save = |id: &str| Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: id.into(),
+            name: "notes.save".into(),
+            arguments: json!({}),
+        }],
+        usage: Usage::default(),
+    };
+    let script = vec![
+        save("c1"),
+        say("Saved.", false),
+        save("c2"),
+        say("Saved again.", false),
+        save("c3"),
+        say("Saved a third time.", false),
+    ];
+    drive("grants", script, Duration::ZERO).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn skills_are_listed_in_settings_and_added_from_the_terminal() {
     drive("skills", vec![], Duration::ZERO).await;

@@ -501,6 +501,7 @@ pub fn decision_word(d: ApprovalDecision) -> &'static str {
     match d {
         ApprovalDecision::AllowOnce => "allowed once",
         ApprovalDecision::AllowSession => "allowed for session",
+        ApprovalDecision::AllowAlways => "allowed in this project",
         ApprovalDecision::Deny => "denied",
     }
 }

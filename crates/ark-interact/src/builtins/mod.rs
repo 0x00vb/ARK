@@ -40,6 +40,7 @@ pub(crate) fn all() -> Vec<Arc<dyn Command>> {
         Arc::new(views::Tools),
         Arc::new(views::Connect),
         Arc::new(views::Disconnect),
+        Arc::new(views::Grants),
         Arc::new(views::Plugin),
         Arc::new(views::Skills),
         Arc::new(views::TraceCmd),

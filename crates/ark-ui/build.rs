@@ -22,6 +22,9 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
+    // A file added to a folder changes that folder, not its parent: watch each one, or a new
+    // script is left out of the binary and the page that imports it stays blank.
+    println!("cargo:rerun-if-changed={}", dir.display());
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {

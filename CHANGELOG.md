@@ -37,9 +37,15 @@ What changed for people building on ARK, per release. Not a commit log.
   `tools_of`, `ark_interact::capabilities::Connector`, `App::sign_in`.
 - `ark_interact::approval_choices` (and `Choice`): the answers both front-ends offer for an
   approval; the window's `approval` event carries them as `choices`.
+- "Always in this project": `ApprovalDecision::AllowAlways`, kept per project in the store
+  (`ApprovalGate::keep_in`, `ark_runtime::{lasting_grants, remove_lasting_grant,
+  LastingGrant}`); `/grants` in both front-ends, Settings › Permissions in the window
+  (methods `grants`, `grant_remove`) ([`EXTENSION.md`](docs/EXTENSION.md#approvals-that-last)).
 
 ### Changed
 - `acquire_capability` takes `need`, as the runtime always read it (its schema said `id`).
+- An approval's headline is "ARK wants to:" or "<agent> wants to:" (was "The agent wants to
+  run:", with the task id).
 - Each acquisition is its own approval class (`acquire_capability:<need>`).
 - A cancelled call on a managed vendor session drops that session (`OpenReason::Cancelled`):
   the next call opens a new one instead of resuming a reply cut off halfway.
@@ -50,9 +56,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - `OpenReason` has a new variant, `Cancelled`; a `match` over it needs an arm.
 - `AcquisitionResult` has a new field, `tools`; build it with `info`, `changed` or
   `with_tools` instead of a struct literal.
+- `ApprovalDecision` has a new variant, `AllowAlways`; a `match` over it needs an arm.
 
 ### Fixed
 - `/tools` and the window's `tools` list the web's actions.
+- A script added under `ark-ui/web/js/` is embedded in the next build; before, the build
+  script missed it and the page that imports it stayed blank.
 - An empty command line (`command` in the window protocol) no longer starts an empty turn.
 
 ## [0.8.0] - 2026-10-03

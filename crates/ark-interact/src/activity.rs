@@ -161,6 +161,10 @@ pub fn describe(
                 Activity::new(K::Approval, format!("allowed for this session ({class})"))
                     .tone(Tone::Muted)
             }
+            ApprovalDecision::AllowAlways => {
+                Activity::new(K::Approval, format!("allowed in this project ({class})"))
+                    .tone(Tone::Muted)
+            }
             ApprovalDecision::Deny => Activity::new(K::Approval, "denied").tone(Tone::Warning),
         },
         HarnessEvent::Capability { action, detail } => {

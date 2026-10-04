@@ -181,7 +181,15 @@ after the sign-in the capability's tools join the same turn. Set `App::sign_in` 
 sign-in page cannot open in a browser on the machine ARK runs on. Why:
 [ADR 0013](adr/0013-asking-for-a-capability-mid-task.md).
 
-Why ARK owns the connection: [ADR 0011](adr/0011-capabilities-and-connections.md). Google's
+Why ARK owns the connection: [ADR 0011](adr/0011-capabilities-and-connections.md).
+
+### Approvals that last
+
+Every approval offers Allow once, Allow for this session, Always in this project, and Deny
+(`ark_interact::approval_choices`). "Always" is a record in the store for the open project
+(`ark_runtime::lasting_grants`, `remove_lasting_grant`); it covers every later call of that
+approval class in the project, in any session, until the person removes it with `/grants` or
+in Settings › Permissions. A connect question offers only Connect or Not now. Google's
 side (client, review, privacy policy): [`GOOGLE.md`](GOOGLE.md).
 
 ## Reuse of results

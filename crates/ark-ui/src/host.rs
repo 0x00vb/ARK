@@ -745,6 +745,27 @@ impl Host {
                     .map(|p| json!({ "name": p.name, "summary": p.summary }))
                     .collect(),
             )),
+            // What agents may do without asking in the open project, lasting ("Always in this
+            // project"); the same as `/grants` in a terminal.
+            "grants" => {
+                let project = self.project()?;
+                Ok(serde_json::to_value(
+                    ark_sdk::prelude::ark_runtime::lasting_grants(
+                        &self.engine.store,
+                        project.id.as_str(),
+                    ),
+                )?)
+            }
+            "grant_remove" => {
+                let project = self.project()?;
+                Ok(
+                    json!({ "removed": ark_sdk::prelude::ark_runtime::remove_lasting_grant(
+                    &self.engine.store,
+                    project.id.as_str(),
+                    &s("class"),
+                ) }),
+                )
+            }
             // What ARK can use: one list with the terminal's `/connect`. Connecting answers the
             // sign-in page for the page to open; it finishes in the background.
             "capabilities" => Ok(serde_json::to_value(

@@ -46,7 +46,8 @@ mod blobs;
 pub use acquire::{AcquisitionProvider, AcquisitionResult};
 pub use agent::{Agent, AgentEvent, AgentOutcome};
 pub use approval::{
-    ApprovalClassifier, ApprovalDecision, ApprovalGate, ApprovalRequest, Approver, FixedApprover,
+    lasting_grants, remove_lasting_grant, ApprovalClassifier, ApprovalDecision, ApprovalGate,
+    ApprovalRequest, Approver, FixedApprover, LastingGrant, LASTING_GRANT,
 };
 pub use cancel::CancelToken;
 pub use context_report::ContextReport;

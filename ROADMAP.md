@@ -42,7 +42,6 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Orchestration is measured on one program, three runs per setting; managed sessions cut uncached input but not wall time | `bench/RESULTS.md` |
 | The window has no graph view of its own; ARK Desktop draws one from `graph` and `orch` events through `ark.view` | `ark-ui` |
 | Agents created from a window use the app's base profile; a custom `AgentProfile` needs code | `ark-orchestrate`, `ark-ui` |
-| Approval grants are not persisted across processes | CLI, UI |
 | One `Host` serves one live session; two browser tabs share it | `ark-ui` |
 | `/context` token numbers are estimates; provider numbers are in `/trace` | `ark-interact` |
 | Not on crates.io; consumers pin a git tag | release |
@@ -90,7 +89,7 @@ permission system. Service details stay in data at the edge.
 |---|---|---|---|
 | C1 | **Web**: `web.search`, `web.fetch` (ADR 0010) | `Adapter`, `Provider` | done on `main`: every model searches; an agent reads pages; the `web` workload |
 | C2 | **Connections** (ADR 0011): ARK owns the account. `ark-connect`: a catalog (data) of providers and capabilities, OAuth with PKCE, tokens in the OS keychain, revoke on disconnect, neutral tool names. One capability list in `ark-interact` (`/connect`, Settings › Capabilities; Tool servers stays the advanced view). Done on `main`: the foundation, Mail (send) and Calendar on Google, tested against a fake provider in WebKit. Left: ARK's Google client and Google's review (`docs/GOOGLE.md`), a live run with a real account. Later, on the same accounts: remote MCP servers (`url`) and third-party sign-in | `ToolSource`, `Adapter`, `ApprovalGate` | Mail and Calendar connect from the list in both front-ends with a real Google account; reading runs on its own, sending asks |
-| C3 | **Task-first access** (ADR 0013): an agent that lacks a capability asks for it through the acquisition seam, backed by the connections; the person sees "ARK needs this to finish: Connect Google…" with Connect or Not now, signs in, and the turn continues with the new tools. Done on `main`, tested in a terminal and in WebKit against a fake provider. Left: grants kept per project | `AcquisitionProvider`, `ApprovalGate` | "research these companies and email me the report" works from an empty setup with one Connect click and one send approval |
+| C3 | **Task-first access** (ADR 0013): an agent that lacks a capability asks for it through the acquisition seam, backed by the connections; the person sees "ARK needs this to finish: Connect Google…" with Connect or Not now, signs in, and the turn continues with the new tools. Done on `main`, tested in a terminal and in WebKit against a fake provider. Grants kept per project: done ("Always in this project", `/grants`, Settings › Permissions) | `AcquisitionProvider`, `ApprovalGate` | "research these companies and email me the report" works from an empty setup with one Connect click and one send approval |
 | C4 | **Browser and shared resources**: Browser as a catalog entry (Playwright MCP; no browser code in ARK). A connection says how it may be shared: `shared` (one server for all), `per_agent` (an isolated browser per agent), `exclusive` (the person's logged-in browser: one task holds it, others wait, shown as "waiting for Browser, used by researcher"). The lead sees which capabilities exist when it creates agents | C2, the scheduler | two agents browse at once without collisions; a third waits for the exclusive one; a test drives it with scripted models |
 | C5 | **Desktop / computer use**: a catalog entry with `exclusive` sharing (one screen) and every action gated | C4 | one agent operates an app while others work; nothing else touches the screen |
 
@@ -170,7 +169,6 @@ Outside the milestone:
 | A second hosted model in the live benchmark | all live numbers come from one 4B model |
 | Working state placement vs time to first token | the 137 to 259 ms rise above |
 | Drop the `list_actions` / `record_note` handlers | no longer offered; kept so an older prompt still works |
-| Persisted approval grants per project | asked for once per process today |
 
 ## Benchmark and optimization opportunities
 

@@ -211,7 +211,7 @@ async function agents(page) {
   });
   const card = page.locator(".asks .approval");
   await card.waitFor();
-  assert.match(await card.innerText(), /scribe \(task t-[0-9a-f]+\) wants to run:/);
+  assert.match(await card.innerText(), /scribe wants to:/);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   assert.equal(await card.isVisible(), true, "esc leaves an agent's question alone");
@@ -274,11 +274,11 @@ async function settings(page) {
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
   const rows = page.locator(".settings-list .nav-row");
   await rows.nth(2).waitFor();
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Capabilities", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Capabilities", "Permissions", "Skills", "Tool servers"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Capabilities", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Capabilities", "Permissions", "Skills", "Tool servers"]);
   await page.locator(".settings-list .nav-row", { hasText: "Look" }).click();
   assert.equal(await page.locator(".settings-title").innerText(), "Look");
   assert.equal(await page.locator(".settings-section").innerText(), "the look");
@@ -372,6 +372,39 @@ async function connectMidTask(page) {
   await page.locator(".agent", { hasText: "Sent the report to Bob." }).waitFor({ timeout: 15000 });
 }
 scenarios["connect-mid-task"] = connectMidTask;
+
+// An approval offers "Always in this project". After it, the same action runs without a card,
+// Settings › Permissions lists the grant, and removing it brings the card back.
+async function grants(page) {
+  const ask = (text) => page.locator("#input").fill(text).then(() => page.keyboard.press("Enter"));
+  await finished(page, async () => {
+    await ask("Save the notes");
+    const card = page.locator(".approval").first();
+    await card.waitFor();
+    const buttons = (await card.locator(".approval-actions button").allInnerTexts()).map((t) => t.split("\n")[0]);
+    assert.deepEqual(buttons, ["Allow once", "Allow for this session", "Always in this project", "Deny"]);
+    await card.locator('button[data-decision="allow_always"]').click();
+  });
+  const cards = await page.locator(".approval").count();
+  await finished(page, () => ask("Save them again"));
+  assert.equal(await page.locator(".approval").count(), cards, "the second save asked nothing");
+  await page.locator(".agent", { hasText: "Saved again." }).waitFor();
+
+  await page.evaluate(() => window.ark.openSettings("permissions"));
+  const row = page.locator('.grant-row[data-class="notes.save"]');
+  await row.waitFor();
+  await row.locator(".plugin-remove").click();
+  await row.waitFor({ state: "detached" });
+  await page.evaluate(() => window.ark.openSettings("permissions"));
+
+  await page.locator("#open-settings").waitFor();
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.ark.compose(""));
+  await ask("And once more");
+  await page.locator(".approval:not(.decided)").waitFor({ timeout: 15000 });
+  await page.locator('.approval:not(.decided) button[data-decision="allow_once"]').click();
+}
+scenarios.grants = grants;
 
 // Settings › Skills lists the store's skill, and Add opens the Terminal in the project folder
 // with the install command typed, unsent.

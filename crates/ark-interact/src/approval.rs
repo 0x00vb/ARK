@@ -16,10 +16,9 @@ pub fn approval_title(req: &ApprovalRequest) -> String {
             None => "ARK needs this to finish:".into(),
         };
     }
-    match (&req.agent, &req.task) {
-        (Some(a), Some(t)) => format!("{a} (task {t}) wants to run:"),
-        (Some(a), None) => format!("{a} wants to run:"),
-        _ => "The agent wants to run:".into(),
+    match &req.agent {
+        Some(a) => format!("{a} wants to:"),
+        None => "ARK wants to:".into(),
     }
 }
 
@@ -53,6 +52,11 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
             "Allow for this session",
             ApprovalDecision::AllowSession,
             Some(format!("don't ask again for `{}`", req.class)),
+        ),
+        choice(
+            "Always in this project",
+            ApprovalDecision::AllowAlways,
+            Some("until you remove it in /grants".into()),
         ),
         choice("Deny", ApprovalDecision::Deny, None),
     ]

@@ -6,11 +6,16 @@
 //! decision through [`Approver`]; they never decide policy themselves. Grants are keyed by an
 //! approval *class*: the action name by default, or whatever the profile's classifier returns
 //! (a shell tool might class `cargo test` separately from `rm`).
+//!
+//! A "yes" lasts once, for the session, or always in a project ([`ApprovalDecision::AllowAlways`]).
+//! A lasting grant is a record in the store, per project; the person lists and removes it
+//! ([`lasting_grants`], [`remove_lasting_grant`]).
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use ark_core::RiskTier;
+use ark_store::Store;
 use serde::{Deserialize, Serialize};
 
 /// What the agent wants to do, in a form a front-end can show.
@@ -44,6 +49,9 @@ pub enum ApprovalDecision {
     AllowOnce,
     /// Run it, and stop asking for this approval class until the session ends.
     AllowSession,
+    /// Run it, and stop asking for this approval class in this project, across sessions and
+    /// restarts, until the person removes the grant.
+    AllowAlways,
     /// Do not run it.
     Deny,
 }
@@ -67,6 +75,44 @@ pub type ApprovalClassifier = Arc<dyn Fn(&str, &serde_json::Value) -> String + S
 pub struct ApprovalGate {
     approver: Arc<dyn Approver>,
     grants: Mutex<BTreeSet<String>>,
+    /// Where lasting grants are kept, and for which project.
+    lasting: Mutex<Option<(Arc<Store>, String)>>,
+}
+
+/// The record kind of a lasting grant in the store.
+pub const LASTING_GRANT: &str = "approval_grant";
+
+/// A grant that lasts in a project until removed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LastingGrant {
+    /// The approval class it covers (an action name, unless the profile classes calls).
+    pub class: String,
+    /// The action it was first given for, and how that call looked.
+    pub action: String,
+    pub preview: String,
+    /// RFC 3339.
+    pub granted_at: String,
+}
+
+fn grant_id(project: &str, class: &str) -> String {
+    format!("{project}/{class}")
+}
+
+/// The lasting grants of a project, oldest first.
+pub fn lasting_grants(store: &Store, project: &str) -> Vec<LastingGrant> {
+    store
+        .list_records(LASTING_GRANT, Some(project))
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect()
+}
+
+/// Remove a lasting grant. Returns whether there was one.
+pub fn remove_lasting_grant(store: &Store, project: &str, class: &str) -> bool {
+    store
+        .delete_record(LASTING_GRANT, &grant_id(project, class))
+        .unwrap_or(false)
 }
 
 impl ApprovalGate {
@@ -74,12 +120,30 @@ impl ApprovalGate {
         ApprovalGate {
             approver,
             grants: Mutex::new(BTreeSet::new()),
+            lasting: Mutex::new(None),
         }
     }
 
-    /// Whether a class was granted for the session.
+    /// Keep and read lasting grants in `store` for `project` (the project a front-end has
+    /// open). Without it, an "always" answer lasts for the session.
+    pub fn keep_in(&self, store: Arc<Store>, project: &str) {
+        *self.lasting.lock().unwrap() = Some((store, project.to_string()));
+    }
+
+    fn lasting_has(&self, class: &str) -> bool {
+        match &*self.lasting.lock().unwrap() {
+            Some((store, project)) => store
+                .get_record(LASTING_GRANT, &grant_id(project, class))
+                .ok()
+                .flatten()
+                .is_some(),
+            None => false,
+        }
+    }
+
+    /// Whether a class was granted for the session or, lasting, for the project.
     pub fn is_granted(&self, class: &str) -> bool {
-        self.grants.lock().unwrap().contains(class)
+        self.grants.lock().unwrap().contains(class) || self.lasting_has(class)
     }
 
     /// The classes granted so far.
@@ -95,12 +159,45 @@ impl ApprovalGate {
     /// Resolve a request: a granted class passes without asking; otherwise the approver
     /// decides, and an `AllowSession` answer is remembered.
     pub async fn check(&self, request: &ApprovalRequest) -> ApprovalDecision {
-        if self.is_granted(&request.class) {
+        if self.grants.lock().unwrap().contains(&request.class) {
             return ApprovalDecision::AllowSession;
         }
+        if self.lasting_has(&request.class) {
+            return ApprovalDecision::AllowAlways;
+        }
         let decision = self.approver.decide(request).await;
-        if decision == ApprovalDecision::AllowSession {
-            self.grants.lock().unwrap().insert(request.class.clone());
+        match decision {
+            ApprovalDecision::AllowSession => {
+                self.grants.lock().unwrap().insert(request.class.clone());
+            }
+            ApprovalDecision::AllowAlways => {
+                // Kept only in the project's record, so removing it there asks again at once.
+                // Without a store it lasts for the session.
+                let lasting = self.lasting.lock().unwrap();
+                if lasting.is_none() {
+                    self.grants.lock().unwrap().insert(request.class.clone());
+                }
+                if let Some((store, project)) = &*lasting {
+                    let grant = LastingGrant {
+                        class: request.class.clone(),
+                        action: request.action.clone(),
+                        preview: request.preview.clone(),
+                        granted_at: time::OffsetDateTime::now_utc()
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .unwrap_or_default(),
+                    };
+                    let json = serde_json::to_value(&grant).expect("a grant serializes");
+                    if let Err(e) = store.put_record(
+                        LASTING_GRANT,
+                        &grant_id(project, &request.class),
+                        project,
+                        &json,
+                    ) {
+                        tracing::warn!("could not keep the grant for {}: {e}", request.class);
+                    }
+                }
+            }
+            _ => {}
         }
         decision
     }
@@ -214,6 +311,40 @@ mod tests {
         gate.check(&req("x")).await;
         assert_eq!(approver.0.load(Ordering::SeqCst), 2);
         assert!(gate.grants().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_always_grant_lasts_in_its_project_until_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::open(dir.path()).unwrap());
+        let approver = Arc::new(Counting(AtomicUsize::new(0), ApprovalDecision::AllowAlways));
+        let gate = ApprovalGate::new(approver.clone());
+        gate.keep_in(store.clone(), "p1");
+        gate.check(&req("doc.save")).await;
+
+        // A new session (a new gate, as after a restart) in the same project does not ask.
+        let later = ApprovalGate::new(approver.clone());
+        later.keep_in(store.clone(), "p1");
+        assert!(later.is_granted("doc.save"));
+        assert_eq!(
+            later.check(&req("doc.save")).await,
+            ApprovalDecision::AllowAlways
+        );
+        assert_eq!(approver.0.load(Ordering::SeqCst), 1);
+
+        // Another project asks.
+        let other = ApprovalGate::new(approver.clone());
+        other.keep_in(store.clone(), "p2");
+        assert!(!other.is_granted("doc.save"));
+
+        let kept = lasting_grants(&store, "p1");
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].class, "doc.save");
+        assert_eq!(kept[0].preview, "doc.save()");
+        assert!(remove_lasting_grant(&store, "p1", "doc.save"));
+        let fresh = ApprovalGate::new(approver.clone());
+        fresh.keep_in(store, "p1");
+        assert!(!fresh.is_granted("doc.save"));
     }
 
     #[test]

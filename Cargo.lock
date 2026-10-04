@@ -247,6 +247,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-exec"
+version = "0.9.0"
+dependencies = [
+ "ark-core",
+ "ark-runtime",
+ "ark-tools",
+ "async-trait",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ark-files"
 version = "0.9.0"
 dependencies = [

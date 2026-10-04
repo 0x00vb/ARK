@@ -1,0 +1,21 @@
+[package]
+name = "ark-exec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK's Run code capability: agents run programs in the project folder, contained (no network, writes only there), and the files they write come back as artifacts."
+
+[dependencies]
+ark-core.workspace = true
+ark-tools.workspace = true
+ark-runtime.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "fs"] }
+uuid.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true

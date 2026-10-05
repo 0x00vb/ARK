@@ -126,6 +126,19 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     if scenario == "files" {
         builder = builder.files(true);
     }
+    if scenario == "analysis" {
+        let Some(sandbox) = ark_sdk::prelude::ark_exec::Sandbox::native() else {
+            eprintln!("skipped: no sandbox for runs on this platform");
+            return;
+        };
+        builder = builder
+            .files(true)
+            .code_with(ark_sdk::prelude::ark_exec::Exec::with_sandbox(
+                sandbox,
+                dir.path().join("runs"),
+                vec![Arc::new(Sh)],
+            ));
+    }
     let ark = builder.build().unwrap();
     let mut app = App::new("Page test").ark(ark);
     if scenario == "connect-mid-task" {
@@ -237,6 +250,84 @@ async fn files_the_agent_writes_open_and_the_person_edits_them() {
         say("The report is ready.", false),
     ];
     drive("files", script, Duration::ZERO).await;
+}
+
+/// A shell as a runtime, so the page test runs a real contained program without Python.
+struct Sh;
+
+#[async_trait::async_trait]
+impl ark_sdk::prelude::ark_exec::Runtime for Sh {
+    fn name(&self) -> &'static str {
+        "sh"
+    }
+    fn says(&self) -> String {
+        "a POSIX shell".into()
+    }
+    fn available(&self) -> Result<(), String> {
+        Ok(())
+    }
+    async fn ready(&self) -> Result<ark_sdk::prelude::ark_exec::Launch, String> {
+        Ok(ark_sdk::prelude::ark_exec::Launch {
+            program: "/bin/sh".into(),
+            args: vec![],
+            file: "main.sh",
+            env: vec![],
+            reads: vec![],
+        })
+    }
+}
+
+/// A one-page PDF with a line of text, written by hand (ASCII, so a shell can write it).
+fn tiny_pdf() -> String {
+    let stream = "BT /F1 12 Tf 72 720 Td (Sales grew) Tj ET";
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [4 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len()),
+    ];
+    let mut out = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.push_str(&format!("{} 0 obj\n{o}\nendobj\n", i + 1));
+    }
+    let xref = out.len();
+    out.push_str(&format!(
+        "xref\n0 {}\n0000000000 65535 f \n",
+        objs.len() + 1
+    ));
+    for o in offsets {
+        out.push_str(&format!("{o:010} 00000 n \n"));
+    }
+    out.push_str(&format!(
+        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+        objs.len() + 1
+    ));
+    out
+}
+
+/// "Analyze the sales": one contained run writes a chart, a table, a report that shows the
+/// chart, and a PDF; each opens beside the conversation in the view for its kind.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_writes_a_chart_and_a_report_that_open_beside_the_conversation() {
+    let program = format!(
+        "cat > table.csv <<'EOF'\nregion,q1\nNorth,120\nSouth,80\nEOF\n\
+         cat > chart.svg <<'EOF'\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"80\"><rect x=\"10\" y=\"20\" width=\"40\" height=\"60\" fill=\"#3b6fd8\"/><rect x=\"70\" y=\"40\" width=\"40\" height=\"40\" fill=\"#3b6fd8\"/></svg>\nEOF\n\
+         cat > report.md <<'EOF'\n# Sales\n\nNorth led with 120.\n\n![Sales by region](chart.svg)\nEOF\n\
+         cat > summary.pdf <<'EOF'\n{}EOF\n\
+         echo 200",
+        tiny_pdf()
+    );
+    let script = vec![
+        call(
+            ark_sdk::prelude::ark_exec::RUN,
+            json!({ "code": program, "runtime": "sh" }),
+        ),
+        say("The chart, the table and the report are ready.", false),
+    ];
+    drive("analysis", script, Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

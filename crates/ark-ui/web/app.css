@@ -978,6 +978,15 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .fv-status[data-state="error"]::after { opacity: 1; scale: 1; background: var(--err); }
 .wb-bar .spacer { flex: 1; }
 
+/* Markdown as a page; PDFs and images as themselves. */
+.md-page { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px 40px; animation: none; }
+.md-page .md-img { display: block; max-width: 100%; height: auto; margin: 0.4em 0 1em; border-radius: 6px; box-shadow: 0 0 0 1px var(--hair); }
+.md-missing { color: var(--text-3); font-size: 13px; }
+.media-body { flex: 1; min-height: 0; display: flex; overflow: auto; background: var(--sunken); }
+.media-image { margin: auto; max-width: calc(100% - 32px); max-height: calc(100% - 32px); object-fit: contain; border-radius: 4px; box-shadow: 0 0 0 1px var(--hair); background: #fff; }
+.media-pdf { flex: 1; width: 100%; border: 0; background: var(--sunken); }
+.file-card[data-kind="image"] .file-card-ico, .file-card[data-kind="pdf"] .file-card-ico, .file-card[data-kind="markdown"] .file-card-ico { color: var(--doc); background: color-mix(in srgb, var(--doc) 12%, transparent); }
+
 /* A spreadsheet. */
 .sh { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .sh-bar { gap: 8px; }

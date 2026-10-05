@@ -1559,7 +1559,9 @@ impl Harness {
             catalog::PRESENT => {
                 let view = sarg("view");
                 if view.is_empty() {
-                    return Ok("error: `present` needs a `view` (artifact, file, diff, …).".into());
+                    return Ok(
+                        "error: `present` needs a `view` (file, artifact, evidence, …).".into(),
+                    );
                 }
                 let opt = |k: &str| {
                     a.get(k)

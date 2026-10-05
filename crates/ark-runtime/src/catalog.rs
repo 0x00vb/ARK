@@ -293,11 +293,11 @@ pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
     if cfg.present {
         tools.push(ToolDef {
             name: PRESENT.into(),
-            description: "Show the user something in the workspace beside the conversation: an artifact, a file, a diff, a terminal, or a domain view.".into(),
+            description: "Show the user something beside the conversation: a file of the project (any kind ARK reads opens in its own view), a stored artifact, evidence, the terminal, the browser, or a view the app adds.".into(),
             parameters: serde_json::json!({
                 "type": "object", "required": ["view"],
                 "properties": {
-                    "view": { "type": "string", "description": "artifact, file, diff, structured, browser, terminal, evidence, split, or a domain view" },
+                    "view": { "type": "string", "description": "file (with path), artifact (with its id), evidence (locator inv:…), terminal, browser, or an app's view" },
                     "artifact": { "type": "string" }, "path": { "type": "string" },
                     "locator": { "type": "string" }, "pane": { "type": "string" }, "note": { "type": "string" }
                 }

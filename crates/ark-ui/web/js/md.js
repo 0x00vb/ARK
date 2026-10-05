@@ -5,8 +5,20 @@
 
 import { esc } from "./dom.js";
 
+/// Set while rendering a document that may show the project's images (`markdown(src, { files: true })`).
+let fileImages = false;
+
 function inline(s) {
   let out = esc(s);
+  // An image: in a document of the project, one of its files (the view loads it by `data-file`);
+  // anywhere else only its words.
+  // Kept aside like code, so no later rule reaches inside the tag.
+  const images = [];
+  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => {
+    if (!fileImages || /^[a-z][a-z0-9+.-]*:|^\//i.test(src)) return alt;
+    images.push(`<img class="md-img" data-file="${src}" alt="${alt}">`);
+    return `\u0001${images.length - 1}\u0001`;
+  });
   const codes = [];
   out = out.replace(/`([^`]+)`/g, (_, c) => {
     codes.push(c);
@@ -18,7 +30,9 @@ function inline(s) {
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
     .replace(/(^|\W)_([^_\s][^_]*)_(?=\W|$)/g, "$1<em>$2</em>");
-  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`);
+  return out
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`)
+    .replace(/\u0001(\d+)\u0001/g, (_, i) => images[Number(i)]);
 }
 
 function table(rows) {
@@ -33,7 +47,16 @@ function table(rows) {
   return html + "</tbody></table></div>";
 }
 
-export function markdown(src) {
+export function markdown(src, { files = false } = {}) {
+  fileImages = files;
+  try {
+    return render(src);
+  } finally {
+    fileImages = false;
+  }
+}
+
+function render(src) {
   const lines = String(src || "").replace(/\r\n/g, "\n").split("\n");
   let html = "";
   let para = [];

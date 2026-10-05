@@ -632,6 +632,11 @@ impl Host {
                         .into_iter()
                         .map(|(e, k)| (e.to_string(), json!(k.as_str())))
                         .collect::<serde_json::Map<_, _>>(),
+                    // What each kind is called, for cards and tabs.
+                    "kind_nouns": ark_sdk::prelude::ark_files::Kind::ALL
+                        .iter()
+                        .map(|k| (k.as_str().to_string(), json!(k.noun())))
+                        .collect::<serde_json::Map<_, _>>(),
                     "version": env!("CARGO_PKG_VERSION"),
                 }))
             }
@@ -857,6 +862,10 @@ impl Host {
                 let base = Some(s("base")).filter(|b| !b.is_empty());
                 let edits = params.get("edits").cloned().unwrap_or(Value::Null);
                 crate::files::edit(&dir, &s("path"), &edits, base.as_deref())
+            }
+            "file_media" => {
+                let dir = self.engine.workspace_dir(&self.project()?.id)?;
+                crate::files::media(&dir, &s("path"))
             }
             "file_version" => {
                 let dir = self.engine.workspace_dir(&self.project()?.id)?;

@@ -285,7 +285,7 @@ function genericArtifact(body, r) {
     try {
       if (/^\s*[{[]/.test(t)) shown = JSON.stringify(JSON.parse(t), null, 2);
     } catch {}
-    if (/\.(md|markdown)$/i.test(r.artifact.name)) body.append(h("div.prose", { html: markdown(t) }));
+    if (r.artifact.kind === "markdown") body.append(h("div.prose", { html: markdown(t) }));
     else body.append(h("pre.code-block.lines", shown));
     if (r.length < r.total) body.append(h("p.insp-note", `Showing the first ${bytes(r.length)} of ${bytes(r.total)}.`));
     return;

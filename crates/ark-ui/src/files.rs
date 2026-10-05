@@ -19,7 +19,7 @@ pub(crate) struct Entry {
     pub path: String,
     pub dir: bool,
     pub size: u64,
-    /// `text`, `sheet` or `document`, for a file.
+    /// The file's kind (`text`, `sheet`, `pdf`, ...; `ark_files::Kind`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<&'static str>,
 }
@@ -91,7 +91,7 @@ pub(crate) fn write(
     if path.is_dir() {
         anyhow::bail!("`{rel}` is a folder");
     }
-    if ark_files::kind_of(rel) != ark_files::Kind::Text {
+    if !ark_files::kind_of(rel).is_text() {
         anyhow::bail!("`{rel}` is not a text file");
     }
     if !path.parent().is_some_and(Path::is_dir) {
@@ -112,12 +112,25 @@ pub(crate) fn edit(
     Ok(ark_files::edit(root, rel, &edits, base)?.page())
 }
 
+/// A PDF or an image as the window draws it: the file's own bytes (base64), its media type and
+/// version. Through `call` like everything else, so the desktop and a browser get it the same way.
+pub(crate) fn media(root: &Path, rel: &str) -> anyhow::Result<Value> {
+    use base64::Engine as _;
+    let (bytes, media_type, version) = ark_files::media(root, rel)?;
+    Ok(json!({
+        "media_type": media_type,
+        "version": version,
+        "size": bytes.len(),
+        "data": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
+}
+
 /// Open a spreadsheet or document in the app the computer opens it with. Only those kinds: a
 /// click never runs a script or a program from the folder.
 pub(crate) fn open_in_app(root: &Path, rel: &str) -> anyhow::Result<()> {
     let path = ark_files::inside(root, rel)?;
     if ark_files::kind_of(rel) == ark_files::Kind::Text || ark_files::format_for(rel).is_none() {
-        anyhow::bail!("only spreadsheets and documents open in their app");
+        anyhow::bail!("only files ARK has a format for open in their app");
     }
     if !path.is_file() {
         anyhow::bail!("there is no file {rel}");

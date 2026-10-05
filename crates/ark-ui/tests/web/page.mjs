@@ -285,30 +285,85 @@ async function files(page) {
 }
 scenarios.files = files;
 
+// A program the agent runs writes a chart, a table, a report that shows the chart, and a PDF.
+// Each is a card in the turn and opens in the view for its kind; nothing names the program.
+async function analysis(page) {
+  await page.locator("#input").fill("Analyze the sales and make me a chart and a short report.");
+  const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
+  await page.keyboard.press("Enter");
+  const ask = page.locator(".approval");
+  await ask.waitFor();
+  // The approval shows the program and what it may do.
+  const words = await ask.innerText();
+  assert.match(words, /Run this Sh program in the project folder \(it can change files there; no network\)/);
+  assert.match(words, /cat > table\.csv/);
+  await page.locator(".approval .btn.primary").click();
+  await done;
+  await page.waitForTimeout(150);
+
+  const cards = await page.locator(".file-card").evaluateAll((els) => els.map((e) => `${e.dataset.kind}:${e.innerText.replace(/\s+/g, " ").trim()}`));
+  assert.deepEqual(cards.sort(), ["image:chart.svg Image", "markdown:report.md Markdown document", "pdf:summary.pdf PDF", "sheet:table.csv Spreadsheet"]);
+
+  // The chart: the file's own bytes, drawn.
+  await page.locator(".file-card", { hasText: "chart.svg" }).click();
+  await page.waitForFunction(() => document.querySelector("img.media-image")?.naturalWidth > 0);
+
+  // The report renders as a page and shows the chart it links to.
+  await page.locator(".file-card", { hasText: "report.md" }).click();
+  await page.locator(".md-page h2").waitFor();
+  assert.equal(await page.locator(".md-page h2").innerText(), "Sales");
+  await page.waitForFunction(() => document.querySelector(".md-page img.md-img")?.naturalWidth > 0);
+
+  // The table opens as a sheet.
+  await page.locator(".file-card", { hasText: "table.csv" }).click();
+  await page.waitForFunction(() => document.querySelector('td[data-r="1"][data-c="1"]')?.textContent === "120");
+
+  // The PDF opens in the browser's own viewer (headless WebKit does not paint it, so only the
+  // frame and its document are checked).
+  await page.locator(".file-card", { hasText: "summary.pdf" }).click();
+  await page.waitForFunction(() => document.querySelector("iframe.media-pdf")?.src.startsWith("blob:"));
+  // The window reads a PDF as itself; the agent reads its text (files.read).
+  const read = await page.evaluate(() => window.ark.call("file_read", { path: "summary.pdf" }));
+  assert.equal(read.kind, "pdf");
+  assert.equal(read.media_type, "application/pdf");
+}
+scenarios.analysis = analysis;
+
 // The + menu opens the built-in panels. Files edits and saves a file in the project folder;
 // the terminal runs a shell there. A page on this machine's loopback address says its runtime
 // is local.
 async function workbench(page) {
   assert.equal(await page.evaluate(() => window.ark.isLocal()), true);
   assert.equal(await page.evaluate(() => document.documentElement.dataset.runtime), "local");
-  await page.evaluate(() => window.ark.call("file_write", { path: "draft.md", text: "one" }));
+  await page.evaluate(() => window.ark.call("file_write", { path: "draft.txt", text: "one" }));
   await page.locator("#open-menu").click();
   const items = page.locator(".popover .open-item");
   assert.deepEqual(await items.allInnerTexts().then((t) => t.map((x) => x.split("\n")[0].trim())), ["Terminal", "Browser", "Files"]);
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  await page.locator(".wb-entry", { hasText: "draft.md" }).click();
+  await page.locator(".wb-entry", { hasText: "draft.txt" }).click();
   const editor = page.locator(".wb-editor");
   assert.equal(await editor.inputValue(), "one");
   assert.equal(await page.locator(".wb-save").isDisabled(), true);
   await editor.fill("two");
   await page.locator(".wb-save").click();
-  for (let i = 0; (await page.evaluate(() => window.ark.call("file_read", { path: "draft.md" }))).text !== "two"; i++) {
-    assert.ok(i < 50, "draft.md was not saved");
+  for (let i = 0; (await page.evaluate(() => window.ark.call("file_read", { path: "draft.txt" }))).text !== "two"; i++) {
+    assert.ok(i < 50, "draft.txt was not saved");
     await page.waitForTimeout(100);
   }
   await assert.rejects(page.evaluate(() => window.ark.call("file_read", { path: "../outside" })));
+
+  // Markdown opens as a page; Edit shows its text, and Done the page as saved.
+  await page.evaluate(() => window.ark.call("file_write", { path: "notes.md", text: "# Plan\n\nShip it." }));
+  await page.evaluate(() => window.ark.openFile("notes.md"));
+  await page.locator(".md-page h2", { hasText: "Plan" }).waitFor();
+  await page.locator(".btn", { hasText: "Edit" }).click();
+  const md = page.locator(".fv").filter({ has: page.locator('textarea[aria-label="notes.md"]') });
+  await md.locator(".wb-editor").fill("# Plan\n\nShip it today.");
+  await md.locator(".wb-save").click();
+  await md.locator(".btn", { hasText: "Done" }).click();
+  await page.locator(".md-page p", { hasText: "Ship it today." }).waitFor();
 
   await page.evaluate(() => window.ark.openPanel("terminal"));
   // A shell under load can miss a line typed before its prompt: type it again until it answers.

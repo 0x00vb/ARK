@@ -73,14 +73,16 @@ const api = {
     const key = `inv:${id}`;
     pane.openTab(key, `inv:${String(id).replace(/^inv:/, "").slice(0, 6)}`, "file", (el) => invocationView(el, api, id));
   },
+  // A stored copy of a project file opens as the file, as it is now (one view per kind), unless
+  // an app's viewer is asked for or matches it.
   openArtifact: (id, viewerId, params) => {
-    const v = registry.viewers.find((x) => x.id === viewerId);
-    const prm = params === undefined && viewerId ? { viewer: viewerId } : params && { ...params, viewer: viewerId };
-    pane.openTab(`art:${id}`, "Artifact", "file", (el, p) => {
-      const ctl = artifactView(el, api, id, viewerId, p);
-      api.call("artifact", { id, length: 1 }).then((r) => retitle(`art:${id}`, r.artifact.name)).catch(() => {});
-      return ctl;
-    }, prm, { wide: v ? !!v.wide : registry.viewers.some((x) => x.wide), fill: true });
+    if (viewerId) return openArtifactTab(id, viewerId, params);
+    api.call("artifact", { id, length: 1 }).then((r) => {
+      const a = r.artifact;
+      const lens = registry.viewers.some((v) => { try { return v.match(a); } catch { return false; } });
+      if (a.path && !lens) api.openFile(a.path, params);
+      else openArtifactTab(id, undefined, params);
+    }).catch(() => openArtifactTab(id, undefined, params));
   },
   // A file of the project in a tab of its own: a spreadsheet, a document or text.
   openFile: (path, params) => {
@@ -453,6 +455,16 @@ async function decide(id, decision) {
   }
 }
 
+function openArtifactTab(id, viewerId, params) {
+  const v = registry.viewers.find((x) => x.id === viewerId);
+  const prm = params === undefined && viewerId ? { viewer: viewerId } : params && { ...params, viewer: viewerId };
+  pane.openTab(`art:${id}`, "Artifact", "file", (el, p) => {
+    const ctl = artifactView(el, api, id, viewerId, p);
+    api.call("artifact", { id, length: 1 }).then((r) => retitle(`art:${id}`, r.artifact.name)).catch(() => {});
+    return ctl;
+  }, prm, { wide: v ? !!v.wide : registry.viewers.some((x) => x.wide), fill: true });
+}
+
 function present(d) {
   const by = presenterFor(d.view);
   // A file opens in a tab of its own, unless the app shows files itself.
@@ -672,7 +684,7 @@ async function bootOnce(again) {
   }
   feed.seq = hello.seq || 0;
   state.ui = hello.ui || {};
-  setFileKinds(hello.file_kinds);
+  setFileKinds(hello.file_kinds, hello.kind_nouns);
   state.commands = hello.commands || [];
   composer.commands = state.commands;
   if (state.ui.accent) document.documentElement.style.setProperty("--accent", state.ui.accent);

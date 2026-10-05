@@ -9,9 +9,8 @@ import { h, icon, clear, clip, secs, tokens, esc } from "./dom.js";
 import { markdown } from "./md.js";
 import { renderReport } from "./report.js";
 import { registry } from "./ext.js";
-import { kindOf, KIND_ICON } from "./file.js";
+import { kindOf, kindNoun, KIND_ICON } from "./file.js";
 
-const KIND_WORD = { sheet: "Spreadsheet", document: "Document", text: "File" };
 
 const TOOLISH = new Set(["tool", "retrieval", "reuse", "capability", "present", "plan", "state", "note", "steered", "warning"]);
 
@@ -402,7 +401,7 @@ class TurnView {
       const kind = kindOf(path);
       return h("button.file-card", { type: "button", "data-kind": kind, title: path, onclick: () => this.api.openFile(path) },
         h("span.file-card-ico", icon(KIND_ICON[kind])),
-        h("span.file-card-text", h("span.file-card-name", path.split("/").pop()), h("span.file-card-sub", KIND_WORD[kind])));
+        h("span.file-card-text", h("span.file-card-name", path.split("/").pop()), h("span.file-card-sub", kindNoun(kind))));
     })));
   }
 

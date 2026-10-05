@@ -64,6 +64,7 @@ const PATHS = {
   trace: '<path d="M3 3v10M3 5h5M3 8.5h8M3 12h4"/>',
   gauge: '<path d="M2.8 11.5a5.5 5.5 0 1 1 10.4 0"/><path d="M8 9l2.5-3"/>',
   file: '<path d="M9 2.5H4.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V6z"/><path d="M9 2.5V6h3.5"/>',
+  image: '<rect x="2.5" y="3" width="11" height="10" rx="1.5"/><circle cx="6" cy="6.5" r="1.2"/><path d="M2.5 11l3.5-3 2.5 2 2-1.5 3 2.5"/>',
   sheet: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 6.5h11M2.5 10h11M6.5 2.5v11"/>',
   doc: '<path d="M9 2.5H4.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V6z"/><path d="M9 2.5V6h3.5M5.5 8.5h5M5.5 11h3.5"/>',
   terminal: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 6.5L7 8l-2 1.5M8.5 10H11"/>',

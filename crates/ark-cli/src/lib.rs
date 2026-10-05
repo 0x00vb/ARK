@@ -25,12 +25,17 @@
 //! The app (agent, commands, labels, status) is an `ark_interact::App`; the same value can
 //! open in `ark-ui` instead. This crate adds only the terminal: line editing, the activity
 //! view, the approval menu, colour. The runtime never learns about the terminal.
+//!
+//! `--connect URL` opens the terminal on a runtime served elsewhere instead (ADR 0024): the
+//! chat open there, its agents, its store and its models. Nothing runs in this process.
 
 mod app;
 mod approval;
+mod chat;
 mod driver;
 mod headless;
 mod markdown;
+mod remote;
 mod render;
 mod shell;
 mod term;
@@ -42,7 +47,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ark_interact::{App, ChannelApprover, Start};
+
 use ark_sdk::prelude::*;
+use chat::{Chat, Local};
 
 pub use app::{EventHook, Welcome};
 pub use markdown::MdStream;
@@ -97,7 +104,28 @@ pub struct ArkArgs {
     /// Use this model: `<model>` or `<provider>:<model>` (e.g. anthropic:claude-sonnet-5-5)
     #[arg(long, value_name = "MODEL")]
     pub model: Option<String>,
+    /// Use the ARK runtime served at this address (https://…) instead of this machine's
+    #[arg(long, value_name = "URL", conflicts_with_all = ["resume", "session", "project", "model"])]
+    pub connect: Option<String>,
+    /// With --connect: the access token (default: the ARK_TOKEN environment variable)
+    #[arg(long, value_name = "TOKEN", requires = "connect")]
+    pub token: Option<String>,
 }
+
+/// The shell's keys, as `/help` lists them.
+const KEYS: &[(&str, &str)] = &[
+    ("enter", "send"),
+    ("alt+enter, ctrl+j", "new line (or end a line with \\)"),
+    ("↑ / ↓", "input history"),
+    ("tab", "complete a /command"),
+    ("esc, ctrl+c", "stop the agent (while it works)"),
+    (
+        "enter (while it works)",
+        "send what you typed to the running turn",
+    ),
+    ("tab (while it works)", "send it after the turn instead"),
+    ("ctrl+d, /exit", "leave (the session is saved)"),
+];
 
 /// Entry point. See the crate docs.
 pub struct ArkCli {
@@ -190,48 +218,55 @@ impl ArkCli {
 
     async fn start(self, args: ArkArgs, color: bool) -> anyhow::Result<std::process::ExitCode> {
         let bin = bin_name(&self.bin);
-        let start = Start {
-            model: args.model.clone(),
-            project: args.project.clone(),
-            session: args.session.clone(),
-            resume: args.resume,
-        };
-        let (approver, approvals) = ChannelApprover::channel();
         let headless = args.print.is_some() || !std::io::stdin().is_terminal();
-        let opened = self.app.open(&start, Arc::new(approver))?;
-        let mut ix = opened.interaction;
-        // Unless the application installed its own logger: a file in the store for the
-        // shell (stderr would break the screen), stderr for a one-shot run.
-        let target = if headless {
-            ark_interact::logging::LogTarget::Stderr
-        } else {
-            ark_interact::logging::LogTarget::File(ark_interact::logging::file_in(
-                &ix.ark().settings().store_root,
-            ))
+        let (chat, resumed, history_file) = match &args.connect {
+            Some(url) => {
+                let token = args
+                    .token
+                    .clone()
+                    .or_else(|| std::env::var("ARK_TOKEN").ok())
+                    .filter(|t| !t.trim().is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("--connect needs an access token: --token or ARK_TOKEN (made on that runtime, docs/REMOTE.md)"))?;
+                // Nothing runs here but the terminal; a one-shot run may log to stderr.
+                if headless {
+                    ark_interact::logging::init(ark_interact::logging::LogTarget::Stderr);
+                }
+                let remote = remote::Remote::connect(url, &token, args.verbose).await?;
+                (Chat::Remote(remote), false, self.history_file)
+            }
+            None => {
+                let start = Start {
+                    model: args.model.clone(),
+                    project: args.project.clone(),
+                    session: args.session.clone(),
+                    resume: args.resume,
+                };
+                let (approver, approvals) = ChannelApprover::channel();
+                let opened = self.app.open(&start, Arc::new(approver))?;
+                let mut ix = opened.interaction;
+                // Unless the application installed its own logger: a file in the store for
+                // the shell (stderr would break the screen), stderr for a one-shot run.
+                let target = if headless {
+                    ark_interact::logging::LogTarget::Stderr
+                } else {
+                    ark_interact::logging::LogTarget::File(ark_interact::logging::file_in(
+                        &ix.ark().settings().store_root,
+                    ))
+                };
+                ark_interact::logging::init(target);
+                ix.set_detail(args.verbose);
+                ix.set_keys(
+                    KEYS.iter()
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect(),
+                );
+                let history_file = self
+                    .history_file
+                    .or_else(|| Some(ix.ark().settings().store_root.join(".history")));
+                let local = Local { ix, approvals };
+                (Chat::Local(Box::new(local)), opened.resumed, history_file)
+            }
         };
-        ark_interact::logging::init(target);
-        ix.set_detail(args.verbose);
-        ix.set_keys(
-            [
-                ("enter", "send"),
-                ("alt+enter, ctrl+j", "new line (or end a line with \\)"),
-                ("↑ / ↓", "input history"),
-                ("tab", "complete a /command"),
-                ("esc, ctrl+c", "stop the agent (while it works)"),
-                (
-                    "enter (while it works)",
-                    "send what you typed to the running turn",
-                ),
-                ("tab (while it works)", "send it after the turn instead"),
-                ("ctrl+d, /exit", "leave (the session is saved)"),
-            ]
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
-        );
-        let history_file = self
-            .history_file
-            .or_else(|| Some(ix.ark().settings().store_root.join(".history")));
         let cfg = Arc::new(Config {
             bin,
             theme: self.theme.with_color(color),
@@ -241,8 +276,7 @@ impl ArkCli {
         });
         let st = ShellState {
             cfg,
-            ix,
-            approvals,
+            chat,
             out: Out::stdout(),
         };
 
@@ -264,7 +298,7 @@ impl ArkCli {
             };
             return Ok(headless::run(st, prompt, mode, args.yes).await);
         }
-        Ok(shell::interactive(st, opened.resumed).await)
+        Ok(shell::interactive(st, resumed).await)
     }
 }
 

@@ -218,7 +218,7 @@ front-end uses the same.
 | Files | `file_read {path}` (`kind`, `version` and `text`, `sheets` or `blocks`; or `why` it cannot be shown), `file_edit {path, edits, base?}` (the file as saved), `file_write {path, text, base?}` (text files), `file_version {path}`, `file_media {path}` (a PDF or an image: `media_type`, `version`, base64 `data`), `file_open {path}` (in its app). All inside the project folder; none waits for a running turn |
 | Session | `hello`, `summary`, `sessions {project?}`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `open_project {id}` (back to its last chat), `add_project {path?, name?}` (a folder becomes a project, or opens the one it is), `rename_project {id, name}`, `project_folder {id, path}`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models`, `subscription_usage` (each subscription's limits as its CLI last reported them: `[{account, plan?, windows: [{minutes, used_percent, resets_at}], limited, reported_ms}]`) |
 | Keys | `api_keys` (`can_save`, `saved`: providers with a saved key), `api_key_save {provider, key}` (checked with the provider, then kept in the system keychain), `api_key_forget {provider}`. Need an app with connections; a key in the environment still comes first |
-| Turn | `send`, `steer`, `cancel` (both take `session` for a chat in the background), `approve`, `command`, `working` (the chats running a turn: `[{session, title, project, input}]`) |
+| Turn | `send` (`ask: false` refuses the turn's state-changing actions instead of asking: a client nobody answers), `steer`, `cancel` (both take `session` for a chat in the background), `approve`, `command`, `working` (the chats running a turn: `[{session, title, project, input}]`) |
 | Views | `transcript {session?}`, `trace`, `call`, `context`, `usage`, `state` |
 | Computer | `computer_stop` (take the screen back from the agent using it) |
 | Store | `artifacts`, `artifact` (the project's, or one an orchestrated agent produced), `invocation`, `run_action` |
@@ -234,6 +234,7 @@ front-end uses the same.
 | `computer` | Who uses the screen changed (`user`: `{owner, who, session}` or null) |
 | `term` | A terminal's output (`session`, `data`), or `exit: true`. Not replayed to a window that rejoins a turn; `term_open` returns the scrollback |
 | `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`, and for a chat's question `session` and `chat`, its title), and its end (answered, or the turn ended) |
+| `post` | Work a chat set up posted its result there (`session`, `post`: `{from, title, text, ok, at, after}`, ADR 0025). Stored turns from `transcript` carry theirs in `posts` |
 | `summary` | Session, model, project or context changed |
 | `ext` | An app handler's `emitter.emit` |
 | `orch` | An orchestration event: `event` (an `OrchEvent`), `line` and `tone` (its timeline line, from `ark_interact::orchestration::event_line`), `activity` (for an agent's runtime event, what the conversation would show; none for steps and context reports) |

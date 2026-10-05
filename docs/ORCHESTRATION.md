@@ -117,6 +117,17 @@ stops one with `/schedules stop <id>`, and `/agents` shows them under "Scheduled
 needs an approval waits for an answer like any agent's question. "Always in this project"
 lets it run unattended.
 
+Each run's result is posted in the chat that asked for the schedule (ADR 0025): the window
+shows it under that chat's last turn, live if the chat is open, and the chat's next turn
+carries it, so the person can answer it. Any task can do the same with `TaskSpec::report_to`:
+
+```rust
+let chat = session.id().as_str();
+orch.schedule("orders", TaskSpec::new("check the new orders").report_to(chat), When::daily_at("09:00"))?;
+let tools = orch.chat_tools_for(chat);   // what agents.schedule does from that chat
+ark_runtime::session::posts(engine, chat, 0, 50)?;   // the chat's posts, oldest first
+```
+
 ## The board
 
 Each project has one board: the work it needs, who has each piece and how far it is (ADR 0023).

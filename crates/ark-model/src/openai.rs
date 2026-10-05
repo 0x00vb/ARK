@@ -11,6 +11,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 pub struct OpenAi {
+    /// The provider name it reports (`openai`, or a named endpoint's).
+    name: String,
     base: String,
     model: String,
     key: String,
@@ -33,12 +35,19 @@ impl OpenAi {
     pub fn new(base: impl Into<String>, model: impl Into<String>, key: impl Into<String>) -> Self {
         let http = HttpConfig::default();
         OpenAi {
+            name: "openai".into(),
             base: base.into(),
             model: model.into(),
             key: key.into(),
             client: http.client(),
             http,
         }
+    }
+
+    /// Report itself as `name` (in `describe` and errors): a named endpoint's provider name.
+    pub fn named(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
     }
 
     /// Use these timeouts and output cap.
@@ -85,10 +94,16 @@ fn to_wire_message(m: &Message) -> Value {
 #[async_trait]
 impl Provider for OpenAi {
     fn describe(&self) -> String {
-        format!("openai {}", self.model)
+        format!("{} {}", self.name, self.model)
     }
     fn model_id(&self) -> String {
-        self.model.clone()
+        // A named endpoint's id is a spec (`router:claude`), so its account and capacity are
+        // the endpoint's, never a built-in provider whose name equals the model's.
+        if self.name == "openai" {
+            self.model.clone()
+        } else {
+            format!("{}:{}", self.name, self.model)
+        }
     }
 
     async fn complete(
@@ -100,7 +115,7 @@ impl Provider for OpenAi {
         let body = self.body(system, messages, tools, false);
         let resp = self.post(&body, false).await?;
         if !resp.status().is_success() {
-            return Err(status_error("openai", resp, error_detail).await);
+            return Err(status_error(&self.name, resp, error_detail).await);
         }
         let v: Value = resp.json().await?;
         let msg = &v["choices"][0]["message"];
@@ -115,7 +130,7 @@ impl Provider for OpenAi {
                 let f = &c["function"];
                 let name = f["name"].as_str().unwrap_or_default();
                 let arguments = parse_args(
-                    "openai",
+                    &self.name,
                     name,
                     f.get("arguments").and_then(|a| a.as_str()).unwrap_or(""),
                 )?;
@@ -144,7 +159,7 @@ impl Provider for OpenAi {
         let body = self.body(system, messages, tools, true);
         let resp = self.post(&body, true).await?;
         if !resp.status().is_success() {
-            return Err(status_error("openai", resp, error_detail).await);
+            return Err(status_error(&self.name, resp, error_detail).await);
         }
         let mut fold = OpenAiFold::default();
         for_each_line(resp, |line| match sse_data(line) {

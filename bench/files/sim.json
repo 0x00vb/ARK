@@ -1,0 +1,331 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T04:07:02.256439Z",
+  "mode": "simulated",
+  "model": "sim",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false"
+  },
+  "workloads": [
+    {
+      "name": "files-edit",
+      "class": "files",
+      "description": "a computed column and a total row in a real spreadsheet; the saved file is checked",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 5.0,
+        "input_tokens": 11412.0,
+        "cached_input_tokens": 8636.0,
+        "uncached_input_tokens": 2776.0,
+        "output_tokens": 180.0,
+        "total_tokens": 11592.0,
+        "cost_usd": 0.010332200000000001,
+        "cost_per_success_usd": 0.010332200000000001,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 5.0,
+        "peak_context_tokens": 2512.0,
+        "mean_context_tokens": 2282.0,
+        "tool_schema_tokens": 6050.0,
+        "prefix_reuse_tokens": 8636.0,
+        "median_turn_ms": 3.0,
+        "p95_turn_ms": 4.0,
+        "median_first_token_ms": 0.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "files-edit",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Added a Revenue column (D) and a Total row (row 5) to sales.xlsx. Total revenue is 4,350.",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 11592
+          },
+          "calls_by_model": {
+            "sim": 5
+          },
+          "input_tokens": 11412,
+          "cached_input_tokens": 8636,
+          "uncached_input_tokens": 2776,
+          "cache_write_tokens": 2506,
+          "output_tokens": 180,
+          "total_tokens": 11592,
+          "tokens_measured": false,
+          "cost_usd": 0.010332200000000001,
+          "wall_ms": 4,
+          "turn_ms": [
+            4
+          ],
+          "first_token_ms": [
+            0,
+            0
+          ],
+          "model_latency_ms": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2512,
+          "mean_context_tokens": 2282,
+          "context_sources": {
+            "Capability index": 2055,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 364,
+            "Project": 250,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 240,
+            "Tool results": 753,
+            "Tool schemas": 6050,
+            "Working state": 270,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6050,
+          "tools_exposed_max": 9,
+          "tools_used": 2,
+          "result_context_tokens": 183,
+          "result_raw_tokens": 137,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 8636,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "files-edit",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Added a Revenue column (D) and a Total row (row 5) to sales.xlsx. Total revenue is 4,350.",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 11592
+          },
+          "calls_by_model": {
+            "sim": 5
+          },
+          "input_tokens": 11412,
+          "cached_input_tokens": 8636,
+          "uncached_input_tokens": 2776,
+          "cache_write_tokens": 2506,
+          "output_tokens": 180,
+          "total_tokens": 11592,
+          "tokens_measured": false,
+          "cost_usd": 0.010332200000000001,
+          "wall_ms": 3,
+          "turn_ms": [
+            3
+          ],
+          "first_token_ms": [
+            0,
+            0
+          ],
+          "model_latency_ms": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2512,
+          "mean_context_tokens": 2282,
+          "context_sources": {
+            "Capability index": 2055,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 364,
+            "Project": 250,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 240,
+            "Tool results": 753,
+            "Tool schemas": 6050,
+            "Working state": 270,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6050,
+          "tools_exposed_max": 9,
+          "tools_used": 2,
+          "result_context_tokens": 183,
+          "result_raw_tokens": 137,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 8636,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "files-edit",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Added a Revenue column (D) and a Total row (row 5) to sales.xlsx. Total revenue is 4,350.",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 11592
+          },
+          "calls_by_model": {
+            "sim": 5
+          },
+          "input_tokens": 11412,
+          "cached_input_tokens": 8636,
+          "uncached_input_tokens": 2776,
+          "cache_write_tokens": 2506,
+          "output_tokens": 180,
+          "total_tokens": 11592,
+          "tokens_measured": false,
+          "cost_usd": 0.010332200000000001,
+          "wall_ms": 3,
+          "turn_ms": [
+            3
+          ],
+          "first_token_ms": [
+            0,
+            0
+          ],
+          "model_latency_ms": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2512,
+          "mean_context_tokens": 2282,
+          "context_sources": {
+            "Capability index": 2055,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 364,
+            "Project": 250,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 240,
+            "Tool results": 753,
+            "Tool schemas": 6050,
+            "Working state": 270,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6050,
+          "tools_exposed_max": 9,
+          "tools_used": 2,
+          "result_context_tokens": 183,
+          "result_raw_tokens": 137,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 8636,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 3,
+    "success_rate": 1.0,
+    "model_calls": 5.0,
+    "input_tokens": 11412.0,
+    "cached_input_tokens": 8636.0,
+    "uncached_input_tokens": 2776.0,
+    "output_tokens": 180.0,
+    "total_tokens": 11592.0,
+    "cost_usd": 0.010332200000000001,
+    "cost_per_success_usd": 0.010332200000000001,
+    "tool_calls": 2.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 5.0,
+    "peak_context_tokens": 2512.0,
+    "mean_context_tokens": 2282.0,
+    "tool_schema_tokens": 6050.0,
+    "prefix_reuse_tokens": 8636.0,
+    "median_turn_ms": 3.0,
+    "p95_turn_ms": 4.0,
+    "median_first_token_ms": 0.0,
+    "stall_stops": 0.0
+  }
+}

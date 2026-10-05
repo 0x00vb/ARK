@@ -27,7 +27,8 @@ ArkUi::new(app)
 | `Tokens::list()`, `Tokens::revoke(name)` | names and creation times; a revoke works at once, no restart |
 | `Access::Tokens` | every request but the page's static files and `GET /health` needs a saved token; any `Host` is accepted |
 | `Access::OneTime` (default) | the local mode: a token printed at start, loopback `Host` only |
-| `remote::Client::new(url, token)` | `call(method, params)` and `hello()` from Rust: scripts, checks, other services |
+| `remote::Client::new(url, token)` | `call(method, params)`, `hello()` and `events()` from Rust: scripts, checks, other services (`ark_interact::remote`, re-exported by `ark-ui`) |
+| `app --connect URL` (`ark-cli`) | the app's terminal on the runtime, with `--token` or `ARK_TOKEN` ([`CLI.md`](CLI.md#on-another-machine), ADR 0024) |
 | `remote::run_window(url, token, ctx)` | a native window (feature `desktop`) on the runtime's own page |
 
 Give your binary a way to manage tokens (ARK Desktop: `ark-desktop token create NAME`). A token
@@ -68,7 +69,7 @@ uptime check.
 
 | Limit | Why |
 |---|---|
-| Clients that connect see the same open chat (other chats keep working in the background, ADR 0017) | one `Host` per runtime |
+| Clients that connect, windows and terminals, see the same open chat (other chats keep working in the background, ADR 0017) | one `Host` per runtime |
 | The Computer (ADR 0018) is not offered by an app served with saved tokens; it would drive the screen of the machine ARK runs on. `serve` refuses to start such an app (`ArkBuilder::computer(false)` when serving with tokens) | nobody sits at a server |
 | Connecting accounts (Mail, Calendar) needs a browser on the runtime's machine | the OAuth sign-in returns to the runtime's loopback address |
 | The signed-in browser opens on the runtime's machine | it is a visible browser there |

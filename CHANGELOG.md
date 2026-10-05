@@ -18,6 +18,16 @@ What changed for people building on ARK, per release. Not a commit log.
   provider's own page instead of ARK's plain one.
 - Window: a `person` icon, and palette actions honor `when` (an action is offered only when
   `when({})` is true).
+- Named OpenAI-compatible endpoints (ADR 0027): `ark_model::endpoints::register(Endpoint::new(name,
+  url))` or `ARK_ENDPOINTS=name=url`; `name:model` reaches it with its own key (`<NAME>_API_KEY`
+  or the app's key store) and its models from `GET /models` in `catalog()`
+  (`BackendKind::Endpoint`). Built-in provider names are refused, so `router:claude` is never
+  Claude Code ([`OPERATIONS.md`](docs/OPERATIONS.md#named-endpoints)).
+- Out of credit (ADR 0027): an HTTP 402 from a provider is `ProviderError::OutOfCredit`, not
+  retried; the turn stops with `AgentError::OutOfCredit` and the provider's words;
+  `TurnEnd::out_of_credit()` and `turn_finished.out_of_credit` give the hint both front-ends show.
+- `ark-bench` workload `files-edit`: a computed column and a total row in a real spreadsheet,
+  checked on the saved file.
 - The Browser (ADR 0015): the new crate `ark-browser` drives the installed Chrome, Edge or Brave
   over the DevTools protocol; `browser.open`, `read`, `back`, `click`, `type`; a fresh context
   per agent, and a signed-in browser one agent uses at a time. `ArkBuilder::browser(true)` or
@@ -113,6 +123,13 @@ What changed for people building on ARK, per release. Not a commit log.
   a worker's brief carries its item. `/board` (`add`, `done`, `move`, `give`, `remove`); window
   methods `board`, `board_add`, `board_change`, `board_remove`, `board_give`; a Board tab beside
   Chat in every app that runs agents ([`ORCHESTRATION.md`](docs/ORCHESTRATION.md#the-board)).
+- The terminal on a runtime elsewhere (ADR 0024): `app --connect URL` with `--token` or
+  `ARK_TOKEN` opens the shell (or a `-p` run) on the same app served with saved tokens. It
+  follows a turn already running there, asks the runtime's questions in its menu and closes
+  them when a window answers ([`CLI.md`](docs/CLI.md#on-another-machine)).
+- `ark_interact::remote::Client` (moved from `ark-ui`, which re-exports it) has `events()`: the
+  runtime's numbered events as a channel. `ark_interact::inspect::recap` builds the "where the
+  chat left off" report from a `SessionSummary` and transcript turns.
 
 - Native window: `ArkUi::keep_running(true)`: closing the window hides it and the app keeps
   running, with Open and Quit in the menu bar (the tray on Windows and Linux); the Dock icon
@@ -132,8 +149,24 @@ What changed for people building on ARK, per release. Not a commit log.
 - Benchmark: the `board` workload (planning on the board across a restart and a new chat);
   `Workload::chat` runs a team's turns through the person's conversation, and
   `TurnSpec::new_chat_after_restart` starts a new chat ([`bench/RESULTS.md`](bench/RESULTS.md)).
+- Work reports into the chat that asked for it (ADR 0025): a scheduled run's result is posted in
+  that chat (`ark_runtime::session::{post, posts, Post}`), shown under its last turn (live in
+  the window, `post` event; in the terminal's recap) and carried by the chat's next turn (the
+  newest 3, clipped). `TaskSpec::report_to`, `TaskRecord::report_to`,
+  `Orchestrator::chat_tools_for(session)`, `EventKind::Posted`, `TranscriptTurn::posts`
+  ([`ORCHESTRATION.md`](docs/ORCHESTRATION.md#schedules)).
+
+- Benchmark: the `analysis` workload (a chart and a report from a CSV with Run code, checked on
+  the saved files; simulated with a stand-in program) ([`bench/RESULTS.md`](bench/RESULTS.md)).
 
 ### Changed
+- A state-changing call that already ran twice in a task with the same input is not run, or asked
+  about, a third time; the model is told to change the input (`harness::MAX_IDENTICAL_CHANGES`).
+  On `analysis`, qwen3:4b: same success, 35% fewer tokens.
+- Runtime: an answer that ends by announcing work it has not done ("I will now call
+  files.edit...") while tools are offered is sent back once, saying nothing ran. On qwen3:4b
+  `files-edit` no run stops after reading any more; seven other workloads 20/21 to 21/21 at the
+  same cost per success (`bench/RESULTS.md`).
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
   window: actions whose summary names that extension load first, whatever the task's language.
 - Window: the Files panel opens a file in its own tab instead of in the panel.
@@ -156,10 +189,18 @@ What changed for people building on ARK, per release. Not a commit log.
   card carries `data-action`. A finished work block reads "Reading notes and 2 more steps"
   instead of "Used 3 tools". Capabilities that cannot be used say "Not available yet" (why, on
   hover) instead of an error. "Choose a folder…" and "New project…" in the sidebar's + menu.
+- Protocol: `send` takes `ask` (default true). With `false` the turn's state-changing actions are
+  refused instead of asked, as in a local `-p` run.
 
 ### Fixed
 - `ark_connect::oauth::revoke` sends the `client_id` (RFC 7009): providers that require it for a
   public client revoked nothing.
+- An app whose model is an OpenAI-compatible model called `claude` no longer gives its agents
+  Claude Code sessions: the orchestrator decides "subscription" from the provider, not the
+  model id.
+- Files: `files.list` on a file shows that file, and on a missing path says nothing has that
+  name (it said "(empty folder)", and a small model concluded the file did not exist);
+  `files.search` also matches file and folder names. Benchmark: `files-edit`, `bench/RESULTS.md`.
 - Window: a question still waiting after a reload keeps all its answers ("Always in this
   project" was missing).
 - `subprocess::run_timeout` no longer hangs until its timeout when a tool prints more than a
@@ -172,10 +213,15 @@ What changed for people building on ARK, per release. Not a commit log.
   created (English only); a file counts as written when a call wrote it or it changed in the
   project folder during the turn. On the new `claimed-files` workload, qwen3:4b said a report was
   saved that its run never wrote in 5 of 5 runs, and in 0 of 5 with the check.
+- `-p` without `--yes` denies questions that still reach it (an agent's, a connection's)
+  instead of allowing each once.
 
 ### Breaking
 - `ConnectError` has a new variant, `Refused`: a 4xx answer from a token endpoint (an expired
   or revoked grant). A `match` on `ConnectError` needs an arm for it.
+- `ProviderError::OutOfCredit` and `AgentError::OutOfCredit` are new variants: an exhaustive
+  `match` adds an arm. `BackendKind::Endpoint` likewise. `OpenAi::describe` uses its name
+  (`openai` unless `.named(..)`).
 - `HarnessEvent::ToolResult` has a new field, `files`, and `ProducedArtifact` one, `path`: a
   struct literal needs `files: Vec::new()` / `path: None` (or `ProducedArtifact::text`/`bytes`).
   `Activity` and `ArtifactSummary` have one more field each.
@@ -193,6 +239,11 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark_orchestrate::EventKind` has two more variants (`Work`, `WorkRemoved`), and `TaskSpec`,
   `TaskRecord` and `Brief` a new field each (`item`): a struct literal needs `item: None`, or
   build with `TaskSpec::new`. `Control` and `ControlOutcome` in `ark-interact` have new variants.
+- `ark_cli::ArkArgs` has `connect` and `token`, and `ark_cli::Welcome` has `runtime`: a struct
+  literal needs them (`..Default::default()` for `ArkArgs`).
+- `TaskSpec`, `TaskRecord`, `SessionRecord` and `TranscriptTurn` have one more field each
+  (`report_to`, `report_to`, `posts_read`, `posts`), and `EventKind` the variant `Posted`: a
+  struct literal or an exhaustive match needs it.
 
 ## [0.9.0] - 2026-10-04
 

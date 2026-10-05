@@ -447,3 +447,82 @@ async fn terminal_commands_and_window_methods_share_one_control() {
         .await
         .contains("a task needs an objective"));
 }
+
+#[tokio::test]
+async fn a_scheduled_run_posts_its_result_in_the_chat_and_the_window_shows_it() {
+    let dir = tempfile::tempdir().unwrap();
+    // The chat schedules; the agent's run answers with what it found.
+    let model = Arc::new(MockProvider::new("m", vec![]).with_fallback(|req| {
+        let asked = req.messages.iter().any(|m| m.content.contains("every 5 minutes"));
+        let done = req.messages.iter().any(|m| m.tool_call_id.is_some());
+        let (content, calls) = match (asked, done) {
+            (true, false) => (
+                String::new(),
+                vec![ToolCall {
+                    id: "s".into(),
+                    name: "agents.schedule".into(),
+                    arguments: json!({ "to": "helper", "objective": "read the notes", "every_minutes": 5 }),
+                }],
+            ),
+            (true, true) => ("Scheduled.".to_string(), vec![]),
+            (false, _) => ("The notes say the locket is brass.".to_string(), vec![]),
+        };
+        Completion {
+            content,
+            tool_calls: calls,
+            usage: Usage::default(),
+        }
+    }));
+    let provider: Arc<dyn ark_model::Provider> = model;
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(provider)
+        .allow_mutate(true)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    // The test drives the schedule's clock itself.
+    let built: Arc<std::sync::Mutex<Option<Orchestrator>>> = Default::default();
+    let keep = built.clone();
+    let app = App::new("Test")
+        .ark(ark)
+        .orchestrate(move |ark, project, gate| {
+            let o = Orchestrator::builder(ark, project)
+                .approvals(gate)
+                .build()?;
+            *keep.lock().unwrap() = Some(o.clone());
+            Ok(o)
+        });
+    let host = ArkUi::new(app).open().await.unwrap().0;
+    host.call("spawn_agent", json!({ "spec": { "name": "helper" } }))
+        .await
+        .unwrap();
+    let mut rx = host.subscribe();
+    host.call(
+        "send",
+        json!({ "text": "every 5 minutes have helper read the notes" }),
+    )
+    .await
+    .unwrap();
+    wait_for(&mut rx, "the turn's end", |v| v["kind"] == "turn_finished").await;
+    let session = host.call("summary", json!({})).await.unwrap()["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let o = built.lock().unwrap().clone().unwrap();
+    let next = o.schedules()[0].next_ms.unwrap();
+    let run = o.tick_schedules(next);
+    o.wait(&run[0]).await.unwrap();
+    let post = wait_for(&mut rx, "the post", |v| v["kind"] == "post").await;
+    assert_eq!(post["session"], json!(session));
+    assert_eq!(post["post"]["from"], "helper");
+
+    let turns = host.call("transcript", json!({})).await.unwrap();
+    let last = turns.as_array().unwrap().last().unwrap().clone();
+    assert_eq!(
+        last["posts"][0]["text"],
+        "The notes say the locket is brass."
+    );
+}

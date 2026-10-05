@@ -156,6 +156,12 @@ pub(crate) async fn status_error(
             t.chars().take(300).collect()
         }
     });
+    if status == 402 {
+        return ProviderError::OutOfCredit {
+            provider: provider.to_string(),
+            detail,
+        };
+    }
     ProviderError::Status {
         provider: provider.to_string(),
         status,

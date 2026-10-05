@@ -44,6 +44,7 @@ Captured from a real run with a local 4B model and the planner on (it is off by 
 | `app --session <id>` | Continue a specific session (id or unique prefix) |
 | `app --project <name>` | Work in another project (created if missing) |
 | `app --model <m>` | Use another model: `qwen3:4b`, `anthropic:claude-sonnet-5-5`, or a subscription: `claude:sonnet`, `codex:default` |
+| `app --connect <url>` | Use the same app running elsewhere (see [On another machine](#on-another-machine)) |
 | `app -v` | Start with the debug view on |
 | `app -p "prompt"` | Run one prompt and exit (see [Headless](#headless-runs)) |
 | `echo "prompt" \| app` | Same, prompt from stdin |
@@ -207,9 +208,48 @@ scripted run can be continued interactively later with `--resume`.
 | `-p "..."` | Answer on stdout (streamed), activity on stderr |
 | `-p "..." --json` | One JSON object: answer, cited, steps, metrics, findings, session, context |
 | `-p "..." --events` | Every runtime event as a JSON line, then a `{"type":"result",...}` line |
-| `--yes` | Allow state-changing actions. Without it they are refused and the model is told |
+| `--yes` | Allow state-changing actions. Without it they are refused and the model is told, and any other question (an agent's) is denied |
 
 Exit codes: 0 answered, 1 error, 130 stopped by Ctrl+C.
+
+## On another machine
+
+`--connect` opens the shell on the same app running elsewhere: its agents, schedules, store and
+models (ADR 0024). The app serves itself with saved access tokens ([`REMOTE.md`](REMOTE.md));
+nothing runs in the terminal's process but the terminal.
+
+```text
+$ export ARK_TOKEN=ark_…            # made on that runtime, e.g. `writer --new-token laptop`
+$ writer --connect https://ark.example.com
+
+  Writer · powered by ARK
+  a developmental editor that reads your manuscript before it opines
+  on ARK at https://ark.example.com
+  model ollama qwen3:4b-instruct · project the-locket · session bfdfa551
+  /help for commands · esc stops the agent · ctrl+d leaves
+
+✓ Continuing How many words are in chapter 4? · 2 turns · just now
+  › How many words are in chapter 4?
+    Chapter 4 contains **95 words**. …
+  The agent continues from its working state; the transcript is not replayed.
+✎ _
+```
+
+Captured from a real run against `writer --serve 127.0.0.1:8431 --tokens` on the same machine
+(address shortened; the answer is trimmed).
+
+| What | How it works with `--connect` |
+|---|---|
+| The chat | The one open there: a window on the same runtime shows the same conversation. `/resume`, `/new`, `/project` and `/model` work as commands |
+| A turn running when you connect | Shown so far, then followed to the end |
+| Questions | Asked here; answered in a window, they close here |
+| Esc, steering, queueing | As locally |
+| `-p` | Same flags. `--json` has `ok`, `answer`, `cancelled`, `steps`, `session` and `project` |
+| Leaving | The chat and its agents keep running there |
+| Not with | `--resume`, `--session`, `--project`, `--model` (use the commands) |
+
+The token comes from `--token` or `ARK_TOKEN`; prefer the variable, since a flag shows in the
+process list.
 
 ## Logs
 

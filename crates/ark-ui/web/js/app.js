@@ -360,7 +360,7 @@ function elsewhere(msg) {
     ask(msg);
   } else if (msg.kind === "approval_closed") {
     state.approvals.delete(msg.id);
-  } else if (msg.kind === "turn_finished") {
+  } else if (msg.kind === "turn_finished" || msg.kind === "post") {
     sidebar.refresh(state.sessionId);
   }
 }
@@ -410,6 +410,9 @@ function onEvent(msg) {
       break;
     case "computer":
       showComputer(msg.user);
+      break;
+    case "post":
+      thread.post(msg.post);
       break;
     case "turn_finished": {
       thread.finish(msg);

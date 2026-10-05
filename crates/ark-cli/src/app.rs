@@ -1,13 +1,12 @@
 //! Shell state shared by the interactive loop, the turn driver and headless runs. Everything
-//! that is not drawing lives in the [`Interaction`].
+//! that is not drawing lives in the [`Chat`]: an `Interaction` here, or a runtime elsewhere.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark_interact::{Interaction, PendingApproval};
 use ark_sdk::prelude::*;
-use tokio::sync::mpsc;
 
+use crate::chat::Chat;
 use crate::term::Out;
 use crate::theme::Theme;
 
@@ -27,6 +26,8 @@ pub struct Welcome {
     pub session: String,
     pub resumed: bool,
     pub turns: u32,
+    /// The runtime's address when the shell is connected to one elsewhere (`--connect`).
+    pub runtime: Option<String>,
 }
 
 pub(crate) struct Config {
@@ -39,8 +40,7 @@ pub(crate) struct Config {
 
 pub(crate) struct ShellState {
     pub cfg: Arc<Config>,
-    pub ix: Interaction,
-    pub approvals: mpsc::UnboundedReceiver<PendingApproval>,
+    pub chat: Chat,
     pub out: Out,
 }
 

@@ -14,7 +14,6 @@ use ark_sdk::prelude::*;
 
 use crate::activity::{self, Activity, ActivityKind};
 use crate::command::{parse, Command, CommandInfo, Reply};
-use crate::fmt::{ago, clip, count};
 use crate::inspect::{
     self, ContextSource, ContextView, KeptOut, Pricing, ProjectSummary, SessionSummary, StateView,
     TranscriptTurn, UsageView,
@@ -392,6 +391,7 @@ fn transcript_page(
     limit: usize,
 ) -> anyhow::Result<Vec<TranscriptTurn>> {
     let sid = session.id().as_str().to_string();
+    let posts = ark_sdk::prelude::ark_runtime::session::posts(engine, &sid, 0, usize::MAX)?;
     Ok(session
         .transcript_page(engine, before, limit)?
         .iter()
@@ -416,7 +416,14 @@ fn transcript_page(
                         .collect()
                 })
                 .unwrap_or_default();
-            TranscriptTurn::of(t, activity, rec.is_some())
+            let mut turn = TranscriptTurn::of(t, activity, rec.is_some());
+            // Each post goes after the turn that was last when it came.
+            turn.posts = posts
+                .iter()
+                .filter(|(_, p)| p.after.unwrap_or(0) == t.index)
+                .map(|(_, p)| p.clone())
+                .collect();
+            turn
         })
         .collect())
 }
@@ -556,25 +563,25 @@ pub struct Opened {
     pub resumed: bool,
 }
 
-/// Parse `<model>`, `<provider>:<model>` or `<provider> <model>`. A bare model keeps the
-/// current reasoning provider.
+/// Parse `<model>`, `<provider>:<model>` or `<provider> <model>`. The provider is a built-in
+/// one or a named endpoint (`router:gpt-5`). A bare model keeps the current reasoning provider.
 pub fn model_spec(spec: &str, ark: &Ark) -> (String, String) {
-    use ark_model::PROVIDERS;
+    use ark_model::is_provider;
     let spec = spec.trim();
     if let Some((p, m)) = spec.split_once(':') {
-        if PROVIDERS.contains(&p) {
+        if is_provider(p) {
             return (p.to_string(), m.trim().to_string());
         }
     }
     let parts: Vec<&str> = spec.split_whitespace().collect();
     match parts.as_slice() {
-        [p, m, ..] if PROVIDERS.contains(p) => (p.to_string(), m.to_string()),
+        [p, m, ..] if is_provider(p) => (p.to_string(), m.to_string()),
         _ => {
             let current = ark.router().provider(Role::Reason).describe();
             let provider = current
                 .split_whitespace()
                 .next()
-                .filter(|p| PROVIDERS.contains(p))
+                .filter(|p| is_provider(p))
                 .map(str::to_string)
                 .or_else(|| std::env::var("ARK_PROVIDER").ok())
                 .unwrap_or_else(|| "ollama".into());
@@ -633,8 +640,49 @@ pub struct TurnEnd {
     pub index: Option<u32>,
 }
 
+impl TurnEnd {
+    /// The turn stopped because the model's account is out of credit.
+    pub fn out_of_credit(&self) -> Option<OutOfCredit> {
+        self.result.as_ref().err().and_then(OutOfCredit::of)
+    }
+}
+
+/// A turn stopped because the model's account has no credit left (the provider answered 402).
+/// Every front-end shows `message` (the provider's words) and `hint`; an app that knows the
+/// provider can offer its own way to add credit.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OutOfCredit {
+    /// The provider in the model spec (`openai`, a named endpoint).
+    pub provider: String,
+    pub message: String,
+    /// "Add credit to your OpenRouter account, or pick another model."
+    pub hint: String,
+}
+
+impl OutOfCredit {
+    pub fn of(e: &ArkError) -> Option<OutOfCredit> {
+        let (provider, message) = match e {
+            ArkError::Runtime(ark_runtime::AgentError::OutOfCredit { provider, message }) => {
+                (provider.clone(), message.clone())
+            }
+            ArkError::Provider(ark_model::ProviderError::OutOfCredit { provider, detail }) => {
+                (provider.clone(), detail.clone())
+            }
+            _ => return None,
+        };
+        let label = ark_model::endpoints::endpoint(&provider)
+            .map(|e| e.label)
+            .unwrap_or_else(|| provider.clone());
+        Some(OutOfCredit {
+            hint: format!("Add credit to your {label} account, or pick another model."),
+            provider,
+            message,
+        })
+    }
+}
+
 /// What a welcome screen or status line shows.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Summary {
     pub name: String,
     pub tagline: Option<String>,
@@ -1253,9 +1301,10 @@ impl Interaction {
     /// chat tools, so the person asks in words and the chat creates agents and tasks, and the
     /// project's board, so it plans and continues work across chats.
     fn turn_tools(&self) -> Vec<ark_sdk::TurnTools> {
+        let chat = self.session.id().as_str();
         self.orchestrator
             .iter()
-            .flat_map(|o| [o.chat_tools(), o.board_tools()])
+            .flat_map(|o| [o.chat_tools_for(chat), o.board_tools()])
             .collect()
     }
 
@@ -1348,35 +1397,9 @@ impl Interaction {
 
     /// Where a resumed session left off: its title and the last exchanges, clipped.
     pub fn recap(&self) -> Report {
-        let rec = self.session.record();
-        let title = if rec.title.is_empty() {
-            rec.id.short().to_string()
-        } else {
-            clip(&rec.title, 60)
-        };
-        let mut r = Report::new().success(format!(
-            "Resumed {title} · {} · {}",
-            count(rec.turn_count as u64, "turn"),
-            ago(rec.updated_at)
-        ));
-        for t in self
-            .session
-            .transcript(self.engine(), Some(2))
-            .unwrap_or_default()
-        {
-            r = r.text(format!("› {}", clip(&t.input, 100)));
-            r = r.note(if t.cancelled {
-                "  (stopped)".to_string()
-            } else if t.incomplete {
-                format!(
-                    "  (did not finish: {})",
-                    t.error.as_deref().unwrap_or("unknown reason")
-                )
-            } else {
-                format!("  {}", clip(&t.answer, 160))
-            });
-        }
-        r.note("The agent continues from its working state; the transcript is not replayed.")
+        let last = self.transcript(None, 2).unwrap_or_default();
+        let session = SessionSummary::of(self.session.record(), &self.project.name, true);
+        inspect::recap("Resumed", &session, &last)
     }
 }
 

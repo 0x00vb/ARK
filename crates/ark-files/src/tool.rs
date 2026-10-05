@@ -70,7 +70,7 @@ impl Adapter for Files {
                     "from": { "type": "integer", "description": "documents: first block; text: first line" }
                 }
             })),
-            ActionDescriptor::new(SEARCH, "find text across the project's files, inside spreadsheets and documents too", RiskTier::Read)
+            ActionDescriptor::new(SEARCH, "find text across the project's files, inside spreadsheets and documents too, and files and folders by name", RiskTier::Read)
                 .with_input_schema(json!({
                     "type": "object", "required": ["query"],
                     "properties": {
@@ -134,6 +134,16 @@ impl Adapter for Files {
                 let rel = s("path");
                 let dir = crate::inside(&root, &rel).map_err(tool)?;
                 let mut entries = Vec::new();
+                if dir.is_file() {
+                    // A file given as the folder: it is there, and this is it (an empty
+                    // listing made models conclude it did not exist).
+                    let bytes = std::fs::metadata(&dir).map_or(0, |m| m.len());
+                    entries.push(json!({ "path": crate::relative(&root, &dir), "bytes": bytes }));
+                } else if !dir.exists() {
+                    return Err(AdapterError::Tool(format!(
+                        "nothing named `{rel}` in the project; list the root (no path) to see what it has"
+                    )));
+                }
                 walk(&root, &dir, 0, 2, &mut entries);
                 let more = entries.len() > LIST_ENTRIES;
                 entries.truncate(LIST_ENTRIES);
@@ -458,6 +468,15 @@ fn search(root: &Path, dir: &Path, needle: &str, hits: &mut Vec<String>) {
         }
         let p = e.path();
         let Ok(meta) = e.metadata() else { continue };
+        // A name matches too: people look for a file by the name they know.
+        if name.to_lowercase().contains(needle) {
+            let rel = crate::relative(root, &p);
+            hits.push(if meta.is_dir() {
+                format!("{rel}/: folder name")
+            } else {
+                format!("{rel}: file name")
+            });
+        }
         if meta.is_dir() {
             search(root, &p, needle, hits);
         } else {
@@ -657,6 +676,34 @@ mod tests {
         // An edit based on what the agent read before the person's change is refused.
         let stale = run(root, EDIT, json!({"path": "sales.xlsx", "version": seen.version, "edits": [{"cell": "B2", "value": 1}]})).await.err().unwrap();
         assert!(stale.contains("changed since it was read"), "{stale}");
+    }
+
+    /// What a small model tried when looking for a file it was told about (the `files-edit`
+    /// workload): listing the file itself, then searching for its name.
+    #[tokio::test]
+    async fn a_file_is_found_by_listing_it_or_searching_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        run(
+            root,
+            WRITE,
+            json!({"path": "sales.xlsx", "rows": [["Month"]]}),
+        )
+        .await
+        .unwrap();
+        let listed = run(root, LIST, json!({"path": "sales.xlsx"}))
+            .await
+            .unwrap();
+        assert_eq!(said(&listed, LIST), "sales.xlsx");
+        let missing = run(root, LIST, json!({"path": "sales.csv"}))
+            .await
+            .err()
+            .unwrap();
+        assert!(missing.contains("nothing named `sales.csv`"), "{missing}");
+        let hits = run(root, SEARCH, json!({"query": "sales.xlsx"}))
+            .await
+            .unwrap();
+        assert_eq!(said(&hits, SEARCH), "sales.xlsx: file name");
     }
 
     #[tokio::test]

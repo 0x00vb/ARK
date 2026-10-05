@@ -2,24 +2,24 @@
 //! around it without blocking any of them:
 //!
 //! ```text
-//!   runtime events ─┐
-//!   approval asks  ─┼─► select! ─► TurnView ─► terminal
-//!   key presses    ─┤              (esc → CancelToken, enter → Steering, tab → queue)
-//!   spinner tick   ─┘
+//!   turn updates   ─┐  (events, approval questions, questions answered elsewhere)
+//!   key presses    ─┼─► select! ─► TurnView ─► terminal
+//!   spinner tick   ─┤              (esc → cancel, enter → steer, tab → queue)
+//!   the turn's end ─┘
 //! ```
 //!
-//! The runtime never sees the terminal. `Interaction::run_turn` gets a [`TurnControl`] and a
-//! callback that forwards events into a channel.
+//! The runtime never sees the terminal. The turn runs here or on a runtime elsewhere
+//! ([`crate::chat`]); the loop is the same.
 
 use std::time::Duration;
 
-use ark_interact::{Activity, TurnControl};
 use ark_sdk::prelude::*;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 
 use crate::app::ShellState;
 use crate::approval::{Menu, MenuKey};
+use crate::chat::Update;
 use crate::term::RawMode;
 use crate::view::TurnView;
 
@@ -34,17 +34,11 @@ pub(crate) struct Next {
 
 pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
     let cfg = st.cfg.clone();
-    let mut view = TurnView::new(&cfg.theme, cfg.event_hook.as_ref(), st.ix.detail());
+    let mut view = TurnView::new(&cfg.theme, cfg.event_hook.as_ref(), st.chat.detail());
     view.live = true;
 
-    let ctl = TurnControl::new();
-    let (ev_tx, mut ev_rx) =
-        tokio::sync::mpsc::unbounded_channel::<(HarnessEvent, Option<Activity>)>();
-
     let raw = RawMode::enable(true);
-    let ShellState {
-        ix, out, approvals, ..
-    } = &mut *st;
+    let ShellState { chat, out, .. } = &mut *st;
     out.set_raw(raw.is_on());
     out.blank();
 
@@ -56,29 +50,34 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
     let mut tick = tokio::time::interval(Duration::from_millis(120));
     let mut menu: Option<Menu> = None;
     let mut queued: Option<String> = None;
-    let labels = ix.labels().clone();
 
-    let turn = ix.run_turn(input, &ctl, move |ev, a| {
-        let _ = ev_tx.send((ev.clone(), a.cloned()));
-    });
-    tokio::pin!(turn);
+    let mut turn = chat.turn(input, true);
+    let ctl = turn.control.clone();
 
     let end = loop {
         tokio::select! {
             biased;
-            Some((ev, a)) = ev_rx.recv() => view.event(ev, a, out),
-            Some(pending) = approvals.recv() => {
-                let line = labels.approval_line(&pending.request);
-                let mut m = Menu::new(pending, line);
-                out.clear_status();
-                let lines = m.render(&cfg.theme);
-                for l in &lines {
-                    out.line(l);
+            Some(u) = turn.updates.recv() => match u {
+                Update::Event(ev, a) => view.event(ev, a, out),
+                Update::Ask(q) => {
+                    let mut m = Menu::new(q);
+                    out.clear_status();
+                    let lines = m.render(&cfg.theme);
+                    for l in &lines {
+                        out.line(l);
+                    }
+                    m.lines = lines.len();
+                    view.in_menu = true;
+                    menu = Some(m);
                 }
-                m.lines = lines.len();
-                view.in_menu = true;
-                menu = Some(m);
-            }
+                // Answered in another window: take the menu away.
+                Update::Closed(id) => {
+                    if menu.as_ref().is_some_and(|m| m.id() == Some(id)) {
+                        out.rewind(menu.take().map_or(0, |m| m.lines));
+                        view.in_menu = false;
+                    }
+                }
+            },
             Some(key) = next_key(&mut keys) => {
                 if let Some(m) = menu.as_mut() {
                     match m.key(key) {
@@ -101,7 +100,7 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
                             m.answer(ApprovalDecision::Deny);
                             menu = None;
                             view.in_menu = false;
-                            ctl.cancel.cancel();
+                            ctl.cancel();
                             view.cancelling = true;
                         }
                         MenuKey::Ignore => {}
@@ -110,12 +109,12 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
                 }
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
-                    KeyCode::Char('c') if ctrl => { ctl.cancel.cancel(); view.cancelling = true; }
-                    KeyCode::Esc => { ctl.cancel.cancel(); view.cancelling = true; }
+                    KeyCode::Char('c') if ctrl => { ctl.cancel(); view.cancelling = true; }
+                    KeyCode::Esc => { ctl.cancel(); view.cancelling = true; }
                     KeyCode::Enter if !view.typeahead.trim().is_empty() => {
                         let text = std::mem::take(&mut view.typeahead);
                         view.note(out, &format!("› {} (reaches the agent at its next step)", text.trim()));
-                        ctl.steer.push(text.trim());
+                        ctl.steer(text.trim());
                     }
                     KeyCode::Tab if !view.typeahead.trim().is_empty() => {
                         queued = Some(std::mem::take(&mut view.typeahead).trim().to_string());
@@ -131,14 +130,17 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
                 out.refresh_width();
                 view.tick(out);
             }
-            end = &mut turn => break end,
+            end = &mut turn.end => break end,
         }
     };
-    while let Ok((ev, a)) = ev_rx.try_recv() {
-        view.event(ev, a, out);
+    while let Ok(u) = turn.updates.try_recv() {
+        match u {
+            Update::Event(ev, a) => view.event(ev, a, out),
+            Update::Ask(q) => q.answer(ApprovalDecision::Deny),
+            Update::Closed(_) => {}
+        }
     }
-    if let Some(m) = menu.take() {
-        let mut m = m;
+    if let Some(mut m) = menu.take() {
         m.answer(ApprovalDecision::Deny);
     }
     let draft = std::mem::take(&mut view.typeahead);

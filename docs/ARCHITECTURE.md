@@ -72,8 +72,8 @@ Arrows point from a dependency to its user. There are no cycles.
 | `ark-runtime` | `Harness` (the loop), `Engine` (ingest, run actions, approval gate), `Session`, `AgentProfile`, `ModelRouter`, `DistillerSet`, `ApprovalGate`, `CancelToken`, `Steering`, `ContextReport`, `Metrics`; `Agent`, a plain ReAct loop |
 | `ark-sdk` | `Ark`, `Ark::builder()`, `TurnOptions`, `prelude` |
 | `ark-orchestrate` | `Orchestrator`, `AgentSpec`, `TaskSpec`, `TaskRecord`, `Budget`, `Models`, `ModelResolver`, `Graph`, `OrchEvent`. Details: [`ORCHESTRATION.md`](ORCHESTRATION.md) |
-| `ark-interact` | `App`, `Interaction`, `Command`, `Reply`, `Report`, `ActivityLabels`, `ToolLabeler`, `trace`, `inspect`, `logging` |
-| `ark-cli` | `ArkCli`, `ArkArgs`, `Theme`. Details: [`CLI.md`](CLI.md) |
+| `ark-interact` | `App`, `Interaction`, `Command`, `Reply`, `Report`, `ActivityLabels`, `ToolLabeler`, `trace`, `inspect`, `logging`; `remote::Client`, the protocol client of a runtime served elsewhere |
+| `ark-cli` | `ArkCli`, `ArkArgs`, `Theme`; the same shell on this process's `Interaction` or on a runtime elsewhere (`--connect`, ADR 0024). Details: [`CLI.md`](CLI.md) |
 | `ark-ui` | `ArkUi`, `Host`; Tauri window (feature `desktop`) or loopback HTTP + SSE. Details: [`UI.md`](UI.md) |
 | `ark-bench` | `Workload`, metered provider, simulated model, reports, `compare`. Details: [`BENCH.md`](BENCH.md) |
 

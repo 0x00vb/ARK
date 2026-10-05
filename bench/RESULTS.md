@@ -3,6 +3,100 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Analysis with Run code (2026-10-05)
+
+The `analysis` workload: `sales.csv` (sales by region and month) in the project folder; the task
+asks for a bar chart (`chart.png`) and a two-sentence report (`report.md`) made with Python. The
+check reads the saved files: a PNG, and a report that names North with 4,300. Live runs use
+ARK's Run code in its sandbox. Reports in `bench/analysis/`.
+
+| `analysis` | Success | Model calls | Total tokens | Runs of code | Median turn |
+|---|---:|---:|---:|---:|---:|
+| qwen3:4b, live | 1/3 | 5.0 | 14,928 | 3.3 | 66.9 s |
+| qwen3.5:27b, live | 2/2 | 3.5 | 8,991 | 2.0 | 154.6 s |
+| simulated | 2/2 | 3.0 | 5,107 | 1.0 | |
+
+- qwen3:4b wrote a program with a syntax error (an extra `)` after an f-string) and ran the same
+  program again unchanged: 2 times in one run, 6 in the other, then explained the error instead
+  of fixing it. Measured below with a check for identical changes.
+- qwen3.5:27b wrote both files on its first run of code in both runs.
+
+**An identical change runs at most twice.** A state-changing call that already ran twice in
+the task with the same input is not run, or asked about, again; the model is told to change the
+input. Live qwen3:4b, 5 runs each (`analysis/repeat-{before,after}-qwen3-4b.json`):
+
+| `analysis`, qwen3:4b | Success | Model calls | Total tokens | Runs of code |
+|---|---:|---:|---:|---:|
+| before | 1/5 | 7.4 | 27,318 | 5.0 |
+| identical change at most twice | 1/5 | 5.6 | 17,873 | 2.4 |
+
+- No success gained or lost; 35% fewer tokens and half the program runs per task. Told to change
+  the program, qwen3:4b explained its syntax error correctly and stopped instead of fixing it.
+- Simulated: none of the 21 workloads moved.
+## An answer that announces work it has not done (2026-10-05)
+
+On `files-edit`, qwen3:4b read the spreadsheet and then ended its reply with "I will now call
+`files__edit` to add the Revenue column" in 3 of 5 runs, with tools still offered. The harness now
+sends such an answer back once: "Your reply says what you will do next, but it called no tool, so
+nothing was done". The check reads the last three sentences of the answer for first-person
+future phrases ("I will now", "let me now", "I'll call", ...) and skips a sentence that waits on
+the person ("if you confirm", a question). It runs only when the request offered tools.
+Deterministic, English only. Reports in `bench/files/`.
+
+| `files-edit`, qwen3:4b | Success | Stopped after reading | Wrote the revenues | Model calls |
+|---|---:|---:|---:|---:|
+| before (`live-qwen3-4b.json`) | 0/5 | 3/5 | 2/5 | 4.2 |
+| with the check (`live-qwen3-4b-announce.json`) | 0/5 | 0/5 | 3/5 | 5.8 |
+
+Every run that finished now edits the file. They still fail the check: the totals go in a new
+column or a new sheet instead of a row under the months (one run of the 5 ended on an Ollama
+error, "invalid tool call arguments"). That is the model's layout, not the loop's.
+
+Seven other live workloads, where recorded qwen3:4b answers ended with "I will now..." (of
+828 recorded live answers, 29 would have been sent back: 15 from failed runs, 14 from runs
+that passed, mostly "I will now verify..."). qwen3:4b, 3 runs each, the check off and on
+(`announce-off.json`, `announce-on.json`):
+
+| 7 workloads | Success | Cost per success | Total tokens | Model calls |
+|---|---:|---:|---:|---:|
+| off | 20/21 | $0.01210 | 105,709 | 61 |
+| on | 21/21 | $0.01203 | 110,609 | 63 |
+
+- `large-output` 2/3 to 3/3 (noise at 3 runs is likely); `duplicate` 2.0 to 2.7 calls, still
+  3/3 (the check fired and the model fetched the orders it had announced); the rest moved
+  within one call.
+- Simulated: the simulated model of `files-edit` now stops after reading the way qwen3:4b did
+  and edits once told; it passes with the check (5 calls) and fails without it (2 calls). The
+  19 other workloads did not move.
+
+## A spreadsheet edited in place (2026-10-05)
+
+The `files-edit` workload: the project folder has `sales.xlsx` (a Sales sheet with Month, Units
+and Price for three months, and a Notes sheet). The task asks for a Revenue column and a Total
+row. The check opens the saved file: each month's revenue in its row, a Total row with 405 units
+and 4,350 revenue, the Notes sheet still there. What the answer says does not count. Reports in
+`bench/files/`.
+
+| `files-edit` | Success | Model calls | Total tokens | Tool calls | Median turn |
+|---|---:|---:|---:|---:|---:|
+| qwen3:4b, before | 0/3 | 4.0 | 10,696 | 3.0 | 6.4 s |
+| qwen3:4b, a file is found by its name | 0/5 | 4.2 | 13,113 | 3.2 | 47.4 s |
+| qwen3.5:27b | 3/3 | 3.3 | 10,430 | 2.0 | 99.1 s |
+| simulated | 3/3 | 4.0 | 9,100 | 2.0 | |
+
+- Before: in 2 of 3 runs qwen3:4b called `files.list {"path": "sales.xlsx"}`, got "(empty
+  folder)", then `files.search` for the name, got "nothing contains", and answered that the file
+  does not exist. Now listing a file shows that file, listing a missing path says nothing has
+  that name, and search matches file and folder names. After: 5 of 5 runs found and read it.
+- What fails now is the model. In 3 of 5 runs qwen3:4b read the file, then ended with "I will
+  now add...". In 1 it replaced the workbook with `files.write`, losing the Notes sheet. In 1 it
+  used `files.edit` but wrote the revenues over the units. This is the stop-before-writing seen
+  in ARK Desktop.
+- qwen3.5:27b read once, then made one `files.edit` with formulas (`=B2*C2`, `=SUM(D2:D4)`), in
+  all 3 runs.
+- Timings are noisy: another live run shared Ollama during the qwen3:4b runs.
+- Next: an answer that announces work it has not done, sent back once (the section above).
+
 ## Planning on the board (2026-10-05)
 
 The `board` workload (ADR 0023): the person's chat, with the chat and board tools, is asked to

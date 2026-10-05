@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use ark_sdk::prelude::ark_core::{Artifact, ResearchState};
-use ark_sdk::prelude::ark_runtime::{Metrics, SessionRecord, Turn};
+use ark_sdk::prelude::ark_runtime::{Metrics, Post, SessionRecord, Turn};
 use ark_sdk::prelude::ContextReport;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -575,6 +575,33 @@ pub fn sessions_report(list: &[SessionSummary]) -> Report {
         .data("sessions", list)
 }
 
+/// Where a chat left off: its title, its last exchanges clipped, and that the agent goes on
+/// from its working state. `heading` says how the person got here ("Resumed").
+pub fn recap(heading: &str, s: &SessionSummary, last: &[TranscriptTurn]) -> Report {
+    let title = if s.title.is_empty() {
+        s.short.clone()
+    } else {
+        clip(&s.title, 60)
+    };
+    let mut r = Report::new().success(format!(
+        "{heading} {title} · {} · {}",
+        count(s.turns as u64, "turn"),
+        ago(s.updated_at)
+    ));
+    for t in last {
+        r = r.text(format!("› {}", clip(&t.input, 100)));
+        r = r.note(match (&t.unfinished, t.cancelled) {
+            (_, true) => "  (stopped)".to_string(),
+            (Some(why), _) => format!("  (did not finish: {why})"),
+            (None, _) => format!("  {}", clip(&t.answer, 160)),
+        });
+        for p in &t.posts {
+            r = r.note(format!("  ↳ {}: {}", p.from, clip(&p.text, 160)));
+        }
+    }
+    r.note("The agent continues from its working state; the transcript is not replayed.")
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProjectSummary {
     pub id: String,
@@ -605,6 +632,9 @@ pub struct TranscriptTurn {
     pub activity: Vec<Activity>,
     pub has_trace: bool,
     pub elapsed_ms: u64,
+    /// Posted in the chat after this turn by work it set up (a scheduled run's result).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub posts: Vec<Post>,
 }
 
 impl TranscriptTurn {
@@ -629,6 +659,7 @@ impl TranscriptTurn {
             activity,
             has_trace,
             elapsed_ms: t.metrics.elapsed_ms,
+            posts: Vec::new(),
         }
     }
 }

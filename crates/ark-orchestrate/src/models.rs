@@ -232,8 +232,10 @@ impl ModelResolver for Models {
                 Some(r) => {
                     let id = r.model_id(Role::Reason);
                     // The app's own model is a subscription CLI: the agent still gets a
-                    // managed session of its own.
-                    if self.subs.manages(&id) {
+                    // managed session of its own. Decided by the provider (`claude sonnet`),
+                    // not the model id: an endpoint's model may be called `claude`.
+                    let spec = r.provider(Role::Reason).describe().replacen(' ', ":", 1);
+                    if self.subs.manages(&spec) {
                         id
                     } else {
                         let account = account_of(&id);

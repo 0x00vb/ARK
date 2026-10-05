@@ -1,0 +1,320 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T04:01:06.345821Z",
+  "mode": "live",
+  "model": "ollama:qwen3.5:27b",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "600"
+  },
+  "workloads": [
+    {
+      "name": "files-edit",
+      "class": "files",
+      "description": "a computed column and a total row in a real spreadsheet; the saved file is checked",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 3.3333333333333335,
+        "input_tokens": 9669.666666666666,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 9669.666666666666,
+        "output_tokens": 760.0,
+        "total_tokens": 10429.666666666666,
+        "cost_usd": 0.026939333333333332,
+        "cost_per_success_usd": 0.026939333333333332,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.3333333333333335,
+        "peak_context_tokens": 2506.0,
+        "mean_context_tokens": 2220.0,
+        "tool_schema_tokens": 4033.3333333333335,
+        "prefix_reuse_tokens": 4868.666666666667,
+        "median_turn_ms": 99082.0,
+        "p95_turn_ms": 140077.0,
+        "median_first_token_ms": 20580.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "files-edit",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done! I've updated sales.xlsx with:\n\n**Revenue Column (Column D):**\n- January: $1,200 (120 × $10)\n- February: $1,350 (135 × $10)\n- March: $1,800 (150 × $12)\n\n**Total Row (Row 5):**\n- Total Units: 405\n- Total Revenue: $4,350\n\nThe spreadsheet now has formulas that will automatically recalculate if the underlying Units or Price values change.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 9190
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 3
+          },
+          "input_tokens": 8535,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8535,
+          "cache_write_tokens": 0,
+          "output_tokens": 655,
+          "total_tokens": 9190,
+          "tokens_measured": true,
+          "cost_usd": 0.02362,
+          "wall_ms": 140077,
+          "turn_ms": [
+            140077
+          ],
+          "first_token_ms": [
+            60196
+          ],
+          "model_latency_ms": [
+            32865,
+            36154,
+            71049
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2360,
+          "mean_context_tokens": 2194,
+          "context_sources": {
+            "Capability index": 1233,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 129,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 144,
+            "Tool results": 299,
+            "Tool schemas": 3630,
+            "Working state": 141,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3630,
+          "tools_exposed_max": 9,
+          "tools_used": 2,
+          "result_context_tokens": 200,
+          "result_raw_tokens": 154,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4107,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "files-edit",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done! I've updated sales.xlsx with:\n\n**Revenue Column (Column D):**\n- Header \"Revenue\" in D1\n- Formulas calculating Units × Price for each month:\n  - January: 1,200 (120 × 10)\n  - February: 1,350 (135 × 10)\n  - March: 1,800 (150 × 12)\n\n**Total Row (Row 5):**\n- \"Total\" label in A5\n- Total Units: 405 (=SUM of B2:B4)\n- Total Revenue: 4,350 (=SUM of D2:D4)\n\nThe spreadsheet now has the complete revenue",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 9259
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 3
+          },
+          "input_tokens": 8527,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8527,
+          "cache_write_tokens": 0,
+          "output_tokens": 732,
+          "total_tokens": 9259,
+          "tokens_measured": true,
+          "cost_usd": 0.024374,
+          "wall_ms": 92586,
+          "turn_ms": [
+            92586
+          ],
+          "first_token_ms": [
+            20580
+          ],
+          "model_latency_ms": [
+            27015,
+            32285,
+            33273
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2360,
+          "mean_context_tokens": 2194,
+          "context_sources": {
+            "Capability index": 1233,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 129,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 144,
+            "Tool results": 299,
+            "Tool schemas": 3630,
+            "Working state": 141,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3630,
+          "tools_exposed_max": 9,
+          "tools_used": 2,
+          "result_context_tokens": 200,
+          "result_raw_tokens": 154,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4107,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "files-edit",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done. I've updated sales.xlsx with:\n\n**Revenue Column (D):**\n- January: 1,200 (120 × 10)\n- February: 1,350 (135 × 10)\n- March: 1,800 (150 × 12)\n\n**Total Row (Row 5):**\n- Total Units: 405\n- Total Revenue: 4,350\n\nAll values use formulas (=B2*C2, etc. for revenue; =SUM() for totals), so they'll update automatically if the source data changes.",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 12840
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 4
+          },
+          "input_tokens": 11947,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 11947,
+          "cache_write_tokens": 0,
+          "output_tokens": 893,
+          "total_tokens": 12840,
+          "tokens_measured": true,
+          "cost_usd": 0.032824,
+          "wall_ms": 99082,
+          "turn_ms": [
+            99082
+          ],
+          "first_token_ms": [
+            16071
+          ],
+          "model_latency_ms": [
+            7069,
+            31007,
+            32752,
+            28245
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2506,
+          "mean_context_tokens": 2272,
+          "context_sources": {
+            "Capability index": 1644,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 314,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 192,
+            "Tool results": 508,
+            "Tool schemas": 4840,
+            "Working state": 248,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 4840,
+          "tools_exposed_max": 9,
+          "tools_used": 2,
+          "result_context_tokens": 200,
+          "result_raw_tokens": 154,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 6392,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 3,
+    "success_rate": 1.0,
+    "model_calls": 3.3333333333333335,
+    "input_tokens": 9669.666666666666,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 9669.666666666666,
+    "output_tokens": 760.0,
+    "total_tokens": 10429.666666666666,
+    "cost_usd": 0.026939333333333332,
+    "cost_per_success_usd": 0.026939333333333332,
+    "tool_calls": 2.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 3.3333333333333335,
+    "peak_context_tokens": 2506.0,
+    "mean_context_tokens": 2220.0,
+    "tool_schema_tokens": 4033.3333333333335,
+    "prefix_reuse_tokens": 4868.666666666667,
+    "median_turn_ms": 99082.0,
+    "p95_turn_ms": 140077.0,
+    "median_first_token_ms": 20580.0,
+    "stall_stops": 0.0
+  }
+}

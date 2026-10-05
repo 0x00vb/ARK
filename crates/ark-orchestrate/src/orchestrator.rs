@@ -26,7 +26,7 @@ use ark_runtime::rules::{select, RULES_BUDGET};
 use ark_runtime::skills;
 use ark_runtime::{
     AgentProfile, ApprovalDecision, ApprovalGate, ApprovalRequest, Approver, CancelToken, Engine,
-    Harness, HarnessEvent, RuleBook, RulesTool, Session, Steering,
+    Harness, HarnessEvent, Post, RuleBook, RulesTool, Session, Steering,
 };
 use ark_sdk::Ark;
 use ark_tools::{action_matches, Registry};
@@ -214,8 +214,21 @@ impl Orchestrator {
     /// for tasks (see [`ChatTools`](crate::tools)). Add them to each turn with
     /// [`TurnOptions::tools`](ark_sdk::TurnOptions::tools); they name the agents of that moment.
     pub fn chat_tools(&self) -> ark_sdk::TurnTools {
+        self.chat_tools_in(None)
+    }
+
+    /// [`chat_tools`](Self::chat_tools) for one conversation (`session`): what it schedules
+    /// posts each run's result into it ([`TaskSpec::report_to`]).
+    pub fn chat_tools_for(&self, session: &str) -> ark_sdk::TurnTools {
+        self.chat_tools_in(Some(session.to_string()))
+    }
+
+    fn chat_tools_in(&self, chat: Option<String>) -> ark_sdk::TurnTools {
         ark_sdk::TurnTools {
-            adapter: Arc::new(tools::ChatTools { orch: self.clone() }),
+            adapter: Arc::new(tools::ChatTools {
+                orch: self.clone(),
+                chat,
+            }),
             distiller: Some(tools::distiller()),
         }
     }
@@ -1365,6 +1378,7 @@ impl Inner {
             pid: None,
             schedule: None,
             item: spec.item.clone(),
+            report_to: spec.report_to.clone(),
         };
         let (parent_rec, linked) = {
             let mut st = self.state.lock().unwrap();
@@ -2407,9 +2421,30 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             run_ms: rec.run_ms,
         });
         self.work_follows(&rec);
+        self.report_back(&rec);
         let st = self.state.lock().unwrap();
         if let Some(t) = st.tasks.get(id) {
             t.done.send_replace(true);
+        }
+    }
+
+    /// A task that reports to a chat posts its result there when it ends: done or failed, not
+    /// cancelled (whoever cancelled it knows).
+    fn report_back(&self, t: &TaskRecord) {
+        let Some(chat) = &t.report_to else { return };
+        let (ok, text) = match t.state {
+            TaskState::Done => (true, t.result.clone().unwrap_or_default()),
+            TaskState::Failed => (false, t.error.clone().unwrap_or_default()),
+            _ => return,
+        };
+        let post = Post::new(&t.owner, clip(&t.objective, 80), text, ok);
+        match ark_runtime::session::post(&self.engine, chat, post.clone()) {
+            Ok(_) => self.emit(EventKind::Posted {
+                session: chat.clone(),
+                task: t.id.clone(),
+                post,
+            }),
+            Err(e) => tracing::warn!(task = %t.id, "could not post into the chat: {e}"),
         }
     }
 

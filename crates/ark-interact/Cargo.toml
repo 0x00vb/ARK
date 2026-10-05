@@ -17,7 +17,8 @@ anyhow.workspace = true
 time.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+reqwest.workspace = true
+futures.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-reqwest.workspace = true

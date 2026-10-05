@@ -256,6 +256,9 @@ pub struct TaskRecord {
     /// The board item it works on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<String>,
+    /// The chat its result is posted into when it ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_to: Option<String>,
 }
 
 fn one() -> u32 {

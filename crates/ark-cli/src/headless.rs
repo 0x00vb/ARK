@@ -6,13 +6,15 @@
 //! - `--events`: every runtime event as a JSON line on stdout, then a `result` line.
 //!
 //! State-changing actions are refused unless `--yes` is given; nothing can prompt here.
+//! With `--connect` the turn runs on that runtime and the result has `ok`, `answer`,
+//! `cancelled`, `steps`, `session` and `project` (ADR 0024).
 
 use std::io::{IsTerminal, Write};
 
-use ark_interact::{Interaction, TurnControl, TurnEnd};
 use ark_sdk::prelude::*;
 
 use crate::app::ShellState;
+use crate::chat::Update;
 use crate::term::Out;
 use crate::theme::want_color;
 use crate::view::TurnView;
@@ -30,33 +32,12 @@ pub(crate) async fn run(
     mode: Mode,
     yes: bool,
 ) -> std::process::ExitCode {
-    let ctl = TurnControl {
-        ask: yes,
-        ..TurnControl::new()
-    };
-    let c2 = ctl.cancel.clone();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            c2.cancel();
-        }
-    });
-    // Nobody can answer an approval here. With `--yes` every question gets "allow once";
-    // without it the gate is not consulted and state-changing actions are refused.
-    let decision = ApprovalDecision::AllowOnce;
-    let mut approvals =
-        std::mem::replace(&mut st.approvals, tokio::sync::mpsc::unbounded_channel().1);
-    tokio::spawn(async move {
-        while let Some(p) = approvals.recv().await {
-            p.answer(decision);
-        }
-    });
-
     let cfg = st.cfg.clone();
     // A command (`-p "/usage"`) runs as in the shell; its report goes to stdout. A command
     // that hands text to the agent (`/chapter 4`) then runs that turn.
     let mut prompt = prompt;
     if prompt.trim_start().starts_with('/') {
-        let reply = st.ix.execute(prompt.trim()).await;
+        let reply = st.chat.execute(prompt.trim()).await;
         match mode {
             Mode::Text => {
                 let theme = cfg
@@ -86,14 +67,32 @@ pub(crate) async fn run(
         .clone()
         .with_color(want_color(std::io::stderr().is_terminal()));
     let mut err_out = Out::sink(Box::new(std::io::stderr()));
-    let mut view = TurnView::new(&theme, cfg.event_hook.as_ref(), st.ix.detail());
+    let mut view = TurnView::new(&theme, cfg.event_hook.as_ref(), st.chat.detail());
     let mut text_out = StdoutText::default();
 
-    let end = st
-        .ix
-        .run_turn(&prompt, &ctl, |ev, a| match mode {
+    // Nobody can answer a question here. With `--yes` state-changing actions are allowed
+    // once each; without it they are refused (a turn here is not even asked).
+    let decision = if yes {
+        ApprovalDecision::AllowOnce
+    } else {
+        ApprovalDecision::Deny
+    };
+    let mut turn = st.chat.turn(&prompt, yes);
+    let ctl = turn.control.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            ctl.cancel();
+        }
+    });
+    let mut show = |u: Update| {
+        let (ev, a) = match u {
+            Update::Event(ev, a) => (ev, a),
+            Update::Ask(q) => return q.answer(decision),
+            Update::Closed(_) => return,
+        };
+        match mode {
             Mode::Events => {
-                if let Ok(line) = serde_json::to_string(ev) {
+                if let Ok(line) = serde_json::to_string(&ev) {
                     let mut o = std::io::stdout().lock();
                     let _ = writeln!(o, "{line}");
                     let _ = o.flush();
@@ -102,7 +101,7 @@ pub(crate) async fn run(
             Mode::Json => {}
             Mode::Text => {
                 // Model text goes to stdout as it streams; everything else is activity.
-                let printed = text_out.event(ev);
+                let printed = text_out.event(&ev);
                 if !printed.is_empty() {
                     let mut o = std::io::stdout().lock();
                     let _ = o.write_all(printed.as_bytes());
@@ -112,51 +111,41 @@ pub(crate) async fn run(
                     ev,
                     HarnessEvent::TextDelta { .. } | HarnessEvent::Answer { .. }
                 ) {
-                    view.event(ev.clone(), a.cloned(), &mut err_out);
+                    view.event(ev, a, &mut err_out);
                 }
             }
-        })
-        .await;
-
-    let code = match &end.result {
-        Ok(o) if o.cancelled => 130,
-        Ok(_) => 0,
-        Err(_) => 1,
+        }
     };
+    let end = loop {
+        tokio::select! {
+            biased;
+            Some(u) = turn.updates.recv() => show(u),
+            end = &mut turn.end => break end,
+        }
+    };
+    while let Ok(u) = turn.updates.try_recv() {
+        show(u);
+    }
+
     match mode {
         Mode::Text => {
-            if let Err(e) = &end.result {
+            if let Some(e) = &end.error {
                 err_out.line(&theme.red(&format!("error: {e}")));
+                // Retrying a one-shot run does not add credit: say what does.
+                if !end.result["out_of_credit"].is_null() {
+                    err_out.line(&theme.dim(&end.hint));
+                }
             }
         }
         Mode::Json | Mode::Events => {
-            println!("{}", result_json(&st.ix, &end, mode == Mode::Events));
+            let mut v = end.result.clone();
+            if mode == Mode::Events {
+                v["type"] = serde_json::json!("result");
+            }
+            println!("{v}");
         }
     }
-    std::process::ExitCode::from(code)
-}
-
-fn result_json(ix: &Interaction, end: &TurnEnd, tagged: bool) -> serde_json::Value {
-    let mut v = match &end.result {
-        Ok(o) => serde_json::json!({
-            "ok": true,
-            "answer": o.answer,
-            "cancelled": o.cancelled,
-            "grounded": o.grounded(),
-            "cited": o.cited.iter().map(|c| c.as_str()).collect::<Vec<_>>(),
-            "steps": o.steps,
-            "metrics": o.metrics,
-            "findings": o.state.findings.iter().map(|f| &f.text).collect::<Vec<_>>(),
-        }),
-        Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
-    };
-    v["session"] = serde_json::json!(ix.session().id().as_str());
-    v["project"] = serde_json::json!(ix.project().name);
-    v["context"] = serde_json::to_value(ix.last_context()).unwrap_or_default();
-    if tagged {
-        v["type"] = serde_json::json!("result");
-    }
-    v
+    std::process::ExitCode::from(end.code())
 }
 
 /// What text mode writes to stdout. Each step's streamed text is its own segment: narration

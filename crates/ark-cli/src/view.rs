@@ -7,10 +7,11 @@ use std::time::Instant;
 
 use ark_interact::fmt::{clip, tokens};
 use ark_interact::trace::entry;
-use ark_interact::{Activity, ActivityKind, TurnEnd};
+use ark_interact::{Activity, ActivityKind};
 use ark_sdk::prelude::*;
 
 use crate::app::EventHook;
+use crate::chat::Ended;
 use crate::markdown::MdStream;
 use crate::render::toned;
 use crate::term::Out;
@@ -299,25 +300,23 @@ impl<'a> TurnView<'a> {
     }
 
     /// End of turn: close the stream and print the footer or the error.
-    pub(crate) fn finish(mut self, out: &mut Out, end: &TurnEnd) {
+    pub(crate) fn finish(mut self, out: &mut Out, end: &Ended) {
         self.close_stream(out);
         out.clear_status();
-        match &end.result {
-            Err(e) => {
+        match &end.error {
+            Some(e) => {
                 out.line(&format!(
                     "{} {}",
                     self.theme.red(&self.theme.glyphs.fail),
-                    self.theme.red(&format!("{e}"))
+                    self.theme.red(e)
                 ));
-                out.line(&self.theme.dim(
-                    "  The session is intact. Try again, /model to switch, or /trace for details.",
-                ));
+                out.line(&self.theme.dim(&format!("  {}", end.hint)));
             }
-            Ok(_) if !end.footer.is_empty() && self.theme.turn_footer => {
+            None if !end.footer.is_empty() && self.theme.turn_footer => {
                 out.line("");
                 out.line(&self.theme.dim(&format!("  {}", end.footer.join(" · "))));
             }
-            _ => {}
+            None => {}
         }
     }
 }

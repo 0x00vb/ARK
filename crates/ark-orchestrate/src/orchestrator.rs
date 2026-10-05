@@ -1077,6 +1077,11 @@ impl Inner {
                     let alive = r.pid.is_some_and(|p| p != pid && process_alive(p));
                     if !alive {
                         r.pid = None;
+                        // Calls the stopped run left open did not finish here.
+                        for c in r.tool_calls.iter_mut().filter(|c| c.ok.is_none()) {
+                            c.ok = Some(false);
+                            c.summary = "stopped: the process stopped".into();
+                        }
                         let asking = r.question.as_ref().is_some_and(Question::open);
                         let scope = st.agents.get(&r.owner).map(|a| a.record.scope.clone());
                         let unsure = match (scope, r.started_ms) {

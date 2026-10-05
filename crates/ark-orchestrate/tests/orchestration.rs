@@ -1029,7 +1029,11 @@ async fn a_question_survives_a_restart_and_its_answer_runs_the_call_once() {
     r.left_open(
         "t-dead0005",
         "waiting",
-        json!({ "waiting_on": "your answer", "question": { "id": "q-1", "request": request, "asked_ms": 5 } }),
+        json!({
+            "waiting_on": "your answer",
+            "question": { "id": "q-1", "request": request, "asked_ms": 5 },
+            "tool_calls": [{ "id": "c0", "action": "doc.save", "ok": null }]
+        }),
     );
     let asked = Arc::new(AtomicUsize::new(0));
     let gate = Arc::new(ApprovalGate::new(Arc::new(Nobody(asked.clone()))));
@@ -1038,6 +1042,11 @@ async fn a_question_survives_a_restart_and_its_answer_runs_the_call_once() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     let t = o.task("t-dead0005").unwrap();
     assert_eq!(t.state, TaskState::Waiting);
+    assert_eq!(
+        t.tool_calls[0].ok,
+        Some(false),
+        "the stopped run's call is not running"
+    );
     assert_eq!(o.questions().len(), 1);
     assert!(m.texts().is_empty());
 

@@ -48,6 +48,7 @@ fn all(engine: &Engine, project: &ProjectId) -> Vec<Skill> {
 pub fn report(list: &[SkillView], engine: &Engine, project: &ProjectId) -> Report {
     let places: Vec<String> = skills::dirs(engine, project)
         .into_iter()
+        .filter(|(_, scope)| *scope != SkillScope::Builtin)
         .map(|(p, _)| p.display().to_string())
         .collect();
     if list.is_empty() {
@@ -61,6 +62,7 @@ pub fn report(list: &[SkillView], engine: &Engine, project: &ProjectId) -> Repor
         let scope = match s.scope {
             SkillScope::Project => "project",
             SkillScope::Store => "all projects",
+            SkillScope::Builtin => "built in",
         };
         t.push(Row {
             cells: vec![

@@ -32,6 +32,8 @@ pub struct Engine {
     plugins: Option<Arc<Plugins>>,
     /// Other sources of tools that change while the engine runs (connected accounts).
     sources: Vec<Arc<dyn ToolSource>>,
+    /// Folders of skills that come with the app's tools ([`crate::skills::dirs`]).
+    skills: Vec<std::path::PathBuf>,
 }
 
 impl Engine {
@@ -43,6 +45,7 @@ impl Engine {
             sniffers: Vec::new(),
             plugins: None,
             sources: Vec::new(),
+            skills: Vec::new(),
         }
     }
 
@@ -56,7 +59,20 @@ impl Engine {
             sniffers: self.sniffers.clone(),
             plugins: None,
             sources: Vec::new(),
+            skills: self.skills.clone(),
         }
+    }
+
+    /// Add a folder of skills that come with a tool (Run code's Python comes with one for
+    /// data work). They are found after the project's and the store's, so either can replace
+    /// one by name.
+    pub fn add_skills(&mut self, dir: impl Into<std::path::PathBuf>) {
+        self.skills.push(dir.into());
+    }
+
+    /// The folders given to [`add_skills`](Engine::add_skills).
+    pub fn skill_dirs(&self) -> &[std::path::PathBuf] {
+        &self.skills
     }
 
     /// Everything this engine can run right now: its registry, then the plugins and the other

@@ -856,6 +856,11 @@ impl ArkBuilder {
             None => None,
         };
         if let Some(exec) = exec {
+            let dir = engine.store.root().join("exec").join("skills");
+            match exec.write_skills(&dir) {
+                Ok(()) => engine.add_skills(dir),
+                Err(e) => tracing::warn!("Run code's skills not written to {}: {e}", dir.display()),
+            }
             engine.register(Arc::new(exec.shows(ark_files::shown())));
             profile.distillers.push(ark_exec::distill());
         }
@@ -1251,5 +1256,55 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(plain.call_count(), 1);
+    }
+
+    /// Run code's Python comes with the data-analysis skill; a skill of the same name in the
+    /// store replaces it, and a runtime without skills leaves none behind.
+    #[test]
+    fn run_code_comes_with_its_skill() {
+        if ark_exec::Sandbox::native().is_none() {
+            eprintln!("skipped: no sandbox here, so no Run code");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let provider: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new("mock", vec![]));
+        let build = |code: Option<ark_exec::Exec>| {
+            let b = Ark::builder()
+                .store_root(dir.path())
+                .provider(provider.clone())
+                .planner(false)
+                .critic(false);
+            match code {
+                Some(e) => b.code_with(e),
+                None => b.code(true),
+            }
+            .build()
+            .unwrap()
+        };
+        let ark = build(None);
+        let project = ark.create_project("p", "").unwrap();
+        let found = ark.skills(&project.id);
+        let s = found.iter().find(|s| s.name == "data-analysis").unwrap();
+        assert_eq!(s.scope, ark_runtime::SkillScope::Builtin);
+        assert!(std::fs::read_to_string(s.dir.join("SKILL.md"))
+            .unwrap()
+            .contains("Join with care"));
+
+        let mine = dir.path().join("skills").join("data-analysis");
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::write(mine.join("SKILL.md"), "---\ndescription: mine\n---\nx").unwrap();
+        let found = ark.skills(&project.id);
+        let s = found.iter().find(|s| s.name == "data-analysis").unwrap();
+        assert_eq!(s.description, "mine");
+        std::fs::remove_dir_all(&mine).unwrap();
+        drop(ark);
+
+        // Another app's Run code, with no Python: the skill goes.
+        let exec = ark_exec::Exec::new(dir.path().join("runs"), vec![]).unwrap();
+        let ark = build(Some(exec));
+        assert!(!ark
+            .skills(&project.id)
+            .iter()
+            .any(|s| s.name == "data-analysis"));
     }
 }

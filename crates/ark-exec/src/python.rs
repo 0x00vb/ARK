@@ -225,6 +225,13 @@ impl Runtime for Python {
         "python"
     }
 
+    fn skills(&self) -> Vec<(&'static str, &'static str)> {
+        vec![(
+            "data-analysis",
+            include_str!("../skills/data-analysis/SKILL.md"),
+        )]
+    }
+
     fn says(&self) -> String {
         let names: Vec<&str> = PACKAGES
             .iter()

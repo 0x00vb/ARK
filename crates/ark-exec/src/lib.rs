@@ -63,6 +63,11 @@ pub trait Runtime: Send + Sync {
     fn available(&self) -> Result<(), String>;
     /// Make the environment ready (install it the first time) and say how to start a program.
     async fn ready(&self) -> Result<Launch, String>;
+    /// Skills that come with this runtime: a folder name and its `SKILL.md`. The SDK writes
+    /// them where the conversation finds them ([`Exec::write_skills`]).
+    fn skills(&self) -> Vec<(&'static str, &'static str)> {
+        Vec::new()
+    }
 }
 
 /// How to start a program in a ready runtime.
@@ -108,6 +113,27 @@ impl Exec {
             scratch: scratch.into(),
             shows: String::new(),
         }
+    }
+
+    /// Write the skills of the runtimes into `dir`, one folder each, and remove the folders of
+    /// skills no runtime has any more. `dir` is ARK's own: nothing else should be in it.
+    pub fn write_skills(&self, dir: &Path) -> std::io::Result<()> {
+        let skills: Vec<(&str, &str)> = self.runtimes.iter().flat_map(|r| r.skills()).collect();
+        std::fs::create_dir_all(dir)?;
+        for entry in std::fs::read_dir(dir)?.filter_map(Result::ok) {
+            let name = entry.file_name();
+            if entry.path().is_dir() && !skills.iter().any(|(n, _)| name == *n) {
+                std::fs::remove_dir_all(entry.path())?;
+            }
+        }
+        for (name, text) in skills {
+            let file = dir.join(name).join("SKILL.md");
+            if std::fs::read_to_string(&file).ok().as_deref() != Some(text) {
+                std::fs::create_dir_all(dir.join(name))?;
+                std::fs::write(&file, text)?;
+            }
+        }
+        Ok(())
     }
 
     /// Say what the window shows when a run writes it (one line, from the formats ARK reads).

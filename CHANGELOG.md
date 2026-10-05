@@ -139,6 +139,13 @@ What changed for people building on ARK, per release. Not a commit log.
   not read and that a program reads all of them. An edit still sees every row. A workbook read
   without a sheet shows the start of every sheet. A 300,000-row workbook reads in 200 MB instead
   of 1.3 GB.
+- Skills that come with a tool (ADR 0033): `Runtime::skills`, `Exec::write_skills`,
+  `Engine::add_skills`, `SkillScope::Builtin`, found after the project's and the store's skills.
+  Run code's Python comes with `data-analysis`: how to inspect sources, check joins, keep
+  originals, reconcile totals and answer in plain words ([`DATA.md`](docs/DATA.md)).
+- `ark-bench` workload `workbooks`: two workbooks and a CSV (54,000 rows, a title row, total
+  rows, duplicates, amounts as text, messy IDs), a summary workbook, a chart and three findings,
+  checked on the saved files; the sources must not change.
 - `code.run` takes an optional `purpose`, one sentence in the person's words. The approval and
   the activity row lead with it; the program follows in the approval.
 - Window: a sheet longer or wider than the grid shows says so under the grid ("Showing the first
@@ -252,6 +259,8 @@ What changed for people building on ARK, per release. Not a commit log.
   instead of allowing each once.
 
 ### Breaking
+- `SkillScope` has a new variant, `Builtin` (a skill that comes with a tool): a `match` on it
+  needs an arm.
 - `ConnectError` has a new variant, `Refused`: a 4xx answer from a token endpoint (an expired
   or revoked grant). A `match` on `ConnectError` needs an arm for it.
 - `ProviderError::OutOfCredit` and `AgentError::OutOfCredit` are new variants: an exhaustive

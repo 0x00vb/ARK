@@ -19,9 +19,9 @@
 //! 2. [`SkillsTool`] reads one on demand: `skills.read` returns its instructions and the files
 //!    beside them; `skills.file` reads one of those files. Both are read-only.
 //!
-//! Where skills live is the application's choice; [`dirs`] gives the usual two: the project
-//! folder's `.agents/skills` and the store's `skills`. A name in the project hides the same
-//! name in the store. Installing skills is not ARK's business (a person runs an installer, or
+//! Where skills live is the application's choice; [`dirs`] gives the usual ones: the project
+//! folder's `.agents/skills`, the store's `skills`, and folders that come with the app's tools
+//! ([`Engine::add_skills`]). A name in an earlier place hides the same name in a later one. Installing skills is not ARK's business (a person runs an installer, or
 //! copies a folder).
 
 use std::fmt::Write as _;
@@ -59,6 +59,8 @@ pub enum SkillScope {
     Project,
     /// The store's `skills`, shared by every project.
     Store,
+    /// Come with one of the app's tools ([`Engine::add_skills`]).
+    Builtin,
 }
 
 /// One skill: its name, when to use it, and its folder.
@@ -70,14 +72,17 @@ pub struct Skill {
     pub scope: SkillScope,
 }
 
-/// The usual places, most specific first: the project folder's `.agents/skills`, then the
-/// store's `skills`.
+/// The usual places, most specific first: the project folder's `.agents/skills`, the store's
+/// `skills`, then the skills that come with the app's tools.
 pub fn dirs(engine: &Engine, project: &ProjectId) -> Vec<(PathBuf, SkillScope)> {
     let mut out = Vec::new();
     if let Ok(ws) = engine.workspace_dir(project) {
         out.push((ws.join(".agents").join("skills"), SkillScope::Project));
     }
     out.push((engine.store.root().join("skills"), SkillScope::Store));
+    for d in engine.skill_dirs() {
+        out.push((d.clone(), SkillScope::Builtin));
+    }
     out
 }
 

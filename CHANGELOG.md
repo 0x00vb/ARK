@@ -10,6 +10,8 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- `ark-bench` workload `files-edit`: a computed column and a total row in a real spreadsheet,
+  checked on the saved file.
 - The Browser (ADR 0015): the new crate `ark-browser` drives the installed Chrome, Edge or Brave
   over the DevTools protocol; `browser.open`, `read`, `back`, `click`, `type`; a fresh context
   per agent, and a signed-in browser one agent uses at a time. `ArkBuilder::browser(true)` or
@@ -150,6 +152,9 @@ What changed for people building on ARK, per release. Not a commit log.
   hover) instead of an error. "Choose a folder…" and "New project…" in the sidebar's + menu.
 
 ### Fixed
+- Files: `files.list` on a file shows that file, and on a missing path says nothing has that
+  name (it said "(empty folder)", and a small model concluded the file did not exist);
+  `files.search` also matches file and folder names. Benchmark: `files-edit`, `bench/RESULTS.md`.
 - Window: a question still waiting after a reload keeps all its answers ("Always in this
   project" was missing).
 - `subprocess::run_timeout` no longer hangs until its timeout when a tool prints more than a

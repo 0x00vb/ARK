@@ -256,6 +256,8 @@ async fn a_folder_sent_from_another_computer_becomes_a_project_there() {
     std::os::unix::fs::symlink("/etc", l.join("outside")).unwrap();
     let folder = Folder::read(l).unwrap();
     assert_eq!(folder.files(), 4);
+    #[cfg(unix)]
+    assert_eq!(folder.skipped(), 1);
     assert_eq!(folder.bytes(), 2_500_000 + 8 + 20);
 
     // Stopped halfway: no project, nothing left.
@@ -313,10 +315,55 @@ async fn a_folder_sent_from_another_computer_becomes_a_project_there() {
     // A path out of the upload's folder is refused.
     let out = client
         .call(
-            "upload_file",
-            json!({ "upload": "abcdef123456", "path": "../../access.json", "data": "", "offset": 0 }),
+            "upload_parts",
+            json!({ "upload": "abcdef123456", "parts": [{ "path": "../../access.json", "data": "", "offset": 0 }] }),
         )
         .await
         .unwrap_err();
     assert!(format!("{out}").contains("outside"), "{out}");
+
+    // An empty folder is a project too; a folder over a limit is not read to the end.
+    let empty = tempfile::tempdir().unwrap();
+    let e = send_folder(
+        &client,
+        &Folder::read(empty.path()).unwrap(),
+        "blank",
+        |_| true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(e["name"], "blank");
+    assert!(Folder::read_at_most(l, 3, u64::MAX).unwrap().is_none());
+    assert!(Folder::read_at_most(l, 10, 1000).unwrap().is_none());
+    assert_eq!(
+        Folder::read_at_most(l, 4, u64::MAX)
+            .unwrap()
+            .unwrap()
+            .files(),
+        4
+    );
+
+    // Asking again for a finished upload's project (its answer was lost) answers the same.
+    client
+        .call(
+            "upload_parts",
+            json!({ "upload": "again12345", "parts": [] }),
+        )
+        .await
+        .unwrap();
+    let first = client
+        .call(
+            "upload_project",
+            json!({ "upload": "again12345", "name": "twice" }),
+        )
+        .await
+        .unwrap();
+    let second = client
+        .call(
+            "upload_project",
+            json!({ "upload": "again12345", "name": "twice" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first, second);
 }

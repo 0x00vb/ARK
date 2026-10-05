@@ -371,6 +371,8 @@ impl Host {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
         );
+        // Uploads a client left more than a day ago (ADR 0030).
+        crate::upload::sweep(ix.ark().shared_engine().store.root());
         let host = Arc::new(Host {
             orch: Mutex::new(None),
             terminals: Default::default(),
@@ -924,22 +926,19 @@ impl Host {
             }
             // A folder from another computer becomes a project here (see `upload`, ADR 0030):
             // its files in parts, then the project. Neither waits for a running turn.
-            "upload_file" => {
-                let offset = n("offset").unwrap_or(0);
-                crate::upload::put(
-                    self.engine.store.root(),
-                    &s("upload"),
-                    &s("path"),
-                    &s("data"),
-                    offset,
-                )
+            "upload_parts" => {
+                let (store, id) = (self.engine.store.root().to_path_buf(), s("upload"));
+                let parts = params.get("parts").cloned().unwrap_or(Value::Null);
+                tokio::task::spawn_blocking(move || crate::upload::put(&store, &id, &parts)).await?
             }
             "upload_project" => {
-                let p = crate::upload::finish(&self.engine, &s("upload"), &s("name"))?;
-                Ok(json!({ "id": p.id.as_str(), "name": p.name }))
+                let (engine, id, name) = (self.engine.clone(), s("upload"), s("name"));
+                tokio::task::spawn_blocking(move || crate::upload::finish(&engine, &id, &name))
+                    .await?
             }
             "upload_cancel" => {
-                crate::upload::cancel(self.engine.store.root(), &s("upload"))?;
+                let (store, id) = (self.engine.store.root().to_path_buf(), s("upload"));
+                tokio::task::spawn_blocking(move || crate::upload::cancel(&store, &id)).await??;
                 Ok(json!({}))
             }
             // On the computer the runtime runs on: the window offers it only when that is the

@@ -9,48 +9,78 @@
 pub use ark_interact::remote::Client;
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 
-/// How much of a file one call carries (the runtime takes up to 8 MiB). Small enough to arrive
-/// within the runtime's 30 seconds per request on a slow connection.
-const PART: usize = 1024 * 1024;
+/// How much one call carries at most: one part of a large file, or several small files. Small
+/// enough to arrive within the runtime's 30 seconds per request on a slow connection (about
+/// 200 kbit/s), large enough that a folder of small files needs few calls.
+const CALL: usize = 512 * 1024;
+/// How many times a call is tried before the copy stops, and how long one may take.
+const TRIES: u32 = 3;
+const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A folder as [`send_folder`] would send it: every file under it, links left out.
 pub struct Folder {
     root: PathBuf,
     /// Paths relative to the folder, with `/`, and sizes.
     files: Vec<(String, u64)>,
+    skipped: usize,
 }
 
 impl Folder {
     /// Read what is in `dir`. Links (to files or folders) are left out: what they point to may
-    /// be outside the folder.
+    /// be outside the folder. So are names that are not UTF-8 (`skipped` counts both).
     pub fn read(dir: &Path) -> anyhow::Result<Folder> {
+        Ok(Self::read_at_most(dir, usize::MAX, u64::MAX)?.expect("no limit"))
+    }
+
+    /// [`read`](Self::read), stopping early with `None` once there are more than `files` files
+    /// or `bytes` bytes: a large folder (a home folder) is not walked to the end.
+    pub fn read_at_most(dir: &Path, files: usize, bytes: u64) -> anyhow::Result<Option<Folder>> {
         anyhow::ensure!(dir.is_dir(), "{} is not a folder", dir.display());
-        let mut files = Vec::new();
+        let mut out = Vec::new();
+        let (mut total, mut skipped) = (0u64, 0);
         let mut todo = vec![dir.to_path_buf()];
         while let Some(d) = todo.pop() {
-            for e in std::fs::read_dir(&d)? {
+            let entries =
+                std::fs::read_dir(&d).map_err(|e| anyhow::anyhow!("{}: {e}", d.display()))?;
+            for e in entries {
                 let e = e?;
                 let kind = e.file_type()?;
+                if !kind.is_dir() && !kind.is_file() {
+                    skipped += 1;
+                    continue;
+                }
+                let Some(rel) = e
+                    .path()
+                    .strip_prefix(dir)
+                    .ok()
+                    .and_then(|r| r.to_str())
+                    .map(|r| r.replace(std::path::MAIN_SEPARATOR, "/"))
+                else {
+                    skipped += 1;
+                    continue;
+                };
                 if kind.is_dir() {
                     todo.push(e.path());
-                } else if kind.is_file() {
-                    let rel = e.path().strip_prefix(dir)?.to_path_buf();
-                    let rel: Vec<String> = rel
-                        .components()
-                        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                        .collect();
-                    files.push((rel.join("/"), e.metadata()?.len()));
+                    continue;
+                }
+                let size = e.metadata()?.len();
+                total += size;
+                out.push((rel, size));
+                if out.len() > files || total > bytes {
+                    return Ok(None);
                 }
             }
         }
-        files.sort();
-        Ok(Folder {
+        out.sort();
+        Ok(Some(Folder {
             root: dir.to_path_buf(),
-            files,
-        })
+            files: out,
+            skipped,
+        }))
     }
 
     /// How many files would be sent.
@@ -61,6 +91,11 @@ impl Folder {
     /// How many bytes would be sent.
     pub fn bytes(&self) -> u64 {
         self.files.iter().map(|(_, n)| n).sum()
+    }
+
+    /// Links and names that are not UTF-8, which are not sent.
+    pub fn skipped(&self) -> usize {
+        self.skipped
     }
 }
 
@@ -73,8 +108,8 @@ pub struct Sent {
 
 /// Copy `folder` to the runtime `client` reaches, where it becomes a new project named `name`
 /// (`name 2` when taken), and answer `{id, name}` there (ADR 0030). The project appears only
-/// when every file arrived; an error or `go_on` answering false removes what was sent.
-/// Empty folders are not sent.
+/// when every file arrived. A call that fails is tried again; when the copy stops (an error,
+/// or `go_on` answering false), what was sent is removed. Empty folders are not sent.
 pub async fn send_folder(
     client: &Client,
     folder: &Folder,
@@ -85,20 +120,46 @@ pub async fn send_folder(
     let sent = send_files(client, folder, &upload, &mut go_on).await;
     let done = match sent {
         Ok(true) => {
-            client
-                .call("upload_project", json!({ "upload": upload, "name": name }))
-                .await
+            call(
+                client,
+                "upload_project",
+                json!({ "upload": upload, "name": name }),
+            )
+            .await
         }
         Ok(false) => Err(anyhow::anyhow!("the copy was stopped")),
         Err(e) => Err(e),
     };
     if done.is_err() {
-        // Best effort: the runtime also removes uploads left for a day.
-        let _ = client
-            .call("upload_cancel", json!({ "upload": upload }))
-            .await;
+        // Best effort: the runtime also removes uploads left for a day when it starts.
+        let _ = call(client, "upload_cancel", json!({ "upload": upload })).await;
     }
     done
+}
+
+/// One call, tried again after a failure that is not the runtime's refusal of the request
+/// itself (no answer, a timeout, a dropped connection).
+async fn call(client: &Client, method: &str, params: Value) -> anyhow::Result<Value> {
+    let mut last = None;
+    for attempt in 0..TRIES {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(500 << attempt)).await;
+        }
+        match tokio::time::timeout(CALL_TIMEOUT, client.call(method, params.clone())).await {
+            Ok(Ok(v)) => return Ok(v),
+            Ok(Err(e)) if !retryable(&e) => return Err(e),
+            Ok(Err(e)) => last = Some(e),
+            Err(_) => last = Some(anyhow::anyhow!("the runtime did not answer in time")),
+        }
+    }
+    Err(last.unwrap_or_else(|| anyhow::anyhow!("the call failed")))
+}
+
+/// A transport failure, worth trying again. The runtime's own answers (`{ok: false}`, a
+/// refused token) are not.
+fn retryable(e: &anyhow::Error) -> bool {
+    let text = e.to_string();
+    text.starts_with("cannot reach the ARK runtime") || text.contains("answered HTTP 5")
 }
 
 async fn send_files(
@@ -108,53 +169,83 @@ async fn send_files(
     go_on: &mut impl FnMut(Sent) -> bool,
 ) -> anyhow::Result<bool> {
     use base64::Engine as _;
+    use tokio::io::AsyncReadExt as _;
 
+    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+    // Starts the upload, so an empty folder is one too.
+    call(
+        client,
+        "upload_parts",
+        json!({ "upload": upload, "parts": [] }),
+    )
+    .await?;
     let mut sent = Sent::default();
-    let mut buf = vec![0u8; PART];
+    let mut batch: Vec<Value> = Vec::new();
+    let mut batch_bytes = 0usize;
+    // Files finished in the batch not yet sent: counted once it is.
+    let mut batch_files = 0usize;
+    let mut buf = vec![0u8; CALL];
     for (rel, _) in &folder.files {
-        let mut file = tokio::fs::File::open(folder.root.join(rel)).await?;
+        let mut file = tokio::fs::File::open(folder.root.join(rel))
+            .await
+            .map_err(|e| anyhow::anyhow!("{rel}: {e}"))?;
         let mut offset = 0u64;
         loop {
-            let n = read_part(&mut file, &mut buf).await?;
+            let room = CALL - batch_bytes;
+            let mut n = 0;
+            while n < room {
+                match file
+                    .read(&mut buf[n..room])
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{rel}: {e}"))?
+                {
+                    0 => break,
+                    k => n += k,
+                }
+            }
+            let end = n < room;
             // A file's first part goes even when it is empty, so the file exists there.
             if n > 0 || offset == 0 {
-                let data = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                client
-                    .call(
-                        "upload_file",
-                        json!({ "upload": upload, "path": rel, "data": data, "offset": offset }),
-                    )
-                    .await
-                    .map_err(|e| anyhow::anyhow!("{rel}: {e}"))?;
+                batch.push(json!({ "path": rel, "offset": offset, "data": b64(&buf[..n]) }));
+                batch_bytes += n;
                 offset += n as u64;
-                sent.bytes += n as u64;
+            }
+            if end {
+                batch_files += 1;
+            }
+            if batch_bytes >= CALL || (!end && batch_bytes > 0) || batch.len() >= 200 {
+                flush(client, upload, &mut batch).await?;
+                sent.bytes += batch_bytes as u64;
+                sent.files += batch_files;
+                (batch_bytes, batch_files) = (0, 0);
                 if !go_on(sent) {
                     return Ok(false);
                 }
             }
-            if n < buf.len() {
+            if end {
                 break;
             }
         }
-        sent.files += 1;
-        if !go_on(sent) {
-            return Ok(false);
-        }
     }
-    Ok(true)
+    if !batch.is_empty() {
+        flush(client, upload, &mut batch).await?;
+    }
+    sent.bytes += batch_bytes as u64;
+    sent.files += batch_files;
+    Ok(go_on(sent))
 }
 
-/// Fill `buf` from `file` as far as it goes; fewer bytes than its length means the end.
-async fn read_part(file: &mut tokio::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
-    use tokio::io::AsyncReadExt as _;
-    let mut n = 0;
-    while n < buf.len() {
-        match file.read(&mut buf[n..]).await? {
-            0 => break,
-            k => n += k,
-        }
-    }
-    Ok(n)
+async fn flush(client: &Client, upload: &str, batch: &mut Vec<Value>) -> anyhow::Result<()> {
+    let parts = std::mem::take(batch);
+    let first = parts[0]["path"].as_str().unwrap_or("").to_string();
+    call(
+        client,
+        "upload_parts",
+        json!({ "upload": upload, "parts": parts }),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{first}: {e}"))?;
+    Ok(())
 }
 
 /// Open the native window on the runtime at `url`. The window's title bar is the system's:

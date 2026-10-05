@@ -196,7 +196,9 @@ export class Sidebar {
           if (a.where !== "project") return false;
           try { return !a.when || a.when({ project: p }); } catch { return false; }
         })
-        .map((a) => item(a.label, () => a.run({ project: p }, window.ark))),
+        .map((a) => item(a.label, async () => {
+          try { await a.run({ project: p }, window.ark); } catch (e) { this.api.toast(e.message || String(e)); }
+        })),
     ]);
   }
 

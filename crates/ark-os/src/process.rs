@@ -1,0 +1,336 @@
+//! Starting programs and stopping them with everything they started.
+//!
+//! [`command`] is how ARK starts any program, so these hold everywhere:
+//! - it starts in its own process group, so [`Tree`] can stop it and its children together
+//!   (a Job Object on Windows, a process group on Unix);
+//! - on Windows no console window opens for it, even from a windowed app;
+//! - on Windows an npm `.cmd` launcher runs its target directly. Through `cmd.exe` a command
+//!   line is cut at 8191 characters and re-quoted by `cmd`'s rules; a system prompt passed as
+//!   an argument would break.
+
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+/// A command for `program` (a path, from [`crate::find`]) with the properties above.
+pub fn command(program: &Path) -> tokio::process::Command {
+    std_command(program).into()
+}
+
+/// [`command`] for code that runs a process without async.
+pub fn std_command(program: &Path) -> std::process::Command {
+    let (exe, first) = launcher(program);
+    let mut c = std::process::Command::new(exe);
+    c.args(first);
+    sys::own_group(&mut c);
+    c
+}
+
+/// What actually runs for `program`: itself, or for an npm launcher on Windows, its target
+/// (`node <script>` or the `.exe` it points at). Anything else runs as given.
+pub fn launcher(program: &Path) -> (PathBuf, Vec<OsString>) {
+    if cfg!(windows) {
+        if let Some(found) = npm_target(program) {
+            return found;
+        }
+    }
+    (program.to_path_buf(), Vec::new())
+}
+
+fn npm_target(program: &Path) -> Option<(PathBuf, Vec<OsString>)> {
+    let ext = program.extension()?.to_string_lossy().to_ascii_lowercase();
+    if ext != "cmd" && ext != "bat" {
+        return None;
+    }
+    let dir = program.parent()?;
+    let text = std::fs::read_to_string(program).ok()?;
+    let target = dir.join(shim_target(&text)?);
+    if !target.is_file() {
+        return None;
+    }
+    let kind = target
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase());
+    match kind.as_deref() {
+        Some("exe") => Some((target, Vec::new())),
+        Some("js" | "mjs" | "cjs") => {
+            let local = dir.join("node.exe");
+            let node = if local.is_file() {
+                local
+            } else {
+                crate::find::program("node")?
+            };
+            Some((node, vec![target.into_os_string()]))
+        }
+        _ => None,
+    }
+}
+
+/// The file an npm `cmd-shim` launcher runs, relative to the launcher's folder: the last
+/// quoted `"%dp0%\..."` path that is not the optional `node.exe` next to it.
+fn shim_target(text: &str) -> Option<String> {
+    text.split('"')
+        .skip(1)
+        .step_by(2)
+        .filter_map(|q| {
+            q.strip_prefix("%dp0%\\")
+                .or_else(|| q.strip_prefix("%~dp0\\"))
+        })
+        .filter(|rel| !rel.eq_ignore_ascii_case("node.exe") && !rel.is_empty())
+        .last()
+        .map(|rel| rel.replace('\\', std::path::MAIN_SEPARATOR_STR))
+}
+
+/// Stops a started program together with everything it started. Dropping it while armed
+/// stops them too: a cancelled call drops its future, and `kill_on_drop` alone would leave a
+/// shell's children (or Node's) running.
+pub struct Tree(sys::Tree);
+
+impl Tree {
+    /// For a child started with [`command`] (`child.id()`).
+    pub fn of(pid: Option<u32>) -> Tree {
+        Tree(sys::Tree::of(pid))
+    }
+
+    /// Stop the program and everything it started, now.
+    pub fn kill(&mut self) {
+        self.0.kill()
+    }
+
+    /// The program ended on its own: leave anything it started on purpose running.
+    pub fn disarm(&mut self) {
+        self.0.disarm()
+    }
+}
+
+impl Drop for Tree {
+    fn drop(&mut self) {
+        self.0.kill()
+    }
+}
+
+/// Whether process `pid` is running. This process counts as alive.
+pub fn alive(pid: u32) -> bool {
+    pid == std::process::id() || sys::alive(pid)
+}
+
+#[cfg(unix)]
+mod sys {
+    use std::os::unix::process::CommandExt;
+
+    pub fn own_group(c: &mut std::process::Command) {
+        c.process_group(0);
+    }
+
+    pub struct Tree(Option<u32>);
+
+    impl Tree {
+        pub fn of(pid: Option<u32>) -> Tree {
+            Tree(pid)
+        }
+        pub fn kill(&mut self) {
+            if let Some(pid) = self.0.take() {
+                // SAFETY: killpg only sends a signal; the group id is the child's own pid.
+                unsafe {
+                    libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+                }
+            }
+        }
+        pub fn disarm(&mut self) {
+            self.0 = None;
+        }
+    }
+
+    pub fn alive(pid: u32) -> bool {
+        // SAFETY: signal 0 only checks that the process exists; nothing is delivered.
+        let r = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        // EPERM: it exists but belongs to someone else.
+        r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+}
+
+#[cfg(windows)]
+mod sys {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ACCESS_DENIED, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+    };
+
+    /// `STILL_ACTIVE`: the exit code of a process that has not exited.
+    const STILL_ACTIVE: u32 = 259;
+
+    pub fn own_group(c: &mut std::process::Command) {
+        c.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+
+    /// A Job Object holding the child; children it starts join the job too. The handle is
+    /// kept as an integer so the guard can cross threads.
+    pub struct Tree(isize);
+
+    fn limit(job: HANDLE, flags: u32) -> bool {
+        // SAFETY: a zeroed limit struct is valid; only LimitFlags is set.
+        unsafe {
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = flags;
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) != 0
+        }
+    }
+
+    impl Tree {
+        pub fn of(pid: Option<u32>) -> Tree {
+            let Some(pid) = pid else { return Tree(0) };
+            // SAFETY: plain Win32 calls on handles this function owns and closes.
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+                if job.is_null() {
+                    return Tree(0);
+                }
+                let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+                let ok = !process.is_null()
+                    && limit(job, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+                    && AssignProcessToJobObject(job, process) != 0;
+                if !process.is_null() {
+                    CloseHandle(process);
+                }
+                if !ok {
+                    CloseHandle(job);
+                    return Tree(0);
+                }
+                Tree(job as isize)
+            }
+        }
+        pub fn kill(&mut self) {
+            if self.0 != 0 {
+                // SAFETY: the job handle is ours; closing it ends the job's processes too.
+                unsafe {
+                    TerminateJobObject(self.0 as HANDLE, 1);
+                    CloseHandle(self.0 as HANDLE);
+                }
+                self.0 = 0;
+            }
+        }
+        pub fn disarm(&mut self) {
+            if self.0 != 0 {
+                // SAFETY: as above; without kill-on-close, closing the handle ends nothing.
+                unsafe {
+                    limit(self.0 as HANDLE, 0);
+                    CloseHandle(self.0 as HANDLE);
+                }
+                self.0 = 0;
+            }
+        }
+    }
+
+    pub fn alive(pid: u32) -> bool {
+        // SAFETY: a query-only handle, closed before returning.
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if h.is_null() {
+                // It exists but belongs to someone else.
+                return GetLastError() == ERROR_ACCESS_DENIED;
+            }
+            let mut code = 0u32;
+            let ok = GetExitCodeProcess(h, &mut code) != 0;
+            CloseHandle(h);
+            ok && code == STILL_ACTIVE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_what_an_npm_launcher_runs() {
+        // npm 10's cmd-shim for a Node script.
+        let js = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js\" %*\r\n";
+        let sep = std::path::MAIN_SEPARATOR_STR;
+        assert_eq!(
+            shim_target(js).unwrap(),
+            ["node_modules", "@openai", "codex", "bin", "codex.js"].join(sep)
+        );
+        // A package whose bin is a native executable.
+        let exe = "@ECHO off\r\n\"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe\"   %*\r\n";
+        assert!(shim_target(exe).unwrap().ends_with("claude.exe"));
+        assert_eq!(shim_target("@echo off\r\nnode x.js %*\r\n"), None);
+    }
+
+    #[test]
+    fn a_plain_program_runs_as_given() {
+        let p = Path::new("/usr/bin/env");
+        assert_eq!(launcher(p), (p.to_path_buf(), Vec::new()));
+    }
+
+    #[test]
+    fn this_process_is_alive_and_a_finished_one_is_not() {
+        assert!(alive(std::process::id()));
+        let exe = std::env::current_exe().unwrap();
+        let mut child = std_command(&exe)
+            .arg("--list")
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!alive(pid));
+    }
+
+    /// Stopping the tree stops a grandchild too (a shell's `sleep`, `cmd`'s `ping`).
+    #[tokio::test]
+    async fn killing_the_tree_stops_the_grandchildren() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pid");
+        let mut c = if cfg!(windows) {
+            let mut c = command(Path::new("powershell.exe"));
+            c.args([
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "$p = Start-Process ping -ArgumentList '-n','60','127.0.0.1' -NoNewWindow -PassThru; Set-Content -Path '{}' -Value $p.Id; Wait-Process -Id $p.Id",
+                    pidfile.display()
+                ),
+            ]);
+            c
+        } else {
+            let mut c = command(Path::new("/bin/sh"));
+            c.args([
+                "-c",
+                &format!("sleep 60 & echo $! > '{}'; wait", pidfile.display()),
+            ]);
+            c
+        };
+        let mut child = c.kill_on_drop(true).spawn().unwrap();
+        let mut tree = Tree::of(child.id());
+        let mut grandchild = None;
+        for _ in 0..100 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if let Ok(t) = std::fs::read_to_string(&pidfile) {
+                if let Ok(p) = t.trim().parse::<u32>() {
+                    grandchild = Some(p);
+                    break;
+                }
+            }
+        }
+        let grandchild = grandchild.expect("the grandchild started");
+        assert!(alive(grandchild));
+        tree.kill();
+        let _ = child.wait().await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            !alive(grandchild),
+            "grandchild {grandchild} outlived its tree"
+        );
+    }
+}

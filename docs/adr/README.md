@@ -28,6 +28,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0019](0019-files-are-shared-in-place.md) | Files: one file, edited in place by the agent and the person | Accepted |
 | [0020](0020-running-code-contained-in-the-project.md) | Running code, contained in the project folder | Accepted |
 | [0021](0021-an-output-is-a-file-with-a-kind.md) | An output is a file with a kind; a kind has one view | Accepted |
+| [0022](0022-one-place-for-what-differs-between-systems.md) | One place for what differs between operating systems (`ark-os`) | Accepted |
 | [0023](0023-the-project-board.md) | The project's board: work items that follow their tasks | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in

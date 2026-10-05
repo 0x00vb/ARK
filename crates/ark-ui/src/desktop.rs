@@ -115,6 +115,15 @@ pub(crate) fn run(
         fallback,
     }));
     let result = tauri::Builder::default()
+        // A second launch brings this window forward instead of starting a second runtime on
+        // the same store.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .manage(State(host))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -124,6 +133,7 @@ pub(crate) fn run(
         ])
         .setup(move |app| {
             if let Some(w) = app.get_webview_window("main") {
+                fit_to_screen(&w);
                 let _ = w.show();
             }
             Ok(())
@@ -135,6 +145,21 @@ pub(crate) fn run(
             eprintln!("error: {e}");
             std::process::ExitCode::FAILURE
         }
+    }
+}
+
+/// Keep the window inside the screen it opens on: a size made for a large display is cut to the
+/// screen's work area (a 1366×768 laptop at 125% has about 1090×580 to show) and centered.
+fn fit_to_screen(w: &tauri::WebviewWindow) {
+    let (Ok(Some(monitor)), Ok(size)) = (w.current_monitor(), w.outer_size()) else {
+        return;
+    };
+    let area = monitor.work_area().size;
+    if size.width > area.width || size.height > area.height {
+        let fitted =
+            tauri::PhysicalSize::new(size.width.min(area.width), size.height.min(area.height));
+        let _ = w.set_size(fitted);
+        let _ = w.center();
     }
 }
 

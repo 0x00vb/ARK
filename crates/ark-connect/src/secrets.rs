@@ -16,6 +16,15 @@ pub trait Secrets: Send + Sync {
 /// The OS keychain, under the service name `ark`.
 pub struct Keychain;
 
+impl Keychain {
+    /// Whether what is saved here outlives a restart: the macOS Keychain and Windows Credential
+    /// Manager do; the Linux kernel keyring a server has does not, so a server takes its keys
+    /// from the environment (docs/REMOTE.md).
+    pub fn lasting() -> bool {
+        cfg!(any(target_os = "macos", windows))
+    }
+}
+
 const SERVICE: &str = "ark";
 
 fn keychain_error(e: keyring::Error) -> ConnectError {

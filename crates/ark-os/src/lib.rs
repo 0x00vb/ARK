@@ -8,7 +8,7 @@
 //! |---|---|
 //! | [`dirs`] | the home, app data and Documents folders; paths as people read them |
 //! | [`find`] | a program on `PATH` or where its installer puts it; an installed app |
-//! | [`process`] | starting a program the same way everywhere; stopping it with everything it started; whether a process is alive |
+//! | [`process`] | starting a program the same way everywhere; stopping it with everything it started; whether a process is alive; a windowed app's `PATH` and console |
 //! | [`open`] | a link or a file in the person's default app, never through a shell |
 //! | [`fs`] | replacing a file atomically; names every OS accepts; files only their owner reads |
 //! | [`time`] | the local UTC offset |

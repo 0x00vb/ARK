@@ -34,8 +34,8 @@ pub fn program_in(name: &str, extra: Vec<PathBuf>) -> Option<PathBuf> {
 /// An installed desktop app, by where its installer puts it on each system.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct App<'a> {
-    /// macOS: the executable inside `/Applications` or `~/Applications`, such as
-    /// `Google Chrome.app/Contents/MacOS/Google Chrome`.
+    /// macOS: a path inside `/Applications` or `~/Applications`: the executable to run it
+    /// (`Google Chrome.app/Contents/MacOS/Google Chrome`) or the app to open (`Ollama.app`).
     pub macos: &'a [&'a str],
     /// Windows: the executable under Program Files, Program Files (x86) or the local app data
     /// folder, such as `Google/Chrome/Application/chrome.exe`.
@@ -52,7 +52,7 @@ pub fn app(app: &App) -> Option<PathBuf> {
         app.macos
             .iter()
             .flat_map(|rel| roots.iter().map(move |r| r.join(rel)))
-            .find(|p| p.is_file())
+            .find(|p| p.exists())
     } else if cfg!(windows) {
         let roots: Vec<PathBuf> = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"]
             .iter()

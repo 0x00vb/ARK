@@ -21,6 +21,11 @@ What changed for people building on ARK, per release. Not a commit log.
 - The window reads the local way: Ctrl in shortcuts and their labels on Windows and Linux
   (`web/js/keys.js`, `data-os` on the app); the room for the Mac window buttons only on
   macOS. In the desktop window, no reload or print keys and no browser menu except on text.
+- The desktop window: a second launch brings the open window forward (one runtime per store),
+  and a window larger than the screen is fitted to it and centered.
+- `ark_os::process::login_path` (a windowed app gets the terminal's `PATH` on macOS and Linux)
+  and `attach_console` (on Windows, a windowed app started from a terminal prints there).
+- `ark_connect::secrets::Keychain::lasting()`: whether saved secrets outlive a restart here.
 - The Browser (ADR 0015): the new crate `ark-browser` drives the installed Chrome, Edge or Brave
   over the DevTools protocol; `browser.open`, `read`, `back`, `click`, `type`; a fresh context
   per agent, and a signed-in browser one agent uses at a time. `ArkBuilder::browser(true)` or

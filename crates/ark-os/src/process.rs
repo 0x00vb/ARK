@@ -108,6 +108,41 @@ impl Drop for Tree {
     }
 }
 
+/// Give this process the `PATH` the person's terminal has. macOS and Linux start an app from
+/// the Dock or a launcher with the system's short `PATH`, without the folders where `claude`,
+/// `codex` or `node` usually live; the login shell's `PATH` is taken instead (bounded: a shell
+/// that does not answer in 3 s leaves it as it is). Windows gives a windowed app the person's
+/// own `PATH`, so there is nothing to do. Call it first, while this is the only thread.
+pub fn login_path() {
+    if cfg!(windows) || std::env::var_os("TERM").is_some() {
+        return;
+    }
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = std::process::Command::new(shell)
+            .args(["-ilc", "printf '%s' \"$PATH\""])
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output();
+        let _ = tx.send(out);
+    });
+    if let Ok(Ok(out)) = rx.recv_timeout(std::time::Duration::from_secs(3)) {
+        let path = String::from_utf8_lossy(&out.stdout);
+        // Interactive shells may print a banner first; the PATH is the last line.
+        if let Some(path) = path.lines().last().filter(|p| p.contains('/')) {
+            std::env::set_var("PATH", path);
+        }
+    }
+}
+
+/// Let a windowed app started from a terminal print there (`--help`, `token create`). On
+/// Windows such an app has no console of its own, so it attaches to the terminal's; elsewhere
+/// it already prints there. Started from the Start menu or Explorer, nothing changes.
+pub fn attach_console() {
+    sys::attach_console()
+}
+
 /// Whether process `pid` is running. This process counts as alive.
 pub fn alive(pid: u32) -> bool {
     pid == std::process::id() || sys::alive(pid)
@@ -139,6 +174,8 @@ mod sys {
             self.0 = None;
         }
     }
+
+    pub fn attach_console() {}
 
     pub fn alive(pid: u32) -> bool {
         // SAFETY: signal 0 only checks that the process exists; nothing is delivered.
@@ -229,6 +266,14 @@ mod sys {
                 }
                 self.0 = 0;
             }
+        }
+    }
+
+    pub fn attach_console() {
+        use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+        // SAFETY: fails harmlessly when there is no parent console or one is attached.
+        unsafe {
+            AttachConsole(ATTACH_PARENT_PROCESS);
         }
     }
 

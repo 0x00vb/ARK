@@ -1390,10 +1390,13 @@ fn parse_claude(stdout: &str) -> std::result::Result<Parsed, String> {
 /// `stream-json`.
 fn parse_claude_result(v: &Value) -> std::result::Result<Parsed, String> {
     if v["is_error"].as_bool() == Some(true) {
-        return Err(v["result"]
-            .as_str()
-            .unwrap_or("the CLI reported an error")
-            .to_string());
+        // Some errors (a turn limit, too many retries of the structured reply) have no text,
+        // only a subtype: name it, so the cause shows.
+        return Err(match (v["result"].as_str(), v["subtype"].as_str()) {
+            (Some(r), _) if !r.trim().is_empty() => r.to_string(),
+            (_, Some(kind)) => format!("the CLI reported an error ({kind})"),
+            _ => "the CLI reported an error".to_string(),
+        });
     }
     let reply = match &v["structured_output"] {
         Value::Object(_) => v["structured_output"].clone(),
@@ -2114,6 +2117,15 @@ done
             .unwrap_err();
         assert!(matches!(e, ProviderError::Malformed { .. }));
         assert!(e.is_transient());
+    }
+
+    #[test]
+    fn an_error_without_words_names_its_kind() {
+        let e = parse_claude(r#"{"is_error":true,"subtype":"error_max_turns","num_turns":9}"#);
+        assert_eq!(
+            e.err().as_deref(),
+            Some("the CLI reported an error (error_max_turns)")
+        );
     }
 
     #[tokio::test]

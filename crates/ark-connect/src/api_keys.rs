@@ -201,7 +201,10 @@ mod tests {
         let base = provider("sk-good").await;
         let keys = ApiKeys::open(dir.path(), secrets.clone()).with_base("anthropic", &base);
         let refused = keys.save("anthropic", "sk-bad").await.unwrap_err();
-        assert!(refused.to_string().contains("That key was not accepted."), "{refused}");
+        assert!(
+            refused.to_string().contains("That key was not accepted."),
+            "{refused}"
+        );
         assert!(keys.saved().is_empty() && !keys.has("ANTHROPIC_API_KEY"));
         keys.save("anthropic", " sk-good ").await.unwrap();
         assert_eq!(keys.saved(), ["anthropic"]);

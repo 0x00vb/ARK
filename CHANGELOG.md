@@ -118,6 +118,9 @@ What changed for people building on ARK, per release. Not a commit log.
   connections on). Window methods `api_keys`, `api_key_save {provider, key}`,
   `api_key_forget {provider}`; the model menu offers a key field for an API without one.
 
+- `ArkUi::serve` with saved tokens refuses an app that lets agents use the computer: a runtime
+  other machines connect to never offers this machine's screen.
+
 ### Changed
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
   window: actions whose summary names that extension load first, whatever the task's language.

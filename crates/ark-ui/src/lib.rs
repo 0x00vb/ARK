@@ -173,6 +173,7 @@ impl ArkUi {
     pub async fn serve(self, addr: &str) -> anyhow::Result<()> {
         let access = self.access.clone();
         let (host, assets) = self.open().await?;
+        screen_stays_here(&host, &access)?;
         if let Access::Tokens(tokens) = &access {
             if tokens.list()?.is_empty() {
                 eprintln!(
@@ -194,6 +195,7 @@ impl ArkUi {
     pub async fn serve_background(self, addr: &str) -> anyhow::Result<(Arc<Host>, Served)> {
         let access = self.access.clone();
         let (host, assets) = self.open().await?;
+        screen_stays_here(&host, &access)?;
         let (served, _task) = serve::serve(host.clone(), assets, addr, access).await?;
         Ok((host, served))
     }
@@ -211,4 +213,16 @@ impl ArkUi {
             }
         }
     }
+}
+
+/// A runtime other machines connect to never offers this machine's screen: someone elsewhere
+/// cannot watch an agent use it or take it back (ADR 0018). The app turns the computer off
+/// when it serves with saved tokens.
+fn screen_stays_here(host: &Host, access: &Access) -> anyhow::Result<()> {
+    if matches!(access, Access::Tokens(_)) && host.uses_computer() {
+        anyhow::bail!(
+            "this app lets agents use the computer; a runtime other machines connect to must not (ArkBuilder::computer(false) when serving with tokens)"
+        );
+    }
+    Ok(())
 }

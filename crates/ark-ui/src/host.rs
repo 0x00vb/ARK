@@ -476,6 +476,11 @@ impl Host {
     }
 
     /// Every event from now on, each with a `seq` one higher than the last.
+    /// Whether agents may use this machine's screen (the Computer).
+    pub fn uses_computer(&self) -> bool {
+        self.computer.is_some()
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.feed.subscribe()
     }

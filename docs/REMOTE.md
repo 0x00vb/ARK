@@ -69,7 +69,7 @@ uptime check.
 | Limit | Why |
 |---|---|
 | Clients that connect see the same open chat (other chats keep working in the background, ADR 0017) | one `Host` per runtime |
-| The Computer (ADR 0018) is not offered by an app served with saved tokens; it would drive the screen of the machine ARK runs on | nobody sits at a server |
+| The Computer (ADR 0018) is not offered by an app served with saved tokens; it would drive the screen of the machine ARK runs on. `serve` refuses to start such an app (`ArkBuilder::computer(false)` when serving with tokens) | nobody sits at a server |
 | Connecting accounts (Mail, Calendar) needs a browser on the runtime's machine | the OAuth sign-in returns to the runtime's loopback address |
 | The signed-in browser opens on the runtime's machine | it is a visible browser there |
 | The folder picker is the window's own; a remote page asks for a typed path | the runtime's disk is not the client's |

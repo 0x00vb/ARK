@@ -22,7 +22,6 @@ Last updated: 2026-10-05 (v0.9.0; `main` has the browser, step 5, C5, Files, Run
 |---|---|
 | Rename "Allow for this session" in approvals | the owner decides the words |
 | Board: a live benchmark workload for planning on the board (does the chat add good items and link hand-offs, with no lost success); board tools for code-defined team leads; ARK Desktop dogfood of the Board tab | before any harness change for it (ADR 0023 › Consequences) |
-| Turn the Computer off when an example serves other machines with tokens | remote work (`examples/writing-agent`) |
 | ARK Desktop moves its keys to ARK's store (`ark_connect::ApiKeys`, the `api_key_*` methods) and drops `setup::keychain` and `load_keys` | ARK Desktop |
 | A paid-model run of scheduling: qwen3:4b claims schedules it never made | needs the owner's OK |
 | ARK Desktop uses `ark_files::Files` instead of its own `files.*` adapter (same action names), and turns Files on | ARK Desktop, against `../ark` until v0.10.0 |

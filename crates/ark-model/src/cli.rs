@@ -44,6 +44,11 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// arguments travel as a JSON string because an open object is not allowed there.
 pub const REPLY_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"properties":{"action":{"type":"string","enum":["reply","call_tools"]},"text":{"type":"string"},"tool_calls":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"arguments":{"type":"string"}},"required":["name","arguments"]}}},"required":["action","text","tool_calls"]}"#;
 
+/// [`REPLY_SCHEMA`] for Claude Code, whose schemas allow an open object: tool arguments are an
+/// object. As a string, a program in them is JSON in a string in JSON, and Haiku could not
+/// escape it (every try failed, `error_max_structured_output_retries`; `bench/RESULTS.md`).
+pub const CLAUDE_REPLY_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"properties":{"action":{"type":"string","enum":["reply","call_tools"]},"text":{"type":"string"},"tool_calls":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"arguments":{"type":"object"}},"required":["name","arguments"]}}},"required":["action","text","tool_calls"]}"#;
+
 /// Which vendor CLI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -353,7 +358,7 @@ impl CliModel {
                     mode,
                     &self.model,
                     Some(sys),
-                    REPLY_SCHEMA,
+                    CLAUDE_REPLY_SCHEMA,
                 ))
                 .current_dir(work_dir()?);
                 LiveProcess::spawn(cmd).map_err(|e| self.api(format!("could not start: {e}")))?
@@ -744,8 +749,11 @@ impl CliModel {
                 if name.is_empty() {
                     continue;
                 }
+                // An object (Claude Code), or a JSON string (Codex).
                 let raw = c["arguments"].as_str().unwrap_or("").trim();
-                let arguments = if raw.is_empty() {
+                let arguments = if c["arguments"].is_object() {
+                    c["arguments"].clone()
+                } else if raw.is_empty() {
                     json!({})
                 } else {
                     serde_json::from_str(raw).map_err(|e| ProviderError::Malformed {
@@ -1242,14 +1250,18 @@ now; no loading step is needed for it.\n\n"
 
 fn protocol(cli: Option<Cli>, system: &str, tools: &[ToolDef], session: bool) -> String {
     let mut s = String::from(opening(cli));
-    s.push_str(
+    let arguments = match cli {
+        Some(Cli::Claude) => "a JSON object",
+        _ => "a JSON object string",
+    };
+    s.push_str(&format!(
         "Answer every turn with exactly one action:\n\
-- \"call_tools\": put one or more calls in tool_calls (name, and arguments as a JSON object \
-string). text may hold a short note. The host runs the calls and sends the results back.\n\
+- \"call_tools\": put one or more calls in tool_calls (name, and arguments as {arguments}). \
+text may hold a short note. The host runs the calls and sends the results back.\n\
 - \"reply\": your answer to the person goes in text, in Markdown. tool_calls must be empty.\n\n\
 Earlier results appear in the transcript as <tool_result>. Never repeat a call whose result \
 you already have.\n",
-    );
+    ));
     if session {
         s.push_str(
             "\nThis conversation continues over several requests. Each later request carries only \
@@ -2117,6 +2129,28 @@ done
             .unwrap_err();
         assert!(matches!(e, ProviderError::Malformed { .. }));
         assert!(e.is_transient());
+    }
+
+    #[test]
+    fn claude_arguments_are_an_object_and_codex_a_string() {
+        let m = CliModel::new(Cli::Claude, "");
+        let reply = json!({"action":"call_tools","text":"","tool_calls":[
+            {"name":"code.run","arguments":{"code":"print(\"a\\nb\")"}},
+            {"name":"fs.read","arguments":"{\"path\": \"a\"}"}
+        ]});
+        let c = m.completion(&reply, Usage::default()).unwrap();
+        assert_eq!(
+            c.tool_calls[0].arguments,
+            json!({"code":"print(\"a\\nb\")"})
+        );
+        assert_eq!(c.tool_calls[1].arguments, json!({"path":"a"}));
+        let schema: Value = serde_json::from_str(CLAUDE_REPLY_SCHEMA).unwrap();
+        assert_eq!(
+            schema["properties"]["tool_calls"]["items"]["properties"]["arguments"]["type"],
+            "object"
+        );
+        assert!(protocol(Some(Cli::Claude), "", &[], false).contains("arguments as a JSON object)"));
+        assert!(protocol(Some(Cli::Codex), "", &[], false).contains("a JSON object string"));
     }
 
     #[test]

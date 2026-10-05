@@ -231,6 +231,11 @@ What changed for people building on ARK, per release. Not a commit log.
   refused instead of asked, as in a local `-p` run.
 
 ### Fixed
+- `claude:` models: a tool call's arguments are a JSON object in Claude Code's reply schema
+  (`CLAUDE_REPLY_SCHEMA`), not a JSON string. Haiku could not escape a program inside a string
+  inside JSON, and every Run code call failed (`error_max_structured_output_retries`). Codex
+  keeps the string (`REPLY_SCHEMA`), which OpenAI's structured outputs need. A Claude Code
+  error with no text names its subtype.
 - `ark_connect::oauth::revoke` sends the `client_id` (RFC 7009): providers that require it for a
   public client revoked nothing.
 - A saved OpenAI or Anthropic key is checked where the model calls go: `OPENAI_BASE_URL` or

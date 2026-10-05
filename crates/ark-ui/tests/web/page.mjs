@@ -1,11 +1,12 @@
 // Drives the real ark-ui page in WebKit (the engine behind the macOS desktop window) against a
-// host that `tests/page.rs` starts with a scripted mock model.
+// host that `tests/page.rs` starts with a scripted mock model. `ARK_UI_BROWSER=chromium` uses
+// Chromium instead, the engine behind WebView2 on Windows.
 //
 //   node page.mjs <scenario> <url>
 //
 // Each scenario guards a rendering bug found while dogfooding. Exit code 0 means it held.
 
-import { webkit } from "playwright-core";
+import { chromium, webkit } from "playwright-core";
 import assert from "node:assert/strict";
 
 const [scenario, url] = process.argv.slice(2);
@@ -772,7 +773,8 @@ if (!run) {
   console.error(`unknown scenario ${scenario}`);
   process.exit(2);
 }
-const browser = await webkit.launch();
+const engine = process.env.ARK_UI_BROWSER === "chromium" ? chromium : webkit;
+const browser = await engine.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   const errors = [];

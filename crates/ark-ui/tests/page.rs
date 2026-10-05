@@ -8,6 +8,9 @@
 //! cd crates/ark-ui/tests/web && npm ci && npx playwright-core install webkit
 //! ARK_UI_PAGE_TESTS=1 cargo test -p ark-ui --test page
 //! ```
+//!
+//! `ARK_UI_BROWSER=chromium` (after `npx playwright-core install chromium`) runs them in
+//! Chromium, the engine behind WebView2 on Windows.
 
 use std::path::PathBuf;
 use std::sync::Arc;

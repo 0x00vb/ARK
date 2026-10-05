@@ -1,0 +1,78 @@
+# Windows x64: build, every test without stopping at the first failure, the page in Chromium
+# (WebView2's engine) and WebKit, and the runtime run for real (scripts/windows-smoke.ps1).
+# Failures are collected, not fatal: the job summary and the `windows-logs` artifact list them.
+# The plan this feeds: ark-desktop/docs/WINDOWS.md.
+name: windows
+on:
+  push:
+    branches: [ci/windows]
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 150
+    env:
+      CARGO_TERM_COLOR: never
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: 1
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: mkdir -p logs && (systeminfo | head -20; rustc -vV; node -v; where python3 python git bash || true) > logs/system.txt 2>&1
+      - name: build
+        id: build
+        run: cargo build --workspace --all-targets --locked 2>&1 | tee logs/build.log; exit ${PIPESTATUS[0]}
+      - name: clippy
+        id: clippy
+        if: always() && steps.build.outcome == 'success'
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee logs/clippy.log; exit ${PIPESTATUS[0]}
+      - name: test
+        id: test
+        if: always() && steps.build.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 45
+        run: cargo test --workspace --locked --no-fail-fast 2>&1 | tee logs/test.log; exit ${PIPESTATUS[0]}
+      - name: page tests (chromium, webkit)
+        id: page
+        if: always() && steps.build.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          (cd crates/ark-ui/tests/web && npm ci && npx playwright-core install chromium webkit) > logs/page-setup.log 2>&1
+          ARK_UI_PAGE_TESTS=1 ARK_UI_BROWSER=chromium cargo test -p ark-ui --test page --locked -- --test-threads=1 2>&1 | tee logs/page-chromium.log; c=${PIPESTATUS[0]}
+          ARK_UI_PAGE_TESTS=1 cargo test -p ark-ui --test page --locked -- --test-threads=1 2>&1 | tee logs/page-webkit.log; w=${PIPESTATUS[0]}
+          exit $((c + w))
+      - name: runtime smoke
+        id: smoke
+        if: always() && steps.build.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 30
+        shell: pwsh
+        run: scripts/windows-smoke.ps1 -Logs logs
+      - name: summary
+        if: always()
+        run: |
+          {
+            echo "## Steps"
+            echo "build: ${{ steps.build.outcome }}, clippy: ${{ steps.clippy.outcome }}, test: ${{ steps.test.outcome }}, page: ${{ steps.page.outcome }}, smoke: ${{ steps.smoke.outcome }}"
+            echo "## Failing tests"
+            echo '```'
+            cat logs/test.log logs/page-*.log 2>/dev/null | grep -E '^test .* FAILED$|^error: test failed|^error: [0-9]+ targets? failed' | sort -u || true
+            echo '```'
+            echo "## Clippy errors: $(grep -c '^error' logs/clippy.log 2>/dev/null || echo 0)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-logs
+          path: logs/

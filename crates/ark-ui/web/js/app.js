@@ -553,6 +553,15 @@ function reportFocus() {
 
 // ---- command palette (⌘K) ------------------------------------------------------------------
 
+/// An action's `when` decides whether it is offered now (a throwing `when` hides it).
+function shown(a) {
+  try {
+    return !a.when || !!a.when({});
+  } catch {
+    return false;
+  }
+}
+
 function palette() {
   const overlay = $("#overlay");
   if (!overlay.hidden) return closePalette();
@@ -562,7 +571,7 @@ function palette() {
     ...[...registry.views.values()].map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),
     ...(registry.settings.size ? [{ label: "Settings", hint: "⌘,", run: () => api.openSettings() }] : []),
     ...[...registry.panels.values()].map((p) => ({ label: p.title, hint: "panel", run: () => api.openPanel(p.id) })),
-    ...registry.actions.filter((a) => !a.where || a.where === "palette").map((a) => ({ label: a.label, hint: "action", run: () => a.run({}, window.ark) })),
+    ...registry.actions.filter((a) => (!a.where || a.where === "palette") && shown(a)).map((a) => ({ label: a.label, hint: "action", run: () => a.run({}, window.ark) })),
     ...(state.commands || []).map((c) => ({ label: `/${c.name}${c.usage ? " " + c.usage : ""}`, hint: c.summary, run: () => (c.usage && !c.usage.startsWith("[") ? composer.set(`/${c.name} `) : runCommand(`/${c.name}`)) })),
   ];
   let sel = 0;

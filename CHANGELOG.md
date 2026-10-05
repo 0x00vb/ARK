@@ -10,6 +10,16 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- ARK Accounts (ADR 0026): the new crate `ark-account`, optional. `Account::sign_in` (the
+  browser, PKCE, loopback), `refresh`, `access_token`, `sign_out` (revokes this computer's
+  token), `status`, and `can("cloud.agents")` for ARK Cloud features. Tokens stay in the OS
+  keychain and in memory ([`EXTENSION.md`](docs/EXTENSION.md#an-ark-account)).
+  `Account::set_computer_name` names this computer's sign-in on the person's account page
+  (ADR 0031).
+- `ark_connect::oauth::SignIn::landing(url)`: once the browser is back, send it to the
+  provider's own page instead of ARK's plain one.
+- Window: a `person` icon, and palette actions honor `when` (an action is offered only when
+  `when({})` is true).
 - A folder sent to a runtime elsewhere becomes a project there (ADR 0030):
   `ark_ui::remote::send_folder(client, &Folder::read(dir)?, name, go_on)` sends it in parts
   (`upload_parts`, `upload_project`, `upload_cancel`); the project appears only when every file
@@ -198,6 +208,8 @@ What changed for people building on ARK, per release. Not a commit log.
   refused instead of asked, as in a local `-p` run.
 
 ### Fixed
+- `ark_connect::oauth::revoke` sends the `client_id` (RFC 7009): providers that require it for a
+  public client revoked nothing.
 - A saved OpenAI or Anthropic key is checked where the model calls go: `OPENAI_BASE_URL` or
   `ANTHROPIC_BASE_URL` when set, not always the vendor's API.
 - `ConnectError::Secrets` reads "secret store: ..." instead of "keychain: ...", since the store
@@ -224,6 +236,8 @@ What changed for people building on ARK, per release. Not a commit log.
   instead of allowing each once.
 
 ### Breaking
+- `ConnectError` has a new variant, `Refused`: a 4xx answer from a token endpoint (an expired
+  or revoked grant). A `match` on `ConnectError` needs an arm for it.
 - `ProviderError::OutOfCredit` and `AgentError::OutOfCredit` are new variants: an exhaustive
   `match` adds an arm. `BackendKind::Endpoint` likewise. `OpenAi::describe` uses its name
   (`openai` unless `.named(..)`).

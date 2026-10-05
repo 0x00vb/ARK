@@ -43,6 +43,7 @@ pub struct SignIn {
     redirect: String,
     provider: Provider,
     client_id: String,
+    landing: Option<String>,
 }
 
 /// Start a sign-in for `scopes` (the provider's identity scopes are added).
@@ -87,6 +88,7 @@ pub async fn begin(provider: &Provider, scopes: &[String]) -> Result<SignIn, Con
         redirect,
         provider: provider.clone(),
         client_id,
+        landing: None,
     })
 }
 
@@ -94,6 +96,13 @@ impl SignIn {
     /// The page the person signs in on.
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// Where the browser goes once it is back with a code: a page of the provider's own
+    /// ("You're signed in") instead of ARK's plain one. Refusals still show ARK's page.
+    pub fn landing(mut self, url: impl Into<String>) -> Self {
+        self.landing = Some(url.into());
+        self
     }
 
     /// Wait for the browser to come back (at most `within`), then trade the code for tokens.
@@ -157,12 +166,17 @@ impl SignIn {
                     "the sign-in was not allowed ({e})"
                 )));
             }
-            reply(
-                &mut sock,
-                200,
-                &page("Connected. You can close this tab and go back to ARK."),
-            )
-            .await;
+            match &self.landing {
+                Some(to) => redirect(&mut sock, to).await,
+                None => {
+                    reply(
+                        &mut sock,
+                        200,
+                        &page("Connected. You can close this tab and go back to ARK."),
+                    )
+                    .await
+                }
+            }
             return Ok(code.unwrap_or_default());
         }
     }
@@ -198,7 +212,12 @@ pub async fn revoke(
     let Some(url) = &provider.oauth.revoke_url else {
         return Ok(());
     };
-    let resp = http.post(url).form(&[("token", token)]).send().await?;
+    // A public client names itself (RFC 7009 §2.1); a provider that does not need it ignores it.
+    let mut form = vec![("token", token.to_string())];
+    if let Some(id) = provider.oauth.client_id() {
+        form.push(("client_id", id));
+    }
+    let resp = http.post(url).form(&form).send().await?;
     if resp.status().is_success() || resp.status().as_u16() == 400 {
         Ok(())
     } else {
@@ -238,10 +257,14 @@ async fn token_request(
             .as_str()
             .or(v["error"].as_str())
             .unwrap_or("no reason given");
-        return Err(ConnectError::Provider(format!(
-            "{} refused the sign-in ({status}): {why}",
-            provider.label
-        )));
+        let text = format!("{} refused the sign-in ({status}): {why}", provider.label);
+        // A 4xx is the provider's answer (an expired or revoked grant): asking again will not
+        // help. Anything else may pass.
+        return Err(if status.is_client_error() {
+            ConnectError::Refused(text)
+        } else {
+            ConnectError::Provider(text)
+        });
     }
     let access = v["access_token"]
         .as_str()
@@ -272,6 +295,13 @@ fn page(text: &str) -> String {
     format!(
         "<!doctype html><meta charset=utf-8><title>ARK</title><body style=\"font:16px system-ui;margin:4em auto;max-width:32em\"><p>{text}</p></body>"
     )
+}
+
+async fn redirect(sock: &mut tokio::net::TcpStream, to: &str) {
+    let text = format!(
+        "HTTP/1.1 303 See Other\r\nlocation: {to}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+    );
+    let _ = sock.write_all(text.as_bytes()).await;
 }
 
 async fn reply(sock: &mut tokio::net::TcpStream, status: u16, body: &str) {

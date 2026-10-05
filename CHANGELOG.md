@@ -14,6 +14,8 @@ What changed for people building on ARK, per release. Not a commit log.
   browser, PKCE, loopback), `refresh`, `access_token`, `sign_out` (revokes this computer's
   token), `status`, and `can("cloud.agents")` for ARK Cloud features. Tokens stay in the OS
   keychain and in memory ([`EXTENSION.md`](docs/EXTENSION.md#an-ark-account)).
+  `Account::set_computer_name` names this computer's sign-in on the person's account page
+  (ADR 0031).
 - `ark_connect::oauth::SignIn::landing(url)`: once the browser is back, send it to the
   provider's own page instead of ARK's plain one.
 - Window: a `person` icon, and palette actions honor `when` (an action is offered only when

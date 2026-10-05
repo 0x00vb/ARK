@@ -10,6 +10,8 @@
 //! own browser, and the browser comes back to `127.0.0.1` with a code. The refresh token lives
 //! in the OS keychain ([`ark_connect::Secrets`]); access tokens live in memory and last minutes.
 //! Every computer is its own sign-in: signing out here revokes this computer's token only.
+//! An app can name the computer ([`Account::set_computer_name`]) so the person can tell its
+//! sign-in from the others on their account page.
 //!
 //! The service is any OpenID Connect provider that serves ARK's account API (`/v1/me`):
 //! [`Service::ark`] is ARK's own (`account.aiark.dev`); `ARK_ACCOUNT_URL` points an app at
@@ -196,6 +198,10 @@ struct State {
     profile: Option<Profile>,
     access: Option<(String, SystemTime)>,
     provider: Option<Provider>,
+    /// This computer's name, as the app gave it.
+    computer: Option<String>,
+    /// The service has the name, or does not take one: send it at most once per run.
+    named: bool,
 }
 
 impl Account {
@@ -244,6 +250,15 @@ impl Account {
         }
     }
 
+    /// Name this computer's sign-in (`MacBook Pro`), so the person can tell it from their
+    /// other computers on the account page. Sent once per run, after signing in or the first
+    /// [`refresh`](Account::refresh); a service that does not take names is not asked again.
+    pub fn set_computer_name(&self, name: impl Into<String>) {
+        let mut st = self.0.state.lock().unwrap();
+        st.computer = Some(name.into()).filter(|n| !n.trim().is_empty());
+        st.named = false;
+    }
+
     /// Call `f` whenever the status changes (signed in, out, or the profile changed).
     pub fn on_change(&self, f: impl Fn(&Status) + Send + Sync + 'static) {
         self.0.on_change.lock().unwrap().push(Box::new(f));
@@ -279,6 +294,7 @@ impl Account {
             other => other?,
         };
         self.update_profile(profile)?;
+        self.name_computer().await;
         Ok(self.status())
     }
 
@@ -340,6 +356,40 @@ impl Account {
             // The token stays valid at the service until it expires (90 days) or is revoked
             // from another device. Nothing on this computer can use it any more.
             tracing::warn!("account: revoking at the service: {e}");
+        }
+    }
+
+    /// Tell the service this computer's name (ADR 0031). The refresh token it holds says which
+    /// sign-in is this computer's. Best effort: the name only helps the person read their
+    /// account page.
+    async fn name_computer(&self) {
+        let Some(name) = ({
+            let st = self.0.state.lock().unwrap();
+            st.computer.clone().filter(|_| !st.named)
+        }) else {
+            return;
+        };
+        let Ok(access) = self.access_token().await else {
+            return;
+        };
+        let Ok(Some(saved)) = self.saved() else {
+            return;
+        };
+        let sent = self
+            .0
+            .http
+            .put(format!("{}/v1/me/computer", self.0.service.issuer))
+            .bearer_auth(access)
+            .json(&serde_json::json!({ "name": name, "refresh_token": saved.refresh_token }))
+            .send()
+            .await;
+        match sent.map(|r| r.status()) {
+            // Named; or a service with no names, or a sign-in it no longer knows: not again.
+            Ok(s) if s.is_success() || s.as_u16() == 404 => {
+                self.0.state.lock().unwrap().named = true;
+            }
+            Ok(s) => tracing::debug!("account: naming this computer: the service answered {s}"),
+            Err(_) => tracing::debug!("account: naming this computer: the service did not answer"),
         }
     }
 
@@ -506,6 +556,9 @@ impl SigningIn {
         if let Some(old) = before {
             a.revoke(&old.refresh_token).await;
         }
+        // A new sign-in at the service: it has no name yet.
+        a.0.state.lock().unwrap().named = false;
+        a.name_computer().await;
         Ok(profile)
     }
 }

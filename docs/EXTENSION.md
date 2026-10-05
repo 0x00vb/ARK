@@ -190,6 +190,7 @@ separate from the runtime. Nothing local asks for it; a Cloud feature asks `can`
 
 ```rust
 let account = Account::new(Service::ark("my-app"), Arc::new(ark_connect::Keychain));
+account.set_computer_name("MacBook Pro");   // optional: names this sign-in on the account page
 account.refresh().await.ok();               // at launch: check the saved sign-in
 let s = account.sign_in().await?;           // open s.url() in the browser
 let profile = s.finish(Duration::from_secs(900)).await?;
@@ -204,6 +205,7 @@ account.sign_out().await?;                  // revokes this computer's token
 | Kept | Refresh token and last profile in the OS keychain (`account:<issuer>`); access tokens in memory |
 | Profile | `id` (the identity), `email`, `name`, `image`, `entitlements` |
 | Client id | Each app has its own at the service (ARK Desktop: `ark-desktop`) |
+| Computer name | `set_computer_name`: sent once per run to `PUT /v1/me/computer`, with the refresh token that says which sign-in it is. A service without names answers 404 and is not asked again ([ADR 0031](adr/0031-an-app-names-its-computers-sign-in.md)) |
 
 Why: [ADR 0026](adr/0026-an-optional-ark-account.md).
 

@@ -27,6 +27,10 @@ struct Fake {
     /// the service does not answer
     down: bool,
     seen: Vec<(String, String, String)>,
+    /// refresh token -> the computer's name
+    names: HashMap<String, String>,
+    /// the service does not take names (404)
+    no_names: bool,
 }
 
 type Shared = Arc<Mutex<Fake>>;
@@ -101,6 +105,19 @@ fn route(
         }
         f.refresh.insert(p["token"].clone(), false);
         return (200, json!({}));
+    }
+    if path == "/v1/me/computer" && method == "PUT" {
+        if f.no_names {
+            return (404, json!({}));
+        }
+        let b: Value = serde_json::from_str(body).unwrap();
+        let token = b["refresh_token"].as_str().unwrap().to_string();
+        if !f.refresh.get(&token).copied().unwrap_or(false) {
+            return (404, json!({ "error": "no such sign-in" }));
+        }
+        f.names
+            .insert(token, b["name"].as_str().unwrap().to_string());
+        return (204, Value::Null);
     }
     if path == "/v1/me" {
         let bearer = head
@@ -403,4 +420,64 @@ async fn signing_in_again_revokes_the_sign_in_it_replaces() {
         "the old token is revoked"
     );
     assert_eq!(f.refresh.get("refresh-2"), Some(&true));
+}
+
+#[tokio::test]
+async fn the_computer_names_its_sign_in_once_per_run() {
+    let (base, fake) = service(900).await;
+    let secrets = Arc::new(MemorySecrets::default());
+    let account = Account::new(Service::new(&base, API, CLIENT), secrets.clone());
+    account.set_computer_name("Ada's MacBook Pro");
+    let s = account.sign_in().await.unwrap();
+    let url = s.url().to_string();
+    let (p, _) = tokio::join!(s.finish(Duration::from_secs(5)), browser(&url));
+    p.unwrap();
+    {
+        let f = fake.lock().unwrap();
+        // Sent with the token this computer holds now.
+        assert_eq!(
+            f.names.get("refresh-1").map(String::as_str),
+            Some("Ada's MacBook Pro")
+        );
+        let put = f
+            .seen
+            .iter()
+            .find(|(m, p, _)| m == "PUT" && p == "/v1/me/computer");
+        assert!(put.is_some());
+    }
+    // Checking in again in the same run does not send it again.
+    account.refresh().await.unwrap();
+    let puts = |f: &Fake| f.seen.iter().filter(|(m, _, _)| m == "PUT").count();
+    assert_eq!(puts(&fake.lock().unwrap()), 1);
+
+    // The next run names the sign-in with its rotated token.
+    let again = Account::new(Service::new(&base, API, CLIENT), secrets.clone());
+    again.set_computer_name("Ada's MacBook Pro");
+    again.refresh().await.unwrap();
+    let f = fake.lock().unwrap();
+    assert_eq!(puts(&f), 2);
+    assert!(f.names.contains_key("refresh-2"));
+}
+
+#[tokio::test]
+async fn a_service_without_names_is_asked_once_and_signing_in_still_works() {
+    let (base, fake) = service(900).await;
+    fake.lock().unwrap().no_names = true;
+    let secrets = Arc::new(MemorySecrets::default());
+    let account = Account::new(Service::new(&base, API, CLIENT), secrets.clone());
+    account.set_computer_name("Ada's PC");
+    let s = account.sign_in().await.unwrap();
+    let url = s.url().to_string();
+    let (p, _) = tokio::join!(s.finish(Duration::from_secs(5)), browser(&url));
+    assert_eq!(p.unwrap().email, "ada@example.com");
+    assert!(account.refresh().await.unwrap().signed_in());
+    let f = fake.lock().unwrap();
+    assert_eq!(f.seen.iter().filter(|(m, _, _)| m == "PUT").count(), 1);
+}
+
+#[tokio::test]
+async fn without_a_name_nothing_is_sent() {
+    let (base, fake) = service(900).await;
+    signed_in(&base, Arc::new(MemorySecrets::default())).await;
+    assert!(!fake.lock().unwrap().seen.iter().any(|(m, _, _)| m == "PUT"));
 }

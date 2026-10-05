@@ -3,6 +3,7 @@
 //! not touch. The run succeeds when the saved file has the values, not when the answer says so.
 //! A small model was seen reading the file and adding a sheet, then stopping before it wrote any
 //! values (`bench/RESULTS.md`); this workload measures that. The simulated model reads the file,
+//! then stops with "I will now call files.edit" as that model did; told that nothing ran, it
 //! sets the cells in one edit and answers.
 
 use std::collections::BTreeMap;
@@ -13,7 +14,9 @@ use ark_sdk::prelude::*;
 use serde_json::{json, Value};
 
 use super::{answer, one, tools, Spec};
-use crate::sim::{competent, Goal};
+use std::sync::Arc;
+
+use crate::sim::{competent, Goal, Policy, Reply, SimRequest};
 use crate::workload::{RunOutput, Verdict};
 
 const FILE: &str = "sales.xlsx";
@@ -141,7 +144,7 @@ fn saved(root: &std::path::Path) -> Option<Saved> {
 
 /// Edit a spreadsheet the person keeps in the project folder.
 pub fn files_edit() -> FilesSpec {
-    let policy = competent(
+    let careful = competent(
         |_| {
             vec![
                 Goal::call(ark_files::READ, json!({ "path": FILE })),
@@ -152,6 +155,19 @@ pub fn files_edit() -> FilesSpec {
             format!("Added a Revenue column (D) and a Total row (row 5) to {FILE}. Total revenue is 4,350.")
         }),
     );
+    // Stops after reading the way qwen3:4b did ("I will now call files.edit"), and makes the
+    // edit once told that nothing ran.
+    let policy: Policy = Arc::new(move |r: &SimRequest| {
+        let read = r.result_of(ark_files::READ).is_some();
+        let edited = r.count_calls(ark_files::EDIT) > 0;
+        let answering = !r.is_planner() && !r.is_critic() && !r.tools.is_empty();
+        if answering && read && !edited && !r.mentions("called no tool") {
+            return Reply::Text(format!(
+                "{FILE} has Month, Units and Price for three months.\n\nI will now call files.edit to add the Revenue column and the Total row."
+            ));
+        }
+        careful(r)
+    });
     FilesSpec(Spec {
         name: "files-edit",
         class: "files",
@@ -159,13 +175,13 @@ pub fn files_edit() -> FilesSpec {
             "a computed column and a total row in a real spreadsheet; the saved file is checked",
         turns: one(TASK),
         policy,
-        prepare: Some(std::sync::Arc::new(|ark: &Ark| {
+        prepare: Some(Arc::new(|ark: &Ark| {
             let id = ark.find_or_create_project("bench", "")?.id;
             let root = folder(ark, &id)?;
             ark_files::write(&root, FILE, &Content::Sheet(seed()), None)?;
             Ok(id)
         })),
-        check: std::sync::Arc::new(|o: &RunOutput| {
+        check: Arc::new(|o: &RunOutput| {
             let Some(s) = folder(o.ark, o.project).ok().and_then(|r| saved(&r)) else {
                 return Verdict::all(&[(false, "sales.xlsx is missing or not a spreadsheet")]);
             };

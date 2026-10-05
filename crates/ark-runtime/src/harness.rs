@@ -525,6 +525,8 @@ impl Harness {
         // once that its answer names a saved file none of them wrote.
         let mut written: Vec<String> = Vec::new();
         let mut corrected_claim = false;
+        // Whether the model was told once that its answer announced work it had not done.
+        let mut corrected_announce = false;
         let mut steered: Vec<String> = Vec::new();
         // Tools an acquisition added this turn, and the turn's engine once it has them.
         let outer = engine;
@@ -642,6 +644,19 @@ impl Harness {
                         retrieved.push(0);
                         continue;
                     }
+                }
+                // An answer that ends by saying what it will do next ("I will now call
+                // files.edit") while it can still call tools stopped before the work: a small
+                // model does this after reading what it was asked to change. Say so once.
+                if !corrected_announce && !tools.is_empty() && announces_work(&completion.content) {
+                    corrected_announce = true;
+                    tracing::info!("the answer announces work it has not done; asking again");
+                    ws.push_round(vec![
+                        Message::assistant(completion.content.clone()),
+                        Message::user(ANNOUNCED_NOTE),
+                    ]);
+                    retrieved.push(0);
+                    continue;
                 }
                 answer = completion.content.trim().to_string();
                 streamed = !answer.is_empty();
@@ -2210,6 +2225,49 @@ fn unwritten_note(missing: &[String], written: &[String]) -> String {
     )
 }
 
+const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";
+
+/// Whether the end of an answer announces work the model is about to do ("I will now call
+/// `files__edit`", "Let me now update the file"), the way a model ends a reply instead of making
+/// the call. Only the last three sentences count, and a sentence that waits on the person
+/// ("if you confirm", a question) does not. Deterministic and English only; a miss costs
+/// nothing, a false alarm one more reply.
+fn announces_work(text: &str) -> bool {
+    const WILL: &[&str] = &[
+        "i will now",
+        "i'll now",
+        "now i will",
+        "now i'll",
+        "let me now",
+        "i will proceed",
+        "i'll proceed",
+        "i will call",
+        "i'll call",
+        "i will execute",
+        "i will perform",
+        "i will run",
+        "i'll run",
+        "i am going to",
+        "i'm going to",
+    ];
+    const WAITS: &[&str] = &[
+        "?",
+        "if you",
+        "once you",
+        "when you",
+        "you'd like",
+        "you want",
+        "confirm",
+        "wait",
+        "approval",
+    ];
+    let all = sentences(text);
+    all.iter().rev().take(3).any(|sentence| {
+        let s = sentence.to_lowercase().replace('\u{2019}', "'");
+        WILL.iter().any(|w| s.contains(w)) && !WAITS.iter().any(|w| s.contains(w))
+    })
+}
+
 /// Whether `text` contains a call to one of `tools` written out as text (`record_state({`,
 /// `fs__read(`), the way a model sometimes "calls" a tool without calling it.
 fn writes_tool_call_as_text(text: &str, tools: &[ToolDef]) -> bool {
@@ -2595,6 +2653,36 @@ mod tests {
             claims("I wrote it up, e.g. the trend, see https://example.com/a.md and v0.10.0, on example.com.").is_empty(),
             "abbreviations, addresses, versions and domains are not files"
         );
+    }
+
+    #[test]
+    fn an_answer_that_announces_work_is_sent_back() {
+        // Endings seen on qwen3:4b (`files-edit`, `bench/RESULTS.md`).
+        assert!(announces_work(
+            "The file has no Revenue column yet.\n\nI will now call `files__edit` to add the Revenue column and the Total row."
+        ));
+        assert!(announces_work(
+            "- Updated the file.\n\n**Next step**: Verify it. I will now read the updated file to confirm the changes.\n\nI will call `files__read` to inspect it."
+        ));
+        assert!(announces_work(
+            "Found the data. Let me now update the sheet."
+        ));
+        // Answers that are done, wait on the person, or announce something far from the end.
+        assert!(!announces_work(
+            "Done! I've updated sales.xlsx with a Revenue column and a Total row."
+        ));
+        assert!(!announces_work(
+            "Next step: Verify the updated spreadsheet contains the correct values."
+        ));
+        assert!(!announces_work(
+            "I will now update the file if you confirm the prices."
+        ));
+        assert!(!announces_work(
+            "Shall I proceed? I will now wait for your answer."
+        ));
+        assert!(!announces_work(
+            "I will now explain. First point. Second point. Third point. That is all."
+        ));
     }
 
     #[test]

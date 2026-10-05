@@ -135,6 +135,10 @@ What changed for people building on ARK, per release. Not a commit log.
   `TurnSpec::new_chat_after_restart` starts a new chat ([`bench/RESULTS.md`](bench/RESULTS.md)).
 
 ### Changed
+- Runtime: an answer that ends by announcing work it has not done ("I will now call
+  files.edit...") while tools are offered is sent back once, saying nothing ran. On qwen3:4b
+  `files-edit` no run stops after reading any more; seven other workloads 20/21 to 21/21 at the
+  same cost per success (`bench/RESULTS.md`).
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
   window: actions whose summary names that extension load first, whatever the task's language.
 - Window: the Files panel opens a file in its own tab instead of in the panel.

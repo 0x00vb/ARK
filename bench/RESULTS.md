@@ -3,6 +3,42 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## An answer that announces work it has not done (2026-10-05)
+
+On `files-edit`, qwen3:4b read the spreadsheet and then ended its reply with "I will now call
+`files__edit` to add the Revenue column" in 3 of 5 runs, with tools still offered. The harness now
+sends such an answer back once: "Your reply says what you will do next, but it called no tool, so
+nothing was done". The check reads the last three sentences of the answer for first-person
+future phrases ("I will now", "let me now", "I'll call", ...) and skips a sentence that waits on
+the person ("if you confirm", a question). It runs only when the request offered tools.
+Deterministic, English only. Reports in `bench/files/`.
+
+| `files-edit`, qwen3:4b | Success | Stopped after reading | Wrote the revenues | Model calls |
+|---|---:|---:|---:|---:|
+| before (`live-qwen3-4b.json`) | 0/5 | 3/5 | 2/5 | 4.2 |
+| with the check (`live-qwen3-4b-announce.json`) | 0/5 | 0/5 | 3/5 | 5.8 |
+
+Every run that finished now edits the file. They still fail the check: the totals go in a new
+column or a new sheet instead of a row under the months (one run of the 5 ended on an Ollama
+error, "invalid tool call arguments"). That is the model's layout, not the loop's.
+
+Seven other live workloads, where recorded qwen3:4b answers ended with "I will now..." (of
+828 recorded live answers, 29 would have been sent back: 15 from failed runs, 14 from runs
+that passed, mostly "I will now verify..."). qwen3:4b, 3 runs each, the check off and on
+(`announce-off.json`, `announce-on.json`):
+
+| 7 workloads | Success | Cost per success | Total tokens | Model calls |
+|---|---:|---:|---:|---:|
+| off | 20/21 | $0.01210 | 105,709 | 61 |
+| on | 21/21 | $0.01203 | 110,609 | 63 |
+
+- `large-output` 2/3 to 3/3 (noise at 3 runs is likely); `duplicate` 2.0 to 2.7 calls, still
+  3/3 (the check fired and the model fetched the orders it had announced); the rest moved
+  within one call.
+- Simulated: the simulated model of `files-edit` now stops after reading the way qwen3:4b did
+  and edits once told; it passes with the check (5 calls) and fails without it (2 calls). The
+  19 other workloads did not move.
+
 ## A spreadsheet edited in place (2026-10-05)
 
 The `files-edit` workload: the project folder has `sales.xlsx` (a Sales sheet with Month, Units
@@ -29,8 +65,7 @@ and 4,350 revenue, the Notes sheet still there. What the answer says does not co
 - qwen3.5:27b read once, then made one `files.edit` with formulas (`=B2*C2`, `=SUM(D2:D4)`), in
   all 3 runs.
 - Timings are noisy: another live run shared Ollama during the qwen3:4b runs.
-- Next, measured here before any change: an answer that announces work it has not done ("I will
-  now...") while the task is open, sent back once, the way `claimed-files` sends back a claim.
+- Next: an answer that announces work it has not done, sent back once (the section above).
 
 ## Planning on the board (2026-10-05)
 

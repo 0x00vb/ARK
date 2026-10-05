@@ -350,6 +350,7 @@ impl Adapter for Exec {
         vec![ActionDescriptor::new(RUN, summary, RiskTier::Mutate).with_input_schema(json!({
             "type": "object", "required": ["code"],
             "properties": {
+                "purpose": { "type": "string", "description": "what the run does, in one short sentence the person understands (no code words), e.g. \"join the two sales files by customer and total each month\"" },
                 "code": { "type": "string", "description": "the whole program" },
                 "runtime": { "type": "string", "enum": names, "description": format!("default {}", names.first().unwrap_or(&"")) },
                 "timeout": { "type": "integer", "description": format!("seconds, default {TIMEOUT}, at most {MAX_TIMEOUT}") }

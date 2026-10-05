@@ -327,10 +327,16 @@ fn run_approval(action: &str, input: &Value) -> Option<String> {
     }
     let code = input.get("code").and_then(Value::as_str).unwrap_or("");
     let lines: Vec<&str> = code.lines().filter(|l| !l.trim().is_empty()).collect();
-    let mut out = format!(
-        "Run this {}program in the project folder (it can change files there; no network):",
-        runtime_name(input)
-    );
+    let mut out = match purpose(input) {
+        Some(p) => format!(
+            "{p}\nWith a {}program in the project folder (it can change files there; no network):",
+            runtime_name(input)
+        ),
+        None => format!(
+            "Run this {}program in the project folder (it can change files there; no network):",
+            runtime_name(input)
+        ),
+    };
     for l in lines.iter().take(PREVIEW_LINES) {
         out.push_str(&format!("\n  {}", clip(l, 160)));
     }
@@ -338,6 +344,18 @@ fn run_approval(action: &str, input: &Value) -> Option<String> {
         out.push_str(&format!("\n  … {} more lines", lines.len() - PREVIEW_LINES));
     }
     Some(out)
+}
+
+/// What the agent says a run is for (`purpose`), as a sentence: what the person reads first,
+/// before the program.
+fn purpose(input: &Value) -> Option<String> {
+    let p = input.get("purpose").and_then(Value::as_str)?.trim();
+    let mut c = p.chars();
+    let first = c.next()?;
+    Some(clip(
+        &(first.to_uppercase().collect::<String>() + c.as_str()),
+        160,
+    ))
 }
 
 /// `Python ` for `{runtime: "python"}`; nothing when the agent left the runtime to the default,
@@ -434,9 +452,10 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
             }
         ),
         "computer.keys" => format!("Pressing {} in {}", s("keys"), s("app")),
-        ark_exec::RUN => match runtime_name(input).trim() {
-            "" => "Running code".into(),
-            r => format!("Running {r}"),
+        ark_exec::RUN => match (purpose(input), runtime_name(input).trim()) {
+            (Some(p), _) => clip(&p, 80),
+            (None, "") => "Running code".into(),
+            (None, r) => format!("Running {r}"),
         },
         "diagram.create" => match s("title") {
             "" => "Drawing a diagram".into(),
@@ -574,6 +593,19 @@ mod tests {
         assert_eq!(
             l.call_label(ark_exec::RUN, &json!({ "code": code })),
             "Running code"
+        );
+        let said =
+            json!({ "code": code, "runtime": "python", "purpose": "total the sales per region" });
+        assert_eq!(
+            l.call_label(ark_exec::RUN, &said),
+            "Total the sales per region"
+        );
+        assert_eq!(
+            l.approval_line(&ApprovalRequest {
+                input: said,
+                ..req.clone()
+            }),
+            "Total the sales per region\nWith a Python program in the project folder (it can change files there; no network):\n  import pandas as pd\n  df = pd.read_excel('sales.xlsx')\n  print(df.sum())"
         );
         let done = "exit 0\nwrote chart.png, summary.csv\nstdout:\n12";
         assert_eq!(

@@ -58,7 +58,12 @@ export function sheetView(el, file, ctx) {
   const cell = (r, c) => data().rows[r]?.[c] || null;
   const size = () => {
     const d = data();
-    return { rows: d.rows.length + SPARE_ROWS, cols: Math.max(d.cols, 1) + SPARE_COLS };
+    // Spare rows and columns only past the end of the sheet: past a part shown they would
+    // be the file's own cells, not shown here.
+    return {
+      rows: d.rows.length + (d.more_rows ? 0 : SPARE_ROWS),
+      cols: Math.max(d.cols, 1) + (d.more_cols ? 0 : SPARE_COLS),
+    };
   };
 
   // ---- drawing ---------------------------------------------------------------------------
@@ -74,9 +79,22 @@ export function sheetView(el, file, ctx) {
   }
 
   function drawTabs() {
-    tabs.replaceChildren(...s.file.sheets.map((sh, i) =>
-      h("button.sh-tab", { type: "button", role: "tab", "aria-selected": String(i === s.sheet), onclick: () => pick(i) }, sh.name)));
-    tabs.hidden = s.file.sheets.length < 2;
+    const many = s.file.sheets.length > 1;
+    const part = shownPart();
+    tabs.replaceChildren(...(many ? s.file.sheets.map((sh, i) =>
+      h("button.sh-tab", { type: "button", role: "tab", "aria-selected": String(i === s.sheet), onclick: () => pick(i) }, sh.name)) : []),
+      ...(part ? [h("span.sh-part", { role: "status" }, part)] : []));
+    tabs.hidden = !many && !part;
+  }
+
+  /// What the grid leaves out of a large sheet, in words, or "".
+  function shownPart() {
+    const d = data();
+    const n = (x) => x.toLocaleString();
+    const rows = d.more_rows ? `the first ${n(d.rows.length)} of ${n(d.rows.length + d.more_rows)} rows` : "";
+    const cols = d.more_cols ? `the first ${n(d.cols)} of ${n(d.cols + d.more_cols)} columns` : "";
+    if (!rows && !cols) return "";
+    return `Showing ${[rows, cols].filter(Boolean).join(" and ")}. Ask ARK to work with all of them.`;
   }
 
   function draw() {

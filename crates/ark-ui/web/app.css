@@ -1056,6 +1056,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 }
 .sh-tab:hover { color: var(--text-2); }
 .sh-tab[aria-selected="true"] { background: var(--active); color: var(--text); }
+.sh-part { margin-left: auto; padding: 4px 4px 4px 12px; flex: none; font: 12.5px var(--font); color: var(--text-3); }
 
 /* A document. */
 .dv { display: flex; flex-direction: column; min-height: 0; flex: 1; position: relative; }

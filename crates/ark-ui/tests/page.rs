@@ -314,12 +314,13 @@ fn tiny_pdf() -> String {
     out
 }
 
-/// "Analyze the sales": one contained run writes a chart, a table, a report that shows the
-/// chart, and a PDF; each opens beside the conversation in the view for its kind.
+/// "Analyze the sales": one contained run writes a chart, a table (longer than the grid shows),
+/// a report that shows the chart, and a PDF; each opens beside the conversation in the view for
+/// its kind.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_run_writes_a_chart_and_a_report_that_open_beside_the_conversation() {
     let program = format!(
-        "cat > table.csv <<'EOF'\nregion,q1\nNorth,120\nSouth,80\nEOF\n\
+        "{{ printf 'region,q1\\nNorth,120\\nSouth,80\\n'; seq 1 6000 | sed 's/^/r,/'; }} > table.csv\n\
          cat > chart.svg <<'EOF'\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"80\"><rect x=\"10\" y=\"20\" width=\"40\" height=\"60\" fill=\"#3b6fd8\"/><rect x=\"70\" y=\"40\" width=\"40\" height=\"40\" fill=\"#3b6fd8\"/></svg>\nEOF\n\
          cat > report.md <<'EOF'\n# Sales\n\nNorth led with 120.\n\n![Sales by region](chart.svg)\nEOF\n\
          cat > summary.pdf <<'EOF'\n{}EOF\n\
@@ -329,7 +330,7 @@ async fn a_run_writes_a_chart_and_a_report_that_open_beside_the_conversation() {
     let script = vec![
         call(
             ark_sdk::prelude::ark_exec::RUN,
-            json!({ "code": program, "runtime": "sh" }),
+            json!({ "code": program, "runtime": "sh", "purpose": "chart the sales and write a report" }),
         ),
         say("The chart, the table and the report are ready.", false),
     ];

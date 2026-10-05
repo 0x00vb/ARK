@@ -139,6 +139,11 @@ What changed for people building on ARK, per release. Not a commit log.
   not read and that a program reads all of them. An edit still sees every row. A workbook read
   without a sheet shows the start of every sheet. A 300,000-row workbook reads in 200 MB instead
   of 1.3 GB.
+- `code.run` takes an optional `purpose`, one sentence in the person's words. The approval and
+  the activity row lead with it; the program follows in the approval.
+- Window: a sheet longer or wider than the grid shows says so under the grid ("Showing the first
+  5,000 of 300,001 rows"), and has no empty rows to type into past the part shown, which would
+  have been the file's own rows.
 
 - The project's board (ADR 0023): work items the person and the agents share, kept per project
   across chats and restarts. `Orchestrator::{board, work_item, add_work, change_work,

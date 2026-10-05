@@ -61,8 +61,19 @@ the dev Mac is broken).
 
 W1 to W3 of [`ROADMAP.md`](ROADMAP.md) › Work runtime are on `main` (ADR 0037). ARK Desktop's
 W4 (its page reads them) is on its `main` and needs a tag with them: v0.11.0 waits for the
-owner's go. Not measured live: a restart of a real runtime mid-task on a hosted model (tests
-drive it with scripted models).
+owner's go. Dogfooded live (2026-10-05, qwen3.5:27b, `writer --serve --tokens`): an agent
+asked to save a chapter, the process was killed with `kill -9`, the restarted runtime listed
+the kept question in `hello` and `/agents` ("waiting (your answer)"), `writer --connect -p
+"/task answer <task> once"` answered it, and the chapter was saved once. Not run on a hosted
+model or a Cloud machine yet. The same through ARK Desktop's page (server build against `main`):
+the canvas showed "needs you" and the waiting line before and after a `kill -9`, and "Allow once"
+in the tray after the restart saved the file once.
+
+Checks on the W1 to W3 commits: `scripts/ci.sh` passes (fmt, clippy, every test, release build,
+bench gate); the 26 WebKit page tests passed on the first full run. `files-edit` reads 8 tokens
+over the baseline both before and after this work: from v0.10.0's versions before (checked on
+8bd8b96), within the gate. The page test `an_agent_asks_to_connect_mail_and_the_turn_goes_on`
+is flaky: 1 of 5 passed before this work, 4 of 5 after (a card on the board).
 
 ## Working notes
 

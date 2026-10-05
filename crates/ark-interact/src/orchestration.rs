@@ -42,8 +42,15 @@ fn agent_word(s: AgentState) -> &'static str {
 /// question it waits on, what its task waits for, or its current call in words. `None` when it
 /// has no task. Every front-end shows this line; none works it out from events.
 pub fn doing(g: &Graph, agent: &ark_orchestrate::AgentNode, labels: &Labels) -> Option<String> {
-    let id = agent.current_task.as_deref()?;
-    let task = g.tasks.iter().find(|t| t.task == id)?;
+    // Its task, or one of its tasks waiting for the person (after a restart the agent is free
+    // while that task waits).
+    let task = match agent.current_task.as_deref() {
+        Some(id) => g.tasks.iter().find(|t| t.task == id)?,
+        None => g
+            .tasks
+            .iter()
+            .find(|t| t.owner == agent.name && t.question.is_some())?,
+    };
     if let Some(q) = &task.question {
         return Some(format!(
             "Waiting for your answer: {}",

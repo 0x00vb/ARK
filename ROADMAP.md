@@ -149,6 +149,13 @@ shows once Desktop pins the ARK release that has W1 to W3.
 | W3 | **What each agent is doing is in the graph.** Its current step as `ark-interact` words it, and what it waits for (a task, capacity, the person), so `/agents` and every client show the same | the terminal's `/agents` and the window show the same line for each agent |
 | W4 | **ARK Desktop reads, not derives** (ark-desktop): the team tree from `graph.edges`, "doing now" from W3, one path for `@agent`, `setup::keychain` replaced by `ark_connect`'s | nothing in `ui/` computes runtime state (ark-desktop `docs/ARCHITECTURE.md`, The boundary, audited) |
 
+Found while building W1 to W3; needed before Cloud runs work nobody watches (Phase 2):
+
+| # | Step | Done means |
+|---|---|---|
+| W5 | **Work the chat hands off reports back to it.** `agents.delegate` sets `report_to` to the chat (as `agents.schedule` does), so a result reaches the conversation even when the turn that waited for it is gone (a restart) or did not wait (`wait: false`); a waited-for result is not posted twice | the chat delegates, the process restarts, the result appears in that chat |
+| W6 | **A stop is graceful.** On SIGTERM (what a deploy or a machine move sends; only Ctrl-C is handled today) the runtime takes no new work, lets a running call finish within a grace period, suspends running tasks at their next step, and exits; the next start resumes them with nothing cut short | a deploy during a change: the change runs once and the task finishes, with no "cut short" failure |
+
 Can wait, each until its trigger:
 
 | Item | Trigger |

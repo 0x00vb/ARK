@@ -597,6 +597,10 @@ fn an_agents_question_survives_a_restart_and_any_client_answers_it() {
             .as_str()
             .expect("a kept question's id is its own")
             .to_string();
+        // The agent is free while its task waits, and still says what it waits for.
+        let g = host.call("graph", json!({})).await.unwrap();
+        let doing = g["agents"][0]["doing"].as_str().unwrap_or_default();
+        assert!(doing.starts_with("Waiting for your answer"), "{doing}");
         assert_eq!(saves.load(Ordering::SeqCst), 0);
 
         host.call("approve", json!({ "id": id, "decision": "allow_once" }))

@@ -31,6 +31,10 @@ pub enum ConnectError {
     Cancelled(String),
     #[error("{0}")]
     Provider(String),
+    /// The provider refused a token request: the code, the refresh token or the client is not
+    /// valid any more. The person has to sign in again.
+    #[error("{0}")]
+    Refused(String),
     #[error("{0}")]
     NotConnected(String),
     #[error("keychain: {0}")]

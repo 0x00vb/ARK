@@ -15,6 +15,7 @@ Last updated: 2026-10-05 (v0.9.0; `main` has the browser, step 5, C5, Files, Run
 | Next tag | v0.10.0 (`Breaking` entries under `[Unreleased]`). Ready to cut with [`docs/RELEASING.md`](docs/RELEASING.md) steps 2 to 9 when the owner says so. ARK Desktop 0.2 waits for it |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | Branch `ci/windows` (pushed to `github`, not merged): `ark-os` (ADR 0022) holds every OS difference, and ARK finds, starts, stops and opens programs through it; text keeps CRLF and UTF-16; Ctrl in the window; page tests in Chromium too. `scripts/ci.sh` with page tests passes on macOS; lint clean for Windows. Not run on Windows yet: the owner runs `scripts/windows-check.ps1` on a Windows machine (GitHub Actions billing stays off). Merges to `main` after that run. Plan: `ark-desktop/docs/WINDOWS.md` |
+| Accounts | Branch `account` (worktree `../ark-account`, not merged): `ark-account` (ADR 0026), an optional ARK Account for ARK Cloud; `ConnectError::Refused`, `SignIn::landing`, revoke sends `client_id`; the window's `person` icon and palette `when`. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local). Merges to `main` when the owner says so; goes out with the next tag |
 
 ## Open follow-ups (not started)
 

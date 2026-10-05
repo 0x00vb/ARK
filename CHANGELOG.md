@@ -10,6 +10,14 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- ARK Accounts (ADR 0026): the new crate `ark-account`, optional. `Account::sign_in` (the
+  browser, PKCE, loopback), `refresh`, `access_token`, `sign_out` (revokes this computer's
+  token), `status`, and `can("cloud.agents")` for ARK Cloud features. Tokens stay in the OS
+  keychain and in memory ([`EXTENSION.md`](docs/EXTENSION.md#an-ark-account)).
+- `ark_connect::oauth::SignIn::landing(url)`: once the browser is back, send it to the
+  provider's own page instead of ARK's plain one.
+- Window: a `person` icon, and palette actions honor `when` (an action is offered only when
+  `when({})` is true).
 - The Browser (ADR 0015): the new crate `ark-browser` drives the installed Chrome, Edge or Brave
   over the DevTools protocol; `browser.open`, `read`, `back`, `click`, `type`; a fresh context
   per agent, and a signed-in browser one agent uses at a time. `ArkBuilder::browser(true)` or
@@ -150,6 +158,8 @@ What changed for people building on ARK, per release. Not a commit log.
   hover) instead of an error. "Choose a folder…" and "New project…" in the sidebar's + menu.
 
 ### Fixed
+- `ark_connect::oauth::revoke` sends the `client_id` (RFC 7009): providers that require it for a
+  public client revoked nothing.
 - Window: a question still waiting after a reload keeps all its answers ("Always in this
   project" was missing).
 - `subprocess::run_timeout` no longer hangs until its timeout when a tool prints more than a
@@ -164,6 +174,8 @@ What changed for people building on ARK, per release. Not a commit log.
   saved that its run never wrote in 5 of 5 runs, and in 0 of 5 with the check.
 
 ### Breaking
+- `ConnectError` has a new variant, `Refused`: a 4xx answer from a token endpoint (an expired
+  or revoked grant). A `match` on `ConnectError` needs an arm for it.
 - `HarnessEvent::ToolResult` has a new field, `files`, and `ProducedArtifact` one, `path`: a
   struct literal needs `files: Vec::new()` / `path: None` (or `ProducedArtifact::text`/`bytes`).
   `Activity` and `ArtifactSummary` have one more field each.

@@ -183,6 +183,30 @@ sign-in page cannot open in a browser on the machine ARK runs on. Why:
 
 Why ARK owns the connection: [ADR 0011](adr/0011-capabilities-and-connections.md).
 
+### An ARK Account
+
+`ark-account` signs a person in to an ARK Account: who ARK Cloud serves. It is optional and
+separate from the runtime. Nothing local asks for it; a Cloud feature asks `can`.
+
+```rust
+let account = Account::new(Service::ark("my-app"), Arc::new(ark_connect::Keychain));
+account.refresh().await.ok();               // at launch: check the saved sign-in
+let s = account.sign_in().await?;           // open s.url() in the browser
+let profile = s.finish(Duration::from_secs(900)).await?;
+match account.can("cloud.agents") { Access::Allowed => {}, Access::SignIn => {}, Access::NotIncluded => {} }
+let token = account.access_token().await?;  // for ARK Cloud's API; never log it
+account.sign_out().await?;                  // revokes this computer's token
+```
+
+| Part | What |
+|---|---|
+| Service | `Service::ark(client_id)` is `https://account.aiark.dev`; `ARK_ACCOUNT_URL` points at another OpenID Connect provider that serves `/v1/me` |
+| Kept | Refresh token and last profile in the OS keychain (`account:<issuer>`); access tokens in memory |
+| Profile | `id` (the identity), `email`, `name`, `image`, `entitlements` |
+| Client id | Each app has its own at the service (ARK Desktop: `ark-desktop`) |
+
+Why: [ADR 0026](adr/0026-an-optional-ark-account.md).
+
 ### The browser
 
 `ArkBuilder::browser(true)` gives agents the browser the person has (Chrome, Edge or Brave),

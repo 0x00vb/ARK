@@ -168,6 +168,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-account"
+version = "0.9.0"
+dependencies = [
+ "ark-connect",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ark-bench"
 version = "0.9.0"
 dependencies = [

@@ -98,6 +98,7 @@ Understand -> Change -> Test -> Benchmark (when relevant) -> Dogfood -> Docs/roa
 | rule selection, the `rules` tool | `ark-runtime::rules`; types in `ark-core::rules` |
 | a tool each agent gets its own of (its own state or model) | a `PerAgent` source (`ark_runtime::per_agent`), like the web and the browser |
 | a capability that needs an account (a provider, its sign-in, a service's tools) | `ark-connect`: data in `catalog.json`, the service in `services/` |
+| the person's ARK Account (sign-in to ARK Cloud, entitlements) | `ark-account`; never in a runtime crate |
 | a persisted record | `ark-store`, with `#[serde(default)]` on new fields |
 | a command, view or label both front-ends show | `ark-interact` |
 | terminal rendering or keys | `ark-cli` |

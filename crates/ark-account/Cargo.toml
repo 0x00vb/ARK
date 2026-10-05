@@ -1,0 +1,19 @@
+[package]
+name = "ark-account"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "An optional ARK Account on this computer: sign in through the browser, stay signed in, and ask what ARK Cloud allows. Local ARK needs no account."
+
+[dependencies]
+ark-connect.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
+reqwest.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }

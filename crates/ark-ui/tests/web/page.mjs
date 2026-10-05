@@ -680,10 +680,28 @@ async function skills(page) {
 }
 scenarios.skills = skills;
 
+// On Windows the same page reads the Windows way: Ctrl in every shortcut label, and Ctrl (not
+// the Windows key) runs them. The system is the one the browser reports.
+async function windows(page) {
+  await page.locator("#input").waitFor();
+  assert.equal(await page.locator("#app").getAttribute("data-os"), "windows");
+  assert.equal((await page.locator("kbd").first().innerText()).trim(), "Ctrl+N");
+  assert.match(await page.locator("#toggle-sidebar").getAttribute("title"), /\(Ctrl\+B\)/);
+  assert.equal(await page.locator("body").evaluate((b) => b.innerHTML.includes("⌘")), false, "no ⌘ left");
+  await page.keyboard.press("Control+k");
+  await page.locator(".palette-input").waitFor();
+}
+scenarios.windows = windows;
+
 const NARRATION = "Reading the notes slowly, one line at a time, so that a window can reload in between. ".repeat(3).trim();
 
 // Scripts that run before the page, for scenarios that replace a browser API.
 const inits = {
+  // The browser says it runs on Windows.
+  windows: () => {
+    Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+    Object.defineProperty(navigator, "userAgentData", { get: () => ({ platform: "Windows" }) });
+  },
   // An EventSource that always fails, and timers that fire at once (recording how long the
   // page asked to wait) so ten backoffs take milliseconds.
   backoff: () => {

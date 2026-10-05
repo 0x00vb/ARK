@@ -18,6 +18,7 @@ import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
 import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
+import { os, label, relabel } from "./keys.js";
 
 const transport = connect();
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
@@ -551,7 +552,7 @@ function palette() {
   const list = h("div.palette-list", { role: "listbox" });
   const items = [
     ...[...registry.views.values()].map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),
-    ...(registry.settings.size ? [{ label: "Settings", hint: "⌘,", run: () => api.openSettings() }] : []),
+    ...(registry.settings.size ? [{ label: "Settings", hint: label("⌘,"), run: () => api.openSettings() }] : []),
     ...[...registry.panels.values()].map((p) => ({ label: p.title, hint: "panel", run: () => api.openPanel(p.id) })),
     ...registry.actions.filter((a) => !a.where || a.where === "palette").map((a) => ({ label: a.label, hint: "action", run: () => a.run({}, window.ark) })),
     ...(state.commands || []).map((c) => ({ label: `/${c.name}${c.usage ? " " + c.usage : ""}`, hint: c.summary, run: () => (c.usage && !c.usage.startsWith("[") ? composer.set(`/${c.name} `) : runCommand(`/${c.name}`)) })),
@@ -590,6 +591,19 @@ function closePalette() {
   overlay.classList.remove("open");
   setTimeout(() => (overlay.hidden = true), 120);
   composer.focus();
+}
+
+// The desktop window is an app, not a browser: no reload or print keys, and no browser menu
+// except on text, a link or a selection, where it copies and pastes.
+function appLike() {
+  addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (e.key === "F5" || ((e.metaKey || e.ctrlKey) && (k === "r" || k === "p"))) e.preventDefault();
+  }, true);
+  document.addEventListener("contextmenu", (e) => {
+    const onText = e.target.closest("input, textarea, [contenteditable], a, .xterm");
+    if (!onText && !String(window.getSelection() || "")) e.preventDefault();
+  });
 }
 
 function keys(e) {
@@ -731,6 +745,9 @@ async function start() {
     if (s) appEl.dataset.sidebar = s;
   } catch {}
   appEl.dataset.shell = transport.kind;
+  appEl.dataset.os = os;
+  relabel(document.body);
+  if (transport.kind === "desktop") appLike();
   thread = new Thread($("#thread"), $("#scroller"), api);
   composer = new Composer(api);
   sidebar = new Sidebar(api);

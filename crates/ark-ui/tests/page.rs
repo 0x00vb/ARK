@@ -222,6 +222,11 @@ async fn a_stopped_turn_replays_as_it_was_shown() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn on_windows_shortcuts_read_and_work_with_ctrl() {
+    drive("windows", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_plus_menu_opens_files_and_a_terminal_in_the_project_folder() {
     drive("workbench", vec![], Duration::ZERO).await;
 }

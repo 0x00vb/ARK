@@ -290,7 +290,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
    sidebar leaves the grid and opens over the conversation from the reveal button. */
 .app[data-compact="true"] { --sb: 0px; }
 .app[data-compact="true"] .reveal-sidebar { display: inline-grid; }
-.app[data-compact="true"][data-shell="desktop"] .topbar { padding-left: 84px; }
+.app[data-compact="true"][data-shell="desktop"][data-os="macos"] .topbar { padding-left: 84px; }
 .app[data-compact="true"] .sidebar {
   position: fixed; inset: 0 auto 0 0; width: 252px; z-index: 30;
   translate: -100% 0; visibility: hidden;
@@ -303,7 +303,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   translate: 0 0; visibility: visible; transition: translate 240ms var(--ease);
   box-shadow: 0 0 0 1px var(--hair), 0 16px 48px rgba(0, 0, 0, 0.18);
 }
-.app[data-shell="desktop"][data-sidebar="closed"] .topbar { padding-left: 84px; }
+.app[data-shell="desktop"][data-os="macos"][data-sidebar="closed"] .topbar { padding-left: 84px; }
 .title {
   flex: 1; min-width: 0;
   font-size: 13px; font-weight: 500; color: var(--text-2);
@@ -864,7 +864,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   .app { --sb: 0px; }
   .app[data-pane="open"] { --pw: 100vw; grid-template-columns: 0 0 100vw; }
   /* The pane is then the whole window: its tabs clear the macOS window buttons. */
-  .app[data-shell="desktop"][data-pane="open"] .pane-head { padding-left: 84px; }
+  .app[data-shell="desktop"][data-os="macos"][data-pane="open"] .pane-head { padding-left: 84px; }
   .thread { padding: 8px 16px 40px; }
   .dock { padding: 0 12px 12px; }
 }

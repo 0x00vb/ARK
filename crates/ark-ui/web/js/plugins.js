@@ -4,6 +4,7 @@
 // from the next turn.
 
 import { h, icon, clear } from "./dom.js";
+import { label } from "./keys.js";
 
 function servers(el, ark) {
   el.classList.add("plugins");
@@ -95,7 +96,7 @@ function servers(el, ark) {
     h("div.plugin-add",
       h("label.plugin-label", icon("plus"), "Add a server"),
       input,
-      h("div.plugin-bar", h("span.plugin-hint", "A name, then the command that starts it. ⌘↩ adds."), add),
+      h("div.plugin-bar", h("span.plugin-hint", label("A name, then the command that starts it. ⌘↩ adds.")), add),
       why));
   load();
   return { refresh: load };

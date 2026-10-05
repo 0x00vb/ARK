@@ -18,6 +18,9 @@ What changed for people building on ARK, per release. Not a commit log.
   that retry while another program holds the file, `fs::name_problem`, `time::local_offset`,
   `shell::interactive`. Re-exported as `ark_sdk::prelude::ark_os`.
 - The page tests run in Chromium too (`ARK_UI_BROWSER=chromium`), the engine of Windows' WebView2.
+- The window reads the local way: Ctrl in shortcuts and their labels on Windows and Linux
+  (`web/js/keys.js`, `data-os` on the app); the room for the Mac window buttons only on
+  macOS. In the desktop window, no reload or print keys and no browser menu except on text.
 - The Browser (ADR 0015): the new crate `ark-browser` drives the installed Chrome, Edge or Brave
   over the DevTools protocol; `browser.open`, `read`, `back`, `click`, `type`; a fresh context
   per agent, and a signed-in browser one agent uses at a time. `ArkBuilder::browser(true)` or

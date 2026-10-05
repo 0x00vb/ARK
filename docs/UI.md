@@ -38,7 +38,8 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Side pane | What the person or the agent opened, beside the conversation: Terminal, Browser, Files, an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
 | Terminal | The project's shell, in its folder (one per project; closing the tab keeps it, reopening re-attaches with its scrollback). The agent's `present` may type a command at the prompt; the person presses Enter. |
 | Browser | A page in a frame with an address bar; words become a search. Sites that refuse framing show blank: "open in your browser" opens them outside. |
-| Files | The project's folder: browse, open a text file, edit and save it (⌘S). A path outside the folder is refused. Saving is the person's action; the agent's writes still ask. |
+| Files | The project's folder. A file opens in a tab of its own (see [Files](#files)). A path outside the folder is refused. |
+| A file | A spreadsheet as a grid, a document as a page, text in an editor: the file the agent works on, edited in place. A turn that wrote files ends with a card per file that opens it. |
 | Inline reports | `/context`, `/usage`, `/state`, `/trace` and every other command render in the conversation. There is no permanent inspector. |
 | App views | An app's `ark.view` takes the main column in place of the conversation (ARK Desktop's graph, agents and tasks). The "Chat" tab, or choosing a chat, brings the conversation back. |
 | Settings | One page in the main column for the app's and the account's configuration, with the sections apps register (`ark.setting`), then ARK's own (Appearance, Capabilities, Permissions). Sections marked `advanced` (the app's, then Skills and Tool servers) are listed under Advanced. A project's own settings are in its menu. |
@@ -49,6 +50,22 @@ serves in a browser without the desktop feature: `writer --serve`.
 
 Narrow windows (up to 760 px, or up to 1000 px with the pane open) fold the sidebar into a
 drawer opened from the top-left button. Below 760 px an open pane covers the window.
+
+## Files
+
+What the window does with a project's files ([ADR 0019](adr/0019-files-are-shared-in-place.md)).
+The file in the folder is the only copy: the agent's `files.*` tools and the window read and
+write it, and each sees the other's changes.
+
+| | |
+|---|---|
+| Open | A file card in the conversation, the Files panel, or the agent's `present {view: "file", path}`. Each file is a tab; the view follows the kind the host reports (`sheet`, `document`, `text`) |
+| Spreadsheet | Click selects, typing replaces, Enter or a double click edits, the bar above shows the cell's formula. Arrows, Tab, Shift for a range, Delete clears, copy and paste as tab-separated text, sheets at the bottom. Each change saves at once as `{cell, value}`; formulas are computed again |
+| Document | Type to change a block; Enter starts the next; `# `, `## `, `- `, `1. ` at the start of a line make a heading or a list; ⌘B and ⌘I; Tab indents a list item. Saves itself a moment after typing stops, as block edits |
+| Text | The editor, saved with ⌘S |
+| Someone else's change | The tab reads the file again when the agent (or another agent) writes it, or the window comes back to the front, unless the person has unsaved typing. A document edit based on an old version is refused and the tab reloads |
+| What the agent is told | While the tab is visible: the file, the cell or block selected, and what the person changed since their last message (`edited`) |
+| Open in its app | When the runtime is local (`ark.isLocal()`), for spreadsheets and documents |
 
 ## Keys
 
@@ -193,7 +210,8 @@ front-end uses the same.
 |---|---|
 | Skills | `skills` (each: `name`, `description`, `scope` `project` or `store`, `chat`: the conversation may read it). Does not wait for a running turn |
 | Plugins | `plugins` (each: `name`, `command`, `args`, `env_keys`, `running`, `tools`, `error`; null when the app has none), `plugin_add {text}` or `{spec}` (answers the plugins added), `plugin_remove {name}`, `plugin_restart {name}`. None waits for a running turn |
-| Workbench | `term_open {cols, rows}` (the project's shell: `session`, `cwd`, `history`), `term_write {session, data}`, `term_resize`, `term_close`, `files {path?}`, `file_read {path}`, `file_write {path, text}` (inside the project folder) |
+| Workbench | `term_open {cols, rows}` (the project's shell: `session`, `cwd`, `history`), `term_write {session, data}`, `term_resize`, `term_close`, `files {path?}` (entries with `kind`) |
+| Files | `file_read {path}` (`kind`, `version` and `text`, `sheets` or `blocks`; or `why` it cannot be shown), `file_edit {path, edits, base?}` (the file as saved), `file_write {path, text, base?}` (text files), `file_version {path}`, `file_open {path}` (in its app). All inside the project folder; none waits for a running turn |
 | Session | `hello`, `summary`, `sessions {project?}`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `open_project {id}` (back to its last chat), `add_project {path?, name?}` (a folder becomes a project, or opens the one it is), `rename_project {id, name}`, `project_folder {id, path}`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models`, `subscription_usage` (each subscription's limits as its CLI last reported them: `[{account, plan?, windows: [{minutes, used_percent, resets_at}], limited, reported_ms}]`) |
 | Turn | `send`, `steer`, `cancel` (both take `session` for a chat in the background), `approve`, `command`, `working` (the chats running a turn: `[{session, title, project, input}]`) |
 | Views | `transcript {session?}`, `trace`, `call`, `context`, `usage`, `state` |
@@ -270,6 +288,9 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
   CodeMirror from cdnjs on first use).
 - The Browser is a frame: many sites refuse to be framed and show blank. The editor is a plain
   text area (no highlighting).
+- A spreadsheet tab shows values, not cell styles (colours, fonts, merged cells); a document
+  shows headings, lists, tables, bold and italic, not fonts or images (an image is a marker).
+  Both survive edits. No undo beyond the browser's own while typing.
 - A `present` directive for a view nothing shows (no panel or viewer lists it) is a toast in
   the window; the model is still told it was presented.
 - Windows on one `Host` show one chat, the same one: two browser tabs on one server, or a

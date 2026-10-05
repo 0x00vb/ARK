@@ -332,8 +332,14 @@ impl Engine {
                     } else {
                         prod.kind
                     };
-                    let art =
+                    let mut art =
                         self.ingest_bytes(project, &prod.name, kind, &prod.bytes, provenance)?;
+                    // A snapshot of a project file names the file, so a front-end opens the
+                    // file itself, as it is now.
+                    if let Some(path) = prod.path {
+                        art.meta = serde_json::json!({ "path": path });
+                        self.store.put_artifact(project, &art)?;
+                    }
                     inv.produced.push(art.id);
                 }
                 inv.mark_ok(out.output);

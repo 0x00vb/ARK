@@ -401,6 +401,9 @@ pub struct ArtifactSummary {
     pub name: String,
     pub kind: String,
     pub size: u64,
+    /// The project file this artifact is a snapshot of, when it is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 impl From<&Artifact> for ArtifactSummary {
@@ -411,6 +414,11 @@ impl From<&Artifact> for ArtifactSummary {
             name: a.name.clone(),
             kind: a.kind.as_tag().to_string(),
             size: a.size,
+            path: a
+                .meta
+                .get("path")
+                .and_then(|p| p.as_str())
+                .map(str::to_string),
         }
     }
 }

@@ -143,6 +143,7 @@ impl Naive {
                     error,
                     context_tokens: tokens,
                     raw_tokens: tokens,
+                    files: Vec::new(),
                 });
                 self.transcript.push(Message::tool_result(call, text));
             }

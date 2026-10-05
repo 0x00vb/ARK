@@ -60,7 +60,30 @@ What changed for people building on ARK, per release. Not a commit log.
 - Window: `ark.isLocal()` and `<html data-runtime="local|remote">`: whether the runtime runs on
   the computer showing the page, so apps offer machine-bound actions only there.
 
+- Files (ADR 0019): the new crate `ark-files`. The project folder's files as text, spreadsheets
+  (`.xlsx`, `.xlsm`, `.csv`, `.tsv`) and documents (`.docx`) that agents and people read and
+  change in place, keeping what an edit does not touch (styles, formulas, other sheets, a
+  paragraph's look). Tools `files.list`, `read`, `search`, `write`, `edit` with `ArkBuilder::files(true)`;
+  one `Edit` list for the agent and the window; a `version` that refuses an edit based on an old
+  read; formulas computed after each edit. `Format` is the seam for another format
+  ([`EXTENSION.md`](docs/EXTENSION.md#files)).
+- Window: a file opens in a tab of its own: a spreadsheet as a grid (formula bar, sheets,
+  keyboard, copy and paste), a document as a page (headings, lists, tables, bold and italic,
+  Markdown shortcuts), text in the editor. Changes save themselves, and the tab follows changes
+  the agent or another app makes. A turn that wrote files ends with a card per file. "Open in its
+  app" when the runtime is local. Protocol: `file_read` answers the file's kind and shape,
+  `file_edit`, `file_version`, `file_open`; `file_write` takes `base`; `hello` carries
+  `file_kinds` ([`UI.md`](docs/UI.md#files)).
+- `HarnessEvent::ToolResult.files` and `Activity.files`: the project files a call wrote.
+  `ProducedArtifact::at(path)` marks an artifact as a snapshot of a project file
+  (`Artifact.meta.path`, `ArtifactSummary.path`).
+- `examples/writing-agent` turns Files on: chapters that arrive as Word files.
+
 ### Changed
+- Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
+  window: actions whose summary names that extension load first, whatever the task's language.
+- Window: the Files panel opens a file in its own tab instead of in the panel.
+- Window: an approval that shows what the call would write hides the action's general summary.
 - With `App::orchestrate`, the orchestrators are shared by all of an app's conversations.
   Each one's approval gate keeps "Always in this project" grants in its own project; before,
   one gate followed whichever project the chat had open. When the app opens, projects with
@@ -85,6 +108,9 @@ What changed for people building on ARK, per release. Not a commit log.
   project" was missing).
 
 ### Breaking
+- `HarnessEvent::ToolResult` has a new field, `files`, and `ProducedArtifact` one, `path`: a
+  struct literal needs `files: Vec::new()` / `path: None` (or `ProducedArtifact::text`/`bytes`).
+  `Activity` and `ArtifactSummary` have one more field each.
 - `ark_sdk::offered_tools(engine, per_agent)` takes the per-agent sources
   (`Ark::per_agent()`) instead of the web adapter. `Ark::web_adapter` and `Ark::web_tools` are
   gone: use `Ark::per_agent` and `Ark::agent_tools(&Owner { name, model })`.

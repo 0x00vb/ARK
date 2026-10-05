@@ -9,6 +9,9 @@ import { h, icon, clear, clip, secs, tokens, esc } from "./dom.js";
 import { markdown } from "./md.js";
 import { renderReport } from "./report.js";
 import { registry } from "./ext.js";
+import { kindOf, KIND_ICON } from "./file.js";
+
+const KIND_WORD = { sheet: "Spreadsheet", document: "Document", text: "File" };
 
 const TOOLISH = new Set(["tool", "retrieval", "reuse", "capability", "present", "plan", "state", "note", "steered", "warning"]);
 
@@ -104,6 +107,7 @@ export class Thread {
     if (t.cancelled && !acts.some((a) => a.kind === "stopped")) turn.notice("Stopped.", "muted");
     else if (t.unfinished) turn.notice(`Did not finish: ${t.unfinished}`, "error");
     else if (t.answer) turn.text(t.answer, true);
+    turn.fileCards();
     turn.footer(t.footer, t.index);
     return turn.el;
   }
@@ -186,6 +190,8 @@ class TurnView {
     this.textEl = null;
     this.textBuf = "";
     this.rows = new Map();
+    /// Files of the project the turn wrote, in the order it first wrote them.
+    this.files = new Set();
     this.started = performance.now();
     this.el = h("article.turn",
       h("div.user", h("div.bubble", input)),
@@ -312,6 +318,7 @@ class TurnView {
   }
 
   result(a, ev) {
+    for (const f of a.files || []) this.files.add(f);
     const row = this.rows.get(a.call);
     if (!row) return;
     const ok = ev ? ev.ok : a.tone !== "error";
@@ -387,6 +394,18 @@ class TurnView {
     this.keepWorkingLast();
   }
 
+  /// The files the turn wrote, each a card that opens it beside the conversation.
+  fileCards() {
+    this.agent.querySelector(".turn-files")?.remove();
+    if (!this.files.size) return;
+    this.agent.append(h("div.turn-files", [...this.files].map((path) => {
+      const kind = kindOf(path);
+      return h("button.file-card", { type: "button", "data-kind": kind, title: path, onclick: () => this.api.openFile(path) },
+        h("span.file-card-ico", icon(KIND_ICON[kind])),
+        h("span.file-card-text", h("span.file-card-name", path.split("/").pop()), h("span.file-card-sub", KIND_WORD[kind])));
+    })));
+  }
+
   footer(parts, index) {
     if (!parts || !parts.length) return;
     this.agent.append(h("div.turn-foot", parts.join(" · ")));
@@ -413,6 +432,7 @@ class TurnView {
     if (msg.error) this.notice(msg.error, "error");
     else if (msg.cancelled && !this.agent.querySelector(".notice")) this.notice("Stopped.", "muted");
     if (msg.ok && !msg.cancelled && msg.answer && !this.agent.querySelector(".prose.answer")) this.text(msg.answer, true);
+    this.fileCards();
     this.footer(msg.footer, msg.index);
     for (const card of this.agent.querySelectorAll(".approval:not(.decided)")) card.remove();
   }
@@ -437,7 +457,8 @@ export function approvalCard(msg, onDecide) {
     h("div.approval-title", msg.title || (own ? "ARK wants to:" : `${req.agent} wants to:`)),
     h("div.approval-line", what),
     preview ? h("pre.approval-preview", preview) : null,
-    req.summary ? h("div.approval-summary", req.summary) : null,
+    // What the action does in general, unless the preview already shows what this call does.
+    req.summary && !preview ? h("div.approval-summary", req.summary) : null,
     // The answers come from ark-interact, as the terminal's do: the first is the default.
     h("div.approval-actions", ...(msg.choices || [
       { label: "Allow once", decision: "allow_once" },

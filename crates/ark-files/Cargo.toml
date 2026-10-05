@@ -1,0 +1,21 @@
+[package]
+name = "ark-files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK's Files capability: the files of a project folder as text, spreadsheets and documents that agents and people read and edit in place."
+
+[dependencies]
+ark-core.workspace = true
+ark-tools.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+blake3.workspace = true
+thiserror.workspace = true
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true

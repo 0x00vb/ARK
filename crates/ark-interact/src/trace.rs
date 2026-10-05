@@ -747,6 +747,7 @@ mod tests {
             error: None,
             context_tokens: 30,
             raw_tokens: 300,
+            files: Vec::new(),
         }
     }
 

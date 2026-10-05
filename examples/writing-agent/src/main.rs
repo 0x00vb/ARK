@@ -373,6 +373,9 @@ fn build_ark(
         .store_root(store_root)
         .tool(Arc::new(Manuscript))
         .tool(Arc::new(Craft))
+        // Chapters that arrive as Word files, a submissions tracker as a spreadsheet: read
+        // and changed in place, the same file the writer opens.
+        .files(true)
         // A writer checks facts: places, dates, how things worked.
         .web(true)
         // Send a chapter to an editor, put a deadline on the calendar.

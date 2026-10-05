@@ -68,6 +68,9 @@ pub struct ProducedArtifact {
     /// Provenance override. Most produced artifacts are `Produced { invocation }` (the
     /// engine fills that in), but some carry `Captured` instead.
     pub provenance: Option<ark_core::Provenance>,
+    /// The file in the project folder these bytes were written to. The stored artifact is a
+    /// snapshot; the file is what a person opens and what later calls change.
+    pub path: Option<String>,
 }
 
 impl ProducedArtifact {
@@ -77,6 +80,7 @@ impl ProducedArtifact {
             name: name.into(),
             bytes: body.into().into_bytes(),
             provenance: None,
+            path: None,
         }
     }
 
@@ -86,11 +90,18 @@ impl ProducedArtifact {
             name: name.into(),
             bytes,
             provenance: None,
+            path: None,
         }
     }
 
     pub fn with_provenance(mut self, p: ark_core::Provenance) -> Self {
         self.provenance = Some(p);
+        self
+    }
+
+    /// The bytes are the file at `path` in the project folder (relative, with `/`).
+    pub fn at(mut self, path: impl Into<String>) -> Self {
+        self.path = Some(path.into());
         self
     }
 }

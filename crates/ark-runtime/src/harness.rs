@@ -99,6 +99,10 @@ pub enum HarnessEvent {
         /// `context_tokens` is what distillation saved.
         #[serde(default)]
         raw_tokens: u32,
+        /// Files of the project folder the call wrote (relative paths), for a front-end to
+        /// open. Each is also stored as an artifact, a snapshot of what was written.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
     },
     Duplicate {
         action: String,
@@ -332,6 +336,20 @@ impl Harness {
 
     /// Tell the harness what the user is currently looking at, so on-screen references
     /// resolve against it.
+    /// The task with the file the person has open, if any: what they look at is part of what
+    /// they ask about, so it counts toward which actions are loaded first.
+    fn with_focus(&self, task: &str) -> String {
+        match self
+            .focus
+            .as_ref()
+            .and_then(|f| f.surface.as_ref())
+            .and_then(|s| s.path.as_deref())
+        {
+            Some(path) => format!("{task} {path}"),
+            None => task.to_string(),
+        }
+    }
+
     pub fn focus(mut self, focus: Option<Focus>) -> Self {
         self.focus = focus.filter(|f| !f.is_empty());
         self
@@ -457,7 +475,9 @@ impl Harness {
         // on-demand load appended. The order never changes within a turn, so loading one more
         // action keeps every earlier tool definition in the cacheable prefix.
         let mut loaded: Vec<String> = core_loaded(engine, profile);
-        for name in catalog::matching_actions(&engine.registry, question, self.preload) {
+        for name in
+            catalog::matching_actions(&engine.registry, &self.with_focus(question), self.preload)
+        {
             if !loaded.contains(&name) {
                 loaded.push(name);
             }
@@ -971,7 +991,9 @@ impl Harness {
         let system = sys.render();
         let wsctx = self.build_workspace_context(engine, project)?;
         let mut loaded = core_loaded(engine, profile);
-        for name in catalog::matching_actions(&engine.registry, task, self.preload) {
+        for name in
+            catalog::matching_actions(&engine.registry, &self.with_focus(task), self.preload)
+        {
             if !loaded.contains(&name) {
                 loaded.push(name);
             }
@@ -1166,6 +1188,12 @@ impl Harness {
             }
             let model_text = card_for_model(&card);
             let raw_tokens = estimate_tokens(&inv.output.to_string());
+            let files = inv
+                .produced
+                .iter()
+                .filter_map(|id| engine.store.get_artifact(project, id).ok().flatten())
+                .filter_map(|a| a.meta.get("path")?.as_str().map(str::to_string))
+                .collect();
             on_event(HarnessEvent::ToolResult {
                 id: p.call.id.clone(),
                 action: p.call.name.clone(),
@@ -1177,6 +1205,7 @@ impl Harness {
                 // The same per-message estimate the working set budgets with.
                 context_tokens: estimate_tokens(&model_text) + 4,
                 raw_tokens,
+                files,
             });
             round.push(Message::tool_result(&p.call, model_text));
         }

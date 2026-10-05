@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use ark_sdk::prelude::ApprovalRequest;
+use ark_sdk::prelude::{ark_files, ApprovalRequest};
 use serde_json::Value;
 
 use crate::fmt::clip;
@@ -108,13 +108,24 @@ impl Labels {
         self.labelers
             .iter()
             .find_map(|r| r.result(action, ok, summary))
-            .unwrap_or_else(|| summary.lines().next().unwrap_or("").to_string())
+            .unwrap_or_else(|| {
+                let line = summary.lines().next().unwrap_or("");
+                // The version is for the agent's next edit, not for the person.
+                match action.starts_with("files.") {
+                    true => match line.rfind(" (version ") {
+                        Some(i) => line[..i].to_string(),
+                        None => line.to_string(),
+                    },
+                    false => line.to_string(),
+                }
+            })
     }
 
     pub fn approval_line(&self, request: &ApprovalRequest) -> String {
         self.labelers
             .iter()
             .find_map(|r| r.approval(request))
+            .or_else(|| file_approval(&request.action, &request.input))
             .or_else(|| runtime_label(&request.action, &request.input))
             .unwrap_or_else(|| request.preview.clone())
     }
@@ -217,6 +228,109 @@ fn when_words(input: &Value) -> String {
     }
 }
 
+/// Lines of new text an approval shows.
+const PREVIEW_LINES: usize = 6;
+
+/// What a file change will do, in words, for its approval: the file and the changes, or the
+/// start of what a write saves.
+fn file_approval(action: &str, input: &Value) -> Option<String> {
+    let path = input
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or("a file");
+    match action {
+        ark_files::EDIT => {
+            let edits = ark_files::Edit::parse_all(input.get("edits")?).ok()?;
+            let mut out = format!("Change {path}:");
+            let mut lines = Vec::new();
+            for e in &edits {
+                lines.push(e.describe());
+                // What the edit writes, under it: cells as rows, blocks as their lines.
+                match e {
+                    ark_files::Edit::Set { rows, .. } | ark_files::Edit::AddSheet { rows, .. } => {
+                        if rows.iter().map(Vec::len).sum::<usize>() > 1 {
+                            lines.extend(
+                                rows.iter()
+                                    .map(|r| format!("  {}", row_line(&Value::Array(r.clone())))),
+                            );
+                        }
+                    }
+                    ark_files::Edit::Replace { text, .. }
+                    | ark_files::Edit::Insert { text, .. }
+                        if text.lines().filter(|l| !l.trim().is_empty()).count() > 1
+                            || text.chars().count() > 60 =>
+                    {
+                        lines.extend(
+                            text.lines()
+                                .filter(|l| !l.trim().is_empty())
+                                .map(|l| format!("  {l}")),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            for l in lines.iter().take(PREVIEW_LINES * 2) {
+                let lead = &l[..l.len() - l.trim_start().len()];
+                out.push_str(&format!("\n  {lead}{}", clip(l, 160)));
+            }
+            if lines.len() > PREVIEW_LINES * 2 {
+                out.push_str(&format!("\n  … {} more", lines.len() - PREVIEW_LINES * 2));
+            }
+            Some(out)
+        }
+        ark_files::WRITE => {
+            let mut out =
+                format!("Save {path} in the project folder. A file with that name is replaced.");
+            let lines: Vec<String> = match (
+                input.get("text").and_then(Value::as_str),
+                input.get("rows"),
+                input.get("sheets"),
+            ) {
+                (Some(t), _, _) => t
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .map(str::to_string)
+                    .collect(),
+                (_, Some(Value::Array(rows)), _) => rows.iter().map(row_line).collect(),
+                (_, _, Some(Value::Array(sheets))) => sheets
+                    .iter()
+                    .map(|s| {
+                        let n = s.get("rows").and_then(Value::as_array).map_or(0, Vec::len);
+                        format!(
+                            "sheet {} ({n} rows)",
+                            s.get("name").and_then(Value::as_str).unwrap_or("?")
+                        )
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            for l in lines.iter().take(PREVIEW_LINES) {
+                out.push_str(&format!("\n  {}", clip(l, 160)));
+            }
+            if lines.len() > PREVIEW_LINES {
+                out.push_str(&format!("\n  … {} more", lines.len() - PREVIEW_LINES));
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+fn row_line(row: &Value) -> String {
+    match row {
+        Value::Array(cells) => cells
+            .iter()
+            .map(|c| {
+                c.as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| c.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(" | "),
+        other => other.to_string(),
+    }
+}
+
 /// A readable label from an action name and its input: `continuity.search {"term":"locket"}`
 /// becomes `Searching "locket"`.
 /// ARK's own tools that an app may offer (delegation, messages, diagrams), in words.
@@ -260,6 +374,19 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
             t => format!("Drawing \"{}\"", clip(t, 60)),
         },
         "diagram.read" => "Reading a diagram".into(),
+        ark_files::LIST => match s("path").trim_matches(['.', '/']) {
+            "" => "Looking in the project folder".into(),
+            p => format!("Looking in {p}"),
+        },
+        ark_files::READ => match (s("sheet"), s("range")) {
+            ("", "") => format!("Reading {}", s("path")),
+            (sheet, "") => format!("Reading {} › {sheet}", s("path")),
+            ("", range) => format!("Reading {} {range}", s("path")),
+            (sheet, range) => format!("Reading {} › {sheet} {range}", s("path")),
+        },
+        ark_files::SEARCH => format!("Searching for \"{}\"", clip(s("query"), 60)),
+        ark_files::WRITE => format!("Writing {}", s("path")),
+        ark_files::EDIT => format!("Editing {}", s("path")),
         _ => return None,
     })
 }
@@ -316,6 +443,41 @@ fn humanize(action: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_file_change_asks_with_what_it_writes() {
+        let l = Labels::new(Vec::new());
+        let req = ApprovalRequest {
+            action: "files.edit".into(),
+            summary: String::new(),
+            risk: ark_sdk::prelude::RiskTier::Mutate,
+            input: json!({ "path": "sales.xlsx", "edits": [
+                { "cell": "B4", "value": 150 },
+                { "add_sheet": "Summary", "rows": [["Total", "=SUM(Sales!B2:B9)"], ["Best", "North"]] }
+            ] }),
+            class: "files.edit".into(),
+            preview: String::new(),
+            agent: None,
+            task: None,
+            ask_each_time: false,
+        };
+        assert_eq!(
+            l.approval_line(&req),
+            "Change sales.xlsx:\n  B4 = 150\n  add sheet Summary (2 rows)\n    Total | =SUM(Sales!B2:B9)\n    Best | North"
+        );
+        assert_eq!(
+            l.call_label("files.read", &json!({"path": "sales.xlsx", "sheet": "Q1"})),
+            "Reading sales.xlsx › Q1"
+        );
+        assert_eq!(
+            l.result_detail(
+                "files.edit",
+                true,
+                "saved sales.xlsx: B4 = 150 (version 1f2e)"
+            ),
+            "saved sales.xlsx: B4 = 150"
+        );
+    }
 
     #[test]
     fn scheduling_and_the_computer_read_naturally() {

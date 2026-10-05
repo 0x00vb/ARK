@@ -123,6 +123,9 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             ark_sdk::prelude::ark_computer::ComputerService::with_screen(Arc::new(screen.clone())),
         );
     }
+    if scenario == "files" {
+        builder = builder.files(true);
+    }
     let ark = builder.build().unwrap();
     let mut app = App::new("Page test").ark(ark);
     if scenario == "connect-mid-task" {
@@ -205,6 +208,35 @@ async fn a_stopped_turn_replays_as_it_was_shown() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_plus_menu_opens_files_and_a_terminal_in_the_project_folder() {
     drive("workbench", vec![], Duration::ZERO).await;
+}
+
+fn call(name: &str, args: Value) -> Completion {
+    Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "c1".into(),
+            name: name.into(),
+            arguments: args,
+        }],
+        usage: Usage::default(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn files_the_agent_writes_open_and_the_person_edits_them() {
+    let script = vec![
+        call(
+            "files.write",
+            json!({ "path": "sales.xlsx", "rows": [["Region", "Q1"], ["North", 120], ["South", 80], ["Total", "=SUM(B2:B3)"]] }),
+        ),
+        say("The workbook is ready.", false),
+        call(
+            "files.write",
+            json!({ "path": "report.docx", "text": "# Sales\n\nNorth led.\n\n- Check the south" }),
+        ),
+        say("The report is ready.", false),
+    ];
+    drive("files", script, Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

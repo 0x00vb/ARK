@@ -63,6 +63,9 @@ pub struct Activity {
     /// The action name, for `Tool`, `Result` and `Reuse`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<String>,
+    /// Files of the project folder a `Result` wrote, for a front-end to offer to open.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
 }
 
 impl Activity {
@@ -75,6 +78,7 @@ impl Activity {
             tone: Tone::Normal,
             call: None,
             action: None,
+            files: Vec::new(),
         }
     }
     fn detail(mut self, d: impl Into<String>) -> Self {
@@ -124,6 +128,7 @@ pub fn describe(
             ok,
             summary,
             error,
+            files,
             ..
         } => {
             let mut a = if *ok {
@@ -136,6 +141,7 @@ pub fn describe(
             };
             a.call = Some(id.clone());
             a.action = Some(action.clone());
+            a.files = files.clone();
             a
         }
         HarnessEvent::Duplicate { action, reused } => {
@@ -298,6 +304,7 @@ mod tests {
                 error: Some("no such file\nmore".into()),
                 context_tokens: 0,
                 raw_tokens: 0,
+                files: Vec::new(),
             },
         )
         .unwrap();

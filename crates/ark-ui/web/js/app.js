@@ -12,6 +12,7 @@ import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
 import { registry, installApi, dispatchExt, presenterFor } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
+import { fileView, kindOf, KIND_ICON, setFileKinds } from "./file.js";
 import { registerCapabilities } from "./capabilities.js";
 import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
@@ -80,6 +81,11 @@ const api = {
       api.call("artifact", { id, length: 1 }).then((r) => retitle(`art:${id}`, r.artifact.name)).catch(() => {});
       return ctl;
     }, prm, { wide: v ? !!v.wide : registry.viewers.some((x) => x.wide), fill: true });
+  },
+  // A file of the project in a tab of its own: a spreadsheet, a document or text.
+  openFile: (path, params) => {
+    path = String(path).replace(/^\.\//, "");
+    pane.openTab(`file:${path}`, path.split("/").pop(), KIND_ICON[kindOf(path)], (el, p) => fileView(el, path, window.ark, p), params, { wide: true, fill: true });
   },
   openPanel(id, params) {
     const p = registry.panels.get(id);
@@ -262,7 +268,7 @@ function applySummary(s) {
 }
 
 async function loadSession() {
-  pane.reset();
+  pane.reset(state.summary?.project?.id);
   thread.clear();
   const turns = await transport.call("transcript", { limit: 30 }).catch(() => []);
   if (turns.length) thread.renderStored(turns, { hasMore: turns.length === 30 });
@@ -449,6 +455,8 @@ async function decide(id, decision) {
 
 function present(d) {
   const by = presenterFor(d.view);
+  // A file opens in a tab of its own, unless the app shows files itself.
+  if (d.view === "file" && d.path && (!by?.panel || by.panel.builtin)) return api.openFile(d.path, d);
   if (by?.panel) return api.openPanel(by.panel.id, d);
   if (by?.viewer && d.artifact) return api.openArtifact(d.artifact, by.viewer.id, d);
   if (d.artifact) return api.openArtifact(d.artifact, undefined, d);
@@ -664,6 +672,7 @@ async function bootOnce(again) {
   }
   feed.seq = hello.seq || 0;
   state.ui = hello.ui || {};
+  setFileKinds(hello.file_kinds);
   state.commands = hello.commands || [];
   composer.commands = state.commands;
   if (state.ui.accent) document.documentElement.style.setProperty("--accent", state.ui.accent);

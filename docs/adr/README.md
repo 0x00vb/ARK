@@ -25,6 +25,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0016](0016-a-runtime-serves-its-clients.md) | A runtime serves its clients; a window is one of them | Accepted |
 | [0017](0017-work-runs-without-the-window.md) | Work runs without the window: live conversations and schedules | Accepted |
 | [0018](0018-the-computer-one-screen-every-action-asked.md) | The Computer: one screen, one agent, every action asked | Accepted |
+| [0019](0019-files-are-shared-in-place.md) | Files: one file, edited in place by the agent and the person | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

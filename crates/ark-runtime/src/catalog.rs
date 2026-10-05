@@ -160,6 +160,20 @@ pub fn matching_actions(registry: &Registry, task: &str, n: usize) -> Vec<String
     let mut asked = words(task);
     asked.sort();
     asked.dedup();
+    // A file the task names (`sales.xlsx`) is the strongest hint there is: the actions that
+    // say they take that kind of file.
+    let exts: Vec<String> = task
+        .split_whitespace()
+        .filter_map(|t| {
+            let t = t.trim_matches(|c: char| !c.is_alphanumeric());
+            let (stem, ext) = t.rsplit_once('.')?;
+            let ok = !stem.is_empty()
+                && (2..=5).contains(&ext.len())
+                && ext.chars().all(|c| c.is_ascii_alphanumeric())
+                && ext.chars().any(|c| c.is_ascii_alphabetic());
+            ok.then(|| ext.to_lowercase())
+        })
+        .collect();
     let mut scored: Vec<(u32, String)> = registry
         .actions()
         .into_iter()
@@ -167,6 +181,9 @@ pub fn matching_actions(registry: &Registry, task: &str, n: usize) -> Vec<String
             let name = words(&d.name);
             let summary = words(&d.summary);
             let mut score = 0;
+            if exts.iter().any(|e| summary.contains(e)) {
+                score += 2;
+            }
             for q in &asked {
                 if name.iter().any(|w| same(q, w)) {
                     score += 2;
@@ -363,6 +380,11 @@ mod tests {
                         RiskTier::Read,
                     ),
                     ActionDescriptor::new("units.convert", "convert between units", RiskTier::Read),
+                    ActionDescriptor::new(
+                        "sheet.read",
+                        "read a spreadsheet (.xlsx, .csv)",
+                        RiskTier::Read,
+                    ),
                 ]
             }
             async fn run(
@@ -400,6 +422,12 @@ mod tests {
             vec!["crm.orders", "crm.find_customer"]
         );
         assert!(matching_actions(&r, "Find the customer", 0).is_empty());
+        // A file the task names, in any language, picks the actions for its kind.
+        assert_eq!(
+            matching_actions(&r, "Agregá una hoja a ventas.xlsx, por favor.", 3),
+            vec!["sheet.read"]
+        );
+        assert!(matching_actions(&r, "Version 3.5, e.g. at example.com", 3).is_empty());
     }
 
     use super::*;

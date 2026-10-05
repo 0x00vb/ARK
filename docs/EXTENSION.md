@@ -225,6 +225,25 @@ mouse alone for 1.5 s. `ComputerService::take_back` (the window's Stop) ends the
 for its turn or task. The first action asks macOS for the Accessibility permission and waits
 for the person to allow it. `computer_with(ComputerService::with_screen(..))` puts another
 `Screen` underneath; `ark_computer::fake::FakeScreen` is one for tests.
+
+### Files
+
+`ArkBuilder::files(true)` gives agents the project folder's files: text, spreadsheets
+(`.xlsx`, `.xlsm`, `.csv`, `.tsv`) and documents (`.docx`), read and changed in place
+([ADR 0019](adr/0019-files-are-shared-in-place.md)). The window opens the same files.
+
+| Action | What |
+|---|---|
+| `files.list {path}`, `files.search {query, path}` | Files under a folder; lines, cells and blocks that contain a text. Run on their own |
+| `files.read {path, sheet, range, from}` | Text with line numbers; a spreadsheet as rows with cell names and formulas; a document as numbered Markdown blocks. Bounded; the answer says what to read next. Carries the file's `version` |
+| `files.write {path, text \| rows \| sheets}` | A whole new file, or a replacement. A document from Markdown, a spreadsheet from rows (`=` starts a formula). Asks |
+| `files.edit {path, edits, version}` | Part of a file, the rest kept: `{cell, value}`, `{cell, rows}`, `{clear}`, `{add_sheet, rows}`, `{rename_sheet, to}`, `{delete_sheet}`; `{block, text}`, `{after, text}`, `{delete}`; `{find, replace}`. With `version`, refused if the file changed since. Asks |
+
+A new format is a `Format` (`read`, `edit`, `create`) in `ark_files::FORMATS`. One that reads
+into an existing shape (`Content::Sheet`, `Document`, `Text`) needs nothing else: the tools,
+the edits and the window's views work on shapes. An app that keeps its own file tools can
+still use `ark_files::open`, `edit` and `write` for the formats.
+
 ### Approvals that last
 
 Every approval offers Allow once, Allow for this session, Always in this project, and Deny

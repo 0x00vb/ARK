@@ -627,6 +627,11 @@ impl Host {
                     "approvals": pending,
                     "working": self.working(),
                     "computer": self.computer_user(),
+                    // How the window names a file before opening it: one list, ark-files'.
+                    "file_kinds": ark_sdk::prelude::ark_files::extensions()
+                        .into_iter()
+                        .map(|(e, k)| (e.to_string(), json!(k.as_str())))
+                        .collect::<serde_json::Map<_, _>>(),
                     "version": env!("CARGO_PKG_VERSION"),
                 }))
             }
@@ -843,8 +848,26 @@ impl Host {
             }
             "file_write" => {
                 let dir = self.engine.workspace_dir(&self.project()?.id)?;
-                let path = crate::files::write(&dir, &s("path"), &s("text"))?;
-                Ok(json!({ "path": path }))
+                let base = Some(s("base")).filter(|b| !b.is_empty());
+                crate::files::write(&dir, &s("path"), &s("text"), base.as_deref())
+            }
+            // The person's change to a spreadsheet or document: the edits the agent sends.
+            "file_edit" => {
+                let dir = self.engine.workspace_dir(&self.project()?.id)?;
+                let base = Some(s("base")).filter(|b| !b.is_empty());
+                let edits = params.get("edits").cloned().unwrap_or(Value::Null);
+                crate::files::edit(&dir, &s("path"), &edits, base.as_deref())
+            }
+            "file_version" => {
+                let dir = self.engine.workspace_dir(&self.project()?.id)?;
+                crate::files::version(&dir, &s("path"))
+            }
+            // On the computer the runtime runs on: the window offers it only when that is the
+            // person's own (`ark.isLocal()`).
+            "file_open" => {
+                let dir = self.engine.workspace_dir(&self.project()?.id)?;
+                crate::files::open_in_app(&dir, &s("path"))?;
+                Ok(Value::Null)
             }
             // The folder the project's tools work in; `path` changes it.
             "workspace" => {

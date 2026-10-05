@@ -4,9 +4,10 @@
 //
 //   terminal  the project's shell (`term_*`); the agent may fill the prompt, never press Enter
 //   browser   a page in a frame, with an address bar
-//   files     the project's folder: browse, read, edit and save a file (`files`, `file_*`)
+//   files     the project's folder; a file opens in a tab of its own (file.js)
 
 import { h, icon, clear } from "./dom.js";
+import { KIND_ICON } from "./file.js";
 
 /// What the agent may put at the prompt: one line, no control characters, so it cannot run
 /// a command itself (that would skip approval). The person presses Enter.
@@ -159,9 +160,11 @@ function browser(el, params, ark) {
 
 // ---- files -------------------------------------------------------------------------------------
 
+/// The project's folder. A file opens in a tab of its own (a spreadsheet as a grid, a document
+/// as a page, text in an editor), the same file the agent works on.
 function files(el, params, ark) {
   el.classList.add("wb-col");
-  const s = { dir: "", file: null, text: "", dirty: false, line: 1 };
+  const s = { dir: "" };
   const crumbs = h("div.wb-crumbs");
   const body = h("div.wb-files");
   el.append(h("div.wb-bar", crumbs), body);
@@ -174,13 +177,7 @@ function files(el, params, ark) {
     parts.forEach((p, i) => crumbs.append(h("span.wb-sep", "/"), crumb(p, parts.slice(0, i + 1).join("/"))));
   };
 
-  const leave = () => !s.dirty || confirm(`Discard your changes to ${s.file}?`);
-
   async function list(path) {
-    if (!leave()) return;
-    s.file = null;
-    s.dirty = false;
-    ark.setPanelTitle("files", "Files");
     let r;
     try {
       r = await ark.call("files", { path });
@@ -192,8 +189,8 @@ function files(el, params, ark) {
     clear(body).append(
       r.entries.length
         ? h("div.wb-list", r.entries.map((e) =>
-          h("button.wb-entry", { type: "button", onclick: () => (e.dir ? list(e.path) : open(e.path)) },
-            icon(e.dir ? "folder" : "file"), h("span.wb-name", e.name), e.dir ? null : h("span.wb-size", size(e.size)))))
+          h("button.wb-entry", { type: "button", "data-kind": e.kind || null, onclick: () => (e.dir ? list(e.path) : ark.openFile(e.path)) },
+            icon(e.dir ? "folder" : KIND_ICON[e.kind] || "file"), h("span.wb-name", e.name), e.dir ? null : h("span.wb-size", size(e.size)))))
         : h("div.wb-empty", "This folder is empty."),
       // `append` prints null as text: an empty string adds nothing.
       r.more ? h("div.wb-note", `${r.more} more not shown`) : "",
@@ -201,77 +198,19 @@ function files(el, params, ark) {
     ark.reportFocus();
   }
 
-  async function open(path) {
-    if (s.file !== path && !leave()) return;
-    let r;
-    try {
-      r = await ark.call("file_read", { path });
-    } catch (e) {
-      return ark.toast(e.message);
+  const show = (p) => {
+    if (p?.path && p.view !== "folder") {
+      list(p.path.includes("/") ? p.path.slice(0, p.path.lastIndexOf("/")) : "");
+      return ark.openFile(p.path, p);
     }
-    s.file = r.path;
-    s.dirty = false;
-    const parent = r.path.includes("/") ? r.path.slice(0, r.path.lastIndexOf("/")) : "";
-    s.dir = parent;
-    const name = r.path.split("/").pop();
-    ark.setPanelTitle("files", name);
-    clear(crumbs).append(crumb("‹ Back", parent), h("span.wb-file-name", r.path));
-    if (r.text == null) {
-      clear(body).append(h("div.wb-empty", `${name} is ${r.why} (${size(r.size)}).`));
-      return ark.reportFocus();
-    }
-    s.text = r.text;
-    const area = h("textarea.wb-editor", { spellcheck: "false", "aria-label": name });
-    area.value = r.text;
-    const save = h("button.wb-save", { type: "button", disabled: true, onclick: () => store(area) }, "Save");
-    const status = h("span.wb-status");
-    const mark = () => {
-      s.dirty = area.value !== s.text;
-      save.disabled = !s.dirty;
-      status.textContent = s.dirty ? "Edited" : "";
-    };
-    const where = () => {
-      s.line = area.value.slice(0, area.selectionStart).split("\n").length;
-      ark.reportFocus();
-    };
-    area.addEventListener("input", mark);
-    area.addEventListener("click", where);
-    area.addEventListener("keyup", where);
-    area.addEventListener("keydown", (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); store(area); }
-    });
-    crumbs.append(h("span.spacer"), status, save);
-    clear(body).append(area);
-    if (params?.locator && /^\d+$/.test(params.locator)) goToLine(area, Number(params.locator));
-    ark.reportFocus();
-
-    async function store(area) {
-      if (!s.dirty) return;
-      try {
-        await ark.call("file_write", { path: s.file, text: area.value });
-        s.text = area.value;
-        mark();
-        ark.toast(`Saved ${name}`);
-      } catch (e) {
-        ark.toast(e.message);
-      }
-    }
-  }
-
-  const show = (p) => (p?.path ? open(p.path) : list(s.dir));
+    list(p?.path || s.dir);
+  };
   show(params);
   return {
-    focus: () => ({ surface: { kind_tag: s.file ? "file" : "folder", title: s.file || s.dir || "Project folder", locator: s.file ? `${s.file}:${s.line}` : undefined } }),
-    update: (p) => p?.path && open(p.path),
-    refresh: () => !s.file && list(s.dir),
+    focus: () => ({ surface: { kind_tag: "folder", title: s.dir || "Project folder" } }),
+    update: (p) => show(p),
+    refresh: () => list(s.dir),
   };
-}
-
-function goToLine(area, n) {
-  const lines = area.value.split("\n");
-  const at = lines.slice(0, Math.max(0, n - 1)).join("\n").length + (n > 1 ? 1 : 0);
-  area.focus();
-  area.setSelectionRange(at, at);
 }
 
 function size(n) {

@@ -226,6 +226,65 @@ async function agents(page) {
 }
 scenarios.agents = agents;
 
+// Files the agent writes are cards that open beside the conversation; the person edits them in
+// place and the file changes: a cell (the total follows), a document's lines.
+async function files(page) {
+  const ask = async (text) => {
+    await page.locator("#input").fill(text);
+    await page.keyboard.press("Enter");
+    await page.locator(".approval .btn.primary").click();
+  };
+  const read = (path) => page.evaluate((p) => window.ark.call("file_read", { path: p }), path);
+  // Until the file (as the host reads it) passes `test`.
+  const until = async (path, test) => {
+    for (let i = 0; ; i++) {
+      const f = await read(path);
+      if (test(f)) return f;
+      if (i > 50) assert.fail(`${path} did not change as expected: ${JSON.stringify(f).slice(0, 400)}`);
+      await page.waitForTimeout(100);
+    }
+  };
+  const total = (f) => f.sheets[0].rows[3][1].t;
+
+  await finished(page, () => ask("Make the sales workbook."));
+  await page.locator(".file-card", { hasText: "sales.xlsx" }).click();
+  const cell = (r, c) => page.locator(`td[data-r="${r}"][data-c="${c}"]`);
+  await page.waitForFunction(() => document.querySelector('td[data-r="3"][data-c="1"]')?.textContent === "200");
+  await cell(1, 1).click();
+  await page.keyboard.type("150");
+  await page.keyboard.press("Enter");
+  await until("sales.xlsx", (f) => total(f) === "230");
+  await page.waitForFunction(() => document.querySelector('td[data-r="3"][data-c="1"]').textContent === "230");
+  assert.equal(await page.locator(".sh-ref").inputValue(), "B3");
+  // The formula bar shows the selected cell's formula.
+  await cell(3, 1).click();
+  assert.equal(await page.locator(".sh-fx").inputValue(), "=SUM(B2:B3)");
+  // Clearing a cell clears it in the file.
+  await cell(2, 1).click();
+  await page.keyboard.press("Backspace");
+  await until("sales.xlsx", (f) => total(f) === "150");
+
+  await finished(page, () => ask("Write the report."));
+  await page.locator(".file-card", { hasText: "report.docx" }).click();
+  await page.locator(".dv-page").waitFor();
+  assert.deepEqual(await page.locator(".dv-b").allInnerTexts(), ["Sales", "North led.", "Check the south"]);
+  assert.equal(await page.locator(".dv-b").nth(2).getAttribute("data-kind"), "bullet");
+  await page.evaluate(() => {
+    const b = document.querySelectorAll(".dv-b")[1];
+    const r = document.createRange();
+    r.selectNodeContents(b);
+    r.collapse(false);
+    document.querySelector(".dv-page").focus();
+    getSelection().removeAllRanges();
+    getSelection().addRange(r);
+  });
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("- South fell");
+  // The agent's next read is the person's version.
+  await until("report.docx", (f) => f.blocks.map((b) => `${b.kind}:${b.text}`).join("|") === "heading:Sales|paragraph:North led.|bullet:South fell|bullet:Check the south");
+}
+scenarios.files = files;
+
 // The + menu opens the built-in panels. Files edits and saves a file in the project folder;
 // the terminal runs a shell there. A page on this machine's loopback address says its runtime
 // is local.
@@ -245,7 +304,10 @@ async function workbench(page) {
   assert.equal(await page.locator(".wb-save").isDisabled(), true);
   await editor.fill("two");
   await page.locator(".wb-save").click();
-  await page.waitForFunction(async () => (await window.ark.call("file_read", { path: "draft.md" })).text === "two");
+  for (let i = 0; (await page.evaluate(() => window.ark.call("file_read", { path: "draft.md" }))).text !== "two"; i++) {
+    assert.ok(i < 50, "draft.md was not saved");
+    await page.waitForTimeout(100);
+  }
   await assert.rejects(page.evaluate(() => window.ark.call("file_read", { path: "../outside" })));
 
   await page.evaluate(() => window.ark.openPanel("terminal"));

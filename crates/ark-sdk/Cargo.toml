@@ -11,6 +11,7 @@ serde.workspace = true
 ark-core.workspace = true
 ark-model.workspace = true
 ark-tools.workspace = true
+ark-files.workspace = true
 ark-connect.workspace = true
 ark-browser.workspace = true
 ark-computer.workspace = true

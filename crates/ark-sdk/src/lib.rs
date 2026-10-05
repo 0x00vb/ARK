@@ -60,7 +60,10 @@ pub mod prelude {
     };
     // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
     // with `ark_model::from_env_arc()`, etc., from the prelude alone.
-    pub use {ark_browser, ark_computer, ark_connect, ark_core, ark_model, ark_runtime, ark_tools};
+    pub use {
+        ark_browser, ark_computer, ark_connect, ark_core, ark_files, ark_model, ark_runtime,
+        ark_tools,
+    };
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -586,6 +589,7 @@ pub struct ArkBuilder {
     subscriptions: Option<SubscriptionRuntime>,
     skills: Vec<String>,
     web: Option<WebAdapter>,
+    files: bool,
     browser: Option<BrowserChoice>,
     computer: Option<ComputerChoice>,
     connections: Option<ConnectionsChoice>,
@@ -629,6 +633,7 @@ impl Default for ArkBuilder {
             subscriptions: None,
             skills: vec!["*".into()],
             web: None,
+            files: false,
             browser: None,
             computer: None,
             connections: None,
@@ -707,6 +712,14 @@ impl ArkBuilder {
     /// agents whose tools allow it. Off by default.
     pub fn web(mut self, yes: bool) -> Self {
         self.web = yes.then(WebAdapter::new);
+        self
+    }
+
+    /// Offer the Files tools (`files.list`, `read`, `search`, `write`, `edit`; [`ark_files`]):
+    /// the project folder's text files, spreadsheets (`.xlsx`, `.csv`) and documents (`.docx`),
+    /// read and changed in place. Writing asks first. Off by default.
+    pub fn files(mut self, yes: bool) -> Self {
+        self.files = yes;
         self
     }
 
@@ -789,6 +802,10 @@ impl ArkBuilder {
             ),
         });
         let mut profile = self.profile;
+        if self.files {
+            engine.register(Arc::new(ark_files::Files));
+            profile.distillers.push(ark_files::distill());
+        }
         if let Some(c) = &connections {
             engine.add_source(Arc::new(c.clone()));
             profile

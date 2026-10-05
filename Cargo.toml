@@ -5,6 +5,7 @@ members = [
     "crates/ark-model",
     "crates/ark-store",
     "crates/ark-tools",
+    "crates/ark-files",
     "crates/ark-connect",
     "crates/ark-browser",
     "crates/ark-computer",
@@ -52,6 +53,7 @@ ark-core = { path = "crates/ark-core", version = "0.9.0" }
 ark-model = { path = "crates/ark-model", version = "0.9.0" }
 ark-store = { path = "crates/ark-store", version = "0.9.0" }
 ark-tools = { path = "crates/ark-tools", version = "0.9.0" }
+ark-files = { path = "crates/ark-files", version = "0.9.0" }
 ark-connect = { path = "crates/ark-connect", version = "0.9.0" }
 ark-browser = { path = "crates/ark-browser", version = "0.9.0" }
 ark-computer = { path = "crates/ark-computer", version = "0.9.0" }

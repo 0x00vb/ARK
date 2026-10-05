@@ -160,10 +160,13 @@ export class Pane {
     else this.open();
   }
 
-  /// A new session: evidence tabs belong to the old one; app panels stay.
-  reset() {
+  /// A new session: evidence tabs belong to the old one; app panels stay. Files belong to
+  /// their project's folder: another project closes them.
+  reset(project) {
+    const moved = project !== this.project;
+    this.project = project;
     for (const key of [...this.tabs.keys()]) {
-      if (key.startsWith("inv:")) this.remove(key);
+      if (key.startsWith("inv:") || (moved && key.startsWith("file:"))) this.remove(key);
     }
   }
 }

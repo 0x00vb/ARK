@@ -80,6 +80,11 @@ pub static FORMATS: &[&dyn Format] = &[
 /// Largest file ARK opens.
 pub const MAX_BYTES: u64 = 25 * 1024 * 1024;
 
+/// Cells of one sheet a read keeps to show it (the agent reads about 12,000 characters at a
+/// time, the window shows 5,000 rows). The rows after are counted, not kept ([`Sheet::unread`]),
+/// so a large workbook opens in a fraction of the memory. An edit reads the whole file.
+pub const READ_CELLS: usize = 100_000;
+
 /// The format for a path, by its extension.
 pub fn format_for(path: &str) -> Option<&'static dyn Format> {
     let ext = Path::new(path).extension()?.to_str()?.to_ascii_lowercase();

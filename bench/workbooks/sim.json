@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T16:07:25.135792Z",
+  "mode": "simulated",
+  "model": "sim",
+  "fast_model": null,
+  "reps": 1,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false"
+  },
+  "workloads": [
+    {
+      "name": "workbooks",
+      "class": "files",
+      "description": "revenue per region and month from two workbooks and a CSV with messy data: a summary workbook, a chart and three findings, checked on the saved files",
+      "summary": {
+        "runs": 1,
+        "successes": 1,
+        "success_rate": 1.0,
+        "model_calls": 4.0,
+        "input_tokens": 20390.0,
+        "cached_input_tokens": 13532.0,
+        "uncached_input_tokens": 6858.0,
+        "output_tokens": 773.0,
+        "total_tokens": 21163.0,
+        "cost_usd": 0.0272179,
+        "cost_per_success_usd": 0.0272179,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.0,
+        "peak_context_tokens": 6308.0,
+        "mean_context_tokens": 5097.0,
+        "tool_schema_tokens": 5236.0,
+        "prefix_reuse_tokens": 13532.0,
+        "median_turn_ms": 213.0,
+        "p95_turn_ms": 213.0,
+        "median_first_token_ms": 0.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "workbooks",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Total revenue for January to June: 57,435,576. West grew most from Q1 to Q2, and South missed its Q2 target. The figures are in summary.xlsx and the chart in revenue.png. I removed duplicate orders and the total rows, read amounts stored as text, and matched customer IDs ignoring case and spaces.",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 21163
+          },
+          "calls_by_model": {
+            "sim": 4
+          },
+          "input_tokens": 20390,
+          "cached_input_tokens": 13532,
+          "uncached_input_tokens": 6858,
+          "cache_write_tokens": 6131,
+          "output_tokens": 773,
+          "total_tokens": 21163,
+          "tokens_measured": false,
+          "cost_usd": 0.0272179,
+          "wall_ms": 213,
+          "turn_ms": [
+            213
+          ],
+          "first_token_ms": [
+            0
+          ],
+          "model_latency_ms": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 6308,
+          "mean_context_tokens": 5097,
+          "context_sources": {
+            "Capability index": 1848,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 1330,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 668,
+            "Tool results": 9237,
+            "Tool schemas": 5236,
+            "Working state": 727,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 5236,
+          "tools_exposed_max": 11,
+          "tools_used": 2,
+          "result_context_tokens": 3086,
+          "result_raw_tokens": 3139,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 13532,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 1,
+    "successes": 1,
+    "success_rate": 1.0,
+    "model_calls": 4.0,
+    "input_tokens": 20390.0,
+    "cached_input_tokens": 13532.0,
+    "uncached_input_tokens": 6858.0,
+    "output_tokens": 773.0,
+    "total_tokens": 21163.0,
+    "cost_usd": 0.0272179,
+    "cost_per_success_usd": 0.0272179,
+    "tool_calls": 2.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 4.0,
+    "peak_context_tokens": 6308.0,
+    "mean_context_tokens": 5097.0,
+    "tool_schema_tokens": 5236.0,
+    "prefix_reuse_tokens": 13532.0,
+    "median_turn_ms": 213.0,
+    "p95_turn_ms": 213.0,
+    "median_first_token_ms": 0.0,
+    "stall_stops": 0.0
+  }
+}

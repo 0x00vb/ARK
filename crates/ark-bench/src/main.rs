@@ -97,6 +97,8 @@ enum Cmd {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Live runs of Run code start through this program on Windows (ark_exec::entry).
+    ark_sdk::prelude::ark_exec::entry();
     match Cli::parse().cmd {
         Cmd::List => {
             for w in suite::all(500) {

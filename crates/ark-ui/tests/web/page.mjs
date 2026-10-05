@@ -374,10 +374,10 @@ async function analysis(page) {
   await page.keyboard.press("Enter");
   const ask = page.locator(".approval");
   await ask.waitFor();
-  // The approval shows the program and what it may do.
+  // The approval leads with what the run is for, then the program and what it may do.
   const words = await ask.innerText();
-  assert.match(words, /Run this Sh program in the project folder \(it can change files there; no network\)/);
-  assert.match(words, /cat > table\.csv/);
+  assert.match(words, /ARK wants to:\nChart the sales and write a report\nWith a Sh program in the project folder \(it can change files there; no network\)/);
+  assert.match(words, /cat > chart\.svg/);
   await page.locator(".approval .btn.primary").click();
   await done;
   await page.waitForTimeout(150);
@@ -398,6 +398,8 @@ async function analysis(page) {
   // The table opens as a sheet.
   await page.locator(".file-card", { hasText: "table.csv" }).click();
   await page.waitForFunction(() => document.querySelector('td[data-r="1"][data-c="1"]')?.textContent === "120");
+  // It is longer than the grid shows, and says so; no rows to type into past the part shown.
+  assert.equal(await page.locator(".sh-part").innerText(), "Showing the first 5,000 of 6,003 rows. Ask ARK to work with all of them.");
 
   // The PDF opens in the browser's own viewer (headless WebKit does not paint it, so only the
   // frame and its document are checked).

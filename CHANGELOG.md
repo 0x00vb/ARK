@@ -115,9 +115,11 @@ What changed for people building on ARK, per release. Not a commit log.
   program in the project folder inside a sandbox: it reads the system, its environment and the
   project, writes only the project (not `.git` and other tool folders), and has no network.
   Python 3.12 with pandas, numpy, matplotlib and openpyxl first, kept with `uv` under the store.
-  Every file a run writes comes back as an artifact with its path. Offered only where ARK can
-  contain a run (macOS). `ArkBuilder::code(true)` or `code_with(Exec)`; a `Runtime` trait for
-  other environments; a "Run code" capability ([`EXTENSION.md`](docs/EXTENSION.md#run-code)).
+  Every file a run writes comes back as an artifact with its path. Contained on macOS
+  (`sandbox-exec`), Linux (bubblewrap) and Windows (an AppContainer; the program calls
+  `ark_exec::entry()` first in `main`), ADR 0032; offered nowhere else. `ArkBuilder::code(true)`
+  or `code_with(Exec)`; a `Runtime` trait for other environments; a "Run code" capability
+  ([`EXTENSION.md`](docs/EXTENSION.md#run-code)).
 - Kinds (ADR 0021): `ark_files::Kind` gains `markdown`, `pdf` and `image`, each from a format.
   PDFs read as their text, a heading per page (read only); images read as their type and size.
   `ark_files::Kinds`, a sniffer the SDK registers, gives a stored copy of a file the same kind;
@@ -128,6 +130,27 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark_tools::subprocess::{Spec, run_spec, timeout_note}`: a process with its folder, its own
   environment, a timeout and a bounded tail of its output.
 - `examples/writing-agent` turns Run code on.
+- Run code's Python has the data tools an analyst's work needs: duckdb (SQL over CSV, Parquet,
+  data frames, and `.xlsx` through its `excel` extension, installed at setup since a run has no
+  network), python-calamine (`pd.read_excel(engine="calamine")`: fast, and reads legacy `.xls`,
+  `.xlsb` and `.ods`), xlsxwriter and pyarrow. The first setup downloads about 100 MB more.
+- Files reads large spreadsheets in part: a read keeps the first `ark_files::READ_CELLS` cells
+  of each sheet and counts the rest (`Sheet.unread`); the agent's listing says which rows were
+  not read and that a program reads all of them. An edit still sees every row. A workbook read
+  without a sheet shows the start of every sheet. A 300,000-row workbook reads in 200 MB instead
+  of 1.3 GB.
+- Skills that come with a tool (ADR 0033): `Runtime::skills`, `Exec::write_skills`,
+  `Engine::add_skills`, `SkillScope::Builtin`, found after the project's and the store's skills.
+  Run code's Python comes with `data-analysis`: how to inspect sources, check joins, keep
+  originals, reconcile totals and answer in plain words ([`DATA.md`](docs/DATA.md)).
+- `ark-bench` workload `workbooks`: two workbooks and a CSV (54,000 rows, a title row, total
+  rows, duplicates, amounts as text, messy IDs), a summary workbook, a chart and three findings,
+  checked on the saved files; the sources must not change.
+- `code.run` takes an optional `purpose`, one sentence in the person's words. The approval and
+  the activity row lead with it; the program follows in the approval.
+- Window: a sheet longer or wider than the grid shows says so under the grid ("Showing the first
+  5,000 of 300,001 rows"), and has no empty rows to type into past the part shown, which would
+  have been the file's own rows.
 
 - The project's board (ADR 0023): work items the person and the agents share, kept per project
   across chats and restarts. `Orchestrator::{board, work_item, add_work, change_work,
@@ -236,6 +259,8 @@ What changed for people building on ARK, per release. Not a commit log.
   instead of allowing each once.
 
 ### Breaking
+- `SkillScope` has a new variant, `Builtin` (a skill that comes with a tool): a `match` on it
+  needs an arm.
 - `ConnectError` has a new variant, `Refused`: a 4xx answer from a token endpoint (an expired
   or revoked grant). A `match` on `ConnectError` needs an arm for it.
 - `ProviderError::OutOfCredit` and `AgentError::OutOfCredit` are new variants: an exhaustive

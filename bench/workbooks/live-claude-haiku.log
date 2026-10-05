@@ -1,0 +1,14 @@
+analysis           rep 0 FAIL calls=0 tokens=0 (0 cached) tools=0 44284ms  turn failed: provider: claude error: the CLI reported an error
+analysis           rep 1 FAIL calls=0 tokens=0 (0 cached) tools=0 30416ms  turn failed: provider: claude error: the CLI reported an error
+files-edit         rep 0 PASS calls=3 tokens=19181 (4553 cached) tools=2 12797ms  all checks passed
+files-edit         rep 1 PASS calls=3 tokens=18889 (4436 cached) tools=2 15697ms  all checks passed
+workbooks          rep 0 FAIL calls=2 tokens=17352 (9821 cached) tools=5 55295ms  turn failed: provider: claude error: the CLI reported an error
+workbooks          rep 1 FAIL calls=11 tokens=238762 (205363 cached) tools=12 115064ms  summary.xlsx lacks the right monthly revenue (as a number) for 30 of 24: East January, East February, East March, East April
+
+run · live · model claude:haiku · 2 rep(s)
+workload           success  calls    tokens  uncached  tools peak ctx  cost/succ
+analysis              0.00    0.0         0         0    0.0        0        n/a
+files-edit            1.00    3.0     19035     13152    2.0        0   $0.04109
+workbooks             0.00    6.5    128057     14832    8.5        0        n/a
+TOTAL                 0.33    3.2     49031      9328    3.5        0   $0.14860
+wrote bench/workbooks/live-claude-haiku.json

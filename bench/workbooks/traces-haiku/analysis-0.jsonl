@@ -1,0 +1,3 @@
+{"event":{"trivial":false,"type":"classified"},"turn":0,"type":"event"}
+{"event":{"index":1,"type":"step"},"turn":0,"type":"event"}
+{"event":{"report":{"action_schemas":290,"budget":6000,"capability_index":402,"compressed_rounds":0,"conversation":0,"instructions":286,"loaded_actions":2,"model_output":0,"project":50,"retrieved":0,"role":"reason","rules":0,"skills":91,"step":1,"task":79,"tool_rounds":0,"tool_schemas":790,"total":983,"working_state":75,"workspace":0},"type":"context"},"turn":0,"type":"event"}

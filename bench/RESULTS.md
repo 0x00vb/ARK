@@ -668,3 +668,21 @@ not yet by a live run.
 - Provider-reported cache reads on Anthropic or OpenAI (no key in this environment).
 - A larger model: every live number is one 4B local model.
 - Cost on a hosted model: cost here is the reference price applied to tokens, not a bill.
+
+## Data work: `workbooks`, `analysis`, `files-edit` on paid models (2026-10-05)
+
+ADR 0033. Runs: `bench/workbooks/live-*.json`, traces in `bench/workbooks/traces-*`. Two reps
+each; the Codex and qwen3.5:27b runs were stopped early (usage limit), so they have fewer.
+
+| Model | workbooks | analysis | files-edit |
+|---|---|---|---|
+| `claude:sonnet` | 2/2 (5 to 6 calls, 40 to 54 s) | 2/2 | 2/2 |
+| `claude:haiku` | 0/2 | 0/2 | 2/2 |
+| `codex:default` | not reached | 2/2 | 2/2 |
+
+- Sonnet read the `data-analysis` skill, gave a `purpose` with each run, and its answers had
+  the right total (57,435,576.18), West +61.2%, South missed by 533,943.
+- Haiku `workbooks` rep 1: the check caught a real analyst error. It removed the total rows but
+  not the orders exported twice, so its total was 57,998,094.97 and no monthly figure matched.
+- Haiku `analysis` 0/2 and `workbooks` rep 0: the Claude CLI returned an error with no text
+  before any reply. `b0de042` now names the CLI's subtype; rerun to see the cause.

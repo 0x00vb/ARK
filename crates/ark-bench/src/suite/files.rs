@@ -59,11 +59,13 @@ fn seed() -> Workbook {
                 name: "Sales".into(),
                 cells: sales,
                 origin: None,
+                unread: 0,
             },
             Sheet {
                 name: "Notes".into(),
                 cells: notes,
                 origin: None,
+                unread: 0,
             },
         ],
     }

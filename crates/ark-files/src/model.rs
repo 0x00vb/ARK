@@ -103,6 +103,10 @@ pub struct Sheet {
     pub cells: BTreeMap<(u32, u32), Cell>,
     /// Which sheet of the file this one was read from; `None` for a new sheet.
     pub origin: Option<usize>,
+    /// Rows of the file after the last one read. A read to show a file stops after
+    /// [`crate::READ_CELLS`] cells of a sheet, since the agent and the window see only its start;
+    /// a program reads the rest. 0 when the whole sheet was read (always for an edit).
+    pub unread: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -143,6 +147,7 @@ impl Sheet {
             name: name.into(),
             cells: BTreeMap::new(),
             origin: None,
+            unread: 0,
         }
     }
 

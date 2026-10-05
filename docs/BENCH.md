@@ -89,6 +89,7 @@ neighbors.
 | team | a lead delegates two independent lookups to two workers (`Workload::team`) |
 | skill | write release notes in a format only a stored skill gives: one catalog line, then `skills.read` |
 | web | search and read a page: `web.search`, then `web.fetch`, against a loopback page and a fixed search engine |
+| claimed-files | one call writes a chart but not the report (a program run that fails halfway); the answer may say only written files were saved |
 
 ## The naive baseline
 

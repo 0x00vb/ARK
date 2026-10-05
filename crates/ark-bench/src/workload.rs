@@ -217,6 +217,19 @@ impl RunOutput<'_> {
     pub fn executed(&self, action: &str) -> usize {
         self.turns.iter().map(|t| t.executed(action)).sum()
     }
+    /// Files of the project folder the run's calls wrote (relative paths), in call order.
+    pub fn written(&self) -> Vec<&str> {
+        self.turns
+            .iter()
+            .flat_map(|t| &t.events)
+            .filter_map(|e| match e {
+                HarnessEvent::ToolResult { files, .. } => Some(files),
+                _ => None,
+            })
+            .flatten()
+            .map(String::as_str)
+            .collect()
+    }
     pub fn model_calls(&self) -> usize {
         self.turns
             .iter()

@@ -30,6 +30,7 @@ ArkUi::new(app)
 | `remote::Client::new(url, token)` | `call(method, params)`, `hello()` and `events()` from Rust: scripts, checks, other services (`ark_interact::remote`, re-exported by `ark-ui`) |
 | `app --connect URL` (`ark-cli`) | the app's terminal on the runtime, with `--token` or `ARK_TOKEN` ([`CLI.md`](CLI.md#on-another-machine), ADR 0024) |
 | `remote::run_window(url, token, ctx)` | a native window (feature `desktop`) on the runtime's own page |
+| `remote::send_folder(client, folder, name, go_on)` | copy a folder from this computer to the runtime, where it becomes a new project (ADR 0030). `Folder::read(dir)` says how many files and bytes first |
 | `remote::visit(url, token)` | from an app's handler: the running window opens the runtime's page in place of its own; `ark.openLocal()` there comes back (ADR 0029) |
 
 Give your binary a way to manage tokens (ARK Desktop: `ark-desktop token create NAME`). A token

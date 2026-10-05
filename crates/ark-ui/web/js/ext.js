@@ -16,7 +16,9 @@
 //                      sending opens the menu instead. `ark.refreshModel()` asks again.
 //   ark.artifactViewer({ id, label, match(artifact), primary, presents, wide, render(el, artifact, api, params) })
 //   ark.toolRenderer({ match(action), render(el, call, api) })
-//   ark.action({ id, label, icon, where: "artifact" | "palette", when(ctx), run(ctx, api) })
+//   ark.action({ id, label, icon, where: "artifact" | "palette" | "project", when(ctx), run(ctx, api) })
+//                      `project`: an item in a project's menu in the projects list; `ctx` is
+//                      `{ project }` (`id`, `name`, `workspace`, `current`)
 //   ark.onSubmit(fn)  `fn(text)` sees each message before it is sent (typed, queued or a
 //                      suggestion; not commands). Return true, or a promise of true, when the
 //                      app took it; the conversation then sends nothing.

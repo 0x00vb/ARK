@@ -35,6 +35,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0027](0027-named-openai-compatible-endpoints.md) | Named OpenAI-compatible endpoints, and out of credit as its own error | Accepted |
 | [0028](0028-secrets-in-a-file-on-servers.md) | On a server, secrets are kept in one encrypted file in the store | Accepted |
 | [0029](0029-the-window-visits-a-runtime-elsewhere.md) | The window opens a runtime elsewhere in place of its own page, and comes back | Accepted |
+| [0030](0030-a-folder-sent-to-a-runtime-becomes-a-project.md) | A folder sent to a runtime elsewhere becomes a project there | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

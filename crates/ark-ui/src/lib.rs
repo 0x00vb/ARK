@@ -35,6 +35,7 @@ pub mod host;
 pub mod remote;
 mod serve;
 mod terminal;
+mod upload;
 
 use std::borrow::Cow;
 use std::collections::HashMap;

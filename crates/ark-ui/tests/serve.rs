@@ -227,3 +227,96 @@ async fn a_client_runs_a_task_that_finishes_with_no_client_connected() {
     }
     panic!("the task did not finish: {state}");
 }
+
+#[tokio::test]
+async fn a_folder_sent_from_another_computer_becomes_a_project_there() {
+    use ark_ui::remote::{send_folder, Folder};
+
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let token = tokens.create("laptop").unwrap();
+    let (_host, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let client = Client::new(&format!("http://127.0.0.1:{}", served.port), &token);
+
+    // The folder on this computer: nested files, one larger than a part, an empty one, and a
+    // link, which is not sent.
+    let local = tempfile::tempdir().unwrap();
+    let l = local.path();
+    std::fs::create_dir_all(l.join("chapters/draft")).unwrap();
+    std::fs::write(l.join("notes.md"), "# Notes\n").unwrap();
+    std::fs::write(l.join("chapters/draft/one.md"), "It was a dark night.").unwrap();
+    let big: Vec<u8> = (0..2_500_000u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(l.join("chapters/cover.bin"), &big).unwrap();
+    std::fs::write(l.join("empty.txt"), "").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("/etc", l.join("outside")).unwrap();
+    let folder = Folder::read(l).unwrap();
+    assert_eq!(folder.files(), 4);
+    assert_eq!(folder.bytes(), 2_500_000 + 8 + 20);
+
+    // Stopped halfway: no project, nothing left.
+    let before = client.call("projects", json!({})).await.unwrap();
+    let mut calls = 0;
+    let stopped = send_folder(&client, &folder, "novel", |_| {
+        calls += 1;
+        calls < 2
+    })
+    .await;
+    assert!(stopped.is_err());
+    assert_eq!(client.call("projects", json!({})).await.unwrap(), before);
+    let uploads = dir.path().join("uploads");
+    assert_eq!(std::fs::read_dir(&uploads).unwrap().count(), 0);
+
+    let mut last = Default::default();
+    let p = send_folder(&client, &folder, "novel", |s| {
+        last = s;
+        true
+    })
+    .await
+    .unwrap();
+    assert_eq!(p["name"], "novel");
+    assert_eq!((last.files, last.bytes), (4, folder.bytes()));
+    let id = p["id"].as_str().unwrap();
+    client
+        .call("open_project", json!({ "id": id }))
+        .await
+        .unwrap();
+    let read = client
+        .call("file_read", json!({ "path": "chapters/draft/one.md" }))
+        .await
+        .unwrap();
+    assert_eq!(read["text"], "It was a dark night.");
+    let root = client.call("files", json!({ "path": "" })).await.unwrap();
+    let names: Vec<&str> = root["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["chapters", "empty.txt", "notes.md"]);
+    let folder_there = std::path::PathBuf::from(root["root"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read(folder_there.join("chapters/cover.bin")).unwrap(),
+        big
+    );
+
+    // The same name again is a second project.
+    let again = send_folder(&client, &folder, "novel", |_| true)
+        .await
+        .unwrap();
+    assert_eq!(again["name"], "novel 2");
+
+    // A path out of the upload's folder is refused.
+    let out = client
+        .call(
+            "upload_file",
+            json!({ "upload": "abcdef123456", "path": "../../access.json", "data": "", "offset": 0 }),
+        )
+        .await
+        .unwrap_err();
+    assert!(format!("{out}").contains("outside"), "{out}");
+}

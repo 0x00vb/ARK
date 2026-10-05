@@ -922,6 +922,26 @@ impl Host {
                 let dir = self.engine.workspace_dir(&self.project()?.id)?;
                 crate::files::version(&dir, &s("path"))
             }
+            // A folder from another computer becomes a project here (see `upload`, ADR 0030):
+            // its files in parts, then the project. Neither waits for a running turn.
+            "upload_file" => {
+                let offset = n("offset").unwrap_or(0);
+                crate::upload::put(
+                    self.engine.store.root(),
+                    &s("upload"),
+                    &s("path"),
+                    &s("data"),
+                    offset,
+                )
+            }
+            "upload_project" => {
+                let p = crate::upload::finish(&self.engine, &s("upload"), &s("name"))?;
+                Ok(json!({ "id": p.id.as_str(), "name": p.name }))
+            }
+            "upload_cancel" => {
+                crate::upload::cancel(self.engine.store.root(), &s("upload"))?;
+                Ok(json!({}))
+            }
             // On the computer the runtime runs on: the window offers it only when that is the
             // person's own (`ark.isLocal()`).
             "file_open" => {

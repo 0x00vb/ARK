@@ -1,0 +1,11 @@
+analysis           rep 0 FAIL calls=1 tokens=12530 (0 cached) tools=0 44813ms  turn failed: provider: claude error: the CLI reported an error (error_max_structured_output_retries)
+analysis           rep 1 FAIL calls=2 tokens=8678 (0 cached) tools=2 36446ms  turn failed: provider: claude error: the CLI reported an error (error_max_structured_output_retries)
+workbooks          rep 0 FAIL calls=2 tokens=21973 (19576 cached) tools=4 41981ms  turn failed: provider: claude sent a malformed reply: arguments for code.run are not JSON: EOF while parsing an object at line 1 column 1832
+workbooks          rep 1 FAIL calls=3 tokens=107959 (90837 cached) tools=5 112718ms  turn failed: provider: claude error: the CLI reported an error (error_max_structured_output_retries)
+
+run · live · model claude:haiku · 2 rep(s)
+workload           success  calls    tokens  uncached  tools peak ctx  cost/succ
+analysis              0.00    1.5     10604      9805    1.0        0        n/a
+workbooks             0.00    2.5     64966      7422    4.5        0        n/a
+TOTAL                 0.00    2.0     37785      8614    2.8        0        n/a
+wrote /private/tmp/claude-501/-Users-valentino-projects-AIengineering/d300bde6-fae2-478f-9109-48d39b7019c8/scratchpad/live/live-claude-haiku.json

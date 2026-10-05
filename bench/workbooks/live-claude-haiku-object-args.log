@@ -1,0 +1,14 @@
+analysis           rep 0 PASS calls=7 tokens=51351 (32931 cached) tools=6 29812ms  all checks passed
+analysis           rep 1 PASS calls=3 tokens=30030 (14540 cached) tools=1 22278ms  all checks passed
+files-edit         rep 0 PASS calls=3 tokens=18723 (4431 cached) tools=2 13048ms  all checks passed
+files-edit         rep 1 PASS calls=3 tokens=19025 (4498 cached) tools=2 14331ms  all checks passed
+workbooks          rep 0 FAIL calls=7 tokens=140339 (106213 cached) tools=9 85731ms  summary.xlsx lacks the right monthly revenue (as a number) for 30 of 30: East January, East February, East March, East April
+workbooks          rep 1 FAIL calls=7 tokens=143793 (114353 cached) tools=8 90121ms  summary.xlsx lacks the right monthly revenue (as a number) for 30 of 30: East January, East February, East March, East April
+
+run · live · model claude:haiku · 2 rep(s)
+workload           success  calls    tokens  uncached  tools peak ctx  cost/succ
+analysis              1.00    5.0     40690     14347    3.5        0   $0.05952
+files-edit            1.00    3.0     18874     13100    2.0        0   $0.04019
+workbooks             0.00    7.0    142066     23253    8.5        0        n/a
+TOTAL                 0.67    5.0     67210     16900    4.7        0   $0.12679
+wrote /private/tmp/claude-501/-Users-valentino-projects-AIengineering/d300bde6-fae2-478f-9109-48d39b7019c8/scratchpad/live/after-claude-haiku.json

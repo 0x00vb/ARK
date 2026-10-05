@@ -1,0 +1,14 @@
+analysis           rep 0 PASS calls=4 tokens=24947 (16127 cached) tools=3 13697ms  all checks passed
+analysis           rep 1 PASS calls=4 tokens=24948 (20085 cached) tools=3 15940ms  all checks passed
+files-edit         rep 0 PASS calls=3 tokens=15970 (10010 cached) tools=2 9680ms  all checks passed
+files-edit         rep 1 PASS calls=3 tokens=15960 (13923 cached) tools=2 10489ms  all checks passed
+workbooks          rep 0 PASS calls=5 tokens=51138 (33631 cached) tools=5 35166ms  all checks passed
+workbooks          rep 1 PASS calls=6 tokens=70462 (52378 cached) tools=6 48422ms  all checks passed
+
+run · live · model claude:sonnet · 2 rep(s)
+workload           success  calls    tokens  uncached  tools peak ctx  cost/succ
+analysis              1.00    4.0     24948      5364    3.0        0   $0.02912
+files-edit            1.00    3.0     15965      3096    2.0        0   $0.01761
+workbooks             1.00    5.5     60800     12238    5.5        0   $0.08866
+TOTAL                 1.00    4.2     33904      6899    3.5        0   $0.04513
+wrote /private/tmp/claude-501/-Users-valentino-projects-AIengineering/d300bde6-fae2-478f-9109-48d39b7019c8/scratchpad/live/after-claude-sonnet.json

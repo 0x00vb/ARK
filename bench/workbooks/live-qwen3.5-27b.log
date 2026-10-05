@@ -1,0 +1,8 @@
+workbooks          rep 0 FAIL calls=9 tokens=89502 (0 cached) tools=10 729384ms  summary.xlsx lacks the right monthly revenue (as a number) for 30 of 30: East January, East February, East March, East April
+workbooks          rep 1 FAIL calls=17 tokens=170619 (0 cached) tools=14 1064725ms  no summary.xlsx that opens as a workbook
+
+run · live · model ollama:qwen3.5:27b · 2 rep(s)
+workload           success  calls    tokens  uncached  tools peak ctx  cost/succ
+workbooks             0.00   13.0    130060    123498   12.0     7557        n/a
+TOTAL                 0.00   13.0    130060    123498   12.0     7557        n/a
+wrote /private/tmp/claude-501/-Users-valentino-projects-AIengineering/d300bde6-fae2-478f-9109-48d39b7019c8/scratchpad/live/live-qwen3.5-27b.json

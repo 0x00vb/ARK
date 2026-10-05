@@ -1,0 +1,428 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T16:35:23.125788Z",
+  "mode": "live",
+  "model": "claude:haiku",
+  "fast_model": null,
+  "reps": 2,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "900"
+  },
+  "workloads": [
+    {
+      "name": "analysis",
+      "class": "files",
+      "description": "a chart and a report from a CSV with Python (code.run), checked on the saved files",
+      "summary": {
+        "runs": 2,
+        "successes": 0,
+        "success_rate": 0.0,
+        "model_calls": 1.5,
+        "input_tokens": 9805.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 9805.0,
+        "output_tokens": 799.0,
+        "total_tokens": 10604.0,
+        "cost_usd": 0.0276,
+        "cost_per_success_usd": null,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 0.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 36446.0,
+        "p95_turn_ms": 44813.0,
+        "median_first_token_ms": 2626.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "analysis",
+          "rep": 0,
+          "success": false,
+          "verdict": "turn failed: provider: claude error: the CLI reported an error (error_max_structured_output_retries)",
+          "answer": "",
+          "turns": 1,
+          "steps": 0,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 12530
+          },
+          "calls_by_model": {
+            "claude:haiku": 1
+          },
+          "input_tokens": 11391,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 11391,
+          "cache_write_tokens": 0,
+          "output_tokens": 1139,
+          "total_tokens": 12530,
+          "tokens_measured": true,
+          "cost_usd": 0.034172,
+          "wall_ms": 44813,
+          "turn_ms": [
+            44813
+          ],
+          "first_token_ms": [
+            18869
+          ],
+          "model_latency_ms": [
+            18869
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 804,
+            "Conversation": 0,
+            "Instructions": 572,
+            "Model output": 20,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 182,
+            "Task": 158,
+            "Tool results": 149,
+            "Tool schemas": 1580,
+            "Working state": 150,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "analysis",
+          "rep": 1,
+          "success": false,
+          "verdict": "turn failed: provider: claude error: the CLI reported an error (error_max_structured_output_retries)",
+          "answer": "",
+          "turns": 1,
+          "steps": 0,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 8678
+          },
+          "calls_by_model": {
+            "claude:haiku": 2
+          },
+          "input_tokens": 8219,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8219,
+          "cache_write_tokens": 0,
+          "output_tokens": 459,
+          "total_tokens": 8678,
+          "tokens_measured": true,
+          "cost_usd": 0.021028,
+          "wall_ms": 36446,
+          "turn_ms": [
+            36446
+          ],
+          "first_token_ms": [
+            2626,
+            2032
+          ],
+          "model_latency_ms": [
+            3327,
+            2718
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 1206,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 62,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 273,
+            "Task": 237,
+            "Tool results": 2157,
+            "Tool schemas": 2370,
+            "Working state": 225,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 2,
+          "result_context_tokens": 1142,
+          "result_raw_tokens": 1181,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "workbooks",
+      "class": "files",
+      "description": "revenue per region and month from two workbooks and a CSV with messy data: a summary workbook, a chart and three findings, checked on the saved files",
+      "summary": {
+        "runs": 2,
+        "successes": 0,
+        "success_rate": 0.0,
+        "model_calls": 2.5,
+        "input_tokens": 62628.5,
+        "cached_input_tokens": 55206.5,
+        "uncached_input_tokens": 7422.0,
+        "output_tokens": 2337.5,
+        "total_tokens": 64966.0,
+        "cost_usd": 0.04926029999999999,
+        "cost_per_success_usd": null,
+        "tool_calls": 4.5,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 0.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 41981.0,
+        "p95_turn_ms": 112718.0,
+        "median_first_token_ms": 5252.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "workbooks",
+          "rep": 0,
+          "success": false,
+          "verdict": "turn failed: provider: claude sent a malformed reply: arguments for code.run are not JSON: EOF while parsing an object at line 1 column 1832",
+          "answer": "",
+          "turns": 1,
+          "steps": 0,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 21973
+          },
+          "calls_by_model": {
+            "claude:haiku": 2
+          },
+          "input_tokens": 20827,
+          "cached_input_tokens": 19576,
+          "uncached_input_tokens": 1251,
+          "cache_write_tokens": 0,
+          "output_tokens": 1146,
+          "total_tokens": 21973,
+          "tokens_measured": true,
+          "cost_usd": 0.0178772,
+          "wall_ms": 41981,
+          "turn_ms": [
+            41981
+          ],
+          "first_token_ms": [
+            10846,
+            1661
+          ],
+          "model_latency_ms": [
+            10847,
+            2626
+          ],
+          "tool_calls": 4,
+          "tool_ok": 4,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 1782,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 88,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 273,
+            "Task": 513,
+            "Tool results": 3799,
+            "Tool schemas": 4617,
+            "Working state": 498,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 2,
+          "result_context_tokens": 3759,
+          "result_raw_tokens": 3788,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "workbooks",
+          "rep": 1,
+          "success": false,
+          "verdict": "turn failed: provider: claude error: the CLI reported an error (error_max_structured_output_retries)",
+          "answer": "",
+          "turns": 1,
+          "steps": 0,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 107959
+          },
+          "calls_by_model": {
+            "claude:haiku": 3
+          },
+          "input_tokens": 104430,
+          "cached_input_tokens": 90837,
+          "uncached_input_tokens": 13593,
+          "cache_write_tokens": 0,
+          "output_tokens": 3529,
+          "total_tokens": 107959,
+          "tokens_measured": true,
+          "cost_usd": 0.08064339999999999,
+          "wall_ms": 112718,
+          "turn_ms": [
+            112718
+          ],
+          "first_token_ms": [
+            7528,
+            1817,
+            5252
+          ],
+          "model_latency_ms": [
+            7528,
+            2452,
+            22097
+          ],
+          "tool_calls": 5,
+          "tool_ok": 5,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 2376,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 351,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 364,
+            "Task": 684,
+            "Tool results": 7618,
+            "Tool schemas": 6156,
+            "Working state": 664,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 3,
+          "result_context_tokens": 3819,
+          "result_raw_tokens": 3818,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 4,
+    "successes": 0,
+    "success_rate": 0.0,
+    "model_calls": 2.0,
+    "input_tokens": 36216.75,
+    "cached_input_tokens": 27603.25,
+    "uncached_input_tokens": 8613.5,
+    "output_tokens": 1568.25,
+    "total_tokens": 37785.0,
+    "cost_usd": 0.038430149999999996,
+    "cost_per_success_usd": null,
+    "tool_calls": 2.75,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 0.0,
+    "peak_context_tokens": 0.0,
+    "mean_context_tokens": 0.0,
+    "tool_schema_tokens": 0.0,
+    "prefix_reuse_tokens": 0.0,
+    "median_turn_ms": 41981.0,
+    "p95_turn_ms": 112718.0,
+    "median_first_token_ms": 2626.0,
+    "stall_stops": 0.0
+  }
+}

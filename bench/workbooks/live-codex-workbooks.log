@@ -1,0 +1,8 @@
+workbooks          rep 0 PASS calls=8 tokens=223762 (189312 cached) tools=8 329861ms  all checks passed
+workbooks          rep 1 PASS calls=8 tokens=233477 (183552 cached) tools=9 495098ms  all checks passed
+
+run · live · model codex:default · 2 rep(s)
+workload           success  calls    tokens  uncached  tools peak ctx  cost/succ
+workbooks             1.00    8.0    228620     34610    8.5        0   $0.18229
+TOTAL                 1.00    8.0    228620     34610    8.5        0   $0.18229
+wrote /private/tmp/claude-501/-Users-valentino-projects-AIengineering/d300bde6-fae2-478f-9109-48d39b7019c8/scratchpad/live/live-codex-workbooks.json

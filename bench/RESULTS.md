@@ -671,18 +671,34 @@ not yet by a live run.
 
 ## Data work: `workbooks`, `analysis`, `files-edit` on paid models (2026-10-05)
 
-ADR 0033. Runs: `bench/workbooks/live-*.json`, traces in `bench/workbooks/traces-*`. Two reps
-each; the Codex and qwen3.5:27b runs were stopped early (usage limit), so they have fewer.
+ADR 0033. Runs in `bench/workbooks/`, two reps per workload unless noted. `workbooks` is two
+workbooks and a CSV, 54,000 rows, with a title row, total rows, orders exported twice, amounts
+as text and messy IDs; checked on the saved files.
 
-| Model | workbooks | analysis | files-edit |
-|---|---|---|---|
-| `claude:sonnet` | 2/2 (5 to 6 calls, 40 to 54 s) | 2/2 | 2/2 |
-| `claude:haiku` | 0/2 | 0/2 | 2/2 |
-| `codex:default` | not reached | 2/2 | 2/2 |
+| Model | workbooks | analysis | files-edit | Files |
+|---|---|---|---|---|
+| `claude:sonnet` | 2/2 | 2/2 | 2/2 | `live-claude-sonnet.json` |
+| `claude:sonnet`, arguments as an object | 2/2 (35 to 48 s, 51k to 70k tokens) | 2/2 | 2/2 | `live-claude-sonnet-object-args.json` |
+| `claude:haiku`, arguments as a string | 0/4 | 0/4 | 2/2 | `live-claude-haiku.json`, `haiku-string-args-rerun.json` |
+| `claude:haiku`, arguments as an object | 0/2 | 2/2 | 2/2 | `live-claude-haiku-object-args.json` |
+| `codex:default` | 2/2 (5 to 8 min, about 230k tokens) | 2/2 | 2/2 | `live-codex.json`, `live-codex-workbooks.json` |
+| `ollama:qwen3.5:27b` (local) | 0/2 | | | `live-qwen3.5-27b.json` |
 
-- Sonnet read the `data-analysis` skill, gave a `purpose` with each run, and its answers had
-  the right total (57,435,576.18), West +61.2%, South missed by 533,943.
-- Haiku `workbooks` rep 1: the check caught a real analyst error. It removed the total rows but
-  not the orders exported twice, so its total was 57,998,094.97 and no monthly figure matched.
-- Haiku `analysis` 0/2 and `workbooks` rep 0: the Claude CLI returned an error with no text
-  before any reply. `b0de042` now names the CLI's subtype; rerun to see the cause.
+What the runs showed:
+
+- **Haiku could not call Run code through Claude Code.** ARK's reply schema carried each tool
+  call's arguments as a JSON string, so a program was JSON in a string in JSON. Haiku's escaping
+  failed every try and the CLI stopped with `error_max_structured_output_retries` (its session
+  files show the attempts). Claude Code now gets the arguments as an object
+  (`CLAUDE_REPLY_SCHEMA`); Codex keeps the string, which OpenAI's strict outputs need. Haiku
+  went from 0/4 to 2/2 on `analysis`; Sonnet stayed 6/6.
+- **The `workbooks` check catches real analyst mistakes.** Haiku (all 5 runs that finished)
+  removed the total rows and duplicate customers but kept the orders exported twice: total
+  57,998,094.97 instead of 57,435,576.18, so no monthly figure matched. qwen3.5:27b also
+  counted the total rows (its total is exactly double). Sonnet and Codex got every figure,
+  West +61.2%, and South missing its target by 533,943.
+- **Haiku does not read the `data-analysis` skill on `workbooks`** (it did on `analysis`).
+  Naming the skill in `code.run`'s description did not change that: 0/2, more tokens
+  (`haiku-skill-pointer.json`), so it was taken out.
+- For data work, Sonnet- and Codex-class models are what ARK can recommend today. Haiku and a
+  27B local model finish the work but make the mistakes a careful analyst would not.

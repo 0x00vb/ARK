@@ -15,6 +15,7 @@ async-trait.workspace = true
 blake3.workspace = true
 thiserror.workspace = true
 zip = { version = "2", default-features = false, features = ["deflate"] }
+pdf-extract = "0.12"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

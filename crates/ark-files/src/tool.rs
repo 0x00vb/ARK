@@ -5,7 +5,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use ark_core::{ActionDescriptor, ArtifactKind, RiskTier};
+use ark_core::{ActionDescriptor, RiskTier};
 use ark_tools::{ActionOutput, Adapter, AdapterError, ProducedArtifact, Result, RunCtx};
 use async_trait::async_trait;
 use serde_json::{json, Value as Json};
@@ -58,7 +58,7 @@ impl Adapter for Files {
                 .with_input_schema(path_schema("a folder, relative to the project root")),
             ActionDescriptor::new(
                 READ,
-                "read a file of the project: text, a spreadsheet (.xlsx, .csv) as rows with cell names, or a document (.docx) as numbered blocks",
+                "read a file of the project: text, a spreadsheet (.xlsx, .csv) as rows with cell names, a document (.docx) as numbered blocks, or the text of a PDF",
                 RiskTier::Read,
             )
             .with_input_schema(json!({
@@ -237,10 +237,7 @@ fn saved(root: &Path, file: File, what: String) -> ActionOutput {
         .ok()
         .and_then(|p| std::fs::read(p).ok())
         .unwrap_or_default();
-    let kind = match file.kind() {
-        Kind::Text => ArtifactKind::Text,
-        k => ArtifactKind::named(k.as_str()),
-    };
+    let kind = crate::artifact_kind(file.kind());
     ActionOutput::json(json!({
         "path": file.path, "kind": file.kind().as_str(), "version": file.version, "summary": what,
     }))
@@ -263,6 +260,7 @@ fn size_words(f: &File) -> String {
             "{} blocks",
             d.blocks.iter().filter(|b| !b.is_blank()).count()
         ),
+        Content::Media(m) => m.media_type.clone(),
     }
 }
 
@@ -333,17 +331,25 @@ fn created(rel: &str, edits: &[Edit]) -> std::result::Result<Content, Error> {
             apply_sheet(&mut book, edits)?;
             Ok(Content::Sheet(book))
         }
-        Kind::Text => Err(Error::Input(format!(
+        Kind::Text | Kind::Markdown => Err(Error::Input(format!(
             "there is no file {rel} yet; files.write creates it with its whole text"
         ))),
+        Kind::Pdf | Kind::Image => Err(not_written(rel)),
     }
+}
+
+fn not_written(rel: &str) -> Error {
+    Error::Input(format!(
+        "ARK reads {rel} but does not write PDFs or images with files.write; a program run with code.run can make one"
+    ))
 }
 
 /// The content a write asks for, in the shape the path's format takes.
 fn content_from(rel: &str, input: &Json) -> std::result::Result<Content, Error> {
     let text = input.get("text").and_then(Json::as_str);
     match crate::kind_of(rel) {
-        Kind::Text => Ok(Content::Text(
+        Kind::Pdf | Kind::Image => Err(not_written(rel)),
+        Kind::Text | Kind::Markdown => Ok(Content::Text(
             text.ok_or_else(|| Error::Input("files.write needs `text` for this file".into()))?
                 .to_string(),
         )),
@@ -498,6 +504,7 @@ fn search_file(root: &Path, p: &Path, needle: &str, hits: &mut Vec<String>) {
                         }
                     }
                 }
+                Content::Media(_) => {}
                 Content::Text(t) => {
                     for (i, line) in t.lines().enumerate() {
                         if line.to_lowercase().contains(needle) {

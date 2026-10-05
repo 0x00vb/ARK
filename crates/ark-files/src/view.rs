@@ -80,12 +80,33 @@ impl File {
                 }
                 Ok(Listing { text: head, more })
             }
+            Content::Media(m) => {
+                let size = match (m.width, m.height) {
+                    (Some(w), Some(h)) => format!(", {w}x{h}"),
+                    _ => String::new(),
+                };
+                Ok(Listing {
+                    text: format!(
+                        "{}: {} ({}{size}). The person sees it in the window; its picture is not readable here.\n",
+                        self.path,
+                        self.kind().noun(),
+                        m.media_type
+                    ),
+                    more: None,
+                })
+            }
             Content::Document(doc) => {
                 let from = w.from.unwrap_or(1).max(1);
                 let shown = doc.blocks.iter().filter(|b| !b.is_blank()).count();
+                let note = if self.kind() == crate::Kind::Document {
+                    "the numbers are what files.edit takes"
+                } else {
+                    "its text, read only"
+                };
                 let mut out = format!(
-                    "{}: document, {} block{}\n(the numbers are what files.edit takes)\n\n",
+                    "{}: {}, {} block{}\n({note})\n\n",
                     self.path,
+                    self.kind().noun(),
                     shown,
                     if shown == 1 { "" } else { "s" }
                 );
@@ -119,6 +140,11 @@ impl File {
     /// The file as a window draws it.
     pub fn page(&self) -> Json {
         let body = match &self.content {
+            // The window shows the file itself (its bytes, `file_bytes`), not what it reads as.
+            _ if self.kind() == crate::Kind::Pdf => json!({ "media_type": "application/pdf" }),
+            Content::Media(m) => json!({
+                "media_type": m.media_type, "width": m.width, "height": m.height,
+            }),
             Content::Text(t) => json!({ "text": t }),
             Content::Sheet(book) => json!({
                 "sheets": book.sheets.iter().map(sheet_page).collect::<Vec<_>>()

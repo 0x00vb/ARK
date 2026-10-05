@@ -1,20 +1,23 @@
 //! # ark-files
 //!
 //! The files of a project folder as things an agent and a person work on together: text,
-//! spreadsheets and documents. The file on disk is the one source of truth. The agent reads
+//! Markdown, spreadsheets, documents, PDFs and images. The file on disk is the one source of truth. The agent reads
 //! and changes it through the [`Files`] tools; the window shows and edits the same file through
 //! [`open`] and [`edit`]. Both send the same [`Edit`]s, so a change means one thing whoever
 //! makes it, and each sees the other's changes on the next read.
 //!
 //! ```text
-//! file (xlsx, csv, docx, text)  --Format-->  Content (Text | Sheet | Document)
-//!                                               |  Edit (cells, blocks, find/replace)
-//! agent: files.read / files.edit                |  window: file_read / file_edit
+//! file (xlsx, csv, docx, md, pdf, png, text)  --Format-->  Content (Text | Sheet | Document | Media)
+//!                                                             |  Edit (cells, blocks, find/replace)
+//! agent: files.read / files.edit                              |  window: file_read / file_edit
 //! ```
 //!
 //! A [`Format`] translates one family of files to a shape and back, and edits a file in
-//! place: what an edit does not touch keeps its bytes. Adding a format is one more `Format`
-//! in [`FORMATS`]; one that maps to an existing shape needs no change anywhere else.
+//! place: what an edit does not touch keeps its bytes. Its [`Kind`] is what the person sees
+//! and the key of the window's view for it; a PDF reads as a document but shows as a PDF.
+//! Adding a format is one more `Format` in [`FORMATS`]; one that maps to an existing kind
+//! needs no change anywhere else. The kind of any file, whichever tool wrote it, is decided
+//! here once: [`kind_of`] for a path, [`Kinds`] for a stored artifact.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -27,7 +30,7 @@ mod view;
 mod xml;
 
 pub use model::{
-    Block, BlockKind, Cell, Content, Document, Edit, Fmt, Kind, Sheet, Value, Workbook,
+    Block, BlockKind, Cell, Content, Document, Edit, Fmt, Kind, Media, Sheet, Value, Workbook,
 };
 pub use tool::{distill, Files, ACTIONS, EDIT, LIST, READ, SEARCH, WRITE};
 pub use view::{Listing, Window, MAX_LISTING};
@@ -65,7 +68,14 @@ pub trait Format: Send + Sync {
 }
 
 /// The formats ARK reads, by extension. Any other file that is text reads as text.
-pub static FORMATS: &[&dyn Format] = &[&format::Xlsx, &format::Csv, &format::Docx];
+pub static FORMATS: &[&dyn Format] = &[
+    &format::Xlsx,
+    &format::Csv,
+    &format::Docx,
+    &format::Markdown,
+    &format::Pdf,
+    &format::Image,
+];
 
 /// Largest file ARK opens.
 pub const MAX_BYTES: u64 = 25 * 1024 * 1024;
@@ -93,6 +103,44 @@ pub fn kind_of(path: &str) -> Kind {
     format_for(path).map_or(Kind::Text, |f| f.kind())
 }
 
+/// The artifact kind a stored copy of a file of this kind has.
+pub fn artifact_kind(kind: Kind) -> ark_core::ArtifactKind {
+    match kind {
+        Kind::Text => ark_core::ArtifactKind::Text,
+        Kind::Image => ark_core::ArtifactKind::Image,
+        k => ark_core::ArtifactKind::named(k.as_str()),
+    }
+}
+
+/// What the window shows when a file of these kinds is written, in one line for a tool's
+/// description: "spreadsheets (xlsx, xlsm, csv, tsv), documents (docx), ...". From [`FORMATS`].
+pub fn shown() -> String {
+    let mut parts = Vec::new();
+    for kind in Kind::ALL {
+        let exts: Vec<&str> = FORMATS
+            .iter()
+            .filter(|f| f.kind() == kind)
+            .flat_map(|f| f.extensions().iter().copied())
+            .collect();
+        if !exts.is_empty() {
+            parts.push(format!("{}s ({})", kind.noun(), exts.join(", ")));
+        }
+    }
+    parts.push("other text files".into());
+    parts.join(", ")
+}
+
+/// Classifies a stored artifact named by a path (a file a tool wrote) the way [`kind_of`]
+/// classifies the file. Register it on the engine; a name ARK has no format for is left to the
+/// next sniffer.
+pub struct Kinds;
+
+impl ark_core::Sniffer for Kinds {
+    fn sniff(&self, name: &str, _bytes: &[u8]) -> Option<ark_core::ArtifactKind> {
+        format_for(name).map(|f| artifact_kind(f.kind()))
+    }
+}
+
 /// A file as read.
 #[derive(Clone, Debug)]
 pub struct File {
@@ -107,8 +155,12 @@ pub struct File {
 }
 
 impl File {
+    /// What the file is, from its format: a PDF is `Pdf` though it reads as a document.
     pub fn kind(&self) -> Kind {
-        self.content.kind()
+        FORMATS
+            .iter()
+            .find(|f| f.name() == self.format)
+            .map_or_else(|| self.content.kind(), |f| f.kind())
     }
     pub fn name(&self) -> &str {
         self.path.rsplit('/').next().unwrap_or(&self.path)
@@ -224,6 +276,31 @@ pub fn open(root: &Path, rel: &str) -> Result<File, Error> {
         size: bytes.len() as u64,
         content,
     })
+}
+
+/// A file the window shows as itself (a PDF, an image): its bytes, its media type and version.
+/// Other kinds are drawn from what they read as ([`File::page`]) and are refused here.
+pub fn media(root: &Path, rel: &str) -> Result<(Vec<u8>, String, String), Error> {
+    let path = inside(root, rel)?;
+    let media_type = match kind_of(rel) {
+        Kind::Pdf => "application/pdf".to_string(),
+        Kind::Image => {
+            let bytes = read_bytes(&path, rel)?;
+            match format::Image.read(&bytes)? {
+                Content::Media(m) => m.media_type,
+                _ => unreachable!("an image reads as media"),
+            }
+        }
+        k => {
+            return Err(Error::Input(format!(
+                "{rel} is a {}; it is shown from what it reads as",
+                k.noun()
+            )))
+        }
+    };
+    let bytes = read_bytes(&path, rel)?;
+    let version = version_of(&bytes);
+    Ok((bytes, media_type, version))
 }
 
 /// The current version of a file, without reading it as its format.
@@ -373,12 +450,40 @@ mod tests {
     }
 
     #[test]
+    fn a_files_kind_is_decided_once_for_paths_and_stored_copies() {
+        use ark_core::{ArtifactKind, Sniffer};
+        assert_eq!(kind_of("out/chart.PNG"), Kind::Image);
+        assert_eq!(kind_of("report.pdf"), Kind::Pdf);
+        assert_eq!(kind_of("notes.md"), Kind::Markdown);
+        assert_eq!(kind_of("run.py"), Kind::Text);
+        assert_eq!(Kinds.sniff("out/chart.png", b""), Some(ArtifactKind::Image));
+        assert_eq!(
+            Kinds.sniff("t.csv", b""),
+            Some(ArtifactKind::named("sheet"))
+        );
+        assert_eq!(Kinds.sniff("r.pdf", b""), Some(ArtifactKind::named("pdf")));
+        assert_eq!(
+            Kinds.sniff("run.py", b"print(1)"),
+            None,
+            "left to the next sniffer"
+        );
+        assert_eq!(
+            shown(),
+            "Markdown documents (md, markdown), spreadsheets (xlsx, xlsm, csv, tsv), documents (docx), PDFs (pdf), images (png, jpg, jpeg, gif, webp, svg), other text files"
+        );
+    }
+
+    #[test]
     fn unknown_binary_files_are_not_text() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.bin"), [0u8, 1, 2]).unwrap();
         assert!(open(dir.path(), "a.bin").is_err());
         std::fs::write(dir.path().join("b.md"), "# hi").unwrap();
-        assert_eq!(open(dir.path(), "b.md").unwrap().kind(), Kind::Text);
+        assert_eq!(open(dir.path(), "b.md").unwrap().kind(), Kind::Markdown);
+        assert_eq!(
+            open(dir.path(), "b.md").unwrap().content,
+            Content::Text("# hi".into())
+        );
         assert_eq!(kind_of("x.XLSX"), Kind::Sheet);
     }
 }

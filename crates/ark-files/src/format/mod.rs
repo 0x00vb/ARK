@@ -2,12 +2,16 @@
 
 mod csv;
 mod docx;
+mod image;
+mod pdf;
 mod text;
 mod xlsx;
 
 pub use csv::Csv;
 pub use docx::Docx;
-pub use text::Text;
+pub use image::Image;
+pub use pdf::Pdf;
+pub use text::{Markdown, Text};
 pub use xlsx::Xlsx;
 
 /// One sheet from CSV text.

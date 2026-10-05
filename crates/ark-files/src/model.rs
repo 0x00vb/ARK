@@ -9,30 +9,53 @@ use serde_json::Value as Json;
 
 use crate::Error;
 
-/// What a file holds, whatever its format.
+/// What a file is, as a person sees it: the key of its view in the window. Several kinds read
+/// as the same shape ([`Content`]): Markdown is text, a PDF reads as a document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Text,
+    Markdown,
     Sheet,
     Document,
+    Pdf,
+    Image,
 }
 
 impl Kind {
+    pub const ALL: [Kind; 6] = [
+        Kind::Text,
+        Kind::Markdown,
+        Kind::Sheet,
+        Kind::Document,
+        Kind::Pdf,
+        Kind::Image,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Text => "text",
+            Kind::Markdown => "markdown",
             Kind::Sheet => "sheet",
             Kind::Document => "document",
+            Kind::Pdf => "pdf",
+            Kind::Image => "image",
         }
     }
     /// The word a person reads.
     pub fn noun(self) -> &'static str {
         match self {
             Kind::Text => "text file",
+            Kind::Markdown => "Markdown document",
             Kind::Sheet => "spreadsheet",
             Kind::Document => "document",
+            Kind::Pdf => "PDF",
+            Kind::Image => "image",
         }
+    }
+    /// Whether it is plain text the window saves whole.
+    pub fn is_text(self) -> bool {
+        matches!(self, Kind::Text | Kind::Markdown)
     }
 }
 
@@ -41,16 +64,29 @@ pub enum Content {
     Text(String),
     Sheet(Workbook),
     Document(Document),
+    /// A file the agent cannot read as text (an image): what it is, for the agent; the window
+    /// shows the bytes.
+    Media(Media),
 }
 
 impl Content {
+    /// The kind a file with this content is when its format says nothing more.
     pub fn kind(&self) -> Kind {
         match self {
             Content::Text(_) => Kind::Text,
             Content::Sheet(_) => Kind::Sheet,
             Content::Document(_) => Kind::Document,
+            Content::Media(_) => Kind::Image,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Media {
+    /// `image/png`.
+    pub media_type: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
 }
 
 // ---- sheets ------------------------------------------------------------------------------------
@@ -830,7 +866,10 @@ fn wrong(kind: Kind, e: &Edit) -> Error {
     let hint = match kind {
         Kind::Sheet => "a spreadsheet takes {cell, value}, {cell, rows}, {clear}, {add_sheet}, {delete_sheet}, {rename_sheet} and {find, replace}",
         Kind::Document => "a document takes {block, text}, {after, text}, {delete} and {find, replace}",
-        Kind::Text => "a text file takes {find, replace}, or files.write with the whole text",
+        Kind::Text | Kind::Markdown => {
+            "a text file takes {find, replace}, or files.write with the whole text"
+        }
+        Kind::Pdf | Kind::Image => "ARK does not change a PDF or an image; write a new file",
     };
     Error::Input(format!("`{}` does not apply here: {hint}", e.describe()))
 }

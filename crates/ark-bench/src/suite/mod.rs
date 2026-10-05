@@ -1,15 +1,19 @@
 //! The generic workload suite. Each workload exercises one harness behavior; together they
 //! cover trivial work, tool discovery, dependent steps, large outputs, long sessions, failure
 //! recovery, repetition, runaway loops, resume across a restart, retrieval from a corpus,
-//! approvals, independent slow calls, an answer that names only files that were written, and work carried on the project's board across a restart and a new chat. Nothing here is specific to an application domain.
+//! approvals, independent slow calls, an answer that names only files that were written, work
+//! carried on the project's board across a restart and a new chat, and a spreadsheet edited in
+//! place. Nothing here is specific to an application domain.
 
 mod board;
 mod claims;
+mod files;
 pub mod tools;
 mod web;
 
 pub use board::{board, BoardSpec};
 pub use claims::{claimed_files, claimed_schedule, ClaimsSpec};
+pub use files::{files_edit, FilesSpec};
 pub use web::{web, WebSpec};
 
 use std::sync::Arc;
@@ -127,6 +131,7 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(claimed_files()),
         Box::new(claimed_schedule()),
         Box::new(board()),
+        Box::new(files_edit()),
     ]
 }
 

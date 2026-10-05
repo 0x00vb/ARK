@@ -3,6 +3,35 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## A spreadsheet edited in place (2026-10-05)
+
+The `files-edit` workload: the project folder has `sales.xlsx` (a Sales sheet with Month, Units
+and Price for three months, and a Notes sheet). The task asks for a Revenue column and a Total
+row. The check opens the saved file: each month's revenue in its row, a Total row with 405 units
+and 4,350 revenue, the Notes sheet still there. What the answer says does not count. Reports in
+`bench/files/`.
+
+| `files-edit` | Success | Model calls | Total tokens | Tool calls | Median turn |
+|---|---:|---:|---:|---:|---:|
+| qwen3:4b, before | 0/3 | 4.0 | 10,696 | 3.0 | 6.4 s |
+| qwen3:4b, a file is found by its name | 0/5 | 4.2 | 13,113 | 3.2 | 47.4 s |
+| qwen3.5:27b | 3/3 | 3.3 | 10,430 | 2.0 | 99.1 s |
+| simulated | 3/3 | 4.0 | 9,100 | 2.0 | |
+
+- Before: in 2 of 3 runs qwen3:4b called `files.list {"path": "sales.xlsx"}`, got "(empty
+  folder)", then `files.search` for the name, got "nothing contains", and answered that the file
+  does not exist. Now listing a file shows that file, listing a missing path says nothing has
+  that name, and search matches file and folder names. After: 5 of 5 runs found and read it.
+- What fails now is the model. In 3 of 5 runs qwen3:4b read the file, then ended with "I will
+  now add...". In 1 it replaced the workbook with `files.write`, losing the Notes sheet. In 1 it
+  used `files.edit` but wrote the revenues over the units. This is the stop-before-writing seen
+  in ARK Desktop.
+- qwen3.5:27b read once, then made one `files.edit` with formulas (`=B2*C2`, `=SUM(D2:D4)`), in
+  all 3 runs.
+- Timings are noisy: another live run shared Ollama during the qwen3:4b runs.
+- Next, measured here before any change: an answer that announces work it has not done ("I will
+  now...") while the task is open, sent back once, the way `claimed-files` sends back a claim.
+
 ## Planning on the board (2026-10-05)
 
 The `board` workload (ADR 0023): the person's chat, with the chat and board tools, is asked to

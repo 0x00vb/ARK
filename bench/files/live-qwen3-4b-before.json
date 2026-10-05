@@ -1,0 +1,322 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T03:48:38.448954Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "300"
+  },
+  "workloads": [
+    {
+      "name": "files-edit",
+      "class": "files",
+      "description": "a computed column and a total row in a real spreadsheet; the saved file is checked",
+      "summary": {
+        "runs": 3,
+        "successes": 0,
+        "success_rate": 0.0,
+        "model_calls": 4.0,
+        "input_tokens": 10411.666666666666,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 10411.666666666666,
+        "output_tokens": 284.0,
+        "total_tokens": 10695.666666666666,
+        "cost_usd": 0.02366333333333333,
+        "cost_per_success_usd": null,
+        "tool_calls": 3.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.0,
+        "peak_context_tokens": 2392.0,
+        "mean_context_tokens": 2136.3333333333335,
+        "tool_schema_tokens": 4808.0,
+        "prefix_reuse_tokens": 6140.0,
+        "median_turn_ms": 6447.0,
+        "p95_turn_ms": 7638.0,
+        "median_first_token_ms": 221.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "files-edit",
+          "rep": 0,
+          "success": false,
+          "verdict": "a month's revenue is missing from its row",
+          "answer": "The search for \"sales.xlsx\" in the project files returned nothing, and listing the root folder also showed no files. This suggests that either:\n\n1. The file \"sales.xlsx\" does not exist in the project.\n2. The file exists but is not in the root or a subfolder that I can access.\n\nTo proceed, I need to confirm whether \"sales.xlsx\" exists in any part of the project. I will now search the entire project",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 7744
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 7534,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7534,
+          "cache_write_tokens": 0,
+          "output_tokens": 210,
+          "total_tokens": 7744,
+          "tokens_measured": true,
+          "cost_usd": 0.017168,
+          "wall_ms": 6447,
+          "turn_ms": [
+            6447
+          ],
+          "first_token_ms": [
+            221
+          ],
+          "model_latency_ms": [
+            3281,
+            520,
+            2617
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2148,
+          "mean_context_tokens": 2091,
+          "context_sources": {
+            "Capability index": 1209,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 63,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 147,
+            "Tool results": 101,
+            "Tool schemas": 3606,
+            "Working state": 141,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3606,
+          "tools_exposed_max": 9,
+          "tools_used": 2,
+          "result_context_tokens": 69,
+          "result_raw_tokens": 24,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4010,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "files-edit",
+          "rep": 1,
+          "success": false,
+          "verdict": "sales.xlsx is missing or not a spreadsheet",
+          "answer": "- Fact: The file `sales.xlsx` contains a sheet named \"Sales\" with data for months January, February, and March, including Units and Price columns. [cites inv:9b7931a5]\n- Fact: The file `sales.xlsx` does not contain a \"Total\" row or any existing Revenue column. [cites inv:500261e0]\n- Action: A new version of `sales.xlsx` has been created with a Revenue column (Units × Price) for each month and a To",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 13904
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 5
+          },
+          "input_tokens": 13511,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 13511,
+          "cache_write_tokens": 0,
+          "output_tokens": 393,
+          "total_tokens": 13904,
+          "tokens_measured": true,
+          "cost_usd": 0.030952,
+          "wall_ms": 7638,
+          "turn_ms": [
+            7638
+          ],
+          "first_token_ms": [
+            161,
+            489
+          ],
+          "model_latency_ms": [
+            976,
+            718,
+            862,
+            2028,
+            2964
+          ],
+          "tool_calls": 4,
+          "tool_ok": 4,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2392,
+          "mean_context_tokens": 2199,
+          "context_sources": {
+            "Capability index": 2015,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 260,
+            "Project": 250,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 245,
+            "Tool results": 552,
+            "Tool schemas": 6010,
+            "Working state": 235,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6010,
+          "tools_exposed_max": 9,
+          "tools_used": 4,
+          "result_context_tokens": 224,
+          "result_raw_tokens": 140,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 8327,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "files-edit",
+          "rep": 2,
+          "success": false,
+          "verdict": "a month's revenue is missing from its row",
+          "answer": "The search for \"sales.xlsx\" and \"sales\" in the project files returned no results, indicating that there is no file named \"sales.xlsx\" or any file containing the term \"sales\" in the current project. \n\nSince the file does not exist, I cannot proceed with adding a Revenue column or a Total row to it. \n\n**Next step**: Confirm whether the file \"sales.xlsx\" is intended to exist or if there is a differen",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 10439
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 10190,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 10190,
+          "cache_write_tokens": 0,
+          "output_tokens": 249,
+          "total_tokens": 10439,
+          "tokens_measured": true,
+          "cost_usd": 0.02287,
+          "wall_ms": 4538,
+          "turn_ms": [
+            4538
+          ],
+          "first_token_ms": [
+            221,
+            238
+          ],
+          "model_latency_ms": [
+            480,
+            544,
+            1423,
+            2058
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2203,
+          "mean_context_tokens": 2119,
+          "context_sources": {
+            "Capability index": 1612,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 125,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 196,
+            "Tool results": 205,
+            "Tool schemas": 4808,
+            "Working state": 188,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 4808,
+          "tools_exposed_max": 9,
+          "tools_used": 2,
+          "result_context_tokens": 104,
+          "result_raw_tokens": 34,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 6083,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 0,
+    "success_rate": 0.0,
+    "model_calls": 4.0,
+    "input_tokens": 10411.666666666666,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 10411.666666666666,
+    "output_tokens": 284.0,
+    "total_tokens": 10695.666666666666,
+    "cost_usd": 0.02366333333333333,
+    "cost_per_success_usd": null,
+    "tool_calls": 3.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 4.0,
+    "peak_context_tokens": 2392.0,
+    "mean_context_tokens": 2136.3333333333335,
+    "tool_schema_tokens": 4808.0,
+    "prefix_reuse_tokens": 6140.0,
+    "median_turn_ms": 6447.0,
+    "p95_turn_ms": 7638.0,
+    "median_first_token_ms": 221.0,
+    "stall_stops": 0.0
+  }
+}

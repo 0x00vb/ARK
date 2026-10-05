@@ -39,6 +39,14 @@ use crate::router::{ModelRouter, Role};
 use crate::rules::RuleSelection;
 use crate::steer::{self, Steering};
 
+/// A file a call changed or removed, and the artifact that holds it as it was before the call
+/// (ADR 0034). `Engine::restore_file` puts it back.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileBefore {
+    pub path: String,
+    pub artifact: String,
+}
+
 /// Events emitted as the harness works. They describe *what happened*, never how to show it:
 /// a terminal, a GUI, a JSON log and a test all consume the same stream. Every event is owned
 /// and serializable so it can cross a channel or a process boundary.
@@ -103,6 +111,10 @@ pub enum HarnessEvent {
         /// open. Each is also stored as an artifact, a snapshot of what was written.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         files: Vec<String>,
+        /// Files the call changed or removed whose version before it is kept, for a front-end
+        /// to offer to put back (ADR 0034).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        before: Vec<FileBefore>,
     },
     Duplicate {
         action: String,
@@ -1245,12 +1257,24 @@ impl Harness {
             }
             let model_text = card_for_model(&card);
             let raw_tokens = estimate_tokens(&inv.output.to_string());
-            let files: Vec<String> = inv
+            let (mut files, mut before) = (Vec::new(), Vec::new());
+            for a in inv
                 .produced
                 .iter()
                 .filter_map(|id| engine.store.get_artifact(project, id).ok().flatten())
-                .filter_map(|a| a.meta.get("path")?.as_str().map(str::to_string))
-                .collect();
+            {
+                let Some(path) = a.meta.get("path").and_then(|p| p.as_str()) else {
+                    continue;
+                };
+                if a.meta["before"] == true {
+                    before.push(FileBefore {
+                        path: path.to_string(),
+                        artifact: a.id.as_str().to_string(),
+                    });
+                } else {
+                    files.push(path.to_string());
+                }
+            }
             tally.written.extend(files.iter().cloned());
             on_event(HarnessEvent::ToolResult {
                 id: p.call.id.clone(),
@@ -1264,6 +1288,7 @@ impl Harness {
                 context_tokens: estimate_tokens(&model_text) + 4,
                 raw_tokens,
                 files,
+                before,
             });
             round.push(Message::tool_result(&p.call, model_text));
         }

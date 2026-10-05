@@ -279,9 +279,7 @@ impl Engine {
         bytes: &[u8],
         provenance: Provenance,
     ) -> Result<Artifact, AgentError> {
-        let id = self.store.put_blob(bytes)?;
-        let art = Artifact::new(id, kind.clone(), name, bytes.len() as u64, provenance);
-        self.store.put_artifact(project, &art)?;
+        let art = self.keep_bytes(project, name, kind.clone(), bytes, provenance)?;
         // Index text-shaped artifacts so their contents become searchable evidence. Also index
         // a domain kind (`Other`) when its bytes are valid UTF-8 — a consumer's text-bearing
         // format (a plist, a JSON trace, an outline) should be searchable without ARK having to
@@ -294,6 +292,75 @@ impl Engine {
             }
         }
         Ok(art)
+    }
+
+    /// Store bytes as an artifact without indexing them: a file's version before a change is
+    /// not evidence of what the file says now.
+    fn keep_bytes(
+        &self,
+        project: &ProjectId,
+        name: &str,
+        kind: ArtifactKind,
+        bytes: &[u8],
+        provenance: Provenance,
+    ) -> Result<Artifact, AgentError> {
+        let id = self.store.put_blob(bytes)?;
+        let art = Artifact::new(id, kind, name, bytes.len() as u64, provenance);
+        self.store.put_artifact(project, &art)?;
+        Ok(art)
+    }
+
+    /// Put a file of the project folder back as artifact `id` holds it: a version kept before a
+    /// call changed or removed the file (ADR 0034). The file as it is now is kept first, the same
+    /// way, so `undo` puts it back in turn. `undo` is `None` when there was no file.
+    pub fn restore_file(
+        &self,
+        project: &ProjectId,
+        id: &ArtifactId,
+    ) -> Result<Restored, AgentError> {
+        let art = self
+            .store
+            .get_artifact(project, id)?
+            .ok_or_else(|| AgentError::ArtifactNotFound(id.to_string()))?;
+        let rel = art.meta["path"]
+            .as_str()
+            .ok_or_else(|| invalid(format!("{} is not a file of the project", art.name)))?
+            .to_string();
+        let bytes = self.store.read_blob(&art.id)?;
+        let file = project_file(&self.workspace_dir(project)?, &rel)?;
+        let undo = match std::fs::read(&file) {
+            Ok(now) => Some(
+                self.keep_bytes(
+                    project,
+                    &art.name,
+                    art.kind.clone(),
+                    &now,
+                    Provenance::Ingested { path: rel.clone() },
+                )
+                .and_then(|mut a| {
+                    a.meta = serde_json::json!({ "path": rel, "before": true });
+                    self.store.put_artifact(project, &a)?;
+                    Ok(a.id)
+                })?,
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
+        };
+        if let Some(dir) = file.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        // Whole or not at all: a program reading the file never sees half of it.
+        let tmp = file.with_file_name(format!(
+            ".ark-restore-{}-{}",
+            art.id.short(),
+            std::process::id()
+        ));
+        std::fs::write(&tmp, &bytes)?;
+        if let Err(e) = std::fs::rename(&tmp, &file) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e.into());
+        }
+        Ok(Restored { path: rel, undo })
     }
 
     // ---- run actions ------------------------------------------------------
@@ -348,12 +415,22 @@ impl Engine {
                     } else {
                         prod.kind
                     };
-                    let mut art =
-                        self.ingest_bytes(project, &prod.name, kind, &prod.bytes, provenance)?;
+                    // A file's version before the call is kept, not indexed: it is not what
+                    // the file says now.
+                    let mut art = if prod.before {
+                        self.keep_bytes(project, &prod.name, kind, &prod.bytes, provenance)?
+                    } else {
+                        self.ingest_bytes(project, &prod.name, kind, &prod.bytes, provenance)?
+                    };
                     // A snapshot of a project file names the file, so a front-end opens the
-                    // file itself, as it is now.
+                    // file itself, as it is now. The file's version before the call names it
+                    // too, so a front-end can put it back (ADR 0034).
                     if let Some(path) = prod.path {
-                        art.meta = serde_json::json!({ "path": path });
+                        art.meta = if prod.before {
+                            serde_json::json!({ "path": path, "before": true })
+                        } else {
+                            serde_json::json!({ "path": path })
+                        };
                         self.store.put_artifact(project, &art)?;
                     }
                     inv.produced.push(art.id);
@@ -400,4 +477,37 @@ impl Engine {
         }
         input
     }
+}
+
+/// What [`Engine::restore_file`] did: the file it put back, and the version it replaced.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct Restored {
+    pub path: String,
+    pub undo: Option<ArtifactId>,
+}
+
+/// `rel` in the project folder `root`, or an error: no `..`, no absolute path, no link that
+/// leads out.
+fn project_file(root: &std::path::Path, rel: &str) -> Result<std::path::PathBuf, AgentError> {
+    use std::path::{Component, Path};
+    let out = || invalid(format!("`{rel}` is outside the project folder"));
+    let r = Path::new(rel);
+    if rel.is_empty() || r.components().any(|c| !matches!(c, Component::Normal(_))) {
+        return Err(out());
+    }
+    let root = root.canonicalize()?;
+    let path = root.join(r);
+    // The nearest part that exists decides where the path really is.
+    let mut probe = path.as_path();
+    while !probe.exists() {
+        probe = probe.parent().ok_or_else(out)?;
+    }
+    if !probe.canonicalize()?.starts_with(&root) {
+        return Err(out());
+    }
+    Ok(path)
+}
+
+fn invalid(msg: String) -> AgentError {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, msg).into()
 }

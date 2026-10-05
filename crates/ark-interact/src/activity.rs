@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use ark_sdk::prelude::{ApprovalDecision, HarnessEvent};
+use ark_sdk::prelude::{ApprovalDecision, FileBefore, HarnessEvent};
 use serde::{Deserialize, Serialize};
 
 use crate::labels::Labels;
@@ -66,6 +66,10 @@ pub struct Activity {
     /// Files of the project folder a `Result` wrote, for a front-end to offer to open.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// Files a `Result` changed or removed whose version before is kept, for a front-end to
+    /// offer to put back (ADR 0034).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub before: Vec<FileBefore>,
 }
 
 impl Activity {
@@ -79,6 +83,7 @@ impl Activity {
             call: None,
             action: None,
             files: Vec::new(),
+            before: Vec::new(),
         }
     }
     fn detail(mut self, d: impl Into<String>) -> Self {
@@ -129,6 +134,7 @@ pub fn describe(
             summary,
             error,
             files,
+            before,
             ..
         } => {
             let mut a = if *ok {
@@ -142,6 +148,7 @@ pub fn describe(
             a.call = Some(id.clone());
             a.action = Some(action.clone());
             a.files = files.clone();
+            a.before = before.clone();
             a
         }
         HarnessEvent::Duplicate { action, reused } => {
@@ -305,6 +312,7 @@ mod tests {
                 context_tokens: 0,
                 raw_tokens: 0,
                 files: Vec::new(),
+                before: Vec::new(),
             },
         )
         .unwrap();

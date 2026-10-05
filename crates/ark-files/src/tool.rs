@@ -189,17 +189,15 @@ impl Adapter for Files {
                     return Err(AdapterError::Tool("files.write needs a path".into()));
                 }
                 let content = content_from(&rel, &input).map_err(tool)?;
-                let existed = crate::inside(&root, &rel)
-                    .map(|p| p.exists())
-                    .unwrap_or(false);
+                let was = read_before(&root, &rel);
                 let file = crate::write(&root, &rel, &content, None).map_err(tool)?;
                 let what = format!(
                     "{} {} ({})",
-                    if existed { "replaced" } else { "created" },
+                    if was.is_some() { "replaced" } else { "created" },
                     file.path,
                     size_words(&file)
                 );
-                Ok(saved(&root, file, what))
+                Ok(saved(&root, file, what, was))
             }
             EDIT => {
                 let rel = s("path");
@@ -214,8 +212,9 @@ impl Adapter for Files {
                     let content = created(&rel, &edits).map_err(tool)?;
                     let file = crate::write(&root, &rel, &content, None).map_err(tool)?;
                     let what = format!("created {} ({})", file.path, size_words(&file));
-                    return Ok(saved(&root, file, what));
+                    return Ok(saved(&root, file, what, None));
                 }
+                let was = read_before(&root, &rel);
                 let file = crate::edit(&root, &rel, &edits, base.as_deref()).map_err(tool)?;
                 let mut what = format!(
                     "saved {}: {}",
@@ -234,27 +233,40 @@ impl Adapter for Files {
                 {
                     what.push_str(". Block numbers moved: read again before editing by number");
                 }
-                Ok(saved(&root, file, what))
+                Ok(saved(&root, file, what, was))
             }
             other => Err(AdapterError::UnknownAction(other.into())),
         }
     }
 }
 
+/// The file at `rel` as it is, before a write changes it, or `None` when there is none.
+fn read_before(root: &Path, rel: &str) -> Option<Vec<u8>> {
+    crate::inside(root, rel)
+        .ok()
+        .and_then(|p| std::fs::read(p).ok())
+}
+
 /// A write's result: what changed, and the file as an artifact the window opens by its path.
-fn saved(root: &Path, file: File, what: String) -> ActionOutput {
+/// `was`, the file before the write, is kept too when the write changed it (ADR 0034).
+fn saved(root: &Path, file: File, what: String, was: Option<Vec<u8>>) -> ActionOutput {
     let bytes = crate::inside(root, &file.path)
         .ok()
         .and_then(|p| std::fs::read(p).ok())
         .unwrap_or_default();
     let kind = crate::artifact_kind(file.kind());
-    ActionOutput::json(json!({
+    let was = was.filter(|w| *w != bytes);
+    let mut out = ActionOutput::json(json!({
         "path": file.path, "kind": file.kind().as_str(), "version": file.version, "summary": what,
     }))
     .with_command(vec!["write".into(), file.path.clone()])
     .with_artifact(
-        ProducedArtifact::bytes(kind, file.name().to_string(), bytes).at(file.path.clone()),
-    )
+        ProducedArtifact::bytes(kind.clone(), file.name().to_string(), bytes).at(file.path.clone()),
+    );
+    if let Some(was) = was {
+        out = out.with_artifact(ProducedArtifact::before(kind, file.path.clone(), was));
+    }
+    out
 }
 
 fn size_words(f: &File) -> String {
@@ -686,6 +698,48 @@ mod tests {
         // An edit based on what the agent read before the person's change is refused.
         let stale = run(root, EDIT, json!({"path": "sales.xlsx", "version": seen.version, "edits": [{"cell": "B2", "value": 1}]})).await.err().unwrap();
         assert!(stale.contains("changed since it was read"), "{stale}");
+    }
+
+    /// ADR 0034: a save over a file keeps the file as it was; a new file or a save that changes
+    /// nothing keeps no version.
+    #[tokio::test]
+    async fn a_save_over_a_file_keeps_the_version_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let before = |out: &ActionOutput| -> Vec<(String, Vec<u8>)> {
+            out.produced
+                .iter()
+                .filter(|a| a.before)
+                .map(|a| (a.path.clone().unwrap(), a.bytes.clone()))
+                .collect()
+        };
+        let made = run(root, WRITE, json!({"path": "notes.md", "text": "one"}))
+            .await
+            .unwrap();
+        assert!(before(&made).is_empty());
+        let first = std::fs::read(root.join("notes.md")).unwrap();
+
+        let out = run(root, WRITE, json!({"path": "notes.md", "text": "two"}))
+            .await
+            .unwrap();
+        assert_eq!(before(&out), vec![("notes.md".to_string(), first)]);
+        assert_eq!(out.produced[0].path.as_deref(), Some("notes.md"));
+        assert!(!out.produced[0].before);
+
+        let second = std::fs::read(root.join("notes.md")).unwrap();
+        let out = run(
+            root,
+            EDIT,
+            json!({"path": "notes.md", "edits": [{"find": "two", "replace": "three"}]}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(before(&out), vec![("notes.md".to_string(), second)]);
+
+        let out = run(root, WRITE, json!({"path": "notes.md", "text": "three"}))
+            .await
+            .unwrap();
+        assert!(before(&out).is_empty(), "nothing changed");
     }
 
     /// What a small model tried when looking for a file it was told about (the `files-edit`

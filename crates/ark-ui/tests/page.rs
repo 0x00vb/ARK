@@ -123,10 +123,10 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             ark_sdk::prelude::ark_computer::ComputerService::with_screen(Arc::new(screen.clone())),
         );
     }
-    if scenario == "files" {
+    if scenario == "files" || scenario == "drop" {
         builder = builder.files(true);
     }
-    if scenario == "analysis" {
+    if scenario == "analysis" || scenario == "restore" {
         let Some(sandbox) = ark_sdk::prelude::ark_exec::Sandbox::native() else {
             eprintln!("skipped: no sandbox for runs on this platform");
             return;
@@ -312,6 +312,30 @@ fn tiny_pdf() -> String {
         objs.len() + 1
     ));
     out
+}
+
+/// ADR 0035: files dropped on the conversation land in the project's folder.
+#[tokio::test(flavor = "multi_thread")]
+async fn files_dropped_on_the_chat_go_into_the_project() {
+    drive("drop", vec![], Duration::ZERO).await;
+}
+
+/// ADR 0034: a run changes a file and removes another; the turn's cards put each back.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_a_run_changed_or_removed_is_put_back_from_its_card() {
+    let run = |code: &str| {
+        call(
+            ark_sdk::prelude::ark_exec::RUN,
+            json!({ "code": code, "runtime": "sh", "purpose": "work on the notes" }),
+        )
+    };
+    let script = vec![
+        run("echo one > notes.md && echo old > old.md"),
+        say("The notes are written.", false),
+        run("echo two > notes.md && rm old.md"),
+        say("The notes are rewritten.", false),
+    ];
+    drive("restore", script, Duration::ZERO).await;
 }
 
 /// "Analyze the sales": one contained run writes a chart, a table (longer than the grid shows),

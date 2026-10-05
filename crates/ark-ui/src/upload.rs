@@ -7,6 +7,9 @@
 //! unique). Until then nothing shows: a copy that stops halfway leaves no project, and
 //! `upload_cancel` (or a start of the runtime a day later) removes what it left.
 //!
+//! Files dropped on a chat take the same way into the open project instead (`upload_add`, ADR
+//! 0035): each keeps its name, or gets a number when the name is taken.
+//!
 //! Every call can be sent again after a lost answer: a part already written is not written
 //! twice, and asking twice for the project answers the same project.
 //!
@@ -114,7 +117,12 @@ pub(crate) fn finish(engine: &Engine, id: &str, name: &str) -> anyhow::Result<Va
     let done = done_file(&dir);
     let _one = NAMING.lock().unwrap_or_else(|e| e.into_inner());
     if let Ok(v) = std::fs::read_to_string(&done) {
-        return Ok(serde_json::from_str(&v)?);
+        let answer: Value = serde_json::from_str(&v)?;
+        anyhow::ensure!(
+            answer.get("id").is_some(),
+            "upload `{id}` went into a project already"
+        );
+        return Ok(answer);
     }
     anyhow::ensure!(dir.is_dir(), "there is no upload `{id}`; start it again");
     let name = name.trim();
@@ -146,6 +154,78 @@ pub(crate) fn finish(engine: &Engine, id: &str, name: &str) -> anyhow::Result<Va
     let answer = json!({ "id": project.id.as_str(), "name": project.name });
     std::fs::write(&done, answer.to_string())?;
     Ok(answer)
+}
+
+/// The upload's files go into the project folder `dir`. Each file or folder at the top of the
+/// upload keeps its name, or gets a number when the name is taken there (`sales 2.xlsx`); nothing
+/// is overwritten. Answers `{added: [paths]}`, the same when asked again.
+pub(crate) fn add(store: &Path, id: &str, dir: &Path) -> anyhow::Result<Value> {
+    let up = folder(store, id)?;
+    let done = done_file(&up);
+    let _one = NAMING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Ok(v) = std::fs::read_to_string(&done) {
+        let answer: Value = serde_json::from_str(&v)?;
+        anyhow::ensure!(
+            answer.get("added").is_some(),
+            "upload `{id}` is a project already"
+        );
+        return Ok(answer);
+    }
+    anyhow::ensure!(up.is_dir(), "there is no upload `{id}`; start it again");
+    std::fs::create_dir_all(dir)?;
+    let mut names: Vec<String> = std::fs::read_dir(&up)?
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    names.sort();
+    let mut added = Vec::new();
+    for name in names {
+        let free = free_name(dir, &name);
+        let target = ark_files::inside(dir, &free)?;
+        move_entry(&up.join(&name), &target)?;
+        added.push(free);
+    }
+    let answer = json!({ "added": added });
+    std::fs::write(&done, answer.to_string())?;
+    let _ = std::fs::remove_dir_all(&up);
+    Ok(answer)
+}
+
+/// `name`, or `name 2`, `name 3`, … before the extension (`sales 2.xlsx`), the first not taken
+/// in `dir`.
+fn free_name(dir: &Path, name: &str) -> String {
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => name.split_at(i),
+        _ => (name, ""),
+    };
+    std::iter::once(name.to_string())
+        .chain((2..).map(|i| format!("{stem} {i}{ext}")))
+        .find(|n| !dir.join(n).exists())
+        .unwrap_or_default()
+}
+
+/// Move a file or folder; across disks, copy it and remove the first.
+fn move_entry(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    copy_all(from, to)?;
+    if from.is_dir() {
+        std::fs::remove_dir_all(from)
+    } else {
+        std::fs::remove_file(from)
+    }
+}
+
+fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
+    if !from.is_dir() {
+        return std::fs::copy(from, to).map(|_| ());
+    }
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)?.flatten() {
+        copy_all(&e.path(), &to.join(e.file_name()))?;
+    }
+    Ok(())
 }
 
 /// Remove an upload and what it wrote. Nothing to remove is fine.
@@ -228,6 +308,57 @@ mod tests {
         cancel(s, id).unwrap();
         assert!(!s.join("uploads").join(id).exists());
         cancel(s, id).unwrap();
+    }
+
+    /// ADR 0035: files dropped on a chat land in the project folder under their names, or with
+    /// a number when a name is taken; asking again answers the same.
+    #[test]
+    fn files_added_to_a_project_keep_their_names_or_get_a_number() {
+        let store = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let (s, dir) = (store.path(), project.path());
+        std::fs::write(dir.join("sales.xlsx"), b"theirs").unwrap();
+        std::fs::create_dir(dir.join("exports")).unwrap();
+        let id = "drop-0001";
+        put(
+            s,
+            id,
+            &json!([
+                part("sales.xlsx", b"mine", 0),
+                part("README", b"r", 0),
+                part("exports/2026/orders.csv", b"a,b", 0),
+            ]),
+        )
+        .unwrap();
+        let answer = add(s, id, dir).unwrap();
+        assert_eq!(
+            answer,
+            json!({ "added": ["README", "exports 2", "sales 2.xlsx"] })
+        );
+        assert_eq!(std::fs::read(dir.join("sales.xlsx")).unwrap(), b"theirs");
+        assert_eq!(std::fs::read(dir.join("sales 2.xlsx")).unwrap(), b"mine");
+        assert_eq!(
+            std::fs::read(dir.join("exports 2/2026/orders.csv")).unwrap(),
+            b"a,b"
+        );
+        assert!(!s.join("uploads").join(id).exists());
+        // The answer was lost: asking again moves nothing more.
+        assert_eq!(add(s, id, dir).unwrap(), answer);
+        assert!(!dir.join("sales 3.xlsx").exists());
+        // An upload made into a project is not added to another, and nothing is not an upload.
+        put(s, "drop-0002", &json!([part("x.txt", b"x", 0)])).unwrap();
+        std::fs::write(
+            done_file(&folder(s, "drop-0002").unwrap()),
+            json!({ "id": "p", "name": "x" }).to_string(),
+        )
+        .unwrap();
+        assert!(add(s, "drop-0002", dir).is_err());
+        // And an upload added to a project is not made a project.
+        let engine = ark_sdk::prelude::Engine::open(s).unwrap();
+        assert!(finish(&engine, id, "x").is_err());
+        assert!(add(s, "drop-0003", dir).is_err());
+        assert_eq!(free_name(dir, ".env"), ".env");
+        assert_eq!(free_name(dir, "README"), "README 2");
     }
 
     #[test]

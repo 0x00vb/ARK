@@ -128,6 +128,7 @@ export function fileView(el, path, ark, params) {
   const wrote = (files) => (files || []).includes(s.path) && setTimeout(check, 60);
   s.offs.push(ark.on("ark:event", (m) => m.event?.type === "tool_result" && wrote(m.event.files)));
   s.offs.push(ark.on("ark:orch", (m) => wrote(m.activity?.files)));
+  s.offs.push(ark.on("ark:files_changed", (m) => wrote(m.paths)));
   const onFocus = () => check();
   addEventListener("focus", onFocus);
   load(true);

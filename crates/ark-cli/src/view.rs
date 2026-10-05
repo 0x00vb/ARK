@@ -385,6 +385,7 @@ mod tests {
                 context_tokens: 20,
                 raw_tokens: 0,
                 files: Vec::new(),
+                before: Vec::new(),
             },
             HarnessEvent::TextDelta {
                 text: "Done.".into(),

@@ -43,6 +43,16 @@ export class Composer {
     this.input.setSelectionRange(text.length, text.length);
   }
 
+  /// Put `text` under the message being written, on a line of its own, and leave the cursor
+  /// at the end of the person's words: what they ask stays first (and names the chat).
+  addLine(text) {
+    const v = this.input.value.replace(/\s+$/, "");
+    this.input.value = `${v}\n${text}`;
+    this.changed();
+    this.focus();
+    this.input.setSelectionRange(v.length, v.length);
+  }
+
   changed() {
     const i = this.input;
     i.style.height = "auto";

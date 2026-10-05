@@ -11,6 +11,23 @@ months, give me a clean workbook"). There is no mode to turn on. The agent picks
 | Run code (`code.run`; ADR 0020, 0032) | anything over many rows or several files: profile, join, clean, total, chart, write workbooks | the project folder only, no network, a timeout; memory not limited yet |
 | The `data-analysis` skill | how to do it with care: look first, check joins, keep originals, reconcile totals, plain answers | read when a task needs it |
 
+## Giving ARK the files
+
+| Where the runtime runs | How a file gets there |
+|---|---|
+| This computer | The project folder in Finder or Explorer, or a drop on the chat |
+| Elsewhere (a server, ARK Cloud) | A drop on the chat, or ARK Desktop's Copy to Cloud for a whole folder (ADR 0030) |
+
+A drop puts the files in the project folder (`upload_add`, ADR 0035). A name in use gets a
+number, so nothing is overwritten. The composer then says `Added to the project: ...`.
+
+## When a run changes a source
+
+Run code and Files keep each file's version from before a call changes or removes it (ADR
+0034). The file's card in that turn has Restore, and after a restore, Undo. Files up to 256 MiB
+are kept, and up to 512 MiB in one run. When a changed file was too large to copy, the agent
+reads `no copy of the version before`.
+
 ## Turning it on
 
 ```rust
@@ -55,3 +72,5 @@ code: a run has no network.
 
 Power BI and other BI tools: ARK reads what they export and writes workbooks they import. There
 is no connector.
+
+Programs run from the Terminal panel keep no versions of the files they change.

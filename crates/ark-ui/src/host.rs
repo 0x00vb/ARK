@@ -463,6 +463,12 @@ impl Host {
         v
     }
 
+    /// Files of a project changed without a tool call (a restore, files added): open views and
+    /// lists read them again.
+    fn files_changed(&self, project: &ProjectId, paths: &[String]) {
+        self.emit(json!({ "kind": "files_changed", "project": project.as_str(), "paths": paths }));
+    }
+
     fn emit_working(&self) {
         self.emit(json!({ "kind": "working", "working": self.working() }));
     }
@@ -924,6 +930,14 @@ impl Host {
                 let dir = self.engine.workspace_dir(&self.project()?.id)?;
                 crate::files::version(&dir, &s("path"))
             }
+            // A file put back as a call found it (ADR 0034); `undo` puts back what it replaced.
+            "file_restore" => {
+                let project = self.project()?.id;
+                let id = ark_sdk::prelude::ArtifactId(s("artifact"));
+                let restored = self.engine.restore_file(&project, &id)?;
+                self.files_changed(&project, std::slice::from_ref(&restored.path));
+                Ok(serde_json::to_value(restored)?)
+            }
             // A folder from another computer becomes a project here (see `upload`, ADR 0030):
             // its files in parts, then the project. Neither waits for a running turn.
             "upload_parts" => {
@@ -935,6 +949,18 @@ impl Host {
                 let (engine, id, name) = (self.engine.clone(), s("upload"), s("name"));
                 tokio::task::spawn_blocking(move || crate::upload::finish(&engine, &id, &name))
                     .await?
+            }
+            // Files dropped on a chat: into the open project's folder (ADR 0035).
+            "upload_add" => {
+                let project = self.project()?.id;
+                let dir = self.engine.workspace_dir(&project)?;
+                let (store, id) = (self.engine.store.root().to_path_buf(), s("upload"));
+                let answer =
+                    tokio::task::spawn_blocking(move || crate::upload::add(&store, &id, &dir))
+                        .await??;
+                let added: Vec<String> = serde_json::from_value(answer["added"].clone())?;
+                self.files_changed(&project, &added);
+                Ok(answer)
             }
             "upload_cancel" => {
                 let (store, id) = (self.engine.store.root().to_path_buf(), s("upload"));

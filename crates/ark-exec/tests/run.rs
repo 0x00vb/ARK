@@ -52,6 +52,7 @@ struct Setup {
     _dirs: Vec<tempfile::TempDir>,
     project: PathBuf,
     outside: PathBuf,
+    scratch: PathBuf,
     exec: Exec,
 }
 
@@ -63,6 +64,7 @@ fn setup(runtime: Arc<dyn Runtime>) -> Setup {
     Setup {
         project: project.path().canonicalize().unwrap(),
         outside: outside.path().canonicalize().unwrap(),
+        scratch: scratch.path().to_path_buf(),
         exec,
         _dirs: vec![project, outside, scratch],
     }
@@ -95,6 +97,61 @@ async fn a_run_returns_the_files_it_wrote_in_the_project() {
     let card = distill()(RUN, &out.output).unwrap();
     assert_eq!(card.0, "exit 0\nwrote out/table.csv\nstdout:\ndone");
     assert_eq!(card.1, vec!["out/table.csv".to_string()]);
+}
+
+/// ADR 0034: a file the run changed or removed keeps its version before; a file it wrote again
+/// with the same bytes, or made new, keeps none.
+#[tokio::test]
+async fn a_run_keeps_the_version_before_of_what_it_changed_or_removed() {
+    let s = setup(Arc::new(Sh));
+    std::fs::create_dir_all(s.project.join("data")).unwrap();
+    std::fs::write(s.project.join("data/sales.csv"), "north,120\n").unwrap();
+    std::fs::write(s.project.join("notes.txt"), "keep\n").unwrap();
+    std::fs::write(s.project.join("old.txt"), "old\n").unwrap();
+    std::fs::write(s.project.join("same.txt"), "same\n").unwrap();
+    // Older than the run, so "written again" shows in the file's time.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let out = run(
+        &s.exec,
+        &s.project,
+        "echo north,999 > data/sales.csv && rm old.txt && echo same > same.txt && echo new > new.txt",
+    )
+    .await;
+    assert_eq!(out.output["exit_code"], 0);
+    assert_eq!(out.output["removed"], json!(["old.txt"]));
+    assert_eq!(out.output["no_copy"], json!([]));
+    let mut before: Vec<(String, String)> = out
+        .produced
+        .iter()
+        .filter(|a| a.before)
+        .map(|a| {
+            (
+                a.path.clone().unwrap(),
+                String::from_utf8(a.bytes.clone()).unwrap(),
+            )
+        })
+        .collect();
+    before.sort();
+    assert_eq!(
+        before,
+        vec![
+            ("data/sales.csv".into(), "north,120\n".into()),
+            ("old.txt".into(), "old\n".into()),
+        ]
+    );
+    // What the run wrote is still each file's snapshot, as before.
+    let mut wrote: Vec<String> = out
+        .produced
+        .iter()
+        .filter(|a| !a.before)
+        .map(|a| a.path.clone().unwrap())
+        .collect();
+    wrote.sort();
+    assert_eq!(wrote, ["data/sales.csv", "new.txt", "same.txt"]);
+    let card = distill()(RUN, &out.output).unwrap();
+    assert!(card.0.contains("\nremoved old.txt"), "{}", card.0);
+    // The copies went with the run's folder.
+    assert_eq!(std::fs::read_dir(&s.scratch).unwrap().count(), 0);
 }
 
 #[tokio::test]

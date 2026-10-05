@@ -723,6 +723,19 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .queued-k { font-size: 11.5px; font-weight: 500; color: var(--text-3); flex: none; }
 .queued.steer .queued-k { color: var(--accent); }
 .queued-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Files dropped on the conversation, on their way into the project (ADR 0035). */
+.adding { margin-bottom: 8px; background: linear-gradient(to right, color-mix(in srgb, var(--accent) 12%, var(--bubble)) var(--p, 0%), var(--bubble) var(--p, 0%)); }
+.adding .queued-k { color: var(--accent); }
+.drop-hint {
+  position: absolute; inset: 10px; z-index: 30; pointer-events: none;
+  display: grid; place-items: center; border-radius: 18px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, color-mix(in srgb, var(--bg) 82%, transparent));
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  animation: pop 160ms var(--ease) both;
+}
+.drop-hint-box { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--accent); }
 
 .palette#slash {
   position: absolute; bottom: calc(100% - 10px); left: 28px; right: 28px;
@@ -975,6 +988,27 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .file-card-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .file-card-name { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-card-sub { font-size: 12px; color: var(--text-3); }
+/* A file the turn changed or removed, with Restore beside it (ADR 0034). */
+.file-item { display: inline-flex; align-items: stretch; min-width: 0; animation: rise 220ms var(--ease) both; }
+.file-item .file-card { border-radius: 12px 0 0 12px; animation: none; }
+.file-card:disabled { cursor: default; scale: 1; background: var(--card); }
+.file-card:disabled .file-card-name { color: var(--text-2); text-decoration: line-through; text-decoration-color: var(--text-3); }
+.file-restore {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  margin-left: 1px; padding: 0 12px 0 10px; border: 0; border-radius: 0 12px 12px 0;
+  background: var(--card); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer;
+  box-shadow: 0 0 0 1px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition-property: background-color, color, scale;
+  transition-duration: 150ms;
+  transition-timing-function: var(--ease);
+}
+.file-restore .ico { width: 14px; height: 14px; }
+@media (hover: hover) and (pointer: fine) {
+  .file-restore:hover { background: var(--hover); color: var(--text); }
+}
+.file-restore:active { scale: 0.96; }
+.file-restore:disabled { cursor: progress; color: var(--text-3); }
+.file-restore:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
 
 .fv-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .fv-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }

@@ -34,7 +34,8 @@ Last updated: 2026-10-05 (v0.9.0; `main` has the browser, step 5, C5, Files, Run
 | Run code later: network as its own permission, packages per project, memory and CPU limits per run | when a workflow needs one (ADR 0020, 0032 › Consequences) |
 | Run code on a real Windows machine (`cargo test -p ark-exec --test run_windows`, with `ARK_TEST_PYTHON=1`) and a real Linux machine (`ARK_TEST_PYTHON=1 cargo test -p ark-exec --test run`) | the owner's Windows machine; a Linux machine or a working Docker (ADR 0032) |
 | Data work on smaller models: Haiku and qwen3.5:27b keep duplicate orders on `workbooks` (0/2 each); Sonnet and Codex 2/2. A hint naming the skill in `code.run` did not help Haiku | a measured change in the skill or the task's shape; nothing planned |
-| Data UX: files dropped on the chat, the version before a run changed a file, Windows saying Excel holds a workbook | board cards; the second wants an ADR first (storage cost) |
+| Data UX: Windows saying Excel holds a workbook open (sharing violation on a save) | the owner's Windows machine run |
+| Versions before (ADR 0034): not measured on ext4 or NTFS, where the copy before a run is a real copy; the store keeps every version (no clean-up of old artifacts yet); the terminal has no Restore | a cloud runtime's numbers; when the store grows too large |
 
 ## Waiting on this repo
 

@@ -207,6 +207,8 @@ class TurnView {
     this.rows = new Map();
     /// Files of the project the turn wrote, in the order it first wrote them.
     this.files = new Set();
+    /// Files the turn changed or removed: the version from before its first change (ADR 0034).
+    this.before = new Map();
     this.started = performance.now();
     this.el = h("article.turn",
       h("div.user", h("div.bubble", input)),
@@ -334,6 +336,7 @@ class TurnView {
 
   result(a, ev) {
     for (const f of a.files || []) this.files.add(f);
+    for (const b of a.before || []) if (!this.before.has(b.path)) this.before.set(b.path, b.artifact);
     const row = this.rows.get(a.call);
     if (!row) return;
     const ok = ev ? ev.ok : a.tone !== "error";
@@ -409,16 +412,13 @@ class TurnView {
     this.keepWorkingLast();
   }
 
-  /// The files the turn wrote, each a card that opens it beside the conversation.
+  /// The files the turn wrote, each a card that opens it beside the conversation, then the ones
+  /// it removed. A file the turn changed or removed can be put back as it was before.
   fileCards() {
     this.agent.querySelector(".turn-files")?.remove();
-    if (!this.files.size) return;
-    this.agent.append(h("div.turn-files", [...this.files].map((path) => {
-      const kind = kindOf(path);
-      return h("button.file-card", { type: "button", "data-kind": kind, title: path, onclick: () => this.api.openFile(path) },
-        h("span.file-card-ico", icon(KIND_ICON[kind])),
-        h("span.file-card-text", h("span.file-card-name", path.split("/").pop()), h("span.file-card-sub", kindNoun(kind))));
-    })));
+    const paths = new Set([...this.files, ...this.before.keys()]);
+    if (!paths.size) return;
+    this.agent.append(h("div.turn-files", [...paths].map((path) => fileCard(this.api, path, this.files.has(path), this.before.get(path)))));
   }
 
   footer(parts, index) {
@@ -454,6 +454,42 @@ class TurnView {
     this.footer(msg.footer, msg.index);
     for (const card of this.agent.querySelectorAll(".approval:not(.decided)")) card.remove();
   }
+}
+
+/// A file of the turn. `here`: the turn left the file in the folder (else it removed it).
+/// `before`: the artifact with the file as it was before the turn, which Restore puts back; the
+/// file as it was then is kept in turn, so Undo puts the turn's version back.
+function fileCard(api, path, here, before) {
+  const kind = kindOf(path);
+  const name = path.split("/").pop();
+  const sub = h("span.file-card-sub", here ? kindNoun(kind) : "Removed");
+  const card = h("button.file-card", { type: "button", "data-kind": kind, title: path, disabled: !here, onclick: () => api.openFile(path) },
+    h("span.file-card-ico", icon(KIND_ICON[kind])),
+    h("span.file-card-text", h("span.file-card-name", name), sub));
+  if (!before) return card;
+  let version = before;
+  let restored = false;
+  const label = h("span", "Restore");
+  const btn = h("button.file-restore", { type: "button", title: "Put the file back as it was before this turn" }, icon("undo"), label);
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const r = await api.call("file_restore", { artifact: version });
+      restored = !restored;
+      card.disabled = false;
+      sub.textContent = kindNoun(kind);
+      if (r.undo) version = r.undo;
+      label.textContent = restored ? "Undo" : "Restore";
+      btn.title = restored ? "Put back this turn's version" : "Put the file back as it was before this turn";
+      btn.hidden = !r.undo;
+      api.toast(restored ? `${name} is back as it was before this turn.` : `${name} has this turn's changes again.`);
+    } catch (e) {
+      api.toast(e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  return h("div.file-item", card, btn);
 }
 
 /// The question card for a pending approval. An orchestrated agent's question names the

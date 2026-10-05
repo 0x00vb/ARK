@@ -71,6 +71,9 @@ pub struct ProducedArtifact {
     /// The file in the project folder these bytes were written to. The stored artifact is a
     /// snapshot; the file is what a person opens and what later calls change.
     pub path: Option<String>,
+    /// The bytes are the file at `path` as it was before this call changed or removed it, kept
+    /// so the person can put it back (ADR 0034). Not a file the call wrote.
+    pub before: bool,
 }
 
 impl ProducedArtifact {
@@ -81,6 +84,7 @@ impl ProducedArtifact {
             bytes: body.into().into_bytes(),
             provenance: None,
             path: None,
+            before: false,
         }
     }
 
@@ -91,6 +95,7 @@ impl ProducedArtifact {
             bytes,
             provenance: None,
             path: None,
+            before: false,
         }
     }
 
@@ -103,6 +108,15 @@ impl ProducedArtifact {
     pub fn at(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
         self
+    }
+
+    /// The bytes are the file at `path` as it was before the call changed or removed it.
+    pub fn before(kind: ArtifactKind, path: impl Into<String>, bytes: Vec<u8>) -> Self {
+        let path = path.into();
+        let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+        let mut a = ProducedArtifact::bytes(kind, name, bytes).at(path);
+        a.before = true;
+        a
     }
 }
 

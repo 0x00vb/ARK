@@ -6,6 +6,7 @@ import { h, icon, clear, $, hydrateIcons, tokens } from "./dom.js";
 import { markdown } from "./md.js";
 import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
+import { acceptDrops } from "./drop.js";
 import { Sidebar } from "./sidebar.js";
 import { Topbar } from "./topbar.js";
 import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
@@ -751,6 +752,7 @@ async function start() {
   appEl.dataset.shell = transport.shell;
   thread = new Thread($("#thread"), $("#scroller"), api);
   composer = new Composer(api);
+  acceptDrops(api, composer, $(".main"));
   sidebar = new Sidebar(api);
   topbar = new Topbar(api);
   pane = new Pane(appEl, api);

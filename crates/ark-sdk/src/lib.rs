@@ -51,8 +51,8 @@ pub mod prelude {
     pub use ark_runtime::{
         AcquisitionProvider, AcquisitionResult, AgentProfile, ApprovalDecision, ApprovalGate,
         ApprovalRequest, Approver, CancelToken, ContextReport, Distiller, DistillerSet, Engine,
-        FixedApprover, Harness, HarnessEvent, HarnessOutcome, KnowledgeHit, KnowledgeProvider,
-        ModelRouter, Prompts, Role, RuleBook, RuleSelection, Session, Steering,
+        FileBefore, FixedApprover, Harness, HarnessEvent, HarnessOutcome, KnowledgeHit,
+        KnowledgeProvider, ModelRouter, Prompts, Role, RuleBook, RuleSelection, Session, Steering,
     };
     pub use ark_tools::diagram::{Diagram, DiagramKind};
     pub use ark_tools::{
@@ -996,6 +996,87 @@ mod tests {
         let outcome = ark.ask(&project.id, "reverse abc").await.unwrap();
         assert!(outcome.answer.contains("cba"), "answer: {}", outcome.answer);
         assert_eq!(outcome.metrics.tool_calls, 1);
+    }
+
+    /// ADR 0034: a turn that saves over a file says which version before it kept; putting it
+    /// back keeps the file as it was, so that can be put back too.
+    #[tokio::test]
+    async fn a_file_put_back_can_be_put_back_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |id: &str, text: &str| Completion {
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: id.into(),
+                name: "files.write".into(),
+                arguments: serde_json::json!({ "path": "notes/plan.md", "text": text }),
+            }],
+            usage: Usage::measured(50, 5),
+        };
+        let done = Completion {
+            content: "Saved.".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(60, 6),
+        };
+        let script = vec![write("c1", "first"), write("c2", "second"), done];
+        let provider: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new("mock", script));
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .files(true)
+            .allow_mutate(true)
+            .provider(provider)
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("t", "").unwrap();
+        let mut kept = Vec::new();
+        ark.ask_with(&project.id, "write the plan twice", |e| {
+            if let HarnessEvent::ToolResult { before, .. } = e {
+                kept.push(before);
+            }
+        })
+        .await
+        .unwrap();
+        // The first save made the file: nothing before it. The second kept "first".
+        assert_eq!(kept.len(), 2);
+        assert!(kept[0].is_empty());
+        assert_eq!(kept[1].len(), 1);
+        assert_eq!(kept[1][0].path, "notes/plan.md");
+
+        let engine = ark.engine();
+        let file = engine
+            .workspace_dir(&project.id)
+            .unwrap()
+            .join("notes/plan.md");
+        let text = || std::fs::read_to_string(&file).unwrap();
+        assert_eq!(text().trim(), "second");
+        let back = engine
+            .restore_file(&project.id, &ArtifactId(kept[1][0].artifact.clone()))
+            .unwrap();
+        assert_eq!(back.path, "notes/plan.md");
+        assert_eq!(text().trim(), "first");
+        engine
+            .restore_file(&project.id, &back.undo.unwrap())
+            .unwrap();
+        assert_eq!(text().trim(), "second");
+
+        // A version that names no file of the project is refused, and so is a path that leads
+        // out of the folder.
+        let note = engine
+            .ingest_bytes(
+                &project.id,
+                "n",
+                ArtifactKind::Text,
+                b"x",
+                Provenance::Ingested { path: "n".into() },
+            )
+            .unwrap();
+        assert!(engine.restore_file(&project.id, &note.id).is_err());
+        let mut out = note.clone();
+        out.meta = serde_json::json!({ "path": "../outside.md", "before": true });
+        engine.store.put_artifact(&project.id, &out).unwrap();
+        assert!(engine.restore_file(&project.id, &out.id).is_err());
+        assert!(!dir.path().join("workspaces/outside.md").exists());
     }
 
     struct OneHit;

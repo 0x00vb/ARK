@@ -8,14 +8,17 @@
 //! ```text
 //! code.run {code, runtime}
 //!   -> Runtime::ready            an environment ARK keeps (Python through uv)
+//!   -> copies of the project     each file as it is, to keep the version before (ADR 0034)
 //!   -> Sandbox                   reads: system, environment, project; writes: project; no network
 //!   -> files the run wrote       -> ProducedArtifact with its path -> kind -> view
+//!   -> files it changed/removed  -> ProducedArtifact::before, from the copies
 //! ```
 //!
 //! A runtime is one [`Runtime`]; [`Python`] is the first. Where ARK has no [`Sandbox`] the
 //! capability is not offered: a run that could reach anything is not one a person can allow for
 //! a whole project.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -51,6 +54,10 @@ const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_WALK: usize = 20_000;
 /// Folders never looked into for written files: tool and package caches.
 const SKIP: &[&str] = &["node_modules", "target", "__pycache__", "venv", ".venv"];
+/// Files copied before a run, to keep the version before of what it changes (ADR 0034): the
+/// largest one, and all of them together.
+const BEFORE_FILE: u64 = 256 * 1024 * 1024;
+const BEFORE_TOTAL: u64 = 512 * 1024 * 1024;
 
 /// One language or environment programs run in.
 #[async_trait]
@@ -208,6 +215,14 @@ impl Exec {
         let mut env = sandbox::base_env(&tmp, launch.program.parent());
         env.extend(launch.env.iter().cloned());
         let absent = sandbox::absent_kept(project);
+        let (root, copies) = (project.to_path_buf(), dir.join("before"));
+        let before = match tokio::task::spawn_blocking(move || Before::take(&root, &copies)).await {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(AdapterError::Tool(e.to_string()));
+            }
+        };
 
         let started = SystemTime::now();
         let ran = subprocess::run_spec(&Spec {
@@ -219,8 +234,12 @@ impl Exec {
             keep: Some(KEEP),
         })
         .await;
-        let _ = std::fs::remove_dir_all(&dir);
         let removed = sandbox::remove_created(&absent);
+        // Reads the copies of what changed (up to `BEFORE_TOTAL`): off the async threads.
+        let root = project.to_path_buf();
+        let kept = tokio::task::spawn_blocking(move || before.changed(&root)).await;
+        let _ = std::fs::remove_dir_all(&dir);
+        let kept = kept.map_err(|e| AdapterError::Tool(e.to_string()))?;
         let mut ran = ran?;
         if !removed.is_empty() {
             ran.stderr.push_str(&format!(
@@ -241,6 +260,7 @@ impl Exec {
             }
             not_kept.push(rel.clone());
         }
+        produced.extend(kept.versions);
         let files: Vec<&String> = written.iter().take(MAX_LISTED).map(|(p, _)| p).collect();
         let timed_out = ran.code == 124
             && ran
@@ -255,6 +275,8 @@ impl Exec {
             "files": files,
             "more_files": written.len().saturating_sub(MAX_LISTED),
             "not_kept": not_kept,
+            "removed": kept.removed,
+            "no_copy": kept.no_copy,
         });
         let mut out = ActionOutput::json(output)
             .with_command(vec![runtime.name().to_string(), launch.file.to_string()]);
@@ -300,7 +322,25 @@ fn io(e: std::io::Error) -> AdapterError {
 /// Files under `root` modified at or after `since`, relative with `/`, newest first. Hidden
 /// folders and package caches are not looked into.
 pub fn written_since(root: &Path, since: SystemTime) -> Vec<(String, u64)> {
-    let mut found: Vec<(String, u64, SystemTime)> = Vec::new();
+    let mut found: Vec<(String, Seen)> = project_files(root)
+        .into_iter()
+        .filter(|(_, f)| f.modified >= since)
+        .collect();
+    found.sort_by(|a, b| b.1.modified.cmp(&a.1.modified).then(a.0.cmp(&b.0)));
+    found.into_iter().map(|(p, f)| (p, f.len)).collect()
+}
+
+/// A file as a listing saw it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Seen {
+    len: u64,
+    modified: SystemTime,
+}
+
+/// The files under `root` a run may change, relative with `/`. Hidden folders and package
+/// caches are not looked into; a project past `MAX_WALK` entries is only partly listed.
+fn project_files(root: &Path) -> Vec<(String, Seen)> {
+    let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     let mut seen = 0usize;
     while let Some(dir) = stack.pop() {
@@ -328,24 +368,110 @@ pub fn written_since(root: &Path, since: SystemTime) -> Vec<(String, u64)> {
                 let Ok(modified) = meta.modified() else {
                     continue;
                 };
-                if modified >= since {
-                    let rel = entry
-                        .path()
-                        .strip_prefix(root)
-                        .map(|p| {
-                            p.components()
-                                .map(|c| c.as_os_str().to_string_lossy())
-                                .collect::<Vec<_>>()
-                                .join("/")
-                        })
-                        .unwrap_or_default();
-                    found.push((rel, meta.len(), modified));
-                }
+                let rel = entry
+                    .path()
+                    .strip_prefix(root)
+                    .map(|p| {
+                        p.components()
+                            .map(|c| c.as_os_str().to_string_lossy())
+                            .collect::<Vec<_>>()
+                            .join("/")
+                    })
+                    .unwrap_or_default();
+                found.push((
+                    rel,
+                    Seen {
+                        len: meta.len(),
+                        modified,
+                    },
+                ));
             }
         }
     }
-    found.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
-    found.into_iter().map(|(p, n, _)| (p, n)).collect()
+    found
+}
+
+/// The project's files before a run, and a copy of each (ADR 0034). `std::fs::copy` clones a
+/// file where the disk can (APFS, btrfs, XFS), so a copy there costs almost nothing.
+struct Before {
+    files: Vec<(String, Seen)>,
+    copies: PathBuf,
+    copied: HashSet<String>,
+}
+
+/// What a run changed or removed: the versions before it, kept as artifacts.
+struct Kept {
+    versions: Vec<ProducedArtifact>,
+    removed: Vec<String>,
+    /// Files changed or removed whose version before was not copied (too large, or past the
+    /// total).
+    no_copy: Vec<String>,
+}
+
+impl Before {
+    fn take(root: &Path, copies: &Path) -> Before {
+        let files = project_files(root);
+        let mut copied = HashSet::new();
+        let mut total = 0u64;
+        for (rel, f) in &files {
+            if f.len > BEFORE_FILE || total + f.len > BEFORE_TOTAL {
+                continue;
+            }
+            let to = copies.join(rel);
+            let made = to
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|_| std::fs::copy(root.join(rel), &to));
+            if made.is_ok() {
+                total += f.len;
+                copied.insert(rel.clone());
+            }
+        }
+        Before {
+            files,
+            copies: copies.to_path_buf(),
+            copied,
+        }
+    }
+
+    /// Compare with the project now: each file that changed or is gone keeps its copy.
+    fn changed(&self, root: &Path) -> Kept {
+        let now: HashMap<String, Seen> = project_files(root).into_iter().collect();
+        let mut kept = Kept {
+            versions: Vec::new(),
+            removed: Vec::new(),
+            no_copy: Vec::new(),
+        };
+        for (rel, was) in &self.files {
+            let gone = match now.get(rel) {
+                Some(f) if f == was => continue,
+                Some(_) => false,
+                None => !root.join(rel).exists(),
+            };
+            if gone {
+                kept.removed.push(rel.clone());
+            }
+            let copy = self.copies.join(rel);
+            let bytes = self
+                .copied
+                .contains(rel)
+                .then(|| std::fs::read(&copy).ok())
+                .flatten();
+            match bytes {
+                // Written again with the same bytes: nothing to put back.
+                Some(b) if !gone && std::fs::read(root.join(rel)).is_ok_and(|n| n == b) => {}
+                Some(b) if kept.versions.len() < MAX_LISTED => {
+                    kept.versions.push(ProducedArtifact::before(
+                        ArtifactKind::Blob,
+                        rel.as_str(),
+                        b,
+                    ));
+                }
+                _ => kept.no_copy.push(rel.clone()),
+            }
+        }
+        kept
+    }
 }
 
 #[async_trait]
@@ -430,15 +556,18 @@ pub fn distill() -> ark_runtime::distill::Distiller {
                 .trim_end()
                 .to_string()
         };
-        let files: Vec<String> = out["files"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(Json::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let list = |k: &str| -> Vec<String> {
+            out[k]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Json::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let files = list("files");
         let code = out["exit_code"].as_i64().unwrap_or(-1);
         let mut t = if out["timed_out"] == true {
             "stopped: it ran past its timeout".to_string()
@@ -450,6 +579,17 @@ pub fn distill() -> ark_runtime::distill::Distiller {
             if let Some(n) = out["more_files"].as_u64().filter(|n| *n > 0) {
                 t.push_str(&format!(" and {n} more"));
             }
+        }
+        let removed = list("removed");
+        if !removed.is_empty() {
+            t.push_str(&format!("\nremoved {}", removed.join(", ")));
+        }
+        let no_copy = list("no_copy");
+        if !no_copy.is_empty() {
+            t.push_str(&format!(
+                "\nno copy of the version before (too large): {}",
+                no_copy.join(", ")
+            ));
         }
         let stdout = s("stdout");
         if !stdout.is_empty() {

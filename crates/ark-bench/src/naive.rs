@@ -144,6 +144,7 @@ impl Naive {
                     context_tokens: tokens,
                     raw_tokens: tokens,
                     files: Vec::new(),
+                    before: Vec::new(),
                 });
                 self.transcript.push(Message::tool_result(call, text));
             }

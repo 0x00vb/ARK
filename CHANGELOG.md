@@ -10,6 +10,20 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- The version before (ADR 0034): a tool that changes or removes a file of the project keeps the
+  file as it was, `ProducedArtifact::before(kind, path, bytes)`. `code.run` copies the
+  project's files before a run (clones on APFS, btrfs and XFS; up to 256 MiB a file, 512 MiB a
+  run) and keeps the copy of each file it changed or removed; its output lists `removed` and
+  `no_copy`. `files.write` and `files.edit` keep the file they save over.
+  `HarnessEvent::ToolResult` and `Activity` carry `before: [FileBefore {path, artifact}]`.
+  `Engine::restore_file(project, artifact)` puts a file back and keeps what it replaced
+  (`Restored {path, undo}`); the window's `file_restore`. A turn's file cards have Restore and
+  Undo, and a card for each file the turn removed.
+- Files dropped on the chat go into the open project's folder (ADR 0035): `upload_add
+  {upload}` after `upload_parts`, names in use get a number. The window takes files and folders
+  dropped on the conversation, shows the progress with Stop, and puts `Added to the project:
+  ...` in the composer. Event `files_changed {project, paths}` after a restore or a drop; open
+  file views and the Files panel read the files again.
 - ARK Accounts (ADR 0026): the new crate `ark-account`, optional. `Account::sign_in` (the
   browser, PKCE, loopback), `refresh`, `access_token`, `sign_out` (revokes this computer's
   token), `status`, and `can("cloud.agents")` for ARK Cloud features. Tokens stay in the OS
@@ -264,6 +278,10 @@ What changed for people building on ARK, per release. Not a commit log.
   instead of allowing each once.
 
 ### Breaking
+- `ProducedArtifact` has a new field, `before`; build it with `text`, `bytes` or `before`
+  instead of a struct literal.
+- `HarnessEvent::ToolResult` and `ark_interact::Activity` have a new field, `before`: a struct
+  literal of either needs `before: Vec::new()` (a pattern with `..` needs nothing).
 - `SkillScope` has a new variant, `Builtin` (a skill that comes with a tool): a `match` on it
   needs an arm.
 - `ConnectError` has a new variant, `Refused`: a 4xx answer from a token endpoint (an expired

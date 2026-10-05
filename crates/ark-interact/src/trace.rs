@@ -748,6 +748,7 @@ mod tests {
             context_tokens: 30,
             raw_tokens: 300,
             files: Vec::new(),
+            before: Vec::new(),
         }
     }
 

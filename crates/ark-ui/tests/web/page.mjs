@@ -412,6 +412,106 @@ async function analysis(page) {
 }
 scenarios.analysis = analysis;
 
+// ADR 0034: a run changes one file and removes another. Each card of that turn puts the file
+// back as it was before the turn, and the changed one can take the turn's version back.
+async function restore(page) {
+  const run = async (text) => {
+    const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
+    await page.locator("#input").fill(text);
+    await page.keyboard.press("Enter");
+    await page.locator(".approval .btn.primary").click();
+    await done;
+    await page.waitForTimeout(150);
+  };
+  const read = (path) => page.evaluate((p) => window.ark.call("file_read", { path: p }).then((f) => f.text, (e) => `error: ${e.message}`), path);
+  await run("Write the notes.");
+  // A new file has nothing to put back.
+  assert.equal(await page.locator(".turn").last().locator(".file-restore").count(), 0);
+
+  await run("Rewrite the notes and drop the old file.");
+  const turn = page.locator(".turn").last();
+  const notes = turn.locator(".file-item", { hasText: "notes.md" });
+  const old = turn.locator(".file-item", { hasText: "old.md" });
+  assert.equal(await old.locator(".file-card-sub").innerText(), "Removed");
+  assert.equal(await old.locator(".file-card").isDisabled(), true);
+  assert.equal(await read("notes.md"), "two\n");
+
+  await notes.locator(".file-restore").click();
+  await notes.locator(".file-restore", { hasText: "Undo" }).waitFor();
+  assert.equal(await read("notes.md"), "one\n");
+  await notes.locator(".file-restore").click();
+  await notes.locator(".file-restore", { hasText: "Restore" }).waitFor();
+  assert.equal(await read("notes.md"), "two\n");
+
+  // The removed file comes back and opens; there was nothing to undo.
+  await old.locator(".file-restore").click();
+  await old.locator(".file-restore").waitFor({ state: "hidden" });
+  assert.equal(await read("old.md"), "old\n");
+  await old.locator(".file-card").click();
+  await page.locator(".md-page").waitFor();
+
+  // A view of the file open beside the conversation follows a restore.
+  await notes.locator(".file-card").click();
+  await page.locator(".md-page h1, .md-page p", { hasText: "two" }).first().waitFor();
+  await notes.locator(".file-restore").click();
+  await page.locator(".md-page p", { hasText: "one" }).first().waitFor();
+}
+scenarios.restore = restore;
+
+// ADR 0035: files dropped on the conversation go into the project's folder. A name in use gets
+// a number, a file larger than one call arrives whole, and the composer names what was added.
+async function drop(page) {
+  // A drop as the browser makes it, with files built in the page.
+  const dropFiles = (files) => page.evaluate((files) => {
+    const dt = new DataTransfer();
+    for (const f of files) {
+      const text = f.lines ? Array.from({ length: f.lines }, (_, i) => `row ${i}`).join("\n") : f.text;
+      dt.items.add(new File([text], f.name, { type: "text/plain" }));
+    }
+    const at = document.querySelector("#thread");
+    for (const type of ["dragenter", "dragover", "drop"]) at.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, files);
+  const read = (path) => page.evaluate((p) => window.ark.call("file_read", { path: p }).then((f) => f.text), path);
+
+  // Dragging over shows where to drop; leaving hides it.
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(["x"], "x.txt"));
+    document.querySelector("#thread").dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  assert.equal(await page.locator(".drop-hint").isVisible(), true);
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(["x"], "x.txt"));
+    document.querySelector("#thread").dispatchEvent(new DragEvent("dragleave", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  assert.equal(await page.locator(".drop-hint").isVisible(), false);
+
+  await page.locator("#input").fill("Compare them");
+  await dropFiles([{ name: "notes.md", text: "# Mine\n" }]);
+  await page.waitForFunction(() => document.querySelector("#input").value.includes("Added to the project"));
+  assert.equal(await page.locator("#input").inputValue(), "Compare them\nAdded to the project: notes.md");
+  // The cursor stays after the person's words, above the line.
+  assert.equal(await page.evaluate(() => document.querySelector("#input").selectionStart), "Compare them".length);
+  assert.equal(await read("notes.md"), "# Mine\n");
+
+  // About 5 MB: three calls. The second notes.md keeps the first.
+  await page.locator("#input").fill("");
+  await dropFiles([{ name: "notes.md", text: "# Theirs\n" }, { name: "rows.txt", lines: 500000 }]);
+  await page.waitForFunction(() => document.querySelector("#input").value.includes("Added to the project"));
+  assert.equal(await page.locator("#input").inputValue(), "\nAdded to the project: notes 2.md, rows.txt");
+  assert.equal(await read("notes.md"), "# Mine\n");
+  assert.equal(await read("notes 2.md"), "# Theirs\n");
+  const rows = await read("rows.txt");
+  assert.equal(rows.length, Array.from({ length: 500000 }, (_, i) => `row ${i}`).join("\n").length);
+  assert.ok(rows.startsWith("row 0\nrow 1\n") && rows.endsWith("\nrow 499999"));
+  assert.equal(await page.locator(".adding").count(), 0);
+  // Nothing is left of the uploads.
+  const left = await page.evaluate(() => window.ark.call("files", { path: "" }).then((r) => r.entries.map((e) => e.name).sort()));
+  assert.deepEqual(left, ["notes 2.md", "notes.md", "rows.txt"]);
+}
+scenarios.drop = drop;
+
 // The + menu opens the built-in panels. Files edits and saves a file in the project folder;
 // the terminal runs a shell there. A page on this machine's loopback address says its runtime
 // is local.

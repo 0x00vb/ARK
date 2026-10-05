@@ -206,6 +206,12 @@ function files(el, params, ark) {
     list(p?.path || s.dir);
   };
   show(params);
+  // Files a call wrote, or that changed without one (a restore, files added): list again.
+  const again = () => (el.isConnected ? list(s.dir) : offs.forEach((off) => off()));
+  const offs = [
+    ark.on("ark:files_changed", again),
+    ark.on("ark:event", (m) => m.event?.type === "tool_result" && (m.event.files?.length || m.event.before?.length) && again()),
+  ];
   return {
     focus: () => ({ surface: { kind_tag: "folder", title: s.dir || "Project folder" } }),
     update: (p) => show(p),

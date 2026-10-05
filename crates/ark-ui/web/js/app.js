@@ -334,7 +334,10 @@ function connection(msg) {
   if (msg.kind === "reconnecting") return toast(`Connection lost; retrying in ${Math.round(msg.delay / 1000)} s`);
   // Disconnected for good: say so until the person retries.
   clearTimeout(toastTimer);
-  clear(el).append(h("span", "Disconnected from the agent. "), h("button.link", { onclick: () => { el.dataset.show = "false"; delete el.dataset.persist; msg.retry(); } }, "Retry"));
+  clear(el).append(h("span", "Disconnected from the agent. "), h("button.link", { onclick: () => { el.dataset.show = "false"; delete el.dataset.persist; msg.retry(); } }, "Retry"),
+    // In the window on a runtime elsewhere: this computer's runtime is one click away.
+    transport.openLocal ? h("span", " · ") : null,
+    transport.openLocal ? h("button.link", { onclick: () => transport.openLocal() }, "Back to this computer") : null);
   el.dataset.persist = "";
   el.dataset.show = "true";
 }

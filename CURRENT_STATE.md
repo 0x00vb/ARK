@@ -23,7 +23,6 @@ Last updated: 2026-10-05 (v0.9.0; `main` has the browser, step 5, C5, Files, Run
 | Rename "Allow for this session" in approvals | the owner decides the words |
 | Board: whether the chat uses the board unasked for project-sized work, and hosted models (the `board` workload passes 3/3 live on qwen3:4b when asked); board tools for code-defined team leads | before turning anything on or off by default (ADR 0023) |
 | ARK Desktop moves its keys to ARK's store (`ark_connect::ApiKeys`, the `api_key_*` methods) and drops `setup::keychain` and `load_keys` | ARK Desktop |
-| ARK Desktop uses `ArkBuilder::secrets(FileSecrets::in_store(root))` when it serves with `--tokens` (ADR 0028), so a server's saved keys survive a restart | ARK Desktop, with Cloud Phase 2 |
 | A paid-model run of scheduling: qwen3:4b claims schedules it never made | needs the owner's OK |
 | ARK Desktop uses `ark_files::Files` instead of its own `files.*` adapter (same action names), and turns Files on | ARK Desktop, against `../ark` until v0.10.0 |
 | Files: cell styles in the grid, images in a document, undo across saves, `.xls`, more formula functions | when a real task needs one (ADR 0019 › Consequences) |
@@ -49,8 +48,8 @@ evidence (time-boxed), persistent headless ARK (on `main`, untagged), ARK Cloud 
 runtime. ARK Cloud's plan is `../ark-cloud/docs/CLOUD.md` (2026-10-05); ARK's part of it is
 A1 to A4 on the board. A1 (named OpenAI-compatible endpoints) and A2 (402 is out of credit) are
 on `main` (ADR 0027), and A3 (`FileSecrets`: keys and tokens in an encrypted file for servers,
-ADR 0028); next A4 (Run code on Linux),
-for Cloud Phase 2.
+ADR 0028), and A6 (the window opens a runtime elsewhere and comes back, `remote::visit`, ADR
+0029, for ARK Desktop's This Mac | Cloud); next A4 (Run code on Linux), for Cloud Phase 2.
 
 ## Working notes
 

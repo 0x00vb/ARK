@@ -56,7 +56,7 @@ pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
     use std::sync::atomic::Ordering;
     use tauri::Manager;
 
-    let (app, _) = crate::desktop::WINDOW
+    let app = crate::desktop::APP
         .get()
         .ok_or_else(|| anyhow::anyhow!("there is no window to open {url} in"))?;
     let client = Client::new(url, token);
@@ -65,8 +65,13 @@ pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| anyhow::anyhow!("there is no window to open {url} in"))?;
+    // Before leaving: the own page's event channels stop sending from here on.
     crate::desktop::VISITS.fetch_add(1, Ordering::SeqCst);
-    window.navigate(target)?;
+    if let Err(e) = window.navigate(target) {
+        // Still on the own page, with its channels stopped: load it again to start over.
+        crate::desktop::go_home(window.as_ref());
+        return Err(e.into());
+    }
     Ok(())
 }
 

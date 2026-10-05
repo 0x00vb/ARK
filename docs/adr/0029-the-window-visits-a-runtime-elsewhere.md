@@ -39,16 +39,25 @@ IPC (which drives this computer's runtime) away from a page that some other mach
 ## Consequences
 - An app can offer runtimes in several places in one window without ARK knowing where they are
   or who provides them.
-- Questions from the page elsewhere do not show system notifications (they come from the
-  window's own runtime only). The page elsewhere shows them as it does in a browser.
-- A runtime elsewhere that stops answering after its page loaded leaves the page reconnecting;
-  its way back stays there. If the window is reloaded while that runtime is down, the system's
-  error page shows and the app's tray item or a restart brings the window back.
+- While the window shows a page elsewhere, this computer's questions still show system
+  notifications (the window counts as in front only on its own page). Questions from the page
+  elsewhere show on that page, as in a browser.
+- A runtime elsewhere that stops answering leaves its page reconnecting, then "Disconnected"
+  with Retry and Back to this computer. A reload while it is down shows the system's error page;
+  quitting and opening the app again opens its own page.
+- `OWN_PAGE` loaded in a frame of the own page is refused and does nothing.
+- If loading the page elsewhere fails, the own page is loaded again (its event channels were
+  already stopped).
+- Left open: Tauri keeps a channel message over 8 KB until a page fetches it, by a sequential id
+  and without a permission check. One queued for the own page just before the window leaves it
+  could be fetched by the page elsewhere. The page elsewhere is the person's own runtime;
+  revisit if the window ever opens pages nobody vouches for.
 - `run_window` (launch-time, no own runtime) is unchanged: no `__TAURI__`, no way back.
 
 ## Check
 `crates/ark-ui/src/desktop.rs` tests: only the app's own origins count as its page.
 `ARK_UI_PAGE_TESTS=1 cargo test -p ark-ui --test page`: `visit` (the window's controls, the way
 back, the row above the projects) and `workbench` (a browser has no way back). A native run in
-ARK Desktop: the window opens a runtime elsewhere and comes back, and that page's
-`__TAURI__.core.invoke("ark_call", …)` is refused.
+ARK Desktop (2026-10-05, its ADR 0009): the window opened a runtime elsewhere and came back,
+and a page elsewhere was refused `ark_call`, `ark_subscribe`, `ark_pick_folder` and the dialog
+plugin (Tauri's own permissions refuse remote origins first; the own-page check is the second).

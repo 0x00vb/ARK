@@ -1,0 +1,4 @@
+analysis           rep 0 PASS calls=9 tokens=181835 (155392 cached) tools=7 164801ms  all checks passed
+analysis           rep 1 PASS calls=4 tokens=94322 (65408 cached) tools=3 131137ms  all checks passed
+files-edit         rep 0 PASS calls=3 tokens=54465 (35072 cached) tools=2 44528ms  all checks passed
+files-edit         rep 1 PASS calls=3 tokens=64611 (40320 cached) tools=2 27758ms  all checks passed

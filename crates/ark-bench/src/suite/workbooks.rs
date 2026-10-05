@@ -411,8 +411,9 @@ fn check(dir: &Path, kept: &Path, answer: &str) -> Verdict {
         (
             summary.is_none() || missing.is_empty(),
             &format!(
-                "summary.xlsx lacks the right monthly revenue (as a number) for {} of 24: {}",
+                "summary.xlsx lacks the right monthly revenue (as a number) for {} of {}: {}",
                 missing.len(),
+                d.monthly.len(),
                 missing
                     .iter()
                     .take(4)

@@ -31,6 +31,7 @@ impl Runtime for Sh {
             file: "main.sh",
             env: vec![],
             reads: vec![],
+            home: vec![],
         })
     }
 }
@@ -195,6 +196,15 @@ df.describe().to_excel("summary.xlsx")
     let out = run(&s.exec, &s.project, code).await;
     assert_eq!(out.output["exit_code"], 0, "{}", out.output);
     assert!(out.output["stdout"].as_str().unwrap().contains("12"));
+    // matplotlib finds the cache it built at install: no warning, no 20 s rebuild.
+    assert!(
+        !out.output["stderr"]
+            .as_str()
+            .unwrap()
+            .contains("not a writable directory"),
+        "{}",
+        out.output["stderr"]
+    );
     let mut files: Vec<&str> = out
         .produced
         .iter()

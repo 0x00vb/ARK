@@ -76,6 +76,9 @@ pub struct Launch {
     pub env: Vec<(String, String)>,
     /// Folders the run reads besides the system's and the project's (the environment).
     pub reads: Vec<PathBuf>,
+    /// Folders copied into the run's home folder (`HOME`) before it starts, by the name they
+    /// get there: caches the runtime built when it was set up, which a run may write to.
+    pub home: Vec<(PathBuf, &'static str)>,
 }
 
 /// The `code` tools: [`RUN`] in each of its runtimes.
@@ -147,6 +150,9 @@ impl Exec {
         let dir = self.scratch.join(uuid::Uuid::new_v4().simple().to_string());
         let tmp = dir.join("tmp");
         std::fs::create_dir_all(&tmp).map_err(io)?;
+        for (from, name) in &launch.home {
+            copy_dir(from, &tmp.join(name)).map_err(io)?;
+        }
         let file = dir.join(launch.file);
         std::fs::write(&file, code).map_err(io)?;
         let bounds = Bounds {
@@ -229,6 +235,22 @@ fn bad(detail: String) -> AdapterError {
         action: RUN.into(),
         detail,
     }
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    if !from.is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)?.flatten() {
+        let (src, dst) = (e.path(), to.join(e.file_name()));
+        if e.file_type()?.is_dir() {
+            copy_dir(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
 }
 
 fn io(e: std::io::Error) -> AdapterError {

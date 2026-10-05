@@ -108,23 +108,25 @@ impl Python {
                 return Err(format!("setting up Python failed: {}", r.stderr.trim()));
             }
         }
-        // Build matplotlib's font cache now: in a run its folder is read-only, and building it
-        // there takes about 20 s.
+        // Build matplotlib's font cache now (about 20 s); each run starts with a copy of it.
         let mut warm = Spec::new(self.venv().join("bin/python"));
         warm.args = vec!["-c".into(), "import matplotlib.pyplot".into()];
-        warm.env = Some(self.env());
+        let mut env = self.env();
+        env.push(("MPLCONFIGDIR".into(), self.cache().display().to_string()));
+        warm.env = Some(env);
         warm.timeout = Some(Duration::from_secs(120));
         let _ = subprocess::run_spec(&warm).await;
         std::fs::write(self.stamp(), Self::wanted()).map_err(|e| e.to_string())
     }
 
+    /// matplotlib's font cache, built at install.
+    fn cache(&self) -> PathBuf {
+        self.home.join("matplotlib")
+    }
+
     fn env(&self) -> Vec<(String, String)> {
         vec![
             ("MPLBACKEND".into(), "Agg".into()),
-            (
-                "MPLCONFIGDIR".into(),
-                self.home.join("matplotlib").display().to_string(),
-            ),
             ("PYTHONDONTWRITEBYTECODE".into(), "1".into()),
             ("PYTHONUNBUFFERED".into(), "1".into()),
             ("VIRTUAL_ENV".into(), self.venv().display().to_string()),
@@ -176,6 +178,8 @@ impl Runtime for Python {
             reads: std::iter::once(self.home.clone())
                 .chain(interpreter)
                 .collect(),
+            // matplotlib looks for its cache in `~/.matplotlib`; a run's home is writable.
+            home: vec![(self.cache(), ".matplotlib")],
         })
     }
 }

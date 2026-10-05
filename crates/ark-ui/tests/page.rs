@@ -273,6 +273,7 @@ impl ark_sdk::prelude::ark_exec::Runtime for Sh {
             file: "main.sh",
             env: vec![],
             reads: vec![],
+            home: vec![],
         })
     }
 }

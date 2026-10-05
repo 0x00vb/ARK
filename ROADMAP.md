@@ -10,7 +10,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 |---|---|
 | Stable release | **v0.10.0** (2026-10-05): ARK without a window (several live chats, schedules that post into the chat that asked, keep running), a runtime other machines, the terminal and the window connect to (ADR 0016, 0024, 0029, 0030), the browser (ADR 0015), the Computer (ADR 0018), Files edited in place (ADR 0019), Run code contained on macOS, Linux and Windows (ADR 0020, 0032), data work (ADR 0033 to 0035), the project's board (ADR 0023), optional ARK Accounts (ADR 0026). v0.9.0 brought Claude Code and Codex first-class |
 | `main` | v0.10.0 |
-| Consumers | SecRes (pins v0.8.0), ARK Desktop (`ark-desktop` repo; pins v0.8.1, moving to v0.10.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Consumers | SecRes (pins v0.8.0), ARK Desktop (`ark-desktop` repo; pins v0.10.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

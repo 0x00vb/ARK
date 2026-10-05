@@ -41,7 +41,7 @@ Last updated: 2026-10-05 (v0.10.0)
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | nothing: v0.10.0 is out. Its pin moves to it, with `ark_exec::entry()` first in `main` (Run code on Windows, ADR 0032) and the window letting the page take dropped files (ADR 0035) |
+| ark-desktop | nothing: it pins v0.10.0 (ark-desktop 255752c), with `ark_exec::entry()` first in `main` (ADR 0032) and `dragDropEnabled: false` so the page takes dropped files (ADR 0035) |
 | SecRes | nothing; pins v0.8.0. v0.9.0 and v0.10.0 are optional upgrades (`Breaking` in `CHANGELOG.md`) |
 | Mail and Calendar for anyone | ARK's Google OAuth client and Google's review: owner steps in [`docs/GOOGLE.md`](docs/GOOGLE.md). Until then they show as unavailable, or work with `ARK_GOOGLE_CLIENT_ID` for test users |
 

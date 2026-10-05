@@ -7,7 +7,7 @@ mod claims;
 pub mod tools;
 mod web;
 
-pub use claims::{claimed_files, ClaimsSpec};
+pub use claims::{claimed_files, claimed_schedule, ClaimsSpec};
 pub use web::{web, WebSpec};
 
 use std::sync::Arc;
@@ -123,6 +123,7 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(skill()),
         Box::new(web()),
         Box::new(claimed_files()),
+        Box::new(claimed_schedule()),
     ]
 }
 

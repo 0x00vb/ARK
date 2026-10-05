@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T02:37:53.414883Z",
+  "mode": "live",
+  "model": "ollama:qwen3.5:27b",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "900"
+  },
+  "workloads": [
+    {
+      "name": "claimed-schedule",
+      "class": "claims",
+      "description": "standing work asked in words; the answer may say it is scheduled only if the schedule was made",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 4.666666666666667,
+        "input_tokens": 9407.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 9407.0,
+        "output_tokens": 928.0,
+        "total_tokens": 10335.0,
+        "cost_usd": 0.028093999999999997,
+        "cost_per_success_usd": 0.028093999999999997,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.666666666666667,
+        "peak_context_tokens": 1679.0,
+        "mean_context_tokens": 1534.6666666666667,
+        "tool_schema_tokens": 3304.6666666666665,
+        "prefix_reuse_tokens": 4602.333333333333,
+        "median_turn_ms": 49976.0,
+        "p95_turn_ms": 61575.0,
+        "median_first_token_ms": 9592.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "claimed-schedule",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done! I've set up a scheduled job that will:\n\n- **Run**: Every Thursday at 17:00\n- **Agent**: `writer`\n- **Task**: Draft the weekly note\n\nThe job is now active with ID `job-1`. The writer agent will automatically draft your weekly note every Thursday afternoon.",
+          "turns": 2,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 10951
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 5
+          },
+          "input_tokens": 10131,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 10131,
+          "cache_write_tokens": 0,
+          "output_tokens": 820,
+          "total_tokens": 10951,
+          "tokens_measured": true,
+          "cost_usd": 0.028462,
+          "wall_ms": 115851,
+          "turn_ms": [
+            56727,
+            59124
+          ],
+          "first_token_ms": [
+            9592,
+            10828
+          ],
+          "model_latency_ms": [
+            41514,
+            15207,
+            28531,
+            14529,
+            16056
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1666,
+          "mean_context_tokens": 1540,
+          "context_sources": {
+            "Capability index": 1523,
+            "Conversation": 312,
+            "Instructions": 1430,
+            "Model output": 132,
+            "Project": 250,
+            "Retrieved context": 29,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 188,
+            "Tool results": 139,
+            "Tool schemas": 3545,
+            "Working state": 156,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3545,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 94,
+          "result_raw_tokens": 42,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5112,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-schedule",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done. I've scheduled the writer agent to draft the weekly note every Thursday at 17:00. **Job Details:** - **Agent:** writer - **Schedule:** Thursdays at 17:00 - **Task:** Draft the weekly note - **Job ID:** job-1 The job is now active and will run automatically on the specified schedule.",
+          "turns": 2,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 8813
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 4
+          },
+          "input_tokens": 7924,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7924,
+          "cache_write_tokens": 0,
+          "output_tokens": 889,
+          "total_tokens": 8813,
+          "tokens_measured": true,
+          "cost_usd": 0.024738,
+          "wall_ms": 92984,
+          "turn_ms": [
+            43008,
+            49976
+          ],
+          "first_token_ms": [
+            8481,
+            15223
+          ],
+          "model_latency_ms": [
+            26877,
+            16127,
+            28512,
+            21460
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1628,
+          "mean_context_tokens": 1516,
+          "context_sources": {
+            "Capability index": 1216,
+            "Conversation": 234,
+            "Instructions": 1144,
+            "Model output": 74,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 94,
+            "Tool schemas": 2824,
+            "Working state": 128,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2824,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 94,
+          "result_raw_tokens": 42,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3558,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-schedule",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done! I've scheduled the writer agent to draft the weekly note every Thursday at 17:00.\n\n**Job Details:**\n- **Agent:** writer\n- **Schedule:** Thursdays at 17:00\n- **Task:** Draft the weekly note\n- **Job ID:** job-1\n\nThe automated task is now active and will run according to the schedule.",
+          "turns": 2,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 11241
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 5
+          },
+          "input_tokens": 10166,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 10166,
+          "cache_write_tokens": 0,
+          "output_tokens": 1075,
+          "total_tokens": 11241,
+          "tokens_measured": true,
+          "cost_usd": 0.031082,
+          "wall_ms": 103337,
+          "turn_ms": [
+            41762,
+            61575
+          ],
+          "first_token_ms": [
+            8714,
+            12358
+          ],
+          "model_latency_ms": [
+            24706,
+            17052,
+            25876,
+            17284,
+            18409
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1679,
+          "mean_context_tokens": 1548,
+          "context_sources": {
+            "Capability index": 1523,
+            "Conversation": 348,
+            "Instructions": 1430,
+            "Model output": 132,
+            "Project": 250,
+            "Retrieved context": 29,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 191,
+            "Tool results": 139,
+            "Tool schemas": 3545,
+            "Working state": 156,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3545,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 94,
+          "result_raw_tokens": 42,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5137,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 3,
+    "success_rate": 1.0,
+    "model_calls": 4.666666666666667,
+    "input_tokens": 9407.0,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 9407.0,
+    "output_tokens": 928.0,
+    "total_tokens": 10335.0,
+    "cost_usd": 0.028093999999999997,
+    "cost_per_success_usd": 0.028093999999999997,
+    "tool_calls": 2.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 4.666666666666667,
+    "peak_context_tokens": 1679.0,
+    "mean_context_tokens": 1534.6666666666667,
+    "tool_schema_tokens": 3304.6666666666665,
+    "prefix_reuse_tokens": 4602.333333333333,
+    "median_turn_ms": 49976.0,
+    "p95_turn_ms": 61575.0,
+    "median_first_token_ms": 9592.0,
+    "stall_stops": 0.0
+  }
+}

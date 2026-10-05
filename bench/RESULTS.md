@@ -29,6 +29,24 @@ judge (the answer names `report.md`, admits no failure, and no call wrote it).
 - Simulated: the 16 older workloads did not move; `claimed-files` passes with the check (5 calls)
   and fails without it (3 calls).
 
+## Schedules an answer says were made (2026-10-05)
+
+In a chat, qwen3:4b was seen saying it had made schedules it never made (the transcript was
+not kept). The `claimed-schedule` workload asks for standing work twice in one chat ("every
+weekday at 09:00, have the assistant..." then "also every Thursday at 17:00, have the writer...")
+with a schedule tool that refuses an agent name it does not know, as the chat's
+`agents.schedule` does. Reports in `bench/claims/schedule-*.json`.
+
+| `claimed-schedule` | Success | False claim | Model calls | Total tokens |
+|---|---:|---:|---:|---:|
+| qwen3:4b, 5 runs | 5/5 | 0/5 | 4.0 | 7,745 |
+| qwen3.5:27b, 3 runs | 3/3 | 0/3 | 4.7 | 10,335 |
+
+Two earlier shapes (one request; one request with the agent's name to work out) also gave
+5/5 on qwen3:4b and 3/3 on qwen3.5:27b. Not reproduced, so the runtime has no check for
+claimed actions: one was written (an action's descriptor names the words that mean it
+happened, `scheduled`, `sent`) and left out. The workload stays as a guard.
+
 ## Subscription CLIs kept running (2026-10-04)
 
 A managed vendor session keeps its CLI running: Claude Code with streaming JSON in and out,

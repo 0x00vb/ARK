@@ -1,0 +1,484 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T02:32:34.439545Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 5,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "300"
+  },
+  "workloads": [
+    {
+      "name": "claimed-schedule",
+      "class": "claims",
+      "description": "standing work asked in words; the answer may say it is scheduled only if the schedule was made",
+      "summary": {
+        "runs": 5,
+        "successes": 5,
+        "success_rate": 1.0,
+        "model_calls": 4.0,
+        "input_tokens": 7393.4,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 7393.4,
+        "output_tokens": 351.8,
+        "total_tokens": 7745.2,
+        "cost_usd": 0.0183048,
+        "cost_per_success_usd": 0.0183048,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.0,
+        "peak_context_tokens": 1673.0,
+        "mean_context_tokens": 1538.2,
+        "tool_schema_tokens": 2824.0,
+        "prefix_reuse_tokens": 3589.0,
+        "median_turn_ms": 3845.0,
+        "p95_turn_ms": 8260.0,
+        "median_first_token_ms": 303.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "claimed-schedule",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- **Fact**: A scheduled job has been created to have the writer draft the weekly note every Thursday at 17:00. [cites inv:0fdf035f]  \n- **Next step**: Verify that the job is active and will execute as intended by confirming its status or observing the output of a subsequent run.  \n\nThe task is now set up and will execute as scheduled. The next action is to validate its functionality.",
+          "turns": 2,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 7816
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 7429,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7429,
+          "cache_write_tokens": 0,
+          "output_tokens": 387,
+          "total_tokens": 7816,
+          "tokens_measured": true,
+          "cost_usd": 0.018728,
+          "wall_ms": 11156,
+          "turn_ms": [
+            8260,
+            2896
+          ],
+          "first_token_ms": [
+            338,
+            257
+          ],
+          "model_latency_ms": [
+            5536,
+            2722,
+            1290,
+            1603
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1673,
+          "mean_context_tokens": 1544,
+          "context_sources": {
+            "Capability index": 1216,
+            "Conversation": 320,
+            "Instructions": 1144,
+            "Model output": 87,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 107,
+            "Tool schemas": 2824,
+            "Working state": 128,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2824,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 107,
+          "result_raw_tokens": 55,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3601,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-schedule",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The task to have the writer draft the weekly note every Thursday at 17:00 has been successfully set up. The job is configured to run on Thursdays at 17:00, with the task \"draft the weekly note\" assigned to the \"writer\" agent. \n\n- **Action**: Scheduled job for Thursday 17:00 weekly note draft.  \n- **Evidence**: [inv:5c19434d] confirms the schedule is active.  \n\nNo further action is needed. The syst",
+          "turns": 2,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 7819
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 7423,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7423,
+          "cache_write_tokens": 0,
+          "output_tokens": 396,
+          "total_tokens": 7819,
+          "tokens_measured": true,
+          "cost_usd": 0.018806,
+          "wall_ms": 9476,
+          "turn_ms": [
+            4347,
+            5129
+          ],
+          "first_token_ms": [
+            336,
+            268
+          ],
+          "model_latency_ms": [
+            1330,
+            3014,
+            1817,
+            3309
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1673,
+          "mean_context_tokens": 1544,
+          "context_sources": {
+            "Capability index": 1216,
+            "Conversation": 320,
+            "Instructions": 1144,
+            "Model output": 87,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 107,
+            "Tool schemas": 2824,
+            "Working state": 128,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2824,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 107,
+          "result_raw_tokens": 55,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3601,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-schedule",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Fact: A job has been scheduled to run every Thursday at 17:00, tasked with having the writer draft the weekly note. [cites inv:901b91c4]  \nHypothesis: The writer will successfully draft the weekly note every Thursday at 17:00.  \nNext step: Verify that the job is active and correctly configured by checking its status or reviewing a sample execution (if available).",
+          "turns": 2,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 7661
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 7357,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7357,
+          "cache_write_tokens": 0,
+          "output_tokens": 304,
+          "total_tokens": 7661,
+          "tokens_measured": true,
+          "cost_usd": 0.017754,
+          "wall_ms": 6436,
+          "turn_ms": [
+            3684,
+            2752
+          ],
+          "first_token_ms": [
+            353,
+            255
+          ],
+          "model_latency_ms": [
+            1754,
+            1927,
+            1241,
+            1508
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1644,
+          "mean_context_tokens": 1530,
+          "context_sources": {
+            "Capability index": 1216,
+            "Conversation": 262,
+            "Instructions": 1144,
+            "Model output": 87,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 107,
+            "Tool schemas": 2824,
+            "Working state": 128,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2824,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 107,
+          "result_raw_tokens": 55,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3572,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-schedule",
+          "rep": 3,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- **Fact**: A scheduled job has been created to have the writer draft the weekly note every Thursday at 17:00. [cites inv:3e1003dc]  \n- **Next step**: Verify that the job is active and will execute as intended by confirming its status or observing the output of a subsequent run.  \n\nThe task is now set and will execute as scheduled. The next action is to validate its functionality.",
+          "turns": 2,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 7813
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 7427,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7427,
+          "cache_write_tokens": 0,
+          "output_tokens": 386,
+          "total_tokens": 7813,
+          "tokens_measured": true,
+          "cost_usd": 0.018714,
+          "wall_ms": 8872,
+          "turn_ms": [
+            5027,
+            3845
+          ],
+          "first_token_ms": [
+            349,
+            293
+          ],
+          "model_latency_ms": [
+            1498,
+            3526,
+            1446,
+            2396
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1673,
+          "mean_context_tokens": 1544,
+          "context_sources": {
+            "Capability index": 1216,
+            "Conversation": 320,
+            "Instructions": 1144,
+            "Model output": 87,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 107,
+            "Tool schemas": 2824,
+            "Working state": 128,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2824,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 107,
+          "result_raw_tokens": 55,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3601,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-schedule",
+          "rep": 4,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Fact: A job has been scheduled to run every Thursday at 17:00, tasked with having the writer draft the weekly note. [cites inv:babe12cd]  \nHypothesis: The writer will successfully draft the weekly note at the scheduled time.  \nNext action: Verify that the job is active and correctly configured by checking its status or reviewing a sample execution (if available).",
+          "turns": 2,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 7617
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 7331,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7331,
+          "cache_write_tokens": 0,
+          "output_tokens": 286,
+          "total_tokens": 7617,
+          "tokens_measured": true,
+          "cost_usd": 0.017522,
+          "wall_ms": 7164,
+          "turn_ms": [
+            3165,
+            3999
+          ],
+          "first_token_ms": [
+            336,
+            303
+          ],
+          "model_latency_ms": [
+            1258,
+            1904,
+            1756,
+            2240
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1642,
+          "mean_context_tokens": 1529,
+          "context_sources": {
+            "Capability index": 1216,
+            "Conversation": 260,
+            "Instructions": 1144,
+            "Model output": 87,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 150,
+            "Tool results": 107,
+            "Tool schemas": 2824,
+            "Working state": 128,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2824,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 107,
+          "result_raw_tokens": 55,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3570,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 5,
+    "successes": 5,
+    "success_rate": 1.0,
+    "model_calls": 4.0,
+    "input_tokens": 7393.4,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 7393.4,
+    "output_tokens": 351.8,
+    "total_tokens": 7745.2,
+    "cost_usd": 0.0183048,
+    "cost_per_success_usd": 0.0183048,
+    "tool_calls": 2.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 4.0,
+    "peak_context_tokens": 1673.0,
+    "mean_context_tokens": 1538.2,
+    "tool_schema_tokens": 2824.0,
+    "prefix_reuse_tokens": 3589.0,
+    "median_turn_ms": 3845.0,
+    "p95_turn_ms": 8260.0,
+    "median_first_token_ms": 303.0,
+    "stall_stops": 0.0
+  }
+}

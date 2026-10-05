@@ -90,6 +90,7 @@ neighbors.
 | skill | write release notes in a format only a stored skill gives: one catalog line, then `skills.read` |
 | web | search and read a page: `web.search`, then `web.fetch`, against a loopback page and a fixed search engine |
 | claimed-files | one call writes a chart but not the report (a program run that fails halfway); the answer may say only written files were saved |
+| claimed-schedule | standing work asked in words, twice in one chat; the answer may say it is scheduled only if the schedule was made |
 
 ## The naive baseline
 

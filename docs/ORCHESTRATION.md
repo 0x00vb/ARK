@@ -325,6 +325,7 @@ To follow a run: load `graph()`, then apply events after its `seq`.
 | Limit | Note |
 |---|---|
 | Delegations from one model reply run at most 4 at a time | the harness's parallel tool limit; more queue |
+| A restart marks every open task failed (`interrupted`), queued and suspended ones too, and a question waiting for the person is lost | `retry` runs one again; W1 and W2 in `ROADMAP.md` (ADR 0036) |
 | An agent loaded from the store after a restart has no custom `AgentProfile` | spawn it again with its full spec |
 | A message pushed into a running task is delivered at the next step | the same as steering |
 | A schedule cannot be edited; its runs do not report into a chat | stop it and ask again; the runs are in the agent's work |

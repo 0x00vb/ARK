@@ -2,8 +2,9 @@
 //! cover trivial work, tool discovery, dependent steps, large outputs, long sessions, failure
 //! recovery, repetition, runaway loops, resume across a restart, retrieval from a corpus,
 //! approvals, independent slow calls, an answer that names only files that were written, work
-//! carried on the project's board across a restart and a new chat, and a spreadsheet edited in
-//! place. Nothing here is specific to an application domain.
+//! carried on the project's board across a restart and a new chat, a spreadsheet edited in
+//! place, and an analyst's task over several messy workbooks. Nothing here is specific to an
+//! application domain.
 
 mod analysis;
 mod board;
@@ -11,12 +12,14 @@ mod claims;
 mod files;
 pub mod tools;
 mod web;
+mod workbooks;
 
 pub use analysis::{analysis, AnalysisSpec};
 pub use board::{board, BoardSpec};
 pub use claims::{claimed_files, claimed_schedule, ClaimsSpec};
 pub use files::{files_edit, FilesSpec};
 pub use web::{web, WebSpec};
+pub use workbooks::{workbooks, WorkbooksSpec};
 
 use std::sync::Arc;
 
@@ -135,6 +138,7 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(board()),
         Box::new(analysis()),
         Box::new(files_edit()),
+        Box::new(workbooks()),
     ]
 }
 

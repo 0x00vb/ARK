@@ -6,5 +6,5 @@ Cargo.lock.orig
 *.db-wal
 *.db-shm
 /scratch
-node_modules/
+node_modules
 examples/*/*-workspace/

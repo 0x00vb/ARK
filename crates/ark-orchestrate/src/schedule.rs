@@ -237,22 +237,8 @@ fn day_set(d: &str) -> Result<Vec<usize>, String> {
 }
 
 /// Seconds east of UTC in local time at Unix time `secs`.
-#[cfg(unix)]
 pub(crate) fn local_offset(secs: i64) -> i64 {
-    let t = secs as libc::time_t;
-    // SAFETY: localtime_r only writes the `tm` it is given.
-    unsafe {
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&t, &mut tm).is_null() {
-            return 0;
-        }
-        tm.tm_gmtoff as i64
-    }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn local_offset(_secs: i64) -> i64 {
-    0
+    ark_os::time::local_offset(secs)
 }
 
 /// A task an agent runs on a schedule. Stored per project; see the module docs.

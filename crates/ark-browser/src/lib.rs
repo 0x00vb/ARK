@@ -149,10 +149,11 @@ impl BrowserService {
         if let Some(c) = slot.as_ref().filter(|c| c.alive()) {
             return Ok(c.clone());
         }
-        let profile = self.root.join(if signed { "signed-in" } else { "fresh" });
-        if !signed {
-            let _ = tokio::fs::remove_dir_all(&profile).await;
-        }
+        let profile = if signed {
+            self.root.join("signed-in")
+        } else {
+            fresh_profile(&self.root).await
+        };
         let headless = !signed || self.signed_headless;
         let c = Arc::new(Chrome::launch(&bin, &profile, headless).await?);
         *slot = Some(c.clone());
@@ -597,4 +598,22 @@ impl ark_runtime::per_agent::PerAgent for Browsers {
     fn distiller(&self) -> Option<ark_runtime::Distiller> {
         Some(Arc::new(distill))
     }
+}
+
+/// A new, empty profile folder for a fresh browser, after removing the old ones. A new name
+/// each time: on Windows a folder the last browser's helpers still hold cannot be emptied
+/// yet, and a fresh browser must never start with cookies.
+async fn fresh_profile(root: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(mut dir) = tokio::fs::read_dir(root).await {
+        while let Ok(Some(e)) = dir.next_entry().await {
+            if e.file_name().to_string_lossy().starts_with("fresh") {
+                let _ = tokio::fs::remove_dir_all(e.path()).await;
+            }
+        }
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    root.join(format!("fresh-{}-{nanos}", std::process::id()))
 }

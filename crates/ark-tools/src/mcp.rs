@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -41,6 +41,8 @@ pub struct McpTool {
 /// mutex, so a blocking request/response cycle is safe.
 struct McpConn {
     child: Child,
+    /// Stops the server with whatever it started (`npx` runs the server as its child).
+    tree: ark_os::process::Tree,
     stdin: ChildStdin,
     /// The server's stdout, line by line, from a reader thread: a request can wait with a
     /// deadline instead of blocking on a server that never answers.
@@ -51,6 +53,7 @@ struct McpConn {
 /// A server that is no longer used is stopped, not left running.
 impl Drop for McpConn {
     fn drop(&mut self) {
+        self.tree.kill();
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -83,7 +86,11 @@ impl McpClient {
         env: &HashMap<String, String>,
         limit: Duration,
     ) -> crate::Result<Self> {
-        let mut cmd = Command::new(command);
+        // `npx` is `npx.cmd` on Windows: found with PATHEXT and started without cmd.exe.
+        let program = ark_os::find::program(command).ok_or_else(|| {
+            AdapterError::Tool(format!("spawn MCP server `{command}`: not found"))
+        })?;
+        let mut cmd = ark_os::process::std_command(&program);
         cmd.args(args)
             .envs(env)
             .stdin(Stdio::piped())
@@ -110,6 +117,7 @@ impl McpClient {
             }
         });
         let conn = McpConn {
+            tree: ark_os::process::Tree::of(Some(child.id())),
             child,
             stdin,
             lines,

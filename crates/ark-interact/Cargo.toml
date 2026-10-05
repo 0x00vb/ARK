@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "ARK interaction layer: sessions, commands, structured reports, activity labels and traces, shared by every front-end."
 
 [dependencies]
+ark-os.workspace = true
 ark-sdk.workspace = true
 ark-orchestrate.workspace = true
 serde.workspace = true

@@ -61,7 +61,7 @@ pub mod prelude {
     // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
     // with `ark_model::from_env_arc()`, etc., from the prelude alone.
     pub use {
-        ark_browser, ark_computer, ark_connect, ark_core, ark_exec, ark_files, ark_model,
+        ark_browser, ark_computer, ark_connect, ark_core, ark_exec, ark_files, ark_model, ark_os,
         ark_runtime, ark_tools,
     };
 }

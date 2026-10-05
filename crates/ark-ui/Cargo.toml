@@ -12,6 +12,7 @@ default = ["desktop"]
 desktop = ["dep:tauri", "dep:tauri-plugin-dialog"]
 
 [dependencies]
+ark-os.workspace = true
 ark-interact.workspace = true
 ark-sdk.workspace = true
 serde.workspace = true

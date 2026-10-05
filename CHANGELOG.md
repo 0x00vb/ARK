@@ -10,6 +10,14 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- `ark-os` (ADR 0022): what differs between operating systems, behind one API. Folders
+  (`dirs::home`, `app_home`, `documents`), finding programs with `PATHEXT` and installers'
+  folders (`find::program`, `find::app`), starting any program in its own group with no
+  console window and stopping it with everything it started (`process::command`, `Tree`),
+  opening links and files without a shell (`open::open`), `fs::replace` and `write_atomic`
+  that retry while another program holds the file, `fs::name_problem`, `time::local_offset`,
+  `shell::interactive`. Re-exported as `ark_sdk::prelude::ark_os`.
+- The page tests run in Chromium too (`ARK_UI_BROWSER=chromium`), the engine of Windows' WebView2.
 - The Browser (ADR 0015): the new crate `ark-browser` drives the installed Chrome, Edge or Brave
   over the DevTools protocol; `browser.open`, `read`, `back`, `click`, `type`; a fresh context
   per agent, and a signed-in browser one agent uses at a time. `ArkBuilder::browser(true)` or
@@ -107,6 +115,14 @@ What changed for people building on ARK, per release. Not a commit log.
   Chat in every app that runs agents ([`ORCHESTRATION.md`](docs/ORCHESTRATION.md#the-board)).
 
 ### Changed
+- Windows: Claude Code, Codex, `npx` and tools are found (`PATHEXT`, npm's `.cmd`
+  launchers run their target directly, not through `cmd.exe`); a cancelled call stops what it
+  started; Connect's sign-in link opens whole; schedules run at local time; a live process
+  counts as alive; data folders no longer depend on `HOME`.
+- Every program ARK starts (vendor CLIs, MCP servers, the browser) runs in its own process
+  group, so a cancelled call or a closed browser stops its children too, on macOS as well.
+- Files ARK creates must have a name every system accepts (no `:`, `?`, `CON`, ...).
+- A fresh browser starts in a new profile folder each time.
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
   window: actions whose summary names that extension load first, whatever the task's language.
 - Window: the Files panel opens a file in its own tab instead of in the panel.

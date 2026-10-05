@@ -184,14 +184,14 @@ pub fn inside(root: &Path, rel: &str) -> Result<PathBuf, Error> {
             rel.display()
         )));
     }
-    let root = root.canonicalize()?;
+    let root = ark_os::dirs::canonicalize(root)?;
     let path = root.join(rel);
     // A link may point out of the folder: check where it really is. A new file's nearest
     // existing folder decides.
     let mut probe = path.clone();
     let mut rest = Vec::new();
     let real = loop {
-        match probe.canonicalize() {
+        match ark_os::dirs::canonicalize(&probe) {
             Ok(p) => {
                 break rest
                     .iter()
@@ -209,6 +209,13 @@ pub fn inside(root: &Path, rel: &str) -> Result<PathBuf, Error> {
             }
         }
     };
+    // What does not exist yet will be made: a name every system accepts, so the project
+    // folder opens anywhere (no `:`, `?` or Windows device names like `CON`).
+    for name in &rest {
+        if let Some(why) = ark_os::fs::name_problem(&name.to_string_lossy()) {
+            return Err(Error::Path(format!("`{}`: {why}", name.to_string_lossy())));
+        }
+    }
     if !real.starts_with(&root) {
         return Err(Error::Path(format!(
             "`{}` is outside the project folder",
@@ -386,7 +393,7 @@ fn save(path: &Path, bytes: &[u8]) -> Result<(), Error> {
         .unwrap_or_default();
     let tmp = path.with_file_name(format!(".{name}.ark-saving"));
     std::fs::write(&tmp, bytes)?;
-    if let Err(e) = std::fs::rename(&tmp, path) {
+    if let Err(e) = ark_os::fs::replace(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
     }
@@ -409,6 +416,15 @@ mod tests {
         );
         for bad in ["../x", "/etc/passwd", "notes/../../x"] {
             assert!(inside(root, bad).is_err(), "{bad}");
+        }
+        for bad in [
+            "notes/a:b.md",
+            "CON",
+            "nul.txt",
+            "notes/new?/x.md",
+            "draft.",
+        ] {
+            assert!(inside(root, bad).is_err(), "a new file named {bad}");
         }
         #[cfg(unix)]
         {

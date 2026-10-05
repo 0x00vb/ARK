@@ -21,6 +21,8 @@ type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
 /// A running browser and the connection to it. Dropping it stops the browser.
 pub struct Chrome {
     child: Mutex<Option<tokio::process::Child>>,
+    /// The browser with its helper processes, which hold the profile's files until they end.
+    tree: Mutex<ark_os::process::Tree>,
     out: mpsc::UnboundedSender<String>,
     pending: Pending,
     next: AtomicU64,
@@ -28,6 +30,7 @@ pub struct Chrome {
 
 impl Drop for Chrome {
     fn drop(&mut self) {
+        self.tree.lock().unwrap().kill();
         if let Some(mut c) = self.child.lock().unwrap().take() {
             let _ = c.start_kill();
         }
@@ -43,7 +46,7 @@ impl Chrome {
             .map_err(|e| format!("profile folder {}: {e}", profile.display()))?;
         let port_file = profile.join("DevToolsActivePort");
         let _ = tokio::fs::remove_file(&port_file).await;
-        let mut cmd = tokio::process::Command::new(bin);
+        let mut cmd = ark_os::process::command(bin);
         cmd.arg(format!("--user-data-dir={}", profile.display()))
             .args([
                 "--remote-debugging-port=0",
@@ -101,6 +104,7 @@ impl Chrome {
             }
         });
         Ok(Chrome {
+            tree: Mutex::new(ark_os::process::Tree::of(child.id())),
             child: Mutex::new(Some(child)),
             out,
             pending,
@@ -165,44 +169,28 @@ pub fn find_browser() -> Option<PathBuf> {
         let p = PathBuf::from(p);
         return p.is_file().then_some(p);
     }
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if cfg!(target_os = "macos") {
-        for app in [
-            "Google Chrome.app/Contents/MacOS/Google Chrome",
-            "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-            "Brave Browser.app/Contents/MacOS/Brave Browser",
-            "Chromium.app/Contents/MacOS/Chromium",
-        ] {
-            candidates.push(Path::new("/Applications").join(app));
-            if let Some(home) = std::env::var_os("HOME") {
-                candidates.push(Path::new(&home).join("Applications").join(app));
-            }
-        }
-    } else if cfg!(windows) {
-        for base in ["ProgramFiles", "ProgramFiles(x86)", "LocalAppData"] {
-            if let Some(b) = std::env::var_os(base) {
-                let b = PathBuf::from(b);
-                candidates.push(b.join("Google/Chrome/Application/chrome.exe"));
-                candidates.push(b.join("Microsoft/Edge/Application/msedge.exe"));
-                candidates.push(b.join("BraveSoftware/Brave-Browser/Application/brave.exe"));
-            }
-        }
-    } else {
-        let path: Vec<PathBuf> = std::env::var_os("PATH")
-            .map(|p| std::env::split_paths(&p).collect())
-            .unwrap_or_default();
-        for name in [
-            "google-chrome",
-            "google-chrome-stable",
-            "chromium",
-            "chromium-browser",
-            "microsoft-edge",
-            "brave-browser",
-        ] {
-            for d in &path {
-                candidates.push(d.join(name));
-            }
-        }
-    }
-    candidates.into_iter().find(|p| p.is_file())
+    ark_os::find::app(&BROWSERS)
 }
+
+/// Chrome, Edge, Brave and Chromium, in that order, where their installers put them.
+const BROWSERS: ark_os::find::App = ark_os::find::App {
+    macos: &[
+        "Google Chrome.app/Contents/MacOS/Google Chrome",
+        "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        "Brave Browser.app/Contents/MacOS/Brave Browser",
+        "Chromium.app/Contents/MacOS/Chromium",
+    ],
+    windows: &[
+        "Google/Chrome/Application/chrome.exe",
+        "Microsoft/Edge/Application/msedge.exe",
+        "BraveSoftware/Brave-Browser/Application/brave.exe",
+    ],
+    other: &[
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "microsoft-edge",
+        "brave-browser",
+    ],
+};

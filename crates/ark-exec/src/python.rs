@@ -33,15 +33,9 @@ pub struct Python {
 
 impl Python {
     /// The environment lives in `home` (made when needed). `uv` is looked up on PATH and in
-    /// its usual install folders.
+    /// its usual install folders (`~/.local/bin`, `~/.cargo/bin`).
     pub fn new(home: impl Into<PathBuf>) -> Self {
-        let uv = subprocess::which("uv").or_else(|| {
-            let user = std::env::var_os("HOME").map(PathBuf::from)?;
-            [".local/bin/uv", ".cargo/bin/uv"]
-                .iter()
-                .map(|p| user.join(p))
-                .find(|p| p.is_file())
-        });
+        let uv = subprocess::which("uv");
         Python {
             home: home.into(),
             uv,

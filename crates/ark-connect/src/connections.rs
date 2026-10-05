@@ -338,7 +338,7 @@ impl Connections {
         let path = self.inner.root.join(FILE);
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, text)?;
-        std::fs::rename(tmp, path)?;
+        ark_os::fs::replace(&tmp, &path)?;
         Ok(())
     }
 }

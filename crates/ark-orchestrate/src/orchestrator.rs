@@ -2798,14 +2798,6 @@ impl Approver for OnBehalf {
 /// Why a task left running by a stopped process failed.
 pub const INTERRUPTED: &str = "interrupted: the process stopped while it ran";
 
-#[cfg(unix)]
 fn process_alive(pid: u32) -> bool {
-    // SAFETY: signal 0 only checks that the process exists; nothing is delivered.
-    let r = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(not(unix))]
-fn process_alive(_pid: u32) -> bool {
-    false
+    ark_os::process::alive(pid)
 }

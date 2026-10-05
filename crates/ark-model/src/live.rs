@@ -19,6 +19,8 @@ const STDERR_TAIL: usize = 4096;
 
 pub(crate) struct LiveProcess {
     child: Child,
+    /// Stops the process with everything it started when this value is dropped.
+    tree: ark_os::process::Tree,
     stdin: ChildStdin,
     lines: Lines<BufReader<ChildStdout>>,
     stderr: Arc<Mutex<String>>,
@@ -34,7 +36,8 @@ pub(crate) enum ReadError {
 }
 
 impl LiveProcess {
-    /// Start `cmd` with piped stdio. It is killed when this value is dropped.
+    /// Start `cmd` (from `ark_os::process::command`) with piped stdio. It and what it started
+    /// are stopped when this value is dropped.
     pub(crate) fn spawn(mut cmd: Command) -> std::io::Result<Self> {
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -62,6 +65,7 @@ impl LiveProcess {
             }
         });
         Ok(LiveProcess {
+            tree: ark_os::process::Tree::of(child.id()),
             child,
             stdin,
             lines: BufReader::new(stdout).lines(),
@@ -105,18 +109,20 @@ impl LiveProcess {
 
     /// Stop the process and wait for it to exit.
     pub(crate) async fn stop(mut self) {
+        self.tree.kill();
         let _ = self.child.start_kill();
         let _ = tokio::time::timeout(Duration::from_secs(5), self.child.wait()).await;
     }
 }
 
-#[cfg(test)]
+// The tests drive a shell; starting programs on Windows is tested in ark-os.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn lines_go_in_and_come_back() {
-        let mut c = Command::new("/bin/sh");
+        let mut c = ark_os::process::command(std::path::Path::new("/bin/sh"));
         c.args([
             "-c",
             "while IFS= read -r l; do echo \"got $l\"; echo oops >&2; done",
@@ -144,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_exit_closes_the_output() {
-        let mut c = Command::new("/bin/sh");
+        let mut c = ark_os::process::command(std::path::Path::new("/bin/sh"));
         c.args(["-c", "read l; echo bye; exit 3"]);
         let mut p = LiveProcess::spawn(c).unwrap();
         p.send("x").await.unwrap();

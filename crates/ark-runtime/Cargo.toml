@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "ARK runtime: the agent loop, context budget, model routing, distillation, and metrics."
 
 [dependencies]
+ark-os.workspace = true
 ark-core.workspace = true
 ark-model.workspace = true
 ark-store.workspace = true
@@ -20,8 +21,6 @@ tracing.workspace = true
 time.workspace = true
 futures.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

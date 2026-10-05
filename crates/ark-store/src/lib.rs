@@ -175,7 +175,7 @@ impl Store {
             // write-to-temp-then-rename so a concurrent reader never sees a partial blob
             let tmp = path.with_extension("tmp");
             std::fs::write(&tmp, bytes)?;
-            std::fs::rename(&tmp, &path)?;
+            ark_os::fs::replace(&tmp, &path)?;
         }
         Ok(id)
     }

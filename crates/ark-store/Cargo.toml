@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "ARK persistence: content-addressed blobs, a SQLite metadata db, and full-text search."
 
 [dependencies]
+ark-os.workspace = true
 ark-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

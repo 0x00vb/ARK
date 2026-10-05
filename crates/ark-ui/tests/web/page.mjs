@@ -689,9 +689,11 @@ const inits = {
   backoff: () => {
     window.__es = { opened: 0, delays: [] };
     const realTimeout = window.setTimeout.bind(window);
-    window.setTimeout = (fn, ms, ...a) => {
-      // Only the transport's reconnect waits are compressed and recorded.
-      const caller = (new Error().stack || "").split("\n")[1] || "";
+    window.setTimeout = function arkTestTimeout(fn, ms, ...a) {
+      // Only the transport's reconnect waits are compressed and recorded. The caller is the
+      // frame after this one (V8 starts its stack with an "Error" line, WebKit does not).
+      const frames = (new Error().stack || "").split("\n");
+      const caller = frames[frames.findIndex((f) => f.includes("arkTestTimeout")) + 1] || "";
       if (ms >= 500 && caller.includes("transport.js")) {
         window.__es.delays.push(ms);
         return realTimeout(fn, 1, ...a);

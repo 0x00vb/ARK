@@ -24,48 +24,70 @@ only. The runtime had no method that makes a project from files.
 
   | Method | Does |
   |---|---|
-  | `upload_file {upload, path, data, offset}` | writes one part (base64, max 8 MiB) of one file into `<store>/uploads/<upload>/` |
+  | `upload_parts {upload, parts: [{path, data, offset}]}` | writes parts (base64, max 8 MiB in one call) into `<store>/uploads/<upload>/`. No parts starts the upload |
   | `upload_project {upload, name}` | moves that folder to a new project's folder in one rename; answers `{id, name}` |
   | `upload_cancel {upload}` | removes the upload |
 
 - The client makes the upload id (8 to 64 letters, digits or `-`).
-- At `offset` 0 the file starts again. Another offset must be the current end of the file.
+- At `offset` 0 a file starts again. Another offset must be the end of the file. A part that is
+  there already (the answer was lost) is not written two times.
+- `upload_project` stores the project only after the rename. A second call with the same
+  upload answers the same project (`uploads/<upload>.done`).
 - All paths stay in the upload folder (`ark_files::inside`). The runtime writes only files.
 - A new name that is in use gets a number (`notes 2`).
-- The runtime removes uploads that are older than one day.
-- `ark_ui::remote::Folder::read(dir)` lists the files. It does not include links.
-- `ark_ui::remote::send_folder(client, folder, name, go_on)` sends 1 MiB parts and then makes the
-  project. It calls `go_on` after each part. If `go_on` answers false, or a call fails, it
-  cancels the upload.
+- The runtime removes uploads older than one day when it starts.
+- `ark_ui::remote::Folder::read(dir)` lists the files. It does not include links or names that
+  are not UTF-8 (`skipped()`). `Folder::read_at_most(dir, files, bytes)` stops early with
+  `None` above a limit.
+- `ark_ui::remote::send_folder(client, folder, name, go_on)` sends calls of 512 KiB at most:
+  one part of a large file, or up to 200 small files. It tries a call 3 times when the
+  connection fails, then makes the project. It calls `go_on` after each call. If `go_on`
+  answers false, or a call fails 3 times, it cancels the upload.
 - `ark.action({ where: "project" })` puts an app's item in a project's menu. The item gets
-  `{ project }`.
+  `{ project }`. A failure of the item shows as a toast.
 
 ```mermaid
 sequenceDiagram
     participant A as App (this computer)
     participant R as Runtime elsewhere
-    A->>A: Folder::read(dir)
-    loop each file, each 1 MiB part
-        A->>R: upload_file {upload, path, data, offset}
-        R->>R: write into <store>/uploads/<upload>/
+    A->>A: Folder::read_at_most(dir, files, bytes)
+    A->>R: upload_parts {upload, parts: []}
+    R->>R: make <store>/uploads/<upload>/
+    loop until all files are sent (512 KiB per call, 3 tries each)
+        A->>R: upload_parts {upload, parts}
+        R->>R: write the parts
     end
     A->>R: upload_project {upload, name}
-    R->>R: create project, rename folder to <store>/workspaces/<id>
+    R->>R: rename the folder to <store>/workspaces/<id>, then store the project
     R-->>A: {id, name}
     Note over A,R: On an error or a stop: upload_cancel {upload}
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Started: upload_parts (no parts)
+    Started --> Started: upload_parts
+    Started --> Project: upload_project
+    Started --> [*]: upload_cancel, or one day old at a start
+    Project --> Project: upload_project again (same answer)
+    Project --> [*]: answer one day old at a start
 ```
 
 ## Consequences
 - The project shows only when all files are there. A stopped copy leaves no project.
 - The copy contains the folder only. Chats, agents and traces stay on the first computer.
 - Empty folders and links are not copied.
+- A folder of many small files needs few calls. Each call opens a new connection (the runtime
+  closes each one), so a call carries as much as it can.
 - A token holder can write files on the runtime. This is not a new permission: the Terminal
   panel can do the same (`REMOTE.md`, What a token allows).
-- The limits of a copy (size, number of files) are for the app to set. ARK sets only the part
-  size.
+- The limits of a copy (size, number of files) are for the app to set. ARK sets only the size
+  of a call.
 
 ## Check
 `crates/ark-ui/tests/serve.rs` (`a_folder_sent_from_another_computer_becomes_a_project_there`):
 a stopped copy leaves nothing, a full copy has the same bytes, a name in use gets a number, a
-path out of the folder is refused. `src/upload.rs` tests the parts and the ids.
+path out of the folder is refused, an empty folder is a project, `read_at_most` stops early, a
+second `upload_project` gives the same answer. `src/upload.rs` tests parts sent again, a bad
+part in a call, and the ids.
 `tests/page.rs` (`an_apps_action_on_a_project_is_in_its_menu`): the project menu item.

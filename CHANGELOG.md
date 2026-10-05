@@ -20,7 +20,7 @@ What changed for people building on ARK, per release. Not a commit log.
   `when({})` is true).
 - A folder sent to a runtime elsewhere becomes a project there (ADR 0030):
   `ark_ui::remote::send_folder(client, &Folder::read(dir)?, name, go_on)` sends it in parts
-  (`upload_file`, `upload_project`, `upload_cancel`); the project appears only when every file
+  (`upload_parts`, `upload_project`, `upload_cancel`); the project appears only when every file
   arrived. `ark.action({ where: "project" })` adds an app's item to a project's menu.
 - The window opens a runtime elsewhere and comes back (ADR 0029): `ark_ui::remote::visit(url,
   token)` from an app's handler loads that runtime's page in place of the app's own, and

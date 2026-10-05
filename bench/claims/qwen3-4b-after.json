@@ -1,0 +1,484 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T01:56:54.103989Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 5,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "300"
+  },
+  "workloads": [
+    {
+      "name": "claimed-files",
+      "class": "claims",
+      "description": "one call writes a chart but not the report; the answer may say only written files were saved",
+      "summary": {
+        "runs": 5,
+        "successes": 1,
+        "success_rate": 0.2,
+        "model_calls": 3.2,
+        "input_tokens": 5857.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 5857.0,
+        "output_tokens": 358.8,
+        "total_tokens": 6215.8,
+        "cost_usd": 0.015302,
+        "cost_per_success_usd": 0.07651,
+        "tool_calls": 1.2,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.2,
+        "peak_context_tokens": 1784.0,
+        "mean_context_tokens": 1524.4,
+        "tool_schema_tokens": 2144.0,
+        "prefix_reuse_tokens": 3096.8,
+        "median_turn_ms": 6808.0,
+        "p95_turn_ms": 7692.0,
+        "median_first_token_ms": 343.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "claimed-files",
+          "rep": 0,
+          "success": false,
+          "verdict": "report.md was not written",
+          "answer": "The line chart of monthly sales was successfully generated and saved as chart.png. The report text was intended to be generated from the data, but an error occurred during report creation due to a missing 'summary' key. The raw data (January=120, February=135, March=150) is correctly formatted and available in the output. \n\nFinding: A line chart was produced and saved as chart.png. [cites inv:67f1",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5901
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5459,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5459,
+          "cache_write_tokens": 0,
+          "output_tokens": 442,
+          "total_tokens": 5901,
+          "tokens_measured": true,
+          "cost_usd": 0.015338,
+          "wall_ms": 7135,
+          "turn_ms": [
+            7135
+          ],
+          "first_token_ms": [
+            159,
+            382,
+            344
+          ],
+          "model_latency_ms": [
+            2449,
+            1668,
+            3012
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1626,
+          "mean_context_tokens": 1509,
+          "context_sources": {
+            "Capability index": 831,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 153,
+            "Project": 150,
+            "Retrieved context": 85,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 150,
+            "Tool results": 140,
+            "Tool schemas": 2010,
+            "Working state": 147,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2010,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 70,
+          "result_raw_tokens": 75,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2781,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-files",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The line chart of monthly sales, with values January=120, February=135, March=150, was saved as chart.png. The two-sentence report detailing the trend in sales was saved as report.md. Both files have been successfully generated and stored. The goal is complete.",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 7951
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 7571,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7571,
+          "cache_write_tokens": 0,
+          "output_tokens": 380,
+          "total_tokens": 7951,
+          "tokens_measured": true,
+          "cost_usd": 0.018942,
+          "wall_ms": 7692,
+          "turn_ms": [
+            7692
+          ],
+          "first_token_ms": [
+            137,
+            376,
+            410
+          ],
+          "model_latency_ms": [
+            2760,
+            1428,
+            1794,
+            1635
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1784,
+          "mean_context_tokens": 1584,
+          "context_sources": {
+            "Capability index": 1108,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 420,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 200,
+            "Tool results": 385,
+            "Tool schemas": 2680,
+            "Working state": 196,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2680,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 137,
+          "result_raw_tokens": 121,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4362,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-files",
+          "rep": 2,
+          "success": false,
+          "verdict": "report.md was not written",
+          "answer": "The only file successfully created in this turn is chart.png. The report.md was not generated or saved by any tool call in this interaction. Therefore, only chart.png was written. \n\nNext step: Confirm whether report.md was actually generated or if the tool call failed to produce it.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5741
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5440,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5440,
+          "cache_write_tokens": 0,
+          "output_tokens": 301,
+          "total_tokens": 5741,
+          "tokens_measured": true,
+          "cost_usd": 0.01389,
+          "wall_ms": 6808,
+          "turn_ms": [
+            6808
+          ],
+          "first_token_ms": [
+            127,
+            389,
+            313
+          ],
+          "model_latency_ms": [
+            3306,
+            2012,
+            1486
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1664,
+          "mean_context_tokens": 1521,
+          "context_sources": {
+            "Capability index": 831,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 221,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 150,
+            "Tool results": 194,
+            "Tool schemas": 2010,
+            "Working state": 147,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2010,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 70,
+          "result_raw_tokens": 75,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2779,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-files",
+          "rep": 3,
+          "success": false,
+          "verdict": "report.md was not written",
+          "answer": "The line chart was successfully saved as chart.png. The report.md file was not generated in this turn, as the reports.make tool only produced chart.png based on the provided output. No evidence confirms the creation of report.md in this execution.  \n\nNext step: Confirm whether report.md was actually generated and verify its existence.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5736
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5432,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5432,
+          "cache_write_tokens": 0,
+          "output_tokens": 304,
+          "total_tokens": 5736,
+          "tokens_measured": true,
+          "cost_usd": 0.013904,
+          "wall_ms": 6791,
+          "turn_ms": [
+            6791
+          ],
+          "first_token_ms": [
+            137,
+            396,
+            343
+          ],
+          "model_latency_ms": [
+            3392,
+            1985,
+            1410
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1661,
+          "mean_context_tokens": 1520,
+          "context_sources": {
+            "Capability index": 831,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 218,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 150,
+            "Tool results": 194,
+            "Tool schemas": 2010,
+            "Working state": 147,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2010,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 70,
+          "result_raw_tokens": 75,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2779,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-files",
+          "rep": 4,
+          "success": false,
+          "verdict": "report.md was not written",
+          "answer": "The goal is to create a line chart and a two-sentence report based on monthly sales data. The initial attempt to generate the report and chart failed because the output did not contain the expected data (e.g., \"January=120\"). To verify the actual output, I need to retrieve the full result of the `reports__make` invocation and inspect it directly. I will now fetch the complete output to ensure the ",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5750
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5383,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5383,
+          "cache_write_tokens": 0,
+          "output_tokens": 367,
+          "total_tokens": 5750,
+          "tokens_measured": true,
+          "cost_usd": 0.014436,
+          "wall_ms": 5757,
+          "turn_ms": [
+            5757
+          ],
+          "first_token_ms": [
+            156,
+            391,
+            209
+          ],
+          "model_latency_ms": [
+            2159,
+            1750,
+            1843
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1561,
+          "mean_context_tokens": 1488,
+          "context_sources": {
+            "Capability index": 831,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 162,
+            "Project": 150,
+            "Retrieved context": 13,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 150,
+            "Tool results": 140,
+            "Tool schemas": 2010,
+            "Working state": 147,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2010,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 70,
+          "result_raw_tokens": 75,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2783,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 5,
+    "successes": 1,
+    "success_rate": 0.2,
+    "model_calls": 3.2,
+    "input_tokens": 5857.0,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 5857.0,
+    "output_tokens": 358.8,
+    "total_tokens": 6215.8,
+    "cost_usd": 0.015302,
+    "cost_per_success_usd": 0.07651,
+    "tool_calls": 1.2,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 3.2,
+    "peak_context_tokens": 1784.0,
+    "mean_context_tokens": 1524.4,
+    "tool_schema_tokens": 2144.0,
+    "prefix_reuse_tokens": 3096.8,
+    "median_turn_ms": 6808.0,
+    "p95_turn_ms": 7692.0,
+    "median_first_token_ms": 343.0,
+    "stall_stops": 0.0
+  }
+}

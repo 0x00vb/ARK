@@ -521,6 +521,10 @@ impl Harness {
         let mut changed_at = turn_started;
         let mut fresh_meta: u32 = 0;
         let mut corrected_text_call = false;
+        // Files of the project folder this turn's calls wrote, and whether the model was told
+        // once that its answer names a saved file none of them wrote.
+        let mut written: Vec<String> = Vec::new();
+        let mut corrected_claim = false;
         let mut steered: Vec<String> = Vec::new();
         // Tools an acquisition added this turn, and the turn's engine once it has them.
         let outer = engine;
@@ -618,6 +622,27 @@ impl Harness {
                     retrieved.push(0);
                     continue;
                 }
+                // An answer that says a file was saved when no call of this turn wrote it (a run
+                // that wrote a chart but not the report it was meant to): say so once, with the
+                // files that were written, and let the model save it or correct the answer.
+                if !corrected_claim {
+                    let missing = unwritten_claims(
+                        &completion.content,
+                        &written,
+                        || engine.workspace_dir(project).ok(),
+                        turn_started,
+                    );
+                    if !missing.is_empty() {
+                        corrected_claim = true;
+                        tracing::info!(files = ?missing, "the answer names files no call wrote; asking again");
+                        ws.push_round(vec![
+                            Message::assistant(completion.content.clone()),
+                            Message::user(unwritten_note(&missing, &written)),
+                        ]);
+                        retrieved.push(0);
+                        continue;
+                    }
+                }
                 answer = completion.content.trim().to_string();
                 streamed = !answer.is_empty();
                 break;
@@ -635,6 +660,7 @@ impl Harness {
                 cited: &mut cited,
                 repeated_failures: &mut repeated_failures,
                 changed_at: &mut changed_at,
+                written: &mut written,
             };
             macro_rules! flush {
                 () => {
@@ -1188,12 +1214,13 @@ impl Harness {
             }
             let model_text = card_for_model(&card);
             let raw_tokens = estimate_tokens(&inv.output.to_string());
-            let files = inv
+            let files: Vec<String> = inv
                 .produced
                 .iter()
                 .filter_map(|id| engine.store.get_artifact(project, id).ok().flatten())
                 .filter_map(|a| a.meta.get("path")?.as_str().map(str::to_string))
                 .collect();
+            tally.written.extend(files.iter().cloned());
             on_event(HarnessEvent::ToolResult {
                 id: p.call.id.clone(),
                 action: p.call.name.clone(),
@@ -1957,6 +1984,8 @@ struct Tally<'a> {
     cited: &'a mut Vec<InvocationId>,
     repeated_failures: &'a mut u32,
     changed_at: &'a mut time::OffsetDateTime,
+    /// Files of the project folder the turn's calls wrote (relative paths).
+    written: &'a mut Vec<String>,
 }
 
 /// Artifacts named in the system prompt. Older ones stay reachable through search.
@@ -2022,6 +2051,163 @@ fn core_loaded(engine: &Engine, profile: &AgentProfile) -> Vec<String> {
         }
     }
     v
+}
+
+/// Files an answer says were saved that no call of this turn wrote. A claim is a file name
+/// (`report.md`, `out/chart.png`) in a sentence that says something was saved, written or
+/// created and does not say it was not. A name counts as written when a call wrote a file of
+/// that name, or when the file in `workspace` changed since `since` (a run lists only so many
+/// of the files it wrote). Deterministic and English only; a miss costs nothing, a false
+/// alarm one more reply.
+fn unwritten_claims(
+    text: &str,
+    written: &[String],
+    workspace: impl FnOnce() -> Option<std::path::PathBuf>,
+    since: time::OffsetDateTime,
+) -> Vec<String> {
+    let claims = claimed_files(text);
+    if claims.is_empty() {
+        return claims;
+    }
+    let workspace = workspace();
+    let since = std::time::SystemTime::from(since);
+    claims
+        .into_iter()
+        .filter(|claim| {
+            let name = file_name(claim);
+            if written.iter().any(|w| file_name(w) == name) {
+                return false;
+            }
+            let changed = workspace
+                .as_ref()
+                .and_then(|dir| std::fs::metadata(dir.join(claim)).ok())
+                .and_then(|m| m.modified().ok())
+                .is_some_and(|t| t >= since);
+            !changed
+        })
+        .collect()
+}
+
+fn file_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+/// File names in sentences that say something was saved, written or created, in order, once
+/// each. A name that follows "from" or "using" is an input, not a claim.
+fn claimed_files(text: &str) -> Vec<String> {
+    const SAYS_SAVED: &[&str] = &[
+        "saved",
+        "wrote",
+        "written",
+        "created",
+        "exported",
+        "generated",
+        "stored",
+        "produced",
+    ];
+    const SAYS_NOT: &[&str] = &[
+        "not", "cannot", "unable", "failed", "fail", "couldn't", "didn't", "wasn't", "won't",
+        "isn't", "hasn't", "haven't",
+    ];
+    const INPUT: &[&str] = &["from", "using"];
+    let mut claims: Vec<String> = Vec::new();
+    for sentence in sentences(text) {
+        let words: Vec<String> = sentence
+            .split(|c: char| c.is_whitespace() || "`*_\"'()[]<>,;|".contains(c))
+            .map(|w| w.trim_end_matches(['.', ':', '!', '?']).to_string())
+            .filter(|w| !w.is_empty())
+            .collect();
+        let lower: Vec<String> = words.iter().map(|w| w.to_lowercase()).collect();
+        let says = |set: &[&str]| lower.iter().any(|w| set.contains(&w.as_str()));
+        if !says(SAYS_SAVED) || says(SAYS_NOT) {
+            continue;
+        }
+        for (i, w) in words.iter().enumerate() {
+            let input = i > 0 && INPUT.contains(&lower[i - 1].as_str());
+            if !input && looks_like_file(w) && !claims.contains(w) {
+                claims.push(w.clone());
+            }
+        }
+    }
+    claims
+}
+
+/// Sentences and lines of `text`: split at a line break, or at `.`, `!` or `?` followed by
+/// a space (a file name's dot is not). A list item belongs to the line before the list when
+/// that line ends with `:` ("Saved these files:" then "- report.md").
+fn sentences(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut lead: Option<String> = None;
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let item = line.trim_start();
+        let is_item = item.starts_with(['-', '*', '+'])
+            || item
+                .split_once(". ")
+                .is_some_and(|(n, _)| n.chars().all(|c| c.is_ascii_digit()));
+        match &lead {
+            Some(l) if is_item => {
+                out.push(format!("{l} {item}"));
+                continue;
+            }
+            _ => lead = None,
+        }
+        let mut start = 0;
+        let bytes = line.as_bytes();
+        for i in 0..bytes.len() {
+            if matches!(bytes[i], b'.' | b'!' | b'?') && bytes.get(i + 1) == Some(&b' ') {
+                out.push(line[start..=i].to_string());
+                start = i + 1;
+            }
+        }
+        let last = line[start..].trim_end();
+        if last.ends_with(':') {
+            lead = Some(last.to_string());
+        }
+        out.push(last.to_string());
+    }
+    out
+}
+
+/// A relative or absolute file name with an extension: `report.md`, `out/chart.png`. Not a
+/// web address, a version number, an abbreviation (`e.g`) or a domain (`example.com`).
+fn looks_like_file(word: &str) -> bool {
+    const DOMAINS: &[&str] = &[
+        "com", "org", "net", "io", "dev", "ai", "app", "co", "edu", "gov",
+    ];
+    if word.contains("://") || word.starts_with("www.") || word.contains('@') {
+        return false;
+    }
+    let Some((stem, ext)) = word.rsplit_once('.') else {
+        return false;
+    };
+    let stem_name = file_name(stem);
+    (2..=5).contains(&ext.len())
+        && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        && ext.starts_with(|c: char| c.is_ascii_alphabetic())
+        && !DOMAINS.contains(&ext.to_lowercase().as_str())
+        && stem_name.chars().any(|c| c.is_alphanumeric())
+}
+
+/// What the model is told when its answer names files no call wrote.
+fn unwritten_note(missing: &[String], written: &[String]) -> String {
+    let (names, it) = if missing.len() == 1 {
+        (missing[0].clone(), "it")
+    } else {
+        (missing.join(", "), "them")
+    };
+    let wrote = if written.is_empty() {
+        "This turn wrote no files.".to_string()
+    } else {
+        let mut w = written.to_vec();
+        w.dedup();
+        format!("This turn wrote: {}.", w.join(", "))
+    };
+    format!(
+        "Your answer says {names} was saved, but no tool call in this turn wrote {it}. {wrote} Save {it} now with a tool, or reply with an answer that names only the files that were written."
+    )
 }
 
 /// Whether `text` contains a call to one of `tools` written out as text (`record_state({`,
@@ -2378,6 +2564,72 @@ mod tests {
             "strings",
             "a bare adapter name is fine"
         );
+    }
+
+    #[test]
+    fn files_an_answer_says_were_saved_are_found() {
+        let claims = |t: &str| claimed_files(t);
+        assert_eq!(
+            claims("Saved the chart as chart.png and the report as `out/report.md`."),
+            vec!["chart.png", "out/report.md"]
+        );
+        // Seen live (qwen3:4b): the failure is admitted, so only the chart is claimed.
+        assert_eq!(
+            claims("The line chart has been created and saved as chart.png.  \n\nThe report.md could not be saved due to a folder busy error."),
+            vec!["chart.png"]
+        );
+        assert_eq!(
+            claims("Files written:\n\n- [report](report.md)\n- data/sales.csv\n\nDone."),
+            vec!["report.md", "data/sales.csv"]
+        );
+        assert_eq!(
+            claims("I created summary.xlsx from sales.csv using clean.py."),
+            vec!["summary.xlsx"],
+            "inputs are not claims"
+        );
+        assert!(
+            claims("Read report.md: sales rose 25%.").is_empty(),
+            "no save"
+        );
+        assert!(
+            claims("I wrote it up, e.g. the trend, see https://example.com/a.md and v0.10.0, on example.com.").is_empty(),
+            "abbreviations, addresses, versions and domains are not files"
+        );
+    }
+
+    #[test]
+    fn a_claim_counts_as_written_by_a_call_or_by_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let start = time::OffsetDateTime::now_utc() - time::Duration::seconds(5);
+        std::fs::write(dir.path().join("extra.csv"), "a").unwrap();
+        let text = "Saved report.md, out/chart.png and extra.csv.";
+        let written = vec!["out/report.md".to_string()];
+        let ws = || Some(dir.path().to_path_buf());
+        assert_eq!(
+            unwritten_claims(text, &written, ws, start),
+            vec!["out/chart.png"],
+            "report.md was written by a call, extra.csv changed in the folder this turn"
+        );
+        let later = time::OffsetDateTime::now_utc() + time::Duration::seconds(60);
+        assert_eq!(
+            unwritten_claims("Saved extra.csv.", &[], ws, later),
+            vec!["extra.csv"],
+            "a file older than the turn was not written by it"
+        );
+        let mut asked = false;
+        assert!(unwritten_claims(
+            "Hello.",
+            &[],
+            || {
+                asked = true;
+                None
+            },
+            start
+        )
+        .is_empty());
+        assert!(!asked, "no claim, no look at the folder");
+        assert!(unwritten_note(&["report.md".into()], &["chart.png".into()])
+            .contains("no tool call in this turn wrote it. This turn wrote: chart.png."));
     }
 
     #[test]

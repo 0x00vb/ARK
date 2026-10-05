@@ -127,6 +127,12 @@ What changed for people building on ARK, per release. Not a commit log.
   pipe holds (about 64 KB): output is read while the tool runs.
 - The `present` tool no longer offers views the window cannot show (`diff`, `structured`,
   `split`).
+- An answer that says a file was saved when no call of the turn wrote it is no longer taken as
+  the final answer: the model is told once which files were written, and saves the file or
+  corrects the answer. A claim is a file name in a sentence that says it was saved, written or
+  created (English only); a file counts as written when a call wrote it or it changed in the
+  project folder during the turn. On the new `claimed-files` workload, qwen3:4b said a report was
+  saved that its run never wrote in 5 of 5 runs, and in 0 of 5 with the check.
 
 ### Breaking
 - `HarnessEvent::ToolResult` has a new field, `files`, and `ProducedArtifact` one, `path`: a

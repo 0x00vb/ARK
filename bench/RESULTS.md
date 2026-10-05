@@ -3,6 +3,32 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Files an answer says were saved (2026-10-05)
+
+In ARK Desktop, qwen3.5:27b said it saved `sales_report.md` after a code run that wrote only a
+chart. The `claimed-files` workload has that shape: one call makes a chart and a report, and its
+first run writes the chart, then stops with a traceback (`exit_code=1`, `files=["chart.png"]`).
+The check: an answer that says a file was saved that no call of the turn wrote is sent back once,
+with the files that were written. Reports in `bench/claims/`; "false claim" is the workload's own
+judge (the answer names `report.md`, admits no failure, and no call wrote it).
+
+| `claimed-files` | Success | False claim | Model calls | Total tokens | Median turn |
+|---|---:|---:|---:|---:|---:|
+| qwen3:4b, before | 0/5 | 5/5 | 2.0 | 3,708 | 3.8 s |
+| qwen3:4b, with the check | 1/5 | 0/5 | 3.2 | 6,216 | 6.8 s |
+| qwen3.5:27b, before | 3/3 | 0/3 | 4.0 | 9,407 | 90.5 s |
+| qwen3.5:27b, with the check | 3/3 | 0/3 | 5.0 | 12,170 | 98.3 s |
+
+- qwen3:4b: told once, it retried in 1 run and admitted the missing report in the other 4. The
+  extra call is the cost of the check, paid only when it fires.
+- qwen3.5:27b ran the tool again by itself in every run; the check never fired (one text reply
+  per run). Its extra calls are its own `get_evidence` and `load_action` calls, noise over 3 runs.
+- A first version of the workload (the tool's result said in plain words "report.md was not
+  written") did not reproduce the claim: qwen3:4b said so honestly in 5 of 5 runs. The claim
+  comes with a result that looks like a program's output.
+- Simulated: the 16 older workloads did not move; `claimed-files` passes with the check (5 calls)
+  and fails without it (3 calls).
+
 ## Subscription CLIs kept running (2026-10-04)
 
 A managed vendor session keeps its CLI running: Claude Code with streaming JSON in and out,

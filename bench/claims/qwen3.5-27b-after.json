@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T02:07:36.143566Z",
+  "mode": "live",
+  "model": "ollama:qwen3.5:27b",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "900"
+  },
+  "workloads": [
+    {
+      "name": "claimed-files",
+      "class": "claims",
+      "description": "one call writes a chart but not the report; the answer may say only written files were saved",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 5.0,
+        "input_tokens": 10958.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 10958.0,
+        "output_tokens": 1211.6666666666667,
+        "total_tokens": 12169.666666666666,
+        "cost_usd": 0.03403266666666667,
+        "cost_per_success_usd": 0.03403266666666667,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 5.0,
+        "peak_context_tokens": 1987.0,
+        "mean_context_tokens": 1656.0,
+        "tool_schema_tokens": 3350.0,
+        "prefix_reuse_tokens": 6100.0,
+        "median_turn_ms": 98275.0,
+        "p95_turn_ms": 146297.0,
+        "median_first_token_ms": 10012.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "claimed-files",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done. I've created both files:\n\n**Facts (cited):**\n- Line chart saved as `chart.png` showing monthly sales data [inv:da319d63]\n- Two-sentence report saved as `report.md` [inv:da319d63]\n\n**Report content:**\n\"Monthly sales showed consistent growth over the first quarter, increasing from 120 in January to 150 in March. This represents a 25% increase over the three-month period with steady month-over-",
+          "turns": 1,
+          "steps": 6,
+          "model_calls": 6,
+          "calls_by_role": {
+            "reason": 6
+          },
+          "tokens_by_role": {
+            "reason": 14989
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 6
+          },
+          "input_tokens": 13412,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 13412,
+          "cache_write_tokens": 0,
+          "output_tokens": 1577,
+          "total_tokens": 14989,
+          "tokens_measured": true,
+          "cost_usd": 0.042594,
+          "wall_ms": 146297,
+          "turn_ms": [
+            146297
+          ],
+          "first_token_ms": [
+            10012
+          ],
+          "model_latency_ms": [
+            25357,
+            10202,
+            18513,
+            53379,
+            17770,
+            20958
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1,
+            "load_action": 1,
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1987,
+          "mean_context_tokens": 1693,
+          "context_sources": {
+            "Capability index": 1662,
+            "Conversation": 0,
+            "Instructions": 1716,
+            "Model output": 852,
+            "Project": 300,
+            "Retrieved context": 340,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 300,
+            "Tool results": 628,
+            "Tool schemas": 4020,
+            "Working state": 336,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 4020,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 137,
+          "result_raw_tokens": 121,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 7793,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-files",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done. I've created both files:\n\n**Facts (cited from inv:34cc1916):**\n- Line chart saved as `chart.png` showing monthly sales data\n- Report saved as `report.md` with two sentences summarizing the trend\n\n**Report content:**\n\"Monthly sales showed consistent growth over the first quarter, increasing from 120 in January to 150 in March. This represents a 25% increase over the three-month period with st",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 12021
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 5
+          },
+          "input_tokens": 11035,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 11035,
+          "cache_write_tokens": 0,
+          "output_tokens": 986,
+          "total_tokens": 12021,
+          "tokens_measured": true,
+          "cost_usd": 0.03193,
+          "wall_ms": 95928,
+          "turn_ms": [
+            95928
+          ],
+          "first_token_ms": [
+            10118
+          ],
+          "model_latency_ms": [
+            24092,
+            9952,
+            21581,
+            18494,
+            21702
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1,
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1959,
+          "mean_context_tokens": 1669,
+          "context_sources": {
+            "Capability index": 1385,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 695,
+            "Project": 250,
+            "Retrieved context": 255,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 250,
+            "Tool results": 423,
+            "Tool schemas": 3350,
+            "Working state": 305,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3350,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 137,
+          "result_raw_tokens": 121,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 6107,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "claimed-files",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done. I've created both files:\n\n**Facts (cited from inv:954335d9):**\n- Line chart saved as `chart.png` showing monthly sales data\n- Report saved as `report.md` with a two-sentence summary\n\n**Report content:**\n\"Monthly sales increased steadily from January through March, starting at 120 in January, rising to 135 in February, and reaching 150 in March. This represents a consistent upward trend with ",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 9499
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 4
+          },
+          "input_tokens": 8427,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8427,
+          "cache_write_tokens": 0,
+          "output_tokens": 1072,
+          "total_tokens": 9499,
+          "tokens_measured": true,
+          "cost_usd": 0.027574,
+          "wall_ms": 98275,
+          "turn_ms": [
+            98275
+          ],
+          "first_token_ms": [
+            9982
+          ],
+          "model_latency_ms": [
+            28509,
+            9714,
+            37206,
+            22750
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1828,
+          "mean_context_tokens": 1606,
+          "context_sources": {
+            "Capability index": 1108,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 446,
+            "Project": 200,
+            "Retrieved context": 170,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 200,
+            "Tool results": 277,
+            "Tool schemas": 2680,
+            "Working state": 196,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2680,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 137,
+          "result_raw_tokens": 121,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4400,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 3,
+    "success_rate": 1.0,
+    "model_calls": 5.0,
+    "input_tokens": 10958.0,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 10958.0,
+    "output_tokens": 1211.6666666666667,
+    "total_tokens": 12169.666666666666,
+    "cost_usd": 0.03403266666666667,
+    "cost_per_success_usd": 0.03403266666666667,
+    "tool_calls": 2.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 5.0,
+    "peak_context_tokens": 1987.0,
+    "mean_context_tokens": 1656.0,
+    "tool_schema_tokens": 3350.0,
+    "prefix_reuse_tokens": 6100.0,
+    "median_turn_ms": 98275.0,
+    "p95_turn_ms": 146297.0,
+    "median_first_token_ms": 10012.0,
+    "stall_stops": 0.0
+  }
+}

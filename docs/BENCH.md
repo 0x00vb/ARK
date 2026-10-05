@@ -93,6 +93,7 @@ neighbors.
 | claimed-schedule | standing work asked in words, twice in one chat; the answer may say it is scheduled only if the schedule was made |
 | board | the person's chat plans three parts on the board and hands the first to a writer; after a restart a new chat hands off the next. Checked on the board itself: three items, each part handed off once (`Workload::chat`, `TurnSpec::new_chat_after_restart`) |
 | files-edit | a computed column and a total row in a real spreadsheet in the project folder, through ARK's Files tools; checked on the saved file, which must keep its other sheet |
+| analysis | a chart and a two-sentence report from a CSV with Python (`code.run` in its sandbox; simulated: a stand-in runs the program), checked on the saved files: a PNG and a report naming the top region and its total |
 
 ## The naive baseline
 

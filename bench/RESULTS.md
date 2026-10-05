@@ -3,6 +3,24 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Analysis with Run code (2026-10-05)
+
+The `analysis` workload: `sales.csv` (sales by region and month) in the project folder; the task
+asks for a bar chart (`chart.png`) and a two-sentence report (`report.md`) made with Python. The
+check reads the saved files: a PNG, and a report that names North with 4,300. Live runs use
+ARK's Run code in its sandbox. Reports in `bench/analysis/`.
+
+| `analysis` | Success | Model calls | Total tokens | Runs of code | Median turn |
+|---|---:|---:|---:|---:|---:|
+| qwen3:4b, live | 1/3 | 5.0 | 14,928 | 3.3 | 66.9 s |
+| qwen3.5:27b, live | 2/2 | 3.5 | 8,991 | 2.0 | 154.6 s |
+| simulated | 2/2 | 3.0 | 5,107 | 1.0 | |
+
+- qwen3:4b wrote a program with a syntax error (an extra `)` after an f-string) and ran the same
+  program again unchanged: 2 times in one run, 6 in the other, then explained the error instead
+  of fixing it. An identical failing `code.run` is not caught today; a check that says "this
+  exact program already failed with this error" is the candidate change, to be measured here.
+- qwen3.5:27b wrote both files on its first run of code in both runs.
 ## An answer that announces work it has not done (2026-10-05)
 
 On `files-edit`, qwen3:4b read the spreadsheet and then ended its reply with "I will now call

@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "label": "live-analysis-qwen3.5-27b",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T04:33:23.453864Z",
+  "mode": "live",
+  "model": "ollama:qwen3.5:27b",
+  "fast_model": null,
+  "reps": 2,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "1500"
+  },
+  "workloads": [
+    {
+      "name": "analysis",
+      "class": "files",
+      "description": "a chart and a report from a CSV with Python (code.run), checked on the saved files",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 3.5,
+        "input_tokens": 8097.5,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 8097.5,
+        "output_tokens": 893.5,
+        "total_tokens": 8991.0,
+        "cost_usd": 0.02513,
+        "cost_per_success_usd": 0.02513,
+        "tool_calls": 2.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.5,
+        "peak_context_tokens": 2299.0,
+        "mean_context_tokens": 1865.5,
+        "tool_schema_tokens": 2408.0,
+        "prefix_reuse_tokens": 4072.0,
+        "median_turn_ms": 154562.0,
+        "p95_turn_ms": 174221.0,
+        "median_first_token_ms": 26616.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "analysis",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Done. I've created both deliverables:\n\n**chart.png** - A bar chart showing total revenue per region:\n- East: $3,600\n- North: $4,300\n- South: $3,950\n\n**report.md** - A two-sentence report stating that **North** is the highest-performing region with a total revenue of **$4,300**.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 7520
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 3
+          },
+          "input_tokens": 6747,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 6747,
+          "cache_write_tokens": 0,
+          "output_tokens": 773,
+          "total_tokens": 7520,
+          "tokens_measured": true,
+          "cost_usd": 0.021224,
+          "wall_ms": 174221,
+          "turn_ms": [
+            174221
+          ],
+          "first_token_ms": [
+            42023,
+            26616
+          ],
+          "model_latency_ms": [
+            55980,
+            71530,
+            37660
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2221,
+          "mean_context_tokens": 1821,
+          "context_sources": {
+            "Capability index": 1071,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 489,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 228,
+            "Tool results": 378,
+            "Tool schemas": 2064,
+            "Working state": 225,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2064,
+          "tools_exposed_max": 5,
+          "tools_used": 1,
+          "result_context_tokens": 270,
+          "result_raw_tokens": 251,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3073,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "analysis",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "You're right - I misstated that. The code **read** `sales.csv` (it already existed) and **wrote**:\n\n- **chart.png** - bar chart of total revenue per region\n- **report.md** - two-sentence report naming North as the highest-revenue region with $4,300 total",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 10462
+          },
+          "calls_by_model": {
+            "qwen3.5:27b": 4
+          },
+          "input_tokens": 9448,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 9448,
+          "cache_write_tokens": 0,
+          "output_tokens": 1014,
+          "total_tokens": 10462,
+          "tokens_measured": true,
+          "cost_usd": 0.029036,
+          "wall_ms": 154562,
+          "turn_ms": [
+            154562
+          ],
+          "first_token_ms": [
+            12808,
+            26720,
+            16914
+          ],
+          "model_latency_ms": [
+            25614,
+            49760,
+            54324,
+            22192
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2299,
+          "mean_context_tokens": 1910,
+          "context_sources": {
+            "Capability index": 1428,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 917,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 304,
+            "Tool results": 595,
+            "Tool schemas": 2752,
+            "Working state": 300,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2752,
+          "tools_exposed_max": 5,
+          "tools_used": 1,
+          "result_context_tokens": 215,
+          "result_raw_tokens": 194,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5071,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 2,
+    "successes": 2,
+    "success_rate": 1.0,
+    "model_calls": 3.5,
+    "input_tokens": 8097.5,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 8097.5,
+    "output_tokens": 893.5,
+    "total_tokens": 8991.0,
+    "cost_usd": 0.02513,
+    "cost_per_success_usd": 0.02513,
+    "tool_calls": 2.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 3.5,
+    "peak_context_tokens": 2299.0,
+    "mean_context_tokens": 1865.5,
+    "tool_schema_tokens": 2408.0,
+    "prefix_reuse_tokens": 4072.0,
+    "median_turn_ms": 154562.0,
+    "p95_turn_ms": 174221.0,
+    "median_first_token_ms": 26616.0,
+    "stall_stops": 0.0
+  }
+}

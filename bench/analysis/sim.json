@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T04:23:43.648881Z",
+  "mode": "simulated",
+  "model": "sim",
+  "fast_model": null,
+  "reps": 2,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false"
+  },
+  "workloads": [
+    {
+      "name": "analysis",
+      "class": "files",
+      "description": "a chart and a report from a CSV with Python (code.run), checked on the saved files",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 3.0,
+        "input_tokens": 4884.0,
+        "cached_input_tokens": 2958.0,
+        "uncached_input_tokens": 1926.0,
+        "output_tokens": 223.0,
+        "total_tokens": 5107.0,
+        "cost_usd": 0.0075076000000000006,
+        "cost_per_success_usd": 0.0075076000000000006,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.0,
+        "peak_context_tokens": 1754.0,
+        "mean_context_tokens": 1628.0,
+        "tool_schema_tokens": 2043.0,
+        "prefix_reuse_tokens": 2958.0,
+        "median_turn_ms": 18.0,
+        "p95_turn_ms": 46.0,
+        "median_first_token_ms": 0.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "analysis",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "North had the highest total revenue, 4,300. The chart is in chart.png and the report in report.md.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5107
+          },
+          "calls_by_model": {
+            "sim": 3
+          },
+          "input_tokens": 4884,
+          "cached_input_tokens": 2958,
+          "uncached_input_tokens": 1926,
+          "cache_write_tokens": 1668,
+          "output_tokens": 223,
+          "total_tokens": 5107,
+          "tokens_measured": false,
+          "cost_usd": 0.0075076000000000006,
+          "wall_ms": 46,
+          "turn_ms": [
+            46
+          ],
+          "first_token_ms": [
+            0
+          ],
+          "model_latency_ms": [
+            0,
+            0,
+            0
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1754,
+          "mean_context_tokens": 1628,
+          "context_sources": {
+            "Capability index": 924,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 354,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 228,
+            "Tool results": 69,
+            "Tool schemas": 2043,
+            "Working state": 258,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2043,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 30,
+          "result_raw_tokens": 31,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2958,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "analysis",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "North had the highest total revenue, 4,300. The chart is in chart.png and the report in report.md.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5107
+          },
+          "calls_by_model": {
+            "sim": 3
+          },
+          "input_tokens": 4884,
+          "cached_input_tokens": 2958,
+          "uncached_input_tokens": 1926,
+          "cache_write_tokens": 1668,
+          "output_tokens": 223,
+          "total_tokens": 5107,
+          "tokens_measured": false,
+          "cost_usd": 0.0075076000000000006,
+          "wall_ms": 18,
+          "turn_ms": [
+            18
+          ],
+          "first_token_ms": [
+            0
+          ],
+          "model_latency_ms": [
+            0,
+            0,
+            0
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1754,
+          "mean_context_tokens": 1628,
+          "context_sources": {
+            "Capability index": 924,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 354,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 228,
+            "Tool results": 69,
+            "Tool schemas": 2043,
+            "Working state": 258,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2043,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 30,
+          "result_raw_tokens": 31,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2958,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 2,
+    "successes": 2,
+    "success_rate": 1.0,
+    "model_calls": 3.0,
+    "input_tokens": 4884.0,
+    "cached_input_tokens": 2958.0,
+    "uncached_input_tokens": 1926.0,
+    "output_tokens": 223.0,
+    "total_tokens": 5107.0,
+    "cost_usd": 0.0075076000000000006,
+    "cost_per_success_usd": 0.0075076000000000006,
+    "tool_calls": 1.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 3.0,
+    "peak_context_tokens": 1754.0,
+    "mean_context_tokens": 1628.0,
+    "tool_schema_tokens": 2043.0,
+    "prefix_reuse_tokens": 2958.0,
+    "median_turn_ms": 18.0,
+    "p95_turn_ms": 46.0,
+    "median_first_token_ms": 0.0,
+    "stall_stops": 0.0
+  }
+}

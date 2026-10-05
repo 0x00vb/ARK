@@ -5,12 +5,14 @@
 //! carried on the project's board across a restart and a new chat, and a spreadsheet edited in
 //! place. Nothing here is specific to an application domain.
 
+mod analysis;
 mod board;
 mod claims;
 mod files;
 pub mod tools;
 mod web;
 
+pub use analysis::{analysis, AnalysisSpec};
 pub use board::{board, BoardSpec};
 pub use claims::{claimed_files, claimed_schedule, ClaimsSpec};
 pub use files::{files_edit, FilesSpec};
@@ -131,6 +133,7 @@ pub fn all(long_turns: usize) -> Vec<Box<dyn Workload>> {
         Box::new(claimed_files()),
         Box::new(claimed_schedule()),
         Box::new(board()),
+        Box::new(analysis()),
         Box::new(files_edit()),
     ]
 }

@@ -134,6 +134,9 @@ What changed for people building on ARK, per release. Not a commit log.
   `Workload::chat` runs a team's turns through the person's conversation, and
   `TurnSpec::new_chat_after_restart` starts a new chat ([`bench/RESULTS.md`](bench/RESULTS.md)).
 
+- Benchmark: the `analysis` workload (a chart and a report from a CSV with Run code, checked on
+  the saved files; simulated with a stand-in program) ([`bench/RESULTS.md`](bench/RESULTS.md)).
+
 ### Changed
 - Runtime: an answer that ends by announcing work it has not done ("I will now call
   files.edit...") while tools are offered is sent back once, saying nothing ran. On qwen3:4b

@@ -1,6 +1,7 @@
-# Runs ARK for real on Windows, after `cargo build`: the things unit tests do not reach.
-# Each check prints one result line and never stops the others; the job summary gets a table.
-# Uses a small local model through Ollama, so no paid model is called and no account is used.
+﻿# Runs ARK for real on Windows, after `cargo build`: the things unit tests do not reach.
+# Each check prints one result line and never stops the others; logs/smoke.md (and in CI the
+# job summary) gets a table. Turns use a small local model through Ollama: no paid model is
+# called. Claude Code and Codex are only asked whether they are signed in.
 #
 #   pwsh scripts/windows-smoke.ps1 [-Logs logs] [-Model qwen3:0.6b]
 
@@ -10,6 +11,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+$Temp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 $Logs = (Resolve-Path $Logs).Path
 $Writer = (Resolve-Path "target/debug/writer.exe").Path
@@ -28,24 +30,33 @@ foreach ($v in "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ARK_CLAUDE_BIN", "ARK_COD
 
 Result "environment" $null ("HOME=" + $env:HOME + "; USERPROFILE=" + $env:USERPROFILE + "; LOCALAPPDATA=" + $env:LOCALAPPDATA)
 
-# ---- Ollama and a small model ---------------------------------------------------------------
-$ollamaDir = Join-Path $env:RUNNER_TEMP "ollama"
+# ---- Ollama and a small model: the one running here, the installed one, or a download ------
+$haveModel = $false
 try {
-    Invoke-WebRequest "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip" -OutFile "$ollamaDir.zip"
-    Expand-Archive "$ollamaDir.zip" -DestinationPath $ollamaDir -Force
-    $ollama = Join-Path $ollamaDir "ollama.exe"
-    Start-Process $ollama -ArgumentList "serve" -RedirectStandardError "$Logs/ollama.log" -RedirectStandardOutput "$Logs/ollama.out" -WindowStyle Hidden
-    Start-Sleep 5
+    $running = $null -ne (Invoke-RestMethod "http://localhost:11434/api/tags" -TimeoutSec 3 -ErrorAction Stop)
+} catch { $running = $false }
+$ollama = (Get-Command ollama -ErrorAction SilentlyContinue).Source
+if (-not $ollama -and (Test-Path "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe")) { $ollama = "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" }
+try {
+    if (-not $ollama) {
+        $ollamaDir = Join-Path $Temp "ollama"
+        Invoke-WebRequest "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip" -OutFile "$ollamaDir.zip"
+        Expand-Archive "$ollamaDir.zip" -DestinationPath $ollamaDir -Force
+        $ollama = Join-Path $ollamaDir "ollama.exe"
+    }
+    if (-not $running) {
+        Start-Process $ollama -ArgumentList "serve" -RedirectStandardError "$Logs/ollama.log" -RedirectStandardOutput "$Logs/ollama.out" -WindowStyle Hidden
+        Start-Sleep 5
+    }
     & $ollama pull $Model *> "$Logs/ollama-pull.log"
     $haveModel = $LASTEXITCODE -eq 0
-    Result "ollama" $haveModel "pull $Model exit $LASTEXITCODE"
+    Result "ollama" $haveModel "already running: $running; pull $Model exit $LASTEXITCODE"
 } catch {
-    $haveModel = $false
     Result "ollama" $false "$_"
 }
 
 # ---- one-shot turn, no WRITER_ROOT: where does the store go without HOME? -----------------
-$work = Join-Path $env:RUNNER_TEMP "writer-cwd"
+$work = Join-Path $Temp "writer-cwd"
 New-Item -ItemType Directory -Force -Path $work | Out-Null
 Push-Location $work
 if ($haveModel) {
@@ -56,12 +67,12 @@ if ($haveModel) {
     $tools = @($events | Select-String '"tool' ).Count
     Result "one-shot turn (ollama)" ($code -eq 0) "exit $code in $([int]$sw.Elapsed.TotalSeconds)s, $($events.Count) events, $tools tool lines"
 }
-$stores = @(Get-ChildItem -Force -Recurse -Depth 2 -Directory -Filter ".writer" $work, $env:USERPROFILE -ErrorAction SilentlyContinue | ForEach-Object FullName)
-Result "store location without WRITER_ROOT" $null ("found: " + ($stores -join ", "))
+$appData = Join-Path $env:LOCALAPPDATA "Writer"
+Result "store in %LOCALAPPDATA%\Writer, not the working folder" ((Test-Path $appData) -and -not (Test-Path (Join-Path $work ".writer"))) "app data: $(Test-Path $appData); in the working folder: $(Test-Path (Join-Path $work '.writer'))"
 Pop-Location
 
 # ---- the same turn, resumed, with an explicit root ------------------------------------------
-$env:WRITER_ROOT = Join-Path $env:RUNNER_TEMP "writer root with spaces é"
+$env:WRITER_ROOT = Join-Path $Temp "writer root with spaces é"
 if ($haveModel) {
     & $Writer -p "List the chapter files." --model "ollama:$Model" --yes --json > "$Logs/turn2.json" 2> "$Logs/turn2-stderr.log"
     $code = $LASTEXITCODE
@@ -89,16 +100,17 @@ Stop-Process -Id $p.Id -ErrorAction SilentlyContinue
 Start-Sleep 2
 Result "serve: process gone after stop" (-not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) "pid $($p.Id)"
 
-# ---- Claude Code and Codex: installed but signed out, so nothing is spent --------------------
-npm install -g @anthropic-ai/claude-code @openai/codex *> "$Logs/npm-cli.log"
+# ---- Claude Code and Codex: found and asked whether signed in, nothing spent ---------------
+# In CI they are installed with npm first (signed out). On a person's machine whatever is
+# installed is checked as it is.
+if ($env:CI) { npm install -g @anthropic-ai/claude-code @openai/codex *> "$Logs/npm-cli.log" }
+cargo test -p ark-model --test this_machine -- --ignored --nocapture *> "$Logs/this-machine.log"
 foreach ($cli in "claude", "codex") {
-    $where = (& where.exe $cli 2>$null) -join ", "
-    $model = if ($cli -eq "claude") { "claude:sonnet" } else { "codex:default" }
-    & $Writer -p "Say hi." --model $model --json > "$Logs/$cli.json" 2> "$Logs/$cli.err"
-    $msg = ((Get-Content "$Logs/$cli.err", "$Logs/$cli.json" -ErrorAction SilentlyContinue) -join " ")
-    if ($msg.Length -gt 300) { $msg = $msg.Substring(0, 300) }
-    $found = $msg -notmatch "not installed|not found"
-    Result "find $cli (on PATH as: $where)" $found "exit $LASTEXITCODE; $msg"
+    $where = ((& where.exe $cli 2>$null) -join ", ")
+    $backend = Select-String -Path "$Logs/this-machine.log" -Pattern "^backend ${cli}: (.*)" | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
+    $path = Select-String -Path "$Logs/this-machine.log" -Pattern "^path ${cli}: (.*)" | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
+    $ok = if ($where) { [bool]($backend -and $backend -notmatch "^not found") } else { $null }
+    Result "find $cli" $ok "where.exe: $(if ($where) { $where } else { 'none' }); ARK: $backend; path $path"
 }
 
 # ---- summary --------------------------------------------------------------------------------
@@ -108,5 +120,6 @@ if ($env:GITHUB_STEP_SUMMARY) {
     "## Runtime smoke" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
     $table | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 }
-Get-Process ollama* -ErrorAction SilentlyContinue | Stop-Process -ErrorAction SilentlyContinue
+# Stop only an Ollama this script started.
+if (-not $running) { Get-Process ollama -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $ollama } | Stop-Process -ErrorAction SilentlyContinue }
 exit 0

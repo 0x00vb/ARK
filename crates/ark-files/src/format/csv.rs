@@ -20,7 +20,7 @@ impl Format for Csv {
     fn read(&self, bytes: &[u8]) -> Result<Content, Error> {
         let text = decode(bytes);
         Ok(Content::Sheet(Workbook {
-            sheets: vec![parse(&text, delimiter(&text))],
+            sheets: vec![parse_upto(&text, delimiter(&text), Some(crate::READ_CELLS))],
         }))
     }
     fn edit(&self, bytes: &[u8], edits: &[Edit]) -> Result<Vec<u8>, Error> {
@@ -93,34 +93,58 @@ fn outside_quotes(line: &str, d: u8) -> usize {
 }
 
 pub fn parse(text: &str, d: u8) -> Sheet {
+    parse_upto(text, d, None)
+}
+
+fn put(sheet: &mut Sheet, r: u32, c: u32, s: &mut String, was_quoted: bool) {
+    let v = std::mem::take(s);
+    if v.is_empty() {
+        return;
+    }
+    let value = match (was_quoted, crate::model::parse_number(&v)) {
+        (false, Some(n)) => Value::Number(n),
+        _ => Value::Text(v),
+    };
+    sheet.cells.insert(
+        (r, c),
+        Cell {
+            value,
+            ..Cell::default()
+        },
+    );
+}
+
+/// The rows a parse stopped before, counted without keeping them: line ends outside quoted
+/// fields, and a last line without one.
+fn rows_left(rest: &str) -> u32 {
+    let (mut rows, mut quoted, mut content) = (0u32, false, false);
+    for b in rest.bytes() {
+        match b {
+            b'"' => quoted = !quoted,
+            b'\n' if !quoted => {
+                rows += u32::from(content);
+                content = false;
+            }
+            b'\r' => {}
+            _ => content = true,
+        }
+    }
+    rows + u32::from(content)
+}
+
+/// [`parse`], stopping at the end of the row where the sheet reaches `limit` cells.
+pub fn parse_upto(text: &str, d: u8, limit: Option<usize>) -> Sheet {
     let mut sheet = Sheet::new("Sheet1");
     let d = d as char;
     let (mut r, mut c) = (0u32, 0u32);
     let mut cur = String::new();
     let mut quoted = false;
-    let mut chars = text.chars().peekable();
-    let mut put = |r: u32, c: u32, s: &mut String, was_quoted: bool| {
-        let v = std::mem::take(s);
-        if v.is_empty() {
-            return;
-        }
-        let value = match (was_quoted, crate::model::parse_number(&v)) {
-            (false, Some(n)) => Value::Number(n),
-            _ => Value::Text(v),
-        };
-        sheet.cells.insert(
-            (r, c),
-            Cell {
-                value,
-                ..Cell::default()
-            },
-        );
-    };
+    let mut chars = text.char_indices().peekable();
     let mut was_quoted = false;
-    while let Some(ch) = chars.next() {
+    while let Some((at, ch)) = chars.next() {
         if quoted {
             if ch == '"' {
-                if chars.peek() == Some(&'"') {
+                if chars.peek().map(|p| p.1) == Some('"') {
                     cur.push('"');
                     chars.next();
                 } else {
@@ -133,22 +157,28 @@ pub fn parse(text: &str, d: u8) -> Sheet {
             quoted = true;
             was_quoted = true;
         } else if ch == d {
-            put(r, c, &mut cur, was_quoted);
+            put(&mut sheet, r, c, &mut cur, was_quoted);
             was_quoted = false;
             c += 1;
         } else if ch == '\n' || ch == '\r' {
-            if ch == '\r' && chars.peek() == Some(&'\n') {
+            let mut end = at + 1;
+            if ch == '\r' && chars.peek().map(|p| p.1) == Some('\n') {
                 chars.next();
+                end += 1;
             }
-            put(r, c, &mut cur, was_quoted);
+            put(&mut sheet, r, c, &mut cur, was_quoted);
             was_quoted = false;
             r += 1;
             c = 0;
+            if limit.is_some_and(|l| sheet.cells.len() >= l) {
+                sheet.unread = rows_left(&text[end..]);
+                break;
+            }
         } else {
             cur.push(ch);
         }
     }
-    put(r, c, &mut cur, was_quoted);
+    put(&mut sheet, r, c, &mut cur, was_quoted);
     let _ = (&mut r, &mut c);
     // Formulas typed into a CSV stay formulas.
     let formulas: Vec<(u32, u32)> = sheet
@@ -203,6 +233,24 @@ pub fn write(sheet: &Sheet, d: u8, crlf: bool) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_large_csv_reads_its_start_and_counts_the_rest() {
+        let rows = crate::READ_CELLS / 2 + 10;
+        let mut text = String::from("a,b\n");
+        for r in 1..rows {
+            text.push_str(&format!("{r},\"x\ny\"\n"));
+        }
+        let read = super::parse_upto(&text, b',', Some(crate::READ_CELLS));
+        let (kept, _) = read.size();
+        assert_eq!(
+            kept + read.unread,
+            rows as u32,
+            "a quoted line break is not a row"
+        );
+        assert!(read.unread > 0);
+        assert_eq!(super::parse(&text, b',').size().0, rows as u32);
+    }
+
     use super::*;
     use serde_json::json;
 

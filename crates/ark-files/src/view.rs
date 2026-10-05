@@ -10,6 +10,9 @@ use crate::File;
 pub const MAX_LISTING: usize = 12_000;
 /// Characters of one cell in a listing.
 const CELL_CHARS: usize = 80;
+/// A workbook read without a sheet shows the start of every sheet, each in an equal share of
+/// the listing, but no less than this.
+const SHEET_SHARE: usize = 900;
 /// Rows and columns a window gets per sheet.
 const PAGE_ROWS: u32 = 5_000;
 const PAGE_COLS: u32 = 200;
@@ -43,7 +46,10 @@ impl File {
                     if book.sheets.len() == 1 { "" } else { "s" },
                     book.sheets
                         .iter()
-                        .map(|s| format!("{} ({})", s.name, s.range()))
+                        .map(|s| match s.unread {
+                            0 => format!("{} ({})", s.name, s.range()),
+                            n => format!("{} ({}, and {n} more rows not read)", s.name, s.range()),
+                        })
                         .collect::<Vec<_>>()
                         .join(", ")
                 );
@@ -67,15 +73,33 @@ impl File {
                     }
                     None => book.sheets.iter().collect(),
                 };
+                // Without a sheet or range, every sheet shows its start: what a person looks at
+                // first in a workbook with several tabs.
+                let overview = w.sheet.is_none() && w.range.is_none() && chosen.len() > 1;
+                let share = if overview {
+                    (MAX_LISTING.saturating_sub(head.len()) / chosen.len()).max(SHEET_SHARE)
+                } else {
+                    usize::MAX
+                };
                 let mut more = None;
-                for s in chosen {
-                    let room = MAX_LISTING.saturating_sub(head.len());
-                    let (text, rest) = sheet_listing(s, w.range.as_deref(), room)?;
+                let count = chosen.len();
+                for (i, s) in chosen.into_iter().enumerate() {
+                    let left = MAX_LISTING.saturating_sub(head.len());
+                    if overview && left < SHEET_SHARE / 2 {
+                        head.push_str(&format!(
+                            "\n[{} more sheets not shown: read with their name as sheet]\n",
+                            count - i
+                        ));
+                        break;
+                    }
+                    let (text, rest) = sheet_listing(s, w.range.as_deref(), left.min(share))?;
                     head.push('\n');
                     head.push_str(&text);
                     if let Some(r) = rest {
                         more.get_or_insert(r);
-                        break;
+                        if !overview {
+                            break;
+                        }
                     }
                 }
                 Ok(Listing { text: head, more })
@@ -270,6 +294,13 @@ fn sheet_listing(
         }
         out.push_str(&line);
     }
+    if s.unread > 0 && r1 + 1 >= rows {
+        out.push_str(&format!(
+            "[rows {}-{} not read: the sheet is large, so ARK reads its start; a program reads all of it]\n",
+            rows + 1,
+            rows + s.unread
+        ));
+    }
     Ok((out, None))
 }
 
@@ -307,7 +338,7 @@ fn sheet_page(s: &Sheet) -> Json {
         "name": s.name,
         "rows": out,
         "cols": shown_cols,
-        "more_rows": rows - shown_rows,
+        "more_rows": rows - shown_rows + s.unread,
         "more_cols": cols - shown_cols,
     })
 }
@@ -361,6 +392,65 @@ mod tests {
             page["sheets"][0]["rows"][3][1],
             serde_json::json!({"t": "200", "e": "=SUM(B2:B3)", "n": 1, "f": 1})
         );
+    }
+
+    #[test]
+    fn a_workbook_read_without_a_sheet_shows_the_start_of_every_sheet() {
+        let mut book = Workbook { sheets: vec![] };
+        for name in ["Jan", "Feb", "Mar"] {
+            let rows: Vec<Vec<serde_json::Value>> = (0..400)
+                .map(|i| {
+                    vec![
+                        serde_json::json!(format!("{name} customer {i}")),
+                        serde_json::json!(i),
+                    ]
+                })
+                .collect();
+            apply_sheet(
+                &mut book,
+                &Edit::parse_all(&serde_json::json!([{"add_sheet": name, "rows": rows}])).unwrap(),
+            )
+            .unwrap();
+        }
+        let l = file(Content::Sheet(book.clone()))
+            .listing(&Window::default())
+            .unwrap();
+        for name in ["Jan", "Feb", "Mar"] {
+            assert!(l.text.contains(&format!("{name}!A1:B400")), "{}", l.text);
+            assert!(l.text.contains(&format!("{name} customer 0")), "{}", l.text);
+            assert!(
+                l.text.contains(&format!("read with sheet \"{name}\"")),
+                "{}",
+                l.text
+            );
+        }
+        assert!(l.text.len() <= MAX_LISTING + 200, "{}", l.text.len());
+        // A sheet asked for by name gets the whole listing.
+        let one = file(Content::Sheet(book))
+            .listing(&Window {
+                sheet: Some("Feb".into()),
+                ..Window::default()
+            })
+            .unwrap();
+        assert!(!one.text.contains("Jan customer"), "{}", one.text);
+        assert!(one.text.matches("Feb customer").count() > 100);
+    }
+
+    #[test]
+    fn a_sheet_read_in_part_says_how_much_is_not_read() {
+        let mut s = Sheet::new("Data");
+        s.cells.insert((0, 0), crate::model::Cell::default());
+        s.cells.get_mut(&(0, 0)).unwrap().value = Value::Number(1.0);
+        s.unread = 250;
+        let l = file(Content::Sheet(Workbook { sheets: vec![s] }))
+            .listing(&Window::default())
+            .unwrap();
+        assert!(
+            l.text.contains("Data (A1:A1, and 250 more rows not read)"),
+            "{}",
+            l.text
+        );
+        assert!(l.text.contains("[rows 2-251 not read"), "{}", l.text);
     }
 
     #[test]

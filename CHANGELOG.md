@@ -134,6 +134,11 @@ What changed for people building on ARK, per release. Not a commit log.
   data frames, and `.xlsx` through its `excel` extension, installed at setup since a run has no
   network), python-calamine (`pd.read_excel(engine="calamine")`: fast, and reads legacy `.xls`,
   `.xlsb` and `.ods`), xlsxwriter and pyarrow. The first setup downloads about 100 MB more.
+- Files reads large spreadsheets in part: a read keeps the first `ark_files::READ_CELLS` cells
+  of each sheet and counts the rest (`Sheet.unread`); the agent's listing says which rows were
+  not read and that a program reads all of them. An edit still sees every row. A workbook read
+  without a sheet shows the start of every sheet. A 300,000-row workbook reads in 200 MB instead
+  of 1.3 GB.
 
 - The project's board (ADR 0023): work items the person and the agents share, kept per project
   across chats and restarts. `Orchestrator::{board, work_item, add_work, change_work,

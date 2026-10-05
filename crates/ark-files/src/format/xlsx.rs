@@ -34,11 +34,11 @@ impl Format for Xlsx {
         Kind::Sheet
     }
     fn read(&self, bytes: &[u8]) -> Result<Content, Error> {
-        let book = Book::read(Package::read(bytes)?)?;
-        Ok(Content::Sheet(book.model()))
+        let book = Book::read(Package::read(bytes)?, Keep::Values)?;
+        Ok(Content::Sheet(book.into_model()))
     }
     fn edit(&self, bytes: &[u8], edits: &[Edit]) -> Result<Vec<u8>, Error> {
-        let mut book = Book::read(Package::read(bytes)?)?;
+        let mut book = Book::read(Package::read(bytes)?, Keep::Bytes)?;
         let before = book.model();
         let mut after = before.clone();
         apply_sheet(&mut after, edits)?;
@@ -61,7 +61,7 @@ impl Format for Xlsx {
             s.origin = None;
         }
         formula::recalc(&mut after);
-        let mut book = Book::read(template())?;
+        let mut book = Book::read(template(), Keep::Bytes)?;
         book.write(&Workbook::default(), &after)
     }
 }
@@ -143,8 +143,17 @@ struct RawCell {
     content: bool,
 }
 
+/// What a read keeps of each sheet: only its values (a read for the agent or the window), or
+/// also its bytes, which an edit rewrites in place. Keeping the bytes takes about twice the
+/// memory of the values.
+#[derive(Clone, Copy, PartialEq)]
+enum Keep {
+    Values,
+    Bytes,
+}
+
 impl Book {
-    fn read(pkg: Package) -> Result<Book, Error> {
+    fn read(pkg: Package, keep: Keep) -> Result<Book, Error> {
         let root_rels = pkg.text_opt("_rels/.rels").unwrap_or_default();
         let wb_part = relationships(&root_rels)
             .into_iter()
@@ -210,6 +219,7 @@ impl Book {
                         &styles,
                         date1904,
                         sheets.len(),
+                        keep,
                     )?);
                     Some(sheets.len() - 1)
                 }
@@ -234,13 +244,32 @@ impl Book {
             styles,
             date1904,
         };
+        // A sheet read only in part keeps the file's values: a formula over rows not read
+        // would compute wrong.
+        if book.sheets.iter().any(|s| s.model.unread > 0) {
+            return Ok(book);
+        }
         // Shared formulas reach their cells; then values the file left stale are computed.
-        let mut model = book.model();
+        // The sheets move out and back rather than being copied: a large sheet is large.
+        let mut model = Workbook {
+            sheets: book
+                .sheets
+                .iter_mut()
+                .map(|s| std::mem::replace(&mut s.model, Sheet::new("")))
+                .collect(),
+        };
         formula::recalc(&mut model);
         for (s, m) in book.sheets.iter_mut().zip(model.sheets) {
             s.model = m;
         }
         Ok(book)
+    }
+
+    /// The workbook's values, without a copy.
+    fn into_model(self) -> Workbook {
+        Workbook {
+            sheets: self.sheets.into_iter().map(|s| s.model).collect(),
+        }
     }
 
     fn model(&self) -> Workbook {
@@ -432,6 +461,22 @@ fn dir_of(part: &str) -> &str {
 }
 
 /// The prefix (`x:`) of `<x:workbook>`, or none.
+/// The index (from 0) of the last `<row>` in `data`, by its `r` attribute.
+fn last_row(data: &str, prefix: &str) -> Option<u32> {
+    let tag = format!("<{prefix}row");
+    let mut end = data.len();
+    while let Some(at) = data[..end].rfind(&tag) {
+        let rest = &data[at + tag.len()..];
+        if rest.starts_with([' ', '>', '/']) {
+            let close = rest.find('>')?;
+            let r = attr(&rest[..close], "r")?.parse::<u32>().ok()?;
+            return r.checked_sub(1);
+        }
+        end = at;
+    }
+    None
+}
+
 fn prefix_of(xml: &str, root: &str) -> String {
     Lexer::new(xml)
         .find_map(|t| match t {
@@ -665,6 +710,7 @@ impl SheetPart {
         styles: &Styles,
         date1904: bool,
         index: usize,
+        keep: Keep,
     ) -> Result<SheetPart, Error> {
         let p = prefix_of(&xml, "worksheet");
         let data = next_element(&xml, "sheetData", 0)
@@ -709,6 +755,12 @@ impl SheetPart {
                         .map(|r| r - 1)
                         .unwrap_or(if rows.is_empty() { 0 } else { row + 1 });
                     col = 0;
+                    if keep == Keep::Values && model.cells.len() >= crate::READ_CELLS {
+                        // Enough to show the sheet: count the rest by the last row's number.
+                        let last = last_row(&xml[..body_end], &p).unwrap_or(row);
+                        model.unread = last.saturating_sub(row) + 1;
+                        break;
+                    }
                     let kept: Vec<String> = xml::attrs(attrs)
                         .into_iter()
                         .filter(|(k, _)| *k != "r" && *k != "spans")
@@ -728,10 +780,10 @@ impl SheetPart {
                         xml::element_end(&xml, start)
                     };
                     pos = cend;
-                    let raw = xml[start..cend].to_string();
+                    let raw = &xml[start..cend];
                     let style = attr(attrs, "s").and_then(|v| v.parse::<u32>().ok());
                     let typ = attr(attrs, "t").map(|t| t.into_owned());
-                    let (v, f, fattrs, inline) = cell_parts(&raw);
+                    let (v, f, fattrs, inline) = cell_parts(raw);
                     let fmt = style.map(|s| styles.fmt(s)).unwrap_or_default();
                     let mut value = match typ.as_deref() {
                         Some("s") => v
@@ -791,15 +843,17 @@ impl SheetPart {
                             },
                         );
                     }
-                    cells.insert(
-                        (row, at),
-                        RawCell {
-                            raw,
-                            style,
-                            shared: shared_si,
-                            content,
-                        },
-                    );
+                    if keep == Keep::Bytes {
+                        cells.insert(
+                            (row, at),
+                            RawCell {
+                                raw: raw.to_string(),
+                                style,
+                                shared: shared_si,
+                                content,
+                            },
+                        );
+                    }
                 }
                 _ => {}
             }
@@ -815,7 +869,11 @@ impl SheetPart {
         Ok(SheetPart {
             name: name.to_string(),
             part,
-            xml,
+            xml: if keep == Keep::Bytes {
+                xml
+            } else {
+                String::new()
+            },
             p,
             data,
             rows,
@@ -1416,6 +1474,67 @@ mod tests {
     fn sheet_of(c: &Content, i: usize) -> &Sheet {
         let Content::Sheet(b) = c else { panic!() };
         &b.sheets[i]
+    }
+
+    /// A sheet of `rows` rows of three numbers, and a second small sheet.
+    fn large_book(rows: u32) -> Vec<u8> {
+        let mut big = Sheet::new("Data");
+        for r in 0..rows {
+            for c in 0..3 {
+                big.cells.insert(
+                    (r, c),
+                    crate::model::Cell {
+                        value: Value::Number(f64::from(r * 3 + c)),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        let mut small = Sheet::new("Notes");
+        small.cells.insert(
+            (0, 0),
+            crate::model::Cell {
+                value: Value::Text("hello".into()),
+                ..Default::default()
+            },
+        );
+        Xlsx.create(&Content::Sheet(Workbook {
+            sheets: vec![big, small],
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_large_sheet_reads_its_start_and_counts_the_rest_but_an_edit_sees_all() {
+        let rows = crate::READ_CELLS as u32 / 3 + 500;
+        let bytes = large_book(rows);
+        let read = Xlsx.read(&bytes).unwrap();
+        let data = sheet_of(&read, 0);
+        let (kept, _) = data.size();
+        assert!(data.cells.len() >= crate::READ_CELLS);
+        assert!(data.cells.len() < crate::READ_CELLS + 3);
+        assert_eq!(kept + data.unread, rows, "every row is read or counted");
+        assert_eq!(sheet_of(&read, 1).unread, 0);
+        assert_eq!(
+            sheet_of(&read, 1).get(0, 0).unwrap().value,
+            Value::Text("hello".into())
+        );
+        // An edit of the last row works on the whole file, and keeps every row.
+        let last = format!("A{rows}");
+        let edited = Xlsx
+            .edit(
+                &bytes,
+                &Edit::parse_all(&json!([{"cell": last, "value": "edited"}])).unwrap(),
+            )
+            .unwrap();
+        let mut whole = Book::read(Package::read(&edited).unwrap(), Keep::Bytes).unwrap();
+        let data = &whole.sheets.remove(0).model;
+        assert_eq!(data.size().0, rows);
+        assert_eq!(data.unread, 0);
+        assert_eq!(
+            data.get(rows - 1, 0).unwrap().value,
+            Value::Text("edited".into())
+        );
     }
 
     #[test]

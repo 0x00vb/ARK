@@ -513,6 +513,16 @@ fn search_file(root: &Path, p: &Path, needle: &str, hits: &mut Vec<String>) {
                                 push(hits, format!("{}!{}", s.name, cell_ref(r, c)), &t);
                             }
                         }
+                        if s.unread > 0 {
+                            push(
+                                hits,
+                                s.name.clone(),
+                                &format!(
+                                    "its last {} rows not searched (a large sheet; a program reads all of it)",
+                                    s.unread
+                                ),
+                            );
+                        }
                     }
                 }
                 Content::Document(doc) => {

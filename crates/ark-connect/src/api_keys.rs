@@ -80,7 +80,7 @@ impl ApiKeys {
         known(provider)?;
         let key = key.trim();
         if key.is_empty() {
-            return Err(ConnectError::Provider("paste the key first".into()));
+            return Err(ConnectError::Provider("Paste the key first.".into()));
         }
         self.check(provider, key).await?;
         self.secrets.set(&secret(provider), key)?;
@@ -126,13 +126,13 @@ impl ApiKeys {
                 .bearer_auth(key),
         };
         let res = req.send().await.map_err(|_| {
-            ConnectError::Provider("could not reach the provider; check the connection".into())
+            ConnectError::Provider("Could not reach the provider. Check the connection.".into())
         })?;
         match res.status().as_u16() {
             200..=299 => Ok(()),
-            401 | 403 => Err(ConnectError::Provider("that key was not accepted".into())),
+            401 | 403 => Err(ConnectError::Provider("That key was not accepted.".into())),
             s => Err(ConnectError::Provider(format!(
-                "the provider answered {s}; try again in a moment"
+                "The provider answered {s}. Try again in a moment."
             ))),
         }
     }
@@ -201,7 +201,7 @@ mod tests {
         let base = provider("sk-good").await;
         let keys = ApiKeys::open(dir.path(), secrets.clone()).with_base("anthropic", &base);
         let refused = keys.save("anthropic", "sk-bad").await.unwrap_err();
-        assert!(refused.to_string().contains("not accepted"), "{refused}");
+        assert!(refused.to_string().contains("That key was not accepted."), "{refused}");
         assert!(keys.saved().is_empty() && !keys.has("ANTHROPIC_API_KEY"));
         keys.save("anthropic", " sk-good ").await.unwrap();
         assert_eq!(keys.saved(), ["anthropic"]);

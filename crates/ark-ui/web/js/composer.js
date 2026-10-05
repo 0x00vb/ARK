@@ -273,7 +273,7 @@ export class Composer {
               paint(this.backends);
             } catch (err) {
               key.disabled = false;
-              why.textContent = err.message.replace(/^./, (c) => c.toUpperCase());
+              why.textContent = err.message;
               key.select();
             }
           });

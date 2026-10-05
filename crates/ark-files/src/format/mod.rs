@@ -11,6 +11,7 @@ pub use csv::Csv;
 pub use docx::Docx;
 pub use image::Image;
 pub use pdf::Pdf;
+pub(crate) use text::rewrite;
 pub use text::{Markdown, Text};
 pub use xlsx::Xlsx;
 

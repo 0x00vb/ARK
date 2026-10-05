@@ -131,6 +131,9 @@ What changed for people building on ARK, per release. Not a commit log.
   group, so a cancelled call or a closed browser stops its children too, on macOS as well.
 - Files ARK creates must have a name every system accepts (no `:`, `?`, `CON`, ...).
 - A fresh browser starts in a new profile folder each time.
+- Text files keep how they are stored when the agent or the person edits them: CRLF lines stay
+  CRLF, UTF-16 stays UTF-16 (and now reads as text). Skills saved with CRLF read cleanly.
+- Paths ARK shows or compares no longer carry Windows' `\\?\` prefix.
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
   window: actions whose summary names that extension load first, whatever the task's language.
 - Window: the Files panel opens a file in its own tab instead of in the panel.

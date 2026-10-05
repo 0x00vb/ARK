@@ -227,7 +227,7 @@ pub fn inside(root: &Path, rel: &str) -> Result<PathBuf, Error> {
 
 /// `p` relative to `root`, with `/`.
 pub fn relative(root: &Path, p: &Path) -> String {
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let root = ark_os::dirs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     p.strip_prefix(&root)
         .unwrap_or(p)
         .components()
@@ -367,9 +367,19 @@ pub fn write(root: &Path, rel: &str, content: &Content, base: Option<&str>) -> R
             return Err(Error::Changed(shown));
         }
     }
-    let bytes = match format_for(rel) {
-        Some(f) => f.create(content)?,
-        None => format::Text.create(content)?,
+    let old = if path.is_file() {
+        Some(std::fs::read(&path)?)
+    } else {
+        None
+    };
+    let text_file = format_for(rel).is_none_or(|f| f.kind().is_text());
+    let bytes = match (content, &old) {
+        // Rewriting a text file keeps how it is stored (CRLF lines, UTF-16).
+        (Content::Text(t), Some(old)) if text_file => format::rewrite(old, t),
+        _ => match format_for(rel) {
+            Some(f) => f.create(content)?,
+            None => format::Text.create(content)?,
+        },
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -404,6 +414,24 @@ fn save(path: &Path, bytes: &[u8]) -> Result<(), Error> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The page's editor saves the whole text: a CRLF file stays CRLF.
+    #[test]
+    fn rewriting_a_crlf_file_keeps_crlf() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("notes.txt"), "one\r\ntwo\r\n").unwrap();
+        write(
+            dir.path(),
+            "notes.txt",
+            &Content::Text("uno\ndos\n".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("notes.txt")).unwrap(),
+            b"uno\r\ndos\r\n"
+        );
+    }
 
     #[test]
     fn paths_stay_inside_the_folder() {

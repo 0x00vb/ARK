@@ -323,7 +323,7 @@ fn split_front_matter(text: &str) -> (std::collections::HashMap<String, String>,
     let head = &rest[..end];
     let body = rest[end + 4..]
         .trim_start_matches(['-'])
-        .trim_start_matches('\n');
+        .trim_start_matches(['\r', '\n']);
     let lines: Vec<&str> = head.lines().collect();
     let mut i = 0;
     while i < lines.len() {
@@ -411,12 +411,9 @@ fn inside(dir: &Path, rel: &str) -> ark_tools::Result<PathBuf> {
             "`{rel}` is outside the skill's folder"
         )));
     }
-    let root = dir
-        .canonicalize()
+    let root = ark_os::dirs::canonicalize(dir)
         .map_err(|e| AdapterError::Tool(format!("skill folder: {e}")))?;
-    let real = root
-        .join(r)
-        .canonicalize()
+    let real = ark_os::dirs::canonicalize(&root.join(r))
         .map_err(|e| AdapterError::Tool(format!("{rel}: {e}")))?;
     if !real.starts_with(&root) {
         return Err(AdapterError::Tool(format!(
@@ -457,6 +454,17 @@ mod tests {
         assert_eq!(body, "# Notes\nStep one.\n");
         let (m, body) = split_front_matter("just text");
         assert!(m.is_empty() && body == "just text");
+    }
+
+    /// A skill saved on Windows (CRLF) reads the same.
+    #[test]
+    fn front_matter_reads_crlf_files() {
+        let (m, body) = split_front_matter(
+            "---\r\nname: release-notes\r\ndescription: >\r\n  Write notes\r\n  from changes.\r\n---\r\n# Notes\r\n",
+        );
+        assert_eq!(m["name"], "release-notes");
+        assert_eq!(m["description"], "Write notes from changes.");
+        assert_eq!(body, "# Notes\r\n");
     }
 
     #[test]

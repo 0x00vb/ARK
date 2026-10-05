@@ -951,7 +951,8 @@ impl Interaction {
             return self.switch_project(name);
         };
         anyhow::ensure!(dir.is_dir(), "{} is not a folder", dir.display());
-        let dir = dir.canonicalize()?;
+        // Without `\\?\` on Windows: the path is shown and compared as text.
+        let dir = ark_os::dirs::canonicalize(dir)?;
         let top = self.top_projects()?;
         let path = dir.to_string_lossy();
         let p = match top.iter().find(|p| p.workspace.as_deref() == Some(&*path)) {

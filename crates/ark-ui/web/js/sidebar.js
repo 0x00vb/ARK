@@ -190,6 +190,13 @@ export class Sidebar {
           this.api.toast(e.message);
         }
       }),
+      // The app's own actions on a project (`ark.action({ where: "project" })`).
+      ...registry.actions
+        .filter((a) => {
+          if (a.where !== "project") return false;
+          try { return !a.when || a.when({ project: p }); } catch { return false; }
+        })
+        .map((a) => item(a.label, () => a.run({ project: p }, window.ark))),
     ]);
   }
 

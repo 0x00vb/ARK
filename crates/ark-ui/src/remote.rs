@@ -8,6 +8,155 @@
 
 pub use ark_interact::remote::Client;
 
+use std::path::{Path, PathBuf};
+
+use serde_json::{json, Value};
+
+/// How much of a file one call carries (the runtime takes up to 8 MiB). Small enough to arrive
+/// within the runtime's 30 seconds per request on a slow connection.
+const PART: usize = 1024 * 1024;
+
+/// A folder as [`send_folder`] would send it: every file under it, links left out.
+pub struct Folder {
+    root: PathBuf,
+    /// Paths relative to the folder, with `/`, and sizes.
+    files: Vec<(String, u64)>,
+}
+
+impl Folder {
+    /// Read what is in `dir`. Links (to files or folders) are left out: what they point to may
+    /// be outside the folder.
+    pub fn read(dir: &Path) -> anyhow::Result<Folder> {
+        anyhow::ensure!(dir.is_dir(), "{} is not a folder", dir.display());
+        let mut files = Vec::new();
+        let mut todo = vec![dir.to_path_buf()];
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d)? {
+                let e = e?;
+                let kind = e.file_type()?;
+                if kind.is_dir() {
+                    todo.push(e.path());
+                } else if kind.is_file() {
+                    let rel = e.path().strip_prefix(dir)?.to_path_buf();
+                    let rel: Vec<String> = rel
+                        .components()
+                        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                        .collect();
+                    files.push((rel.join("/"), e.metadata()?.len()));
+                }
+            }
+        }
+        files.sort();
+        Ok(Folder {
+            root: dir.to_path_buf(),
+            files,
+        })
+    }
+
+    /// How many files would be sent.
+    pub fn files(&self) -> usize {
+        self.files.len()
+    }
+
+    /// How many bytes would be sent.
+    pub fn bytes(&self) -> u64 {
+        self.files.iter().map(|(_, n)| n).sum()
+    }
+}
+
+/// How far a [`send_folder`] is.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Sent {
+    pub files: usize,
+    pub bytes: u64,
+}
+
+/// Copy `folder` to the runtime `client` reaches, where it becomes a new project named `name`
+/// (`name 2` when taken), and answer `{id, name}` there (ADR 0030). The project appears only
+/// when every file arrived; an error or `go_on` answering false removes what was sent.
+/// Empty folders are not sent.
+pub async fn send_folder(
+    client: &Client,
+    folder: &Folder,
+    name: &str,
+    mut go_on: impl FnMut(Sent) -> bool,
+) -> anyhow::Result<Value> {
+    let upload = uuid::Uuid::new_v4().simple().to_string();
+    let sent = send_files(client, folder, &upload, &mut go_on).await;
+    let done = match sent {
+        Ok(true) => {
+            client
+                .call("upload_project", json!({ "upload": upload, "name": name }))
+                .await
+        }
+        Ok(false) => Err(anyhow::anyhow!("the copy was stopped")),
+        Err(e) => Err(e),
+    };
+    if done.is_err() {
+        // Best effort: the runtime also removes uploads left for a day.
+        let _ = client
+            .call("upload_cancel", json!({ "upload": upload }))
+            .await;
+    }
+    done
+}
+
+async fn send_files(
+    client: &Client,
+    folder: &Folder,
+    upload: &str,
+    go_on: &mut impl FnMut(Sent) -> bool,
+) -> anyhow::Result<bool> {
+    use base64::Engine as _;
+
+    let mut sent = Sent::default();
+    let mut buf = vec![0u8; PART];
+    for (rel, _) in &folder.files {
+        let mut file = tokio::fs::File::open(folder.root.join(rel)).await?;
+        let mut offset = 0u64;
+        loop {
+            let n = read_part(&mut file, &mut buf).await?;
+            // A file's first part goes even when it is empty, so the file exists there.
+            if n > 0 || offset == 0 {
+                let data = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+                client
+                    .call(
+                        "upload_file",
+                        json!({ "upload": upload, "path": rel, "data": data, "offset": offset }),
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{rel}: {e}"))?;
+                offset += n as u64;
+                sent.bytes += n as u64;
+                if !go_on(sent) {
+                    return Ok(false);
+                }
+            }
+            if n < buf.len() {
+                break;
+            }
+        }
+        sent.files += 1;
+        if !go_on(sent) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Fill `buf` from `file` as far as it goes; fewer bytes than its length means the end.
+async fn read_part(file: &mut tokio::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+    use tokio::io::AsyncReadExt as _;
+    let mut n = 0;
+    while n < buf.len() {
+        match file.read(&mut buf[n..]).await? {
+            0 => break,
+            k => n += k,
+        }
+    }
+    Ok(n)
+}
+
 /// Open the native window on the runtime at `url`. The window's title bar is the system's:
 /// the remote page does not know it sits under window controls. If the runtime cannot be
 /// reached, or refuses the token, the window says so instead. `context` is the app's

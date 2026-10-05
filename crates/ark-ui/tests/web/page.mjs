@@ -804,6 +804,28 @@ async function visit(page) {
 }
 scenarios.visit = visit;
 
+// An app's action on a project: an item in that project's menu, given the project.
+async function projectAction(page) {
+  await page.evaluate(() => {
+    window.ark.action({
+      id: "copy", label: "Copy elsewhere", where: "project",
+      when: ({ project }) => project.current,
+      run: ({ project }) => { window.copied = project.name; },
+    });
+  });
+  const current = page.locator(".project-row[aria-current=true]").first();
+  await current.waitFor();
+  const more = current.locator(".project-more");
+  await more.click();
+  const item = page.locator(".popover .menu-item", { hasText: "Copy elsewhere" });
+  await item.waitFor();
+  await item.click();
+  const name = await current.locator(".project-name").innerText();
+  assert.equal(await page.evaluate(() => window.copied), name);
+  assert.equal(await page.locator(".popover[open]").count(), 0, "the menu closes");
+}
+scenarios["project-action"] = projectAction;
+
 const run = scenarios[scenario];
 if (!run) {
   console.error(`unknown scenario ${scenario}`);

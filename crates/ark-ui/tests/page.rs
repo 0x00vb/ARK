@@ -512,6 +512,11 @@ async fn always_in_this_project_stops_the_question_until_removed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_apps_action_on_a_project_is_in_its_menu() {
+    drive("project-action", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn skills_are_listed_in_settings_and_added_from_the_terminal() {
     drive("skills", vec![], Duration::ZERO).await;
 }

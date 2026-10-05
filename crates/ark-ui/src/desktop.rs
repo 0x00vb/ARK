@@ -62,8 +62,10 @@ impl tauri::Assets<Wry> for UiAssets {
 
 struct State(Arc<Host>);
 
-/// The running window and the address of its own page, once it exists.
-pub(crate) static WINDOW: OnceLock<(tauri::AppHandle, tauri::Url)> = OnceLock::new();
+/// The running app, once its window exists.
+pub(crate) static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+/// The address of the window's own page, from the first time it is seen there.
+static HOME: OnceLock<tauri::Url> = OnceLock::new();
 /// Changes each time the window leaves its own page: event channels opened before stop.
 pub(crate) static VISITS: AtomicU64 = AtomicU64::new(0);
 /// What a page elsewhere loads to bring the window back to its own page (`ark.openLocal()`).
@@ -76,26 +78,43 @@ fn own_page(url: &tauri::Url) -> bool {
     url.scheme() == "tauri" || (url.scheme() == "http" && url.host_str() == Some("tauri.localhost"))
 }
 
-fn from_own_page(webview: &tauri::Webview) -> Result<(), String> {
+fn on_own_page(webview: &tauri::Webview) -> bool {
     match webview.url() {
-        Ok(u) if own_page(&u) => Ok(()),
-        _ => Err("only the app's own page can use the window".into()),
+        Ok(u) if own_page(&u) => {
+            let _ = HOME.set(u);
+            true
+        }
+        _ => false,
     }
 }
 
-/// Catches [`OWN_PAGE`]: the window goes back to its own page instead.
+fn from_own_page(webview: &tauri::Webview) -> Result<(), String> {
+    if on_own_page(webview) {
+        Ok(())
+    } else {
+        Err("only the app's own page can use the window".into())
+    }
+}
+
+/// The window back on its own page.
+pub(crate) fn go_home(webview: &tauri::Webview) {
+    if let Some(home) = HOME.get() {
+        let _ = webview.navigate(home.clone());
+    }
+}
+
+/// Catches [`OWN_PAGE`]: from a page elsewhere, the window goes back to its own page. Loaded
+/// on the own page (a frame in it), it is only refused.
 fn window_plugin() -> tauri::plugin::TauriPlugin<Wry> {
     tauri::plugin::Builder::<Wry>::new("ark-window")
         .on_navigation(|webview, url| {
             if url.as_str() != OWN_PAGE {
                 return true;
             }
-            if let Some((_, home)) = WINDOW.get() {
-                let (webview, home) = (webview.clone(), home.clone());
+            if !on_own_page(webview) {
+                let webview = webview.clone();
                 // Not from inside the navigation callback.
-                tauri::async_runtime::spawn(async move {
-                    let _ = webview.navigate(home);
-                });
+                tauri::async_runtime::spawn(async move { go_home(&webview) });
             }
             false
         })
@@ -213,9 +232,10 @@ pub(crate) fn run(
             }
         })
         .setup(move |app| {
+            let _ = APP.set(app.handle().clone());
             if let Some(w) = app.get_webview_window("main") {
-                if let Ok(url) = w.url() {
-                    let _ = WINDOW.set((app.handle().clone(), url));
+                if let Some(url) = w.url().ok().filter(own_page) {
+                    let _ = HOME.set(url);
                 }
                 let _ = w.show();
             }
@@ -291,8 +311,11 @@ fn notify_questions(
             if ev["kind"] != "approval" {
                 continue;
             }
+            // In front and showing this runtime: a page elsewhere does not show its questions.
             let in_front = app.get_webview_window("main").is_some_and(|w| {
-                w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)
+                w.is_visible().unwrap_or(false)
+                    && w.is_focused().unwrap_or(false)
+                    && w.url().is_ok_and(|u| own_page(&u))
             });
             if in_front {
                 continue;

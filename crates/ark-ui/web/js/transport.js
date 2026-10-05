@@ -9,11 +9,16 @@ function ownPage() {
   return location.protocol === "tauri:" || location.hostname === "tauri.localhost";
 }
 
+// The window that opened a runtime elsewhere in place of its own page (`ark_ui::remote::visit`)
+// goes back to it when this address is loaded: the window catches it and never fetches it.
+const OWN_PAGE = "https://ark-local.invalid/";
+
 export function connect() {
   const tauri = window.__TAURI__;
   if (tauri && tauri.core && ownPage()) {
     return {
       kind: "desktop",
+      shell: "desktop",
       local: true,
       call: (method, params = {}) =>
         tauri.core.invoke("ark_call", { method, params }).catch((e) => {
@@ -37,8 +42,13 @@ export function connect() {
     url.searchParams.delete("token");
     history.replaceState(null, "", url.pathname + url.search);
   }
+  // In the window, on a runtime it visits: the window's title bar and a way back. In a
+  // browser, or a window opened only on that runtime (`run_window`), neither.
+  const inWindow = !!window.__TAURI__;
   return {
     kind: "browser",
+    shell: inWindow ? "desktop" : "browser",
+    openLocal: inWindow ? () => location.assign(OWN_PAGE) : undefined,
     // A browser on this machine's loopback address reaches a runtime on this machine; any other
     // address is a runtime elsewhere (ADR 0016).
     local: ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname),

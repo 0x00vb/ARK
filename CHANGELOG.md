@@ -10,6 +10,10 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- The window opens a runtime elsewhere and comes back (ADR 0029): `ark_ui::remote::visit(url,
+  token)` from an app's handler loads that runtime's page in place of the app's own, and
+  `ark.openLocal()` on that page goes back. `ark.sidebar({ id, render })` adds a row above the
+  projects. The window's commands answer only the app's own page.
 - Secrets in a file for servers (ADR 0028): `ark_connect::FileSecrets::in_store(root)` keeps
   account tokens and saved API keys in `<store>/secrets.enc` (AES-256-GCM, mode 0600), with the
   key from `ARK_SECRETS_KEY` or `<store>/secrets.key`; `ArkBuilder::secrets(..)` uses it instead

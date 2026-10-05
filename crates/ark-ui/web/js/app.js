@@ -41,6 +41,9 @@ const api = {
   // or a browser on this machine). False for a runtime elsewhere: its files, programs and
   // sign-ins are on that machine, so actions that need this one should not be offered.
   isLocal: () => transport.local,
+  // In the window, on a runtime elsewhere it opened: back to this computer's runtime.
+  // Undefined anywhere else (the window's own page, a browser).
+  openLocal: transport.openLocal,
   summary: () => state.summary,
   project: () => state.summary?.project,
   send: (text) => submit(text),
@@ -733,7 +736,7 @@ async function start() {
     const s = localStorage.getItem("ark-sidebar");
     if (s) appEl.dataset.sidebar = s;
   } catch {}
-  appEl.dataset.shell = transport.kind;
+  appEl.dataset.shell = transport.shell;
   thread = new Thread($("#thread"), $("#scroller"), api);
   composer = new Composer(api);
   sidebar = new Sidebar(api);

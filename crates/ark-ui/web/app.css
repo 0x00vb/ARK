@@ -208,6 +208,8 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .icon-btn.small .ico { width: 14px; height: 14px; }
 
 /* Projects, each with its chats beneath it. */
+.sidebar-ext { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px; }
+.sidebar-ext[hidden] { display: none; }
 .projects { flex: 1; overflow-y: auto; margin: 0 -4px; padding: 0 4px 8px; scrollbar-width: none; }
 .projects::-webkit-scrollbar { display: none; }
 .project + .project { margin-top: 1px; }

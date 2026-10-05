@@ -133,6 +133,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - Benchmark: the `board` workload (planning on the board across a restart and a new chat);
   `Workload::chat` runs a team's turns through the person's conversation, and
   `TurnSpec::new_chat_after_restart` starts a new chat ([`bench/RESULTS.md`](bench/RESULTS.md)).
+- Work reports into the chat that asked for it (ADR 0025): a scheduled run's result is posted in
+  that chat (`ark_runtime::session::{post, posts, Post}`), shown under its last turn (live in
+  the window, `post` event; in the terminal's recap) and carried by the chat's next turn (the
+  newest 3, clipped). `TaskSpec::report_to`, `TaskRecord::report_to`,
+  `Orchestrator::chat_tools_for(session)`, `EventKind::Posted`, `TranscriptTurn::posts`
+  ([`ORCHESTRATION.md`](docs/ORCHESTRATION.md#schedules)).
 
 - Benchmark: the `analysis` workload (a chart and a report from a CSV with Run code, checked on
   the saved files; simulated with a stand-in program) ([`bench/RESULTS.md`](bench/RESULTS.md)).
@@ -209,6 +215,9 @@ What changed for people building on ARK, per release. Not a commit log.
   build with `TaskSpec::new`. `Control` and `ControlOutcome` in `ark-interact` have new variants.
 - `ark_cli::ArkArgs` has `connect` and `token`, and `ark_cli::Welcome` has `runtime`: a struct
   literal needs them (`..Default::default()` for `ArkArgs`).
+- `TaskSpec`, `TaskRecord`, `SessionRecord` and `TranscriptTurn` have one more field each
+  (`report_to`, `report_to`, `posts_read`, `posts`), and `EventKind` the variant `Posted`: a
+  struct literal or an exhaustive match needs it.
 
 ## [0.9.0] - 2026-10-04
 

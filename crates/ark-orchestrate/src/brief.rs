@@ -196,6 +196,7 @@ mod tests {
             pid: None,
             schedule: None,
             item: None,
+            report_to: None,
         }
     }
 

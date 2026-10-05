@@ -225,6 +225,8 @@ impl Adapter for AgentTools {
 /// turn, so the agents it names are the current ones.
 pub(crate) struct ChatTools {
     pub orch: Orchestrator,
+    /// The conversation (session id): what it schedules posts each run's result there.
+    pub chat: Option<String>,
 }
 
 impl ChatTools {
@@ -337,7 +339,8 @@ impl Adapter for ChatTools {
             ActionDescriptor::new(
                 SCHEDULE,
                 format!(
-                    "have an agent run a task on its own at set times (every weekday at 09:00, every 30 minutes) or once later (in 2 hours, at 18:00). Each run is a new task; it runs whether or not this chat is open. {}",
+                    "have an agent run a task on its own at set times (every weekday at 09:00, every 30 minutes) or once later (in 2 hours, at 18:00). Each run is a new task; it runs whether or not this chat is open{}. {}",
+                    if self.chat.is_some() { ", and its result is posted in this chat" } else { "" },
                     self.roster()
                 ),
                 RiskTier::Mutate,
@@ -498,7 +501,10 @@ impl Adapter for ChatTools {
                         .unwrap_or_default(),
                     once: input.get("once").and_then(Value::as_bool).unwrap_or(false),
                 };
-                let task = TaskSpec::new(s("objective")).context(s("context"));
+                let mut task = TaskSpec::new(s("objective")).context(s("context"));
+                if let Some(chat) = &self.chat {
+                    task = task.report_to(chat);
+                }
                 let rec = self
                     .orch
                     .schedule(to, task, when)

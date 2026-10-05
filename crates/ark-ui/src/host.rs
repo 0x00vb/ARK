@@ -58,6 +58,10 @@ async fn forward_orchestration(
                 ) {
                     continue;
                 }
+                // A result posted into a chat: shown there live, like its turns.
+                if let EventKind::Posted { session, post, .. } = &ev.kind {
+                    feed.send(json!({ "kind": "post", "session": session, "post": post }));
+                }
                 feed.send(orch_event(&labels, &names, ev));
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {

@@ -259,6 +259,10 @@ pub struct TaskSpec {
     /// The board item it works on (`w-…`): the item follows the task (see [`crate::board`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<String>,
+    /// A chat (session id) the result is posted into when the task ends: a scheduled run
+    /// reports to the chat that asked for the schedule (`ark_runtime::session::Post`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_to: Option<String>,
 }
 
 impl TaskSpec {
@@ -295,6 +299,11 @@ impl TaskSpec {
     /// Work on a board item: it moves with this task.
     pub fn item(mut self, id: impl Into<String>) -> Self {
         self.item = Some(id.into());
+        self
+    }
+    /// Post the result into the chat `session` when the task ends.
+    pub fn report_to(mut self, session: impl Into<String>) -> Self {
+        self.report_to = Some(session.into());
         self
     }
 }

@@ -357,6 +357,10 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
             format!("{agent} runs {says}: {}", clip(objective, 80)),
             Tone::Accent,
         ),
+        EventKind::Posted { post, .. } => (
+            "posted the result in the chat that asked for it".to_string(),
+            if post.ok { Tone::Muted } else { Tone::Warning },
+        ),
         EventKind::Unscheduled { agent, says, .. } => {
             (format!("{agent} no longer runs {says}"), Tone::Muted)
         }

@@ -108,7 +108,15 @@ export class Thread {
     else if (t.answer) turn.text(t.answer, true);
     turn.fileCards();
     turn.footer(t.footer, t.index);
+    for (const p of t.posts || []) turn.el.append(postView(p));
     return turn.el;
+  }
+
+  /// Something work this chat set up posted here (a scheduled run's result), as it arrives.
+  post(p) {
+    this.dropWelcome();
+    this.root.append(postView(p));
+    this.scroll(false);
   }
 
   // ---- the live turn -------------------------------------------------------------------------
@@ -177,6 +185,14 @@ export class Thread {
     this.scroll(true);
   }
 
+}
+
+/// A post: who sent it, what about, and what it said.
+function postView(p) {
+  return h(`div.post${p.ok ? "" : ".failed"}`,
+    h("div.post-head", h("span.post-from", p.from), h("span.post-title", p.title),
+      p.ok ? null : h("span.post-failed", "did not finish")),
+    h("div.prose", { html: markdown(p.text || "") }));
 }
 
 class TurnView {

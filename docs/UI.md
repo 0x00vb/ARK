@@ -234,6 +234,7 @@ front-end uses the same.
 | `computer` | Who uses the screen changed (`user`: `{owner, who, session}` or null) |
 | `term` | A terminal's output (`session`, `data`), or `exit: true`. Not replayed to a window that rejoins a turn; `term_open` returns the scrollback |
 | `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`, and for a chat's question `session` and `chat`, its title), and its end (answered, or the turn ended) |
+| `post` | Work a chat set up posted its result there (`session`, `post`: `{from, title, text, ok, at, after}`, ADR 0025). Stored turns from `transcript` carry theirs in `posts` |
 | `summary` | Session, model, project or context changed |
 | `ext` | An app handler's `emitter.emit` |
 | `orch` | An orchestration event: `event` (an `OrchEvent`), `line` and `tone` (its timeline line, from `ark_interact::orchestration::event_line`), `activity` (for an agent's runtime event, what the conversation would show; none for steps and context reports) |

@@ -391,6 +391,7 @@ fn transcript_page(
     limit: usize,
 ) -> anyhow::Result<Vec<TranscriptTurn>> {
     let sid = session.id().as_str().to_string();
+    let posts = ark_sdk::prelude::ark_runtime::session::posts(engine, &sid, 0, usize::MAX)?;
     Ok(session
         .transcript_page(engine, before, limit)?
         .iter()
@@ -415,7 +416,14 @@ fn transcript_page(
                         .collect()
                 })
                 .unwrap_or_default();
-            TranscriptTurn::of(t, activity, rec.is_some())
+            let mut turn = TranscriptTurn::of(t, activity, rec.is_some());
+            // Each post goes after the turn that was last when it came.
+            turn.posts = posts
+                .iter()
+                .filter(|(_, p)| p.after.unwrap_or(0) == t.index)
+                .map(|(_, p)| p.clone())
+                .collect();
+            turn
         })
         .collect())
 }
@@ -1252,9 +1260,10 @@ impl Interaction {
     /// chat tools, so the person asks in words and the chat creates agents and tasks, and the
     /// project's board, so it plans and continues work across chats.
     fn turn_tools(&self) -> Vec<ark_sdk::TurnTools> {
+        let chat = self.session.id().as_str();
         self.orchestrator
             .iter()
-            .flat_map(|o| [o.chat_tools(), o.board_tools()])
+            .flat_map(|o| [o.chat_tools_for(chat), o.board_tools()])
             .collect()
     }
 

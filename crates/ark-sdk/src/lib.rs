@@ -312,6 +312,8 @@ impl Ark {
             p.distillers.push(skills::distiller());
             p.core_actions.push(skills::READ.into());
         }
+        // What work this chat set up has posted since its last answer.
+        session.read_posts(&self.engine)?;
         let harness = self
             .harness_with(router)
             .conversation(session.conversation_digest())

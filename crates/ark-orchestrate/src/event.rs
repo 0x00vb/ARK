@@ -133,6 +133,12 @@ pub enum EventKind {
         item: String,
         title: String,
     },
+    /// A task's result was posted into the chat it reports to (`session`).
+    Posted {
+        session: String,
+        task: String,
+        post: ark_runtime::Post,
+    },
     /// A schedule stopped (asked to, or its agent ended).
     Unscheduled {
         schedule: String,
@@ -158,7 +164,8 @@ impl EventKind {
             | EventKind::ArtifactProduced { task, .. }
             | EventKind::TaskRetry { task, .. }
             | EventKind::BudgetExceeded { task, .. }
-            | EventKind::TaskFinished { task, .. } => Some(task),
+            | EventKind::TaskFinished { task, .. }
+            | EventKind::Posted { task, .. } => Some(task),
             EventKind::Message { task, .. } => task.as_deref(),
             _ => None,
         }

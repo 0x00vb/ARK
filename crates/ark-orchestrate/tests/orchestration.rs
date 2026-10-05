@@ -1510,6 +1510,81 @@ async fn a_scheduled_run_is_skipped_while_the_last_one_is_still_open() {
 }
 
 #[tokio::test]
+async fn a_scheduled_run_posts_its_result_in_the_chat_that_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let chat = Script::new(
+        "chat",
+        vec![
+            calls(vec![(
+                "agents.schedule",
+                json!({"to": "news", "objective": "summarize the news", "every_minutes": 30}),
+            )]),
+            answer("scheduled [inv:1]"),
+            // The scheduled run, by the news agent on the same model.
+            answer("3 stories about the harbour"),
+            // The chat's next turn.
+            answer("Glad it helps."),
+        ],
+    );
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(chat.clone() as Arc<dyn Provider>)
+        .allow_mutate(true)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "").unwrap();
+    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    o.spawn(AgentSpec::new("news").role("reads the news"))
+        .await
+        .unwrap();
+    let mut session = ark.start_session(&project.id).unwrap();
+    let id = session.id().as_str().to_string();
+    let opts = || TurnOptions {
+        tools: vec![o.chat_tools_for(&id)],
+        ..Default::default()
+    };
+    ark.ask_session(
+        &mut session,
+        "every 30 minutes have news summarize the news",
+        opts(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+    assert!(chat.texts()[0].contains("its result is posted in this chat"));
+    let s = o.schedules();
+    assert_eq!(s[0].task.report_to.as_deref(), Some(id.as_str()));
+
+    let run = o.tick_schedules(s[0].next_ms.unwrap());
+    let done = o.wait(&run[0]).await.unwrap();
+    assert_eq!(done.report_to.as_deref(), Some(id.as_str()));
+    let posts = ark_runtime::session::posts(ark.engine(), &id, 0, 10).unwrap();
+    assert_eq!(posts.len(), 1);
+    let p = &posts[0].1;
+    assert_eq!(
+        (p.from.as_str(), p.text.as_str(), p.ok, p.after),
+        ("news", "3 stories about the harbour", true, Some(0))
+    );
+    assert!(o
+        .events(0, 200)
+        .unwrap()
+        .iter()
+        .any(|e| matches!(&e.kind, EventKind::Posted { session, .. } if *session == id)));
+
+    // The chat's next turn knows what was posted.
+    ark.ask_session(&mut session, "thanks for the digest", opts(), |_| {})
+        .await
+        .unwrap();
+    let last = chat.texts().last().unwrap().clone();
+    assert!(
+        last.contains("[news · summarize the news] 3 stories about the harbour"),
+        "{last}"
+    );
+}
+
+#[tokio::test]
 async fn the_conversation_schedules_work_and_stops_it() {
     let dir = tempfile::tempdir().unwrap();
     let chat = Script::new(

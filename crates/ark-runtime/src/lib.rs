@@ -63,7 +63,9 @@ pub use plugins::{PluginSpec, PluginStatus, Plugins};
 pub use profile::{AgentProfile, AgentProfileBuilder, Prompts};
 pub use router::{ModelRouter, Role};
 pub use rules::{RuleBook, RuleSelection, RulesTool};
-pub use session::{CarryPolicy, CompactReport, Session, SessionRecord, SessionUsage, Turn};
+pub use session::{
+    CarryPolicy, CompactReport, Post, Session, SessionRecord, SessionUsage, Turn, POSTS_CARRIED,
+};
 pub use skills::{Skill, SkillCatalog, SkillScope, SkillsTool};
 pub use steer::Steering;
 

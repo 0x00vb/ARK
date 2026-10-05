@@ -13,6 +13,10 @@
 //! So a session with 500 turns sends about the same number of conversation tokens as one with
 //! 5. [`Session::compact`] tightens the carry-over and the working state on demand, using the
 //! same deterministic rules; it never asks a model to summarize the transcript.
+//!
+//! Work a chat set up (a scheduled run) reports back with a [`Post`]: a message in the chat's
+//! own stream, apart from its numbered turns, so posting never races a turn. The next turn
+//! carries the posts that arrived since the last answer, at most [`POSTS_CARRIED`], clipped.
 
 use ark_core::{ProjectId, SessionId};
 use serde::{Deserialize, Serialize};
@@ -116,6 +120,80 @@ pub struct SessionRecord {
     pub compactions: u32,
     #[serde(default)]
     pub policy: CarryPolicy,
+    /// The last post ([`Post`]) a turn has carried; later ones are new to the model.
+    #[serde(default)]
+    pub posts_read: u64,
+}
+
+/// Posts a turn carries at most; older unread ones are counted, not shown.
+pub const POSTS_CARRIED: usize = 3;
+
+/// A message posted into a chat by work the chat set up, not by the person in it: an agent's
+/// scheduled run reporting its result.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Post {
+    /// Who posts: the agent's name.
+    pub from: String,
+    /// What it is about, in a few words.
+    pub title: String,
+    pub text: String,
+    /// False when the work failed; `text` says why.
+    pub ok: bool,
+    #[serde(with = "time::serde::rfc3339")]
+    pub at: OffsetDateTime,
+    /// The chat's last stored turn when it was posted: a transcript shows it after that turn.
+    #[serde(default)]
+    pub after: Option<u32>,
+}
+
+impl Post {
+    pub fn new(
+        from: impl Into<String>,
+        title: impl Into<String>,
+        text: impl Into<String>,
+        ok: bool,
+    ) -> Post {
+        Post {
+            from: from.into(),
+            title: title.into(),
+            text: text.into(),
+            ok,
+            at: OffsetDateTime::now_utc(),
+            after: None,
+        }
+    }
+}
+
+fn posts_stream(session: &str) -> String {
+    format!("session-posts/{session}")
+}
+
+/// Post into the chat `session`, open or not. Returns the post's sequence number.
+pub fn post(engine: &Engine, session: &str, mut post: Post) -> Result<u64, AgentError> {
+    post.after = engine
+        .store
+        .list_session_turns(session, Some(1))?
+        .first()
+        .and_then(|t| t["index"].as_u64())
+        .map(|i| i as u32);
+    Ok(engine
+        .store
+        .append_event(&posts_stream(session), &serde_json::to_value(&post)?)?)
+}
+
+/// Up to `limit` posts of `session` after sequence number `after`, oldest first.
+pub fn posts(
+    engine: &Engine,
+    session: &str,
+    after: u64,
+    limit: usize,
+) -> Result<Vec<(u64, Post)>, AgentError> {
+    Ok(engine
+        .store
+        .list_events(&posts_stream(session), after, limit)?
+        .into_iter()
+        .filter_map(|(seq, v)| serde_json::from_value(v).ok().map(|p| (seq, p)))
+        .collect())
 }
 
 /// One stored exchange. The full text is kept for the human; the model sees a clip.
@@ -187,6 +265,8 @@ pub struct Session {
     record: SessionRecord,
     /// The last `policy.recent_turns` turns (the verbatim window), cached.
     recent: Vec<Turn>,
+    /// Posts after `record.posts_read`, as of the last [`Session::read_posts`].
+    unread: Vec<(u64, Post)>,
 }
 
 impl Session {
@@ -213,10 +293,12 @@ impl Session {
             usage: SessionUsage::default(),
             compactions: 0,
             policy,
+            posts_read: 0,
         };
         let s = Session {
             record,
             recent: Vec::new(),
+            unread: Vec::new(),
         };
         s.save(engine)?;
         Ok(s)
@@ -267,7 +349,11 @@ impl Session {
             .into_iter()
             .filter(|t| t.index as usize >= start && t.index < count)
             .collect();
-        let mut session = Session { record, recent };
+        let mut session = Session {
+            record,
+            recent,
+            unread: Vec::new(),
+        };
         // A turn begun by a process that is gone was interrupted: keep it, marked, so the
         // person sees what they asked and the next turn's carry-over says it did not finish.
         if let Some(mut t) = begun {
@@ -279,6 +365,8 @@ impl Session {
                 session.push_turn(engine, t, &Metrics::default())?;
             }
         }
+        // After marking an interrupted turn: it never carried them.
+        session.read_posts(engine)?;
         Ok(session)
     }
 
@@ -326,6 +414,17 @@ impl Session {
     }
     pub fn turn_count(&self) -> u32 {
         self.record.turn_count
+    }
+
+    /// Read the posts that arrived since the last turn, for the next turn to carry.
+    pub fn read_posts(&mut self, engine: &Engine) -> Result<(), AgentError> {
+        self.unread = posts(
+            engine,
+            self.record.id.as_str(),
+            self.record.posts_read,
+            1000,
+        )?;
+        Ok(())
     }
 
     /// Give the session a human title (shown in session lists). Blank titles are ignored.
@@ -394,7 +493,7 @@ impl Session {
     pub fn conversation_digest(&self) -> Option<String> {
         use std::fmt::Write as _;
         let p = &self.record.policy;
-        if self.recent.is_empty() && self.record.gists.is_empty() {
+        if self.recent.is_empty() && self.record.gists.is_empty() && self.unread.is_empty() {
             return None;
         }
         let mut s = String::new();
@@ -426,6 +525,26 @@ impl Session {
                     clip(&t.answer, p.answer_chars)
                 };
                 let _ = writeln!(s, "  [you] {reply}");
+            }
+        }
+        if !self.unread.is_empty() {
+            let _ = writeln!(
+                s,
+                "Posted in this chat since your last answer, by work it set up:"
+            );
+            let older = self.unread.len().saturating_sub(POSTS_CARRIED);
+            if older > 0 {
+                let _ = writeln!(s, "  (+{older} earlier posts)");
+            }
+            for (_, p) in &self.unread[older..] {
+                let failed = if p.ok { "" } else { ", failed" };
+                let _ = writeln!(
+                    s,
+                    "  [{} · {}{failed}] {}",
+                    p.from,
+                    p.title,
+                    clip(&p.text, self.record.policy.answer_chars)
+                );
             }
         }
         Some(s.trim_end().to_string())
@@ -499,6 +618,11 @@ impl Session {
             self.record.title = clip(&turn.input, 60);
         }
         self.record.turn_count += 1;
+        // The posts this turn carried are read now.
+        if let Some((seq, _)) = self.unread.last() {
+            self.record.posts_read = *seq;
+            self.unread.clear();
+        }
         self.record.usage.add(metrics);
         self.record.updated_at = OffsetDateTime::now_utc();
         self.recent.push(turn);
@@ -658,6 +782,69 @@ mod tests {
             cancelled: false,
             steered: vec![],
         }
+    }
+
+    #[test]
+    fn a_post_is_carried_once_by_the_next_turn_and_placed_after_the_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let p = engine.create_project("p", "").unwrap();
+        let mut s = Session::start(&engine, &p.id).unwrap();
+        s.record_turn(
+            &engine,
+            "check the orders every morning",
+            &outcome("Scheduled."),
+        )
+        .unwrap();
+        let id = s.id().as_str().to_string();
+        for i in 0..5 {
+            post(
+                &engine,
+                &id,
+                Post::new(
+                    "orders",
+                    "Morning orders",
+                    format!("{i} new orders"),
+                    i != 4,
+                ),
+            )
+            .unwrap();
+        }
+        let all = posts(&engine, &id, 0, 100).unwrap();
+        assert_eq!(all.len(), 5);
+        assert!(all.iter().all(|(_, p)| p.after == Some(0)), "after turn 0");
+
+        // Reopened, as a window would: the next turn carries the newest posts.
+        let mut s = Session::open(&engine, &id).unwrap().unwrap();
+        s.read_posts(&engine).unwrap();
+        let digest = s.conversation_digest().unwrap();
+        assert!(digest.contains("(+2 earlier posts)"), "{digest}");
+        assert!(
+            digest.contains("[orders · Morning orders] 3 new orders"),
+            "{digest}"
+        );
+        assert!(
+            digest.contains("[orders · Morning orders, failed] 4 new orders"),
+            "{digest}"
+        );
+        assert!(
+            !digest.contains("1 new orders"),
+            "only the newest are carried"
+        );
+        s.record_turn(&engine, "thanks", &outcome("You're welcome."))
+            .unwrap();
+        s.read_posts(&engine).unwrap();
+        assert!(
+            !s.conversation_digest()
+                .unwrap()
+                .contains("Posted in this chat"),
+            "a turn carries a post once"
+        );
+        let s = Session::open(&engine, &id).unwrap().unwrap();
+        assert!(!s
+            .conversation_digest()
+            .unwrap()
+            .contains("Posted in this chat"));
     }
 
     #[test]

@@ -721,6 +721,8 @@ fn labels() -> ActivityLabels {
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
+    // Run code's contained runs start through this program on Windows (ark_exec::entry).
+    ark_sdk::prelude::ark_exec::entry();
     let root = std::env::var_os("WRITER_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| {

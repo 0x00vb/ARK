@@ -737,8 +737,10 @@ impl ArkBuilder {
     /// Offer Run code (`code.run`; [`ark_exec`]): agents run programs (Python first) in the
     /// project folder, contained: no network, writes only there. Every file a run writes comes
     /// back as an artifact the window shows by its kind. Asks before each run unless the person
-    /// allows it in the project. Where ARK cannot contain a run (only macOS can today) it is not
-    /// offered. Python is set up with `uv` under the store on first use. Off by default.
+    /// allows it in the project. Runs are contained on macOS, on Linux with bubblewrap, and on
+    /// Windows in an AppContainer when the program calls [`ark_exec::entry`] first in `main`;
+    /// where ARK cannot contain a run it is not offered. Python is set up with `uv` under the
+    /// store on first use. Off by default.
     pub fn code(mut self, yes: bool) -> Self {
         self.code = yes.then_some(CodeChoice::Default);
         self

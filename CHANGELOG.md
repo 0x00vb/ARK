@@ -115,9 +115,11 @@ What changed for people building on ARK, per release. Not a commit log.
   program in the project folder inside a sandbox: it reads the system, its environment and the
   project, writes only the project (not `.git` and other tool folders), and has no network.
   Python 3.12 with pandas, numpy, matplotlib and openpyxl first, kept with `uv` under the store.
-  Every file a run writes comes back as an artifact with its path. Offered only where ARK can
-  contain a run (macOS). `ArkBuilder::code(true)` or `code_with(Exec)`; a `Runtime` trait for
-  other environments; a "Run code" capability ([`EXTENSION.md`](docs/EXTENSION.md#run-code)).
+  Every file a run writes comes back as an artifact with its path. Contained on macOS
+  (`sandbox-exec`), Linux (bubblewrap) and Windows (an AppContainer; the program calls
+  `ark_exec::entry()` first in `main`), ADR 0032; offered nowhere else. `ArkBuilder::code(true)`
+  or `code_with(Exec)`; a `Runtime` trait for other environments; a "Run code" capability
+  ([`EXTENSION.md`](docs/EXTENSION.md#run-code)).
 - Kinds (ADR 0021): `ark_files::Kind` gains `markdown`, `pdf` and `image`, each from a format.
   PDFs read as their text, a heading per page (read only); images read as their type and size.
   `ark_files::Kinds`, a sniffer the SDK registers, gives a stored copy of a file the same kind;
@@ -128,6 +130,10 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark_tools::subprocess::{Spec, run_spec, timeout_note}`: a process with its folder, its own
   environment, a timeout and a bounded tail of its output.
 - `examples/writing-agent` turns Run code on.
+- Run code's Python has the data tools an analyst's work needs: duckdb (SQL over CSV, Parquet,
+  data frames, and `.xlsx` through its `excel` extension, installed at setup since a run has no
+  network), python-calamine (`pd.read_excel(engine="calamine")`: fast, and reads legacy `.xls`,
+  `.xlsb` and `.ods`), xlsxwriter and pyarrow. The first setup downloads about 100 MB more.
 
 - The project's board (ADR 0023): work items the person and the agents share, kept per project
   across chats and restarts. `Orchestrator::{board, work_item, add_work, change_work,

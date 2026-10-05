@@ -1,7 +1,9 @@
-//! `code.run` against the real sandbox, with `sh` as the runtime so no install is needed.
-//! Python itself runs in `python_analysis_writes_a_chart_and_a_table` when
-//! `ARK_TEST_PYTHON=1` (the first run downloads Python and packages with uv).
-#![cfg(target_os = "macos")]
+//! `code.run` against the real sandbox (macOS: `sandbox-exec`, Linux: bubblewrap), with `sh` as
+//! the runtime so no install is needed. The checks look at what happened, not at error texts,
+//! which differ between the two. Python itself runs in `python_analysis_writes_a_chart_and_a_table`
+//! when `ARK_TEST_PYTHON=1` (the first run downloads Python and packages with uv). Windows has
+//! its own file, `run_windows.rs`.
+#![cfg(any(target_os = "macos", target_os = "linux"))]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -99,20 +101,20 @@ async fn a_run_returns_the_files_it_wrote_in_the_project() {
 async fn a_run_cannot_write_outside_the_project_or_into_its_kept_folders() {
     let s = setup(Arc::new(Sh));
     let escape = s.outside.join("escape.txt");
+    std::fs::create_dir_all(s.project.join(".git")).unwrap();
     let code = format!(
-        "echo x > '{}'; echo x > ../escape.txt; mkdir -p .git/hooks; echo x > .git/hooks/pre-commit; echo x > ok.txt",
+        "echo x > '{}'; echo x > ../escape.txt; mkdir -p .git/hooks; echo x > .git/hooks/pre-commit; mkdir -p .vscode; echo x > .vscode/tasks.json; echo x > ok.txt",
         escape.display()
     );
     let out = run(&s.exec, &s.project, &code).await;
     assert!(!escape.exists());
     assert!(!s.project.parent().unwrap().join("escape.txt").exists());
     assert!(!s.project.join(".git/hooks/pre-commit").exists());
+    // A kept folder that did not exist is not there after the run either.
+    assert!(!s.project.join(".vscode").exists());
     assert!(s.project.join("ok.txt").exists());
     assert!(
-        out.output["stderr"]
-            .as_str()
-            .unwrap()
-            .contains("not permitted"),
+        !out.output["stderr"].as_str().unwrap().is_empty(),
         "{}",
         out.output
     );
@@ -131,7 +133,7 @@ async fn a_run_cannot_read_outside_the_project_or_reach_the_network() {
     let all = format!("{}{}", out.output["stdout"], out.output["stderr"]);
     assert!(!all.contains("the secret"), "{all}");
     assert!(!all.contains("REACHED"), "{all}");
-    assert!(all.contains("not permitted"), "{all}");
+    assert!(!out.output["stderr"].as_str().unwrap().is_empty(), "{all}");
 }
 
 #[tokio::test]
@@ -213,4 +215,57 @@ df.describe().to_excel("summary.xlsx")
     files.sort();
     assert_eq!(files, ["chart.png", "summary.xlsx"]);
     assert!(out.produced.iter().any(|p| p.bytes.starts_with(b"\x89PNG")));
+}
+
+/// The data tools of the environment: a workbook read fast (calamine) and in SQL (DuckDB's
+/// `excel` extension, installed at setup since a run has no network), joined with a CSV, and a
+/// new workbook written.
+#[tokio::test]
+async fn python_joins_a_workbook_and_a_csv_in_sql() {
+    if std::env::var("ARK_TEST_PYTHON").as_deref() != Ok("1") {
+        eprintln!("skipped: set ARK_TEST_PYTHON=1 (downloads Python and packages once)");
+        return;
+    }
+    let home = std::env::temp_dir().join("ark-exec-test-python");
+    let s = setup(Arc::new(Python::new(&home)));
+    std::fs::write(
+        s.project.join("regions.csv"),
+        "id,region\n1,North\n2,South\n",
+    )
+    .unwrap();
+    let make = r#"
+import pandas as pd
+pd.DataFrame({"id": [1, 2, 1], "amount": [10.5, 20.0, 4.5]}).to_excel("orders.xlsx", sheet_name="Orders", index=False)
+"#;
+    let out = run(&s.exec, &s.project, make).await;
+    assert_eq!(out.output["exit_code"], 0, "{}", out.output);
+    let code = r#"
+import duckdb, pandas as pd
+fast = pd.read_excel("orders.xlsx", sheet_name=None, engine="calamine")
+print("sheets", list(fast))
+t = duckdb.sql("""
+  select r.region, sum(o.amount) as total
+  from read_xlsx('orders.xlsx', sheet = 'Orders') o
+  join read_csv('regions.csv') r using (id)
+  group by r.region order by r.region
+""").df()
+print(t.to_string(index=False))
+with pd.ExcelWriter("totals.xlsx", engine="xlsxwriter") as w:
+    t.to_excel(w, sheet_name="Totals", index=False)
+import pyarrow
+"#;
+    let out = run(&s.exec, &s.project, code).await;
+    assert_eq!(out.output["exit_code"], 0, "{}", out.output);
+    let stdout = out.output["stdout"].as_str().unwrap();
+    assert!(stdout.contains("sheets ['Orders']"), "{stdout}");
+    let row = |r: &str| {
+        stdout
+            .lines()
+            .find(|l| l.contains(r))
+            .unwrap_or("")
+            .to_string()
+    };
+    assert!(row("North").ends_with("15.0"), "{stdout}");
+    assert!(row("South").ends_with("20.0"), "{stdout}");
+    assert!(s.project.join("totals.xlsx").exists());
 }

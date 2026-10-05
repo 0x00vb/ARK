@@ -13,12 +13,23 @@ use crate::{Launch, Runtime};
 /// The Python version, and the packages with exact versions, so a program that ran once runs
 /// the same later and elsewhere. Changing either makes the environment again.
 const VERSION: &str = "3.12";
+/// pandas, numpy and matplotlib for analysis and charts; openpyxl and xlsxwriter to write
+/// workbooks; python-calamine to read `.xlsx`, `.xls`, `.xlsb` and `.ods` fast
+/// (`pd.read_excel(engine="calamine")`); duckdb for SQL over files and data frames without
+/// loading them whole; pyarrow for columnar memory and Parquet.
 const PACKAGES: &[&str] = &[
     "pandas==3.0.6",
     "numpy==2.5.3",
     "matplotlib==3.11.2",
     "openpyxl==3.1.5",
+    "xlsxwriter==3.2.9",
+    "python-calamine==0.8.2",
+    "duckdb==1.5.6",
+    "pyarrow==25.0.1",
 ];
+/// DuckDB extensions installed with the environment, since a run has no network to fetch
+/// them: `excel` reads `.xlsx` in SQL (`read_xlsx`).
+const DUCKDB_EXTENSIONS: &[&str] = &["excel"];
 
 /// Longest a first-run install may take (downloads included).
 const INSTALL: Duration = Duration::from_secs(600);
@@ -35,11 +46,13 @@ impl Python {
     /// The environment lives in `home` (made when needed). `uv` is looked up on PATH and in
     /// its usual install folders.
     pub fn new(home: impl Into<PathBuf>) -> Self {
-        let uv = subprocess::which("uv").or_else(|| {
-            let user = std::env::var_os("HOME").map(PathBuf::from)?;
-            [".local/bin/uv", ".cargo/bin/uv"]
+        let exe = format!("uv{}", std::env::consts::EXE_SUFFIX);
+        let uv = subprocess::which(&exe).or_else(|| {
+            let user = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                .map(PathBuf::from)?;
+            [".local/bin", ".cargo/bin"]
                 .iter()
-                .map(|p| user.join(p))
+                .map(|p| user.join(p).join(&exe))
                 .find(|p| p.is_file())
         });
         Python {
@@ -59,16 +72,49 @@ impl Python {
         self.home.join("venv")
     }
 
+    /// The environment's interpreter.
+    fn python(&self) -> PathBuf {
+        if cfg!(windows) {
+            self.venv().join("Scripts").join("python.exe")
+        } else {
+            self.venv().join("bin").join("python")
+        }
+    }
+
+    /// Where the interpreter the environment was made from lives (`home` in `pyvenv.cfg`): a
+    /// run reads it too.
+    fn base(&self) -> Option<PathBuf> {
+        let cfg = std::fs::read_to_string(self.venv().join("pyvenv.cfg")).ok()?;
+        let home = cfg.lines().find_map(|l| {
+            let (k, v) = l.split_once('=')?;
+            (k.trim() == "home").then(|| PathBuf::from(v.trim()))
+        })?;
+        // On Unix `home` is the install's `bin` folder; its libraries are beside it.
+        Some(match home.file_name() {
+            Some(n) if n == "bin" => home.parent().map(Path::to_path_buf).unwrap_or(home),
+            _ => home,
+        })
+    }
+
     fn stamp(&self) -> PathBuf {
         self.home.join("ready")
     }
 
+    /// DuckDB's extensions, installed with the environment and copied into each run's home.
+    fn extensions(&self) -> PathBuf {
+        self.home.join("duckdb-extensions")
+    }
+
     fn wanted() -> String {
-        format!("python {VERSION}\n{}\n", PACKAGES.join("\n"))
+        format!(
+            "python {VERSION}\n{}\nduckdb extensions {}\n",
+            PACKAGES.join("\n"),
+            DUCKDB_EXTENSIONS.join(" ")
+        )
     }
 
     fn is_ready(&self) -> bool {
-        self.venv().join("bin/python").exists()
+        self.python().exists()
             && std::fs::read_to_string(self.stamp()).ok().as_deref() == Some(&Self::wanted())
     }
 
@@ -76,6 +122,7 @@ impl Python {
         std::fs::create_dir_all(&self.home).map_err(|e| e.to_string())?;
         let _ = std::fs::remove_file(self.stamp());
         let venv = self.venv().display().to_string();
+        let python = self.python().display().to_string();
         let step = |args: Vec<String>| {
             let mut spec = Spec::new(uv);
             spec.args = args;
@@ -93,7 +140,7 @@ impl Python {
                 venv.clone(),
             ]),
             step(
-                ["pip", "install", "--python", &format!("{venv}/bin/python")]
+                ["pip", "install", "--python", &python]
                     .iter()
                     .map(|s| s.to_string())
                     .chain(PACKAGES.iter().map(|s| s.to_string()))
@@ -109,13 +156,35 @@ impl Python {
             }
         }
         // Build matplotlib's font cache now (about 20 s); each run starts with a copy of it.
-        let mut warm = Spec::new(self.venv().join("bin/python"));
-        warm.args = vec!["-c".into(), "import matplotlib.pyplot".into()];
-        let mut env = self.env();
-        env.push(("MPLCONFIGDIR".into(), self.cache().display().to_string()));
-        warm.env = Some(env);
-        warm.timeout = Some(Duration::from_secs(120));
-        let _ = subprocess::run_spec(&warm).await;
+        // Install DuckDB's extensions (a download). Neither stops the setup when it fails: a
+        // run then builds the cache itself, or cannot read `.xlsx` in SQL.
+        let slash = |p: PathBuf| p.display().to_string().replace('\\', "/");
+        let (extensions, home) = (slash(self.extensions()), slash(self.home.clone()));
+        let install: Vec<String> = DUCKDB_EXTENSIONS
+            .iter()
+            .map(|e| format!("INSTALL {e};"))
+            .collect();
+        let warmups = [
+            "import matplotlib.pyplot".to_string(),
+            format!(
+                "import duckdb; c = duckdb.connect(config={{'extension_directory': '{extensions}', 'home_directory': '{home}'}}); c.sql(\"{}\")",
+                install.join(" ")
+            ),
+        ];
+        for code in warmups {
+            let mut warm = Spec::new(self.python());
+            warm.args = vec!["-c".into(), code];
+            let mut env = self.env();
+            env.push(("MPLCONFIGDIR".into(), self.cache().display().to_string()));
+            warm.env = Some(env);
+            warm.timeout = Some(Duration::from_secs(120));
+            warm.keep = Some(2000);
+            match subprocess::run_spec(&warm).await {
+                Ok(r) if r.code == 0 => {}
+                Ok(r) => tracing::warn!("Python setup step failed: {}", r.stderr.trim()),
+                Err(e) => tracing::warn!("Python setup step failed: {e}"),
+            }
+        }
         std::fs::write(self.stamp(), Self::wanted()).map_err(|e| e.to_string())
     }
 
@@ -125,12 +194,28 @@ impl Python {
     }
 
     fn env(&self) -> Vec<(String, String)> {
-        vec![
+        let mut env = vec![
             ("MPLBACKEND".into(), "Agg".into()),
             ("PYTHONDONTWRITEBYTECODE".into(), "1".into()),
             ("PYTHONUNBUFFERED".into(), "1".into()),
             ("VIRTUAL_ENV".into(), self.venv().display().to_string()),
-        ]
+        ];
+        // The setup steps run outside the sandbox and need the system's own variables there.
+        if cfg!(windows) {
+            for k in [
+                "SystemRoot",
+                "windir",
+                "TEMP",
+                "TMP",
+                "USERPROFILE",
+                "LOCALAPPDATA",
+            ] {
+                if let Ok(v) = std::env::var(k) {
+                    env.push((k.into(), v));
+                }
+            }
+        }
+        env
     }
 }
 
@@ -164,22 +249,21 @@ impl Runtime for Python {
             tracing::info!("setting up Python {VERSION} in {}", self.home.display());
             self.install(&uv).await?;
         }
-        let python = self.venv().join("bin/python");
-        // The environment's python links to the interpreter uv installed; the run reads both.
-        let interpreter = python
-            .canonicalize()
-            .ok()
-            .and_then(|p| p.parent()?.parent().map(Path::to_path_buf));
+        // The environment's python starts the interpreter uv installed; the run reads both.
         Ok(Launch {
-            program: python,
+            program: self.python(),
             args: vec!["-B".into(), "-s".into()],
             file: "main.py",
             env: self.env(),
             reads: std::iter::once(self.home.clone())
-                .chain(interpreter)
+                .chain(self.base())
                 .collect(),
-            // matplotlib looks for its cache in `~/.matplotlib`; a run's home is writable.
-            home: vec![(self.cache(), ".matplotlib")],
+            // matplotlib looks for its cache in `~/.matplotlib` and DuckDB for its extensions
+            // in `~/.duckdb/extensions`; a run's home is writable.
+            home: vec![
+                (self.cache(), ".matplotlib"),
+                (self.extensions(), ".duckdb/extensions"),
+            ],
         })
     }
 }

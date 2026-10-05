@@ -285,11 +285,11 @@ project folder, contained ([ADR 0020](adr/0020-running-code-contained-in-the-pro
 | | |
 |---|---|
 | Where | The project folder is the working folder; each run has a scratch folder of its own, removed after |
-| What it may touch | Reads the system folders, its environment and the project. Writes the project only, not `.git`, `.agents`, `.ark`, `.claude`, `.codex`, `.vscode`, `.idea`, `.envrc` or `.github`. No network |
-| Runtimes | Python 3.12 with pandas, numpy, matplotlib and openpyxl, set up with `uv` in `<store>/exec/python` on the first run. Another is a `Runtime` (`ready` returns how to start a program) passed to `code_with(Exec::new(..))` |
+| What it may touch | Reads the system folders, its environment and the project. Writes the project only, not `.git`, `.agents`, `.ark`, `.claude`, `.codex`, `.vscode`, `.idea`, `.envrc` or `.github` (one of these a run creates is removed after it). No network |
+| Runtimes | Python 3.12 with pandas, numpy, matplotlib, openpyxl, xlsxwriter, python-calamine (fast `.xlsx`, `.xls`, `.xlsb`, `.ods` reads), duckdb (SQL over files and data frames, with its `excel` extension) and pyarrow, set up with `uv` in `<store>/exec/python` on the first run. Another is a `Runtime` (`ready` returns how to start a program) passed to `code_with(Exec::new(..))` |
 | What comes back | The exit, the end of stdout and stderr, and every file the run wrote, each an artifact with its path; the window shows each by its kind |
 | Asks | Every run, unless the person allows it in the project: the run is contained, so the grant covers only contained runs |
-| Where it is offered | Where ARK has a `Sandbox`: macOS. Elsewhere it is not listed |
+| Where it is offered | Where ARK has a `Sandbox` ([ADR 0032](adr/0032-run-code-contained-on-every-system.md)): macOS; Linux with `bwrap` and user namespaces; Windows when the program calls `ark_exec::entry()` first in `main` (a run starts through the program, in an AppContainer). Elsewhere it is not listed |
 
 ### Approvals that last
 

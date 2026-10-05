@@ -30,7 +30,7 @@ pub mod python;
 mod sandbox;
 
 pub use python::Python;
-pub use sandbox::{Bounds, Sandbox};
+pub use sandbox::{entry, Bounds, Sandbox};
 
 /// The action.
 pub const RUN: &str = "code.run";
@@ -162,19 +162,26 @@ impl Exec {
         };
         let mut args = launch.args.clone();
         args.push(file.display().to_string());
-        let (program, args) = self.sandbox.wrap(&bounds, &launch.program, &args);
-        let bin = launch
-            .program
-            .parent()
-            .map(|p| format!("{}:", p.display()))
-            .unwrap_or_default();
-        let mut env = vec![
-            ("HOME".to_string(), tmp.display().to_string()),
-            ("TMPDIR".to_string(), format!("{}/", tmp.display())),
-            ("PATH".to_string(), format!("{bin}/usr/bin:/bin")),
-            ("LANG".to_string(), "en_US.UTF-8".to_string()),
-        ];
+        let (sandbox, program) = (self.sandbox.clone(), launch.program.clone());
+        let wrapped =
+            tokio::task::spawn_blocking(move || sandbox.wrap(&bounds, &program, &args)).await;
+        let (program, args) = match wrapped {
+            Ok(Ok(w)) => w,
+            Ok(Err(e)) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(AdapterError::ToolUnavailable {
+                    tool: self.sandbox.name().into(),
+                    detail: e,
+                });
+            }
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(AdapterError::Tool(e.to_string()));
+            }
+        };
+        let mut env = sandbox::base_env(&tmp, launch.program.parent());
         env.extend(launch.env.iter().cloned());
+        let absent = sandbox::absent_kept(project);
 
         let started = SystemTime::now();
         let ran = subprocess::run_spec(&Spec {
@@ -187,7 +194,14 @@ impl Exec {
         })
         .await;
         let _ = std::fs::remove_dir_all(&dir);
-        let ran = ran?;
+        let removed = sandbox::remove_created(&absent);
+        let mut ran = ran?;
+        if !removed.is_empty() {
+            ran.stderr.push_str(&format!(
+                "\nRemoved {}: a run may not create these folders in the project.",
+                removed.join(", ")
+            ));
+        }
 
         let written = written_since(project, started);
         let mut produced = Vec::new();

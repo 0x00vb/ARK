@@ -49,7 +49,9 @@ runtime. ARK Cloud's plan is `../ark-cloud/docs/CLOUD.md` (2026-10-05); ARK's pa
 A1 to A4 on the board. A1 (named OpenAI-compatible endpoints) and A2 (402 is out of credit) are
 on `main` (ADR 0027), and A3 (`FileSecrets`: keys and tokens in an encrypted file for servers,
 ADR 0028), and A6 (the window opens a runtime elsewhere and comes back, `remote::visit`, ADR
-0029, for ARK Desktop's This Mac | Cloud); next A4 (Run code on Linux), for Cloud Phase 2.
+0029, for ARK Desktop's This Mac | Cloud), and a folder sent to a runtime elsewhere becomes a
+project there (`remote::send_folder`, ADR 0030, for Copy to Cloud); next A4 (Run code on
+Linux), for Cloud Phase 2. A4 needs a Linux machine to test on (Docker on the dev Mac is broken).
 
 ## Working notes
 

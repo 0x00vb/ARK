@@ -13,7 +13,7 @@
 //! [`AgentProfile`], so the same loop drives a security agent, a writing agent, or a data
 //! agent unchanged.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::Arc;
 
@@ -516,6 +516,8 @@ impl Harness {
         // Runtime-handled calls (retrievals, state edits, notes) seen this turn. Only a new one
         // counts as progress: repeating the same search or the same hypothesis is not work.
         let mut meta_seen: HashSet<String> = HashSet::new();
+        // State-changing calls run this task, by digest (see `MAX_IDENTICAL_CHANGES`).
+        let mut changes_run: HashMap<String, u32> = HashMap::new();
         // When an action that changes state last ran this turn. Reads before it are not
         // reused after it.
         let mut changed_at = turn_started;
@@ -743,6 +745,20 @@ impl Harness {
                     continue;
                 };
 
+                // The digest uses the canonical artifact id, so a short id and a full id name
+                // the same call.
+                let canonical = engine.canonical_input(project, call.arguments.clone());
+                let digest = call_digest(&call.name, &canonical);
+                // An identical change that already ran twice in this task is not run, or asked
+                // about, again: the same program fails the same way, the same refused write is
+                // refused again. Twice allows one retry of a transient failure.
+                if desc.risk == RiskTier::Mutate
+                    && changes_run.get(&digest).copied().unwrap_or(0) >= MAX_IDENTICAL_CHANGES
+                {
+                    flush!();
+                    round.push(Message::tool_result(call, REPEATED_CHANGE_NOTE));
+                    continue;
+                }
                 if desc.risk == RiskTier::Mutate {
                     // A change waits for the reads before it, and runs alone.
                     flush!();
@@ -789,10 +805,7 @@ impl Harness {
                 // the point. Only a successful result is evidence. A failure (an error, a
                 // timeout, a missing tool) may be transient, so the same call runs again; a
                 // repeat that fails again counts as no progress, which keeps the stall guard
-                // working. The digest uses the canonical artifact id, so a short id and a full
-                // id name the same call.
-                let canonical = engine.canonical_input(project, call.arguments.clone());
-                let digest = call_digest(&call.name, &canonical);
+                // working.
                 if batch.iter().any(|p| p.digest == digest) {
                     // The same call is already pending: let it finish so this one can reuse it.
                     flush!();
@@ -831,6 +844,9 @@ impl Harness {
                     }
                 }
 
+                if desc.risk == RiskTier::Mutate {
+                    *changes_run.entry(digest.clone()).or_default() += 1;
+                }
                 batch.push(Pending {
                     call: call.clone(),
                     risk: desc.risk,
@@ -2224,6 +2240,11 @@ fn unwritten_note(missing: &[String], written: &[String]) -> String {
         "Your answer says {names} was saved, but no tool call in this turn wrote {it}. {wrote} Save {it} now with a tool, or reply with an answer that names only the files that were written."
     )
 }
+
+/// Runs of one identical state-changing call in a task: the first and one retry.
+pub const MAX_IDENTICAL_CHANGES: u32 = 2;
+
+const REPEATED_CHANGE_NOTE: &str = "not run: this exact call already ran twice in this task, with the results above. Running it again gives the same result. Change the input to fix what went wrong (for a program, fix the error it reported), or answer from what you have.";
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";
 

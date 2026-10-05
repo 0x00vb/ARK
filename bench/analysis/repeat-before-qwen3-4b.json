@@ -1,0 +1,523 @@
+{
+  "schema_version": 1,
+  "label": "analysis-before",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T04:46:00.683782Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 5,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "900"
+  },
+  "workloads": [
+    {
+      "name": "analysis",
+      "class": "files",
+      "description": "a chart and a report from a CSV with Python (code.run), checked on the saved files",
+      "summary": {
+        "runs": 5,
+        "successes": 1,
+        "success_rate": 0.2,
+        "model_calls": 7.4,
+        "input_tokens": 24669.4,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 24669.4,
+        "output_tokens": 2649.0,
+        "total_tokens": 27318.4,
+        "cost_usd": 0.0758288,
+        "cost_per_success_usd": 0.379144,
+        "tool_calls": 5.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 7.4,
+        "peak_context_tokens": 5087.0,
+        "mean_context_tokens": 2705.4,
+        "tool_schema_tokens": 5091.2,
+        "prefix_reuse_tokens": 16701.6,
+        "median_turn_ms": 68109.0,
+        "p95_turn_ms": 81379.0,
+        "median_first_token_ms": 946.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "analysis",
+          "rep": 0,
+          "success": false,
+          "verdict": "no PNG chart was saved as chart.png",
+          "answer": "The repeated syntax error in the f-string — specifically, an unmatched closing parenthesis `)` — indicates a malformed string. The issue arises from the f-string: `f\\\"The region with the highest total revenue is {max_revenue_region} with a total of ${max_revenue:,.2f}.\\\"` contains a closing quote `\"` after the final `.` but is incorrectly formatted due to a missing closing quote or improper escapi",
+          "turns": 1,
+          "steps": 9,
+          "model_calls": 9,
+          "calls_by_role": {
+            "reason": 9
+          },
+          "tokens_by_role": {
+            "reason": 37850
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 9
+          },
+          "input_tokens": 34293,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 34293,
+          "cache_write_tokens": 0,
+          "output_tokens": 3557,
+          "total_tokens": 37850,
+          "tokens_measured": true,
+          "cost_usd": 0.104156,
+          "wall_ms": 68109,
+          "turn_ms": [
+            68109
+          ],
+          "first_token_ms": [
+            3344,
+            878,
+            927,
+            1020,
+            1017,
+            1062,
+            1149,
+            1164
+          ],
+          "model_latency_ms": [
+            9864,
+            6682,
+            6979,
+            7733,
+            8557,
+            7196,
+            6498,
+            9167,
+            5201
+          ],
+          "tool_calls": 7,
+          "tool_ok": 7,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 7,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 5087,
+          "mean_context_tokens": 3303,
+          "context_sources": {
+            "Capability index": 3213,
+            "Conversation": 0,
+            "Instructions": 2574,
+            "Model output": 11343,
+            "Project": 450,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 684,
+            "Tool results": 4602,
+            "Tool schemas": 6192,
+            "Working state": 675,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6192,
+          "tools_exposed_max": 5,
+          "tools_used": 1,
+          "result_context_tokens": 938,
+          "result_raw_tokens": 931,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 23718,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "analysis",
+          "rep": 1,
+          "success": false,
+          "verdict": "no PNG chart was saved as chart.png",
+          "answer": "The issue is a syntax error in the f-string: the string ends with a closing parenthesis `)` that is not properly matched. The f-string is malformed and will not execute correctly.\n\nI have attempted to run the code multiple times with the same flawed syntax. The error persists, indicating that the root cause is the incorrect string formatting.\n\n**Corrected version of the f-string**:\n```python\nrepor",
+          "turns": 1,
+          "steps": 10,
+          "model_calls": 10,
+          "calls_by_role": {
+            "reason": 10
+          },
+          "tokens_by_role": {
+            "reason": 43091
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 10
+          },
+          "input_tokens": 38976,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 38976,
+          "cache_write_tokens": 0,
+          "output_tokens": 4115,
+          "total_tokens": 43091,
+          "tokens_measured": true,
+          "cost_usd": 0.119102,
+          "wall_ms": 81342,
+          "turn_ms": [
+            81342
+          ],
+          "first_token_ms": [
+            278,
+            861,
+            882,
+            907,
+            946,
+            983,
+            1135,
+            1229,
+            1315
+          ],
+          "model_latency_ms": [
+            5159,
+            6120,
+            6416,
+            10898,
+            13224,
+            8096,
+            14596,
+            4130,
+            7552,
+            4870
+          ],
+          "tool_calls": 8,
+          "tool_ok": 8,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 8,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 5047,
+          "mean_context_tokens": 3347,
+          "context_sources": {
+            "Capability index": 3570,
+            "Conversation": 0,
+            "Instructions": 2860,
+            "Model output": 12272,
+            "Project": 500,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 760,
+            "Tool results": 5882,
+            "Tool schemas": 6880,
+            "Working state": 750,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6880,
+          "tools_exposed_max": 5,
+          "tools_used": 1,
+          "result_context_tokens": 1072,
+          "result_raw_tokens": 1064,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 27334,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "analysis",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- Fact: The script successfully executed and generated both `chart.png` and `report.md` as required. This is evidenced by the output of the code execution: \"Bar chart saved as chart.png and report generated as report.md\" and the produced artifacts `art:8ed0cf165577` (report.md) and `art:49ee6e84d366` (chart.png).\n\n- Inference: The region with the highest total revenue is identified in the script's",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 12064
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 5
+          },
+          "input_tokens": 11082,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 11082,
+          "cache_write_tokens": 0,
+          "output_tokens": 982,
+          "total_tokens": 12064,
+          "tokens_measured": true,
+          "cost_usd": 0.031984,
+          "wall_ms": 23550,
+          "turn_ms": [
+            23550
+          ],
+          "first_token_ms": [
+            297,
+            316,
+            839
+          ],
+          "model_latency_ms": [
+            1699,
+            5551,
+            1946,
+            7181,
+            3522
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1,
+            "search_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2399,
+          "mean_context_tokens": 1913,
+          "context_sources": {
+            "Capability index": 1785,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 1260,
+            "Project": 250,
+            "Retrieved context": 292,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 380,
+            "Tool results": 354,
+            "Tool schemas": 3440,
+            "Working state": 375,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3440,
+          "tools_exposed_max": 5,
+          "tools_used": 1,
+          "result_context_tokens": 168,
+          "result_raw_tokens": 144,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 6787,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "analysis",
+          "rep": 3,
+          "success": false,
+          "verdict": "no PNG chart was saved as chart.png",
+          "answer": "The Python code contains a syntax error due to an unmatched closing parenthesis in the f-string for the report content. This error prevents the successful generation of both the bar chart and the report file. The error occurs in the report_content assignment line, where the string is not properly closed.\n\nI need to fix the syntax error in the code before executing it again. The issue is that the f",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 11083
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 10013,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 10013,
+          "cache_write_tokens": 0,
+          "output_tokens": 1070,
+          "total_tokens": 11083,
+          "tokens_measured": true,
+          "cost_usd": 0.030726,
+          "wall_ms": 18252,
+          "turn_ms": [
+            18252
+          ],
+          "first_token_ms": [
+            193,
+            1083,
+            281
+          ],
+          "model_latency_ms": [
+            6431,
+            7826,
+            1722,
+            2179
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 2,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2610,
+          "mean_context_tokens": 2184,
+          "context_sources": {
+            "Capability index": 1428,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 1897,
+            "Project": 200,
+            "Retrieved context": 26,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 304,
+            "Tool results": 685,
+            "Tool schemas": 2752,
+            "Working state": 300,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2752,
+          "tools_exposed_max": 5,
+          "tools_used": 1,
+          "result_context_tokens": 274,
+          "result_raw_tokens": 274,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5859,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "analysis",
+          "rep": 4,
+          "success": false,
+          "verdict": "no PNG chart was saved as chart.png",
+          "answer": "The code has repeatedly failed due to a syntax error in the report string, specifically an unmatched closing parenthesis. This suggests a malformed string literal in the f-string. The issue is likely in the report content construction, where the closing quote is not properly escaped or matched.\n\nI will now attempt to fix the syntax error by properly escaping the string and ensuring the f-string is",
+          "turns": 1,
+          "steps": 9,
+          "model_calls": 9,
+          "calls_by_role": {
+            "reason": 9
+          },
+          "tokens_by_role": {
+            "reason": 32504
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 9
+          },
+          "input_tokens": 28983,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 28983,
+          "cache_write_tokens": 0,
+          "output_tokens": 3521,
+          "total_tokens": 32504,
+          "tokens_measured": true,
+          "cost_usd": 0.093176,
+          "wall_ms": 81379,
+          "turn_ms": [
+            81379
+          ],
+          "first_token_ms": [
+            199,
+            270,
+            343,
+            1159,
+            1126,
+            1224,
+            1316
+          ],
+          "model_latency_ms": [
+            5375,
+            1572,
+            6141,
+            1822,
+            6970,
+            13920,
+            19774,
+            12820,
+            12764
+          ],
+          "tool_calls": 6,
+          "tool_ok": 6,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 6,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 4282,
+          "mean_context_tokens": 2780,
+          "context_sources": {
+            "Capability index": 3213,
+            "Conversation": 0,
+            "Instructions": 2574,
+            "Model output": 7704,
+            "Project": 450,
+            "Retrieved context": 312,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 684,
+            "Tool results": 3216,
+            "Tool schemas": 6192,
+            "Working state": 675,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6192,
+          "tools_exposed_max": 5,
+          "tools_used": 1,
+          "result_context_tokens": 804,
+          "result_raw_tokens": 798,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 19810,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 5,
+    "successes": 1,
+    "success_rate": 0.2,
+    "model_calls": 7.4,
+    "input_tokens": 24669.4,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 24669.4,
+    "output_tokens": 2649.0,
+    "total_tokens": 27318.4,
+    "cost_usd": 0.0758288,
+    "cost_per_success_usd": 0.379144,
+    "tool_calls": 5.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 7.4,
+    "peak_context_tokens": 5087.0,
+    "mean_context_tokens": 2705.4,
+    "tool_schema_tokens": 5091.2,
+    "prefix_reuse_tokens": 16701.6,
+    "median_turn_ms": 68109.0,
+    "p95_turn_ms": 81379.0,
+    "median_first_token_ms": 946.0,
+    "stall_stops": 0.0
+  }
+}

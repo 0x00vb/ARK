@@ -18,9 +18,21 @@ ARK's Run code in its sandbox. Reports in `bench/analysis/`.
 
 - qwen3:4b wrote a program with a syntax error (an extra `)` after an f-string) and ran the same
   program again unchanged: 2 times in one run, 6 in the other, then explained the error instead
-  of fixing it. An identical failing `code.run` is not caught today; a check that says "this
-  exact program already failed with this error" is the candidate change, to be measured here.
+  of fixing it. Measured below with a check for identical changes.
 - qwen3.5:27b wrote both files on its first run of code in both runs.
+
+**An identical change runs at most twice.** A state-changing call that already ran twice in
+the task with the same input is not run, or asked about, again; the model is told to change the
+input. Live qwen3:4b, 5 runs each (`analysis/repeat-{before,after}-qwen3-4b.json`):
+
+| `analysis`, qwen3:4b | Success | Model calls | Total tokens | Runs of code |
+|---|---:|---:|---:|---:|
+| before | 1/5 | 7.4 | 27,318 | 5.0 |
+| identical change at most twice | 1/5 | 5.6 | 17,873 | 2.4 |
+
+- No success gained or lost; 35% fewer tokens and half the program runs per task. Told to change
+  the program, qwen3:4b explained its syntax error correctly and stopped instead of fixing it.
+- Simulated: none of the 21 workloads moved.
 ## An answer that announces work it has not done (2026-10-05)
 
 On `files-edit`, qwen3:4b read the spreadsheet and then ended its reply with "I will now call

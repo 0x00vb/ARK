@@ -14,6 +14,7 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 | `claims/schedule-qwen3-4b.json`, `claims/schedule-qwen3.5-27b.json` | live, the `claimed-schedule` workload, 5 repetitions on qwen3:4b-instruct and 3 on qwen3.5:27b |
 | `board/live-qwen3-4b.json`, `board/sim.json` | the `board` workload (ADR 0023), 3 repetitions live on qwen3:4b-instruct and simulated |
 | `analysis/live-qwen3-4b.json`, `analysis/live-qwen3.5-27b.json`, `analysis/sim.json` | the `analysis` workload: 3 repetitions live on qwen3:4b-instruct, 2 on qwen3.5:27b, and simulated |
+| `analysis/repeat-before-qwen3-4b.json`, `analysis/repeat-after-qwen3-4b.json` | the `analysis` workload, 5 repetitions live on qwen3:4b-instruct, before and after an identical change runs at most twice |
 | `baseline-naive.json` | the same suite through the naive loop (`--harness naive`), for "ARK against a naive loop" in `RESULTS.md` |
 | `m4/sim.json` | simulated, the M4 runtime (v0.3.0 plus measurement-only event fields, `035a06b`) |
 | `m4/live-qwen3-4b.json` | live, M4 runtime, qwen3:4b-instruct through Ollama, 3 repetitions |

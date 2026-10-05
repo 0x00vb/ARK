@@ -29,7 +29,7 @@ Last updated: 2026-10-05 (v0.9.0; `main` has the browser, step 5, C5, Files, Run
 | Files on qwen3:4b: `files-edit` (`bench/RESULTS.md`) is 0/5. It finds the file, and since the announced-work check it no longer stops after reading; it then puts the totals in a new column or sheet. qwen3.5:27b 3/3 | the layout is the model's; revisit with a hosted model or a larger local one |
 | ARK Desktop ships `uv` in the app (Run code is on in its `main`): without `uv` a clean Mac shows Run code as unavailable. The Data Analysis page on aiark.dev waits for that release (owner, 2026-10-05) | ARK Desktop |
 | Claimed files: the harness checks an answer's saved files against the turn's (`claimed-files`, `bench/RESULTS.md`). Claimed schedules: not reproduced on qwen3:4b or qwen3.5:27b in three shapes (`claimed-schedule`), so no check for claimed actions. Left: claims in other languages than English | a transcript of a claimed schedule, then a workload that reproduces it |
-| Run code: qwen3:4b reruns an identical failing program unchanged (the `analysis` workload, 1/3; qwen3.5:27b 2/2). A deterministic check for an identical failing `code.run`, measured on `analysis` | ark-runtime, after the "I will now" check lands |
+| Run code on qwen3:4b: 1/5 on `analysis`; it diagnoses its own syntax error but does not fix it. Identical changes now run at most twice (35% fewer tokens). qwen3.5:27b 2/2 | a fix needs a stronger model or a measured hint; nothing planned |
 | Run code later: network as its own permission, packages per project, a sandbox for Linux and Windows | when a workflow needs one (ADR 0020 › Consequences) |
 
 ## Waiting on this repo

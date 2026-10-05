@@ -236,3 +236,40 @@ async fn a_stored_artifact_read_carries_across_turns_but_an_observation_does_not
     assert_eq!(values.len(), 1, "only the observation ran");
     assert_eq!(f.runs.load(Ordering::SeqCst), 3);
 }
+
+#[tokio::test]
+async fn an_identical_change_runs_at_most_twice_in_a_task() {
+    let f = fixture();
+    let set = || ("kv.set", json!({ "key": "mode", "value": "fast" }));
+    let script = calls(
+        vec![
+            set(),
+            set(),
+            set(),
+            set(),
+            ("kv.set", json!({ "key": "mode", "value": "slow" })),
+        ],
+        "done",
+    );
+    let p: Arc<dyn Provider> = Arc::new(MockProvider::new("m", script));
+    let profile = AgentProfile::builder().core_actions(["kv.set"]).build();
+    let gate = Arc::new(ApprovalGate::new(Arc::new(FixedApprover(
+        ApprovalDecision::AllowOnce,
+    ))));
+    let mut asked = 0;
+    let out = Harness::new(ModelRouter::single(p))
+        .planner(false)
+        .critic(false)
+        .approvals(Some(gate))
+        .ask(&f.engine, &profile, &f.project, "set the mode", |e| {
+            if let HarnessEvent::ToolCall { .. } = e {
+                asked += 1;
+            }
+        })
+        .await
+        .unwrap();
+    // Twice the same, refused twice without being run or asked about, then a different one.
+    assert_eq!(f.runs.load(Ordering::SeqCst), 3);
+    assert_eq!(asked, 3);
+    assert_eq!(out.answer, "done");
+}

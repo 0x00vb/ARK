@@ -138,6 +138,9 @@ What changed for people building on ARK, per release. Not a commit log.
   the saved files; simulated with a stand-in program) ([`bench/RESULTS.md`](bench/RESULTS.md)).
 
 ### Changed
+- A state-changing call that already ran twice in a task with the same input is not run, or asked
+  about, a third time; the model is told to change the input (`harness::MAX_IDENTICAL_CHANGES`).
+  On `analysis`, qwen3:4b: same success, 35% fewer tokens.
 - Runtime: an answer that ends by announcing work it has not done ("I will now call
   files.edit...") while tools are offered is sent back once, saying nothing ran. On qwen3:4b
   `files-edit` no run stops after reading any more; seven other workloads 20/21 to 21/21 at the

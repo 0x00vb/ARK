@@ -47,7 +47,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Settings › Skills | ARK's own section: the skills of the project folder and the store (name, "This project" or "All projects", description). Add skills opens the Terminal in the project folder with `npx skills add <package>` typed; Enter is the person's |
 | Settings › Tool servers | ARK's own section, when the app has plugins: the MCP servers (running or why not, their tools, the command), Add (a name and a command, or a pasted `mcpServers` snippet), Restart, Remove (a second click confirms). The same as `/plugin`. An app section with the id `plugins` replaces it |
 | Board | In an app that runs agents, a tab beside Chat: the project's work as To do, In progress and Done ([`ORCHESTRATION.md`](ORCHESTRATION.md#the-board)). A card is a status circle, a title and its owner; "Needs you" and a dot while its agent works are the only marks. Drag moves a card (a line shows where it lands), the circle completes it, + adds one (Enter keeps the box open for the next). A click opens it in the side pane: title and note in place, owner, "Give to…" an agent (starts a task linked to it), what blocks it, each run's answer and files, its history, Delete (with Undo). Keys on a card: Enter opens, Space completes, Backspace deletes, arrows move the focus, Shift with arrows moves the card. Changes by agents and other windows glide into place |
-| Agents' questions | An orchestrated agent's approval waits in a tray at the bottom right, whatever the main column shows. |
+| Agents' questions | An orchestrated agent's approval waits in a tray at the bottom right, whatever the main column shows. In the native window, a question that arrives while the window is not in front (hidden, minimized, another app in use) also shows a system notification. |
 
 Narrow windows (up to 760 px, or up to 1000 px with the pane open) fold the sidebar into a
 drawer opened from the top-left button. Below 760 px an open pane covers the window.
@@ -141,6 +141,7 @@ ui.run_desktop(tauri::generate_context!())
 | `.asset(path, bytes)` | A file the page can load, served at `ext/<path>` |
 | `.script(asset)`, `.stylesheet(asset)` | Load an asset as a module or stylesheet after ARK's own |
 | `.handler(name, f)` | A backend method the app's scripts call with `ark.ext(name, params)` |
+| `.keep_running(true)` | The native window: closing it hides it and the app keeps running (schedules, agents' work), with Open and Quit in the menu bar (macOS) or the tray (Windows, Linux); the Dock icon opens it again. Default: closing quits |
 | `.open()`, `.serve(addr)`, `.serve_background(addr)`, `.run_desktop(ctx)` | Start |
 
 A handler gets `HandlerCtx { engine, project, emitter }`. `emitter.emit(name, payload)`

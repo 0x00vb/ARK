@@ -106,6 +106,11 @@ What changed for people building on ARK, per release. Not a commit log.
   methods `board`, `board_add`, `board_change`, `board_remove`, `board_give`; a Board tab beside
   Chat in every app that runs agents ([`ORCHESTRATION.md`](docs/ORCHESTRATION.md#the-board)).
 
+- Native window: `ArkUi::keep_running(true)`: closing the window hides it and the app keeps
+  running, with Open and Quit in the menu bar (the tray on Windows and Linux); the Dock icon
+  opens it again. A question that waits while the window is not in front shows a system
+  notification (`tauri-plugin-notification`, part of the `desktop` feature).
+
 ### Changed
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
   window: actions whose summary names that extension load first, whatever the task's language.

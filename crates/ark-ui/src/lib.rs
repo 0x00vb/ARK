@@ -56,6 +56,7 @@ pub struct ArkUi {
     handlers: HashMap<String, Handler>,
     start: Start,
     access: Access,
+    keep_running: bool,
 }
 
 impl ArkUi {
@@ -67,6 +68,7 @@ impl ArkUi {
             handlers: HashMap::new(),
             start: Start::default(),
             access: Access::default(),
+            keep_running: false,
         }
     }
     /// The accent colour, any CSS colour.
@@ -138,6 +140,14 @@ impl ArkUi {
         self
     }
 
+    /// The native window: closing it hides it and the app keeps running, with an item in the
+    /// menu bar (the tray elsewhere) to open it again or quit. Schedules and agents' work go on;
+    /// a question that waits shows a system notification. Default: closing the window quits.
+    pub fn keep_running(mut self, on: bool) -> Self {
+        self.keep_running = on;
+        self
+    }
+
     /// Open the app and wrap it in a [`Host`]. Transports and tests start here.
     pub async fn open(self) -> anyhow::Result<(Arc<Host>, Arc<Assets>)> {
         let title = self.app.name().to_string();
@@ -191,9 +201,10 @@ impl ArkUi {
     /// Open the native window. `context` is the app's `tauri::generate_context!()`.
     #[cfg(feature = "desktop")]
     pub fn run_desktop(self, context: tauri::Context<tauri::Wry>) -> std::process::ExitCode {
+        let keep_running = self.keep_running;
         let opened = tauri::async_runtime::block_on(self.open());
         match opened {
-            Ok((host, assets)) => desktop::run(host, assets, context),
+            Ok((host, assets)) => desktop::run(host, assets, context, keep_running),
             Err(e) => {
                 eprintln!("error: {e:#}");
                 std::process::ExitCode::FAILURE

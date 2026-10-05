@@ -9,7 +9,7 @@ description = "ARK graphical agent workspace: a desktop window (Tauri) or a loca
 [features]
 default = ["desktop"]
 # The native window. Without it, ark-ui still serves the workspace to a local browser.
-desktop = ["dep:tauri", "dep:tauri-plugin-dialog"]
+desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-notification"]
 
 [dependencies]
 ark-interact.workspace = true
@@ -23,8 +23,9 @@ portable-pty.workspace = true
 reqwest.workspace = true
 sha2 = "0.10"
 base64 = "0.22"
-tauri = { version = "2", optional = true }
+tauri = { version = "2", optional = true, features = ["tray-icon"] }
 tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

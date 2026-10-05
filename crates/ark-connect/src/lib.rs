@@ -9,6 +9,7 @@
 //! Service names live only here and in `catalog.json`. A capability's tools have neutral
 //! names (`mail.send`), so another provider can back the same capability. Why: ADR 0011.
 
+pub mod api_keys;
 pub mod catalog;
 pub mod oauth;
 pub mod secrets;
@@ -17,6 +18,7 @@ pub mod services;
 mod acquire;
 mod connections;
 
+pub use api_keys::ApiKeys;
 pub use catalog::{Capability, Catalog, OAuth, Provider};
 pub use connections::{Account, CapabilityStatus, Connecting, Connections, State};
 pub use secrets::{Keychain, MemorySecrets, Secrets};

@@ -847,6 +847,8 @@ impl ArkBuilder {
             profile.distillers.push(ark_files::distill());
         }
         if let Some(c) = &connections {
+            // Saved API keys reach the model APIs; the environment still comes first.
+            ark_model::keys::set_source(Arc::new(c.api_keys().clone()));
             engine.add_source(Arc::new(c.clone()));
             profile
                 .distillers

@@ -23,8 +23,8 @@ pub struct Anthropic {
 
 impl Anthropic {
     pub fn from_env(model: impl Into<String>) -> Result<Self> {
-        let key = std::env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| ProviderError::MissingCredential("ANTHROPIC_API_KEY".into()))?;
+        let key = crate::keys::api_key("ANTHROPIC_API_KEY")
+            .ok_or_else(|| ProviderError::MissingCredential("ANTHROPIC_API_KEY".into()))?;
         let mut a = Anthropic::new(model, key);
         if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL") {
             a.base = base;

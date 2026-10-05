@@ -20,8 +20,8 @@ pub struct OpenAi {
 
 impl OpenAi {
     pub fn from_env(model: impl Into<String>) -> Result<Self> {
-        let key = std::env::var("OPENAI_API_KEY")
-            .map_err(|_| ProviderError::MissingCredential("OPENAI_API_KEY".into()))?;
+        let key = crate::keys::api_key("OPENAI_API_KEY")
+            .ok_or_else(|| ProviderError::MissingCredential("OPENAI_API_KEY".into()))?;
         Ok(OpenAi::new(
             std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into()),
             model,

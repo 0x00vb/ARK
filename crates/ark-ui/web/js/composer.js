@@ -247,7 +247,7 @@ export class Composer {
       clear(body);
       const current = this.model.textContent;
       for (const b of backends) {
-        if (b.kind === "api" && !b.ready) continue;
+        if (b.kind === "api" && !b.ready && !this.canSaveKeys) continue;
         const group = h("div.model-group",
           h("div.model-head",
             h("span.model-dot", { "data-ok": String(b.ready) }),
@@ -258,6 +258,26 @@ export class Composer {
             const here = current === `${b.provider} ${m}`;
             group.append(h("button.menu-item.model-item", { "aria-current": here ? "true" : null, onclick: () => !here && pick(`${b.provider}:${m}`) }, h("span", m)));
           }
+        } else if (b.kind === "api") {
+          // A key pasted here is checked with the provider and kept in the system's keychain.
+          const key = h("input.menu-input.model-key", { type: "password", placeholder: `Paste your ${b.label} key`, "aria-label": `${b.label} key`, autocomplete: "off" });
+          const why = h("div.menu-sub.model-key-why");
+          key.addEventListener("keydown", async (e) => {
+            if (e.key !== "Enter" || !key.value.trim()) return;
+            e.stopPropagation();
+            key.disabled = true;
+            why.textContent = "Checking the key…";
+            try {
+              await this.api.call("api_key_save", { provider: b.provider, key: key.value.trim() });
+              this.backends = await this.api.call("models");
+              paint(this.backends);
+            } catch (err) {
+              key.disabled = false;
+              why.textContent = err.message.replace(/^./, (c) => c.toUpperCase());
+              key.select();
+            }
+          });
+          group.append(h("div.model-fix", key), why);
         } else if (b.fix) {
           group.append(h("div.model-fix",
             h("code", b.fix),
@@ -269,7 +289,10 @@ export class Composer {
     if (this.backends) paint(this.backends);
     else body.append(h("div.menu-sub.pad", "Checking models…"));
     try {
-      this.backends = await this.api.call("models");
+      [this.backends, this.canSaveKeys] = await Promise.all([
+        this.api.call("models"),
+        this.api.call("api_keys").then((k) => !!k.can_save).catch(() => false),
+      ]);
       paint(this.backends);
     } catch (err) {
       if (!this.backends) {

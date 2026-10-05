@@ -75,6 +75,7 @@ struct Inner {
     tokens: Mutex<HashMap<String, Tokens>>,
     /// Service base URLs that replace the real ones (tests, a proxy).
     bases: HashMap<String, String>,
+    api_keys: crate::ApiKeys,
 }
 
 /// The engine's connected accounts and what they make ready. Cheap to clone.
@@ -96,6 +97,7 @@ pub struct Connecting {
 impl Connections {
     /// Read `<root>/connections.json`. A missing or unreadable file is no accounts.
     pub fn open(root: &Path, catalog: Catalog, secrets: Arc<dyn Secrets>) -> Self {
+        let api_keys = crate::ApiKeys::open(root, secrets.clone());
         let file: File = std::fs::read_to_string(root.join(FILE))
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
@@ -112,8 +114,14 @@ impl Connections {
                 accounts: RwLock::new(file.accounts),
                 tokens: Mutex::new(HashMap::new()),
                 bases: HashMap::new(),
+                api_keys,
             }),
         }
+    }
+
+    /// Saved API keys for the hosted model APIs, in the same secret store.
+    pub fn api_keys(&self) -> &crate::ApiKeys {
+        &self.inner.api_keys
     }
 
     /// Send `service`'s requests to `base` instead (tests, a proxy). Before the first clone.

@@ -10,6 +10,7 @@ description = "ARK capabilities that need an account: providers, sign-in, accoun
 ark-core.workspace = true
 ark-tools.workspace = true
 ark-runtime.workspace = true
+ark-model.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

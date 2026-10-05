@@ -548,6 +548,11 @@ impl Host {
         Ok(json!({}))
     }
 
+    /// The app's saved API keys, when it keeps connections.
+    fn api_keys(&self) -> Option<ark_interact::ark_sdk::prelude::ark_connect::ApiKeys> {
+        self.caps.connections.as_ref().map(|c| c.api_keys().clone())
+    }
+
     /// A board change; answers with the item as it is now.
     async fn board_control(&self, c: Control) -> anyhow::Result<Value> {
         match self.control(c).await? {
@@ -744,6 +749,32 @@ impl Host {
             "models" => Ok(serde_json::to_value(
                 ark_interact::ark_sdk::prelude::ark_model::catalog().await,
             )?),
+            // Saved API keys (ark-connect): which providers have one, save one (checked with
+            // the provider first), forget one. Without connections, keys come from the
+            // environment only and these refuse.
+            "api_keys" => {
+                let keys = self.api_keys();
+                Ok(json!({
+                    "can_save": keys.is_some(),
+                    "saved": keys.map(|k| k.saved()).unwrap_or_default(),
+                }))
+            }
+            "api_key_save" => {
+                let keys = self.api_keys().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "this app keeps no keys; set the provider's environment variable"
+                    )
+                })?;
+                keys.save(&s("provider"), &s("key")).await?;
+                Ok(json!({ "saved": keys.saved() }))
+            }
+            "api_key_forget" => {
+                let keys = self
+                    .api_keys()
+                    .ok_or_else(|| anyhow::anyhow!("this app keeps no keys"))?;
+                keys.forget(&s("provider"))?;
+                Ok(json!({ "saved": keys.saved() }))
+            }
             // What the subscription CLIs last reported about their accounts' usage limits.
             "subscription_usage" => Ok(serde_json::to_value(
                 ark_interact::ark_sdk::prelude::ark_model::subscription_usage(),

@@ -17,6 +17,7 @@ pub mod capacity;
 mod catalog;
 pub mod cli;
 mod codex_app;
+pub mod keys;
 mod live;
 pub mod mock;
 mod ollama;
@@ -321,7 +322,7 @@ pub trait Provider: Send + Sync {
 /// Build a provider from the environment:
 /// - `ARK_PROVIDER` = ollama (default) | openai | anthropic | claude | codex
 /// - `ARK_MODEL` overrides the model
-/// - API keys from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
+/// - API keys from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, else a saved key ([`keys`])
 pub fn from_env() -> Result<Box<dyn Provider>> {
     let which = std::env::var("ARK_PROVIDER").unwrap_or_else(|_| "ollama".into());
     let model = std::env::var("ARK_MODEL").ok();

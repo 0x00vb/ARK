@@ -77,16 +77,16 @@ pub async fn catalog() -> Vec<Backend> {
         ),
         ("openai", "OpenAI API", "OPENAI_API_KEY", "gpt-4o-mini"),
     ] {
-        let ready = std::env::var(key).is_ok_and(|k| !k.trim().is_empty());
+        let ready = crate::keys::has_api_key(key);
         out.push(Backend {
             provider: provider.into(),
             label: label.into(),
             kind: BackendKind::Api,
             ready,
             detail: if ready {
-                format!("{key} set")
+                "key set".into()
             } else {
-                format!("{key} not set")
+                "no key".into()
             },
             fix: None,
             models: vec![model.into()],

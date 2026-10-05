@@ -338,6 +338,8 @@ pub struct Host {
     commands: Value,
     /// The current project's orchestrator, and the task forwarding its events.
     orch: Mutex<Option<(Orchestrator, tokio::task::JoinHandle<()>)>>,
+    /// Every project's orchestrator: questions kept by tasks in any of them (ADR 0036).
+    orchs: ark_interact::OrchestratorSet,
     /// One shell per project, for the Terminal panel.
     terminals: crate::terminal::Terminals,
     /// The Computer, when the app offers it.
@@ -375,6 +377,7 @@ impl Host {
         crate::upload::sweep(ix.ark().shared_engine().store.root());
         let host = Arc::new(Host {
             orch: Mutex::new(None),
+            orchs: ix.orchestrators(),
             terminals: Default::default(),
             engine: ix.ark().shared_engine(),
             chat_skills: ix.ark().skill_names().to_vec(),
@@ -532,6 +535,42 @@ impl Host {
         s.project = Some(ix.project().clone());
     }
 
+    /// The graph, each agent with `doing`: what it does now in words, as the terminal's
+    /// `/agents` shows it (`ark_interact::orchestration::doing`).
+    fn graph_with_doing(&self, g: &ark_interact::ark_orchestrate::Graph) -> anyhow::Result<Value> {
+        let mut v = serde_json::to_value(g)?;
+        if let Some(agents) = v["agents"].as_array_mut() {
+            for (a, node) in agents.iter_mut().zip(&g.agents) {
+                a["doing"] = json!(ark_interact::orchestration::doing(g, node, &self.labels));
+            }
+        }
+        Ok(v)
+    }
+
+    /// Questions tasks keep whose run is not waiting live in this process (it restarted), in
+    /// the shape `hello` lists questions. Their id is the question's.
+    fn kept_questions(&self, live: &[Value]) -> Vec<Value> {
+        let asked_live = |task: &str| live.iter().any(|q| q["request"]["task"] == json!(task));
+        self.orchs
+            .list()
+            .iter()
+            .flat_map(|o| o.questions())
+            .filter(|t| !asked_live(&t.id))
+            .filter_map(|t| {
+                let q = t.question?;
+                Some(json!({
+                    "id": q.id,
+                    "request": q.request,
+                    "line": self.labels.approval_line(&q.request),
+                    "title": ark_interact::approval_title(&q.request),
+                    "choices": ark_interact::approval_choices(&q.request),
+                    "session": Value::Null,
+                    "chat": Value::Null,
+                }))
+            })
+            .collect()
+    }
+
     /// Forward the events of the interaction's orchestrator (it changes with the project).
     fn follow_orchestrator(&self, current: Option<&Orchestrator>) {
         let mut orch = self.orch.lock().unwrap();
@@ -630,13 +669,14 @@ impl Host {
         let n = |k: &str| params.get(k).and_then(|v| v.as_u64());
         match method {
             "hello" => {
-                let pending: Vec<Value> = self
+                let mut pending: Vec<Value> = self
                     .approvals
                     .lock()
                     .unwrap()
                     .iter()
                     .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"], "session": req["session"], "chat": req["chat"] }))
                     .collect();
+                pending.extend(self.kept_questions(&pending));
                 let cur = self.cur();
                 let running = cur
                     .running
@@ -709,9 +749,26 @@ impl Host {
                 Ok(json!({}))
             }
             "approve" => {
-                let id = n("id").unwrap_or(0);
                 let decision: ApprovalDecision =
                     serde_json::from_value(params["decision"].clone())?;
+                // A question a task kept, whose run is gone (a restart): its id is a string.
+                if let Some(question) = params["id"].as_str() {
+                    let (o, task) =
+                        self.orchs
+                            .list()
+                            .into_iter()
+                            .find_map(|o| {
+                                let t = o.questions().into_iter().find(|t| {
+                                    t.question.as_ref().is_some_and(|q| q.id == question)
+                                })?;
+                                Some((o, t.id))
+                            })
+                            .ok_or_else(|| anyhow::anyhow!("that approval is no longer pending"))?;
+                    o.answer(&task, decision)?;
+                    self.emit(json!({ "kind": "approval_closed", "id": question }));
+                    return Ok(json!({}));
+                }
+                let id = n("id").unwrap_or(0);
                 match self.approvals.lock().unwrap().remove(&id) {
                     Some((_, reply)) => {
                         let _ = reply.send(decision);
@@ -1037,7 +1094,7 @@ impl Host {
             "context" => Ok(serde_json::to_value(self.context().await?)?),
             // The agent and task graph; follow it with `orch` events after its `seq`.
             "graph" => match self.orchestrator() {
-                Ok(o) => Ok(serde_json::to_value(o.graph())?),
+                Ok(o) => Ok(self.graph_with_doing(&o.graph())?),
                 Err(_) => Ok(Value::Null),
             },
             "task_trace" => Ok(serde_json::to_value(

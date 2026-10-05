@@ -68,6 +68,20 @@ pub enum EventKind {
     TaskResumed {
         task: String,
     },
+    /// A task's agent asks the person before a state-changing call; the task waits for the
+    /// answer (its `question`).
+    Asked {
+        task: String,
+        agent: String,
+        question: String,
+        preview: String,
+    },
+    /// The person answered a task's question.
+    Answered {
+        task: String,
+        question: String,
+        decision: ark_runtime::ApprovalDecision,
+    },
     Message {
         from: String,
         to: String,
@@ -159,6 +173,8 @@ impl EventKind {
             | EventKind::Delegated { task, .. }
             | EventKind::TaskWaiting { task, .. }
             | EventKind::TaskResumed { task }
+            | EventKind::Asked { task, .. }
+            | EventKind::Answered { task, .. }
             | EventKind::RulesApplied { task, .. }
             | EventKind::Agent { task, .. }
             | EventKind::ArtifactProduced { task, .. }
@@ -186,6 +202,7 @@ impl EventKind {
             | EventKind::Session { agent, .. }
             | EventKind::ArtifactProduced { agent, .. }
             | EventKind::Scheduled { agent, .. }
+            | EventKind::Asked { agent, .. }
             | EventKind::TaskStarted { agent, .. } => Some(agent),
             EventKind::TaskCreated { owner, .. } => Some(owner),
             EventKind::Delegated { from_agent, .. } => Some(from_agent),

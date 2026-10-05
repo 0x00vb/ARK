@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::brief::clip;
 use crate::orchestrator::Inner;
-use crate::record::{now_ms, AgentState, ArtifactRef, Origin, TaskState, ToolCallRecord, Usage};
+use crate::record::{
+    now_ms, AgentState, ArtifactRef, Origin, Question, Step, TaskState, ToolCallRecord, Usage,
+};
 use crate::spec::Budget;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -57,6 +59,10 @@ pub struct AgentNode {
     pub profile: Option<String>,
     /// Messages waiting for its next task.
     pub inbox: usize,
+    /// The call it is making, or made last, in the task it runs now. What its task waits on
+    /// is the task's `waiting_on` and `question`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<Step>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -100,6 +106,9 @@ pub struct TaskNode {
     pub created_ms: u64,
     pub started_ms: Option<u64>,
     pub finished_ms: Option<u64>,
+    /// The question it waits for the person to answer (ADR 0036).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<Question>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +202,10 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 tools: r.spec.tools.clone(),
                 profile: r.spec.profile_name.clone(),
                 inbox: r.inbox.len(),
+                step: a
+                    .step
+                    .clone()
+                    .filter(|s| r.current_task.as_deref() == Some(s.task.as_str())),
             }
         })
         .collect();
@@ -215,7 +228,13 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 after: r.after.clone(),
                 state: r.state,
                 waiting_on: r.waiting_on.clone(),
-                waiting_for: t.waiting_for.clone(),
+                // Tasks only; waiting for the person shows as `question`.
+                waiting_for: t
+                    .waiting_for
+                    .iter()
+                    .filter(|w| !w.starts_with('@'))
+                    .cloned()
+                    .collect(),
                 attempts: r.attempts,
                 max_attempts: r.max_attempts,
                 elapsed_ms: r.elapsed_ms(),
@@ -234,6 +253,7 @@ pub(crate) fn build(inner: &Inner) -> Graph {
                 created_ms: r.created_ms,
                 started_ms: r.started_ms,
                 finished_ms: r.finished_ms,
+                question: r.question.clone().filter(|q| q.open()),
             }
         })
         .collect();

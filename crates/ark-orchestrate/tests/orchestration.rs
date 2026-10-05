@@ -715,34 +715,359 @@ async fn a_named_profile_is_chosen_by_name_and_survives_a_restart() {
     );
 }
 
-#[tokio::test]
-async fn interrupted_tasks_are_marked_and_can_run_again() {
-    let f = fixture();
-    let m = Script::new("m", vec![answer("recovered")]);
-    {
-        let o = orch(&f, vec![("m", m.clone())], vec![]);
-        o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+/// A state-changing tool that counts its runs: a change must happen once, whatever stops.
+struct Change(Arc<AtomicUsize>);
+
+#[async_trait::async_trait]
+impl Adapter for Change {
+    fn name(&self) -> &str {
+        "doc"
     }
-    // A task a dead process left running.
-    let record = json!({
-        "id": "t-dead0001", "project": f.project.id.to_string(), "owner": "w",
-        "objective": "unfinished", "origin": { "by": "external" }, "state": "running",
-        "created_ms": 1, "pid": 999_999_u32
-    });
-    f.ark
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new("doc.save", "save", RiskTier::Mutate)]
+    }
+    async fn run(
+        &self,
+        _: &str,
+        input: serde_json::Value,
+        _: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(ActionOutput::json(json!({ "saved": input["text"] })))
+    }
+}
+
+/// An app with the counting tool, kept across "restarts": each `orch()` is the orchestrator a
+/// new process builds over the same store.
+struct Restarts {
+    _dir: tempfile::TempDir,
+    ark: Ark,
+    project: Project,
+    runs: Arc<AtomicUsize>,
+}
+
+impl Restarts {
+    fn new() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .tool(Arc::new(Change(runs.clone())))
+            .provider(Arc::new(ark_model::MockProvider::new("unused", vec![])))
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("p", "").unwrap();
+        Restarts {
+            _dir: dir,
+            ark,
+            project,
+            runs,
+        }
+    }
+    fn orch(&self, m: &Arc<Script>, gate: Option<Arc<ApprovalGate>>) -> Orchestrator {
+        let mm = m.clone();
+        let mut b = Orchestrator::builder(&self.ark, &self.project)
+            .configure_models(move |b| b.provider("m", mm as Arc<dyn Provider>));
+        if let Some(g) = gate {
+            b = b.approvals(g);
+        }
+        b.build().unwrap()
+    }
+    /// Store a task as a process that died left it.
+    fn left_open(&self, id: &str, state: &str, extra: serde_json::Value) {
+        let mut record = json!({
+            "id": id, "project": self.project.id.to_string(), "owner": "w",
+            "objective": "unfinished", "origin": { "by": "external" }, "state": state,
+            "attempts": 1, "created_ms": 1, "started_ms": 1, "pid": 999_999_u32
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            record[k] = v.clone();
+        }
+        self.ark
+            .engine()
+            .store
+            .put_record("orch_task", id, self.project.id.as_str(), &record)
+            .unwrap();
+    }
+    fn scope(&self, o: &Orchestrator) -> ProjectId {
+        ProjectId(o.agent("w").unwrap().scope)
+    }
+}
+
+/// An approver nobody answers, counting the questions it gets.
+struct Nobody(Arc<AtomicUsize>);
+
+#[async_trait::async_trait]
+impl Approver for Nobody {
+    async fn decide(&self, _: &ApprovalRequest) -> ApprovalDecision {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        std::future::pending().await
+    }
+}
+
+#[tokio::test]
+async fn work_a_stopped_process_left_open_continues_after_a_restart() {
+    let r = Restarts::new();
+    let m = Script::new("m", vec![answer("recovered"), answer("fresh")]);
+    {
+        let o = r.orch(&m, None);
+        o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+        o.spawn(AgentSpec::new("v").model("m")).await.unwrap();
+    }
+    // One was running, one never started.
+    r.left_open("t-dead0001", "running", json!({}));
+    r.left_open(
+        "t-dead0002",
+        "queued",
+        json!({ "owner": "v", "attempts": 0, "started_ms": null }),
+    );
+    let o = r.orch(&m, None);
+    let done = o.wait("t-dead0001").await.unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    let fresh = o.wait("t-dead0002").await.unwrap();
+    assert_eq!(fresh.state, TaskState::Done, "{:?}", fresh.error);
+    let texts = m.texts();
+    let briefs: Vec<&String> = texts.iter().filter(|t| t.contains("unfinished")).collect();
+    assert_eq!(briefs.len(), 2);
+    // Only the one that had run is told it continues.
+    assert_eq!(
+        briefs
+            .iter()
+            .filter(|t| t.contains("It was interrupted"))
+            .count(),
+        1
+    );
+    let events = o.events(0, 1000).unwrap();
+    assert!(events.iter().any(|e| matches!(
+        &e.kind,
+        EventKind::TaskQueued { task, reason } if task == "t-dead0001" && reason.contains("restart")
+    )));
+}
+
+#[tokio::test]
+async fn a_change_cut_short_by_a_restart_is_not_run_again_on_its_own() {
+    let r = Restarts::new();
+    let m = Script::new("m", vec![answer("ran again")]);
+    let scope = {
+        let o = r.orch(&m, None);
+        o.spawn(AgentSpec::new("w").model("m").allow_mutate(true))
+            .await
+            .unwrap();
+        r.scope(&o)
+    };
+    r.left_open("t-dead0003", "running", json!({ "report_to": null }));
+    // The engine recorded the call as running, in a process that is gone.
+    let mut inv = ark_core::Invocation::new("doc.save", RiskTier::Mutate, json!({"text": "a"}));
+    inv.status = ark_core::InvocationStatus::Running;
+    inv.pid = Some(999_999);
+    r.ark.engine().store.put_invocation(&scope, &inv).unwrap();
+
+    let o = r.orch(&m, None);
+    let t = o.task("t-dead0003").unwrap();
+    assert_eq!(t.state, TaskState::Failed);
+    let error = t.error.unwrap();
+    assert!(
+        error.starts_with(INTERRUPTED) && error.contains("doc.save"),
+        "{error}"
+    );
+    assert!(m.texts().is_empty(), "nothing ran on its own");
+    // The person checks, then runs it again.
+    o.retry("t-dead0003").unwrap();
+    assert_eq!(o.wait("t-dead0003").await.unwrap().state, TaskState::Done);
+
+    // Run again and stopped again with no change under way: the old cut-short call is not
+    // this run's, so it continues.
+    let m2 = Script::new("m2", vec![answer("third time")]);
+    drop(o);
+    let mut rec = r
+        .ark
         .engine()
         .store
-        .put_record("orch_task", "t-dead0001", f.project.id.as_str(), &record)
+        .get_record("orch_task", "t-dead0003")
+        .unwrap()
         .unwrap();
-    let o = orch(&f, vec![("m", m.clone())], vec![]);
-    let t = o.task("t-dead0001").unwrap();
-    assert_eq!(t.state, TaskState::Failed);
-    assert_eq!(t.error.as_deref(), Some(INTERRUPTED));
-    o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
-    o.retry("t-dead0001").unwrap();
-    let done = o.wait("t-dead0001").await.unwrap();
-    assert_eq!(done.state, TaskState::Done);
-    assert_eq!(done.result.as_deref(), Some("recovered"));
+    rec["state"] = json!("running");
+    rec["pid"] = json!(999_999);
+    r.ark
+        .engine()
+        .store
+        .put_record("orch_task", "t-dead0003", r.project.id.as_str(), &rec)
+        .unwrap();
+    let o = r.orch(&m2, None);
+    let t = o.wait("t-dead0003").await.unwrap();
+    assert_eq!(t.state, TaskState::Done, "{:?}", t.error);
+}
+
+#[tokio::test]
+async fn a_change_made_before_a_restart_is_not_made_twice() {
+    let r = Restarts::new();
+    let m = Script::new(
+        "m",
+        vec![
+            // The resumed run makes the same change again, then a new one.
+            calls(vec![("doc.save", json!({"text": "a"}))]),
+            calls(vec![("doc.save", json!({"text": "b"}))]),
+            answer("saved a and b [inv:1]"),
+        ],
+    );
+    let scope = {
+        let o = r.orch(&m, None);
+        o.spawn(
+            AgentSpec::new("w")
+                .model("m")
+                .tools(["doc.*"])
+                .allow_mutate(true),
+        )
+        .await
+        .unwrap();
+        r.scope(&o)
+    };
+    r.left_open("t-dead0004", "running", json!({}));
+    // The stopped run had saved "a".
+    let mut inv = ark_core::Invocation::new("doc.save", RiskTier::Mutate, json!({"text": "a"}));
+    inv.mark_ok(json!({"saved": "a"}));
+    r.ark.engine().store.put_invocation(&scope, &inv).unwrap();
+
+    let o = r.orch(&m, None);
+    let done = o.wait("t-dead0004").await.unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!(r.runs.load(Ordering::SeqCst), 1, "only \"b\" ran");
+    let texts = m.texts();
+    assert!(texts[0].contains("you already did, do not do again: doc.save"));
+    assert!(texts[1].contains("not run again"));
+}
+
+#[tokio::test]
+async fn a_task_waiting_for_the_person_shows_it_and_any_client_answers() {
+    let r = Restarts::new();
+    let m = Script::new(
+        "m",
+        vec![
+            calls(vec![("doc.save", json!({"text": "a"}))]),
+            answer("saved [inv:1]"),
+        ],
+    );
+    let asked = Arc::new(AtomicUsize::new(0));
+    let gate = Arc::new(ApprovalGate::new(Arc::new(Nobody(asked.clone()))));
+    let o = r.orch(&m, Some(gate));
+    o.spawn(AgentSpec::new("w").model("m").tools(["doc.*"]))
+        .await
+        .unwrap();
+    let id = o.submit("w", TaskSpec::new("save a")).unwrap();
+    for _ in 0..200 {
+        if !o.questions().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let waiting = o.task(&id).unwrap();
+    assert_eq!(waiting.state, TaskState::Waiting);
+    assert_eq!(waiting.waiting_on.as_deref(), Some(WAITING_PERSON));
+    let q = waiting.question.clone().unwrap();
+    assert_eq!(q.request.action, "doc.save");
+    assert_eq!(o.agent("w").unwrap().state, AgentState::Waiting);
+    let g = o.graph();
+    let node = g.tasks.iter().find(|t| t.task == id).unwrap();
+    assert_eq!(node.question.as_ref().unwrap().id, q.id);
+    assert!(node.waiting_for.is_empty());
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+
+    // Another client answers through the orchestrator, not the gate's approver.
+    o.answer(&id, ApprovalDecision::AllowOnce).unwrap();
+    let done = o.wait(&id).await.unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert!(done.question.is_none());
+    assert_eq!(r.runs.load(Ordering::SeqCst), 1);
+    assert!(o.questions().is_empty());
+    let events = o.events(0, 1000).unwrap();
+    assert!(events
+        .iter()
+        .any(|e| matches!(e.kind, EventKind::Asked { .. })));
+    assert!(events.iter().any(|e| matches!(
+        e.kind,
+        EventKind::Answered {
+            decision: ApprovalDecision::AllowOnce,
+            ..
+        }
+    )));
+    assert!(
+        o.answer(&id, ApprovalDecision::Deny).is_err(),
+        "nothing waits now"
+    );
+}
+
+#[tokio::test]
+async fn a_question_survives_a_restart_and_its_answer_runs_the_call_once() {
+    let r = Restarts::new();
+    // The resumed run asks for the same call again.
+    let m = Script::new(
+        "m",
+        vec![
+            calls(vec![("doc.save", json!({"text": "a"}))]),
+            answer("saved [inv:1]"),
+        ],
+    );
+    {
+        let o = r.orch(&m, None);
+        o.spawn(AgentSpec::new("w").model("m").tools(["doc.*"]))
+            .await
+            .unwrap();
+    }
+    let request = ApprovalRequest {
+        action: "doc.save".into(),
+        summary: "save".into(),
+        risk: RiskTier::Mutate,
+        input: json!({"text": "a"}),
+        class: "doc.save".into(),
+        preview: "doc.save(text=\"a\")".into(),
+        agent: Some("w".into()),
+        task: Some("t-dead0005".into()),
+        ask_each_time: false,
+    };
+    r.left_open(
+        "t-dead0005",
+        "waiting",
+        json!({ "waiting_on": "your answer", "question": { "id": "q-1", "request": request, "asked_ms": 5 } }),
+    );
+    let asked = Arc::new(AtomicUsize::new(0));
+    let gate = Arc::new(ApprovalGate::new(Arc::new(Nobody(asked.clone()))));
+    let o = r.orch(&m, Some(gate));
+    // Still waiting for the person, and nothing ran.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let t = o.task("t-dead0005").unwrap();
+    assert_eq!(t.state, TaskState::Waiting);
+    assert_eq!(o.questions().len(), 1);
+    assert!(m.texts().is_empty());
+
+    o.answer("t-dead0005", ApprovalDecision::AllowOnce).unwrap();
+    let done = o.wait("t-dead0005").await.unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!(r.runs.load(Ordering::SeqCst), 1);
+    assert_eq!(asked.load(Ordering::SeqCst), 0, "the kept answer was used");
+    assert!(m.texts()[0].contains("the person allowed it"));
+}
+
+#[tokio::test]
+async fn cancelling_a_task_that_waits_for_an_answer_after_a_restart_ends_it() {
+    let r = Restarts::new();
+    let m = Script::new("m", vec![]);
+    {
+        let o = r.orch(&m, None);
+        o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+    }
+    let request = json!({ "action": "doc.save", "summary": "", "risk": "mutate", "input": {}, "class": "doc.save", "preview": "doc.save()" });
+    r.left_open(
+        "t-dead0006",
+        "waiting",
+        json!({ "question": { "id": "q-2", "request": request, "asked_ms": 5 } }),
+    );
+    let o = r.orch(&m, None);
+    o.cancel("t-dead0006").unwrap();
+    let t = o.wait("t-dead0006").await.unwrap();
+    assert_eq!(t.state, TaskState::Cancelled);
+    assert!(t.question.is_none());
 }
 
 #[tokio::test]

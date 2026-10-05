@@ -20,6 +20,10 @@ use crate::blobs::StoreBlobs;
 use crate::error::AgentError;
 use crate::plugins::{PluginSpec, PluginStatus, Plugins};
 
+/// The error of a call a stopped process left running. A state-changing one may or may not
+/// have happened.
+pub const INTERRUPTED_CALL: &str = "interrupted: the process stopped before this call finished";
+
 pub struct Engine {
     /// Shared with every engine made by [`scoped`](Engine::scoped).
     pub store: Arc<Store>,
@@ -149,7 +153,8 @@ impl Engine {
         Ok(engine)
     }
 
-    /// Mark calls left running by a process that no longer exists as failed, so nothing reads
+    /// Mark calls left running by a process that no longer exists as failed (their error is
+    /// [`INTERRUPTED_CALL`]), so nothing reads
     /// as still in progress (or, worse, as finished) after a crash. Returns how many.
     pub fn recover_interrupted(&self) -> Result<usize, AgentError> {
         let mut n = 0;
@@ -157,7 +162,7 @@ impl Engine {
             if inv.pid.is_some_and(crate::process::alive) {
                 continue;
             }
-            inv.mark_failed("interrupted: the process stopped before this call finished");
+            inv.mark_failed(INTERRUPTED_CALL);
             self.store.put_invocation(&project, &inv)?;
             n += 1;
         }

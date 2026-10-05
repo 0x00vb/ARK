@@ -11,7 +11,7 @@ Last updated: 2026-10-05 (v0.10.0; work runtime review, ADR 0036)
 | | |
 |---|---|
 | Latest tag | v0.10.0 (2026-10-05), on `origin` and `github` |
-| `main` | v0.10.0, plus ADR 0036 and a fix: a delegated task's outputs no longer include versions before (`[Unreleased]`). Since v0.9.0: the browser (ADR 0015), a runtime other machines connect to (ADR 0016, [`docs/REMOTE.md`](docs/REMOTE.md)), work without the window (several live chats, schedules, keep running, ADR 0017), the Computer (ADR 0018), Files edited in place (ADR 0019), Run code (ADR 0020, contained on macOS, Linux and Windows, ADR 0032), outputs opened by kind (ADR 0021), the project's board (ADR 0023), the terminal on a runtime elsewhere (ADR 0024), schedules posting into the chat (ADR 0025), ARK Accounts (ADR 0026, 0031), named endpoints and out of credit (ADR 0027), secrets in a file for servers (ADR 0028), the window visiting a runtime elsewhere (ADR 0029), folders sent as projects (ADR 0030), data work (ADR 0033), versions before a change (ADR 0034), files dropped on the chat (ADR 0035). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
+| `main` | v0.10.0, plus (`[Unreleased]`, breaking, so the next tag is v0.11.0): W1 to W3 (ADR 0036, 0037: questions kept on tasks and answered from any client, a restart continues work without repeating a change, each agent's step in the graph) and a fix (a delegated task's outputs no longer include versions before). Since v0.9.0: the browser (ADR 0015), a runtime other machines connect to (ADR 0016, [`docs/REMOTE.md`](docs/REMOTE.md)), work without the window (several live chats, schedules, keep running, ADR 0017), the Computer (ADR 0018), Files edited in place (ADR 0019), Run code (ADR 0020, contained on macOS, Linux and Windows, ADR 0032), outputs opened by kind (ADR 0021), the project's board (ADR 0023), the terminal on a runtime elsewhere (ADR 0024), schedules posting into the chat (ADR 0025), ARK Accounts (ADR 0026, 0031), named endpoints and out of credit (ADR 0027), secrets in a file for servers (ADR 0028), the window visiting a runtime elsewhere (ADR 0029), folders sent as projects (ADR 0030), data work (ADR 0033), versions before a change (ADR 0034), files dropped on the chat (ADR 0035). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | Next tag | none planned. `[Unreleased]` in `CHANGELOG.md` collects what comes next |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | Branch `ci/windows` (pushed to `github`, not merged): `ark-os` (ADR 0022) holds every OS difference, and ARK finds, starts, stops and opens programs through it; text keeps CRLF and UTF-16; Ctrl in the window; page tests in Chromium too. `scripts/ci.sh` with page tests passes on macOS; lint clean for Windows. Not run on Windows yet: the owner runs `scripts/windows-check.ps1` on a Windows machine (GitHub Actions billing stays off). Merges to `main` after that run. Plan: `ark-desktop/docs/WINDOWS.md` |
@@ -59,10 +59,10 @@ project there (`remote::send_folder`, ADR 0030, for Copy to Cloud); and A4 (Run 
 bubblewrap, ADR 0032), for Cloud Phase 2. A4 still needs a run on a Linux machine (Docker on
 the dev Mac is broken).
 
-Then, before Cloud relies on it: W1 to W3 in [`ROADMAP.md`](ROADMAP.md) › Work runtime
-(ADR 0036, review of 2026-10-05). A question for the person becomes a stored record, a restart
-resumes work instead of failing it, and each agent's activity is in the graph. ARK Desktop's W4
-follows. W1 and W2 are one change in practice: start with W1.
+W1 to W3 of [`ROADMAP.md`](ROADMAP.md) › Work runtime are on `main` (ADR 0037). ARK Desktop's
+W4 (its page reads them) is on its `main` and needs a tag with them: v0.11.0 waits for the
+owner's go. Not measured live: a restart of a real runtime mid-task on a hosted model (tests
+drive it with scripted models).
 
 ## Working notes
 

@@ -3,7 +3,7 @@
 //! view never keeps state of its own.
 
 use ark_core::RuleRef;
-use ark_runtime::ContextReport;
+use ark_runtime::{ApprovalDecision, ApprovalRequest, ContextReport};
 use serde::{Deserialize, Serialize};
 
 use crate::spec::{AgentSpec, Budget};
@@ -128,6 +128,37 @@ pub struct ToolCallRecord {
     /// Reused an earlier result instead of running.
     #[serde(default)]
     pub reused: bool,
+}
+
+/// The call an agent is making, or made last, in the task it runs now (ADR 0036). Kept by the
+/// orchestrator from the run's events, so every client shows the same "doing now".
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Step {
+    pub task: String,
+    pub action: String,
+    /// The input as the model gave it, long strings clipped.
+    pub input: serde_json::Value,
+    pub since_ms: u64,
+}
+
+/// A question a task waits for the person to answer. It is kept on the task, so any client
+/// answers it and a restart does not lose it (ADR 0036).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Question {
+    pub id: String,
+    pub request: ApprovalRequest,
+    pub asked_ms: u64,
+    /// An answer given after the run that asked had stopped (a restart). The task runs again,
+    /// and this answers the same call when it asks again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<ApprovalDecision>,
+}
+
+impl Question {
+    /// Still waiting for the person.
+    pub fn open(&self) -> bool {
+        self.answer.is_none()
+    }
 }
 
 /// Tool calls kept per task; older ones stay in the event log.
@@ -259,6 +290,9 @@ pub struct TaskRecord {
     /// The chat its result is posted into when it ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_to: Option<String>,
+    /// The question it waits for the person to answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question: Option<Question>,
 }
 
 fn one() -> u32 {

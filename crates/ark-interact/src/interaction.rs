@@ -451,18 +451,37 @@ impl Orchestrators {
         Ok(o)
     }
 
-    /// Open the orchestrators of the projects that have schedules still running.
+    /// Open the orchestrators of the projects that have schedules still running or work a
+    /// stopped process left open, so that work goes on with no window.
     fn wake_scheduled(&self, ark: &Ark) {
         let store = &ark.engine().store;
-        for id in ark_orchestrate::scheduled_projects(store) {
+        for id in ark_orchestrate::projects_with_work(store) {
             match store.get_project(&ProjectId(id.clone())) {
                 Ok(Some(p)) => {
                     if let Err(e) = self.get(ark, &p) {
-                        tracing::warn!(project = %id, "scheduled work cannot run: {e:#}");
+                        tracing::warn!(project = %id, "its work cannot run: {e:#}");
                     }
                 }
-                _ => tracing::warn!(project = %id, "a schedule names a project that is gone"),
+                _ => tracing::warn!(project = %id, "work names a project that is gone"),
             }
+        }
+    }
+}
+
+/// Every orchestrator an app has open: one per project that has work (with
+/// [`App::orchestrate`]), or the app's only one. Cheap to clone; a front-end keeps one to list
+/// what waits for the person in any project (ADR 0036).
+#[derive(Clone, Default)]
+pub struct OrchestratorSet {
+    all: Option<Arc<Orchestrators>>,
+    one: Option<ark_orchestrate::Orchestrator>,
+}
+
+impl OrchestratorSet {
+    pub fn list(&self) -> Vec<ark_orchestrate::Orchestrator> {
+        match &self.all {
+            Some(all) => all.built.lock().unwrap().values().cloned().collect(),
+            None => self.one.iter().cloned().collect(),
         }
     }
 }
@@ -726,6 +745,18 @@ impl Interaction {
     /// app builds one per project.
     pub fn orchestrator(&self) -> Option<&ark_orchestrate::Orchestrator> {
         self.orchestrator.as_ref()
+    }
+
+    /// Every orchestrator the app has open, in any project.
+    pub fn orchestrators(&self) -> OrchestratorSet {
+        OrchestratorSet {
+            all: self.orchs.clone(),
+            one: self
+                .orchs
+                .is_none()
+                .then(|| self.orchestrator.clone())
+                .flatten(),
+        }
     }
 
     /// With [`App::orchestrate`], use the current project's orchestrator (built on first use).

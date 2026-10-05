@@ -28,7 +28,6 @@ const store = {
   items: [],
   tasks: {},
   agents: [],
-  asks: new Map(), // approval id -> task id
   project: null,
   removing: new Set(), // deleted, waiting for undo to pass
   listeners: new Set(),
@@ -41,7 +40,11 @@ const item = (id) => store.items.find((w) => w.id === id);
 const task = (id) => store.tasks[id];
 const openTask = (w) => [...(w.tasks || [])].reverse().map((t) => [t, task(t)]).find(([, t]) => t && !["done", "failed", "cancelled"].includes(t.state));
 const running = (w) => (w.tasks || []).some((t) => task(t)?.state === "running");
-const asking = (w) => [...store.asks.values()].some((t) => (w.tasks || []).includes(t));
+/// One of its tasks waits for the person's answer: the runtime keeps the question on the task.
+const asking = (w) => (w.tasks || []).some((t) => {
+  const r = task(t);
+  return r && r.question && !r.question.answer && !["done", "failed", "cancelled"].includes(r.state);
+});
 /// Waiting for the person: an agent asks a question on it, or it is blocked and theirs.
 export const needsYou = (w) => w.state !== "done" && (asking(w) || (!!w.blocked && w.owner === PERSON));
 const ownerName = (o) => (o === PERSON ? "You" : o || "");
@@ -92,16 +95,6 @@ async function change(id, ch) {
 
 export function registerBoard(ark) {
   store.ark = ark;
-  // Questions agents ask arrive before the view is first drawn: keep them from the start.
-  ark.on("ark:approval", (m) => {
-    if (m.request?.task) {
-      store.asks.set(m.id, m.request.task);
-      store.changed();
-    }
-  });
-  ark.on("ark:approval_closed", (m) => {
-    if (store.asks.delete(m.id)) store.changed();
-  });
   ark.on("ark:orch", (m) => {
     const ev = m.event || {};
     if (ev.type === "work") {

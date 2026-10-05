@@ -219,11 +219,11 @@ front-end uses the same.
 | Uploads | `upload_parts {upload, parts}`, then `upload_project {upload, name}` (a new project, ADR 0030) or `upload_add {upload}` (into the open project's folder: `{added}`, names in use get a number, ADR 0035), or `upload_cancel {upload}`. None waits for a running turn |
 | Session | `hello`, `summary`, `sessions {project?}`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `open_project {id}` (back to its last chat), `add_project {path?, name?}` (a folder becomes a project, or opens the one it is), `rename_project {id, name}`, `project_folder {id, path}`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models`, `subscription_usage` (each subscription's limits as its CLI last reported them: `[{account, plan?, windows: [{minutes, used_percent, resets_at}], limited, reported_ms}]`) |
 | Keys | `api_keys` (`can_save`, `saved`: providers with a saved key), `api_key_save {provider, key}` (checked with the provider, then kept in the system keychain), `api_key_forget {provider}`. Need an app with connections; a key in the environment still comes first |
-| Turn | `send` (`ask: false` refuses the turn's state-changing actions instead of asking: a client nobody answers), `steer`, `cancel` (both take `session` for a chat in the background), `approve`, `command`, `working` (the chats running a turn: `[{session, title, project, input}]`) |
+| Turn | `send` (`ask: false` refuses the turn's state-changing actions instead of asking: a client nobody answers), `steer`, `cancel` (both take `session` for a chat in the background), `approve {id, decision}` (a live question's number, or a kept question's string id: a task's question after a restart, ADR 0037), `command`, `working` (the chats running a turn: `[{session, title, project, input}]`) |
 | Views | `transcript {session?}`, `trace`, `call`, `context`, `usage`, `state` |
 | Computer | `computer_stop` (take the screen back from the agent using it) |
 | Store | `artifacts`, `artifact` (the project's, or one an orchestrated agent produced), `invocation`, `run_action` |
-| Agents | `graph`, `agents`, `tools`, `profiles` (what `AgentSpec.profile_name` may name), `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
+| Agents | `graph` (each agent has `doing`: what it does now in words, as `/agents` shows it), `agents`, `tools`, `profiles` (what `AgentSpec.profile_name` may name), `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
 | Tasks | `submit_task {agent, task}`, `task {task}` (record and timeline lines), `task_trace`, `cancel_task`, `retry_task`, `unschedule {schedule}`, `orch_events {after, limit}` |
 | Board | `board` (`items`, the `tasks` run for them, the live `agents`; null without an orchestrator), `board_add {title, note?, owner?, state?, blocked?, before?}`, `board_change {item, change}` (a `WorkChange`), `board_remove {item}`, `board_give {item, agent}` (answers the `task`). Follow it with `orch` events of type `work` and `work_removed` |
 | Page | `focus`, `ext` (an app handler) |
@@ -252,7 +252,7 @@ build, and only shape the answer. `spawn_agent` takes an `AgentSpec` as JSON and
 work wherever the runtime runs. Tests: `tests/orchestration.rs`.
 
 Every event carries `seq`, one higher than the last. `hello` returns `seq` (everything up to
-it is in its answer), `working`, `computer`, and `live`, the open chat's running turn's events so far, so a window that opens or
+it is in its answer), `approvals` (live questions and those tasks kept across a restart), `working`, `computer`, and `live`, the open chat's running turn's events so far, so a window that opens or
 reconnects mid-turn rebuilds the turn and then follows it; the page drops events it has
 already shown and reloads on a gap. In a browser the stream reconnects with backoff (1 s
 doubling to 30 s) and stops after ten failures with a Retry button.

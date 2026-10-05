@@ -37,8 +37,8 @@ use crate::brief::{clip, Brief};
 use crate::event::{EventKind, OrchEvent};
 use crate::models::{AgentModels, ModelResolver, Models, ModelsBuilder};
 use crate::record::{
-    now_ms, AgentRecord, AgentState, ArtifactRef, Mail, Origin, TaskRecord, TaskState,
-    ToolCallRecord, Usage, TOOL_CALLS_KEPT,
+    now_ms, AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord,
+    TaskState, ToolCallRecord, Usage, TOOL_CALLS_KEPT,
 };
 use crate::schedule::{ScheduleRecord, When, SCHEDULE};
 use crate::spec::{AgentSpec, TaskSpec};
@@ -46,7 +46,7 @@ use crate::tools::{self, AgentTools};
 use crate::OrchError;
 
 const AGENT: &str = "orch_agent";
-const TASK: &str = "orch_task";
+pub(crate) const TASK: &str = "orch_task";
 const MESSAGE: &str = "orch_message";
 
 /// Runs agents and tasks in one project. Cheap to clone; clones share everything.
@@ -158,11 +158,13 @@ impl<'a> OrchestratorBuilder<'a> {
             events,
             ticks: Mutex::new(()),
         });
-        inner.load()?;
+        let recover = inner.load()?;
         let orch = Orchestrator { inner };
-        // Schedules fire whether or not anything else runs: no window needs to be open.
+        // Schedules fire whether or not anything else runs: no window needs to be open. Work a
+        // stopped process left open continues the same way.
         if tokio::runtime::Handle::try_current().is_ok() {
             orch.spawn_schedule_timer(SCHEDULE_TICK);
+            orch.inner.recover(&recover);
         }
         Ok(orch)
     }
@@ -302,6 +304,62 @@ impl Orchestrator {
     pub fn task(&self, id: &str) -> Option<TaskRecord> {
         let st = self.inner.state.lock().unwrap();
         st.tasks.get(id).map(|t| t.record.clone())
+    }
+
+    /// Open tasks waiting for the person to answer their question, longest waiting first. Each
+    /// task's `question` says what it asks (ADR 0036).
+    pub fn questions(&self) -> Vec<TaskRecord> {
+        let st = self.inner.state.lock().unwrap();
+        let mut v: Vec<TaskRecord> = st
+            .tasks
+            .values()
+            .map(|t| &t.record)
+            .filter(|r| !r.state.is_final() && r.question.as_ref().is_some_and(Question::open))
+            .cloned()
+            .collect();
+        v.sort_by_key(|r| r.question.as_ref().map(|q| q.asked_ms));
+        v
+    }
+
+    /// Answer a task's question. While its run waits, the answer goes to it. When that run is
+    /// gone (the process restarted), the answer is kept and the task runs again; when its agent
+    /// asks the same call, this answers it. Grants the answer gives are kept either way.
+    pub fn answer(&self, task: &str, decision: ApprovalDecision) -> Result<(), OrchError> {
+        let inner = &self.inner;
+        let (live, question, answered) = {
+            let mut st = inner.state.lock().unwrap();
+            let t = st
+                .tasks
+                .get_mut(task)
+                .ok_or_else(|| OrchError::UnknownTask(task.into()))?;
+            let q = t
+                .record
+                .question
+                .clone()
+                .filter(|q| q.open() && !t.record.state.is_final())
+                .ok_or_else(|| OrchError::NotAllowed(format!("task {task} waits for no answer")))?;
+            (t.answer.take(), q, t.answered.clone())
+        };
+        if let Some(tx) = live {
+            if tx.send(decision).is_ok() {
+                return Ok(());
+            }
+        }
+        if let Some(gate) = &inner.approvals {
+            gate.remember(&question.request, decision);
+        }
+        inner.update_task(task, |t| {
+            if let Some(q) = &mut t.question {
+                q.answer = Some(decision);
+            }
+        });
+        inner.emit(EventKind::Answered {
+            task: task.to_string(),
+            question: question.id,
+            decision,
+        });
+        answered.notify_one();
+        Ok(())
     }
 
     /// Every task, oldest first.
@@ -551,6 +609,8 @@ pub(crate) struct AgentRt {
     pub models: Option<Arc<AgentModels>>,
     /// The resolver's default version when `models` was resolved.
     default_version: u64,
+    /// Its current call (see [`Step`]).
+    pub step: Option<Step>,
 }
 
 pub(crate) struct TaskRt {
@@ -561,6 +621,12 @@ pub(crate) struct TaskRt {
     slots: Arc<tokio::sync::Mutex<Slots>>,
     pub waiting_for: Vec<String>,
     delegations: u32,
+    /// Where the person's answer goes while the run that asked is waiting for it.
+    answer: Option<tokio::sync::oneshot::Sender<ApprovalDecision>>,
+    /// Woken when a question kept across a restart is answered.
+    answered: Arc<tokio::sync::Notify>,
+    /// Picked up again after a restart: its next run continues the interrupted one.
+    recovering: bool,
 }
 
 #[derive(Default)]
@@ -969,12 +1035,15 @@ impl Inner {
         }
     }
 
-    /// Load the project's agents and tasks. Tasks left open by a process that is gone are
-    /// marked failed.
-    fn load(&self) -> Result<(), OrchError> {
+    /// Load the project's agents and tasks. Work a process that is gone left open is picked up
+    /// again (ADR 0036): it is returned, for [`Inner::recover`] to run. A task that stopped
+    /// during a state-changing call is failed instead: that change may or may not have
+    /// happened, and only the person can tell.
+    fn load(&self) -> Result<Vec<String>, OrchError> {
         let store = &self.engine.store;
         let pid = std::process::id();
         let mut interrupted = Vec::new();
+        let mut recover = Vec::new();
         {
             let mut st = self.state.lock().unwrap();
             for v in store.list_records(AGENT, Some(self.project.id.as_str()))? {
@@ -995,6 +1064,7 @@ impl Inner {
                         steering: None,
                         models: None,
                         default_version: 0,
+                        step: None,
                     },
                 );
             }
@@ -1002,15 +1072,41 @@ impl Inner {
                 let Ok(mut r) = serde_json::from_value::<TaskRecord>(v) else {
                     continue;
                 };
+                let mut recovering = false;
                 if !r.state.is_final() {
                     let alive = r.pid.is_some_and(|p| p != pid && process_alive(p));
                     if !alive {
-                        r.state = TaskState::Failed;
-                        r.error = Some(INTERRUPTED.into());
-                        r.waiting_on = None;
-                        r.finished_ms = Some(now_ms());
                         r.pid = None;
-                        interrupted.push(r.clone());
+                        let asking = r.question.as_ref().is_some_and(Question::open);
+                        let scope = st.agents.get(&r.owner).map(|a| a.record.scope.clone());
+                        let unsure = match (scope, r.started_ms) {
+                            (Some(scope), Some(started)) if !asking => {
+                                self.change_cut_short(&ProjectId(scope), started)
+                            }
+                            _ => None,
+                        };
+                        if let Some(action) = unsure {
+                            r.state = TaskState::Failed;
+                            r.error = Some(format!(
+                                "{INTERRUPTED} during {action}, which may or may not have \
+                                 happened. Check, then run the task again"
+                            ));
+                            r.waiting_on = None;
+                            r.question = None;
+                            r.finished_ms = Some(now_ms());
+                            interrupted.push(r.clone());
+                        } else {
+                            // It had started a run: the next one continues it.
+                            recovering = r.attempts > 0 && r.state != TaskState::Pending;
+                            if asking {
+                                r.state = TaskState::Waiting;
+                                r.waiting_on = Some(WAITING_PERSON.into());
+                            } else if r.state != TaskState::Suspended {
+                                r.state = TaskState::Queued;
+                                r.waiting_on = Some(RESTARTED.into());
+                            }
+                            recover.push(r.id.clone());
+                        }
                     }
                 }
                 let (done, _) = watch::channel(r.state.is_final());
@@ -1024,6 +1120,9 @@ impl Inner {
                         slots: Default::default(),
                         waiting_for: Vec::new(),
                         delegations: 0,
+                        answer: None,
+                        answered: Default::default(),
+                        recovering,
                     },
                 );
             }
@@ -1045,6 +1144,12 @@ impl Inner {
                 }
             }
         }
+        for id in &recover {
+            let st = self.state.lock().unwrap();
+            if let Some(t) = st.tasks.get(id) {
+                self.save_task(&t.record);
+            }
+        }
         for r in interrupted {
             self.save_task(&r);
             self.emit(EventKind::TaskFinished {
@@ -1056,8 +1161,9 @@ impl Inner {
                 run_ms: r.run_ms,
             });
             self.work_follows(&r);
+            self.report_back(&r);
         }
-        Ok(())
+        Ok(recover)
     }
 
     // ---- agents ------------------------------------------------------------------
@@ -1163,6 +1269,7 @@ impl Inner {
                             steering: None,
                             models: Some(models.clone()),
                             default_version,
+                            step: None,
                         },
                     );
                 }
@@ -1379,6 +1486,7 @@ impl Inner {
             schedule: None,
             item: spec.item.clone(),
             report_to: spec.report_to.clone(),
+            question: None,
         };
         let (parent_rec, linked) = {
             let mut st = self.state.lock().unwrap();
@@ -1412,6 +1520,9 @@ impl Inner {
                     slots: Default::default(),
                     waiting_for: Vec::new(),
                     delegations: 0,
+                    answer: None,
+                    answered: Default::default(),
+                    recovering: false,
                 },
             );
             let parent_rec = parent.and_then(|p| {
@@ -1516,6 +1627,9 @@ impl Inner {
             t.record.state = TaskState::Queued;
             t.record.error = None;
             t.record.finished_ms = None;
+            // A run the person starts again is new work: what earlier runs did (a change cut
+            // short, a change made) is not this run's after a later restart.
+            t.record.started_ms = None;
             t.record.max_attempts = t.record.attempts + 1;
             t.stop = None;
             t.cancel = CancelToken::new();
@@ -1608,7 +1722,10 @@ impl Inner {
                 }
             }
         }
-        let mut resumed = false;
+        let mut resumed = self.take_recovering(id);
+        if !self.wait_for_answer(id).await {
+            return self.stopped_before_start(id);
+        }
         loop {
             if let Some(Stop::Cancel) = self.stop_reason(id) {
                 return Final::cancelled("cancelled");
@@ -1679,7 +1796,11 @@ impl Inner {
             match attempt {
                 Attempt::Done(answer) => return Final::done(answer),
                 Attempt::Stopped(Stop::Suspend) => {
-                    self.update_task(id, |t| t.state = TaskState::Suspended);
+                    // A question it was asking is asked again when it runs again.
+                    self.update_task(id, |t| {
+                        t.state = TaskState::Suspended;
+                        t.question = None;
+                    });
                     continue;
                 }
                 Attempt::Stopped(Stop::Cancel) => return Final::cancelled("cancelled"),
@@ -1715,6 +1836,165 @@ impl Inner {
     fn agent_state(&self, agent: &str) -> Option<AgentState> {
         let st = self.state.lock().unwrap();
         st.agents.get(agent).map(|a| a.record.state)
+    }
+
+    /// A state-changing call of an agent, since `started_ms`, that a stopped process left
+    /// running (the engine marks those when it opens). Whether it happened is unknown.
+    fn change_cut_short(&self, scope: &ProjectId, started_ms: u64) -> Option<String> {
+        self.engine
+            .store
+            .list_invocations(scope)
+            .ok()?
+            .into_iter()
+            .filter(|i| i.created_at.unix_timestamp_nanos() / 1_000_000 >= started_ms as i128)
+            .find(|i| {
+                let left_running = i.status == ark_core::InvocationStatus::Running
+                    && !i.pid.is_some_and(process_alive);
+                i.risk == ark_core::RiskTier::Mutate
+                    && (left_running
+                        || i.error.as_deref() == Some(ark_runtime::engine::INTERRUPTED_CALL))
+            })
+            .map(|i| i.action)
+    }
+
+    /// Run again the work [`Inner::load`] picked up after a restart.
+    fn recover(&self, ids: &[String]) {
+        for id in ids {
+            let (owner_known, asking) = {
+                let st = self.state.lock().unwrap();
+                match st.tasks.get(id) {
+                    Some(t) => (
+                        st.agents.contains_key(&t.record.owner),
+                        t.record.question.as_ref().is_some_and(Question::open),
+                    ),
+                    None => continue,
+                }
+            };
+            if !owner_known {
+                self.finish(
+                    id,
+                    Final::failed(format!("{INTERRUPTED}; its agent is gone")),
+                );
+                continue;
+            }
+            if !asking {
+                self.emit(EventKind::TaskQueued {
+                    task: id.clone(),
+                    reason: RESTARTED.into(),
+                });
+            }
+            self.start(id);
+        }
+    }
+
+    fn take_recovering(&self, id: &str) -> bool {
+        let mut st = self.state.lock().unwrap();
+        st.tasks
+            .get_mut(id)
+            .is_some_and(|t| std::mem::take(&mut t.recovering))
+    }
+
+    /// A question kept across a restart: the run that asked is gone, so the task waits here
+    /// for the answer. False: cancelled while waiting.
+    async fn wait_for_answer(&self, id: &str) -> bool {
+        loop {
+            let (open, answered, cancel) = {
+                let st = self.state.lock().unwrap();
+                let t = &st.tasks[id];
+                let open = t.record.question.as_ref().is_some_and(Question::open);
+                (open, t.answered.clone(), t.cancel.clone())
+            };
+            if !open {
+                return true;
+            }
+            tokio::select! {
+                _ = answered.notified() => {}
+                _ = cancel.cancelled() => return false,
+            }
+        }
+    }
+
+    /// The task's agent asks the person. The task keeps the question, so any client can answer
+    /// it and a restart does not lose it, and gives its capacity back while it waits.
+    async fn ask(
+        &self,
+        task: &str,
+        agent: &str,
+        request: &ApprovalRequest,
+    ) -> (String, tokio::sync::oneshot::Receiver<ApprovalDecision>) {
+        let id = format!("q-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if let Some(t) = self.state.lock().unwrap().tasks.get_mut(task) {
+            t.answer = Some(tx);
+        }
+        self.update_task(task, |t| {
+            t.question = Some(Question {
+                id: id.clone(),
+                request: request.clone(),
+                asked_ms: now_ms(),
+                answer: None,
+            })
+        });
+        self.park(task, &[ANSWER.to_string()]).await;
+        self.emit(EventKind::Asked {
+            task: task.to_string(),
+            agent: agent.to_string(),
+            question: id.clone(),
+            preview: request.preview.clone(),
+        });
+        (id, rx)
+    }
+
+    /// The person answered the question the task's run waits on.
+    async fn answered(&self, task: &str, question: &str, decision: ApprovalDecision) {
+        let ours = {
+            let mut st = self.state.lock().unwrap();
+            st.tasks.get_mut(task).is_some_and(|t| {
+                t.answer = None;
+                t.record.question.as_ref().is_some_and(|q| q.id == question)
+            })
+        };
+        if ours {
+            self.update_task(task, |t| t.question = None);
+        }
+        self.emit(EventKind::Answered {
+            task: task.to_string(),
+            question: question.to_string(),
+            decision,
+        });
+        self.unpark(task, &[ANSWER.to_string()]).await;
+    }
+
+    /// An answer given while the run that asked was gone, for the same call asked again.
+    fn take_answer(&self, task: &str, request: &ApprovalRequest) -> Option<ApprovalDecision> {
+        let decision = {
+            let st = self.state.lock().unwrap();
+            let q = st.tasks.get(task)?.record.question.as_ref()?;
+            let d = q.answer?;
+            (q.request.action == request.action && q.request.input == request.input).then_some(d)?
+        };
+        self.update_task(task, |t| t.question = None);
+        Some(decision)
+    }
+
+    /// The calls an earlier run of this task made, for the next run not to repeat a change
+    /// (`Harness::done_before`). The agent runs one task at a time, so its calls since the
+    /// task first started are this task's.
+    fn done_before(&self, id: &str, scope: &ProjectId) -> Vec<ark_core::Invocation> {
+        let started = {
+            let st = self.state.lock().unwrap();
+            st.tasks.get(id).and_then(|t| t.record.started_ms)
+        };
+        let Some(started) = started else {
+            return Vec::new();
+        };
+        self.engine
+            .store
+            .list_invocations(scope)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|i| i.created_at.unix_timestamp_nanos() / 1_000_000 >= started as i128)
+            .collect()
     }
 
     /// After a suspend the task needs a fresh token to run again. Returns whether it was
@@ -2012,8 +2292,23 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         profile.core_actions.extend(per_agent_actions);
         let scope = ProjectId(agent.scope.clone());
 
+        // A run that continues an interrupted one gets the changes it already made, so it does
+        // not make them twice.
+        let done = if resumed {
+            self.done_before(id, &scope)
+        } else {
+            Vec::new()
+        };
+        let done_lines: Vec<String> = done
+            .iter()
+            .filter(|i| {
+                i.risk == ark_core::RiskTier::Mutate && i.status == ark_core::InvocationStatus::Ok
+            })
+            .map(|i| format!("{} ({})", i.action, clip(&i.output.to_string(), 160)))
+            .collect();
         let dep_refs: Vec<&TaskRecord> = deps.iter().collect();
         let brief = Brief {
+            done: &done_lines,
             task: &task,
             deps: dep_refs,
             children: children.iter().collect(),
@@ -2047,6 +2342,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             .approvals(match &self.approvals {
                 Some(gate) if !spec.allow_mutate => {
                     Some(Arc::new(ApprovalGate::new(Arc::new(OnBehalf {
+                        orch: self.clone(),
                         agent: owner.to_string(),
                         task: id.to_string(),
                         gate: gate.clone(),
@@ -2058,7 +2354,8 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             .steering(Some(steer.clone()))
             .conversation(session.conversation_digest())
             .rules(selection.clone())
-            .skills(catalog);
+            .skills(catalog)
+            .done_before(done);
 
         let session_id = session.id().to_string();
         let attempt_no = {
@@ -2269,6 +2566,14 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                     }
                     HarnessEvent::ToolResult { .. } => a.record.usage.tool_calls += 1,
                     HarnessEvent::Step { .. } => a.record.usage.steps += 1,
+                    HarnessEvent::ToolCall { action, input, .. } => {
+                        a.step = Some(Step {
+                            task: task.to_string(),
+                            action: action.clone(),
+                            input: clip_strings(input),
+                            since_ms: now_ms(),
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -2344,7 +2649,11 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             t.waiting_on = None;
             t.finished_ms = Some(now_ms());
             t.pid = None;
+            t.question = None;
         });
+        if let Some(t) = self.state.lock().unwrap().tasks.get_mut(id) {
+            t.answer = None;
+        }
         let Some(rec) = rec else { return };
         let owner = rec.owner.clone();
         let current = self
@@ -2689,13 +2998,15 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         };
         self.update_task(parent, |t| {
             t.state = TaskState::Waiting;
-            t.waiting_on = Some(format!("tasks {}", on.join(", ")));
+            t.waiting_on = Some(waiting_text(&on));
         });
         self.set_agent_state(&owner, AgentState::Waiting);
-        self.emit(EventKind::TaskWaiting {
-            task: parent.to_string(),
-            on: ids.to_vec(),
-        });
+        if ids.iter().any(|i| i != ANSWER) {
+            self.emit(EventKind::TaskWaiting {
+                task: parent.to_string(),
+                on: ids.to_vec(),
+            });
+        }
     }
 
     async fn unpark(&self, parent: &str, ids: &[String]) {
@@ -2712,9 +3023,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 let st = self.state.lock().unwrap();
                 st.tasks[parent].waiting_for.clone()
             };
-            self.update_task(parent, |t| {
-                t.waiting_on = Some(format!("tasks {}", on.join(", ")))
-            });
+            self.update_task(parent, |t| t.waiting_on = Some(waiting_text(&on)));
             return;
         }
         if cancel.is_cancelled() {
@@ -2819,7 +3128,9 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
 
 /// Asks the orchestrator's gate on behalf of one agent's task, so the person sees who asks.
 /// Grants are kept by the orchestrator's gate.
+/// While the person has not answered, the task keeps the question and waits (ADR 0036).
 struct OnBehalf {
+    orch: Arc<Inner>,
     agent: String,
     task: String,
     gate: Arc<ApprovalGate>,
@@ -2831,12 +3142,70 @@ impl Approver for OnBehalf {
         let mut r = request.clone();
         r.agent = Some(self.agent.clone());
         r.task = Some(self.task.clone());
-        self.gate.check(&r).await
+        // Answered while no run waited (after a restart): the same call needs no new question.
+        if let Some(d) = self.orch.take_answer(&self.task, &r) {
+            return d;
+        }
+        // A grant answers without the person: nothing to wait for.
+        if !r.ask_each_time && self.gate.is_granted(&r.class) {
+            return self.gate.check(&r).await;
+        }
+        let (question, answer) = self.orch.ask(&self.task, &self.agent, &r).await;
+        let decision = tokio::select! {
+            d = self.gate.check(&r) => d,
+            Ok(d) = answer => {
+                // Answered through the orchestrator (another client, the terminal).
+                self.gate.remember(&r, d);
+                d
+            }
+        };
+        self.orch.answered(&self.task, &question, decision).await;
+        decision
     }
 }
 
 /// Why a task left running by a stopped process failed.
 pub const INTERRUPTED: &str = "interrupted: the process stopped while it ran";
+
+/// What a task waits on while its question waits for the person.
+pub const WAITING_PERSON: &str = "your answer";
+
+/// Why a task is queued again after a restart.
+const RESTARTED: &str = "continues after a restart";
+
+/// The entry a task's `waiting_for` holds while it waits for the person's answer.
+const ANSWER: &str = "@answer";
+
+/// A call's input with long strings clipped, for showing what an agent does.
+fn clip_strings(v: &serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::String(s) => serde_json::Value::String(clip(s, 200)),
+        serde_json::Value::Array(a) => a.iter().take(20).map(clip_strings).collect(),
+        serde_json::Value::Object(m) => m
+            .iter()
+            .map(|(k, x)| (k.clone(), clip_strings(x)))
+            .collect::<serde_json::Map<_, _>>()
+            .into(),
+        other => other.clone(),
+    }
+}
+
+/// What a task waits on, in words: the person's answer, tasks it delegated, or both.
+fn waiting_text(on: &[String]) -> String {
+    let tasks: Vec<&str> = on
+        .iter()
+        .filter(|w| *w != ANSWER)
+        .map(String::as_str)
+        .collect();
+    let mut parts = Vec::new();
+    if on.iter().any(|w| w == ANSWER) {
+        parts.push(WAITING_PERSON.to_string());
+    }
+    if !tasks.is_empty() {
+        parts.push(format!("tasks {}", tasks.join(", ")));
+    }
+    parts.join("; ")
+}
 
 #[cfg(unix)]
 fn process_alive(pid: u32) -> bool {

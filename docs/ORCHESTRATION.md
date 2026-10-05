@@ -158,6 +158,20 @@ and `WorkRemoved`. `/board add <title>`, `done <item>`, `move <item> <column>`,
 `give <item> <agent>`, `remove <item>` and the window's `board_*` methods build the same
 `Control`s.
 
+## Questions and restarts
+
+An agent's state-changing call asks the person through the orchestrator's approval gate. The
+question is kept on the task (`TaskRecord::question`), so it survives a restart and any client
+answers it (ADR 0037).
+
+| | |
+|---|---|
+| While it asks | The task is `Waiting` on `WAITING_PERSON` (`"your answer"`), its agent is `Waiting`, its capacity is given back. `questions()` lists such tasks; the graph's task carries `question` |
+| Answering | `answer(task, decision)` from any client: the window's tray (`approve`), `/task answer <task> once\|session\|always\|deny`. A grant it gives is kept |
+| A restart | Open work continues: a task with an open question waits for the answer and then runs again, and the same call asked again takes the kept answer; started tasks continue from their working state; queued ones run; suspended ones stay suspended. A task whose state-changing call was cut short fails with the call named, since only the person can tell whether it happened; `retry` runs it again |
+| No change twice | A continuing run gets the state-changing calls the earlier run made (`Harness::done_before`); an identical call returns the earlier result instead of running |
+| What an agent does | `AgentNode::step`, worded by `ark_interact::orchestration::doing` for every front-end |
+
 ## Context isolation
 
 Each agent works in a child project of the orchestrator's project. Its working state,
@@ -325,7 +339,6 @@ To follow a run: load `graph()`, then apply events after its `seq`.
 | Limit | Note |
 |---|---|
 | Delegations from one model reply run at most 4 at a time | the harness's parallel tool limit; more queue |
-| A restart marks every open task failed (`interrupted`), queued and suspended ones too, and a question waiting for the person is lost | `retry` runs one again; W1 and W2 in `ROADMAP.md` (ADR 0036) |
 | An agent loaded from the store after a restart has no custom `AgentProfile` | spawn it again with its full spec |
 | A message pushed into a running task is delivered at the next step | the same as steering |
 | A schedule cannot be edited; its runs do not report into a chat | stop it and ask again; the runs are in the agent's work |

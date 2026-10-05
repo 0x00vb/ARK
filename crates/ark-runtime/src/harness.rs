@@ -18,8 +18,9 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use ark_core::{
-    ArtifactId, Author, Claim, ClaimType, EvidenceCard, Focus, Interesting, InvocationId,
-    InvocationStatus, Note, NoteKind, ProjectId, ResearchState, Reuse, RiskTier, WorkspaceContext,
+    ArtifactId, Author, Claim, ClaimType, EvidenceCard, Focus, Interesting, Invocation,
+    InvocationId, InvocationStatus, Note, NoteKind, ProjectId, ResearchState, Reuse, RiskTier,
+    WorkspaceContext,
 };
 use ark_model::{estimate_tokens, Completion, Message, ToolDef, Usage};
 use serde::{Deserialize, Serialize};
@@ -238,6 +239,9 @@ pub struct Harness {
     presentation: bool,
     rules: Option<RuleSelection>,
     skills: Option<String>,
+    /// State-changing calls that already succeeded in an earlier run of the same work, which
+    /// stopped before it finished (see [`Harness::done_before`]).
+    done_before: Vec<Invocation>,
 }
 
 /// The pieces of the first user message, kept separate so the context report can attribute
@@ -314,6 +318,7 @@ impl Harness {
             presentation: false,
             rules: None,
             skills: None,
+            done_before: Vec::new(),
         }
     }
 
@@ -330,6 +335,18 @@ impl Harness {
     /// the runtime reads a skill's instructions only through `skills.read`.
     pub fn skills(mut self, catalog: Option<String>) -> Self {
         self.skills = catalog.filter(|t| !t.trim().is_empty());
+        self
+    }
+
+    /// Calls an earlier run of this work made before it stopped (a restart, a suspend). A
+    /// state-changing call identical to one of them that succeeded is not run, or asked about,
+    /// again: the model gets that earlier result. A change must not happen twice because the
+    /// work was interrupted.
+    pub fn done_before(mut self, invocations: Vec<Invocation>) -> Self {
+        self.done_before = invocations
+            .into_iter()
+            .filter(|i| i.risk == RiskTier::Mutate && i.status == InvocationStatus::Ok)
+            .collect();
         self
     }
 
@@ -530,6 +547,15 @@ impl Harness {
         let mut meta_seen: HashSet<String> = HashSet::new();
         // State-changing calls run this task, by digest (see `MAX_IDENTICAL_CHANGES`).
         let mut changes_run: HashMap<String, u32> = HashMap::new();
+        // Changes an earlier run of this work already made, by digest (`done_before`).
+        let done_before: HashMap<String, &Invocation> = self
+            .done_before
+            .iter()
+            .map(|i| {
+                let canonical = engine.canonical_input(project, i.input.clone());
+                (call_digest(&i.action, &canonical), i)
+            })
+            .collect();
         // When an action that changes state last ran this turn. Reads before it are not
         // reused after it.
         let mut changed_at = turn_started;
@@ -772,6 +798,24 @@ impl Harness {
                     continue;
                 }
                 if desc.risk == RiskTier::Mutate {
+                    if let Some(inv) = done_before.get(&digest) {
+                        flush!();
+                        let reused = format!("{} ({})", inv.id, inv.action);
+                        on_event(HarnessEvent::Duplicate {
+                            action: call.name.clone(),
+                            reused: reused.clone(),
+                        });
+                        tally.cited.push(inv.id.clone());
+                        round.push(Message::tool_result(
+                            call,
+                            format!(
+                                "{DONE_BEFORE_NOTE} [{}]: {}",
+                                inv.id,
+                                inv.output.to_string().chars().take(600).collect::<String>()
+                            ),
+                        ));
+                        continue;
+                    }
                     // A change waits for the reads before it, and runs alone.
                     flush!();
                 }
@@ -2269,6 +2313,7 @@ fn unwritten_note(missing: &[String], written: &[String]) -> String {
 /// Runs of one identical state-changing call in a task: the first and one retry.
 pub const MAX_IDENTICAL_CHANGES: u32 = 2;
 
+const DONE_BEFORE_NOTE: &str = "not run again: this exact change already ran before the work was interrupted, so running it again would make it twice. Its result";
 const REPEATED_CHANGE_NOTE: &str = "not run: this exact call already ran twice in this task, with the results above. Running it again gives the same result. Change the input to fix what went wrong (for a program, fix the error it reported), or answer from what you have.";
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";

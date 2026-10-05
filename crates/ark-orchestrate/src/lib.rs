@@ -49,12 +49,14 @@ pub use brief::Brief;
 pub use event::{EventKind, OrchEvent};
 pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskNode};
 pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
-pub use orchestrator::{NamedProfile, Orchestrator, OrchestratorBuilder, INTERRUPTED};
-pub use record::{
-    AgentRecord, AgentState, ArtifactRef, Mail, Origin, TaskRecord, TaskState, ToolCallRecord,
-    Usage,
+pub use orchestrator::{
+    NamedProfile, Orchestrator, OrchestratorBuilder, INTERRUPTED, WAITING_PERSON,
 };
-pub use schedule::{scheduled_projects, ScheduleRecord, When};
+pub use record::{
+    AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord, TaskState,
+    ToolCallRecord, Usage,
+};
+pub use schedule::{projects_with_work, scheduled_projects, ScheduleRecord, When};
 pub use spec::{AgentSpec, Budget, TaskSpec};
 pub use tools::{
     BOARD_ADD, BOARD_LIST, BOARD_UPDATE, CHAT, CREATE, DELEGATE, MESSAGE, SCHEDULE, UNSCHEDULE,

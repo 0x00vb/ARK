@@ -37,7 +37,7 @@ impl Command for Agents {
         let g = o.graph();
         let task = args.trim();
         if task.is_empty() {
-            return Ok(crate::orchestration::graph_report(&g).into());
+            return Ok(crate::orchestration::graph_report(&g, ix.labels()).into());
         }
         let events = o.task_trace(task)?;
         Ok(crate::orchestration::task_report(&g, task, &events).into())
@@ -113,10 +113,10 @@ pub struct TaskCmd;
 impl Command for TaskCmd {
     meta!(
         "task",
-        "Hand an agent a task, or cancel or retry one: /task <agent> <objective>"
+        "Hand an agent a task, cancel, retry or answer one: /task <agent> <objective>"
     );
     fn usage(&self) -> &str {
-        "<agent> <objective> | cancel|retry <task>"
+        "<agent> <objective> | cancel|retry <task> | answer <task> once|session|always|deny"
     }
     async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
         control_cmd(ix, crate::orchestration::parse_task(args)).await

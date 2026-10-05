@@ -9,6 +9,40 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+Work survives a restart, and what it waits for is the runtime's (ADR 0036, 0037).
+
+### Added
+- A question an orchestrated agent asks is kept on its task (`TaskRecord::question`, `Question`):
+  the task is `Waiting` on `WAITING_PERSON` and gives its capacity back; events `Asked` and
+  `Answered`. `Orchestrator::questions()` lists them; `Orchestrator::answer(task, decision)`
+  answers from any client, also after a restart. The window's `hello` lists kept questions
+  (their `id` is a string) and `approve` takes that id; the terminal has
+  `/task answer <task> once|session|always|deny`. `ApprovalGate::remember` keeps what an
+  answer grants.
+- A restart continues open work: pending and queued tasks run, started ones continue from their
+  working state, a task with an open question waits for the answer, a suspended one stays
+  suspended. A task whose state-changing call was cut short fails with that call named
+  (`retry` runs it again) and reports to its chat. Apps open every project with open work or
+  schedules when they start (`projects_with_work`).
+- `Harness::done_before(invocations)`: a run that continues an interrupted one (a restart, a
+  resume) does not repeat a state-changing call an earlier run made; the brief lists them.
+  `ark_runtime::engine::INTERRUPTED_CALL` names a call a stopped process left running.
+- What an agent does now: `AgentNode::step` (its current call), worded once by
+  `ark_interact::orchestration::doing`; `/agents` has a "doing" column and says how to answer a
+  waiting task; the window's `graph` adds `doing` to each agent.
+
+### Changed
+- The board's "Needs you" reads questions from the tasks, not from approval events.
+
+### Breaking
+- `TaskRecord`, `TaskNode`, `AgentNode` and `orchestrate::Brief` have new fields (`question`,
+  `step`, `done`): code that builds them adds them (`None`, `&[]`).
+- `EventKind` has `Asked` and `Answered`: an exhaustive `match` adds them.
+- `ark_interact::orchestration::graph_report(g)` is `graph_report(g, labels)`: pass the app's
+  `Labels` (`ix.labels()`), or `Labels::new(vec![])`.
+- `INTERRUPTED` is now the start of a failed task's error, not all of it (the call cut short
+  follows).
+
 ### Fixed
 - A delegated task's outputs no longer include the versions before that its calls kept for
   Restore (ADR 0034). Before, a task that edited `notes.md` handed its delegator two

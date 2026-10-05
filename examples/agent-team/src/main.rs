@@ -224,7 +224,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let g = orch.graph();
-    println!("\n{}", graph_report(&g).plain_text());
+    println!(
+        "\n{}",
+        graph_report(&g, &ark_interact::Labels::new(vec![])).plain_text()
+    );
 
     println!("\n== model sessions");
     for a in &g.agents {

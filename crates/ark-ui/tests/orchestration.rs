@@ -526,3 +526,86 @@ async fn a_scheduled_run_posts_its_result_in_the_chat_and_the_window_shows_it() 
         "The notes say the locket is brass."
     );
 }
+
+/// A question an agent asks outlives the process (ADR 0036): after a restart, `hello` lists it
+/// with the question's id, the graph says the agent waits for the answer as the terminal's
+/// `/agents` does, and answering it by that id runs the call once.
+#[test]
+fn an_agents_question_survives_a_restart_and_any_client_answers_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let saves = Arc::new(AtomicUsize::new(0));
+
+    // The first process: the agent asks, nobody answers, the process stops.
+    let path = dir.path().to_path_buf();
+    let s = saves.clone();
+    let task = std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let task = rt.block_on(async {
+            let host = open(&path, s).await;
+            let mut rx = host.subscribe();
+            let spec = json!({ "name": "scribe", "role": "keeps the notes", "tools": ["notes.*"] });
+            host.call("spawn_agent", json!({ "spec": spec }))
+                .await
+                .unwrap();
+            let r = host
+                .call(
+                    "submit_task",
+                    json!({ "agent": "scribe", "task": { "objective": "save the notes" } }),
+                )
+                .await
+                .unwrap();
+            wait_for(&mut rx, "agent approval", |v| v["kind"] == "approval").await;
+
+            // While it waits, the window and the terminal say the same thing about it.
+            let g = host.call("graph", json!({})).await.unwrap();
+            let doing = g["agents"][0]["doing"].as_str().unwrap().to_string();
+            assert!(doing.starts_with("Waiting for your answer"), "{doing}");
+            let agents = host
+                .call("command", json!({ "line": "/agents" }))
+                .await
+                .unwrap()
+                .to_string();
+            assert!(agents.contains(&doing), "{agents}");
+            assert!(agents.contains("/task answer"), "{agents}");
+            r["task"].as_str().unwrap().to_string()
+        });
+        drop(rt);
+        task
+    })
+    .join()
+    .unwrap();
+
+    // The process is gone: the task's record names a process that no longer runs.
+    {
+        let ark = Ark::builder().store_root(dir.path()).build().unwrap();
+        let store = &ark.engine().store;
+        let mut rec = store.get_record("orch_task", &task).unwrap().unwrap();
+        assert_eq!(rec["question"]["request"]["action"], "notes.save");
+        rec["pid"] = json!(999_999);
+        let scope = rec["project"].as_str().unwrap().to_string();
+        store.put_record("orch_task", &task, &scope, &rec).unwrap();
+    }
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let host = open(dir.path(), saves.clone()).await;
+        let mut rx = host.subscribe();
+        let hello = host.call("hello", json!({})).await.unwrap();
+        let kept = &hello["approvals"][0];
+        assert_eq!(kept["request"]["task"], task.as_str());
+        let id = kept["id"]
+            .as_str()
+            .expect("a kept question's id is its own")
+            .to_string();
+        assert_eq!(saves.load(Ordering::SeqCst), 0);
+
+        host.call("approve", json!({ "id": id, "decision": "allow_once" }))
+            .await
+            .unwrap();
+        let done = wait_for(&mut rx, "task end", |v| orch_type(v, "task_finished")).await;
+        assert_eq!(done["event"]["state"], "done");
+        assert_eq!(saves.load(Ordering::SeqCst), 1, "the call ran once");
+        let hello = host.call("hello", json!({})).await.unwrap();
+        assert!(hello["approvals"].as_array().unwrap().is_empty());
+    });
+}

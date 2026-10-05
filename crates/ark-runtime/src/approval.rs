@@ -177,6 +177,17 @@ impl ApprovalGate {
             return ApprovalDecision::AllowAlways;
         }
         let decision = self.approver.decide(request).await;
+        self.remember(request, decision);
+        decision
+    }
+
+    /// Keep what an answer grants: `AllowSession` for the session, `AllowAlways` in the
+    /// project. For an answer that reached the asker some other way than [`ApprovalGate::check`]
+    /// (a question kept across a restart and answered later).
+    pub fn remember(&self, request: &ApprovalRequest, decision: ApprovalDecision) {
+        if request.ask_each_time {
+            return;
+        }
         match decision {
             ApprovalDecision::AllowSession => {
                 self.grants.lock().unwrap().insert(request.class.clone());
@@ -210,7 +221,6 @@ impl ApprovalGate {
             }
             _ => {}
         }
-        decision
     }
 }
 

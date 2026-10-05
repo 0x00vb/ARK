@@ -10,8 +10,10 @@ use ark_orchestrate::{
     WorkState,
 };
 use ark_sdk::prelude::ark_model::SessionState;
+use ark_sdk::prelude::ApprovalDecision;
 
 use crate::fmt::{clip, count, millis, tokens};
+use crate::labels::Labels;
 use crate::report::{Cell, Report, Row, Table, Tone};
 
 pub fn task_tone(s: TaskState) -> Tone {
@@ -34,6 +36,35 @@ fn agent_word(s: AgentState) -> &'static str {
         AgentState::Suspended => "suspended",
         AgentState::Terminated => "terminated",
     }
+}
+
+/// What an agent is doing now, in one line, from the runtime's graph alone (ADR 0036): the
+/// question it waits on, what its task waits for, or its current call in words. `None` when it
+/// has no task. Every front-end shows this line; none works it out from events.
+pub fn doing(g: &Graph, agent: &ark_orchestrate::AgentNode, labels: &Labels) -> Option<String> {
+    let id = agent.current_task.as_deref()?;
+    let task = g.tasks.iter().find(|t| t.task == id)?;
+    if let Some(q) = &task.question {
+        return Some(format!(
+            "Waiting for your answer: {}",
+            labels.approval_line(&q.request)
+        ));
+    }
+    if agent.state == AgentState::Suspended {
+        return Some("Paused".into());
+    }
+    if let Some(on) = task.waiting_on.as_deref().filter(|_| {
+        matches!(
+            task.state,
+            TaskState::Waiting | TaskState::Queued | TaskState::Pending
+        )
+    }) {
+        return Some(format!("Waiting for {on}"));
+    }
+    Some(match &agent.step {
+        Some(s) => labels.call_label(&s.action, &s.input),
+        None => clip(&task.objective, 80),
+    })
 }
 
 /// Tasks agents run on their own: when, the next run, what.
@@ -66,7 +97,7 @@ pub fn schedules_report(g: &Graph) -> Report {
 
 /// The whole graph: tasks as a tree (who delegated what to whom), agents with their model,
 /// session and context use, and each account's capacity.
-pub fn graph_report(g: &Graph) -> Report {
+pub fn graph_report(g: &Graph, labels: &Labels) -> Report {
     let mut r = Report::titled("Agents and tasks");
     if g.tasks.is_empty() && g.agents.is_empty() {
         return r.note("No agents yet.");
@@ -81,10 +112,10 @@ pub fn graph_report(g: &Graph) -> Report {
         r = r.heading("Tasks").table(t);
     }
     let mut a = Table::with_header(&[
-        "agent", "state", "model", "session", "context", "tokens", "done",
+        "agent", "state", "doing", "model", "session", "context", "tokens", "done",
     ])
-    .right(5)
-    .right(6);
+    .right(6)
+    .right(7);
     for n in &g.agents {
         let session = match &n.session {
             None => "-".to_string(),
@@ -120,6 +151,12 @@ pub fn graph_report(g: &Graph) -> Report {
             cells: vec![
                 Cell::new(n.name.clone(), Tone::Normal),
                 Cell::new(agent_word(n.state), tone),
+                Cell::new(
+                    doing(g, n, labels)
+                        .map(|d| clip(&d, 60))
+                        .unwrap_or_default(),
+                    Tone::Normal,
+                ),
                 // The profile it starts from, when the app's and not the base one.
                 Cell::new(
                     match &n.profile {
@@ -155,6 +192,12 @@ pub fn graph_report(g: &Graph) -> Report {
             ]);
         }
         r = r.heading("Capacity").table(c);
+    }
+    for t in g.tasks.iter().filter(|t| t.question.is_some()) {
+        r = r.note(format!(
+            "{} waits for your answer. `/task answer {} once|session|always|deny`",
+            t.task, t.task
+        ));
     }
     r.note(format!(
         "{} · {} tokens. `/agents <task>` shows one task's trace.",
@@ -301,6 +344,18 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
             (format!("waiting for {}", on.join(", ")), Tone::Warning)
         }
         EventKind::TaskResumed { .. } => ("continues".into(), Tone::Normal),
+        EventKind::Asked { preview, .. } => (
+            format!("waiting for your answer: {}", clip(preview, 80)),
+            Tone::Warning,
+        ),
+        EventKind::Answered { decision, .. } => (
+            if decision.allows() {
+                "you allowed it".into()
+            } else {
+                "you declined it".into()
+            },
+            Tone::Normal,
+        ),
         EventKind::Message { from, to, text, .. } => (
             format!("message {from} → {to}: {}", clip(text, 80)),
             Tone::Normal,
@@ -494,6 +549,11 @@ pub enum Control {
         item: String,
         agent: String,
     },
+    /// Answer the question a task waits on (ADR 0036).
+    Answer {
+        task: String,
+        decision: ApprovalDecision,
+    },
 }
 
 /// What a [`Control`] did.
@@ -591,6 +651,17 @@ pub async fn control(
             let w = o.remove_work(&item)?;
             ControlOutcome::Done(format!("removed \"{}\"", clip(&w.title, 60)))
         }
+        Control::Answer { task, decision } => {
+            o.answer(&task, decision)?;
+            ControlOutcome::Done(format!(
+                "{task}: {}",
+                if decision.allows() {
+                    "allowed"
+                } else {
+                    "declined"
+                }
+            ))
+        }
         Control::GiveWork { item, agent } => {
             let w = o
                 .work_item(&item)
@@ -682,7 +753,26 @@ pub fn parse_task(args: &str) -> Result<Control, String> {
     let (first, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
     let rest = rest.trim();
     Ok(match first {
-        "" => return Err("usage: /task <agent> <objective> | cancel <task> | retry <task>".into()),
+        "" => return Err(
+            "usage: /task <agent> <objective> | cancel <task> | retry <task> | answer <task> once|session|always|deny".into(),
+        ),
+        "answer" => {
+            let mut w = rest.split_whitespace();
+            let (Some(task), Some(word), None) = (w.next(), w.next(), w.next()) else {
+                return Err("usage: /task answer <task> once|session|always|deny".into());
+            };
+            let decision = match word {
+                "once" | "yes" | "allow" => ApprovalDecision::AllowOnce,
+                "session" => ApprovalDecision::AllowSession,
+                "always" => ApprovalDecision::AllowAlways,
+                "deny" | "no" => ApprovalDecision::Deny,
+                _ => return Err(format!("`{word}`: answer once, session, always or deny")),
+            };
+            Control::Answer {
+                task: task.into(),
+                decision,
+            }
+        }
         "cancel" if !rest.is_empty() => Control::Cancel { task: rest.into() },
         "retry" if !rest.is_empty() => Control::Retry { task: rest.into() },
         agent => Control::Submit {

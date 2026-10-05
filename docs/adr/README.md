@@ -42,6 +42,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0034](0034-a-file-a-call-changes-keeps-its-version-before.md) | A file a call changes keeps its version before: copies before a run, `ProducedArtifact::before`, `Engine::restore_file`, Restore and Undo on the file card | Accepted |
 | [0035](0035-files-dropped-on-the-chat-go-into-the-project.md) | Files dropped on the chat go into the project: `upload_add`, names in use get a number, the composer names them | Accepted |
 | [0036](0036-a-runtime-for-work.md) | A runtime for work: coding is one workload, no new work model, and what a client shows about work is runtime state | Accepted |
+| [0037](0037-work-survives-a-restart.md) | Work survives a restart: a question is kept on its task and any client answers it; a restart continues work, never repeats a change, and fails a task only when a change was cut short; each agent's step is in the graph | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

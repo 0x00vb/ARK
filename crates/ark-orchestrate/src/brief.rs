@@ -22,8 +22,10 @@ pub struct Brief<'a> {
     /// Tasks it delegated in an earlier attempt (shown when it resumes).
     pub children: Vec<&'a TaskRecord>,
     pub inbox: &'a [Mail],
-    /// It was stopped by a suspend and runs again.
+    /// It was stopped (a suspend, a restart) and runs again.
     pub resumed: bool,
+    /// Changes the stopped run already made, one line each (shown when it resumes).
+    pub done: &'a [String],
     /// The board item it works on.
     pub item: Option<&'a WorkItem>,
 }
@@ -60,6 +62,21 @@ impl Brief<'_> {
                     c.id,
                     c.owner,
                     c.state.as_str()
+                );
+            }
+            for d in self.done {
+                let _ = writeln!(s, "- you already did, do not do again: {d}");
+            }
+            if let Some(q) = t.question.as_ref().filter(|q| !q.open()) {
+                let answer = if q.answer.is_some_and(|a| a.allows()) {
+                    "allowed it; make that call again to run it"
+                } else {
+                    "declined it"
+                };
+                let _ = writeln!(
+                    s,
+                    "- you asked to {}; the person {answer}",
+                    q.request.preview
                 );
             }
         }
@@ -197,6 +214,7 @@ mod tests {
             schedule: None,
             item: None,
             report_to: None,
+            question: None,
         }
     }
 
@@ -211,6 +229,7 @@ mod tests {
             children: vec![],
             inbox: &[],
             resumed: false,
+            done: &[],
             item: None,
         }
         .render();
@@ -239,6 +258,7 @@ mod tests {
             children: vec![],
             inbox: &[],
             resumed: false,
+            done: &[],
             item: Some(&w),
         }
         .render();

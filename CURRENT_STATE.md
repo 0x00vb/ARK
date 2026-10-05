@@ -11,7 +11,7 @@ Last updated: 2026-10-04 (v0.9.0; `main` has the browser, step 5, C5 and Files, 
 | | |
 |---|---|
 | Latest tag | v0.9.0 (2026-10-04), on `origin` and `github` |
-| `main` | Everything since v0.9.0 in one place, no other branches: the browser (C4, ADR 0015), the window hooks for ARK Desktop's UX pass (`ArkUi::theme`, `ark.modelPicker`, `ark.onSubmit`), a runtime other machines connect to with saved access tokens (ADR 0016, [`docs/REMOTE.md`](docs/REMOTE.md)), work that runs without the window: several live chats, schedules (ADR 0017), the Computer, `ark-computer` (C5, ADR 0018), and Files, `ark-files` (ADR 0019): spreadsheets and documents the agent and the person edit in place, opened in the window as a grid or a page. `scripts/ci.sh` and the WebKit page tests passed on it. Not pushed |
+| `main` | Everything since v0.9.0 in one place, no other branches: the browser (C4, ADR 0015), the window hooks for ARK Desktop's UX pass (`ArkUi::theme`, `ark.modelPicker`, `ark.onSubmit`), a runtime other machines connect to with saved access tokens (ADR 0016, [`docs/REMOTE.md`](docs/REMOTE.md)), work that runs without the window: several live chats, schedules (ADR 0017), the Computer, `ark-computer` (C5, ADR 0018), and Files, `ark-files` (ADR 0019): spreadsheets and documents the agent and the person edit in place, opened in the window as a grid or a page. `scripts/ci.sh` and the WebKit page tests passed on it. Pushed to `origin` and `github` |
 | Next tag | v0.10.0 (`Breaking` entries under `[Unreleased]`). Ready to cut with [`docs/RELEASING.md`](docs/RELEASING.md) steps 2 to 9 when the owner says so. ARK Desktop 0.2 waits for it |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 

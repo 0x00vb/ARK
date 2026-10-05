@@ -415,6 +415,9 @@ scenarios.analysis = analysis;
 // is local.
 async function workbench(page) {
   assert.equal(await page.evaluate(() => window.ark.isLocal()), true);
+  // A browser has no window to go back to.
+  assert.equal(await page.evaluate(() => typeof window.ark.openLocal), "undefined");
+  assert.equal(await page.locator("#app").getAttribute("data-shell"), "browser");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.runtime), "local");
   await page.evaluate(() => window.ark.call("file_write", { path: "draft.txt", text: "one" }));
   await page.locator("#open-menu").click();
@@ -685,6 +688,10 @@ const NARRATION = "Reading the notes slowly, one line at a time, so that a windo
 
 // Scripts that run before the page, for scenarios that replace a browser API.
 const inits = {
+  // The window on a runtime it visits (ADR 0029): Tauri defines `__TAURI__` there too.
+  visit: () => {
+    window.__TAURI__ = {};
+  },
   // An EventSource that always fails, and timers that fire at once (recording how long the
   // page asked to wait) so ten backoffs take milliseconds.
   backoff: () => {
@@ -768,6 +775,34 @@ async function computer(page) {
   assert.equal(await pill.isVisible(), false);
 }
 scenarios.computer = computer;
+
+// The window on a runtime it visits (ADR 0029): the page talks HTTP but leaves room for the
+// window's controls, and `ark.openLocal()` loads the address the window catches to go back to
+// its own page. An app's row sits above the projects.
+async function visit(page) {
+  assert.equal(await page.locator("#app").getAttribute("data-shell"), "desktop");
+  assert.equal(await page.evaluate(() => typeof window.__TAURI__.core), "undefined");
+  assert.ok(await page.evaluate(() => window.ark.call("hello")), "the page talks to its runtime over HTTP");
+  await page.evaluate(() => window.ark.sidebar({ id: "place", render: (el) => el.append("This Mac · Cloud") }));
+  const row = page.locator("#sidebar-ext .sidebar-item[data-id=place]");
+  await row.waitFor();
+  assert.equal(await row.innerText(), "This Mac · Cloud");
+  // Above the projects.
+  const [r, p] = await Promise.all([row.boundingBox(), page.locator("#projects").boundingBox()]);
+  assert.ok(r.y < p.y, "the row is above the projects");
+  let asked = null;
+  await page.route("https://ark-local.invalid/**", (route) => {
+    asked = route.request().url();
+    route.abort();
+  });
+  await page.evaluate(() => window.ark.openLocal());
+  for (let i = 0; !asked; i++) {
+    assert.ok(i < 50, "ark.openLocal() did not ask for the window's own page");
+    await page.waitForTimeout(50);
+  }
+  assert.equal(asked, "https://ark-local.invalid/");
+}
+scenarios.visit = visit;
 
 const run = scenarios[scenario];
 if (!run) {

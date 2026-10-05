@@ -44,6 +44,32 @@ pub fn run_window(
     }
 }
 
+/// Open the window on the runtime at `url` in place of the app's own page (ADR 0029): the page
+/// that runtime serves, which talks to it over HTTP like a browser. The window's own runtime
+/// goes on running; the page elsewhere brings the window back with `ark.openLocal()`.
+///
+/// For an app's handler, while [`ArkUi::run_desktop`](crate::ArkUi::run_desktop) runs. Fails,
+/// leaving the window where it is, when there is no window, or the runtime cannot be reached
+/// or refuses `token`.
+#[cfg(feature = "desktop")]
+pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
+    use std::sync::atomic::Ordering;
+    use tauri::Manager;
+
+    let (app, _) = crate::desktop::WINDOW
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("there is no window to open {url} in"))?;
+    let client = Client::new(url, token);
+    client.hello().await?;
+    let target: tauri::Url = client.page_url().parse()?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| anyhow::anyhow!("there is no window to open {url} in"))?;
+    crate::desktop::VISITS.fetch_add(1, Ordering::SeqCst);
+    window.navigate(target)?;
+    Ok(())
+}
+
 /// A small page that says the runtime could not be opened, as a `data:` address.
 #[cfg(feature = "desktop")]
 fn unreachable_page(url: &str, error: &str) -> String {

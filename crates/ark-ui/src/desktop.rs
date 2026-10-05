@@ -8,12 +8,18 @@
 //! The page is served through the app's own asset origin, so Tauri treats it as a local page.
 //! Files in the consumer's `frontendDist` stay reachable as a fallback.
 //!
+//! The window can open a runtime elsewhere in place of its own page
+//! ([`visit`](crate::remote::visit), ADR 0029). That page talks to its runtime over HTTP; the
+//! commands above answer only the app's own page, and the event channel stops when the window
+//! leaves it. The page elsewhere comes back by loading [`OWN_PAGE`], which the window catches.
+//!
 //! A question that waits while the window is not in front shows a system notification. With
 //! [`ArkUi::keep_running`](crate::ArkUi::keep_running), closing the window hides it: the app
 //! stays in the menu bar (the tray elsewhere) with Open and Quit, and the Dock icon opens it.
 
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 use tauri::menu::{Menu, MenuItem};
@@ -56,13 +62,55 @@ impl tauri::Assets<Wry> for UiAssets {
 
 struct State(Arc<Host>);
 
+/// The running window and the address of its own page, once it exists.
+pub(crate) static WINDOW: OnceLock<(tauri::AppHandle, tauri::Url)> = OnceLock::new();
+/// Changes each time the window leaves its own page: event channels opened before stop.
+pub(crate) static VISITS: AtomicU64 = AtomicU64::new(0);
+/// What a page elsewhere loads to bring the window back to its own page (`ark.openLocal()`).
+/// Never fetched: `.invalid` does not resolve, and the window catches it first.
+pub(crate) const OWN_PAGE: &str = "https://ark-local.invalid/";
+
+/// The app's own page: its asset origin (`tauri:` on macOS and Linux, `http://tauri.localhost`
+/// on Windows). Anything else the window shows is a page elsewhere and gets no IPC.
+fn own_page(url: &tauri::Url) -> bool {
+    url.scheme() == "tauri" || (url.scheme() == "http" && url.host_str() == Some("tauri.localhost"))
+}
+
+fn from_own_page(webview: &tauri::Webview) -> Result<(), String> {
+    match webview.url() {
+        Ok(u) if own_page(&u) => Ok(()),
+        _ => Err("only the app's own page can use the window".into()),
+    }
+}
+
+/// Catches [`OWN_PAGE`]: the window goes back to its own page instead.
+fn window_plugin() -> tauri::plugin::TauriPlugin<Wry> {
+    tauri::plugin::Builder::<Wry>::new("ark-window")
+        .on_navigation(|webview, url| {
+            if url.as_str() != OWN_PAGE {
+                return true;
+            }
+            if let Some((_, home)) = WINDOW.get() {
+                let (webview, home) = (webview.clone(), home.clone());
+                // Not from inside the navigation callback.
+                tauri::async_runtime::spawn(async move {
+                    let _ = webview.navigate(home);
+                });
+            }
+            false
+        })
+        .build()
+}
+
 #[tauri::command]
 async fn ark_call(
     app: tauri::AppHandle,
+    webview: tauri::Webview,
     state: tauri::State<'_, State>,
     method: String,
     params: Value,
 ) -> Result<Value, String> {
+    from_own_page(&webview)?;
     if method == "quit" {
         app.exit(0);
         return Ok(Value::Null);
@@ -75,11 +123,22 @@ async fn ark_call(
 }
 
 #[tauri::command]
-fn ark_subscribe(state: tauri::State<'_, State>, channel: tauri::ipc::Channel<Value>) {
+fn ark_subscribe(
+    webview: tauri::Webview,
+    state: tauri::State<'_, State>,
+    channel: tauri::ipc::Channel<Value>,
+) -> Result<(), String> {
+    from_own_page(&webview)?;
     let mut rx = state.0.subscribe();
+    let visit = VISITS.load(Ordering::SeqCst);
     tauri::async_runtime::spawn(async move {
         loop {
-            match rx.recv().await {
+            let next = rx.recv().await;
+            // The window left this page: this runtime's events are not sent to the next one.
+            if VISITS.load(Ordering::SeqCst) != visit {
+                break;
+            }
+            match next {
                 Ok(v) => {
                     if channel.send(v).is_err() {
                         break;
@@ -92,12 +151,19 @@ fn ark_subscribe(state: tauri::State<'_, State>, channel: tauri::ipc::Channel<Va
             }
         }
     });
+    Ok(())
 }
 
-/// The system's folder picker. `None` when the person dismisses it.
+/// The system's folder picker. `None` when the person dismisses it, or asked from a page
+/// elsewhere.
 #[tauri::command]
-async fn ark_pick_folder(app: tauri::AppHandle, title: Option<String>) -> Option<String> {
+async fn ark_pick_folder(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    title: Option<String>,
+) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
+    from_own_page(&webview).ok()?;
     let (tx, rx) = tokio::sync::oneshot::channel();
     let mut dialog = app.dialog().file();
     if let Some(t) = title {
@@ -132,6 +198,7 @@ pub(crate) fn run(
         .manage(State(host))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(window_plugin())
         .invoke_handler(tauri::generate_handler![
             ark_call,
             ark_subscribe,
@@ -147,6 +214,9 @@ pub(crate) fn run(
         })
         .setup(move |app| {
             if let Some(w) = app.get_webview_window("main") {
+                if let Ok(url) = w.url() {
+                    let _ = WINDOW.set((app.handle().clone(), url));
+                }
                 let _ = w.show();
             }
             if keep_running {
@@ -254,5 +324,22 @@ impl tauri::Assets<Wry> for EmptyAssets {
     }
     fn csp_hashes(&self, _html_path: &AssetKey) -> Box<dyn Iterator<Item = CspHash<'_>> + '_> {
         Box::new(std::iter::empty())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_apps_own_page_is_its_own() {
+        let own = |u: &str| own_page(&u.parse().unwrap());
+        assert!(own("tauri://localhost/index.html"));
+        assert!(own("http://tauri.localhost/"));
+        assert!(!own("https://tauri.localhost/"));
+        assert!(!own("https://ark-ws-1.fly.dev/"));
+        assert!(!own("http://127.0.0.1:8420/"));
+        assert!(!own("http://tauri.localhost.example.com/"));
+        assert!(!own(OWN_PAGE));
     }
 }

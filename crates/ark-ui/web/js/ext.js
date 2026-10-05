@@ -21,10 +21,16 @@
 //                      suggestion; not commands). Return true, or a promise of true, when the
 //                      app took it; the conversation then sends nothing.
 //   ark.status({ id, render(el, api) })
+//   ark.sidebar({ id, render(el, api) })
+//                      a row at the top of the projects list, for what the list as a whole
+//                      depends on (an app with runtimes in several places says which here)
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
 //   ark.isLocal()      true when the runtime runs on this computer; false for a runtime
 //                      elsewhere. Also `<html data-runtime="local|remote">`, for styles
+//   ark.openLocal()    only in the window on a runtime elsewhere it opened (Rust:
+//                      `ark_ui::remote::visit`): the window goes back to its own runtime.
+//                      Undefined everywhere else
 //   ark.on(name, fn)   an app handler's events, and ARK's own as `ark:<kind>` (in a browser
 //                      also `ark:reconnecting`, `ark:disconnected` with `retry()`, `ark:connected`)
 //                      (`ark:turn_finished`, `ark:event`, `ark:summary`, ...)
@@ -43,6 +49,7 @@ export const registry = {
   toolRenderers: [],
   actions: [],
   statuses: [],
+  sidebars: [],
   modelPicker: null,
   submitHooks: [],
 };
@@ -112,6 +119,11 @@ export function installApi(api) {
     status(s) {
       need(s, ["id", "render"], "status");
       registry.statuses.push(s);
+      api._changed();
+    },
+    sidebar(s) {
+      need(s, ["id", "render"], "sidebar");
+      registry.sidebars.push(s);
       api._changed();
     },
     on: onExt,

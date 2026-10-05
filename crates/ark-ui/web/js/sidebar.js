@@ -15,6 +15,7 @@ export class Sidebar {
     this.api = api;
     this.tree = $("#projects");
     this.status = $("#status-ext");
+    this.top = $("#sidebar-ext");
     this.settings = $("#open-settings");
     this.gen = 0;
     // Project id -> unfolded (true) or folded (false), where the person chose; else the
@@ -229,9 +230,17 @@ export class Sidebar {
     });
   }
 
-  /// The app's status items, and Settings once an app has registered a section.
+  /// The app's rows above the projects and status items, and Settings once an app has
+  /// registered a section.
   renderExtensions() {
     this.settings.hidden = !registry.settings.size;
+    clear(this.top);
+    this.top.hidden = !registry.sidebars.length;
+    for (const s of registry.sidebars) {
+      const el = h("div.sidebar-item", { "data-id": s.id });
+      this.top.append(el);
+      try { s.render(el, window.ark); } catch (e) { console.error(e); }
+    }
     clear(this.status);
     for (const s of registry.statuses) {
       const el = h("div.status-item", { "data-id": s.id });

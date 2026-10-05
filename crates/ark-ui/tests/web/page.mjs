@@ -236,9 +236,11 @@ async function board(page) {
   const input = page.locator(".bd-input");
   await input.click();
   for (const t of ["Draft chapter 3", "Edit chapter 2", "Pick a title"]) {
-    await input.fill(t);
+    // Typed, not filled: the box keeps the focus from one item to the next.
+    await page.keyboard.type(t);
     await page.keyboard.press("Enter");
     await page.locator(".bd-card", { hasText: t }).waitFor();
+    assert.ok(await page.evaluate(() => document.activeElement?.classList.contains("bd-input")), `the box kept the focus after "${t}"`);
   }
   await page.keyboard.press("Escape");
   assert.deepEqual(await column("todo"), ["Draft chapter 3", "Edit chapter 2", "Pick a title"]);

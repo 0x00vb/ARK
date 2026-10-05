@@ -304,6 +304,7 @@ function boardView(el) {
     const before = new Map();
     if (animate) for (const [id, c] of cards) before.set(id, c.node.getBoundingClientRect());
     const hadFocus = document.activeElement?.closest?.(".bd-card")?.dataset.id;
+    const typing = document.activeElement === input;
     const visible = store.items.filter((w) => !store.removing.has(w.id));
     const mine = visible.filter(needsYou);
     needsChip.hidden = !mine.length;
@@ -337,6 +338,8 @@ function boardView(el) {
       counts.get(c.state).textContent = total ? String(total) : "";
     }
     for (const id of [...cards.keys()]) if (!keep.has(id)) cards.delete(id);
+    // Moving the box in the list blurs it: give the focus back so typing goes on.
+    if (typing && input.isConnected) input.focus({ preventScroll: true });
     const refocus = v.focus || hadFocus;
     v.focus = null;
     if (refocus && cards.has(refocus) && document.activeElement !== input) cards.get(refocus).node.focus({ preventScroll: true });

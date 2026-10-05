@@ -3,6 +3,26 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Planning on the board (2026-10-05)
+
+The `board` workload (ADR 0023): the person's chat, with the chat and board tools, is asked to
+put a three-part guide on the board and have the writer draft the first part. After a restart,
+a new chat (nothing of the first in view) is asked to hand off the next part. The check reads the
+board: three items, the first done by the writer, exactly one other handed off and done, the
+third still to do. Reports in `bench/board/`.
+
+| `board` | Success | Model calls | Total tokens | Tool calls | Median turn |
+|---|---:|---:|---:|---:|---:|
+| qwen3:4b, live | 3/3 | 7.0 | 22,472 | 5.0 | 22.7 s |
+| simulated | 3/3 | 6.0 | 14,899 | 4.0 | |
+
+- qwen3:4b added the three items in one `board.add`, linked each hand-off to its item
+  (`agents.delegate {item}`), and in the new chat read the board (`board.list`) before picking
+  the next part. No part was handed off twice in 3 runs.
+- One live call more than the simulated model per run: the writer's own task.
+- Not measured yet: whether the chat uses the board unasked for project-sized work, and
+  hosted models. Both before turning anything on or off by default.
+
 ## Files an answer says were saved (2026-10-05)
 
 In ARK Desktop, qwen3.5:27b said it saved `sales_report.md` after a code run that wrote only a

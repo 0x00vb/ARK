@@ -121,6 +121,10 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ArkUi::serve` with saved tokens refuses an app that lets agents use the computer: a runtime
   other machines connect to never offers this machine's screen.
 
+- Benchmark: the `board` workload (planning on the board across a restart and a new chat);
+  `Workload::chat` runs a team's turns through the person's conversation, and
+  `TurnSpec::new_chat_after_restart` starts a new chat ([`bench/RESULTS.md`](bench/RESULTS.md)).
+
 ### Changed
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
   window: actions whose summary names that extension load first, whatever the task's language.

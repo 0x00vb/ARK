@@ -1,0 +1,346 @@
+{
+  "schema_version": 1,
+  "label": "live-board-qwen3-4b",
+  "ark_version": "0.9.0",
+  "created_at": "2026-10-05T03:47:27.747529Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "600"
+  },
+  "workloads": [
+    {
+      "name": "board",
+      "class": "orchestration",
+      "description": "the chat plans three parts on the board and hands one off; after a restart a new chat hands off the next",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 7.0,
+        "input_tokens": 21692.666666666668,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 21692.666666666668,
+        "output_tokens": 779.6666666666666,
+        "total_tokens": 22472.333333333332,
+        "cost_usd": 0.051182,
+        "cost_per_success_usd": 0.051182,
+        "tool_calls": 5.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 1.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 7.0,
+        "peak_context_tokens": 3182.0,
+        "mean_context_tokens": 1766.0,
+        "tool_schema_tokens": 15581.0,
+        "prefix_reuse_tokens": 20050.333333333332,
+        "median_turn_ms": 22682.0,
+        "p95_turn_ms": 29166.0,
+        "median_first_token_ms": 2102.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "board",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Facts (cited):**  \n- The board currently has two tasks in todo state: \"Watering schedule\" (w-fa5d141f) and \"Composting page\" (w-15d29d03).  \n- The \"Welcome page\" (w-f905dd1f) is already done.  \n- The writer agent has been tasked with drafting the composting section, but no stored evidence or accessible tool provides accurate, grounded content on composting practices.  \n\n**Inference:**  \n- The cu",
+          "turns": 2,
+          "steps": 7,
+          "model_calls": 7,
+          "calls_by_role": {
+            "reason": 7
+          },
+          "tokens_by_role": {
+            "reason": 22462
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 7
+          },
+          "input_tokens": 21619,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 21619,
+          "cache_write_tokens": 0,
+          "output_tokens": 843,
+          "total_tokens": 22462,
+          "tokens_measured": true,
+          "cost_usd": 0.051668,
+          "wall_ms": 49476,
+          "turn_ms": [
+            29166,
+            20310
+          ],
+          "first_token_ms": [
+            2575,
+            367,
+            2102
+          ],
+          "model_latency_ms": [
+            4280,
+            1398,
+            2827,
+            6317,
+            519,
+            2479,
+            6125
+          ],
+          "tool_calls": 5,
+          "tool_ok": 5,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 1,
+          "meta_calls": {
+            "load_action": 6,
+            "search_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 3182,
+          "mean_context_tokens": 1750,
+          "context_sources": {
+            "Capability index": 2885,
+            "Conversation": 0,
+            "Instructions": 2002,
+            "Model output": 368,
+            "Project": 350,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 377,
+            "Tool results": 1300,
+            "Tool schemas": 10581,
+            "Working state": 370,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 15581,
+          "tools_exposed_max": 12,
+          "tools_used": 3,
+          "result_context_tokens": 1081,
+          "result_raw_tokens": 1093,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 19825,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "board",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "I have identified that the composting section of the volunteer guide cannot be drafted without external, reliable information. The writer has been assigned the task, but no existing data or tool results provide the necessary details on composting practices.\n\n**Finding:**  \n- The current state of the board shows two pending tasks: \"Watering schedule\" and \"Composting page\" (w-e44858d4), with the \"We",
+          "turns": 2,
+          "steps": 7,
+          "model_calls": 7,
+          "calls_by_role": {
+            "reason": 7
+          },
+          "tokens_by_role": {
+            "reason": 22285
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 7
+          },
+          "input_tokens": 21495,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 21495,
+          "cache_write_tokens": 0,
+          "output_tokens": 790,
+          "total_tokens": 22285,
+          "tokens_measured": true,
+          "cost_usd": 0.05089,
+          "wall_ms": 43015,
+          "turn_ms": [
+            23836,
+            19179
+          ],
+          "first_token_ms": [
+            2545,
+            367,
+            1945
+          ],
+          "model_latency_ms": [
+            1584,
+            1392,
+            2836,
+            5362,
+            519,
+            2551,
+            6026
+          ],
+          "tool_calls": 5,
+          "tool_ok": 5,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 1,
+          "meta_calls": {
+            "load_action": 6,
+            "search_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 3137,
+          "mean_context_tokens": 1736,
+          "context_sources": {
+            "Capability index": 2885,
+            "Conversation": 0,
+            "Instructions": 2002,
+            "Model output": 369,
+            "Project": 350,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 377,
+            "Tool results": 1097,
+            "Tool schemas": 10581,
+            "Working state": 370,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 15581,
+          "tools_exposed_max": 12,
+          "tools_used": 3,
+          "result_context_tokens": 878,
+          "result_raw_tokens": 889,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 19789,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "board",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- Fact: The board has two tasks in todo state: \"Watering schedule\" (w-2f6315c9) and \"Composting page\" (w-6f03bc68), with the \"Welcome page\" (w-46e210a7) completed. [cites inv:2af14a99]\n\n- Finding: The writer has been delegated to compose the \"Composting page\" for the volunteer guide. [cites inv:9f38676b]\n\n- Inference: The composting page draft is based on general composting principles, as no speci",
+          "turns": 2,
+          "steps": 7,
+          "model_calls": 7,
+          "calls_by_role": {
+            "reason": 7
+          },
+          "tokens_by_role": {
+            "reason": 22670
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 7
+          },
+          "input_tokens": 21964,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 21964,
+          "cache_write_tokens": 0,
+          "output_tokens": 706,
+          "total_tokens": 22670,
+          "tokens_measured": true,
+          "cost_usd": 0.050988,
+          "wall_ms": 49439,
+          "turn_ms": [
+            26757,
+            22682
+          ],
+          "first_token_ms": [
+            2575,
+            2696
+          ],
+          "model_latency_ms": [
+            1596,
+            1597,
+            2988,
+            5584,
+            592,
+            1441,
+            6504
+          ],
+          "tool_calls": 5,
+          "tool_ok": 5,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 1,
+          "meta_calls": {
+            "load_action": 6,
+            "search_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 3158,
+          "mean_context_tokens": 1812,
+          "context_sources": {
+            "Capability index": 2885,
+            "Conversation": 0,
+            "Instructions": 2002,
+            "Model output": 393,
+            "Project": 350,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 377,
+            "Tool results": 1547,
+            "Tool schemas": 10581,
+            "Working state": 370,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 15581,
+          "tools_exposed_max": 12,
+          "tools_used": 3,
+          "result_context_tokens": 1328,
+          "result_raw_tokens": 1559,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 20537,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 3,
+    "success_rate": 1.0,
+    "model_calls": 7.0,
+    "input_tokens": 21692.666666666668,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 21692.666666666668,
+    "output_tokens": 779.6666666666666,
+    "total_tokens": 22472.333333333332,
+    "cost_usd": 0.051182,
+    "cost_per_success_usd": 0.051182,
+    "tool_calls": 5.0,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 1.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 7.0,
+    "peak_context_tokens": 3182.0,
+    "mean_context_tokens": 1766.0,
+    "tool_schema_tokens": 15581.0,
+    "prefix_reuse_tokens": 20050.333333333332,
+    "median_turn_ms": 22682.0,
+    "p95_turn_ms": 29166.0,
+    "median_first_token_ms": 2102.0,
+    "stall_stops": 0.0
+  }
+}

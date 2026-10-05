@@ -161,6 +161,8 @@ impl Env {
 pub struct TurnSpec {
     pub input: String,
     pub restart: bool,
+    /// A new conversation instead of the last one (after the restart, if any).
+    pub new_chat: bool,
 }
 
 impl TurnSpec {
@@ -168,12 +170,22 @@ impl TurnSpec {
         TurnSpec {
             input: input.into(),
             restart: false,
+            new_chat: false,
         }
     }
     pub fn after_restart(input: impl Into<String>) -> Self {
         TurnSpec {
             input: input.into(),
             restart: true,
+            new_chat: false,
+        }
+    }
+    /// After a restart, in a new conversation: nothing of the earlier chat is in view.
+    pub fn new_chat_after_restart(input: impl Into<String>) -> Self {
+        TurnSpec {
+            input: input.into(),
+            restart: true,
+            new_chat: true,
         }
     }
 }
@@ -289,6 +301,11 @@ pub trait Workload: Send + Sync {
     fn team(&self) -> Vec<AgentSpec> {
         Vec::new()
     }
+    /// With a team: each turn goes to the person's conversation, with the orchestrator's chat
+    /// and board tools, instead of a task for the first agent.
+    fn chat(&self) -> bool {
+        false
+    }
 }
 
 fn build_provider(
@@ -375,6 +392,9 @@ pub async fn run(
                 .latest_session(&project)?
                 .ok_or_else(|| anyhow::anyhow!("no session to resume"))?;
         }
+        if spec.new_chat {
+            session = ark.start_session(&project)?;
+        }
         let mut events = Vec::new();
         let started = Instant::now();
         let out: Result<(String, usize, usize, bool), String> = {
@@ -415,7 +435,19 @@ pub async fn run(
                             orch = Some(o);
                         }
                         let o = orch.as_ref().expect("set above");
-                        team_turn(o, &team[0].name, &spec.input, &mut events).await
+                        if w.chat() {
+                            let opts = TurnOptions {
+                                approvals: Some(Arc::new(ApprovalGate::new(approver.clone()))),
+                                tools: vec![o.chat_tools(), o.board_tools()],
+                                ..Default::default()
+                            };
+                            ark.ask_session(&mut session, &spec.input, opts, |e| events.push(e))
+                                .await
+                                .map(|o| (o.answer.clone(), o.cited.len(), o.steps, o.cancelled))
+                                .map_err(|e| e.to_string())
+                        } else {
+                            team_turn(o, &team[0].name, &spec.input, &mut events).await
+                        }
                     }
                 }
             };

@@ -91,6 +91,7 @@ neighbors.
 | web | search and read a page: `web.search`, then `web.fetch`, against a loopback page and a fixed search engine |
 | claimed-files | one call writes a chart but not the report (a program run that fails halfway); the answer may say only written files were saved |
 | claimed-schedule | standing work asked in words, twice in one chat; the answer may say it is scheduled only if the schedule was made |
+| board | the person's chat plans three parts on the board and hands the first to a writer; after a restart a new chat hands off the next. Checked on the board itself: three items, each part handed off once (`Workload::chat`, `TurnSpec::new_chat_after_restart`) |
 
 ## The naive baseline
 

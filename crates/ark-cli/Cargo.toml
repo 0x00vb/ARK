@@ -19,3 +19,7 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+async-trait.workspace = true
+# A served runtime for the `--connect` tests; never a normal dependency (ark-cli and ark-ui
+# build on ark-interact, not on each other).
+ark-ui.workspace = true

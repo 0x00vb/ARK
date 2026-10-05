@@ -107,6 +107,13 @@ What changed for people building on ARK, per release. Not a commit log.
   a worker's brief carries its item. `/board` (`add`, `done`, `move`, `give`, `remove`); window
   methods `board`, `board_add`, `board_change`, `board_remove`, `board_give`; a Board tab beside
   Chat in every app that runs agents ([`ORCHESTRATION.md`](docs/ORCHESTRATION.md#the-board)).
+- The terminal on a runtime elsewhere (ADR 0024): `app --connect URL` with `--token` or
+  `ARK_TOKEN` opens the shell (or a `-p` run) on the same app served with saved tokens. It
+  follows a turn already running there, asks the runtime's questions in its menu and closes
+  them when a window answers ([`CLI.md`](docs/CLI.md#on-another-machine)).
+- `ark_interact::remote::Client` (moved from `ark-ui`, which re-exports it) has `events()`: the
+  runtime's numbered events as a channel. `ark_interact::inspect::recap` builds the "where the
+  chat left off" report from a `SessionSummary` and transcript turns.
 
 - Native window: `ArkUi::keep_running(true)`: closing the window hides it and the app keeps
   running, with Open and Quit in the menu bar (the tray on Windows and Linux); the Dock icon
@@ -150,6 +157,8 @@ What changed for people building on ARK, per release. Not a commit log.
   card carries `data-action`. A finished work block reads "Reading notes and 2 more steps"
   instead of "Used 3 tools". Capabilities that cannot be used say "Not available yet" (why, on
   hover) instead of an error. "Choose a folder…" and "New project…" in the sidebar's + menu.
+- Protocol: `send` takes `ask` (default true). With `false` the turn's state-changing actions are
+  refused instead of asked, as in a local `-p` run.
 
 ### Fixed
 - Files: `files.list` on a file shows that file, and on a missing path says nothing has that
@@ -167,6 +176,8 @@ What changed for people building on ARK, per release. Not a commit log.
   created (English only); a file counts as written when a call wrote it or it changed in the
   project folder during the turn. On the new `claimed-files` workload, qwen3:4b said a report was
   saved that its run never wrote in 5 of 5 runs, and in 0 of 5 with the check.
+- `-p` without `--yes` denies questions that still reach it (an agent's, a connection's)
+  instead of allowing each once.
 
 ### Breaking
 - `HarnessEvent::ToolResult` has a new field, `files`, and `ProducedArtifact` one, `path`: a
@@ -186,6 +197,8 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark_orchestrate::EventKind` has two more variants (`Work`, `WorkRemoved`), and `TaskSpec`,
   `TaskRecord` and `Brief` a new field each (`item`): a struct literal needs `item: None`, or
   build with `TaskSpec::new`. `Control` and `ControlOutcome` in `ark-interact` have new variants.
+- `ark_cli::ArkArgs` has `connect` and `token`, and `ark_cli::Welcome` has `runtime`: a struct
+  literal needs them (`..Default::default()` for `ArkArgs`).
 
 ## [0.9.0] - 2026-10-04
 

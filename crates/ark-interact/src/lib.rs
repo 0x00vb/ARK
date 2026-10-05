@@ -12,6 +12,7 @@
 //! - [`inspect`]: typed views of context, usage, working state and sessions.
 //! - [`ChannelApprover`]: carries approval questions to the front-end.
 //! - [`orchestration`]: the agent and task graph of an [`App::orchestrator`], as reports.
+//! - [`remote`]: a client of a runtime served elsewhere.
 //!
 //! `ark-cli` and `ark-ui` both build on this crate and on nothing of each other. It knows
 //! nothing about terminals, windows, HTML or ANSI codes.
@@ -28,6 +29,7 @@ pub mod labels;
 pub mod logging;
 pub mod orchestration;
 pub mod plugins;
+pub mod remote;
 pub mod report;
 pub mod skills;
 pub mod trace;

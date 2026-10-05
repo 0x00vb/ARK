@@ -14,7 +14,6 @@ use ark_sdk::prelude::*;
 
 use crate::activity::{self, Activity, ActivityKind};
 use crate::command::{parse, Command, CommandInfo, Reply};
-use crate::fmt::{ago, clip, count};
 use crate::inspect::{
     self, ContextSource, ContextView, KeptOut, Pricing, ProjectSummary, SessionSummary, StateView,
     TranscriptTurn, UsageView,
@@ -634,7 +633,7 @@ pub struct TurnEnd {
 }
 
 /// What a welcome screen or status line shows.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Summary {
     pub name: String,
     pub tagline: Option<String>,
@@ -1348,35 +1347,9 @@ impl Interaction {
 
     /// Where a resumed session left off: its title and the last exchanges, clipped.
     pub fn recap(&self) -> Report {
-        let rec = self.session.record();
-        let title = if rec.title.is_empty() {
-            rec.id.short().to_string()
-        } else {
-            clip(&rec.title, 60)
-        };
-        let mut r = Report::new().success(format!(
-            "Resumed {title} · {} · {}",
-            count(rec.turn_count as u64, "turn"),
-            ago(rec.updated_at)
-        ));
-        for t in self
-            .session
-            .transcript(self.engine(), Some(2))
-            .unwrap_or_default()
-        {
-            r = r.text(format!("› {}", clip(&t.input, 100)));
-            r = r.note(if t.cancelled {
-                "  (stopped)".to_string()
-            } else if t.incomplete {
-                format!(
-                    "  (did not finish: {})",
-                    t.error.as_deref().unwrap_or("unknown reason")
-                )
-            } else {
-                format!("  {}", clip(&t.answer, 160))
-            });
-        }
-        r.note("The agent continues from its working state; the transcript is not replayed.")
+        let last = self.transcript(None, 2).unwrap_or_default();
+        let session = SessionSummary::of(self.session.record(), &self.project.name, true);
+        inspect::recap("Resumed", &session, &last)
     }
 }
 

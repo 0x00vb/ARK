@@ -1,13 +1,14 @@
 //! The terminal side of an approval. The runtime's [`ApprovalGate`] decides *when* to ask and
-//! remembers grants; `ark-interact`'s channel approver carries the question here. This module
-//! only draws a [`Menu`] and returns the person's pick.
+//! remembers grants; `ark-interact`'s channel approver, or a runtime's events, carry the
+//! question here ([`Question`]). This module only draws a [`Menu`] and returns the person's
+//! pick.
 //!
 //! [`ApprovalGate`]: ark_sdk::prelude::ApprovalGate
 
-use ark_interact::PendingApproval;
 use ark_sdk::prelude::{ApprovalDecision, ApprovalRequest};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::chat::Question;
 use crate::theme::Theme;
 
 /// What a key press did to the menu.
@@ -23,20 +24,23 @@ pub(crate) enum MenuKey {
 /// The approval prompt: the choices `ark_interact::approval_choices` gives (usually allow
 /// once, allow for the session, deny), arrow keys or a shortcut to pick.
 pub(crate) struct Menu {
-    pub pending: Option<PendingApproval>,
+    pub question: Option<Question>,
     pub selected: usize,
     pub lines: usize,
-    call_line: String,
 }
 
 impl Menu {
-    pub(crate) fn new(pending: PendingApproval, call_line: String) -> Self {
+    pub(crate) fn new(question: Question) -> Self {
         Menu {
-            pending: Some(pending),
+            question: Some(question),
             selected: 0,
             lines: 0,
-            call_line,
         }
+    }
+
+    /// The question's id at the runtime that asked it, while it waits.
+    pub(crate) fn id(&self) -> Option<u64> {
+        self.question.as_ref().map(|q| q.id)
     }
 
     fn choices(&self) -> Vec<ark_interact::Choice> {
@@ -83,20 +87,21 @@ impl Menu {
 
     /// Send the decision back to the gate.
     pub(crate) fn answer(&mut self, d: ApprovalDecision) {
-        if let Some(p) = self.pending.take() {
-            p.answer(d);
+        if let Some(q) = self.question.take() {
+            q.answer(d);
         }
     }
 
     pub(crate) fn request(&self) -> Option<&ApprovalRequest> {
-        self.pending.as_ref().map(|p| &p.request)
+        self.question.as_ref().map(|q| &q.request)
     }
 
     /// The menu as lines, ready to print.
     pub(crate) fn render(&self, theme: &Theme) -> Vec<String> {
-        let Some(req) = self.request() else {
+        let Some(q) = &self.question else {
             return Vec::new();
         };
+        let req = &q.request;
         let labels: Vec<String> = ark_interact::approval_choices(req)
             .into_iter()
             .map(|c| match c.hint {
@@ -112,7 +117,7 @@ impl Menu {
                 theme.bold(&ark_interact::approval_title(req))
             ),
             String::new(),
-            format!("    {}", theme.accented(&self.call_line)),
+            format!("    {}", theme.accented(&q.line)),
             format!("    {}", theme.dim(&req.summary)),
             String::new(),
         ];
@@ -165,10 +170,8 @@ mod tests {
         let approver = Arc::new(approver);
         let task = tokio::spawn(async move { approver.decide(&request()).await });
         let pending = rx.recv().await.unwrap();
-        (
-            Menu::new(pending, "manuscript.save(file=\"ch4.md\")".into()),
-            task,
-        )
+        let line = "manuscript.save(file=\"ch4.md\")".to_string();
+        (Menu::new(Question::local(pending, line)), task)
     }
 
     #[tokio::test]
@@ -217,7 +220,10 @@ mod tests {
         req.class = "acquire_capability:mail".into();
         req.summary = "Connect Google so ARK can send email from your account.".into();
         let task = tokio::spawn(async move { approver.decide(&req).await });
-        let mut m = Menu::new(rx.recv().await.unwrap(), "Connect Mail".into());
+        let mut m = Menu::new(Question::local(
+            rx.recv().await.unwrap(),
+            "Connect Mail".into(),
+        ));
         let text = m.render(&Theme::default().with_color(false)).join("\n");
         assert!(text.contains("ARK needs this to finish:"), "{text}");
         assert!(

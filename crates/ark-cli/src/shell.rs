@@ -16,13 +16,23 @@ use std::collections::VecDeque;
 use ark_interact::Effect;
 
 use crate::app::{ShellState, Welcome};
+use crate::chat::Chat;
 use crate::driver::run_turn;
 
 pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::process::ExitCode {
-    print_welcome(&mut st, resumed);
-    if resumed && st.ix.session().turn_count() > 0 {
-        let recap = st.ix.recap();
-        st.print(&recap);
+    let runtime = match &st.chat {
+        Chat::Remote(r) => Some(r.url().to_string()),
+        Chat::Local(_) => None,
+    };
+    let connected = runtime.is_some();
+    if let Err(e) = print_welcome(&mut st, resumed, runtime).await {
+        st.out.line(&st.cfg.theme.red(&format!("error: {e:#}")));
+        return std::process::ExitCode::FAILURE;
+    }
+    if resumed || connected {
+        if let Some(recap) = st.chat.recap().await {
+            st.print(&recap);
+        }
     }
 
     let mut editor = build_editor(&st);
@@ -32,6 +42,10 @@ pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::proce
         plain: !st.cfg.theme.color_enabled(),
     };
     let mut pending: VecDeque<String> = VecDeque::new();
+    // A turn already running there when the terminal connected: follow it first.
+    if let Chat::Remote(r) = &st.chat {
+        pending.extend(r.running().map(str::to_string));
+    }
     let mut ctrl_c_hint = false;
 
     loop {
@@ -75,7 +89,7 @@ pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::proce
         }
 
         let input = if text.starts_with('/') {
-            let reply = st.ix.execute(text).await;
+            let reply = st.chat.execute(text).await;
             st.print(&reply.report);
             match reply.effect {
                 Some(Effect::Submit(t)) => t,
@@ -101,14 +115,7 @@ pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::proce
         st.out.line("");
     }
 
-    let s = st.ix.session();
-    if s.turn_count() > 0 {
-        let msg = format!(
-            "Session {} saved ({} turns). Continue with `{} --resume`.",
-            s.id().short(),
-            s.turn_count(),
-            st.cfg.bin
-        );
+    if let Some(msg) = st.chat.farewell(&st.cfg.bin) {
         st.out.line(&st.cfg.theme.dim(&msg));
     }
     std::process::ExitCode::SUCCESS
@@ -145,7 +152,7 @@ fn build_editor(st: &ShellState) -> Reedline {
     }
 
     let commands: Vec<(String, String)> = st
-        .ix
+        .chat
         .commands()
         .into_iter()
         .flat_map(|c| {
@@ -261,9 +268,13 @@ impl Prompt for ShellPrompt {
     }
 }
 
-fn print_welcome(st: &mut ShellState, resumed: bool) {
+async fn print_welcome(
+    st: &mut ShellState,
+    resumed: bool,
+    runtime: Option<String>,
+) -> anyhow::Result<()> {
     let cfg = st.cfg.clone();
-    let sum = st.ix.summary();
+    let sum = st.chat.summary().await?;
     let info = Welcome {
         name: sum.name,
         tagline: sum.tagline,
@@ -272,6 +283,7 @@ fn print_welcome(st: &mut ShellState, resumed: bool) {
         session: sum.session.short,
         resumed,
         turns: sum.session.turns,
+        runtime,
     };
     let text = match &cfg.welcome {
         Some(f) => f(&info, &cfg.theme),
@@ -281,6 +293,7 @@ fn print_welcome(st: &mut ShellState, resumed: bool) {
         st.out.line(l);
     }
     st.out.line("");
+    Ok(())
 }
 
 fn default_welcome(w: &Welcome, t: &crate::theme::Theme) -> String {
@@ -299,6 +312,13 @@ fn default_welcome(w: &Welcome, t: &crate::theme::Theme) -> String {
     } else {
         format!("session {}", w.session)
     };
+    if let Some(url) = &w.runtime {
+        s.push_str(&format!(
+            "  {}
+",
+            t.dim(&format!("on ARK at {url}"))
+        ));
+    }
     s.push_str(&format!(
         "  {}\n",
         t.dim(&format!(

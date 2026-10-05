@@ -29,6 +29,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0020](0020-running-code-contained-in-the-project.md) | Running code, contained in the project folder | Accepted |
 | [0021](0021-an-output-is-a-file-with-a-kind.md) | An output is a file with a kind; a kind has one view | Accepted |
 | [0023](0023-the-project-board.md) | The project's board: work items that follow their tasks | Accepted |
+| [0024](0024-the-terminal-is-a-client-too.md) | The terminal is a client of a runtime too | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

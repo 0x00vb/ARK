@@ -575,6 +575,30 @@ pub fn sessions_report(list: &[SessionSummary]) -> Report {
         .data("sessions", list)
 }
 
+/// Where a chat left off: its title, its last exchanges clipped, and that the agent goes on
+/// from its working state. `heading` says how the person got here ("Resumed").
+pub fn recap(heading: &str, s: &SessionSummary, last: &[TranscriptTurn]) -> Report {
+    let title = if s.title.is_empty() {
+        s.short.clone()
+    } else {
+        clip(&s.title, 60)
+    };
+    let mut r = Report::new().success(format!(
+        "{heading} {title} · {} · {}",
+        count(s.turns as u64, "turn"),
+        ago(s.updated_at)
+    ));
+    for t in last {
+        r = r.text(format!("› {}", clip(&t.input, 100)));
+        r = r.note(match (&t.unfinished, t.cancelled) {
+            (_, true) => "  (stopped)".to_string(),
+            (Some(why), _) => format!("  (did not finish: {why})"),
+            (None, _) => format!("  {}", clip(&t.answer, 160)),
+        });
+    }
+    r.note("The agent continues from its working state; the transcript is not replayed.")
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProjectSummary {
     pub id: String,

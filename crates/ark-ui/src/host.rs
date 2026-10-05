@@ -667,13 +667,16 @@ impl Host {
             // Every chat running a turn now (`{session, title, project, input}`).
             "working" => Ok(Value::Array(self.working())),
             "summary" => Ok(self.summary()),
+            // `ask: false`: nobody can answer this turn's questions (a one-shot client), so its
+            // state-changing actions are refused, not asked.
             "send" => {
                 let text = s("text");
                 if text.trim().is_empty() {
                     anyhow::bail!("nothing to send");
                 }
+                let ask = params.get("ask").and_then(|v| v.as_bool()).unwrap_or(true);
                 let _quiet = self.switching.lock().await;
-                self.start_turn(text)?;
+                self.start_turn(text, ask)?;
                 Ok(json!({ "started": true }))
             }
             // `session` names a chat working in the background; default the current one.
@@ -713,7 +716,7 @@ impl Host {
                 self.refresh_with(&ix).await;
                 drop(ix);
                 if let Some(Effect::Submit(text)) = &reply.effect {
-                    self.start_turn(text.clone())?;
+                    self.start_turn(text.clone(), true)?;
                 }
                 self.emit(json!({ "kind": "summary", "summary": self.summary() }));
                 Ok(serde_json::to_value(reply)?)
@@ -1533,9 +1536,12 @@ impl Host {
         }))
     }
 
-    fn start_turn(self: &Arc<Self>, input: String) -> anyhow::Result<()> {
+    fn start_turn(self: &Arc<Self>, input: String, ask: bool) -> anyhow::Result<()> {
         let conv = self.cur();
-        let ctl = TurnControl::new();
+        let ctl = TurnControl {
+            ask,
+            ..TurnControl::new()
+        };
         {
             let mut running = conv.running.lock().unwrap();
             if running.is_some() {

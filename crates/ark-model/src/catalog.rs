@@ -1,11 +1,13 @@
 //! What models this machine can use right now: signed-in subscriptions, local Ollama models,
-//! and APIs with a key in the environment. Front-ends build their model picker from it.
+//! APIs with a key, and the named endpoints an app registered ([`crate::endpoints`]).
+//! Front-ends build their model picker from it.
 
 use crate::cli::{self, Cli};
 use serde::Serialize;
 use std::time::Duration;
 
-/// Provider names a model spec may start with (`claude:sonnet`, `ollama qwen3:4b`).
+/// The built-in provider names a model spec may start with (`claude:sonnet`, `ollama qwen3:4b`).
+/// Named endpoints add theirs ([`crate::endpoints::is_provider`]).
 pub const PROVIDERS: &[&str] = &["ollama", "openai", "anthropic", "claude", "codex", "mock"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -14,6 +16,8 @@ pub enum BackendKind {
     Subscription,
     Local,
     Api,
+    /// A named OpenAI-compatible endpoint ([`crate::endpoints`]).
+    Endpoint,
 }
 
 /// One way to reach models.
@@ -36,10 +40,12 @@ pub struct Backend {
 /// Check every backend. Runs the checks at once; a slow or missing one costs at most a few
 /// seconds and never fails the listing.
 pub async fn catalog() -> Vec<Backend> {
-    let (claude, codex, ollama) = tokio::join!(
+    let named = crate::endpoints::endpoints();
+    let (claude, codex, ollama, named) = tokio::join!(
         cli::status(Cli::Claude),
         cli::status(Cli::Codex),
-        ollama_models()
+        ollama_models(),
+        futures::future::join_all(named.iter().map(crate::endpoints::backend))
     );
     let mut out: Vec<Backend> = [claude, codex].into_iter().map(subscription).collect();
     out.push(match ollama {
@@ -92,6 +98,7 @@ pub async fn catalog() -> Vec<Backend> {
             models: vec![model.into()],
         });
     }
+    out.extend(named);
     out
 }
 

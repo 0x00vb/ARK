@@ -1375,7 +1375,7 @@ impl Harness {
                 }
                 Err(e) => {
                     tracing::warn!(role = role_name(role), retries, error = %e, "model call failed");
-                    return Err(AgentError::Provider(e.to_string()));
+                    return Err(AgentError::model(&e));
                 }
             };
             let model = provider.model_id();

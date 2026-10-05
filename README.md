@@ -110,7 +110,8 @@ cargo run -p agent-team   # a coordinator and two readers on Claude and ChatGPT 
 cargo test --workspace   # no model needed: a scripted mock drives the loops
 ```
 
-`ARK_PROVIDER` is `ollama` (default), `anthropic`, `openai`, `claude`, `codex` or `mock`. Keys and every other
+`ARK_PROVIDER` is `ollama` (default), `anthropic`, `openai`, `claude`, `codex`, `mock`, or a named
+OpenAI-compatible endpoint (`ARK_ENDPOINTS`). Keys and every other
 setting: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ## Builder defaults

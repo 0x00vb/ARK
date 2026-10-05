@@ -10,6 +10,14 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- Named OpenAI-compatible endpoints (ADR 0027): `ark_model::endpoints::register(Endpoint::new(name,
+  url))` or `ARK_ENDPOINTS=name=url`; `name:model` reaches it with its own key (`<NAME>_API_KEY`
+  or the app's key store) and its models from `GET /models` in `catalog()`
+  (`BackendKind::Endpoint`). Built-in provider names are refused, so `router:claude` is never
+  Claude Code ([`OPERATIONS.md`](docs/OPERATIONS.md#named-endpoints)).
+- Out of credit (ADR 0027): an HTTP 402 from a provider is `ProviderError::OutOfCredit`, not
+  retried; the turn stops with `AgentError::OutOfCredit` and the provider's words;
+  `TurnEnd::out_of_credit()` and `turn_finished.out_of_credit` give the hint both front-ends show.
 - `ark-bench` workload `files-edit`: a computed column and a total row in a real spreadsheet,
   checked on the saved file.
 - The Browser (ADR 0015): the new crate `ark-browser` drives the installed Chrome, Edge or Brave
@@ -177,6 +185,9 @@ What changed for people building on ARK, per release. Not a commit log.
   refused instead of asked, as in a local `-p` run.
 
 ### Fixed
+- An app whose model is an OpenAI-compatible model called `claude` no longer gives its agents
+  Claude Code sessions: the orchestrator decides "subscription" from the provider, not the
+  model id.
 - Files: `files.list` on a file shows that file, and on a missing path says nothing has that
   name (it said "(empty folder)", and a small model concluded the file did not exist);
   `files.search` also matches file and folder names. Benchmark: `files-edit`, `bench/RESULTS.md`.
@@ -196,6 +207,9 @@ What changed for people building on ARK, per release. Not a commit log.
   instead of allowing each once.
 
 ### Breaking
+- `ProviderError::OutOfCredit` and `AgentError::OutOfCredit` are new variants: an exhaustive
+  `match` adds an arm. `BackendKind::Endpoint` likewise. `OpenAi::describe` uses its name
+  (`openai` unless `.named(..)`).
 - `HarnessEvent::ToolResult` has a new field, `files`, and `ProducedArtifact` one, `path`: a
   struct literal needs `files: Vec::new()` / `path: None` (or `ProducedArtifact::text`/`bytes`).
   `Activity` and `ArtifactSummary` have one more field each.

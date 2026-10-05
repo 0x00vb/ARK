@@ -444,8 +444,11 @@ class TurnView {
     if (this.textEl && !msg.cancelled && !msg.error) this.markAnswer();
     else this.textEl?.classList.remove("streaming");
     this.closeBlocks();
-    if (msg.error) this.notice(msg.error, "error");
-    else if (msg.cancelled && !this.agent.querySelector(".notice")) this.notice("Stopped.", "muted");
+    if (msg.error) {
+      this.notice(msg.error, "error");
+      // Out of credit: the provider's words, then what to do (the host words it).
+      if (msg.out_of_credit) this.notice(msg.out_of_credit.hint, "muted");
+    } else if (msg.cancelled && !this.agent.querySelector(".notice")) this.notice("Stopped.", "muted");
     if (msg.ok && !msg.cancelled && msg.answer && !this.agent.querySelector(".prose.answer")) this.text(msg.answer, true);
     this.fileCards();
     this.footer(msg.footer, msg.index);

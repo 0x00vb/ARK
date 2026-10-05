@@ -131,6 +131,10 @@ pub(crate) async fn run(
         Mode::Text => {
             if let Some(e) = &end.error {
                 err_out.line(&theme.red(&format!("error: {e}")));
+                // Retrying a one-shot run does not add credit: say what does.
+                if !end.result["out_of_credit"].is_null() {
+                    err_out.line(&theme.dim(&end.hint));
+                }
             }
         }
         Mode::Json | Mode::Events => {

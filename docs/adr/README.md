@@ -31,6 +31,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0023](0023-the-project-board.md) | The project's board: work items that follow their tasks | Accepted |
 | [0024](0024-the-terminal-is-a-client-too.md) | The terminal is a client of a runtime too | Accepted |
 | [0025](0025-work-reports-into-the-chat-that-asked.md) | Work reports into the chat that asked for it | Accepted |
+| [0027](0027-named-openai-compatible-endpoints.md) | Named OpenAI-compatible endpoints, and out of credit as its own error | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

@@ -104,7 +104,7 @@ impl Control {
 pub(crate) struct Ended {
     pub error: Option<String>,
     /// What to do next after an error.
-    pub hint: &'static str,
+    pub hint: String,
     pub cancelled: bool,
     /// `3 tools · 25k tokens · 15.0s`.
     pub footer: Vec<String>,
@@ -123,7 +123,7 @@ impl Ended {
         Ended {
             result: json!({ "ok": false, "error": error }),
             error: Some(error),
-            hint,
+            hint: hint.into(),
             cancelled: false,
             footer: Vec::new(),
             undelivered: Vec::new(),
@@ -153,12 +153,16 @@ impl Ended {
             }),
             Err(e) => json!({ "ok": false, "error": e.to_string() }),
         };
+        let out_of_credit = end.out_of_credit();
+        if let Some(o) = &out_of_credit {
+            result["out_of_credit"] = json!(o);
+        }
         result["session"] = json!(ix.session().id().as_str());
         result["project"] = json!(ix.project().name);
         result["context"] = serde_json::to_value(ix.last_context()).unwrap_or_default();
         Ended {
             error: end.result.as_ref().err().map(|e| e.to_string()),
-            hint: RETRY,
+            hint: out_of_credit.map_or_else(|| RETRY.into(), |o| o.hint),
             cancelled: end.result.as_ref().is_ok_and(|o| o.cancelled),
             footer: end.footer,
             undelivered: end.undelivered,

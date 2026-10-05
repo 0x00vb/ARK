@@ -344,6 +344,9 @@ fn finished(v: &Value) -> Ended {
     } else {
         json!({ "ok": false, "error": v["error"] })
     };
+    if !v["out_of_credit"].is_null() {
+        result["out_of_credit"] = v["out_of_credit"].clone();
+    }
     result["session"] = v["session"].clone();
     if let Some(p) = v["summary"]["project"]["name"].as_str() {
         result["project"] = json!(p);
@@ -351,7 +354,10 @@ fn finished(v: &Value) -> Ended {
     Ended {
         error: (v["ok"] != json!(true))
             .then(|| v["error"].as_str().unwrap_or("the turn failed").to_string()),
-        hint: RETRY,
+        hint: v["out_of_credit"]["hint"]
+            .as_str()
+            .unwrap_or(RETRY)
+            .to_string(),
         cancelled: v["cancelled"] == json!(true),
         footer: strings("footer"),
         undelivered: strings("undelivered"),

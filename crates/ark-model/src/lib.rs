@@ -17,6 +17,7 @@ pub mod capacity;
 mod catalog;
 pub mod cli;
 mod codex_app;
+pub mod endpoints;
 pub mod keys;
 mod live;
 pub mod mock;
@@ -31,6 +32,7 @@ pub use anthropic::Anthropic;
 pub use capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
 pub use catalog::{catalog, Backend, BackendKind, PROVIDERS};
 pub use cli::{Cli, CliModel, CliStatus};
+pub use endpoints::{is_provider, Endpoint};
 pub use mock::MockProvider;
 pub use ollama::Ollama;
 pub use openai::OpenAi;
@@ -58,6 +60,11 @@ pub enum ProviderError {
         /// The server's `retry-after`, when it sent one.
         retry_after: Option<std::time::Duration>,
     },
+    /// The account behind the key has no credit left (HTTP 402). `detail` is the provider's own
+    /// message ("Your balance is used up. Add credit to continue."). Sending again does not
+    /// help until the person adds credit or picks another model.
+    #[error("{detail}")]
+    OutOfCredit { provider: String, detail: String },
     /// The provider reported a temporary failure inside a successful response (an
     /// `overloaded_error` event mid-stream).
     #[error("{provider} is overloaded: {detail}")]
@@ -87,9 +94,15 @@ impl ProviderError {
             }
             ProviderError::Overloaded { .. } | ProviderError::Malformed { .. } => true,
             ProviderError::Api { .. }
+            | ProviderError::OutOfCredit { .. }
             | ProviderError::MissingCredential(_)
             | ProviderError::Serde(_) => false,
         }
+    }
+
+    /// Whether the account behind the key is out of credit ([`ProviderError::OutOfCredit`]).
+    pub fn is_out_of_credit(&self) -> bool {
+        matches!(self, ProviderError::OutOfCredit { .. })
     }
 
     /// How long the server asked to wait, if it did.
@@ -320,7 +333,8 @@ pub trait Provider: Send + Sync {
 }
 
 /// Build a provider from the environment:
-/// - `ARK_PROVIDER` = ollama (default) | openai | anthropic | claude | codex
+/// - `ARK_PROVIDER` = ollama (default) | openai | anthropic | claude | codex, or a named
+///   endpoint ([`endpoints`])
 /// - `ARK_MODEL` overrides the model
 /// - API keys from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, else a saved key ([`keys`])
 pub fn from_env() -> Result<Box<dyn Provider>> {
@@ -355,10 +369,25 @@ fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
                 std::path::Path::new(&path),
             )?))
         }
-        other => Err(ProviderError::Api {
-            provider: other.into(),
-            detail: "unknown provider (use ollama|openai|anthropic|claude|codex|mock)".into(),
-        }),
+        other => match endpoints::endpoint(other) {
+            Some(e) => {
+                let model = model.filter(|m| !m.trim().is_empty()).ok_or_else(|| {
+                    ProviderError::Api {
+                        provider: other.into(),
+                        detail: format!("say which model: {other}:<model>"),
+                    }
+                })?;
+                let key = e
+                    .api_key()
+                    .ok_or_else(|| ProviderError::MissingCredential(e.key_var()))?;
+                Ok(Box::new(OpenAi::new(e.base_url, model, key).named(other)))
+            }
+            None => Err(ProviderError::Api {
+                provider: other.into(),
+                detail: "unknown provider (use ollama|openai|anthropic|claude|codex|mock, or a named endpoint)"
+                    .into(),
+            }),
+        },
     }
 }
 

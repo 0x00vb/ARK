@@ -1629,6 +1629,7 @@ impl Host {
             "ok": ok,
             "cancelled": cancelled,
             "error": error,
+            "out_of_credit": end.out_of_credit(),
             "answer": answer,
             "steps": steps,
             "footer": end.footer,

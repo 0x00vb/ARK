@@ -23,7 +23,8 @@ any application on ARK.
 | `ARK_WHOLE_RESULT_TOKENS` | 0 | give a result whole when it is under this many tokens (0: always the summary) |
 | `ARK_PRICE` | none | `in,out[,cached]` US dollars per million tokens, for `/usage` |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | none, `https://api.anthropic.com/v1` | Anthropic provider |
-| `OPENAI_API_KEY`, `OPENAI_BASE_URL` | none, `https://api.openai.com/v1` | OpenAI and compatible endpoints |
+| `OPENAI_API_KEY`, `OPENAI_BASE_URL` | none, `https://api.openai.com/v1` | OpenAI, or one compatible endpoint in its place |
+| `ARK_ENDPOINTS`, `<NAME>_API_KEY` | none | named OpenAI-compatible endpoints, `name=url,name=url`, each with its key ([below](#named-endpoints)) |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama provider |
 | `ARK_CLAUDE_BIN`, `ARK_CODEX_BIN` | found on `PATH` and the usual install places | the CLI behind the `claude` / `codex` providers |
 | `NO_COLOR` | unset | no colour in the terminal shell |
@@ -97,13 +98,31 @@ the vendor's file for that session id only: Claude Code's under
 `~/.codex/sessions/`. Sessions still open when the app exits keep their files and are resumed
 next time.
 
+## Named endpoints
+
+Any service that speaks the OpenAI chat API (a router such as OpenRouter or LiteLLM, a vLLM
+server, a gateway an app provides) can be a provider of its own, beside the built-in ones
+(ADR 0027):
+
+```sh
+ARK_ENDPOINTS=router=https://openrouter.ai/api/v1 ROUTER_API_KEY=sk-... \
+ARK_PROVIDER=router ARK_MODEL=anthropic/claude-sonnet-4.5 app
+```
+
+| | |
+|---|---|
+| In a spec | `router:anthropic/claude-sonnet-4.5`, `/model router <model>`; a bare model keeps the endpoint |
+| From an app | `ark_model::endpoints::register(Endpoint::new("router", url).label("OpenRouter").key(k))`. Without `.key`, the key is `<NAME>_API_KEY` from the environment or the app's key store |
+| Names | lowercase letters, digits, `-`, `_`; `claude`, `openai` and the other built-in names are refused |
+| Models | the endpoint's `GET /models`, in the model picker under its label; reused 5 minutes. One that cannot be reached shows as not ready |
+
 ## When a model call fails
 
 A provider error is classified as temporary or not (`ProviderError::is_transient`):
 
 | Temporary (retried) | Not retried |
 |---|---|
-| connection failures and timeouts, 408, 425, 429, 5xx, 529, an overload event inside a stream, a reply whose tool-call arguments are not valid JSON | 400, 401, 403, 404, other client errors, missing credentials, a malformed protocol message |
+| connection failures and timeouts, 408, 425, 429, 5xx, 529, an overload event inside a stream, a reply whose tool-call arguments are not valid JSON | 400, 401, 403, 404, other client errors, missing credentials, a malformed protocol message; 402 is out of credit (below) |
 
 The harness retries a temporary failure with exponential backoff and jitter (500 ms doubling,
 at most 30 s per wait, never shorter than the server's `retry-after`), up to
@@ -113,6 +132,10 @@ at most 30 s per wait, never shorter than the server's `retry-after`), up to
   second answer after half of a first would duplicate output.
 - A retry repeats the model request, never a tool. Tools run only after a model call
   succeeds, so a state-changing action cannot run twice because of a retry.
+
+A 402 means the account behind the key has no credit left: `ProviderError::OutOfCredit`. The
+turn stops at once with the provider's own message, and both front-ends add what to do ("Add
+credit to your OpenRouter account, or pick another model.", `TurnEnd::out_of_credit`).
 
 Every retry is an event (`HarnessEvent::Retry`), a count on the model call
 (`ModelCall.retries`), in the metrics (`provider_retries`) and a `warn` log line.

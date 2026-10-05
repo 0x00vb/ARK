@@ -99,7 +99,7 @@ impl Agent {
                 .provider
                 .complete(&system, &messages, &tools)
                 .await
-                .map_err(|e| AgentError::Provider(e.to_string()))?;
+                .map_err(|e| AgentError::model(&e))?;
             prompt_tokens += completion.usage.prompt_tokens as u64;
             completion_tokens += completion.usage.completion_tokens as u64;
             peak_prompt_tokens = peak_prompt_tokens.max(completion.usage.prompt_tokens);
@@ -189,7 +189,7 @@ impl Agent {
             .provider
             .complete(&system, &messages, &[])
             .await
-            .map_err(|e| AgentError::Provider(e.to_string()))?;
+            .map_err(|e| AgentError::model(&e))?;
         prompt_tokens += final_c.usage.prompt_tokens as u64;
         completion_tokens += final_c.usage.completion_tokens as u64;
         peak_prompt_tokens = peak_prompt_tokens.max(final_c.usage.prompt_tokens);

@@ -78,6 +78,23 @@ What changed for people building on ARK, per release. Not a commit log.
   `ProducedArtifact::at(path)` marks an artifact as a snapshot of a project file
   (`Artifact.meta.path`, `ArtifactSummary.path`).
 - `examples/writing-agent` turns Files on: chapters that arrive as Word files.
+- Run code (ADR 0020): the new crate `ark-exec`. `code.run {code, runtime?, timeout?}` runs a
+  program in the project folder inside a sandbox: it reads the system, its environment and the
+  project, writes only the project (not `.git` and other tool folders), and has no network.
+  Python 3.12 with pandas, numpy, matplotlib and openpyxl first, kept with `uv` under the store.
+  Every file a run writes comes back as an artifact with its path. Offered only where ARK can
+  contain a run (macOS). `ArkBuilder::code(true)` or `code_with(Exec)`; a `Runtime` trait for
+  other environments; a "Run code" capability ([`EXTENSION.md`](docs/EXTENSION.md#run-code)).
+- Kinds (ADR 0021): `ark_files::Kind` gains `markdown`, `pdf` and `image`, each from a format.
+  PDFs read as their text, a heading per page (read only); images read as their type and size.
+  `ark_files::Kinds`, a sniffer the SDK registers, gives a stored copy of a file the same kind;
+  `artifact_kind`, `shown()` and `media()` are the rest of the one decision.
+- Window: images and PDFs open as themselves, Markdown as a page that shows the project's images
+  it links to (Edit for the text). A stored copy of a project file opens as the file. Protocol:
+  `file_media {path}` (a PDF or an image as base64); `hello` carries `kind_nouns`.
+- `ark_tools::subprocess::{Spec, run_spec, timeout_note}`: a process with its folder, its own
+  environment, a timeout and a bounded tail of its output.
+- `examples/writing-agent` turns Run code on.
 
 ### Changed
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
@@ -106,6 +123,10 @@ What changed for people building on ARK, per release. Not a commit log.
 ### Fixed
 - Window: a question still waiting after a reload keeps all its answers ("Always in this
   project" was missing).
+- `subprocess::run_timeout` no longer hangs until its timeout when a tool prints more than a
+  pipe holds (about 64 KB): output is read while the tool runs.
+- The `present` tool no longer offers views the window cannot show (`diff`, `structured`,
+  `split`).
 
 ### Breaking
 - `HarnessEvent::ToolResult` has a new field, `files`, and `ProducedArtifact` one, `path`: a

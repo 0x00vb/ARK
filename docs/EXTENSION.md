@@ -229,7 +229,8 @@ for the person to allow it. `computer_with(ComputerService::with_screen(..))` pu
 ### Files
 
 `ArkBuilder::files(true)` gives agents the project folder's files: text, spreadsheets
-(`.xlsx`, `.xlsm`, `.csv`, `.tsv`) and documents (`.docx`), read and changed in place
+(`.xlsx`, `.xlsm`, `.csv`, `.tsv`) and documents (`.docx`), read and changed in place; PDFs and
+images read only
 ([ADR 0019](adr/0019-files-are-shared-in-place.md)). The window opens the same files.
 
 | Action | What |
@@ -243,6 +244,26 @@ A new format is a `Format` (`read`, `edit`, `create`) in `ark_files::FORMATS`. O
 into an existing shape (`Content::Sheet`, `Document`, `Text`) needs nothing else: the tools,
 the edits and the window's views work on shapes. An app that keeps its own file tools can
 still use `ark_files::open`, `edit` and `write` for the formats.
+
+A file's kind (`ark_files::Kind`: text, Markdown, spreadsheet, document, PDF, image) is what
+the person sees and the key of the window's view; a format has one. A PDF reads as its text and
+shows as a PDF; an image reads as its type and size. `ark_files::Kinds` is a sniffer the SDK
+registers, so a file any tool writes (`ProducedArtifact::at(path)`) is stored with the same kind
+([ADR 0021](adr/0021-an-output-is-a-file-with-a-kind.md)).
+
+### Run code
+
+`ArkBuilder::code(true)` gives agents `code.run {code, runtime?, timeout?}`: a program run in the
+project folder, contained ([ADR 0020](adr/0020-running-code-contained-in-the-project.md)).
+
+| | |
+|---|---|
+| Where | The project folder is the working folder; each run has a scratch folder of its own, removed after |
+| What it may touch | Reads the system folders, its environment and the project. Writes the project only, not `.git`, `.agents`, `.ark`, `.claude`, `.codex`, `.vscode`, `.idea`, `.envrc` or `.github`. No network |
+| Runtimes | Python 3.12 with pandas, numpy, matplotlib and openpyxl, set up with `uv` in `<store>/exec/python` on the first run. Another is a `Runtime` (`ready` returns how to start a program) passed to `code_with(Exec::new(..))` |
+| What comes back | The exit, the end of stdout and stderr, and every file the run wrote, each an artifact with its path; the window shows each by its kind |
+| Asks | Every run, unless the person allows it in the project: the run is contained, so the grant covers only contained runs |
+| Where it is offered | Where ARK has a `Sandbox`: macOS. Elsewhere it is not listed |
 
 ### Approvals that last
 

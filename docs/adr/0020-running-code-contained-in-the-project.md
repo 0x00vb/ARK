@@ -30,9 +30,9 @@ A crate, `ark-exec`, with one action, `code.run {code, runtime?, timeout?}`, and
 | What asks | `Mutate`. The person sees the program in the approval. Because the run is contained, "Always in this project" is allowed: it covers only runs that are contained like this one |
 | Network | None in a run. If a workflow needs it, it becomes its own explicit permission (its own approval class), never a flag on the same grant |
 | The environment | ARK keeps it, not the person: `uv` makes a venv with Python 3.12 and exact package versions under the store (`exec/python`). The first run installs it (ARK's own step, outside the sandbox, with network). A version change makes it again. Without uv, Python is unavailable, with the reason |
-| Outputs | Every file the run wrote in the project comes back as a `ProducedArtifact` with its path (up to 20 files, 25 MB each; up to 50 listed). `code.run` names no kind: the engine's sniffers decide it (ADR 0019) |
+| Outputs | Every file the run wrote in the project comes back as a `ProducedArtifact` with its path (up to 20 files, 25 MB each; up to 50 listed). `code.run` names no kind: the engine's sniffers decide it (ADR 0021) |
 | Output bounds | `subprocess::run_spec` reads both streams while the program runs and keeps the last 16 KB of each. The agent's card shows the exit, the files and the last 4,000 characters of stdout (2,000 of stderr when it failed) |
-| What the agent is told | The action's description names the runtimes and what the window shows when a run writes it, generated from the formats ARK reads (ADR 0019). Nothing goes in the base prompt |
+| What the agent is told | The action's description names the runtimes and what the window shows when a run writes it, generated from the formats ARK reads (ADR 0021). Nothing goes in the base prompt |
 
 ## Consequences
 - A new runtime (Node, R, a shell) is one `Runtime`: an environment and a launch line. The

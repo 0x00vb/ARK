@@ -110,19 +110,24 @@ impl ApiKeys {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .build()?;
-        let base = |default: &str| {
-            self.bases
-                .get(provider)
-                .cloned()
-                .unwrap_or_else(|| default.to_string())
+        // Checked where the model calls go: a base the app set, the provider's base URL
+        // variable (as ark-model reads it), or the provider's own API.
+        let models = |var: &str, default: &str| match self.bases.get(provider) {
+            Some(b) => format!("{b}/v1/models"),
+            None => match std::env::var(var) {
+                Ok(b) if !b.trim().is_empty() => {
+                    format!("{}/models", b.trim().trim_end_matches('/'))
+                }
+                _ => format!("{default}/models"),
+            },
         };
         let req = match provider {
             "anthropic" => client
-                .get(format!("{}/v1/models", base("https://api.anthropic.com")))
+                .get(models("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"))
                 .header("x-api-key", key)
                 .header("anthropic-version", "2023-06-01"),
             _ => client
-                .get(format!("{}/v1/models", base("https://api.openai.com")))
+                .get(models("OPENAI_BASE_URL", "https://api.openai.com/v1"))
                 .bearer_auth(key),
         };
         let res = req.send().await.map_err(|_| {

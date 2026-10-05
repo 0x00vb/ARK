@@ -10,6 +10,11 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- Secrets in a file for servers (ADR 0028): `ark_connect::FileSecrets::in_store(root)` keeps
+  account tokens and saved API keys in `<store>/secrets.enc` (AES-256-GCM, mode 0600), with the
+  key from `ARK_SECRETS_KEY` or `<store>/secrets.key`; `ArkBuilder::secrets(..)` uses it instead
+  of the OS keychain. `writing-agent --serve --tokens` uses it, so saved keys survive a restart
+  ([`REMOTE.md`](docs/REMOTE.md#saved-keys-and-connections)).
 - Named OpenAI-compatible endpoints (ADR 0027): `ark_model::endpoints::register(Endpoint::new(name,
   url))` or `ARK_ENDPOINTS=name=url`; `name:model` reaches it with its own key (`<NAME>_API_KEY`
   or the app's key store) and its models from `GET /models` in `catalog()`
@@ -185,6 +190,10 @@ What changed for people building on ARK, per release. Not a commit log.
   refused instead of asked, as in a local `-p` run.
 
 ### Fixed
+- A saved OpenAI or Anthropic key is checked where the model calls go: `OPENAI_BASE_URL` or
+  `ANTHROPIC_BASE_URL` when set, not always the vendor's API.
+- `ConnectError::Secrets` reads "secret store: ..." instead of "keychain: ...", since the store
+  may be a file.
 - An app whose model is an OpenAI-compatible model called `claude` no longer gives its agents
   Claude Code sessions: the orchestrator decides "subscription" from the provider, not the
   model id.

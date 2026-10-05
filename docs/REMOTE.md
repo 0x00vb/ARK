@@ -65,6 +65,32 @@ is connected; a window that connects later reads their results.
 `GET /health` answers `{"ok":true,"version":"…"}` without a token, for the supervisor or an
 uptime check.
 
+## Saved keys and connections
+
+On a person's computer, API keys and account tokens go in the OS keychain. A server's keyring
+(the Linux kernel keyring) is gone after a restart, so a served app keeps them in one encrypted
+file in the store instead (ADR 0028):
+
+```rust
+use ark_sdk::prelude::ark_connect::FileSecrets;
+
+let ark = Ark::builder()
+    .store_root(&root)
+    .connections(true)
+    .secrets(Arc::new(FileSecrets::in_store(&root)?))   // <store>/secrets.enc
+    .build()?;
+```
+
+| File or variable | What it is |
+|---|---|
+| `<store>/secrets.enc` | every saved secret, AES-256-GCM, mode 0600 |
+| `<store>/secrets.key` | the key, made on first use, mode 0600; unused when `ARK_SECRETS_KEY` is set |
+| `ARK_SECRETS_KEY` | the key from the host (`openssl rand -base64 32`), to keep it off the volume |
+
+Back up the key with the store, or keep `ARK_SECRETS_KEY` in the host's secret store. Without the
+key the app refuses to start and says how to recover; the secrets can be entered again.
+`examples/writing-agent` does this when run with `--serve ADDR --tokens`.
+
 ## Limits
 
 | Limit | Why |

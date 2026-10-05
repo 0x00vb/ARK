@@ -21,7 +21,7 @@ mod connections;
 pub use api_keys::ApiKeys;
 pub use catalog::{Capability, Catalog, OAuth, Provider};
 pub use connections::{Account, CapabilityStatus, Connecting, Connections, State};
-pub use secrets::{Keychain, MemorySecrets, Secrets};
+pub use secrets::{FileSecrets, Keychain, MemorySecrets, Secrets, SECRETS_KEY_VAR};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
@@ -33,7 +33,7 @@ pub enum ConnectError {
     Provider(String),
     #[error("{0}")]
     NotConnected(String),
-    #[error("keychain: {0}")]
+    #[error("secret store: {0}")]
     Secrets(String),
     #[error("unknown capability `{0}`")]
     Unknown(String),

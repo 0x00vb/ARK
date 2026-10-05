@@ -596,6 +596,7 @@ pub struct ArkBuilder {
     browser: Option<BrowserChoice>,
     computer: Option<ComputerChoice>,
     connections: Option<ConnectionsChoice>,
+    secrets: Option<Arc<dyn ark_connect::Secrets>>,
 }
 enum CodeChoice {
     Default,
@@ -615,7 +616,8 @@ enum BrowserChoice {
 }
 
 enum ConnectionsChoice {
-    /// The built-in catalog, tokens in the OS keychain, records in the store root.
+    /// The built-in catalog, tokens in the OS keychain (or the app's
+    /// [`secrets`](ArkBuilder::secrets)), records in the store root.
     Default,
     Given(Connections),
 }
@@ -645,6 +647,7 @@ impl Default for ArkBuilder {
             browser: None,
             computer: None,
             connections: None,
+            secrets: None,
         }
     }
 }
@@ -755,6 +758,14 @@ impl ArkBuilder {
         self
     }
 
+    /// Where account tokens and saved API keys are kept, instead of the OS keychain. A server
+    /// uses [`ark_connect::FileSecrets`], since a Linux kernel keyring is gone after a restart
+    /// (ADR 0028): `.secrets(Arc::new(FileSecrets::in_store(&root)?))`.
+    pub fn secrets(mut self, secrets: Arc<dyn ark_connect::Secrets>) -> Self {
+        self.secrets = Some(secrets);
+        self
+    }
+
     /// [`connections`](ArkBuilder::connections) with a set the app opened: its own catalog or
     /// secret store.
     pub fn connections_with(mut self, c: Connections) -> Self {
@@ -822,7 +833,9 @@ impl ArkBuilder {
             ConnectionsChoice::Default => Connections::open(
                 engine.store.root(),
                 ark_connect::Catalog::builtin(),
-                Arc::new(ark_connect::Keychain),
+                self.secrets
+                    .clone()
+                    .unwrap_or_else(|| Arc::new(ark_connect::Keychain)),
             ),
         });
         let mut profile = self.profile;

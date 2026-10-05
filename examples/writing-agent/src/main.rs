@@ -368,6 +368,7 @@ fn build_ark(
     store_root: impl Into<PathBuf>,
     provider: Option<Arc<dyn ark_model::Provider>>,
     computer: bool,
+    secrets: Option<Arc<dyn ark_connect::Secrets>>,
 ) -> Result<Ark, ArkError> {
     let mut b = Ark::builder()
         .store_root(store_root)
@@ -388,6 +389,9 @@ fn build_ark(
         // Work in the writer's own apps: paste a chapter into Pages, file notes in Notes.
         .computer(computer)
         .profile(writer_profile());
+    if let Some(s) = secrets {
+        b = b.secrets(s);
+    }
     if let Some(p) = provider {
         b = b.provider(p);
     }
@@ -739,7 +743,20 @@ async fn main() -> std::process::ExitCode {
             }
         };
     }
-    let ark = match build_ark(root, None, !cli.tokens) {
+    // Serving other machines: keys and account tokens in an encrypted file in the store, since
+    // a server's kernel keyring is gone after a restart (ADR 0028).
+    let secrets: Option<Arc<dyn ark_connect::Secrets>> = if cli.tokens {
+        match ark_connect::FileSecrets::in_store(&root) {
+            Ok(s) => Some(Arc::new(s)),
+            Err(e) => {
+                eprintln!("writer: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+    } else {
+        None
+    };
+    let ark = match build_ark(root, None, !cli.tokens, secrets) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("writer: {e}");
@@ -973,7 +990,7 @@ mod tests {
                 usage: Usage::measured(240, 30),
             },
         ];
-        let ark = build_ark(dir.path(), mock(script), true).unwrap();
+        let ark = build_ark(dir.path(), mock(script), true, None).unwrap();
         let project = ark.create_project("the-locket", "a debut novel").unwrap();
         seed_manuscript(&ark.engine().workspace_dir(&project.id).unwrap()).unwrap();
 
@@ -1039,7 +1056,7 @@ mod tests {
             }
         }));
         let provider: Arc<dyn ark_model::Provider> = mock.clone();
-        let ark = build_ark(dir.path(), Some(provider), true).unwrap();
+        let ark = build_ark(dir.path(), Some(provider), true, None).unwrap();
         let project = ark.create_project("the-locket", "a debut novel").unwrap();
         seed_manuscript(&ark.engine().workspace_dir(&project.id).unwrap()).unwrap();
         let (approver, _rx) = ChannelApprover::channel();
@@ -1130,7 +1147,7 @@ mod tests {
                 usage: Usage::measured(90, 9),
             },
         ];
-        let ark = build_ark(dir.path(), mock(script), true).unwrap();
+        let ark = build_ark(dir.path(), mock(script), true, None).unwrap();
         let project = ark.create_project("t", "").unwrap();
         let _ = ark.ask(&project.id, "save a new chapter").await.unwrap();
         let ws = ark.engine().workspace_dir(&project.id).unwrap();
@@ -1160,7 +1177,7 @@ mod tests {
                 usage: Usage::measured(90, 9),
             },
         ];
-        let ark = build_ark(dir.path(), mock(script), true).unwrap();
+        let ark = build_ark(dir.path(), mock(script), true, None).unwrap();
         let project = ark.create_project("t", "").unwrap();
         let mut session = ark.start_session(&project.id).unwrap();
         let gate = Arc::new(ApprovalGate::new(Arc::new(FixedApprover(

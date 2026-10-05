@@ -585,6 +585,19 @@ async fn an_app_view_takes_the_main_column_and_agents_ask_from_the_tray() {
     .await;
 }
 
+/// The board: add, drag, complete, open an item, hand it to an agent and see it move by itself,
+/// what needs the person, delete with undo.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_board_is_worked_by_the_person_and_the_agents() {
+    drive_app(
+        "board",
+        vec![say("Chapter 3 is drafted.", false)],
+        Duration::ZERO,
+        true,
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_chat_keeps_working_in_the_background_while_another_runs() {
     let save = Completion {

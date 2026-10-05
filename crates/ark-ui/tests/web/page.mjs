@@ -226,6 +226,85 @@ async function agents(page) {
 }
 scenarios.agents = agents;
 
+// The project's board: the person adds, drags and completes cards and opens one; an agent
+// given a card moves it by itself; what waits for the person is marked; delete has an undo.
+async function board(page) {
+  await page.locator('.view-tab[data-view="board"]').click();
+  const server = () => page.evaluate(async () => (await window.ark.call("board")).items.map((w) => `${w.state}:${w.title}`));
+  const column = (state) => page.locator(`.bd-list[data-state="${state}"] .bd-card .bd-title`).allInnerTexts();
+  // An empty board offers the input at once.
+  const input = page.locator(".bd-input");
+  await input.click();
+  for (const t of ["Draft chapter 3", "Edit chapter 2", "Pick a title"]) {
+    await input.fill(t);
+    await page.keyboard.press("Enter");
+    await page.locator(".bd-card", { hasText: t }).waitFor();
+  }
+  await page.keyboard.press("Escape");
+  assert.deepEqual(await column("todo"), ["Draft chapter 3", "Edit chapter 2", "Pick a title"]);
+
+  // Drag "Pick a title" above "Draft chapter 3", then "Draft chapter 3" into In progress.
+  const drag = async (title, to) => {
+    const from = await page.locator(".bd-card", { hasText: title }).boundingBox();
+    await page.mouse.move(from.x + 40, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + 50, from.y + from.height / 2 + 8, { steps: 3 });
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    assert.equal(await page.locator(".bd-line").count(), 1, "a line shows where it lands");
+    await page.mouse.up();
+  };
+  const first = await page.locator(".bd-card", { hasText: "Draft chapter 3" }).boundingBox();
+  await drag("Pick a title", { x: first.x + 60, y: first.y + 4 });
+  assert.deepEqual(await column("todo"), ["Pick a title", "Draft chapter 3", "Edit chapter 2"]);
+  const doing = await page.locator('.bd-list[data-state="doing"]').boundingBox();
+  await drag("Draft chapter 3", { x: doing.x + 60, y: doing.y + 30 });
+  assert.deepEqual(await column("doing"), ["Draft chapter 3"]);
+  await page.waitForFunction(async () => (await window.ark.call("board")).items.some((w) => w.title === "Draft chapter 3" && w.state === "doing"));
+  assert.deepEqual(await server(), ["todo:Pick a title", "todo:Edit chapter 2", "doing:Draft chapter 3"]);
+
+  // The circle completes a card.
+  await page.locator(".bd-card", { hasText: "Edit chapter 2" }).locator(".bd-check").click();
+  assert.deepEqual(await column("done"), ["Edit chapter 2"]);
+
+  // A click opens the card beside the board; a note typed there is kept.
+  await page.locator(".bd-card", { hasText: "Draft chapter 3" }).click();
+  const panel = page.locator(".bd-panel");
+  await panel.waitFor();
+  assert.equal(await panel.locator(".bd-p-title").inputValue(), "Draft chapter 3");
+  await panel.locator(".bd-p-note").fill("Under 2,000 words.");
+  await panel.locator(".bd-p-title").click();
+  await page.waitForFunction(async () => (await window.ark.call("board")).items.some((w) => w.note === "Under 2,000 words."));
+
+  // Given to an agent, the card moves to Done on its own, and the panel shows the answer.
+  await page.evaluate(() => window.ark.call("spawn_agent", { spec: { name: "writer", role: "drafts chapters" } }));
+  await page.locator(".bd-p-give").waitFor();
+  await page.locator(".bd-p-give").click();
+  await page.locator(".popover .menu-item", { hasText: "writer" }).click();
+  await page.locator('.bd-list[data-state="done"] .bd-card', { hasText: "Draft chapter 3" }).waitFor();
+  await panel.locator(".bd-p-said", { hasText: "Chapter 3 is drafted." }).waitFor();
+  assert.match(await panel.locator(".bd-p-history summary").innerText(), /History · \d/);
+
+  // A card another client adds appears without a reload; one blocked on the person is marked.
+  await page.evaluate(() => window.ark.call("board_add", { title: "Choose the cover", owner: "user", blocked: "needs your photo" }));
+  const cover = page.locator(".bd-card", { hasText: "Choose the cover" });
+  await cover.waitFor();
+  assert.equal(await cover.locator(".bd-tag.you").innerText(), "Needs you");
+  const chip = page.locator(".bd-needs");
+  assert.equal(await chip.innerText(), "Needs you · 1");
+  await chip.click();
+  assert.equal(await page.locator(".bd-card").count(), 1);
+  await chip.click();
+
+  // Delete from the keyboard, then undo.
+  await page.locator(".bd-card", { hasText: "Pick a title" }).focus();
+  await page.keyboard.press("Backspace");
+  assert.equal(await page.locator(".bd-card", { hasText: "Pick a title" }).count(), 0);
+  await page.locator(".bd-undo-btn").click();
+  await page.locator(".bd-card", { hasText: "Pick a title" }).waitFor();
+  assert.ok((await server()).includes("todo:Pick a title"));
+}
+scenarios.board = board;
+
 // Files the agent writes are cards that open beside the conversation; the person edits them in
 // place and the file changes: a cell (the total follows), a document's lines.
 async function files(page) {

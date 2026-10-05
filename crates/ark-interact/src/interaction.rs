@@ -1250,9 +1250,13 @@ impl Interaction {
     }
 
     /// Tools the conversation gets beside the app's: with several agents, the orchestrator's
-    /// chat tools, so the person asks in words and the chat creates agents and tasks.
+    /// chat tools, so the person asks in words and the chat creates agents and tasks, and the
+    /// project's board, so it plans and continues work across chats.
     fn turn_tools(&self) -> Vec<ark_sdk::TurnTools> {
-        self.orchestrator.iter().map(|o| o.chat_tools()).collect()
+        self.orchestrator
+            .iter()
+            .flat_map(|o| [o.chat_tools(), o.board_tools()])
+            .collect()
     }
 
     /// What the model receives, by source, and what ARK kept out.

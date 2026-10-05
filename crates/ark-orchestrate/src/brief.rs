@@ -1,14 +1,19 @@
 //! What an agent receives for a task: the objective, the context its delegator chose to
 //! give, the artifacts it may use, the results of the tasks it runs after, and messages
-//! waiting for it. Never the delegator's conversation, working state or tool output.
+//! waiting for it, and the board item it works on. Never the delegator's conversation, working
+//! state or tool output.
 
 use std::fmt::Write as _;
 
+use crate::board::WorkItem;
 use crate::record::{Mail, Origin, TaskRecord};
 
 /// Characters of a prerequisite task's result put in a brief. The whole result stays on
 /// the task and in the store.
 pub const DEP_RESULT_CHARS: usize = 1200;
+
+/// Earlier steps of its board item put in a brief.
+pub const ITEM_STEPS: usize = 3;
 
 pub struct Brief<'a> {
     pub task: &'a TaskRecord,
@@ -19,6 +24,8 @@ pub struct Brief<'a> {
     pub inbox: &'a [Mail],
     /// It was stopped by a suspend and runs again.
     pub resumed: bool,
+    /// The board item it works on.
+    pub item: Option<&'a WorkItem>,
 }
 
 impl Brief<'_> {
@@ -81,6 +88,24 @@ impl Brief<'_> {
                 for a in &d.outputs {
                     let _ = writeln!(s, "  - art:{} {} ({})", short_id(&a.id), a.name, a.kind);
                 }
+            }
+        }
+        if let Some(w) = self.item {
+            let _ = write!(s, "\n== BOARD ITEM ==\n{} {}\n", w.id, w.title);
+            if !w.note.trim().is_empty() {
+                let _ = writeln!(s, "Note: {}", clip(&w.note, 600));
+            }
+            // What was done on it before this task: another agent's or an earlier session's.
+            let earlier: Vec<_> = w
+                .log
+                .iter()
+                .filter(|st| {
+                    st.text != "added it" && !st.text.starts_with(&format!("started {}", t.id))
+                })
+                .collect();
+            let skip = earlier.len().saturating_sub(ITEM_STEPS);
+            for st in &earlier[skip..] {
+                let _ = writeln!(s, "- {}: {}", st.by, clip(&st.text, 200));
             }
         }
         if !self.inbox.is_empty() {
@@ -170,6 +195,7 @@ mod tests {
             run_ms: 0,
             pid: None,
             schedule: None,
+            item: None,
         }
     }
 
@@ -184,6 +210,7 @@ mod tests {
             children: vec![],
             inbox: &[],
             resumed: false,
+            item: None,
         }
         .render();
         assert!(b.starts_with("Task t-2 delegated by lead"));
@@ -193,5 +220,32 @@ mod tests {
         assert!(b.contains("result of t-0 (other)"));
         assert!(b.len() < 2000, "a dependency's result is clipped");
         assert!(b.contains("4 steps"));
+        assert!(!b.contains("BOARD ITEM"));
+    }
+
+    #[test]
+    fn a_brief_carries_its_board_item_and_the_last_steps_on_it() {
+        let t = task("t-2", "worker");
+        let mut w = WorkItem::new("p", "chat", "Draft chapter 3");
+        w.note = "Keep it under 2,000 words.".into();
+        for n in 1..=5 {
+            w.step("worker", format!("step {n}"));
+        }
+        w.step("worker", "started t-2: Draft chapter 3");
+        let b = Brief {
+            task: &t,
+            deps: vec![],
+            children: vec![],
+            inbox: &[],
+            resumed: false,
+            item: Some(&w),
+        }
+        .render();
+        assert!(b.contains(&format!(
+            "== BOARD ITEM ==\n{} Draft chapter 3\nNote: Keep it",
+            w.id
+        )));
+        assert!(b.contains("- worker: step 3\n- worker: step 4\n- worker: step 5"));
+        assert!(!b.contains("step 2") && !b.contains("added it") && !b.contains("started t-2"));
     }
 }

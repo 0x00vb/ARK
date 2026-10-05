@@ -17,6 +17,7 @@ import { registerCapabilities } from "./capabilities.js";
 import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
 import { registerSkills } from "./skills.js";
+import { registerBoard } from "./board.js";
 
 const transport = connect();
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
@@ -699,6 +700,8 @@ async function bootOnce(again) {
     registerGrants(window.ark);
     registerPlugins(window.ark);
     registerSkills(window.ark);
+    // The project's board, when the app runs agents.
+    registerBoard(window.ark);
   }
   await loadSession();
   state.working = hello.working || [];

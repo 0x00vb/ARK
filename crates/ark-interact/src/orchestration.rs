@@ -1,9 +1,14 @@
 //! Orchestration views: the agent and task graph, and one task's trace, as [`Report`]s. The
 //! terminal prints them; the window renders the same report or uses its typed data
 //! (`view: "orchestration"` carries the whole [`Graph`], `view: "orchestration_task"` the
-//! task and its events). Both come from the orchestrator's own records and event log.
+//! task and its events). Both come from the orchestrator's own records and event log. The
+//! project's board (`/board`) is read and changed here too, for both front-ends.
 
-use ark_orchestrate::{AgentState, EventKind, Graph, OrchEvent, Origin, TaskNode, TaskState};
+use ark_orchestrate::board::PERSON;
+use ark_orchestrate::{
+    AgentState, EventKind, Graph, OrchEvent, Origin, TaskNode, TaskState, WorkChange, WorkItem,
+    WorkState,
+};
 use ark_sdk::prelude::ark_model::SessionState;
 
 use crate::fmt::{clip, count, millis, tokens};
@@ -355,10 +360,74 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
         EventKind::Unscheduled { agent, says, .. } => {
             (format!("{agent} no longer runs {says}"), Tone::Muted)
         }
+        EventKind::Work { item, by } => (
+            format!(
+                "{} {}: {}",
+                who(by),
+                item.log
+                    .last()
+                    .map(|s| s.text.as_str())
+                    .unwrap_or("changed"),
+                clip(&item.title, 60)
+            ),
+            Tone::Normal,
+        ),
+        EventKind::WorkRemoved { title, .. } => (
+            format!("removed from the board: {}", clip(title, 60)),
+            Tone::Muted,
+        ),
         EventKind::AgentSpawned { .. }
         | EventKind::AgentState { .. }
         | EventKind::Session { .. } => return None,
     })
+}
+
+/// A board actor in words: the person is "you".
+pub fn who(by: &str) -> String {
+    match by {
+        PERSON => "you".into(),
+        other => other.into(),
+    }
+}
+
+/// The project's board (`/board`): what is open by column, the latest done.
+pub fn board_report(items: &[WorkItem]) -> Report {
+    let r = Report::titled("Board");
+    if items.is_empty() {
+        return r.note("The board is empty. Add an item with /board add <title>, or ask in words.");
+    }
+    let mut r = r;
+    for state in WorkState::ALL {
+        let col: Vec<&WorkItem> = items.iter().filter(|w| w.state == state).collect();
+        if col.is_empty() {
+            continue;
+        }
+        let shown = if state == WorkState::Done {
+            5
+        } else {
+            col.len()
+        };
+        let mut t = Table::with_header(&["item", "owner", "title"]);
+        for w in col.iter().take(shown) {
+            let mut title = clip(&w.title, 70);
+            if let Some(b) = &w.blocked {
+                title.push_str(&format!("  (blocked: {})", clip(b, 50)));
+            }
+            t = t.row([
+                Cell::from(w.id.clone()),
+                Cell::from(w.owner.as_deref().map(who).unwrap_or_else(|| "-".into())),
+                if w.blocked.is_some() {
+                    Cell::new(title, Tone::Warning)
+                } else {
+                    Cell::from(title)
+                },
+            ]);
+        }
+        r = r
+            .heading(format!("{} ({})", state.label(), col.len()))
+            .table(t);
+    }
+    r.note("/board add <title> · done <item> · move <item> todo|doing|done · give <item> <agent> · remove <item>")
 }
 
 // ---- control ---------------------------------------------------------------------------------
@@ -403,6 +472,24 @@ pub enum Control {
     Unschedule {
         schedule: String,
     },
+    /// Add an item to the board.
+    AddWork {
+        title: String,
+        change: WorkChange,
+    },
+    /// Change a board item (its words, column, place, owner, what blocks it).
+    ChangeWork {
+        item: String,
+        change: WorkChange,
+    },
+    RemoveWork {
+        item: String,
+    },
+    /// Hand a board item to an agent: a task with the item's title, linked to it.
+    GiveWork {
+        item: String,
+        agent: String,
+    },
 }
 
 /// What a [`Control`] did.
@@ -417,6 +504,7 @@ pub enum ControlOutcome {
         agent: String,
         delivered: bool,
     },
+    Work(Box<WorkItem>),
     Done(String),
 }
 
@@ -433,6 +521,7 @@ impl ControlOutcome {
             } else {
                 format!("kept for {agent}'s next task")
             }),
+            ControlOutcome::Work(w) => Report::new().success(w.line()),
             ControlOutcome::Done(what) => Report::new().success(what.clone()),
         }
     }
@@ -488,6 +577,67 @@ pub async fn control(
                 clip(&s.task.objective, 60)
             ))
         }
+        Control::AddWork { title, change } => {
+            ControlOutcome::Work(Box::new(o.add_work(PERSON, &title, change)?))
+        }
+        Control::ChangeWork { item, change } => {
+            ControlOutcome::Work(Box::new(o.change_work(PERSON, &item, change)?))
+        }
+        Control::RemoveWork { item } => {
+            let w = o.remove_work(&item)?;
+            ControlOutcome::Done(format!("removed \"{}\"", clip(&w.title, 60)))
+        }
+        Control::GiveWork { item, agent } => {
+            let w = o
+                .work_item(&item)
+                .ok_or_else(|| anyhow::anyhow!("no board item `{item}`"))?;
+            let task = ark_orchestrate::TaskSpec::new(w.title.clone()).item(w.id.clone());
+            ControlOutcome::Submitted {
+                task: o.submit(&agent, task)?,
+            }
+        }
+    })
+}
+
+/// `/board …` as a [`Control`]: `add <title>`, `done <item>`, `move <item> <column>`,
+/// `give <item> <agent>`, `remove <item>`.
+pub fn parse_board(args: &str) -> Result<Control, String> {
+    let usage = || {
+        "usage: /board add <title> | done <item> | move <item> todo|doing|done | give <item> <agent> | remove <item>".to_string()
+    };
+    let args = args.trim();
+    let (verb, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
+    let rest = rest.trim();
+    let mut words = rest.split_whitespace();
+    let item = words.next().unwrap_or("").to_string();
+    Ok(match verb {
+        "add" if !rest.is_empty() => Control::AddWork {
+            title: rest.to_string(),
+            change: WorkChange::default(),
+        },
+        "done" if !item.is_empty() => Control::ChangeWork {
+            item,
+            change: WorkChange::default().state(WorkState::Done),
+        },
+        "move" => {
+            let state = words.collect::<Vec<_>>().join(" ");
+            match (item.is_empty(), WorkState::parse(&state)) {
+                (false, Some(s)) => Control::ChangeWork {
+                    item,
+                    change: WorkChange::default().state(s),
+                },
+                _ => return Err(usage()),
+            }
+        }
+        "give" => match words.next() {
+            Some(agent) if !item.is_empty() => Control::GiveWork {
+                item,
+                agent: agent.to_string(),
+            },
+            _ => return Err(usage()),
+        },
+        "remove" if !item.is_empty() => Control::RemoveWork { item },
+        _ => return Err(usage()),
     })
 }
 

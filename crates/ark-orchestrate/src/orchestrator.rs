@@ -32,6 +32,7 @@ use ark_sdk::Ark;
 use ark_tools::{action_matches, Registry};
 use tokio::sync::{broadcast, watch, OwnedSemaphorePermit, Semaphore};
 
+use crate::board::{self, rank_before, WorkChange, WorkItem, WorkState, PERSON, WORK};
 use crate::brief::{clip, Brief};
 use crate::event::{EventKind, OrchEvent};
 use crate::models::{AgentModels, ModelResolver, Models, ModelsBuilder};
@@ -216,6 +217,15 @@ impl Orchestrator {
         ark_sdk::TurnTools {
             adapter: Arc::new(tools::ChatTools { orch: self.clone() }),
             distiller: Some(tools::distiller()),
+        }
+    }
+
+    /// The project's board for the person's conversation: `board.list`, `board.add`,
+    /// `board.update` (see [`crate::board`]). Add them beside [`chat_tools`](Self::chat_tools).
+    pub fn board_tools(&self) -> ark_sdk::TurnTools {
+        ark_sdk::TurnTools {
+            adapter: Arc::new(tools::BoardTools { orch: self.clone() }),
+            distiller: Some(tools::board_distiller()),
         }
     }
 
@@ -462,6 +472,46 @@ impl Orchestrator {
             }
         })
     }
+
+    // ---- the board ---------------------------------------------------------------------
+
+    /// The project's board in order: To do, In progress, Done (latest first). See
+    /// [`crate::board`].
+    pub fn board(&self) -> Vec<WorkItem> {
+        let st = self.inner.state.lock().unwrap();
+        board::ordered(st.work.values().cloned().collect())
+    }
+
+    pub fn work_item(&self, id: &str) -> Option<WorkItem> {
+        self.inner.state.lock().unwrap().work.get(id).cloned()
+    }
+
+    /// Add an item, at the end of its column unless `change.before` places it. `by` is who adds
+    /// it: an agent, [`board::PERSON`], or `chat`.
+    pub fn add_work(
+        &self,
+        by: &str,
+        title: &str,
+        change: WorkChange,
+    ) -> Result<WorkItem, OrchError> {
+        self.inner.add_work(by, title, change)
+    }
+
+    /// Change an item: its words, column, place, owner or what blocks it. An item an agent works
+    /// on keeps that agent as owner until its task ends.
+    pub fn change_work(
+        &self,
+        by: &str,
+        id: &str,
+        change: WorkChange,
+    ) -> Result<WorkItem, OrchError> {
+        self.inner.change_work(by, id, change)
+    }
+
+    /// Remove an item. Tasks run for it stay as they are.
+    pub fn remove_work(&self, id: &str) -> Result<WorkItem, OrchError> {
+        self.inner.remove_work(id)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -506,6 +556,8 @@ pub(crate) struct State {
     pub tasks: HashMap<String, TaskRt>,
     pub messages: Vec<crate::graph::MessageEdge>,
     pub schedules: HashMap<String, ScheduleRecord>,
+    /// The project's board.
+    pub work: HashMap<String, WorkItem>,
 }
 
 pub(crate) struct Inner {
@@ -569,6 +621,92 @@ impl Final {
     }
 }
 
+/// The open task another agent runs for `item`, if any: then `owner` may not take it.
+fn claimable(st: &State, item: &str, owner: &str) -> Result<(), OrchError> {
+    let w = st
+        .work
+        .get(item)
+        .ok_or_else(|| OrchError::NotAllowed(format!("no board item `{item}`")))?;
+    let busy = w.tasks.iter().rev().find_map(|t| {
+        st.tasks
+            .get(t)
+            .filter(|t| !t.record.state.is_final() && t.record.owner != owner)
+            .map(|t| (t.record.owner.clone(), t.record.id.clone()))
+    });
+    match busy {
+        Some((other, task)) => Err(OrchError::NotAllowed(format!(
+            "{} is being worked on by {other} ({task}); wait for it or pick another item",
+            w.id
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// The rank that puts `w` before `before` in its column, or at the column's end.
+fn column_rank(st: &State, w: &WorkItem, before: Option<&str>) -> f64 {
+    let mut column: Vec<&WorkItem> = st
+        .work
+        .values()
+        .filter(|o| o.state == w.state && o.id != w.id)
+        .collect();
+    column.sort_by(|a, b| {
+        a.rank
+            .partial_cmp(&b.rank)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rank_before(&column, before)
+}
+
+/// Apply the fields of `c` other than state and place, checked.
+fn apply_change(st: &State, w: &mut WorkItem, by: &str, c: WorkChange) -> Result<(), OrchError> {
+    if let Some(t) = c.title {
+        let t = t.trim();
+        if t.is_empty() {
+            return Err(OrchError::NotAllowed("an item needs a title".into()));
+        }
+        w.title = clip(t, 200);
+    }
+    if let Some(n) = c.note {
+        w.note = clip(&n, 4000);
+    }
+    if let Some(o) = c.owner {
+        let o = o.trim();
+        let owner = match o {
+            "" => None,
+            PERSON | "you" | "person" => Some(PERSON.to_string()),
+            name => {
+                let live = st
+                    .agents
+                    .get(name)
+                    .is_some_and(|a| a.record.state != AgentState::Terminated);
+                if !live {
+                    return Err(OrchError::NotAllowed(format!("no agent named `{name}`")));
+                }
+                Some(name.to_string())
+            }
+        };
+        // The agent running a task for it keeps it until that task ends.
+        if owner != w.owner {
+            if let Some(t) = w.tasks.iter().rev().find_map(|t| {
+                st.tasks
+                    .get(t)
+                    .filter(|t| !t.record.state.is_final())
+                    .map(|t| (t.record.owner.clone(), t.record.id.clone()))
+            }) {
+                return Err(OrchError::NotAllowed(format!(
+                    "{} is working on it ({}); cancel that task first",
+                    t.0, t.1
+                )));
+            }
+        }
+        w.set_owner(by, owner);
+    }
+    if let Some(b) = c.blocked {
+        w.set_blocked(by, Some(b));
+    }
+    Ok(())
+}
+
 fn valid_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() <= 64
@@ -597,7 +735,23 @@ impl Inner {
             kind,
         };
         if ev.kind.stored() {
-            match serde_json::to_value(&ev) {
+            // A board item is stored with its last step only: the store holds the item, the
+            // stream what changed.
+            let slim = match &ev.kind {
+                EventKind::Work { item, by } if item.log.len() > 1 => {
+                    let mut item = item.clone();
+                    item.log.drain(..item.log.len() - 1);
+                    Some(OrchEvent {
+                        kind: EventKind::Work {
+                            item,
+                            by: by.clone(),
+                        },
+                        ..ev.clone()
+                    })
+                }
+                _ => None,
+            };
+            match serde_json::to_value(slim.as_ref().unwrap_or(&ev)) {
                 Ok(v) => match self.engine.store.append_event(&self.stream, &v) {
                     Ok(seq) => ev.seq = seq,
                     Err(e) => tracing::warn!("could not store an orchestration event: {e}"),
@@ -662,6 +816,25 @@ impl Inner {
             }
             Err(e) => tracing::warn!("could not encode a schedule: {e}"),
         }
+    }
+
+    fn save_work(&self, w: &WorkItem, by: &str) {
+        match serde_json::to_value(w) {
+            Ok(v) => {
+                if let Err(e) =
+                    self.engine
+                        .store
+                        .put_record(WORK, &w.id, self.project.id.as_str(), &v)
+                {
+                    tracing::warn!(item = %w.id, "could not save the board item: {e}");
+                }
+            }
+            Err(e) => tracing::warn!("could not encode a board item: {e}"),
+        }
+        self.emit(EventKind::Work {
+            item: w.clone(),
+            by: by.to_string(),
+        });
     }
 
     /// Remove a schedule, from memory and the store under one lock, so a tick running at the
@@ -853,6 +1026,11 @@ impl Inner {
                     }
                 }
             }
+            for v in store.list_records(WORK, Some(self.project.id.as_str()))? {
+                if let Ok(w) = serde_json::from_value::<WorkItem>(v) {
+                    st.work.insert(w.id.clone(), w);
+                }
+            }
         }
         for r in interrupted {
             self.save_task(&r);
@@ -864,6 +1042,7 @@ impl Inner {
                 usage: r.usage,
                 run_ms: r.run_ms,
             });
+            self.work_follows(&r);
         }
         Ok(())
     }
@@ -1129,6 +1308,10 @@ impl Inner {
         if spec.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
         }
+        if let Some(item) = &spec.item {
+            let st = self.state.lock().unwrap();
+            claimable(&st, item, owner)?;
+        }
         let id = format!("t-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let source = match &origin {
             Origin::Agent { agent, .. } => self.scope_of(agent).unwrap_or(self.project.id.clone()),
@@ -1181,9 +1364,29 @@ impl Inner {
             run_ms: 0,
             pid: None,
             schedule: None,
+            item: spec.item.clone(),
         };
-        let parent_rec = {
+        let (parent_rec, linked) = {
             let mut st = self.state.lock().unwrap();
+            // Checked again under the lock that inserts the task: two agents never take one item.
+            if let Some(item) = &spec.item {
+                claimable(&st, item, owner)?;
+            }
+            let linked = spec.item.as_ref().and_then(|item| {
+                let w = st.work.get_mut(item)?;
+                w.tasks.push(id.clone());
+                w.owner = Some(owner.to_string());
+                if w.state != WorkState::Doing {
+                    w.state = WorkState::Doing;
+                    w.done_ms = None;
+                }
+                w.blocked = None;
+                w.step(
+                    owner,
+                    format!("started {id}: {}", clip(&spec.objective, 100)),
+                );
+                Some(w.clone())
+            });
             let (done, _) = watch::channel(false);
             st.tasks.insert(
                 id.clone(),
@@ -1197,17 +1400,21 @@ impl Inner {
                     delegations: 0,
                 },
             );
-            parent.and_then(|p| {
+            let parent_rec = parent.and_then(|p| {
                 st.tasks.get_mut(p).map(|t| {
                     t.record.children.push(id.clone());
                     t.record.clone()
                 })
-            })
+            });
+            (parent_rec, linked)
         };
         if let Some(p) = parent_rec {
             self.save_task(&p);
         }
         self.save_task(&record);
+        if let Some(w) = linked {
+            self.save_work(&w, owner);
+        }
         self.emit(EventKind::TaskCreated {
             task: id.clone(),
             owner: owner.to_string(),
@@ -1302,6 +1509,23 @@ impl Inner {
         }
         let rec = self.update_task(id, |_| {});
         if let Some(r) = rec {
+            if let Some(item) = &r.item {
+                let w = {
+                    let mut st = self.state.lock().unwrap();
+                    st.work.get_mut(item).map(|w| {
+                        w.blocked = None;
+                        if w.state != WorkState::Doing {
+                            w.state = WorkState::Doing;
+                            w.done_ms = None;
+                        }
+                        w.step(&r.owner, format!("running {} again", r.id));
+                        w.clone()
+                    })
+                };
+                if let Some(w) = w {
+                    self.save_work(&w, &r.owner);
+                }
+            }
             self.emit(EventKind::TaskQueued {
                 task: r.id,
                 reason: "retry".into(),
@@ -1642,9 +1866,10 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         models: &AgentModels,
         resumed: bool,
     ) -> Attempt {
-        let (task, agent, deps, children, inbox, cancel, roster) = {
+        let (task, agent, deps, children, inbox, cancel, roster, item) = {
             let mut st = self.state.lock().unwrap();
             let task = st.tasks[id].record.clone();
+            let item = task.item.as_ref().and_then(|w| st.work.get(w).cloned());
             let cancel = st.tasks[id].cancel.clone();
             let deps: Vec<TaskRecord> = task
                 .after
@@ -1677,6 +1902,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 inbox,
                 cancel,
                 roster,
+                item,
             )
         };
         let spec = &agent.spec;
@@ -1779,6 +2005,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             children: children.iter().collect(),
             inbox: &inbox,
             resumed,
+            item: item.as_ref(),
         }
         .render();
         let brief_tokens = estimate_tokens(&brief);
@@ -2179,10 +2406,139 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             usage: rec.usage,
             run_ms: rec.run_ms,
         });
+        self.work_follows(&rec);
         let st = self.state.lock().unwrap();
         if let Some(t) = st.tasks.get(id) {
             t.done.send_replace(true);
         }
+    }
+
+    // ---- the board ------------------------------------------------------------------
+
+    /// A finished task moves its board item (see [`crate::board`]): the last open task done
+    /// makes it done; a failure blocks it; a cancel puts it back in To do.
+    fn work_follows(&self, t: &TaskRecord) {
+        let Some(item) = &t.item else { return };
+        let changed = {
+            let mut st = self.state.lock().unwrap();
+            let others_open = st.work.get(item).is_some_and(|w| {
+                w.tasks.iter().any(|x| {
+                    x != &t.id && st.tasks.get(x).is_some_and(|o| !o.record.state.is_final())
+                })
+            });
+            let Some(w) = st.work.get_mut(item) else {
+                return;
+            };
+            match t.state {
+                TaskState::Done => {
+                    let said = clip(t.result.as_deref().unwrap_or(""), 200);
+                    w.step(&t.owner, format!("finished {}: {said}", t.id));
+                    if !others_open && w.state != WorkState::Done {
+                        w.state = WorkState::Done;
+                        w.done_ms = Some(now_ms());
+                        w.blocked = None;
+                    }
+                }
+                TaskState::Failed => {
+                    let why = format!(
+                        "{} failed: {}",
+                        t.id,
+                        clip(t.error.as_deref().unwrap_or("no reason given"), 200)
+                    );
+                    w.step(&t.owner, why.clone());
+                    if w.state != WorkState::Done {
+                        w.blocked = Some(why);
+                    }
+                }
+                TaskState::Cancelled => {
+                    w.step(&t.owner, format!("{} was cancelled", t.id));
+                    if !others_open && w.state == WorkState::Doing {
+                        w.state = WorkState::Todo;
+                    }
+                }
+                _ => return,
+            }
+            w.clone()
+        };
+        self.save_work(&changed, &t.owner);
+    }
+
+    pub(crate) fn add_work(
+        &self,
+        by: &str,
+        title: &str,
+        change: WorkChange,
+    ) -> Result<WorkItem, OrchError> {
+        if title.trim().is_empty() {
+            return Err(OrchError::NotAllowed("an item needs a title".into()));
+        }
+        let w = {
+            let mut st = self.state.lock().unwrap();
+            let mut w = WorkItem::new(self.project.id.as_str(), by, title.trim());
+            let mut change = change;
+            change.title = None;
+            // A new item goes at the end of its column unless placed.
+            let state = change.state.take().unwrap_or(WorkState::Todo);
+            w.state = state;
+            if state == WorkState::Done {
+                w.done_ms = Some(now_ms());
+            }
+            w.rank = column_rank(&st, &w, change.before.as_deref());
+            change.before = None;
+            apply_change(&st, &mut w, by, change)?;
+            st.work.insert(w.id.clone(), w.clone());
+            w
+        };
+        self.save_work(&w, by);
+        Ok(w)
+    }
+
+    pub(crate) fn change_work(
+        &self,
+        by: &str,
+        id: &str,
+        change: WorkChange,
+    ) -> Result<WorkItem, OrchError> {
+        let w = {
+            let mut st = self.state.lock().unwrap();
+            let mut w = st
+                .work
+                .get(id)
+                .cloned()
+                .ok_or_else(|| OrchError::NotAllowed(format!("no board item `{id}`")))?;
+            let moved = change.state.is_some() || change.before.is_some();
+            let mut change = change;
+            if let Some(s) = change.state.take() {
+                w.set_state(by, s);
+            }
+            if moved {
+                w.rank = column_rank(&st, &w, change.before.as_deref());
+            }
+            change.before = None;
+            apply_change(&st, &mut w, by, change)?;
+            w.updated_ms = now_ms();
+            st.work.insert(w.id.clone(), w.clone());
+            w
+        };
+        self.save_work(&w, by);
+        Ok(w)
+    }
+
+    pub(crate) fn remove_work(&self, id: &str) -> Result<WorkItem, OrchError> {
+        let w = {
+            let mut st = self.state.lock().unwrap();
+            let w = st
+                .work
+                .remove(id)
+                .ok_or_else(|| OrchError::NotAllowed(format!("no board item `{id}`")))?;
+            let _ = self.engine.store.delete_record(WORK, id);
+            w
+        };
+        self.emit(EventKind::WorkRemoved {
+            item: w.id.clone(),
+            title: w.title.clone(),
+        });
+        Ok(w)
     }
 
     // ---- delegation and messages ---------------------------------------------------

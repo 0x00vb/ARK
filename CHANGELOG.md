@@ -96,6 +96,16 @@ What changed for people building on ARK, per release. Not a commit log.
   environment, a timeout and a bounded tail of its output.
 - `examples/writing-agent` turns Run code on.
 
+- The project's board (ADR 0023): work items the person and the agents share, kept per project
+  across chats and restarts. `Orchestrator::{board, work_item, add_work, change_work,
+  remove_work}`; `WorkItem`, `WorkState`, `WorkChange`; `TaskSpec::item` links a task, and the
+  item follows it (In progress with its agent as owner, Done when it finishes, blocked when it
+  fails). Two agents never take one item. The chat plans with `Orchestrator::board_tools`
+  (`board.list`, `board.add`, `board.update`) and links a hand-off with `agents.delegate {item}`;
+  a worker's brief carries its item. `/board` (`add`, `done`, `move`, `give`, `remove`); window
+  methods `board`, `board_add`, `board_change`, `board_remove`, `board_give`; a Board tab beside
+  Chat in every app that runs agents ([`ORCHESTRATION.md`](docs/ORCHESTRATION.md#the-board)).
+
 ### Changed
 - Preloading actions counts a file the task names (`ventas.xlsx`) and the file open in the
   window: actions whose summary names that extension load first, whatever the task's language.
@@ -149,6 +159,9 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark_orchestrate::EventKind` has two new variants (`Scheduled`, `Unscheduled`): an exhaustive
   `match` needs an arm or `_`. `Graph` and `TaskNode` have a new field each (`schedules`,
   `schedule`): add it where you build them; deserializing fills a default.
+- `ark_orchestrate::EventKind` has two more variants (`Work`, `WorkRemoved`), and `TaskSpec`,
+  `TaskRecord` and `Brief` a new field each (`item`): a struct literal needs `item: None`, or
+  build with `TaskSpec::new`. `Control` and `ControlOutcome` in `ark-interact` have new variants.
 
 ## [0.9.0] - 2026-10-04
 

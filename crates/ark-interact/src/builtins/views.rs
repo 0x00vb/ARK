@@ -89,6 +89,25 @@ impl Command for Schedules {
     }
 }
 
+/// `/board`: the project's work by column, and changing it.
+pub struct Board;
+#[async_trait::async_trait]
+impl Command for Board {
+    meta!("board", "The project's work: to do, in progress and done");
+    fn usage(&self) -> &str {
+        "[add <title> | done <item> | move <item> <column> | give <item> <agent> | remove <item>]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let Some(o) = ix.orchestrator() else {
+            return Ok(Report::new().note("This app runs a single agent.").into());
+        };
+        if args.trim().is_empty() {
+            return Ok(crate::orchestration::board_report(&o.board()).into());
+        }
+        control_cmd(ix, crate::orchestration::parse_board(args)).await
+    }
+}
+
 pub struct TaskCmd;
 #[async_trait::async_trait]
 impl Command for TaskCmd {

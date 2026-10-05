@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ark_interact::activity::describe;
-use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec};
+use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec, WorkChange};
 use ark_interact::inspect::{
     ArtifactSummary, ContextSource, ContextView, KeptOut, StateView, UsageView,
 };
@@ -548,6 +548,14 @@ impl Host {
         Ok(json!({}))
     }
 
+    /// A board change; answers with the item as it is now.
+    async fn board_control(&self, c: Control) -> anyhow::Result<Value> {
+        match self.control(c).await? {
+            ControlOutcome::Work(w) => Ok(serde_json::to_value(*w)?),
+            _ => Ok(json!({})),
+        }
+    }
+
     /// The orchestrator, for the orchestration methods. They do not wait for the
     /// conversation: agents work on their own.
     fn orchestrator(&self) -> anyhow::Result<Orchestrator> {
@@ -1018,6 +1026,70 @@ impl Host {
                 })
                 .await
             }
+            // The project's board, with what the page shows of the tasks run for its items
+            // and the agents an item can be given to. Follow it with `orch` events (`work`).
+            "board" => {
+                let o = match self.orchestrator() {
+                    Ok(o) => o,
+                    Err(_) => return Ok(Value::Null),
+                };
+                let items = o.board();
+                let mut tasks = serde_json::Map::new();
+                for id in items.iter().flat_map(|w| w.tasks.iter()) {
+                    if let Some(t) = o.task(id) {
+                        tasks.insert(
+                            id.clone(),
+                            json!({
+                                "owner": t.owner,
+                                "state": t.state,
+                                "objective": t.objective,
+                                "result": t.result,
+                                "error": t.error,
+                                "outputs": t.outputs,
+                                "finished_ms": t.finished_ms,
+                            }),
+                        );
+                    }
+                }
+                let agents: Vec<Value> = o
+                    .agents()
+                    .into_iter()
+                    .filter(|a| a.state != ark_interact::ark_orchestrate::AgentState::Terminated)
+                    .map(|a| json!({ "name": a.name, "role": a.spec.role, "state": a.state }))
+                    .collect();
+                Ok(json!({ "items": items, "tasks": tasks, "agents": agents }))
+            }
+            // Changes to the board go through ark-interact's `control`, as `/board` does.
+            "board_add" => {
+                let change: WorkChange = serde_json::from_value(params.clone())?;
+                self.board_control(Control::AddWork {
+                    title: s("title"),
+                    change,
+                })
+                .await
+            }
+            "board_change" => {
+                let change: WorkChange = serde_json::from_value(params["change"].clone())?;
+                self.board_control(Control::ChangeWork {
+                    item: s("item"),
+                    change,
+                })
+                .await
+            }
+            "board_remove" => {
+                self.control_done(Control::RemoveWork { item: s("item") })
+                    .await
+            }
+            "board_give" => match self
+                .control(Control::GiveWork {
+                    item: s("item"),
+                    agent: s("agent"),
+                })
+                .await?
+            {
+                ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                _ => Ok(json!({})),
+            },
             "suspend_agent" => {
                 self.control_done(Control::Suspend { agent: s("agent") })
                     .await

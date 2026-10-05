@@ -46,6 +46,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Settings › Appearance | ARK's own section: Light, Dark or System. The choice is kept in the page's storage and set on `<html data-theme>` before the first paint; until the person chooses, the app's `.theme(...)` applies. Pages that draw their own colours read `data-theme` and listen for `ark:theme` on `window` |
 | Settings › Skills | ARK's own section: the skills of the project folder and the store (name, "This project" or "All projects", description). Add skills opens the Terminal in the project folder with `npx skills add <package>` typed; Enter is the person's |
 | Settings › Tool servers | ARK's own section, when the app has plugins: the MCP servers (running or why not, their tools, the command), Add (a name and a command, or a pasted `mcpServers` snippet), Restart, Remove (a second click confirms). The same as `/plugin`. An app section with the id `plugins` replaces it |
+| Board | In an app that runs agents, a tab beside Chat: the project's work as To do, In progress and Done ([`ORCHESTRATION.md`](ORCHESTRATION.md#the-board)). A card is a status circle, a title and its owner; "Needs you" and a dot while its agent works are the only marks. Drag moves a card (a line shows where it lands), the circle completes it, + adds one (Enter keeps the box open for the next). A click opens it in the side pane: title and note in place, owner, "Give to…" an agent (starts a task linked to it), what blocks it, each run's answer and files, its history, Delete (with Undo). Keys on a card: Enter opens, Space completes, Backspace deletes, arrows move the focus, Shift with arrows moves the card. Changes by agents and other windows glide into place |
 | Agents' questions | An orchestrated agent's approval waits in a tray at the bottom right, whatever the main column shows. |
 
 Narrow windows (up to 760 px, or up to 1000 px with the pane open) fold the sidebar into a
@@ -221,6 +222,7 @@ front-end uses the same.
 | Store | `artifacts`, `artifact` (the project's, or one an orchestrated agent produced), `invocation`, `run_action` |
 | Agents | `graph`, `agents`, `tools`, `profiles` (what `AgentSpec.profile_name` may name), `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
 | Tasks | `submit_task {agent, task}`, `task {task}` (record and timeline lines), `task_trace`, `cancel_task`, `retry_task`, `unschedule {schedule}`, `orch_events {after, limit}` |
+| Board | `board` (`items`, the `tasks` run for them, the live `agents`; null without an orchestrator), `board_add {title, note?, owner?, state?, blocked?, before?}`, `board_change {item, change}` (a `WorkChange`), `board_remove {item}`, `board_give {item, agent}` (answers the `task`). Follow it with `orch` events of type `work` and `work_removed` |
 | Page | `focus`, `ext` (an app handler) |
 
 | Events (`kind`) | |

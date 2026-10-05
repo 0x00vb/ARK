@@ -56,12 +56,14 @@ pub(crate) fn all() -> Vec<Arc<dyn Command>> {
 
 pub use views::{call_report, trace_report};
 
-/// `/agents`, `/agent`, `/task` and `/schedules`, offered when the app has an orchestrator.
+/// `/agents`, `/agent`, `/task`, `/schedules` and `/board`, offered when the app has an
+/// orchestrator.
 pub(crate) fn agents() -> Vec<Arc<dyn Command>> {
     vec![
         Arc::new(views::Agents),
         Arc::new(views::AgentCmd),
         Arc::new(views::TaskCmd),
         Arc::new(views::Schedules),
+        Arc::new(views::Board),
     ]
 }

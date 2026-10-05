@@ -253,6 +253,9 @@ pub struct TaskRecord {
     /// The schedule that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<String>,
+    /// The board item it works on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<String>,
 }
 
 fn one() -> u32 {

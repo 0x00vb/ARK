@@ -9,11 +9,12 @@
 //! | [`AgentSpec`] | an agent's identity, instructions, tools, permissions and model |
 //! | [`TaskSpec`] / [`TaskRecord`] | an objective, its state, owner, dependencies, artifacts and [`Budget`] |
 //! | delegation | `agents.delegate`: an agent creates a task for an agent it may delegate to |
-//! | the person's chat | [`Orchestrator::chat_tools`]: the conversation creates agents and hands them tasks |
+//! | the person's chat | [`Orchestrator::chat_tools`]: the conversation creates agents and hands them tasks; [`Orchestrator::board_tools`]: it plans on the board |
 //! | messages | `agents.message`: a short note into another agent's running task or inbox |
 //! | artifacts | passed explicitly with a task and handed back with its result |
 //! | [`Orchestrator`] | lifecycle (spawn, run, suspend, resume, cancel, terminate) and a capacity-aware scheduler |
 //! | [`ScheduleRecord`] / [`When`] | a task an agent runs on its own at set times (`every weekday at 09:00`) |
+//! | [`WorkItem`] | the project's board: work the person and agents share; it follows the tasks run for it ([`board`]) |
 //! | [`Graph`] / [`OrchEvent`] | the live state and the full trace, for any front-end |
 //!
 //! Each agent works in its own child project, so its working state, evidence and
@@ -32,6 +33,7 @@
 //! println!("{}", orch.graph().to_mermaid());
 //! ```
 
+pub mod board;
 mod brief;
 mod event;
 mod graph;
@@ -42,6 +44,7 @@ pub mod schedule;
 mod spec;
 mod tools;
 
+pub use board::{WorkChange, WorkItem, WorkState, WorkStep};
 pub use brief::Brief;
 pub use event::{EventKind, OrchEvent};
 pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskNode};
@@ -53,7 +56,10 @@ pub use record::{
 };
 pub use schedule::{scheduled_projects, ScheduleRecord, When};
 pub use spec::{AgentSpec, Budget, TaskSpec};
-pub use tools::{CREATE, DELEGATE, MESSAGE, SCHEDULE, UNSCHEDULE, WAIT};
+pub use tools::{
+    BOARD_ADD, BOARD_LIST, BOARD_UPDATE, CHAT, CREATE, DELEGATE, MESSAGE, SCHEDULE, UNSCHEDULE,
+    WAIT,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OrchError {

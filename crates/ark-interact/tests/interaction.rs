@@ -302,6 +302,76 @@ async fn agents_command_shows_the_graph_and_a_task() {
     assert!(!solo.commands().iter().any(|c| c.name == "agents"));
 }
 
+/// `/board`: the project's work by column; adding, handing to an agent, moving and removing go
+/// through the same controls the window uses.
+#[tokio::test]
+async fn board_command_shows_and_changes_the_board() {
+    use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, WorkState};
+    let dir = tempfile::tempdir().unwrap();
+    let worker: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new(
+        "w",
+        vec![Completion {
+            content: "Chapter 3 is drafted.".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(50, 5),
+        }],
+    ));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(worker.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("novel", "").unwrap();
+    let orch = Orchestrator::builder(&ark, &project)
+        .configure_models(|b| b.provider("w", worker))
+        .build()
+        .unwrap();
+    orch.spawn(AgentSpec::new("writer").model("w"))
+        .await
+        .unwrap();
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = App::new("Novel")
+        .ark(ark)
+        .orchestrator(orch.clone())
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    assert!(ix.commands().iter().any(|c| c.name == "board"));
+    let empty = ix.execute("/board").await.report.plain_text();
+    assert!(empty.contains("The board is empty"), "{empty}");
+    let added = ix
+        .execute("/board add Draft chapter 3")
+        .await
+        .report
+        .plain_text();
+    let id = orch.board()[0].id.clone();
+    assert!(
+        added.contains(&format!("{id} [todo] Draft chapter 3")),
+        "{added}"
+    );
+    let given = ix
+        .execute(&format!("/board give {id} writer"))
+        .await
+        .report
+        .plain_text();
+    assert!(given.contains("started task"), "{given}");
+    let task = orch.work_item(&id).unwrap().tasks[0].clone();
+    orch.wait(&task).await.unwrap();
+    let text = ix.execute("/board").await.report.plain_text();
+    assert!(
+        text.contains("Done (1)") && text.contains("writer"),
+        "{text}"
+    );
+    ix.execute(&format!("/board move {id} to do")).await;
+    assert_eq!(orch.work_item(&id).unwrap().state, WorkState::Todo);
+    let bad = ix.execute("/board move").await.report.plain_text();
+    assert!(bad.contains("usage: /board"), "{bad}");
+    ix.execute(&format!("/board remove {id}")).await;
+    assert!(orch.board().is_empty());
+}
+
 /// With several agents, the person asks in words: the chat creates an agent and hands it a
 /// task, and the task is in the graph like any other.
 #[tokio::test]

@@ -399,6 +399,25 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
         .trim_end()
         .to_string(),
         ark_orchestrate::UNSCHEDULE => "Stopping a scheduled task".into(),
+        ark_orchestrate::BOARD_LIST => "Reading the board".into(),
+        ark_orchestrate::BOARD_ADD => {
+            let items = input.get("items").and_then(Value::as_array);
+            match items.map(|a| a.as_slice()) {
+                Some([one]) => format!(
+                    "Adding \"{}\" to the board",
+                    clip(one.get("title").and_then(Value::as_str).unwrap_or(""), 60)
+                ),
+                Some(many) => format!("Adding {} items to the board", many.len()),
+                None => "Adding to the board".into(),
+            }
+        }
+        ark_orchestrate::BOARD_UPDATE => match s("state") {
+            "done" => format!("Marking {} done", s("item")),
+            "doing" => format!("Moving {} to In progress", s("item")),
+            "todo" => format!("Moving {} to To do", s("item")),
+            _ if !s("blocked").is_empty() => format!("Marking {} blocked", s("item")),
+            _ => format!("Updating {} on the board", s("item")),
+        },
         "computer.apps" => "Listing the open apps".into(),
         "computer.look" => format!("Looking at {}", s("app")),
         "computer.open" => format!("Opening {}", s("app")),

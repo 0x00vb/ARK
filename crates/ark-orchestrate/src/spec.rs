@@ -256,6 +256,9 @@ pub struct TaskSpec {
     /// Rule sets bound to this task only.
     #[serde(default)]
     pub rules: Vec<RuleBinding>,
+    /// The board item it works on (`w-…`): the item follows the task (see [`crate::board`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<String>,
 }
 
 impl TaskSpec {
@@ -287,6 +290,11 @@ impl TaskSpec {
     }
     pub fn rules(mut self, r: RuleBinding) -> Self {
         self.rules.push(r);
+        self
+    }
+    /// Work on a board item: it moves with this task.
+    pub fn item(mut self, id: impl Into<String>) -> Self {
+        self.item = Some(id.into());
         self
     }
 }

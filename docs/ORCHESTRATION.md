@@ -75,10 +75,11 @@ person asks in words; the chat decides what becomes an agent or a task.
 | Action | Does |
 |---|---|
 | `agents.create {name, role, instructions?, skills?, capabilities?}` | adds an agent with the skills named (none by default) and the capabilities named (`["web", "browser"]`, from `Orchestrator::capabilities`; every app tool when none are named); its state-changing actions still ask the person. An existing name or an unknown capability is refused |
-| `agents.delegate {to, objective, context?, wait?}` | hands any live agent a task with `Origin::External`; waits for the result unless `wait: false` |
+| `agents.delegate {to, objective, context?, item?, wait?}` | hands any live agent a task with `Origin::External`; waits for the result unless `wait: false`. `item` links it to a board item |
 | `agents.wait {tasks}` | waits for tasks handed off with `wait: false` |
 | `agents.schedule {to, objective, context?, at?, days?, every_minutes?, once?}` | has an agent run the task at set times ([Schedules](#schedules)). `Mutate`: the person agrees to standing work once |
 | `agents.unschedule {schedule}` | stops a schedule; its description lists the ones running |
+| `board.list`, `board.add {items}`, `board.update {item, …}` | the project's board ([The board](#the-board)), from `Orchestrator::board_tools()` |
 
 The `agents.delegate` summary lists the current agents and their roles, so the chat picks one
 without a lookup. An app with no orchestrator offers none of these.
@@ -115,6 +116,36 @@ The chat schedules with `agents.schedule`, the terminal lists them with `/schedu
 stops one with `/schedules stop <id>`, and `/agents` shows them under "Scheduled". A run that
 needs an approval waits for an answer like any agent's question. "Always in this project"
 lets it run unattended.
+
+## The board
+
+Each project has one board: the work it needs, who has each piece and how far it is (ADR 0023).
+The person and the agents change the same `WorkItem`s; the window draws them as To do, In
+progress and Done, the terminal with `/board`. An item is an outcome; a task is one agent's run
+toward it.
+
+```rust
+let w = orch.add_work("user", "Draft chapter 3", WorkChange::default().note("Under 2,000 words."))?;
+orch.submit("writer", TaskSpec::new("Draft chapter 3").item(&w.id))?;   // In progress, owner writer
+orch.change_work("user", &w.id, WorkChange::default().blocked("needs the outline").owner("user"))?;
+orch.board();   // To do, In progress, Done (latest first)
+```
+
+| Rule | Why |
+|---|---|
+| A task linked to an item moves it to In progress with that agent as owner | the board shows who works on what without the agent saying so |
+| The last open linked task finishing moves the item to Done, its answer in the log | done means done; the planner may move it back |
+| A failed task blocks the item with the error; a retry clears it; a cancel puts it back in To do | failures show where the work is tracked |
+| An item another agent works on cannot be given to a second one, nor its owner changed | two agents never do the same work |
+| Blocked and owned by `user`, or its task waiting for the person's answer: "Needs you" | what the person must do is one glance |
+| A worker's brief carries its item: title, note, its last 3 steps | an agent continues what another agent or session left |
+| The chat gets `board.list` (its description is the board in one line), `board.add`, `board.update`; workers get none | planning is the chat's; bookkeeping is code's |
+| The log keeps the last 30 steps | history is a summary, not a transcript |
+
+Items are stored with the orchestrator's records (`orch_work`) and traced as `EventKind::Work`
+and `WorkRemoved`. `/board add <title>`, `done <item>`, `move <item> <column>`,
+`give <item> <agent>`, `remove <item>` and the window's `board_*` methods build the same
+`Control`s.
 
 ## Context isolation
 

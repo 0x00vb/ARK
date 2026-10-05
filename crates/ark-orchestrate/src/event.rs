@@ -123,6 +123,16 @@ pub enum EventKind {
         objective: String,
         says: String,
     },
+    /// A board item was added or changed (`by`: an agent, `user`, or `chat`).
+    Work {
+        item: crate::board::WorkItem,
+        by: String,
+    },
+    /// A board item was removed.
+    WorkRemoved {
+        item: String,
+        title: String,
+    },
     /// A schedule stopped (asked to, or its agent ended).
     Unscheduled {
         schedule: String,

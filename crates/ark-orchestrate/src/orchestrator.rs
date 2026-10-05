@@ -2310,6 +2310,11 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                     continue;
                 }
                 if let Ok(Some(art)) = self.engine.store.resolve_artifact(scope, a.as_str()) {
+                    // A file's version before the call is kept for Restore (ADR 0034); the
+                    // task did not make it.
+                    if art.meta.get("before").and_then(|b| b.as_bool()) == Some(true) {
+                        continue;
+                    }
                     new.push(ArtifactRef {
                         id: art.id.to_string(),
                         name: art.name.clone(),

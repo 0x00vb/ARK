@@ -9,6 +9,11 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Fixed
+- A delegated task's outputs no longer include the versions before that its calls kept for
+  Restore (ADR 0034). Before, a task that edited `notes.md` handed its delegator two
+  `notes.md` outputs, the new one and the old one.
+
 ## [0.10.0] - 2026-10-05
 
 ARK works without a window and on other machines: several live chats, schedules that post

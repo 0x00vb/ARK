@@ -880,6 +880,87 @@ async fn diagrams_are_artifacts_that_flow_back_to_the_delegator() {
 }
 
 /// A session backend factory for `fake:*` specs, sharing one scripted backend per model.
+#[tokio::test]
+async fn a_files_version_before_is_not_a_task_output() {
+    // A call that changes a file keeps the file's version before (ADR 0034). That copy is
+    // for Restore, not something the task made, so it does not go back to the delegator.
+    struct Rewrite;
+    #[async_trait::async_trait]
+    impl Adapter for Rewrite {
+        fn name(&self) -> &str {
+            "doc"
+        }
+        fn actions(&self) -> Vec<ActionDescriptor> {
+            vec![ActionDescriptor::new(
+                "doc.rewrite",
+                "rewrite",
+                RiskTier::Mutate,
+            )]
+        }
+        async fn run(
+            &self,
+            _: &str,
+            _: serde_json::Value,
+            _: &RunCtx<'_>,
+        ) -> ark_tools::Result<ActionOutput> {
+            let mut now = ProducedArtifact::text("notes.md", "new text");
+            now.path = Some("notes.md".into());
+            let mut before = ProducedArtifact::text("notes.md", "old text");
+            before.path = Some("notes.md".into());
+            before.before = true;
+            let mut out = ActionOutput::json(json!({ "saved": "notes.md" }));
+            out.produced = vec![now, before];
+            Ok(out)
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .tool(Arc::new(Rewrite))
+        .provider(Arc::new(ark_model::MockProvider::new("unused", vec![])))
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("p", "").unwrap();
+    let m = Script::new(
+        "m",
+        vec![
+            calls(vec![("doc.rewrite", json!({}))]),
+            answer("rewrote notes.md [inv:1]"),
+        ],
+    );
+    let mm = m.clone();
+    let o = Orchestrator::builder(&ark, &project)
+        .configure_models(move |b| b.provider("m", mm as Arc<dyn Provider>))
+        .build()
+        .unwrap();
+    o.spawn(
+        AgentSpec::new("editor")
+            .model("m")
+            .tools(["doc.*"])
+            .allow_mutate(true),
+    )
+    .await
+    .unwrap();
+    let done = o
+        .run("editor", TaskSpec::new("rewrite notes"))
+        .await
+        .unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!(done.outputs.len(), 1, "{:?}", done.outputs);
+    let art = ark
+        .engine()
+        .store
+        .resolve_artifact(
+            &ProjectId(o.agent("editor").unwrap().scope),
+            &done.outputs[0].id,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(ark.engine().store.read_blob(&art.id).unwrap(), b"new text");
+}
+
 fn fake_sessions(
     backends: Vec<(&str, Arc<MockSessions>)>,
     policy: SessionPolicy,

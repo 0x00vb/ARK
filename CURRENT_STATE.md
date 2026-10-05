@@ -4,18 +4,18 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-05 (v0.9.0; `main` has the browser, step 5, C5, Files, Run code, the board and data work, untagged)
+Last updated: 2026-10-05 (v0.10.0)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.9.0 (2026-10-04), on `origin` and `github` |
-| `main` | Everything since v0.9.0 in one place, no other branches: the browser (C4, ADR 0015), the window hooks for ARK Desktop's UX pass (`ArkUi::theme`, `ark.modelPicker`, `ark.onSubmit`), a runtime other machines connect to with saved access tokens (ADR 0016, [`docs/REMOTE.md`](docs/REMOTE.md)), work that runs without the window: several live chats, schedules (ADR 0017), the Computer, `ark-computer` (C5, ADR 0018), and Files, `ark-files` (ADR 0019): spreadsheets and documents the agent and the person edit in place, opened in the window as a grid or a page. Run code, `ark-exec` (ADR 0020), and kinds for Markdown, PDFs and images with one view per kind (ADR 0021). The project's board (ADR 0023): work items the person and the agents share, which follow the tasks run for them; a Board tab in every app that runs agents, `/board`, and `board.*` for the chat. `scripts/ci.sh` and the WebKit page tests passed on all of it. Pushed to `origin` and `github` The terminal on a runtime elsewhere: `app --connect URL` (ADR 0024). A schedule's runs post their results into the chat that asked (ADR 0025). Named OpenAI-compatible endpoints, and a 402 as out of credit with what to do (ADR 0027). Data work (ADR 0032, 0033, [`docs/DATA.md`](docs/DATA.md)): Run code contained on macOS, Linux (bubblewrap) and Windows (AppContainer); Python with DuckDB, calamine, xlsxwriter, pyarrow; Files reads large sheets in part; the `data-analysis` skill comes with Run code; `code.run` `purpose`; the `workbooks` workload. |
-| Next tag | v0.10.0 (`Breaking` entries under `[Unreleased]`). Ready to cut with [`docs/RELEASING.md`](docs/RELEASING.md) steps 2 to 9 when the owner says so: `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on 78dc9bf (2026-10-05). Since v0.9.0: the browser, the Computer, Files edited in place, Run code, outputs opened by kind, a runtime other machines connect to, work without the window (several chats, schedules, keep running), the project's board, API keys in ARK's keychain, data work (ADR 0032, 0033). ARK Desktop 0.2 waits for it |
+| Latest tag | v0.10.0 (2026-10-05), on `origin` and `github` |
+| `main` | v0.10.0. Since v0.9.0: the browser (ADR 0015), a runtime other machines connect to (ADR 0016, [`docs/REMOTE.md`](docs/REMOTE.md)), work without the window (several live chats, schedules, keep running, ADR 0017), the Computer (ADR 0018), Files edited in place (ADR 0019), Run code (ADR 0020, contained on macOS, Linux and Windows, ADR 0032), outputs opened by kind (ADR 0021), the project's board (ADR 0023), the terminal on a runtime elsewhere (ADR 0024), schedules posting into the chat (ADR 0025), ARK Accounts (ADR 0026, 0031), named endpoints and out of credit (ADR 0027), secrets in a file for servers (ADR 0028), the window visiting a runtime elsewhere (ADR 0029), folders sent as projects (ADR 0030), data work (ADR 0033), versions before a change (ADR 0034), files dropped on the chat (ADR 0035). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
+| Next tag | none planned. `[Unreleased]` in `CHANGELOG.md` collects what comes next |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | Branch `ci/windows` (pushed to `github`, not merged): `ark-os` (ADR 0022) holds every OS difference, and ARK finds, starts, stops and opens programs through it; text keeps CRLF and UTF-16; Ctrl in the window; page tests in Chromium too. `scripts/ci.sh` with page tests passes on macOS; lint clean for Windows. Not run on Windows yet: the owner runs `scripts/windows-check.ps1` on a Windows machine (GitHub Actions billing stays off). Merges to `main` after that run. Plan: `ark-desktop/docs/WINDOWS.md` |
-| Accounts | On `main` since 2026-10-05 (owner's go to merge): `ark-account` (ADR 0026, 0031), an optional ARK Account for ARK Cloud; `ConnectError::Refused`, `SignIn::landing`, revoke sends `client_id`; the window's `person` icon and palette `when`. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local). Goes out with v0.10.0 |
+| Accounts | In v0.10.0: `ark-account` (ADR 0026, 0031), an optional ARK Account for ARK Cloud. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local) |
 
 ## Open follow-ups (not started)
 
@@ -41,7 +41,7 @@ Last updated: 2026-10-05 (v0.9.0; `main` has the browser, step 5, C5, Files, Run
 
 | Who | Waits for |
 |---|---|
-| ark-desktop | v0.10.0. Its `main` has the whole 0.2 (Mail, Calendar, Browser, the UX pass, remote) and builds against `../ark` through a gitignored `[patch]` until the tag exists. With the tag it calls `ark_exec::entry()` first in `main`, or Run code is not offered on Windows (ADR 0032) |
+| ark-desktop | nothing: v0.10.0 is out. Its pin moves to it, with `ark_exec::entry()` first in `main` (Run code on Windows, ADR 0032) and the window letting the page take dropped files (ADR 0035) |
 | SecRes | nothing; pins v0.8.0. v0.9.0 and v0.10.0 are optional upgrades (`Breaking` in `CHANGELOG.md`) |
 | Mail and Calendar for anyone | ARK's Google OAuth client and Google's review: owner steps in [`docs/GOOGLE.md`](docs/GOOGLE.md). Until then they show as unavailable, or work with `ARK_GOOGLE_CLIENT_ID` for test users |
 

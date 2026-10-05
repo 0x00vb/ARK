@@ -9,6 +9,15 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-05
+
+ARK works without a window and on other machines: several live chats, schedules that post
+their results into the chat that asked, a runtime other machines and the terminal connect to,
+the window visiting a runtime elsewhere, and folders sent there as projects. Agents get the
+browser, the Computer, Files edited in place, Run code contained on macOS, Linux and Windows,
+outputs opened by kind, data work, and the project's board. Optional ARK Accounts. A file a
+call changes keeps its version before, and files dropped on the chat go into the project.
+
 ### Added
 - The version before (ADR 0034): a tool that changes or removes a file of the project keeps the
   file as it was, `ProducedArtifact::before(kind, path, bytes)`. `code.run` copies the

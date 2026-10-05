@@ -61,8 +61,8 @@ pub mod prelude {
     // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
     // with `ark_model::from_env_arc()`, etc., from the prelude alone.
     pub use {
-        ark_browser, ark_computer, ark_connect, ark_core, ark_files, ark_model, ark_runtime,
-        ark_tools,
+        ark_browser, ark_computer, ark_connect, ark_core, ark_exec, ark_files, ark_model,
+        ark_runtime, ark_tools,
     };
 }
 
@@ -590,9 +590,14 @@ pub struct ArkBuilder {
     skills: Vec<String>,
     web: Option<WebAdapter>,
     files: bool,
+    code: Option<CodeChoice>,
     browser: Option<BrowserChoice>,
     computer: Option<ComputerChoice>,
     connections: Option<ConnectionsChoice>,
+}
+enum CodeChoice {
+    Default,
+    Given(Box<ark_exec::Exec>),
 }
 
 enum ComputerChoice {
@@ -634,6 +639,7 @@ impl Default for ArkBuilder {
             skills: vec!["*".into()],
             web: None,
             files: false,
+            code: None,
             browser: None,
             computer: None,
             connections: None,
@@ -723,6 +729,22 @@ impl ArkBuilder {
         self
     }
 
+    /// Offer Run code (`code.run`; [`ark_exec`]): agents run programs (Python first) in the
+    /// project folder, contained: no network, writes only there. Every file a run writes comes
+    /// back as an artifact the window shows by its kind. Asks before each run unless the person
+    /// allows it in the project. Where ARK cannot contain a run (only macOS can today) it is not
+    /// offered. Python is set up with `uv` under the store on first use. Off by default.
+    pub fn code(mut self, yes: bool) -> Self {
+        self.code = yes.then_some(CodeChoice::Default);
+        self
+    }
+
+    /// [`code`](ArkBuilder::code) with tools the app set up (its own `uv`, other runtimes).
+    pub fn code_with(mut self, exec: ark_exec::Exec) -> Self {
+        self.code = Some(CodeChoice::Given(Box::new(exec)));
+        self
+    }
+
     /// Offer capabilities that need an account (Mail, Calendar; [`ark_connect`]). Their records
     /// go in the store root's `connections.json`, their tokens in the OS keychain. A connected
     /// capability's tools join every turn, and agents whose `tools` allow them. Off by default.
@@ -802,6 +824,24 @@ impl ArkBuilder {
             ),
         });
         let mut profile = self.profile;
+        // A stored copy of a project file has the kind ark-files gives the file, whichever
+        // tool wrote it: one decision for the agent, the store and the window.
+        engine.register_sniffer(Arc::new(ark_files::Kinds));
+        let exec = match self.code {
+            Some(CodeChoice::Given(e)) => Some(*e),
+            Some(CodeChoice::Default) => {
+                let root = engine.store.root().join("exec");
+                ark_exec::Exec::new(
+                    root.join("runs"),
+                    vec![Arc::new(ark_exec::Python::new(root.join("python")))],
+                )
+            }
+            None => None,
+        };
+        if let Some(exec) = exec {
+            engine.register(Arc::new(exec.shows(ark_files::shown())));
+            profile.distillers.push(ark_exec::distill());
+        }
         if self.files {
             engine.register(Arc::new(ark_files::Files));
             profile.distillers.push(ark_files::distill());

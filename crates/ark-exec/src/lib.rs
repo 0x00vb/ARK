@@ -3,7 +3,7 @@
 //! ARK's Run code capability. An agent runs a program in the project folder, contained, and
 //! every file the program writes there comes back as an artifact. `code.run` knows nothing
 //! about charts, tables or reports: it says which files changed, the engine decides their kind,
-//! and the window shows each kind with its view (ADR 0019).
+//! and the window shows each kind with its view (ADR 0021).
 //!
 //! ```text
 //! code.run {code, runtime}
@@ -217,10 +217,11 @@ impl Exec {
     }
 }
 
-/// A file the run wrote, as an artifact. Its kind is left to the engine's sniffers, which
-/// decide it from the path and the bytes the same way for every tool.
+/// A file the run wrote, as a stored copy that names the file. Its kind is left to the engine's
+/// sniffers, which decide it from the name the same way for every tool (`ark_files::Kinds`).
 fn snapshot(rel: &str, bytes: Vec<u8>) -> ProducedArtifact {
-    ProducedArtifact::bytes(ArtifactKind::Blob, rel, bytes)
+    let name = rel.rsplit('/').next().unwrap_or(rel);
+    ProducedArtifact::bytes(ArtifactKind::Blob, name, bytes).at(rel)
 }
 
 fn bad(detail: String) -> AdapterError {

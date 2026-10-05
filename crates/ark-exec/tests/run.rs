@@ -86,7 +86,8 @@ async fn a_run_returns_the_files_it_wrote_in_the_project() {
     assert_eq!(out.output["exit_code"], 0);
     assert_eq!(out.output["files"], json!(["out/table.csv"]));
     assert_eq!(out.produced.len(), 1);
-    assert_eq!(out.produced[0].name, "out/table.csv");
+    assert_eq!(out.produced[0].name, "table.csv");
+    assert_eq!(out.produced[0].path.as_deref(), Some("out/table.csv"));
     assert_eq!(out.produced[0].bytes, b"a,b\n");
     let card = distill()(RUN, &out.output).unwrap();
     assert_eq!(card.0, "exit 0\nwrote out/table.csv\nstdout:\ndone");
@@ -194,7 +195,11 @@ df.describe().to_excel("summary.xlsx")
     let out = run(&s.exec, &s.project, code).await;
     assert_eq!(out.output["exit_code"], 0, "{}", out.output);
     assert!(out.output["stdout"].as_str().unwrap().contains("12"));
-    let mut files: Vec<&str> = out.produced.iter().map(|p| p.name.as_str()).collect();
+    let mut files: Vec<&str> = out
+        .produced
+        .iter()
+        .filter_map(|p| p.path.as_deref())
+        .collect();
     files.sort();
     assert_eq!(files, ["chart.png", "summary.xlsx"]);
     assert!(out.produced.iter().any(|p| p.bytes.starts_with(b"\x89PNG")));

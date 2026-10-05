@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use ark_sdk::prelude::{ark_files, ApprovalRequest};
+use ark_sdk::prelude::{ark_exec, ark_files, ApprovalRequest};
 use serde_json::Value;
 
 use crate::fmt::clip;
@@ -111,6 +111,9 @@ impl Labels {
             .unwrap_or_else(|| {
                 let line = summary.lines().next().unwrap_or("");
                 // The version is for the agent's next edit, not for the person.
+                if action == ark_exec::RUN {
+                    return run_result(summary);
+                }
                 match action.starts_with("files.") {
                     true => match line.rfind(" (version ") {
                         Some(i) => line[..i].to_string(),
@@ -126,6 +129,7 @@ impl Labels {
             .iter()
             .find_map(|r| r.approval(request))
             .or_else(|| file_approval(&request.action, &request.input))
+            .or_else(|| run_approval(&request.action, &request.input))
             .or_else(|| runtime_label(&request.action, &request.input))
             .unwrap_or_else(|| request.preview.clone())
     }
@@ -316,6 +320,48 @@ fn file_approval(action: &str, input: &Value) -> Option<String> {
     }
 }
 
+/// A run, for its approval: what runs, where, and what it cannot do, then the program's start.
+fn run_approval(action: &str, input: &Value) -> Option<String> {
+    if action != ark_exec::RUN {
+        return None;
+    }
+    let code = input.get("code").and_then(Value::as_str).unwrap_or("");
+    let lines: Vec<&str> = code.lines().filter(|l| !l.trim().is_empty()).collect();
+    let mut out = format!(
+        "Run this {}program in the project folder (it can change files there; no network):",
+        runtime_name(input)
+    );
+    for l in lines.iter().take(PREVIEW_LINES) {
+        out.push_str(&format!("\n  {}", clip(l, 160)));
+    }
+    if lines.len() > PREVIEW_LINES {
+        out.push_str(&format!("\n  … {} more lines", lines.len() - PREVIEW_LINES));
+    }
+    Some(out)
+}
+
+/// `Python ` for `{runtime: "python"}`; nothing when the agent left the runtime to the default,
+/// which only the tool knows.
+fn runtime_name(input: &Value) -> String {
+    let r = input.get("runtime").and_then(Value::as_str).unwrap_or("");
+    let mut c = r.chars();
+    c.next()
+        .map(|f| f.to_uppercase().collect::<String>() + c.as_str() + " ")
+        .unwrap_or_default()
+}
+
+/// A run's result in one line: the files it wrote, or how it ended.
+fn run_result(summary: &str) -> String {
+    let mut lines = summary.lines();
+    let first = lines.next().unwrap_or("");
+    match lines.next().and_then(|l| l.strip_prefix("wrote ")) {
+        Some(files) if first == "exit 0" => format!("Wrote {files}"),
+        Some(files) => format!("{first}; wrote {files}"),
+        None if first == "exit 0" => "Done".into(),
+        None => first.to_string(),
+    }
+}
+
 fn row_line(row: &Value) -> String {
     match row {
         Value::Array(cells) => cells
@@ -369,6 +415,10 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
             }
         ),
         "computer.keys" => format!("Pressing {} in {}", s("keys"), s("app")),
+        ark_exec::RUN => match runtime_name(input).trim() {
+            "" => "Running code".into(),
+            r => format!("Running {r}"),
+        },
         "diagram.create" => match s("title") {
             "" => "Drawing a diagram".into(),
             t => format!("Drawing \"{}\"", clip(t, 60)),
@@ -476,6 +526,48 @@ mod tests {
                 "saved sales.xlsx: B4 = 150 (version 1f2e)"
             ),
             "saved sales.xlsx: B4 = 150"
+        );
+    }
+
+    #[test]
+    fn a_run_asks_with_its_program_and_says_what_it_wrote() {
+        let l = Labels::new(Vec::new());
+        let code = "import pandas as pd\n\ndf = pd.read_excel('sales.xlsx')\nprint(df.sum())";
+        let req = ApprovalRequest {
+            action: ark_exec::RUN.into(),
+            summary: String::new(),
+            risk: ark_sdk::prelude::RiskTier::Mutate,
+            input: json!({ "code": code, "runtime": "python" }),
+            class: ark_exec::RUN.into(),
+            preview: String::new(),
+            agent: None,
+            task: None,
+            ask_each_time: false,
+        };
+        assert_eq!(
+            l.approval_line(&req),
+            "Run this Python program in the project folder (it can change files there; no network):\n  import pandas as pd\n  df = pd.read_excel('sales.xlsx')\n  print(df.sum())"
+        );
+        assert_eq!(
+            l.call_label(ark_exec::RUN, &json!({ "code": code, "runtime": "python" })),
+            "Running Python"
+        );
+        assert_eq!(
+            l.call_label(ark_exec::RUN, &json!({ "code": code })),
+            "Running code"
+        );
+        let done = "exit 0\nwrote chart.png, summary.csv\nstdout:\n12";
+        assert_eq!(
+            l.result_detail(ark_exec::RUN, true, done),
+            "Wrote chart.png, summary.csv"
+        );
+        assert_eq!(
+            l.result_detail(ark_exec::RUN, true, "exit 1\nstderr:\nKeyError"),
+            "exit 1"
+        );
+        assert_eq!(
+            l.result_detail(ark_exec::RUN, true, "exit 0\nstdout:\n12"),
+            "Done"
         );
     }
 

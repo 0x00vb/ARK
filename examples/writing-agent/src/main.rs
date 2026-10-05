@@ -376,6 +376,9 @@ fn build_ark(
         // Chapters that arrive as Word files, a submissions tracker as a spreadsheet: read
         // and changed in place, the same file the writer opens.
         .files(true)
+        // Count words per chapter, chart a submissions tracker: a program run on the project's
+        // files, contained, whose charts and tables open beside the conversation.
+        .code(true)
         // A writer checks facts: places, dates, how things worked.
         .web(true)
         // Send a chapter to an editor, put a deadline on the calendar.

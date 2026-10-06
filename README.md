@@ -5,7 +5,7 @@ provides the agent loop, context and token management, model routing, the tool a
 model, working-state memory, persistence, usage accounting and a benchmark harness. An
 application supplies its tools, prompts and vocabulary.
 
-ARK came out of a security research workstation (SecRes) and keeps no trace of that domain.
+ARK came out of a security research workstation (SecRes, now retired) and keeps no trace of that domain.
 The same runtime runs [`examples/writing-agent`](examples/writing-agent), an editor for
 novelists, with no change to any ARK crate.
 

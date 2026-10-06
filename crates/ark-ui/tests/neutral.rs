@@ -1,6 +1,6 @@
-//! ARK names no domain. SecRes is the largest consumer, so security words are the likeliest
-//! to leak in. The front-end layers (ark-interact, ark-cli, ark-ui: Rust sources and the page)
-//! must not contain one anywhere. The runtime crates must not contain one in code; their doc
+//! ARK names no domain. ARK was extracted from a security app (SecRes, retired), so security
+//! words are the likeliest to leak in. The front-end layers (ark-interact, ark-cli, ark-ui:
+//! Rust sources and the page) must not contain one anywhere. The runtime crates must not contain one in code; their doc
 //! comments and unit tests may, because they illustrate extension with a security consumer on
 //! purpose. Writing words are allowed: the docs and tests use the example writing agent.
 

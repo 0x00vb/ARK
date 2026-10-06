@@ -114,22 +114,27 @@ the agent read it. A steer that arrives after the agent's last step becomes the 
 
 ## Building a workspace
 
-From SecRes (`workbench/apps/secres-desktop/src/main.rs`), trimmed:
+From ARK Desktop (`ark-desktop/src/main.rs`, `setup.rs`), trimmed; its `ui_files!` macro is
+one `.asset` per file:
 
 ```rust
-let ui = ArkUi::new(secres_app::app(root)?)       // the same App the `secres` shell opens
-    .accent("#16a34a")
+let ui = ArkUi::new(app(root, secrets)?)
     .asset("logo.svg", include_bytes!("../ui/logo.svg").as_slice())
+    .asset("desktop.js", include_bytes!("../ui/desktop.js").as_slice())
+    .asset("desktop.css", include_bytes!("../ui/desktop.css").as_slice())
+    .theme(Theme::Light)
+    .keep_running(true)
+    .accent("#335eb7")
     .logo("logo.svg")
-    .asset("secres.js", include_bytes!("../ui/secres.js").as_slice())
-    .script("secres.js")
-    .stylesheet("secres.css")
-    .welcome("What are we looking into?", "Binaries, a live device, a web target or code. …")
-    .suggestion("Is a device attached?", "Is a device attached? Tell me its model, OS version and architecture.")
-    .handler("notes", |ctx: HandlerCtx, _| async move {
-        Ok(json!(ctx.engine.store.list_notes(&ctx.project.id)?))
+    .script("desktop.js")
+    .stylesheet("desktop.css")
+    .welcome("What should we work on?", "")
+    .suggestion("Make a checklist", "Make a packing checklist for a three-day work trip and save it as packing.md.")
+    .handler("desktop.folder", |ctx, _v| async move {
+        let dir = ctx.engine.workspace_dir(&ctx.project.id)?;   // in the app: ~/Documents/ARK/<name> on a Mac
+        std::fs::create_dir_all(&dir)?;
+        Ok(json!({ "path": dir }))
     });
-ui.run_desktop(tauri::generate_context!())
 ```
 
 | `ArkUi` method | Purpose |
@@ -145,8 +150,8 @@ ui.run_desktop(tauri::generate_context!())
 | `.open()`, `.serve(addr)`, `.serve_background(addr)`, `.run_desktop(ctx)` | Start |
 
 A handler gets `HandlerCtx { engine, project, emitter }`. `emitter.emit(name, payload)`
-pushes an event the page receives with `ark.on(name, fn)`; SecRes streams its terminal
-output this way.
+pushes an event the page receives with `ark.on(name, fn)`; ARK Desktop sends the progress
+of a Copy to Cloud this way (`desktop:cloud_copy`).
 
 ## The page extension API
 
@@ -183,27 +188,23 @@ false for a runtime elsewhere; `<html data-runtime="local|remote">` says the sam
 Offer actions that need the person's own computer (open a local app, a native picker, "on
 this Mac") only when it is true.
 
-A small real panel, SecRes's notebook (`ui/notes.js`, trimmed):
+A small real viewer, ARK Desktop's diagrams (`ui/diagram.js`, trimmed):
 
 ```js
-ark.panel({
-  id: "notes", title: "Notes", icon: "file", nav: true, presents: ["notebook"],
-  render(el) {
-    const list = h("div.sr-notes");
-    el.append(list);
-    const refresh = async () => {
-      const notes = await ark.ext("notes");
-      list.replaceChildren(...notes.slice().reverse().map((n) => h("article", { html: ark.markdown(n.body) })));
-    };
-    refresh();
-    return { refresh, focus: () => ({ surface: { kind_tag: "notebook", title: "Notes" } }) };
+ark.artifactViewer({
+  id: "diagram", label: "Diagram", wide: true, presents: ["diagram"],
+  match: (a) => a.kind === "diagram" || /\.(mmd|mermaid)$/i.test(a.name),
+  render(el, artifact) {
+    const stage = h("div.dk-diagram");
+    el.append(stage);
+    ark.call("artifact", { id: artifact.id }).then((r) => renderMermaid(stage, r.text || ""));
+    return { focus: () => ({ surface: { kind_tag: "diagram", title: artifact.name, artifact: artifact.id } }) };
   },
 });
 ```
 
-SecRes adds 14 surfaces this way (artifacts, notes, device, terminal, browser, editor and
-diff panels; functions, hex, events and tree viewers; recipe actions; two tool renderers;
-tool health), one module each under `ui/`.
+ARK Desktop adds its agents view, the inspector, its model menu, the account and Cloud settings,
+the This Mac | Cloud switch and the diagram viewer this way, one module each under `ui/`.
 
 ## Protocol
 
@@ -293,8 +294,8 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
 ## Limits
 
 - The page is plain ES modules with no build step and no CDN. xterm.js 5.3 (MIT) ships in
-  `web/vendor/xterm/` for the terminal. App scripts may load their own libraries (SecRes loads
-  CodeMirror from cdnjs on first use).
+  `web/vendor/xterm/` for the terminal. App scripts may ship their own libraries (ARK Desktop
+  ships Mermaid in its `ui/vendor/`).
 - The Browser is a frame: many sites refuse to be framed and show blank. The editor is a plain
   text area (no highlighting).
 - A spreadsheet tab shows values, not cell styles (colours, fonts, merged cells); a document
@@ -308,5 +309,4 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
 - "Always in this project" grants last until removed in Settings › Permissions (or
   `/grants`); "for this session" grants end with the process, as in the shell.
 - There is no macOS WebDriver for the native window; its page is tested in WebKit instead,
-  and an app's bundle can be checked through its browser transport (SecRes:
-  `scripts/verify-desktop.sh`).
+  and an app's bundle can be checked through its browser transport.

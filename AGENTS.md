@@ -55,7 +55,7 @@ runtime       ark-core .. ark-orchestrate: loop, context, tools, several agents 
   `ContextReport`. Large data stays in the store and is read on demand.
 - **No speculative abstraction.** New public surface needs a real consumer today, ideally
   two domains. Prefer a small change to an existing seam over a new one.
-- **Dogfood.** Exercise a change through a real app (`writing-agent`, SecRes) in the
+- **Dogfood.** Exercise a change through a real app (`writing-agent`, ARK Desktop) in the
   front-end it affects, not only through unit tests.
 - **Check the roadmap** before starting: measured-and-rejected ideas are listed there.
 

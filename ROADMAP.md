@@ -10,7 +10,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 |---|---|
 | Stable release | **v0.11.0** (2026-10-05): work that survives a restart and a stop (ADR 0036 to 0038: questions kept on tasks and answered from any client, a restart continues work without repeating a change, each agent's step in the graph, handed-off results reach their chat once, SIGTERM lets work reach a safe point); `SurfaceKind::Terminal` and `DiffViewer` out of `ark-core`. v0.10.0 brought ARK without a window, a runtime other machines connect to, the browser, the Computer, Files, Run code, data work, the board and ARK Accounts. v0.9.0 brought Claude Code and Codex first-class |
 | `main` | v0.11.0 |
-| Consumers | SecRes (pins v0.8.0), ARK Desktop (`ark-desktop` repo; pins v0.11.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Consumers | ARK Desktop (`ark-desktop` repo; pins v0.11.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 
@@ -31,7 +31,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | Limitation | Where it shows |
 |---|---|
-| Tauri IPC path of the native window has no automated test (the page is tested in WebKit; SecRes checks its bundle through the browser transport) | `ark-ui` |
+| Tauri IPC path of the native window has no automated test (the page is tested in WebKit; an app's bundle can be checked through the browser transport) | `ark-ui` |
 | Anthropic and OpenAI prompt-cache reads are not measured against a live provider, only by unit tests and the simulated cache model | `ark-model`, `ark-bench` |
 | Every live benchmark uses one 4B local model (qwen3:4b-instruct through Ollama) | `bench/RESULTS.md` |
 | With qwen3:4b, `tool-lookup` and `approval` fail 3 of 3: the model picks a plausible neighbor tool, or files the note in its own working state | `bench/RESULTS.md` |

@@ -43,7 +43,6 @@ Last updated: 2026-10-05 (v0.11.0; work runtime W1 to W6, ADR 0036 to 0039)
 | Who | Waits for |
 |---|---|
 | ark-desktop | nothing: it pins v0.11.0 (ark-desktop 05b7aa1), so its page shows W4 (what agents do and wait for, from ARK) |
-| SecRes | nothing; pins v0.8.0. v0.9.0 and v0.10.0 are optional upgrades (`Breaking` in `CHANGELOG.md`) |
 | Mail and Calendar for anyone | ARK's Google OAuth client and Google's review: owner steps in [`docs/GOOGLE.md`](docs/GOOGLE.md). Until then they show as unavailable, or work with `ARK_GOOGLE_CLIENT_ID` for test users |
 
 ## Next

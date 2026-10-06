@@ -22,7 +22,7 @@ flowchart LR
 | 4. App | commands, labels, status sections | `examples/writing-agent/src/main.rs` |
 | 5. Front-end | `ArkCli::new(app).run()`, or `ArkUi::new(app)` | same file; [`CLI.md`](CLI.md), [`UI.md`](UI.md) |
 | 6. Tests | scripted model, no network | `cargo test -p writing-agent` |
-| 7. Benchmark | your own `Workload`s | SecRes `crates/secres-bench`; [`BENCH.md`](BENCH.md) |
+| 7. Benchmark | your own `Workload`s | [`BENCH.md`](BENCH.md) |
 
 Steps 4 to 7 are optional. A headless agent stops at step 3 and depends on `ark-sdk` and
 `ark-model` only.
@@ -310,7 +310,7 @@ An identical successful call may be served from an earlier result.
 | `.reusable()` (`Reuse::Stable`) | output depends only on input | always |
 | `.volatile()` (`Reuse::Volatile`) | a live capture, a clock, a counter | never |
 
-SecRes marks its live captures (`frida.trace`, `debug.trace`, `debug.memory`, `debug.attach`)
+Mark live captures (a trace, a reading of a device, anything that changes between two calls)
 volatile.
 
 ## What the user is looking at

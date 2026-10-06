@@ -2,8 +2,8 @@
 
 Every ARK app opens into a persistent agent session. You type what you want in plain words;
 the agent works, shows what it is doing, asks before it changes anything, and remembers where
-you left off. The same shell runs a security workbench (`secres`) and a novel editor
-(`writer`). Each app brings its own tools, commands, look and labels.
+you left off. The same shell runs every ARK app, from the novel editor (`writer`) to a team of
+agents (`agent-team`). Each app brings its own tools, commands, look and labels.
 
 ```text
 $ writer
@@ -113,8 +113,8 @@ Actions marked `Mutate` never run on their own. When the agent wants one, the sh
 Arrows and enter, or `1`/`y`, `2`/`a`, `3`/`n`. Esc denies. Ctrl+C denies and stops the turn.
 
 "Allow for this session" is remembered by approval class. By default the class is the action
-name. A profile can class calls more finely; SecRes classes shell commands by program, so
-allowing `cargo` does not allow `rm`. Grants live in memory and reset on `/new` and `/resume`.
+name. A profile can class calls more finely (`AgentProfile::approval_classifier`): classing shell
+commands by program means allowing `cargo` does not allow `rm`. Grants live in memory and reset on `/new` and `/resume`.
 
 The shell does not decide policy. The runtime's `ApprovalGate` does; the shell only shows the
 question and returns the answer.
@@ -301,8 +301,8 @@ ArkCli::new(app)
 | `.run()` / `.run_with(ArkArgs)` | Parse flags and go, or take flags you parsed |
 
 An app with its own subcommands flattens `ArkArgs` into its clap parser and calls
-`run_with` when no subcommand is given. SecRes does this: `secres` opens the shell,
-`secres health` stays a plain command.
+`run_with` when no subcommand is given. `examples/writing-agent` does this with its flags:
+`writer` opens the shell, `writer --serve` serves the runtime.
 
 ### Domain commands
 

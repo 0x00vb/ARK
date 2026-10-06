@@ -20,7 +20,7 @@ purpose.
 
 | Remote | URL | Role |
 |---|---|---|
-| `origin` | `/Users/valentino/git/ark.git` (bare) | canonical; SecRes pins this URL |
+| `origin` | `/Users/valentino/git/ark.git` (bare) | canonical |
 | `github` | `https://github.com/0x00vb/ARK` | public copy; external consumers pin this URL |
 
 Push `main` and every tag to both. `main` is always releasable.
@@ -44,7 +44,7 @@ flowchart LR
 | 7 | Commit `vX.Y.Z: <one line>`, then tag that commit | `git tag -a vX.Y.Z -m vX.Y.Z` |
 | 8 | Push | `git push origin main vX.Y.Z && git push github main vX.Y.Z` |
 | 9 | Verify as a consumer gets it: clone at the tag into an empty directory, check the tag matches the version, run every check | `scripts/verify-release.sh vX.Y.Z` |
-| 10 | Upgrade SecRes (below) | |
+| 10 | Move ARK Desktop's pin (its `CURRENT_STATE.md`, ARK pin) | |
 
 `scripts/ci.sh` runs, in order: `cargo fmt --check`, clippy with `-D warnings`, all tests, a
 release build, `scripts/check-version.sh` (every crate on the workspace version, a changelog
@@ -75,18 +75,6 @@ flowchart LR
 
 Never pin `branch = "main"` or leave a `path =` dependency in a committed manifest. Both make
 the build depend on whatever ARK looks like that day.
-
-### SecRes
-
-SecRes lives in `~/projects/ios-research/workbench` and pins
-`git = "file:///Users/valentino/git/ark.git"`. Its upgrade adds two checks after step 5:
-
-```sh
-cargo run --release -p secres-bench -- run --out bench/<tag>.json   # compare with the last report
-scripts/verify-desktop.sh                                           # builds SecRes.app, checks it in WebKit
-```
-
-Its migration record and history are in `workbench/docs/ARK_MIGRATION.md`.
 
 ### Developing ARK and an app together
 

@@ -152,8 +152,8 @@ reply); a live recording carries it in the reply's usage.
 ## Your application's workloads
 
 Implement `ark_bench::Workload` (or assemble one from closures like `suite::Spec`) and run it
-with `ark_bench::run_suite`. SecRes does this in its `secres-bench` crate with its real
-profile and adapters; ARK's own suite never names a domain.
+with `ark_bench::run_suite`, with your real profile and adapters; ARK's own suite never names
+a domain.
 
 ```rust
 pub trait Workload: Send + Sync {

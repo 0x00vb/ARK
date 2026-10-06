@@ -175,9 +175,8 @@ flowchart LR
 
 ## Origin
 
-ARK was extracted from SecRes, a security research workstation, which now consumes ARK by
-release tag. The extraction turned fixed security vocabularies into open, application-supplied
-ones:
+ARK was extracted from SecRes, a security research workstation (since retired). The
+extraction turned fixed security vocabularies into open, application-supplied ones:
 
 | In SecRes | In ARK |
 |---|---|

@@ -93,10 +93,6 @@ pub struct Usage {
     pub measured: bool,
 }
 
-fn yes() -> bool {
-    true
-}
-
 impl Usage {
     pub fn tokens(&self) -> u64 {
         self.prompt_tokens + self.completion_tokens
@@ -290,6 +286,11 @@ pub struct TaskRecord {
     /// The chat its result is posted into when it ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_to: Option<String>,
+    /// Its result reached the chat it reports to: as the answer to that chat's own wait for it,
+    /// or as a post. Only a finished task's counts; a restart posts a result that did not
+    /// (ADR 0038). A record saved before this field existed was reported when it finished.
+    #[serde(default = "yes")]
+    pub reported: bool,
     /// The question it waits for the person to answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub question: Option<Question>,
@@ -297,6 +298,10 @@ pub struct TaskRecord {
 
 fn one() -> u32 {
     1
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl TaskRecord {

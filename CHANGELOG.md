@@ -9,7 +9,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
-Work survives a restart, and what it waits for is the runtime's (ADR 0036, 0037).
+Work survives a restart and a stop, and what it waits for is the runtime's (ADR 0036, 0037,
+0038).
 
 ### Added
 - A question an orchestrated agent asks is kept on its task (`TaskRecord::question`, `Question`):
@@ -27,16 +28,29 @@ Work survives a restart, and what it waits for is the runtime's (ADR 0036, 0037)
 - `Harness::done_before(invocations)`: a run that continues an interrupted one (a restart, a
   resume) does not repeat a state-changing call an earlier run made; the brief lists them.
   `ark_runtime::engine::INTERRUPTED_CALL` names a call a stopped process left running.
+- A task the chat hands off (`agents.delegate`) reports to that chat (`report_to`), so its
+  result arrives when the turn did not wait for it (`wait: false`), was stopped, or the process
+  restarted. `TaskRecord::reported` makes it once: the waiting turn's answer, or a post. A
+  restart posts a result that had not arrived; `Post::work` names the task a post is about and
+  `ark_runtime::session::posted` finds it.
+- A graceful stop: `Engine::stop_soon()` and `Engine::runs_ended()`, watched by every turn and
+  task (`Harness::stopping`). Runs stop at their next safe point; a batch with a state-changing
+  call finishes first. An orchestrated task stopped this way is saved to continue in the next
+  process, not failed. `ArkUi::serve` stops this way on SIGTERM as well as ctrl+c
+  (`Host::stop(grace)`, `ARK_STOP_GRACE_SECS`, default 25), the window when the app quits, and
+  the terminal when the person leaves. `RESTARTED` is exported.
 - What an agent does now: `AgentNode::step` (its current call), worded once by
   `ark_interact::orchestration::doing`; `/agents` has a "doing" column and says how to answer a
   waiting task; the window's `graph` adds `doing` to each agent.
 
 ### Changed
 - The board's "Needs you" reads questions from the tasks, not from approval events.
+- `agents.delegate` with `wait: false` in a chat says the result will be posted there.
 
 ### Breaking
 - `TaskRecord`, `TaskNode`, `AgentNode` and `orchestrate::Brief` have new fields (`question`,
-  `step`, `done`): code that builds them adds them (`None`, `&[]`).
+  `reported`, `step`, `done`): code that builds them adds them (`None`, `false`, `&[]`).
+  `session::Post` has `work` (`Post::new` sets it to `None`).
 - `EventKind` has `Asked` and `Answered`: an exhaustive `match` adds them.
 - `ark_interact::orchestration::graph_report(g)` is `graph_report(g, labels)`: pass the app's
   `Labels` (`ix.labels()`), or `Labels::new(vec![])`.

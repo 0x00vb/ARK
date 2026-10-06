@@ -214,6 +214,7 @@ mod tests {
             schedule: None,
             item: None,
             report_to: None,
+            reported: false,
             question: None,
         }
     }

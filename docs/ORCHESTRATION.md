@@ -171,6 +171,8 @@ answers it (ADR 0037).
 | A restart | Open work continues: a task with an open question waits for the answer and then runs again, and the same call asked again takes the kept answer; started tasks continue from their working state; queued ones run; suspended ones stay suspended. A task whose state-changing call was cut short fails with the call named, since only the person can tell whether it happened; `retry` runs it again |
 | No change twice | A continuing run gets the state-changing calls the earlier run made (`Harness::done_before`); an identical call returns the earlier result instead of running |
 | What an agent does | `AgentNode::step`, worded by `ark_interact::orchestration::doing` for every front-end |
+| A stop | `Engine::stop_soon()` (SIGTERM on a served app, quitting the window or the terminal): runs stop at their next safe point, a batch with a state-changing call finishes first, and each task is saved as "continues after a restart" instead of failing (ADR 0038) |
+| Results to the chat | A task the chat hands off (`agents.delegate`) reports to it: the waiting turn takes the result as its answer, or the task posts it into the chat when it ends (`wait: false`, a cancelled turn, a restart). `TaskRecord::reported` makes it once; a restart posts a result that had not arrived (ADR 0038) |
 
 ## Context isolation
 

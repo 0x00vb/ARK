@@ -17,6 +17,7 @@ use ark_store::Store;
 use ark_tools::{Registry, RunCtx, ToolSource};
 
 use crate::blobs::StoreBlobs;
+use crate::cancel::{CancelToken, RunGuard, Stopping};
 use crate::error::AgentError;
 use crate::plugins::{PluginSpec, PluginStatus, Plugins};
 
@@ -38,6 +39,8 @@ pub struct Engine {
     sources: Vec<Arc<dyn ToolSource>>,
     /// Folders of skills that come with the app's tools ([`crate::skills::dirs`]).
     skills: Vec<std::path::PathBuf>,
+    /// Shared with every engine made by [`scoped`](Engine::scoped): the process is stopping.
+    stopping: Arc<Stopping>,
 }
 
 impl Engine {
@@ -50,6 +53,7 @@ impl Engine {
             plugins: None,
             sources: Vec::new(),
             skills: Vec::new(),
+            stopping: Arc::default(),
         }
     }
 
@@ -64,7 +68,36 @@ impl Engine {
             plugins: None,
             sources: Vec::new(),
             skills: self.skills.clone(),
+            stopping: self.stopping.clone(),
         }
+    }
+
+    /// The process is about to exit (a deploy, SIGTERM, the app quitting). Every run of this
+    /// engine and the engines scoped from it stops at its next safe point: no new model or tool
+    /// call starts, a model call or a batch of reads under way is dropped, and a batch with a
+    /// state-changing call runs to its end, so a change is never cut in half. A run that starts
+    /// now stops at once. Wait for them with [`runs_ended`](Engine::runs_ended).
+    pub fn stop_soon(&self) {
+        self.stopping.token.cancel();
+    }
+
+    pub fn is_stopping(&self) -> bool {
+        self.stopping.token.is_cancelled()
+    }
+
+    /// The token a run watches for [`stop_soon`](Engine::stop_soon) (`Harness::stopping`).
+    pub fn stopping(&self) -> CancelToken {
+        self.stopping.token.clone()
+    }
+
+    /// Count a run in progress until the guard is dropped (the harness takes one per turn).
+    pub fn run_started(&self) -> RunGuard {
+        self.stopping.run()
+    }
+
+    /// Resolves once no run of this engine (or its scoped engines) is in progress.
+    pub async fn runs_ended(&self) {
+        self.stopping.idle().await
     }
 
     /// Add a folder of skills that come with a tool (Run code's Python comes with one for

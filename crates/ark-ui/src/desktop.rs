@@ -254,13 +254,22 @@ pub(crate) fn run(
         }
     };
     app.run(|app, ev| {
+        // Quitting: agents' work under way reaches a safe point and continues next time the app
+        // opens, instead of being cut in the middle of a change (ADR 0038).
+        if let RunEvent::Exit = ev {
+            let host = app.state::<State>().0.clone();
+            tauri::async_runtime::block_on(
+                host.stop(ark_sdk::prelude::ark_runtime::cancel::stop_grace()),
+            );
+            return;
+        }
         // The Dock icon (or opening the app again) brings back a hidden window.
         #[cfg(target_os = "macos")]
         if let RunEvent::Reopen { .. } = ev {
             show(app);
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = (app, ev);
+        let _ = app;
     });
     std::process::ExitCode::SUCCESS
 }

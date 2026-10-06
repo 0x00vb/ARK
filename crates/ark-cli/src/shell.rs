@@ -118,6 +118,7 @@ pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::proce
     if let Some(msg) = st.chat.farewell(&st.cfg.bin) {
         st.out.line(&st.cfg.theme.dim(&msg));
     }
+    st.chat.leave().await;
     std::process::ExitCode::SUCCESS
 }
 

@@ -301,7 +301,7 @@ impl Adapter for ChatTools {
                     "objective": { "type": "string", "description": "what the agent must achieve" },
                     "context": { "type": "string", "description": "only what it needs to know; it does not see this conversation" },
                     "item": { "type": "string", "description": "the board item (w-…) this task works on; the item then follows the task" },
-                    "wait": { "type": "boolean", "description": "wait for the result (default true); false returns at once and the task runs on" }
+                    "wait": { "type": "boolean", "description": if self.chat.is_some() { "wait for the result (default true); false returns at once, the task runs on and its result is posted in this chat" } else { "wait for the result (default true); false returns at once and the task runs on" } }
                 }
             })),
             ActionDescriptor::new(
@@ -397,16 +397,26 @@ impl Adapter for ChatTools {
                 if !s("item").is_empty() {
                     spec = spec.item(s("item"));
                 }
+                // Its result comes back to this chat even when this turn is gone (a restart).
+                if let Some(chat) = &self.chat {
+                    spec = spec.report_to(chat);
+                }
                 let id = self
                     .orch
                     .submit(to, spec)
                     .map_err(|e| AdapterError::bad_input(action, e.to_string()))?;
                 if !input.get("wait").and_then(Value::as_bool).unwrap_or(true) {
-                    return Ok(ActionOutput::json(
-                        json!({ "task": id, "agent": to, "state": "queued" }),
-                    ));
+                    let mut v = json!({ "task": id, "agent": to, "state": "queued" });
+                    if self.chat.is_some() {
+                        v["result"] = json!("posted in this chat when it ends");
+                    }
+                    return Ok(ActionOutput::json(v));
                 }
-                let done = self.orch.wait(&id).await.map_err(fail)?;
+                let done = self
+                    .orch
+                    .wait_in(&id, self.chat.as_deref())
+                    .await
+                    .map_err(fail)?;
                 Ok(ActionOutput::json(result_json(&done)))
             }
             WAIT => {
@@ -423,7 +433,12 @@ impl Adapter for ChatTools {
                 }
                 let mut done = Vec::new();
                 for id in ids {
-                    done.push(result_json(&self.orch.wait(id).await.map_err(fail)?));
+                    let rec = self
+                        .orch
+                        .wait_in(id, self.chat.as_deref())
+                        .await
+                        .map_err(fail)?;
+                    done.push(result_json(&rec));
                 }
                 Ok(ActionOutput::json(json!({ "tasks": done })))
             }

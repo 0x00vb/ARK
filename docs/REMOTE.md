@@ -60,9 +60,16 @@ buffer `/events`.
 ## Running it
 
 Keep the process under a supervisor (systemd, a container's restart policy). On restart,
-sessions, agents and tasks come back from the store; a task that was running when the process
-stopped is marked interrupted, and can be retried. Agents and tasks run whether or not a client
-is connected; a window that connects later reads their results.
+sessions, agents and tasks come back from the store and open work continues (ADR 0037). Agents
+and tasks run whether or not a client is connected; a window that connects later reads their
+results.
+
+Stop it with SIGTERM (what systemd, Docker and deploys send) or ctrl+c. The runtime lets running
+work reach a safe point: a change under way finishes, nothing new starts, each task is saved to
+continue in the next process, and it exits (ADR 0038). It waits up to `ARK_STOP_GRACE_SECS`
+(default 25); give the platform's stop timeout a little more (Docker's default is 10 s, Fly.io's
+`kill_timeout` is 5 s). A change still running when the process is killed fails its task after
+the restart, for the person to check.
 
 `GET /health` answers `{"ok":true,"version":"…"}` without a token, for the supervisor or an
 uptime check.

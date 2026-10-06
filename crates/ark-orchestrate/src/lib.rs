@@ -50,7 +50,7 @@ pub use event::{EventKind, OrchEvent};
 pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskNode};
 pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
 pub use orchestrator::{
-    NamedProfile, Orchestrator, OrchestratorBuilder, INTERRUPTED, WAITING_PERSON,
+    NamedProfile, Orchestrator, OrchestratorBuilder, INTERRUPTED, RESTARTED, WAITING_PERSON,
 };
 pub use record::{
     AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord, TaskState,

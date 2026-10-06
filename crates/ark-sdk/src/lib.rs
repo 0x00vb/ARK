@@ -273,6 +273,7 @@ impl Ark {
             .planner(self.planner)
             .critic(self.critic)
             .allow_mutate(self.allow_mutate)
+            .stopping(Some(self.engine.stopping()))
     }
 
     /// Start a new conversation session in `project`.

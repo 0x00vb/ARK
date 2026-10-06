@@ -2059,3 +2059,330 @@ async fn the_conversation_schedules_work_and_stops_it() {
         .iter()
         .any(|e| matches!(e.kind, EventKind::Unscheduled { .. })));
 }
+
+/// A chat (the person's conversation) and an agent on its own model, for hand-offs.
+struct ChatAndAgent {
+    _dir: tempfile::TempDir,
+    ark: Ark,
+    project: Project,
+    o: Orchestrator,
+}
+
+async fn chat_and_agent(chat: &Arc<Script>, agent: &Arc<Script>) -> ChatAndAgent {
+    let dir = tempfile::tempdir().unwrap();
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(chat.clone() as Arc<dyn Provider>)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "").unwrap();
+    let a = agent.clone();
+    let o = Orchestrator::builder(&ark, &project)
+        .configure_models(move |b| b.provider("m", a as Arc<dyn Provider>))
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+    ChatAndAgent {
+        _dir: dir,
+        ark,
+        project,
+        o,
+    }
+}
+
+impl ChatAndAgent {
+    async fn turn(&self, input: &str) -> String {
+        let mut session = self.ark.start_session(&self.project.id).unwrap();
+        let id = session.id().as_str().to_string();
+        self.ark
+            .ask_session(
+                &mut session,
+                input,
+                TurnOptions {
+                    tools: vec![self.o.chat_tools_for(&id)],
+                    ..Default::default()
+                },
+                |_| {},
+            )
+            .await
+            .unwrap();
+        id
+    }
+    fn posts(&self, chat: &str) -> Vec<ark_runtime::session::Post> {
+        ark_runtime::session::posts(self.ark.engine(), chat, 0, 100)
+            .unwrap()
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn a_handoff_the_chat_waits_for_is_its_answer_and_is_not_posted_too() {
+    let chat = Script::new(
+        "chat",
+        vec![
+            calls(vec![(
+                "agents.delegate",
+                json!({"to": "w", "objective": "count the chapters"}),
+            )]),
+            answer("w counted 12 [inv:1]"),
+        ],
+    );
+    let agent = Script::new("m", vec![answer("12 chapters")]);
+    let c = chat_and_agent(&chat, &agent).await;
+    let id = c.turn("how many chapters?").await;
+    let t = &c.o.tasks()[0];
+    assert_eq!(t.report_to.as_deref(), Some(id.as_str()));
+    assert_eq!(t.result.as_deref(), Some("12 chapters"));
+    assert!(t.reported, "the chat's own call had it");
+    assert!(c.posts(&id).is_empty());
+    assert!(chat.texts()[1].contains("12 chapters"));
+}
+
+#[tokio::test]
+async fn a_handoff_the_chat_does_not_wait_for_is_posted_in_it_once() {
+    let chat = Script::new(
+        "chat",
+        vec![
+            calls(vec![(
+                "agents.delegate",
+                json!({"to": "w", "objective": "count the chapters", "wait": false}),
+            )]),
+            answer("w is on it [inv:1]"),
+        ],
+    );
+    let gate = Arc::new(Notify::new());
+    let agent = Script::with(
+        "m",
+        vec![answer("12 chapters")],
+        Duration::ZERO,
+        Some(gate.clone()),
+    );
+    let c = chat_and_agent(&chat, &agent).await;
+    let id = c.turn("count the chapters").await;
+    assert!(chat.texts()[1].contains("posted in this chat when it ends"));
+    // The turn is over; the task ends after it.
+    let task = c.o.tasks()[0].id.clone();
+    gate.notify_one();
+    let t = c.o.wait(&task).await.unwrap();
+    assert!(t.reported);
+    let posts = c.posts(&id);
+    assert_eq!(posts.len(), 1);
+    assert_eq!(
+        (posts[0].text.as_str(), posts[0].work.as_deref()),
+        ("12 chapters", Some(task.as_str()))
+    );
+}
+
+#[tokio::test]
+async fn a_result_that_never_reached_its_chat_is_posted_after_the_restart_once() {
+    let r = Restarts::new();
+    let m = Script::new("m", vec![answer("12 chapters")]);
+    {
+        let o = r.orch(&m, None);
+        o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+    }
+    let posts = |chat: &str| ark_runtime::session::posts(r.ark.engine(), chat, 0, 100).unwrap();
+    // The chat waited for it in a process that stopped: it continues and reports here.
+    r.left_open("t-hand0001", "running", json!({ "report_to": "s-chat" }));
+    // It ended, but the process stopped before its result reached the chat.
+    r.left_open(
+        "t-hand0002",
+        "done",
+        json!({ "report_to": "s-chat", "reported": false, "result": "finished before" }),
+    );
+    // Posted, and the process stopped before it marked that.
+    r.left_open(
+        "t-hand0003",
+        "done",
+        json!({ "report_to": "s-chat", "reported": false, "result": "posted once" }),
+    );
+    let post = ark_runtime::session::Post::new("w", "x", "posted once", true).work("t-hand0003");
+    ark_runtime::session::post(r.ark.engine(), "s-chat", post).unwrap();
+    // Saved by a version without the mark: it was posted when it finished.
+    r.left_open(
+        "t-hand0004",
+        "done",
+        json!({ "report_to": "s-chat", "result": "long ago" }),
+    );
+
+    let o = r.orch(&m, None);
+    let done = o.wait("t-hand0001").await.unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    let texts: Vec<String> = posts("s-chat").into_iter().map(|(_, p)| p.text).collect();
+    assert_eq!(texts.len(), 3, "{texts:?}");
+    for t in ["posted once", "finished before", "12 chapters"] {
+        assert_eq!(
+            texts.iter().filter(|x| *x == t).count(),
+            1,
+            "{t}: {texts:?}"
+        );
+    }
+    assert!(["t-hand0001", "t-hand0002", "t-hand0003", "t-hand0004"]
+        .iter()
+        .all(|id| o.task(id).unwrap().reported));
+    // Another restart posts nothing again.
+    drop(o);
+    let _o = r.orch(&m, None);
+    assert_eq!(posts("s-chat").len(), 3);
+}
+
+/// A state-changing tool that takes a while, counting the runs that started and finished.
+struct SlowChange {
+    started: Arc<Notify>,
+    finished: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl Adapter for SlowChange {
+    fn name(&self) -> &str {
+        "slow"
+    }
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            "slow.save",
+            "save, slowly",
+            RiskTier::Mutate,
+        )]
+    }
+    async fn run(
+        &self,
+        _: &str,
+        input: serde_json::Value,
+        _: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        self.started.notify_one();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        self.finished.fetch_add(1, Ordering::SeqCst);
+        Ok(ActionOutput::json(json!({ "saved": input["text"] })))
+    }
+}
+
+/// One process of an app with the slow tool, over the store in `dir`.
+fn slow_process(dir: &std::path::Path, finished: &Arc<AtomicUsize>) -> (Ark, Arc<Notify>) {
+    let started = Arc::new(Notify::new());
+    let ark = Ark::builder()
+        .store_root(dir)
+        .tool(Arc::new(SlowChange {
+            started: started.clone(),
+            finished: finished.clone(),
+        }))
+        .provider(Arc::new(ark_model::MockProvider::new("unused", vec![])))
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    (ark, started)
+}
+
+async fn until(what: &str, mut ok: impl FnMut() -> bool) {
+    for _ in 0..400 {
+        if ok() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
+#[tokio::test]
+async fn a_stopping_process_lets_a_change_under_way_finish_and_the_task_continues_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let finished = Arc::new(AtomicUsize::new(0));
+    let build = |ark: &Ark, project: &Project, m: &Arc<Script>| {
+        let mm = m.clone();
+        Orchestrator::builder(ark, project)
+            .configure_models(move |b| b.provider("m", mm as Arc<dyn Provider>))
+            .build()
+            .unwrap()
+    };
+    let m = Script::new(
+        "m",
+        vec![
+            calls(vec![("slow.save", json!({"text": "a"}))]),
+            answer("never asked"),
+        ],
+    );
+    let (ark, started) = slow_process(dir.path(), &finished);
+    let project = ark.create_project("p", "").unwrap();
+    let o = build(&ark, &project, &m);
+    o.spawn(
+        AgentSpec::new("w")
+            .model("m")
+            .tools(["slow.*"])
+            .allow_mutate(true),
+    )
+    .await
+    .unwrap();
+    let id = o.submit("w", TaskSpec::new("save a")).unwrap();
+    started.notified().await;
+
+    // A deploy: the change under way finishes, nothing new starts, the task waits for the next
+    // process.
+    ark.engine().stop_soon();
+    tokio::time::timeout(Duration::from_secs(5), ark.engine().runs_ended())
+        .await
+        .unwrap();
+    assert_eq!(finished.load(Ordering::SeqCst), 1);
+    until("the task to wait for the next process", || {
+        o.task(&id).unwrap().state == TaskState::Queued
+    })
+    .await;
+    let t = o.task(&id).unwrap();
+    assert_eq!(t.waiting_on.as_deref(), Some(RESTARTED));
+    assert_eq!((t.pid, t.error), (None, None));
+    assert_eq!(m.texts().len(), 1, "no model call after the stop");
+    let invs = ark
+        .engine()
+        .store
+        .list_invocations(&ProjectId(o.agent("w").unwrap().scope))
+        .unwrap();
+    assert!(invs
+        .iter()
+        .all(|i| i.status == ark_core::InvocationStatus::Ok));
+    drop((o, ark));
+
+    // The next process continues it; the change made before is not made again.
+    let m2 = Script::new(
+        "m2",
+        vec![
+            calls(vec![("slow.save", json!({"text": "a"}))]),
+            answer("saved a [inv:1]"),
+        ],
+    );
+    let (ark, _) = slow_process(dir.path(), &finished);
+    let project = ark.find_or_create_project("p", "").unwrap();
+    let o = build(&ark, &project, &m2);
+    let t = o.wait(&id).await.unwrap();
+    assert_eq!(t.state, TaskState::Done, "{:?}", t.error);
+    assert_eq!(finished.load(Ordering::SeqCst), 1, "saved once");
+    assert!(m2.texts()[0].contains("It was interrupted"));
+}
+
+#[tokio::test]
+async fn a_stopping_process_drops_a_model_call_and_the_task_continues_after() {
+    let r = Restarts::new();
+    let never = Arc::new(Notify::new());
+    let m = Script::with("m", vec![], Duration::ZERO, Some(never));
+    let o = r.orch(&m, None);
+    o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
+    let id = o.submit("w", TaskSpec::new("think")).unwrap();
+    until("the model call", || m.texts().len() == 1).await;
+    r.ark.engine().stop_soon();
+    until("the task to wait for the next process", || {
+        o.task(&id).unwrap().state == TaskState::Queued
+    })
+    .await;
+    // Work handed to it now waits for the next process too.
+    let later = o.submit("w", TaskSpec::new("later")).unwrap();
+    until("the new task to wait", || {
+        o.task(&later)
+            .is_some_and(|t| t.waiting_on.as_deref() == Some(RESTARTED))
+    })
+    .await;
+    assert_eq!(o.agent("w").unwrap().state, AgentState::Idle);
+    assert_eq!(m.texts().len(), 1);
+}

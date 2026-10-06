@@ -154,6 +154,7 @@ impl<'a> OrchestratorBuilder<'a> {
             max_parallel: self.max_parallel,
             global: Arc::new(Semaphore::new(self.max_parallel)),
             accounts: Mutex::new(HashMap::new()),
+            chat_waits: Mutex::new(Vec::new()),
             state: Mutex::new(State::default()),
             events,
             ticks: Mutex::new(()),
@@ -299,6 +300,22 @@ impl Orchestrator {
             return Err(OrchError::UnknownTask(task.into()));
         }
         Ok(self.inner.wait_final(task).await)
+    }
+
+    /// [`wait`](Self::wait) in a turn of `chat`: a task that reports to it gets its result there
+    /// as this answer, not as a post too.
+    pub(crate) async fn wait_in(
+        &self,
+        task: &str,
+        chat: Option<&str>,
+    ) -> Result<TaskRecord, OrchError> {
+        let Some(chat) = chat else {
+            return self.wait(task).await;
+        };
+        let w = self.inner.chat_wait(task, chat);
+        let rec = self.wait(task).await?;
+        w.took(&rec);
+        Ok(rec)
     }
 
     pub fn task(&self, id: &str) -> Option<TaskRecord> {
@@ -590,6 +607,8 @@ pub(crate) enum Stop {
     Cancel,
     Suspend,
     Limit(String),
+    /// The process is stopping ([`Engine::stop_soon`]): the task continues after the restart.
+    Restart,
 }
 
 #[derive(Default)]
@@ -662,6 +681,74 @@ pub(crate) struct Inner {
     stream: String,
     /// Held while schedules are ticked: one tick at a time.
     ticks: Mutex<()>,
+    /// (task, chat): a turn of that chat waits for the task in this process and takes its
+    /// result as its call's answer, so it is not posted too. Lost with the process, as the
+    /// turn is: then the result is posted ([`ChatWait`]).
+    chat_waits: Mutex<Vec<(String, String)>>,
+}
+
+/// A chat's turn waiting for a task it handed off. Dropped without [`ChatWait::took`] (the
+/// turn was cancelled), the result goes into the chat as a post.
+pub(crate) struct ChatWait {
+    inner: Arc<Inner>,
+    task: String,
+    chat: String,
+    took: bool,
+}
+
+impl ChatWait {
+    /// The turn has the result: it reached the chat.
+    pub(crate) fn took(mut self, rec: &TaskRecord) {
+        self.took = true;
+        if rec.report_to.as_deref() == Some(self.chat.as_str()) && reports(rec).is_some() {
+            self.inner.update_task(&rec.id, |t| t.reported = true);
+        }
+    }
+}
+
+impl Drop for ChatWait {
+    fn drop(&mut self) {
+        {
+            let mut w = self.inner.chat_waits.lock().unwrap();
+            if let Some(i) = w
+                .iter()
+                .position(|(t, c)| *t == self.task && *c == self.chat)
+            {
+                w.remove(i);
+            }
+        }
+        if !self.took {
+            let rec = self
+                .inner
+                .state
+                .lock()
+                .unwrap()
+                .tasks
+                .get(&self.task)
+                .map(|t| t.record.clone());
+            if let Some(r) = rec.filter(|r| r.state.is_final()) {
+                self.inner.report_back(&r);
+            }
+        }
+    }
+}
+
+/// Calls a stopped run left open did not finish there.
+fn close_open_calls(t: &mut TaskRecord) {
+    for c in t.tool_calls.iter_mut().filter(|c| c.ok.is_none()) {
+        c.ok = Some(false);
+        c.summary = "stopped: the process stopped".into();
+    }
+}
+
+/// What a finished task reports to its chat: (ok, text). Nothing for one that was cancelled
+/// (whoever cancelled it knows) or has not finished.
+fn reports(t: &TaskRecord) -> Option<(bool, String)> {
+    match t.state {
+        TaskState::Done => Some((true, t.result.clone().unwrap_or_default())),
+        TaskState::Failed => Some((false, t.error.clone().unwrap_or_default())),
+        _ => None,
+    }
 }
 
 enum Attempt {
@@ -696,6 +783,14 @@ impl Final {
             state: TaskState::Cancelled,
             result: None,
             error: Some(why.into()),
+        }
+    }
+    /// Not an end: the process is stopping and the task continues after the restart.
+    fn left() -> Self {
+        Final {
+            state: TaskState::Queued,
+            result: None,
+            error: None,
         }
     }
 }
@@ -1044,6 +1139,7 @@ impl Inner {
         let pid = std::process::id();
         let mut interrupted = Vec::new();
         let mut recover = Vec::new();
+        let mut late = Vec::new();
         {
             let mut st = self.state.lock().unwrap();
             for v in store.list_records(AGENT, Some(self.project.id.as_str()))? {
@@ -1073,15 +1169,17 @@ impl Inner {
                     continue;
                 };
                 let mut recovering = false;
-                if !r.state.is_final() {
+                if r.state.is_final() {
+                    if r.report_to.is_some() && !r.reported && reports(&r).is_some() {
+                        late.push(r.id.clone());
+                    }
+                } else {
+                    // Its result has not been anywhere yet.
+                    r.reported = false;
                     let alive = r.pid.is_some_and(|p| p != pid && process_alive(p));
                     if !alive {
                         r.pid = None;
-                        // Calls the stopped run left open did not finish here.
-                        for c in r.tool_calls.iter_mut().filter(|c| c.ok.is_none()) {
-                            c.ok = Some(false);
-                            c.summary = "stopped: the process stopped".into();
-                        }
+                        close_open_calls(&mut r);
                         let asking = r.question.as_ref().is_some_and(Question::open);
                         let scope = st.agents.get(&r.owner).map(|a| a.record.scope.clone());
                         let unsure = match (scope, r.started_ms) {
@@ -1167,6 +1265,9 @@ impl Inner {
             });
             self.work_follows(&r);
             self.report_back(&r);
+        }
+        for id in late {
+            self.report_late(&id);
         }
         Ok(recover)
     }
@@ -1491,6 +1592,7 @@ impl Inner {
             schedule: None,
             item: spec.item.clone(),
             report_to: spec.report_to.clone(),
+            reported: false,
             question: None,
         };
         let (parent_rec, linked) = {
@@ -1635,6 +1737,7 @@ impl Inner {
             // A run the person starts again is new work: what earlier runs did (a change cut
             // short, a change made) is not this run's after a later restart.
             t.record.started_ms = None;
+            t.record.reported = false;
             t.record.max_attempts = t.record.attempts + 1;
             t.stop = None;
             t.cancel = CancelToken::new();
@@ -1795,6 +1898,10 @@ impl Inner {
             if !self.acquire(id, &models.account).await {
                 return self.stopped_before_start(id);
             }
+            if self.engine.is_stopping() {
+                self.release(id).await;
+                return Final::left();
+            }
             let attempt = self.attempt(id, &owner, &models, resumed).await;
             self.release(id).await;
             drop(guard);
@@ -1809,6 +1916,7 @@ impl Inner {
                     continue;
                 }
                 Attempt::Stopped(Stop::Cancel) => return Final::cancelled("cancelled"),
+                Attempt::Stopped(Stop::Restart) => return Final::left(),
                 Attempt::Stopped(Stop::Limit(l)) => {
                     return Final::failed(format!("budget exceeded: {l}"))
                 }
@@ -2356,6 +2464,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 _ => None,
             })
             .cancel(Some(cancel.clone()))
+            .stopping(Some(self.engine.stopping()))
             .steering(Some(steer.clone()))
             .conversation(session.conversation_digest())
             .rules(selection.clone())
@@ -2455,12 +2564,20 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             }
             Ok(outcome) => {
                 let _ = session.record_turn(&self.engine, &brief, &outcome);
-                Attempt::Stopped(self.stop_reason(id).unwrap_or(Stop::Cancel))
+                Attempt::Stopped(
+                    self.stop_reason(id)
+                        .unwrap_or(if self.engine.is_stopping() {
+                            Stop::Restart
+                        } else {
+                            Stop::Cancel
+                        }),
+                )
             }
             Err(e) => {
                 let _ = session.fail_turn(&self.engine, &brief, &e.to_string());
                 match self.stop_reason(id) {
                     Some(s) => Attempt::Stopped(s),
+                    None if self.engine.is_stopping() => Attempt::Stopped(Stop::Restart),
                     None => Attempt::Failed(e.to_string()),
                 }
             }
@@ -2647,6 +2764,9 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
     }
 
     fn finish(&self, id: &str, f: Final) {
+        if !f.state.is_final() {
+            return self.leave(id);
+        }
         let rec = self.update_task(id, |t| {
             t.state = f.state;
             t.result = f.result.clone();
@@ -2747,23 +2867,107 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         }
     }
 
-    /// A task that reports to a chat posts its result there when it ends: done or failed, not
-    /// cancelled (whoever cancelled it knows).
+    /// A task that reports to a chat gets its result there once, when it ends: done or failed,
+    /// not cancelled (whoever cancelled it knows). A turn of that chat waiting for it in this
+    /// process takes it as its call's answer ([`ChatWait`]); otherwise it is posted.
     fn report_back(&self, t: &TaskRecord) {
         let Some(chat) = &t.report_to else { return };
-        let (ok, text) = match t.state {
-            TaskState::Done => (true, t.result.clone().unwrap_or_default()),
-            TaskState::Failed => (false, t.error.clone().unwrap_or_default()),
-            _ => return,
+        let Some((ok, text)) = reports(t).filter(|_| !t.reported) else {
+            return;
         };
-        let post = Post::new(&t.owner, clip(&t.objective, 80), text, ok);
+        let waiting = self
+            .chat_waits
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(task, c)| *task == t.id && c == chat);
+        if waiting {
+            return;
+        }
+        let post = Post::new(&t.owner, clip(&t.objective, 80), text, ok).work(&t.id);
         match ark_runtime::session::post(&self.engine, chat, post.clone()) {
-            Ok(_) => self.emit(EventKind::Posted {
-                session: chat.clone(),
-                task: t.id.clone(),
-                post,
-            }),
+            Ok(_) => {
+                self.update_task(&t.id, |r| r.reported = true);
+                self.emit(EventKind::Posted {
+                    session: chat.clone(),
+                    task: t.id.clone(),
+                    post,
+                })
+            }
             Err(e) => tracing::warn!(task = %t.id, "could not post into the chat: {e}"),
+        }
+    }
+
+    /// A result that had not reached its chat when the process stopped: posted now, unless the
+    /// post was made and only its mark was lost.
+    fn report_late(&self, id: &str) {
+        let Some(rec) = self
+            .state
+            .lock()
+            .unwrap()
+            .tasks
+            .get(id)
+            .map(|t| t.record.clone())
+        else {
+            return;
+        };
+        let Some(chat) = &rec.report_to else { return };
+        match ark_runtime::session::posted(&self.engine, chat, id) {
+            Ok(true) => {
+                self.update_task(id, |r| r.reported = true);
+            }
+            Ok(false) => self.report_back(&rec),
+            Err(e) => tracing::warn!(task = %id, "could not read the chat's posts: {e}"),
+        }
+    }
+
+    /// Wait in a turn of `chat` for a task it handed off: the result is that turn's, not posted.
+    pub(crate) fn chat_wait(self: &Arc<Self>, task: &str, chat: &str) -> ChatWait {
+        self.chat_waits
+            .lock()
+            .unwrap()
+            .push((task.to_string(), chat.to_string()));
+        ChatWait {
+            inner: self.clone(),
+            task: task.to_string(),
+            chat: chat.to_string(),
+            took: false,
+        }
+    }
+
+    /// The process is stopping and the task's run stopped at a safe point: it waits for the next
+    /// process, as a restart leaves it ([`Inner::load`]), and is not failed.
+    fn leave(&self, id: &str) {
+        let rec = self.update_task(id, |t| {
+            t.pid = None;
+            close_open_calls(t);
+            if t.question.as_ref().is_some_and(Question::open) {
+                t.state = TaskState::Waiting;
+                t.waiting_on = Some(WAITING_PERSON.into());
+            } else if t.state != TaskState::Suspended {
+                t.state = TaskState::Queued;
+                t.waiting_on = Some(RESTARTED.into());
+            }
+        });
+        let Some(rec) = rec else { return };
+        let owner = rec.owner.clone();
+        let current = {
+            let st = self.state.lock().unwrap();
+            st.agents
+                .get(&owner)
+                .and_then(|a| a.record.current_task.clone())
+        };
+        if current.as_deref() == Some(id) {
+            self.update_agent(&owner, |a| a.current_task = None);
+            if self.agent_state(&owner) == Some(AgentState::Running) {
+                self.set_agent_state(&owner, AgentState::Idle);
+            }
+        }
+        if rec.state == TaskState::Queued {
+            self.emit(EventKind::TaskQueued {
+                task: id.to_string(),
+                reason: RESTARTED.into(),
+            });
         }
     }
 
@@ -3176,7 +3380,7 @@ pub const INTERRUPTED: &str = "interrupted: the process stopped while it ran";
 pub const WAITING_PERSON: &str = "your answer";
 
 /// Why a task is queued again after a restart.
-const RESTARTED: &str = "continues after a restart";
+pub const RESTARTED: &str = "continues after a restart";
 
 /// The entry a task's `waiting_for` holds while it waits for the person's answer.
 const ANSWER: &str = "@answer";

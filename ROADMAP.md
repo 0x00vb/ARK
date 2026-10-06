@@ -127,7 +127,7 @@ through). ARK does not copy them; this is the floor it must not be under.
 
 | Area | ARK today | Verdict |
 |---|---|---|
-| Work that persists | the runtime runs without a window (ADR 0016, 0017), schedules, keep running; a restart continues open work, keeps questions, never repeats a change (ADR 0037) | at par since W1, W2 (`[Unreleased]`) |
+| Work that persists | the runtime runs without a window (ADR 0016, 0017), schedules, keep running; a restart continues open work, keeps questions, never repeats a change (ADR 0037); a stop (SIGTERM, quit) leaves work to continue and handed-off results reach their chat once (ADR 0038) | at par since W1, W2, W5, W6 (`[Unreleased]`) |
 | Agent state at a glance | `AgentState`, `TaskState`, `waiting_on`, a task's `question`, each agent's `step` worded once for every client (ADR 0037) | at par since W1, W3 (`[Unreleased]`) |
 | Parallel work | many agents, capacity-aware scheduling, dependencies, up to 4 delegations per reply; one task at a time per agent | at par. No "same task N ways, compare": can wait |
 | Isolation on shared files | one folder per project; version guard, versions before (ADR 0034) | enough for now. A copy per task when a workload shows conflicts |
@@ -139,8 +139,10 @@ through). ARK does not copy them; this is the floor it must not be under.
 | Non-code work | Files (sheets, documents), Run code, data work, browser, Computer, mail, calendar, board, artifacts by kind | ahead; nothing in the runtime assumes code |
 
 Fix before Cloud depends on it. Each is small and in an existing seam; none adds a work type.
-W1 to W3 are done on `main` (ADR 0037, `[Unreleased]`); W4 is done on ARK Desktop's `main` and
-shows once Desktop pins the ARK release that has W1 to W3.
+W1 to W3, W5 and W6 are done on `main` (ADR 0037, 0038, `[Unreleased]`); W4 is done on ARK
+Desktop's `main` and shows once Desktop pins the ARK release that has them. With these, the
+runtime has no known blocker for Cloud running work nobody watches; what is left is checking it
+on a Cloud machine (ark-cloud, Phase 2) and Cloud's own notifications.
 
 | # | Step | Done means |
 |---|---|---|
@@ -149,12 +151,13 @@ shows once Desktop pins the ARK release that has W1 to W3.
 | W3 | **What each agent is doing is in the graph.** Its current step as `ark-interact` words it, and what it waits for (a task, capacity, the person), so `/agents` and every client show the same | the terminal's `/agents` and the window show the same line for each agent |
 | W4 | **ARK Desktop reads, not derives** (ark-desktop): the team tree from `graph.edges`, "doing now" from W3, one path for `@agent`, `setup::keychain` replaced by `ark_connect`'s | nothing in `ui/` computes runtime state (ark-desktop `docs/ARCHITECTURE.md`, The boundary, audited) |
 
-Found while building W1 to W3; needed before Cloud runs work nobody watches (Phase 2):
+Found while building W1 to W3; needed before Cloud runs work nobody watches (Phase 2). Both done
+(ADR 0038):
 
 | # | Step | Done means |
 |---|---|---|
-| W5 | **Work the chat hands off reports back to it.** `agents.delegate` sets `report_to` to the chat (as `agents.schedule` does), so a result reaches the conversation even when the turn that waited for it is gone (a restart) or did not wait (`wait: false`); a waited-for result is not posted twice | the chat delegates, the process restarts, the result appears in that chat |
-| W6 | **A stop is graceful.** On SIGTERM (what a deploy or a machine move sends; only Ctrl-C is handled today) the runtime takes no new work, lets a running call finish within a grace period, suspends running tasks at their next step, and exits; the next start resumes them with nothing cut short | a deploy during a change: the change runs once and the task finishes, with no "cut short" failure |
+| W5 (done) | **Work the chat hands off reports back to it.** `agents.delegate` sets `report_to` to the chat (as `agents.schedule` does), so a result reaches the conversation even when the turn that waited for it is gone (a restart) or did not wait (`wait: false`); a waited-for result is not posted twice | the chat delegates, the process restarts, the result appears in that chat |
+| W6 (done) | **A stop is graceful.** On SIGTERM (what a deploy or a machine move sends) the runtime takes no new work, lets a running change finish within a grace period, saves running tasks to continue, and exits; the next start continues them with nothing cut short | a deploy during a change: the change runs once and the task finishes, with no "cut short" failure |
 
 Can wait, each until its trigger:
 

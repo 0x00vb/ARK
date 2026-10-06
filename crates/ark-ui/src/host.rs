@@ -347,6 +347,27 @@ pub struct Host {
 }
 
 impl Host {
+    /// The process is about to exit (SIGTERM, a deploy, the app quitting). Every run stops at its
+    /// next safe point (`Engine::stop_soon`): a change under way finishes, nothing new starts.
+    /// An agent's task is saved to continue in the next process; a chat's turn ends as
+    /// cancelled. Waits up to `grace`; false when some run did not stop in time (its change, if
+    /// any, then shows as cut short after the restart).
+    pub async fn stop(&self, grace: std::time::Duration) -> bool {
+        self.engine.stop_soon();
+        let settled = async {
+            self.engine.runs_ended().await;
+            // A run that stopped is saved as waiting for the next process just after.
+            while self.orchs.list().iter().any(|o| {
+                o.tasks()
+                    .iter()
+                    .any(|t| t.state == ark_interact::ark_orchestrate::TaskState::Running)
+            }) {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        };
+        tokio::time::timeout(grace, settled).await.is_ok()
+    }
+
     /// Wrap an opened interaction. `approvals` is the receiving end of the channel approver
     /// the interaction was opened with. Must be called inside a tokio runtime.
     pub async fn new(

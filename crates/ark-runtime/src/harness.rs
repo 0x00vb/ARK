@@ -234,6 +234,9 @@ pub struct Harness {
     conversation: Option<String>,
     approvals: Option<Arc<ApprovalGate>>,
     cancel: Option<CancelToken>,
+    /// The process is stopping ([`Engine::stop_soon`]): like a cancel, except that a batch with
+    /// a state-changing call runs to its end.
+    stopping: Option<CancelToken>,
     steer: Option<Steering>,
     retry: ark_model::RetryPolicy,
     presentation: bool,
@@ -313,6 +316,7 @@ impl Harness {
             conversation: None,
             approvals: None,
             cancel: None,
+            stopping: None,
             steer: None,
             retry: ark_model::RetryPolicy::default(),
             presentation: false,
@@ -424,6 +428,13 @@ impl Harness {
         self.cancel = token;
         self
     }
+    /// Stop at the next safe point when the process is stopping: give it
+    /// [`Engine::stopping`]. The turn ends cancelled; a batch of calls that changes something
+    /// finishes first, so no change is cut in half.
+    pub fn stopping(mut self, token: Option<CancelToken>) -> Self {
+        self.stopping = token;
+        self
+    }
     /// Take messages the user sends while the turn runs (see [`Steering`]).
     pub fn steering(mut self, steer: Option<Steering>) -> Self {
         self.steer = steer;
@@ -448,6 +459,8 @@ impl Harness {
         question: &str,
         mut on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, AgentError> {
+        // Counted, so a stopping process waits for this run to reach a safe point.
+        let _run = engine.run_started();
         let mut metrics = Metrics::start();
         let turn_started = time::OffsetDateTime::now_utc();
 
@@ -1270,7 +1283,19 @@ impl Harness {
             }))
             .buffered(MAX_PARALLEL_TOOLS)
             .collect::<Vec<_>>();
-        let Some(results) = self.cancellable(runs).await else {
+        // A stopping process lets a batch that changes something finish: dropped halfway, the
+        // change may or may not have happened. Only a cancel drops it.
+        let changes = pending.iter().any(|p| p.risk == RiskTier::Mutate);
+        let results = if changes {
+            tokio::select! {
+                biased;
+                _ = cancel::wait(&self.cancel) => None,
+                out = runs => Some(out),
+            }
+        } else {
+            self.cancellable(runs).await
+        };
+        let Some(results) = results else {
             return Ok(false);
         };
         for (p, inv) in pending.iter().zip(results) {
@@ -1357,17 +1382,18 @@ impl Harness {
     }
 
     fn is_cancelled(&self) -> bool {
-        self.cancel
-            .as_ref()
-            .map(|c| c.is_cancelled())
-            .unwrap_or(false)
+        [&self.cancel, &self.stopping]
+            .into_iter()
+            .flatten()
+            .any(|c| c.is_cancelled())
     }
 
-    /// Run a future unless the turn is cancelled first. `None` means cancelled.
+    /// Run a future unless the turn is cancelled, or the process stops, first. `None` means
+    /// cancelled.
     async fn cancellable<F: std::future::Future>(&self, fut: F) -> Option<F::Output> {
         tokio::select! {
             biased;
-            _ = cancel::wait(&self.cancel) => None,
+            _ = cancel::wait_either(&self.cancel, &self.stopping) => None,
             out = fut => Some(out),
         }
     }
@@ -1400,7 +1426,7 @@ impl Harness {
             let result = loop {
                 tokio::select! {
                     biased;
-                    _ = cancel::wait(&self.cancel) => return Ok(None),
+                    _ = cancel::wait_either(&self.cancel, &self.stopping) => return Ok(None),
                     Some(text) = rx.recv() => {
                         first_token_ms.get_or_insert(attempt_started.elapsed().as_millis() as u64);
                         if stream {

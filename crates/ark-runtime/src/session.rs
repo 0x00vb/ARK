@@ -144,6 +144,9 @@ pub struct Post {
     /// The chat's last stored turn when it was posted: a transcript shows it after that turn.
     #[serde(default)]
     pub after: Option<u32>,
+    /// The work it reports on (a task id), so a result is never posted twice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work: Option<String>,
 }
 
 impl Post {
@@ -160,7 +163,14 @@ impl Post {
             ok,
             at: OffsetDateTime::now_utc(),
             after: None,
+            work: None,
         }
+    }
+
+    /// The work it reports on: [`posted`] finds it by this.
+    pub fn work(mut self, id: impl Into<String>) -> Post {
+        self.work = Some(id.into());
+        self
     }
 }
 
@@ -179,6 +189,21 @@ pub fn post(engine: &Engine, session: &str, mut post: Post) -> Result<u64, Agent
     Ok(engine
         .store
         .append_event(&posts_stream(session), &serde_json::to_value(&post)?)?)
+}
+
+/// Whether `session` has a post about the work `work` ([`Post::work`]).
+pub fn posted(engine: &Engine, session: &str, work: &str) -> Result<bool, AgentError> {
+    let mut after = 0;
+    loop {
+        let page = posts(engine, session, after, 500)?;
+        if page.iter().any(|(_, p)| p.work.as_deref() == Some(work)) {
+            return Ok(true);
+        }
+        match page.last() {
+            Some((seq, _)) if page.len() == 500 => after = *seq,
+            _ => return Ok(false),
+        }
+    }
 }
 
 /// Up to `limit` posts of `session` after sequence number `after`, oldest first.

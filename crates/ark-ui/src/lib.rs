@@ -183,11 +183,23 @@ impl ArkUi {
                 );
             }
         }
-        let (served, task) = serve::serve(host, assets, addr, access).await?;
+        let (served, task) = serve::serve(host.clone(), assets, addr, access).await?;
         println!("{}", served.url);
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = task => {}
+            _ = stop_signal() => {}
+            _ = task => return Ok(()),
+        }
+        // A deploy or a machine move: work under way continues in the next process (ADR 0038).
+        let grace = ark_sdk::prelude::ark_runtime::cancel::stop_grace();
+        eprintln!(
+            "stopping: letting work reach a safe point (up to {}s)",
+            grace.as_secs()
+        );
+        tokio::select! {
+            settled = host.stop(grace) => if !settled {
+                eprintln!("stopping: some work did not reach a safe point in time");
+            },
+            _ = stop_signal() => eprintln!("stopping now"),
         }
         Ok(())
     }
@@ -213,6 +225,30 @@ impl ArkUi {
                 std::process::ExitCode::FAILURE
             }
         }
+    }
+}
+
+/// Resolves when the process is told to stop: ctrl+c, or SIGTERM (what a deploy, a container
+/// platform or a service manager sends).
+async fn stop_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
     }
 }
 

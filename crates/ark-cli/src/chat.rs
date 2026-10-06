@@ -236,6 +236,17 @@ impl Chat {
         }
     }
 
+    /// The person leaves: agents' work under way here reaches a safe point first, and continues
+    /// the next time the app opens (ADR 0038). Nothing to wait for on a remote runtime.
+    pub(crate) async fn leave(&self) {
+        if let Chat::Local(l) = self {
+            let engine = l.ix.ark().engine();
+            engine.stop_soon();
+            let grace = ark_sdk::prelude::ark_runtime::cancel::stop_grace();
+            let _ = tokio::time::timeout(grace, engine.runs_ended()).await;
+        }
+    }
+
     /// The line the shell prints when the person leaves.
     pub(crate) fn farewell(&self, bin: &str) -> Option<String> {
         match self {

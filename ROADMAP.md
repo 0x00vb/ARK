@@ -10,7 +10,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 |---|---|
 | Stable release | **v0.11.0** (2026-10-05): work that survives a restart and a stop (ADR 0036 to 0038: questions kept on tasks and answered from any client, a restart continues work without repeating a change, each agent's step in the graph, handed-off results reach their chat once, SIGTERM lets work reach a safe point); `SurfaceKind::Terminal` and `DiffViewer` out of `ark-core`. v0.10.0 brought ARK without a window, a runtime other machines connect to, the browser, the Computer, Files, Run code, data work, the board and ARK Accounts. v0.9.0 brought Claude Code and Codex first-class |
 | `main` | v0.11.0 |
-| Consumers | SecRes (pins v0.8.0), ARK Desktop (`ark-desktop` repo; pins v0.10.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Consumers | SecRes (pins v0.8.0), ARK Desktop (`ark-desktop` repo; pins v0.11.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 
@@ -128,8 +128,8 @@ floor it must not be under.
 
 | Area | ARK today | Verdict |
 |---|---|---|
-| Work that persists | the runtime runs without a window (ADR 0016, 0017), schedules, keep running; a restart continues open work, keeps questions, never repeats a change (ADR 0037); a stop (SIGTERM, quit) leaves work to continue and handed-off results reach their chat once (ADR 0038) | at par since W1, W2, W5, W6 (`[Unreleased]`) |
-| Agent state at a glance | `AgentState`, `TaskState`, `waiting_on`, a task's `question`, each agent's `step` worded once for every client (ADR 0037) | at par since W1, W3 (`[Unreleased]`) |
+| Work that persists | the runtime runs without a window (ADR 0016, 0017), schedules, keep running; a restart continues open work, keeps questions, never repeats a change (ADR 0037); a stop (SIGTERM, quit) leaves work to continue and handed-off results reach their chat once (ADR 0038) | at par since W1, W2, W5, W6 (v0.11.0) |
+| Agent state at a glance | `AgentState`, `TaskState`, `waiting_on`, a task's `question`, each agent's `step` worded once for every client (ADR 0037) | at par since W1, W3 (v0.11.0) |
 | Parallel work | many agents, capacity-aware scheduling, dependencies, up to 4 delegations per reply; one task at a time per agent | at par. No "same task N ways, compare": can wait |
 | Isolation on shared files | one folder per project; version guard, versions before (ADR 0034) | enough for now. A copy per task when a workload shows conflicts |
 | Delegation | by brief, typed, traced, budgets (ADR 0005, 0007); the chat creates agents. Chat-created agents cannot delegate; the chat's `agents.delegate` takes no inputs or `after` | ahead in structure; gaps can wait for the hosted-model board workload |
@@ -140,8 +140,8 @@ floor it must not be under.
 | Non-code work | Files (sheets, documents), Run code, data work, browser, Computer, mail, calendar, board, artifacts by kind | ahead; nothing in the runtime assumes code |
 
 Fix before Cloud depends on it. Each is small and in an existing seam; none adds a work type.
-W1 to W3, W5 and W6 are done on `main` (ADR 0037, 0038, `[Unreleased]`); W4 is done on ARK
-Desktop's `main` and shows once Desktop pins the ARK release that has them. With these, the
+W1 to W3, W5 and W6 shipped in v0.11.0 (ADR 0037, 0038); W4 is done on ARK
+Desktop's `main`, which pins v0.11.0. With these, the
 runtime has no known blocker for Cloud running work nobody watches; what is left is checking it
 on a Cloud machine (ark-cloud, Phase 2) and Cloud's own notifications.
 

@@ -48,6 +48,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | On `workbooks`, `claude:haiku` (0/2) and qwen3.5:27b (0/2) keep orders exported twice even when told each order counts once, and Haiku does not read the `data-analysis` skill there; Sonnet and Codex pass | `bench/RESULTS.md` |
 | A run's memory and CPU are not limited: a program that reads a very large file can use most of the machine's memory | `ark-exec`, ADR 0032, 0033 |
 | Run code on Linux and Windows is checked by lint and unit tests here, not yet run on a machine of each | `ark-exec`, ADR 0032 |
+| ARK has never run on Windows. `ark-os` (ADR 0022) is on `ci/windows` only; on `main`, other processes look dead to the runtime, links open through `cmd`, and stops other than Ctrl+C get no grace | `ark-desktop/docs/WINDOWS.md` |
 | Not on crates.io; consumers pin a git tag | release |
 
 ## Next
@@ -234,6 +235,20 @@ AST and hash-anchored edit tools, per-model edit formats (a worker brings them);
 emulator, an in-band pty UI protocol, a plugin language in the runtime (Adapters, MCP and skills
 stay the extension seams); compaction tricks and mid-stream rule injection without a benchmark
 that pays; ARK as an ACP agent for editors (no user asks; ARK's client is the person, not an IDE).
+
+### Windows (proposed, not approved)
+
+ARK Desktop on Windows is planned in [`../ark-desktop/docs/WINDOWS.md`](../ark-desktop/docs/WINDOWS.md)
+(analysis of 2026-10-05). The ARK part, waiting for the owner's go:
+
+| # | Work | Why |
+|---|---|---|
+| X1 | Merge `ci/windows` (`ark-os`, ADR 0022) into `main`; move code written since onto it: stop handling, restore, `FileSecrets`, API key index, uploads, `open_in_browser` | the port is 56 commits behind; new code bypasses the boundary |
+| X2 | One runtime per store: the process that opens a store holds a lock on it until it exits; a second one is refused or connects as a client (ADR 0024) | on Windows a second process re-runs tasks the first still runs; removes the pid check everywhere (an ADR if accepted) |
+| X3 | Windows stop events in `ark-os` (Ctrl+Break, close, logoff, shutdown) for ADR 0038's safe point | today only Ctrl+C gives grace |
+| X4 | `ark-files`: a "file in use" error with plain words, legacy code pages and CSV BOM kept, `~$` lock files hidden; the data skill writes `utf-8-sig` | Windows knowledge workers keep workbooks open in Excel; Windows-1252 text loses accents on edit today |
+| X5 | `scripts/ci.sh` runs ADR 0022's `cfg` grep and a Windows cross-lint on the Mac; a self-hosted Windows runner for tests | Windows cannot regress silently while no hosted Windows CI runs |
+| X6 | After the Desktop beta: the Computer's `Screen` on UI Automation | the trait fits; about 600 lines, 2 to 3 weeks with the native pass |
 
 ### Deferred: measured runtime
 

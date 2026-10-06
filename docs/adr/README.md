@@ -44,6 +44,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0036](0036-a-runtime-for-work.md) | A runtime for work: coding is one workload, no new work model, and what a client shows about work is runtime state | Accepted |
 | [0037](0037-work-survives-a-restart.md) | Work survives a restart: a question is kept on its task and any client answers it; a restart continues work, never repeats a change, and fails a task only when a change was cut short; each agent's step is in the graph | Accepted |
 | [0038](0038-results-reach-the-chat-and-a-stop-is-graceful.md) | A result the chat handed off reaches it once (as its answer or a post, also after a restart); a stop (SIGTERM, quit) lets a change under way finish and leaves work to continue in the next process | Accepted |
+| [0039](0039-agent-harnesses-are-workers.md) | Agent harnesses are workers: ARK owns the task boundary (brief, capabilities, approvals, outputs, result), the worker owns its loop; ARK stays the authority for task state, approvals, grants, artifacts, budgets and recovery; no coding-harness features in ARK; ACP first, its behaviour tested before H4 | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

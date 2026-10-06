@@ -4,7 +4,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-05 (v0.10.0; work runtime W1 to W6, ADR 0036 to 0038)
+Last updated: 2026-10-05 (v0.10.0; work runtime W1 to W6, ADR 0036 to 0039)
 
 ## Release
 
@@ -22,6 +22,7 @@ Last updated: 2026-10-05 (v0.10.0; work runtime W1 to W6, ADR 0036 to 0038)
 | What | Owner |
 |---|---|
 | Rename "Allow for this session" in approvals | the owner decides the words |
+| Agent harnesses as workers (ADR 0039, accepted; ROADMAP › Work runtime, H1 to H5): Claude Code, Codex, OMP or any ACP agent runs a task under ARK's work model. Not built; ACP first; how each agent behaves over ACP (writes, permissions, outputs, resume) is tested before H4 counts as solved | a concrete external-worker use case |
 | Board: whether the chat uses the board unasked for project-sized work, and hosted models (the `board` workload passes 3/3 live on qwen3:4b when asked); board tools for code-defined team leads | before turning anything on or off by default (ADR 0023) |
 | ARK Desktop moves its keys to ARK's store (`ark_connect::ApiKeys`, the `api_key_*` methods) and drops `setup::keychain` and `load_keys` | ARK Desktop |
 | A paid-model run of scheduling: qwen3:4b claims schedules it never made | needs the owner's OK |

@@ -123,7 +123,8 @@ ARK is a runtime people give work and outcomes to; several agents are an impleme
 the chat decides on. Reviewed 2026-10-05 against coding-agent orchestrators (Orca: parallel
 agents in git worktrees, compare and merge, SSH, a phone app; Herdr: a terminal multiplexer
 that knows each agent's state, sessions that survive detach, a socket agents drive each other
-through). ARK does not copy them; this is the floor it must not be under.
+through). Extended the same day to Tern and OMP (below). ARK does not copy them; this is the
+floor it must not be under.
 
 | Area | ARK today | Verdict |
 |---|---|---|
@@ -134,7 +135,7 @@ through). ARK does not copy them; this is the floor it must not be under.
 | Delegation | by brief, typed, traced, budgets (ADR 0005, 0007); the chat creates agents. Chat-created agents cannot delegate; the chat's `agents.delegate` takes no inputs or `after` | ahead in structure; gaps can wait for the hosted-model board workload |
 | Local, remote, cloud | one binary and protocol everywhere (ADR 0016, 0024, 0029, 0030), Cloud machines on it | ahead |
 | Observability | stored `OrchEvent`s, `graph()`, `task_trace`, usage and cost per task | ahead |
-| Extension | `Adapter`, stdio MCP, skills, connections; the protocol is JSON over HTTP + SSE | gap: remote MCP servers (most business apps ship one); any CLI agent as an agent (Orca, Herdr) is not ARK's model |
+| Extension | `Adapter`, stdio MCP, skills, connections; the protocol is JSON over HTTP + SSE | gap: remote MCP servers (most business apps ship one). Vendor agents as workers: see "Agent harnesses as workers" below (ADR 0039) |
 | Low friction | chat first, no forms, Connect in one click, approvals | ahead for non-programmers; the gap is shipping Desktop (step 3) |
 | Non-code work | Files (sheets, documents), Run code, data work, browser, Computer, mail, calendar, board, artifacts by kind | ahead; nothing in the runtime assumes code |
 
@@ -159,21 +160,80 @@ Found while building W1 to W3; needed before Cloud runs work nobody watches (Pha
 | W5 (done) | **Work the chat hands off reports back to it.** `agents.delegate` sets `report_to` to the chat (as `agents.schedule` does), so a result reaches the conversation even when the turn that waited for it is gone (a restart) or did not wait (`wait: false`); a waited-for result is not posted twice | the chat delegates, the process restarts, the result appears in that chat |
 | W6 (done) | **A stop is graceful.** On SIGTERM (what a deploy or a machine move sends) the runtime takes no new work, lets a running change finish within a grace period, saves running tasks to continue, and exits; the next start continues them with nothing cut short | a deploy during a change: the change runs once and the task finishes, with no "cut short" failure |
 
+#### Reviewed against Tern and OMP (2026-10-05)
+
+Both come from Stencil Labs. OMP (Oh My Pi, MIT, a fork of Pi, about 34k stars, several releases
+a day) is a coding-agent harness. It has 31 tools, among them LSP, a DAP debugger, AST edits and
+hash-anchored edits. It also has 60+ providers with per-role models, subagents with filesystem
+clones, a compaction cascade, remote MCP with OAuth, TypeScript extensions, an NDJSON RPC with
+host tools and SDKs in four languages, and a native ACP server. Its default approval mode runs
+everything and it has no OS sandbox. Tern (closed source, closed beta, 0.4.x) is a native
+terminal and workspace. A daemon owns the panes, and the desktop, iOS, a web tab and remote
+hosts over QUIC mirror them. Its in-band UI protocol (TSP: typed nodes, incremental ops, events
+back, ANSI fallback) lets any program draw native views. Luau plugins add lenses over command
+output, blocks and an agents API. Sources and detail: ADR 0039 › Context.
+
+| Area | Tern / OMP | ARK | Verdict |
+|---|---|---|---|
+| Durable sessions | Tern: panes outlive windows, scrollback and omp's conversation come back after a reboot. OMP: session files, a tree, resume | work outlives the process: tasks resume, questions are kept, changes are not repeated, results reach their chat (ADR 0037, 0038) | ahead. They keep sessions; ARK keeps work |
+| Clients on one runtime | Tern: desktop, iOS, web, remote, typing mirrored | window, browser page, terminal, remote, Cloud; one protocol | at par. Phone only through the browser (a phone app can wait) |
+| Agent state | Tern: working, idle, waiting from OSC 9;4 progress, any agent | each agent's step and what it waits for, stored (W3) | ahead |
+| Programs drawing UI | Tern: TSP, 40+ node kinds, forms and events back, any program on the pty | outputs are files with a kind and one view each (ADR 0021); app views through `ark.view`; tool cards worded in `ark-interact` | different layer. Lesson below; no in-band terminal protocol |
+| Protocol for others | OMP: RPC with a JSON schema, generated SDKs, ACP. Tern: CLI and NDJSON events against the daemon | JSON over HTTP and SSE; a Rust client; no published schema, no version in `hello` | gap when the first outside client comes (item below) |
+| Capabilities | OMP: browser, computer, eval (persistent Python), web, MCP stdio, http and SSE with OAuth | browser, Computer (every action asks), Run code contained on three systems, Files, connections with OAuth, stdio MCP | ahead on safety and non-code work. Behind on remote MCP with sign-in |
+| Context efficiency | OMP: compaction cascade, cache-aware pruning, cache warming, big outputs as `artifact://`, code read as outlines | no transcript replay, bounded context, distilled cards, raw output in the store, cost per success measured | ahead in design. Live cache reads still unmeasured (Known limitations) |
+| Models | OMP: 60+ providers, roles (smol, slow, plan), fallback chains on quota, subscriptions through OAuth | Ollama, Anthropic, OpenAI, Claude and ChatGPT subscriptions through their CLIs, named OpenAI-compatible endpoints, roles | at par. ARK does not move work to another provider without asking (ADR 0014) |
+| Isolation between agents | OMP: a clone per subagent (APFS, reflink, overlay, copy), merged back as a patch | version guard, versions before (ADR 0034) | enough for ARK's own agents. Becomes a floor once a worker writes with its own tools (ADR 0039) |
+| Coding tools | OMP: LSP, DAP, AST and hashline edits, git, per-model edit formats | none, on purpose | not ARK's to build: comes with a worker |
+| Agent harness as a worker | Tern runs any agent in a pane, omp natively. OMP speaks ACP | vendor CLIs are models only; every task runs in ARK's `Harness` | gap, structural (below) |
+
+Agent harnesses as workers (ADR 0039, Accepted; not built until a concrete external-worker use case validates the seam). ARK's task boundary already fits a worker: a
+brief in (ADR 0005), an answer and outputs out, `HarnessEvent`s in between. Five gaps block it.
+None is a new work type:
+
+| # | Gap | Generic fix |
+|---|---|---|
+| H1 | `Orchestrator::attempt` always builds ARK's `Harness` | a worker resolved like a model (`ModelResolver`), so orchestration names no vendor |
+| H2 | ARK is only an MCP client; nothing outside its loop can call its capabilities | serve the agent's filtered `Registry` to the worker: ACP `fs/*` and `terminal/*`, and MCP per task, through the same gate and invocation log |
+| H3 | A worker's permission request has no path to the `ApprovalGate` | ACP `session/request_permission` as an `OnBehalf` request, so it becomes a stored question (W1) |
+| H4 | Outputs, versions before and "never repeat a change" come from ARK's invocation log; a worker's own writes are invisible | writes through ARK where the agent allows; else a folder checkpoint per task (the deferred copy per task) |
+| H5 | ADR 0004 says vendor sessions are disposable; a worker's transcript is its own | canonical at the task boundary; the worker's session is a cache (`session/load` when it exists) |
+
+First slice, when triggered: one ACP worker (OMP natively; Claude Code and Codex through their
+adapters), H1 to H3, file writes through ARK, measured against ARK's own agent on two
+workloads. Direct bridges (Claude Code `stream-json` with tools on, Codex `app-server` with
+approvals) only where ACP measurably falls short. H4 is not solved until a test records how
+OMP, Claude Code and Codex behave over ACP: where writes go, which actions ask permission, what
+tool calls report as outputs, and whether a session comes back after a restart (ADR 0039 ›
+Consequences). Design from those results, not from the spec.
+
+What ARK takes from Tern, without becoming a terminal: (1) the daemon-owns-state, clients-mirror
+model, which ARK already has for work; (2) a typed, versioned protocol with a schema, text
+fallback and generated clients; (3) a small vocabulary of views a tool or worker can send
+(table, key-value, checklist, progress, a form that answers back) that every client draws and
+the terminal prints as text. Start from ACP's own `plan` and `diff` content and ARK's kinds. Do
+not build a parallel UI system. Trigger: the first worker or MCP tool whose progress shows only
+as text.
+
 Can wait, each until its trigger:
 
 | Item | Trigger |
 |---|---|
-| A copy of the project folder per task (the generic worktree), and running one task N ways to compare | a workload or a user shows agents overwriting each other, or asks for best-of-N |
+| A copy of the project folder per task (the generic worktree; a clone or reflink where the filesystem has one, as OMP's `pi-iso`), and running one task N ways to compare | a workload or a user shows agents overwriting each other, asks for best-of-N, or the first worker that writes with its own tools (H4) |
 | A done-check on a work item (acceptance criteria the runtime verifies) | the board workload on a hosted model shows items marked done that are not |
 | Teams from the chat (`agents.create` with `delegates_to`), inputs and `after` on the chat's `agents.delegate` | the same workload shows the chat needs them |
-| Remote MCP servers with sign-in on ARK's connections | after Desktop is public, before ARK builds more services itself: the scalable way to business apps |
-| A vendor agent (Claude Code, Codex with its own tools) as an ARK agent | people ask for it; today vendor CLIs are ARK models (ADR 0012) |
-| The protocol in its own crate, out of `ark-ui`, with a version in `hello` | the first client not served by the runtime it talks to (a Cloud web app, a phone app) |
+| Remote MCP servers with sign-in on ARK's connections | after Desktop is public, before ARK builds more services itself: the scalable way to business apps. OMP, Claude Code and Codex all have it: the floor for capabilities |
+| Agent harnesses as workers (Claude Code, Codex, OMP, any ACP agent): H1 to H3, then H4 (ADR 0039) | a person asks to run work on a vendor agent with its own tools, or a coding consumer on ARK needs it; today vendor CLIs are ARK models (ADR 0012) |
+| The protocol in its own crate, out of `ark-ui`, with a version in `hello`, a published schema and a client outside Rust (OMP and Tern both publish theirs) | the first client not served by the runtime it talks to (a Cloud web app, a phone app) |
 | A phone app | after a phone browser on a remote or Cloud runtime falls short (the page has a narrow layout) |
 | `SurfaceKind::Terminal` and `DiffViewer` out of `ark-core`; `present` offers a terminal only where the host has one | the next breaking release |
 
 Kept out: git worktrees, branches, pull requests and terminal multiplexing as runtime concepts.
-They belong to a coding app built on ARK.
+They belong to a coding app built on ARK. Also kept out after the Tern and OMP review: LSP, debugger,
+AST and hash-anchored edit tools, per-model edit formats (a worker brings them); a terminal
+emulator, an in-band pty UI protocol, a plugin language in the runtime (Adapters, MCP and skills
+stay the extension seams); compaction tricks and mid-stream rule injection without a benchmark
+that pays; ARK as an ACP agent for editors (no user asks; ARK's client is the person, not an IDE).
 
 ### Deferred: measured runtime
 

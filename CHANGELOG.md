@@ -9,6 +9,16 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-06
+
+A browser comes in through a one-time link and keeps a session in a cookie (ADR 0040).
+
+### Breaking
+- A page served by `ArkUi::serve` runs only scripts it serves: an inline `<script>` or a script
+  from another origin is blocked by its Content-Security-Policy. Serve it as a file
+  (`ArkUi::asset` and `ArkUi::script`).
+- `TokenInfo` has `expires_ms` (None for a saved token): code that builds a `TokenInfo` sets it.
+
 ### Added
 - A browser comes in through a one-time link and keeps a session in a cookie (ADR 0040):
   `Tokens::link`, `Tokens::redeem`, `Tokens::end`, `TokenInfo::expires_ms`, `ArkUi::entry`, and

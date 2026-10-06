@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "agent-team"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "ark-interact",
@@ -169,7 +169,7 @@ dependencies = [
 
 [[package]]
 name = "ark-account"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-connect",
  "reqwest 0.12.28",
@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "ark-bench"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "ark-orchestrate",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "ark-browser"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "ark-runtime",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "ark-cli"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "ark-interact",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "ark-computer"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "ark-runtime",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "ark-connect"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "ark-model",
@@ -273,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "ark-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "blake3",
  "serde",
@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "ark-exec"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "ark-runtime",
@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "ark-files"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "ark-tools",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "ark-interact"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "ark-orchestrate",
@@ -337,7 +337,7 @@ dependencies = [
 
 [[package]]
 name = "ark-model"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "ark-orchestrate"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "ark-model",
@@ -375,7 +375,7 @@ dependencies = [
 
 [[package]]
 name = "ark-runtime"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "ark-model",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "ark-sdk"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-browser",
  "ark-computer",
@@ -417,7 +417,7 @@ dependencies = [
 
 [[package]]
 name = "ark-store"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "rusqlite",
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "ark-tools"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-core",
  "async-trait",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "ark-ui"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "ark-interact",
@@ -3141,7 +3141,7 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minimal-agent"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "ark-sdk",
  "async-trait",
@@ -6969,7 +6969,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "writing-agent"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "anyhow",
  "ark-cli",

@@ -9,6 +9,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-05
+
 Work survives a restart and a stop, and what it waits for is the runtime's (ADR 0036, 0037,
 0038).
 

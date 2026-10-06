@@ -166,6 +166,183 @@ async fn saved_tokens_admit_any_host_and_revoke_at_once() {
     assert!(still.contains(r#""ok":true"#));
 }
 
+/// A POST with a JSON body, from a page at `origin` (or none).
+fn post(path: &str, host: &str, origin: Option<&str>, extra: &str, body: &str) -> String {
+    let origin = origin
+        .map(|o| format!("Origin: {o}\r\n"))
+        .unwrap_or_default();
+    format!(
+        "POST {path} HTTP/1.1\r\nHost: {host}\r\n{origin}{extra}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+/// The value a response sets for `name`, and the rest of that header line.
+fn set_cookie<'a>(resp: &'a str, name: &str) -> Option<(&'a str, &'a str)> {
+    resp.lines()
+        .find_map(|l| l.strip_prefix("Set-Cookie: "))
+        .and_then(|c| c.strip_prefix(name)?.strip_prefix('='))
+        .and_then(|c| c.split_once(';'))
+}
+
+#[tokio::test]
+async fn a_one_time_link_becomes_a_session_cookie_the_page_never_sees() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let hour = Duration::from_secs(3600);
+    let (_host, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .entry("https://account.example.com/open")
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let port = served.port;
+    let host = "ws-1.example.dev";
+    let me = "https://ws-1.example.dev";
+
+    // Out: the page learns where to go, and every answer carries the page's policy.
+    let out = raw(
+        port,
+        format!("GET /session HTTP/1.1\r\nHost: {host}\r\n\r\n"),
+    )
+    .await;
+    assert!(out.contains(r#""signed_in":false"#), "{out}");
+    assert!(out.contains(r#""entry":"https://account.example.com/open""#));
+    let page = raw(port, format!("GET / HTTP/1.1\r\nHost: {host}\r\n\r\n")).await;
+    for h in [
+        "Content-Security-Policy: default-src 'self'; script-src 'self';",
+        "frame-ancestors 'none'",
+        "Referrer-Policy: no-referrer",
+        "X-Content-Type-Options: nosniff",
+    ] {
+        assert!(page.contains(h), "page lacks {h}");
+    }
+
+    // A link from another page is refused; from this page it becomes an HttpOnly cookie, once.
+    let code = tokens
+        .link("Chrome on Mac", Duration::from_secs(60), hour)
+        .unwrap();
+    let body = json!({ "code": code }).to_string();
+    let elsewhere = raw(
+        port,
+        post("/session", host, Some("https://evil.example"), "", &body),
+    )
+    .await;
+    assert!(elsewhere.starts_with("HTTP/1.1 403"), "{elsewhere}");
+    let inside = raw(port, post("/session", host, Some(me), "", &body)).await;
+    assert!(inside.starts_with("HTTP/1.1 200"), "{inside}");
+    let (session, attrs) = set_cookie(&inside, "__Host-ark-session").expect("a cookie");
+    assert!(session.starts_with("arks_"));
+    for a in ["Path=/", "HttpOnly", "SameSite=Strict", "Secure"] {
+        assert!(
+            attrs.contains(a) || inside.contains(&format!("; {a}")),
+            "cookie lacks {a}"
+        );
+    }
+    assert!(
+        !inside.split("\r\n\r\n").nth(1).unwrap().contains(session),
+        "not in the body"
+    );
+    let again = raw(port, post("/session", host, Some(me), "", &body)).await;
+    assert!(
+        again.starts_with("HTTP/1.1 401") && again.contains(r#""entry""#),
+        "once"
+    );
+
+    // The cookie reads and changes from this page; a change from another page is refused.
+    let cookie = format!("Cookie: theme=dark; __Host-ark-session={session}\r\n");
+    let rpc_body = json!({ "method": "hello", "params": {} }).to_string();
+    let ok = raw(port, post("/rpc", host, Some(me), &cookie, &rpc_body)).await;
+    assert!(ok.contains(r#""ok":true"#), "{ok}");
+    let csrf = raw(
+        port,
+        post(
+            "/rpc",
+            host,
+            Some("https://evil.example"),
+            &cookie,
+            &rpc_body,
+        ),
+    )
+    .await;
+    assert!(csrf.starts_with("HTTP/1.1 403"), "{csrf}");
+    let blind = raw(port, post("/rpc", host, None, &cookie, &rpc_body)).await;
+    assert!(
+        blind.starts_with("HTTP/1.1 403"),
+        "no Origin, no Sec-Fetch-Site: refused"
+    );
+    let same = raw(
+        port,
+        post(
+            "/rpc",
+            host,
+            None,
+            &format!("{cookie}Sec-Fetch-Site: same-origin\r\n"),
+            &rpc_body,
+        ),
+    )
+    .await;
+    assert!(same.contains(r#""ok":true"#));
+    let state = raw(
+        port,
+        format!("GET /session HTTP/1.1\r\nHost: {host}\r\n{cookie}\r\n"),
+    )
+    .await;
+    assert!(state.contains(r#""signed_in":true"#));
+
+    // Signing out ends this session only; revoking the name ends the rest.
+    let other = tokens
+        .redeem(
+            &tokens
+                .link("Chrome on Mac", Duration::from_secs(60), hour)
+                .unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+    let del = raw(port, format!("DELETE /session HTTP/1.1\r\nHost: {host}\r\nOrigin: {me}\r\n{cookie}Content-Length: 0\r\n\r\n")).await;
+    assert!(del.starts_with("HTTP/1.1 200"));
+    assert_eq!(
+        set_cookie(&del, "__Host-ark-session").map(|c| c.0),
+        Some("")
+    );
+    let after = raw(port, post("/rpc", host, Some(me), &cookie, &rpc_body)).await;
+    assert!(after.starts_with("HTTP/1.1 401"));
+    assert_eq!(tokens.check(&other.token).as_deref(), Some("Chrome on Mac"));
+    tokens.revoke("Chrome on Mac").unwrap();
+    let revoked = raw(
+        port,
+        post(
+            "/rpc",
+            host,
+            Some(me),
+            &format!("Cookie: __Host-ark-session={}\r\n", other.token),
+            &rpc_body,
+        ),
+    )
+    .await;
+    assert!(revoked.starts_with("HTTP/1.1 401"));
+
+    // On a loopback address the cookie is named for the port and works over plain HTTP.
+    let local = format!("127.0.0.1:{port}");
+    let code = tokens
+        .link("Firefox", Duration::from_secs(60), hour)
+        .unwrap();
+    let body = json!({ "code": code }).to_string();
+    let inside = raw(
+        port,
+        post(
+            "/session",
+            &local,
+            Some(&format!("http://{local}")),
+            "",
+            &body,
+        ),
+    )
+    .await;
+    let (_, attrs) = set_cookie(&inside, &format!("ark-session-{port}")).expect("a port cookie");
+    assert!(!attrs.contains("Secure") && !inside.contains("; Secure"));
+}
+
 #[tokio::test]
 async fn the_one_time_token_still_answers_only_the_loopback_host() {
     let dir = tempfile::tempdir().unwrap();
@@ -366,4 +543,79 @@ async fn a_folder_sent_from_another_computer_becomes_a_project_there() {
         .await
         .unwrap();
     assert_eq!(first, second);
+}
+
+#[tokio::test]
+async fn a_revoked_session_stops_receiving_events_on_a_stream_it_already_had() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let script = tokens.create("script").unwrap();
+    let (_host, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let port = served.port;
+    let host = "ws-1.example.dev";
+    let s = tokens
+        .redeem(
+            &tokens
+                .link(
+                    "Chrome on Mac",
+                    Duration::from_secs(60),
+                    Duration::from_secs(3600),
+                )
+                .unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream
+        .write_all(
+            format!(
+                "GET /events HTTP/1.1\r\nHost: {host}\r\nCookie: __Host-ark-session={}\r\n\r\n",
+                s.token
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut buf = vec![0u8; 4096];
+    let n = stream.read(&mut buf).await.unwrap();
+    assert!(String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200"));
+
+    // Signed out elsewhere; then something happens in the runtime.
+    tokens.revoke("Chrome on Mac").unwrap();
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let client = Client::new(&format!("http://127.0.0.1:{port}"), &script);
+    client
+        .call("spawn_agent", json!({ "spec": { "name": "reader", "role": "reads the notes", "tools": ["notes.*"] } }))
+        .await
+        .unwrap();
+    client
+        .call(
+            "submit_task",
+            json!({ "agent": "reader", "task": { "objective": "read the notes" } }),
+        )
+        .await
+        .unwrap();
+    let mut got = String::new();
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            if n == 0 {
+                return;
+            }
+            got.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+    })
+    .await;
+    assert!(closed.is_ok(), "the stream stayed open after the revoke");
+    assert!(
+        !got.contains("data:"),
+        "an event reached a revoked session: {got}"
+    );
 }

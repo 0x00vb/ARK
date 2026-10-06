@@ -36,6 +36,21 @@ ArkUi::new(app)
 Give your binary a way to manage tokens (ARK Desktop: `ark-desktop token create NAME`). A token
 sent by a client may be in `Authorization: Bearer`, `X-Ark-Token` or `?token=`.
 
+## A browser sent by a control plane
+
+A service that signs people in (ARK Cloud's console) sends a browser into the runtime with a
+one-time link instead of a token (ADR 0040):
+
+| Piece | Does |
+|---|---|
+| `Tokens::link(name, valid_for, session)` | a one-time code (ARK Desktop: `ark-desktop token link NAME [MINUTES]`); only its hash is kept |
+| `https://runtime/#code=arkl_…` | the page takes the code out of the address and trades it at `POST /session` for a session in an HttpOnly, `SameSite=Strict` cookie that ends on its own |
+| `ArkUi::entry(url)` | where a browser without a session goes (the service's page that signs in and makes a new link); `GET /session` answers `{signed_in, entry}` |
+| `Tokens::revoke(name)` | ends every session made from links of that name, open event streams included |
+
+A change the cookie carries must come from the page itself (`Origin`). Every answer has a
+Content-Security-Policy that runs only the runtime's own scripts.
+
 ## What a token allows
 
 Everything the window can do, on the runtime's machine, as the OS user the app runs as: run
@@ -50,7 +65,7 @@ ARK serves plain HTTP. Put it behind something that adds TLS:
 
 | Setup | How |
 |---|---|
-| A public host name | Caddy on the same machine: `ark.example.com { reverse_proxy 127.0.0.1:8420 }` gets and renews a certificate by itself. Keep its access log off (the page's event stream has the token in its address) |
+| A public host name | Caddy on the same machine: `ark.example.com { reverse_proxy 127.0.0.1:8420 }` gets and renews a certificate by itself. Keep its access log off (with `?token=`, the page's event stream has the token in its address; a browser with a session sends none) |
 | A private network | Tailscale or WireGuard; serve on the private address only |
 
 Server-sent events pass through Caddy without settings (tested with ARK Desktop's

@@ -57,6 +57,7 @@ pub struct ArkUi {
     handlers: HashMap<String, Handler>,
     start: Start,
     access: Access,
+    entry: Option<String>,
     keep_running: bool,
 }
 
@@ -69,6 +70,7 @@ impl ArkUi {
             handlers: HashMap::new(),
             start: Start::default(),
             access: Access::default(),
+            entry: None,
             keep_running: false,
         }
     }
@@ -141,6 +143,14 @@ impl ArkUi {
         self
     }
 
+    /// Where a browser without a session is sent: the app's page that signs a person in and
+    /// comes back with a one-time link (ADR 0040). With saved tokens only. Without it, the page
+    /// says it needs a link.
+    pub fn entry(mut self, url: impl Into<String>) -> Self {
+        self.entry = Some(url.into());
+        self
+    }
+
     /// The native window: closing it hides it and the app keeps running, with an item in the
     /// menu bar (the tray elsewhere) to open it again or quit. Schedules and agents' work go on;
     /// a question that waits shows a system notification. Default: closing the window quits.
@@ -172,7 +182,7 @@ impl ArkUi {
     /// Serve the workspace at `addr` (e.g. `127.0.0.1:0`) until ctrl+c. Prints the URL, which
     /// carries the one-time token unless [`access`](Self::access) gave saved tokens.
     pub async fn serve(self, addr: &str) -> anyhow::Result<()> {
-        let access = self.access.clone();
+        let (access, entry) = (self.access.clone(), self.entry.clone());
         let (host, assets) = self.open().await?;
         screen_stays_here(&host, &access)?;
         if let Access::Tokens(tokens) = &access {
@@ -183,7 +193,7 @@ impl ArkUi {
                 );
             }
         }
-        let (served, task) = serve::serve(host.clone(), assets, addr, access).await?;
+        let (served, task) = serve::serve(host.clone(), assets, addr, access, entry).await?;
         println!("{}", served.url);
         tokio::select! {
             _ = stop_signal() => {}
@@ -206,10 +216,10 @@ impl ArkUi {
 
     /// Start serving and return at once (tests, embedding).
     pub async fn serve_background(self, addr: &str) -> anyhow::Result<(Arc<Host>, Served)> {
-        let access = self.access.clone();
+        let (access, entry) = (self.access.clone(), self.entry.clone());
         let (host, assets) = self.open().await?;
         screen_stays_here(&host, &access)?;
-        let (served, _task) = serve::serve(host.clone(), assets, addr, access).await?;
+        let (served, _task) = serve::serve(host.clone(), assets, addr, access, entry).await?;
         Ok((host, served))
     }
 

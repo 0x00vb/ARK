@@ -38,11 +38,53 @@ export function connect() {
     if (token) sessionStorage.setItem("ark-token", token);
     else token = sessionStorage.getItem("ark-token");
   } catch {}
-  if (url.searchParams.has("token")) {
+  // A one-time link from the runtime's entry (ADR 0040): `#code=…`. It leaves the address at
+  // once and is traded for a session the browser keeps in an HttpOnly cookie; the page never
+  // holds a secret.
+  const code = new URLSearchParams(url.hash.slice(1)).get("code");
+  if (url.searchParams.has("token") || code) {
     url.searchParams.delete("token");
     history.replaceState(null, "", url.pathname + url.search);
   }
-  // In the window, on a runtime it visits: the window's title bar and a way back. In a
+  const ready = code
+    ? fetch("/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }).catch(() => {})
+    : Promise.resolve();
+  const headers = { "content-type": "application/json", ...(token ? { "x-ark-token": token } : {}) };
+  // Where the entry is, learnt while the runtime answers: a runtime that went down cannot say.
+  let entry = null;
+  const session = async () => {
+    try {
+      const r = await fetch("/session", { cache: "no-store" });
+      const s = r.ok ? await r.json() : null;
+      if (s?.entry) entry = s.entry;
+      return s;
+    } catch {
+      return null;
+    }
+  };
+  if (!token) ready.then(session);
+  // Without a session, the runtime's entry (an app's sign-in page) brings a fresh link. At most
+  // once in 30 seconds, so a link that keeps failing shows the error instead of looping. Calls
+  // that fail together share one answer: the page leaves once.
+  let entering = null;
+  const enter = () =>
+    (entering ??= (async () => {
+      const s = await session();
+      if (!s?.entry) return false;
+      const now = Date.now();
+      let last = 0;
+      try {
+        last = Number(sessionStorage.getItem("ark-entered")) || 0;
+        sessionStorage.setItem("ark-entered", String(now));
+      } catch {}
+      if (now - last < 30000) return false;
+      location.replace(s.entry);
+      return true;
+    })().then((left) => {
+      if (!left) entering = null;
+      return left;
+    }));
+  // In the window on a runtime it visits: the window's title bar and a way back. In a
   // browser, or a window opened only on that runtime (`run_window`), neither.
   const inWindow = !!window.__TAURI__;
   return {
@@ -55,26 +97,29 @@ export function connect() {
     // A page in a browser cannot see the runtime's disk: no native picker.
     pickFolder: async () => undefined,
     async call(method, params = {}) {
-      const r = await fetch("/rpc", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-ark-token": token || "" },
-        body: JSON.stringify({ method, params }),
-      });
-      if (r.status === 401) throw new Error("This page needs the link printed at start (with its token).");
+      await ready;
+      const r = await fetch("/rpc", { method: "POST", headers, body: JSON.stringify({ method, params }) });
+      if (r.status === 401) {
+        // Leaving for the entry: the call never settles, so nothing flashes an error.
+        if (await enter()) return new Promise(() => {});
+        throw new Error("This page needs the link printed at start (with its token).");
+      }
       const j = await r.json();
       if (!j.ok) throw new Error(j.error);
       return j.result;
     },
     // The browser's EventSource retries every few seconds forever. Instead: close it on an
     // error and reconnect with exponential backoff (1 s doubling to 30 s, with jitter); after
-    // RECONNECT_TRIES failures, stop and report `disconnected` with a `retry` function. A
+    // `tries()` failures, stop and report `disconnected` with a `retry` function. A
     // reconnect reports `resync`: the page reloads its state and replays the running turn.
+    // A session that ended goes to the entry. With an entry, the page stops trying sooner (about
+    // 15 seconds) and `retry` goes there: it starts a runtime that stopped, then comes back.
     subscribe(fn) {
-      const RECONNECT_TRIES = 10;
+      const tries = () => (entry && !token ? 4 : 10);
       let failures = 0;
       let everOpen = false;
       const open = () => {
-        const es = new EventSource(`/events?token=${encodeURIComponent(token || "")}`);
+        const es = new EventSource(token ? `/events?token=${encodeURIComponent(token)}` : "/events");
         es.onopen = () => {
           if (everOpen) fn({ kind: "resync" });
           if (failures > 0) fn({ kind: "connected" });
@@ -82,10 +127,13 @@ export function connect() {
           failures = 0;
         };
         es.onmessage = (e) => fn(JSON.parse(e.data));
-        es.onerror = () => {
+        es.onerror = async () => {
           es.close();
-          if (failures >= RECONNECT_TRIES) {
-            fn({ kind: "disconnected", retry: () => { failures = 0; open(); } });
+          const s = await session();
+          if (s && !s.signed_in && (await enter())) return;
+          if (failures >= tries()) {
+            const retry = entry && !token ? () => location.assign(entry) : () => { failures = 0; open(); };
+            fn({ kind: "disconnected", retry });
             return;
           }
           const delay = Math.min(30000, 1000 * 2 ** failures) * (0.5 + Math.random() / 2);
@@ -94,7 +142,7 @@ export function connect() {
           setTimeout(open, delay);
         };
       };
-      open();
+      ready.then(open);
     },
   };
 }

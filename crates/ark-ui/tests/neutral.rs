@@ -51,8 +51,10 @@ fn scan(dir: &Path, code_only: bool, hits: &mut Vec<String>) {
                     continue;
                 }
             }
-            // `IpAddr` (std::net) is not the tablet.
-            let line = line.replace("ipaddr", "");
+            // `IpAddr` (std::net) is not the tablet, nor is the HTTP header a domain.
+            let line = line
+                .replace("ipaddr", "")
+                .replace("content-security-policy", "");
             for w in WORDS {
                 if line.contains(w) {
                     hits.push(format!("{}:{}: `{w}`", p.display(), n + 1));

@@ -9,6 +9,24 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- A browser comes in through a one-time link and keeps a session in a cookie (ADR 0040):
+  `Tokens::link`, `Tokens::redeem`, `Tokens::end`, `TokenInfo::expires_ms`, `ArkUi::entry`, and
+  `GET/POST/DELETE /session` on a served runtime. The page trades `#code=` for an HttpOnly,
+  `SameSite=Strict` session cookie, goes to the entry when it has no session, and stops
+  reconnecting sooner with an entry ([`docs/REMOTE.md`](docs/REMOTE.md)).
+
+### Changed
+- A served page has a Content-Security-Policy (only its own scripts, no framing),
+  `Referrer-Policy: no-referrer` and `nosniff` on every answer. An inline script or one from
+  elsewhere no longer runs there.
+- A request carried by the session cookie that changes something must come from the page
+  (`Origin`); an event stream ends when its token or session is revoked or over.
+- `access.json` changes hold a lock (`access.json.lock`).
+
+### Fixed
+- The page's "Disconnected" toast in a plain browser no longer shows "nullnull".
+
 ## [0.11.0] - 2026-10-05
 
 Work survives a restart and a stop, and what it waits for is the runtime's (ADR 0036, 0037,

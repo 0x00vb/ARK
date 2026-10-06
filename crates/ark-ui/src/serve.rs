@@ -7,6 +7,13 @@
 //! another local process or a web page cannot drive the agent. With saved tokens (a runtime
 //! other machines connect to, ADR 0016) any `Host` is accepted: a reverse proxy in front
 //! terminates TLS and passes its own name.
+//!
+//! A browser can also come in through a one-time link (ADR 0040): the page posts the code to
+//! `POST /session` and gets a session in an HttpOnly cookie, so no secret stays in the address,
+//! the history or the page. A request carried by that cookie must come from this page (its
+//! `Origin`) unless it only reads. `GET /session` says whether the browser is in and where one
+//! that is not should go ([`ArkUi::entry`](crate::ArkUi::entry)); `DELETE /session` ends it.
+//! Every answer carries a Content-Security-Policy that lets the page run only its own scripts.
 
 use std::sync::Arc;
 
@@ -39,6 +46,17 @@ pub struct Served {
     pub port: u16,
 }
 
+/// Headers on every answer. The page runs only scripts it serves (no inline script, nothing
+/// from elsewhere), is never framed, and sends no referrer. Styles stay inline-able (the page
+/// and its libraries set them); frames may show any web page (the workbench's browser).
+/// `ipc:` is the desktop window's own channel when it shows a runtime elsewhere.
+const PAGE_HEADERS: &str = "Content-Security-Policy: default-src 'self'; script-src 'self'; \
+style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob:; \
+font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; \
+frame-src 'self' blob: data: https: http:; worker-src 'self' blob:; object-src 'none'; \
+base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n\
+Referrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n";
+
 /// How long a client may take to send a request's head and body.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -52,6 +70,7 @@ pub(crate) async fn serve(
     assets: Arc<Assets>,
     addr: &str,
     access: Access,
+    entry: Option<String>,
 ) -> anyhow::Result<(Served, tokio::task::JoinHandle<()>)> {
     let listener = TcpListener::bind(addr).await?;
     let local = listener.local_addr()?;
@@ -76,6 +95,7 @@ pub(crate) async fn serve(
         }
     };
     let check = Arc::new(check);
+    let entry = Arc::new(entry);
     let task = tokio::spawn(async move {
         loop {
             let Ok((sock, _)) = listener.accept().await else {
@@ -83,9 +103,10 @@ pub(crate) async fn serve(
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 continue;
             };
-            let (host, assets, check) = (host.clone(), assets.clone(), check.clone());
+            let (host, assets, check, entry) =
+                (host.clone(), assets.clone(), check.clone(), entry.clone());
             tokio::spawn(async move {
-                let _ = handle(sock, host, assets, &check, port).await;
+                let _ = handle(sock, host, assets, &check, port, &entry).await;
             });
         }
     });
@@ -106,6 +127,29 @@ impl Request {
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
+    }
+    fn cookie(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+            .flat_map(|(_, v)| v.split(';'))
+            .find_map(|kv| {
+                let (k, v) = kv.trim().split_once('=')?;
+                (k == name).then_some(v)
+            })
+    }
+    /// The request comes from a page at this address: its `Origin` names this `Host`, or,
+    /// without an `Origin`, the browser says it is same-origin.
+    fn same_origin(&self) -> bool {
+        match (self.header("origin"), self.header("host")) {
+            (Some(o), Some(h)) => o.split_once("://").is_some_and(|(_, rest)| rest == h),
+            _ => self.header("sec-fetch-site") == Some("same-origin"),
+        }
+    }
+    fn loopback(&self) -> bool {
+        let host = self.header("host").unwrap_or("");
+        let name = host.rsplit_once(':').map_or(host, |(n, _)| n);
+        matches!(name, "127.0.0.1" | "localhost" | "[::1]")
     }
     fn query(&self, key: &str) -> Option<&str> {
         self.query.split('&').find_map(|kv| {
@@ -176,8 +220,19 @@ async fn respond(
     mime: &str,
     body: &[u8],
 ) -> anyhow::Result<()> {
+    respond_with(sock, status, mime, "", body).await
+}
+
+/// [`respond`] with more header lines (each ending in `\r\n`).
+async fn respond_with(
+    sock: &mut TcpStream,
+    status: &str,
+    mime: &str,
+    extra: &str,
+    body: &[u8],
+) -> anyhow::Result<()> {
     let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{PAGE_HEADERS}{extra}Connection: close\r\n\r\n",
         body.len()
     );
     sock.write_all(head.as_bytes()).await?;
@@ -197,12 +252,44 @@ impl Request {
     }
 }
 
+/// The session cookie of a browser at this address. On a loopback address (cookies do not
+/// keep ports apart) its name has the port; elsewhere the `__Host-` prefix pins it to this
+/// host, over HTTPS only.
+struct Cookie {
+    name: String,
+    secure: bool,
+}
+
+impl Cookie {
+    fn of(req: &Request, port: u16) -> Cookie {
+        if req.loopback() {
+            Cookie {
+                name: format!("ark-session-{port}"),
+                secure: false,
+            }
+        } else {
+            Cookie {
+                name: "__Host-ark-session".into(),
+                secure: true,
+            }
+        }
+    }
+    fn set(&self, value: &str, max_age_s: u64) -> String {
+        format!(
+            "Set-Cookie: {}={value}; Path=/; Max-Age={max_age_s}; HttpOnly; SameSite=Strict{}\r\n",
+            self.name,
+            if self.secure { "; Secure" } else { "" }
+        )
+    }
+}
+
 async fn handle(
     mut sock: TcpStream,
     host: Arc<Host>,
     assets: Arc<Assets>,
     check: &Check,
     port: u16,
+    entry: &Option<String>,
 ) -> anyhow::Result<()> {
     let req = tokio::time::timeout(READ_TIMEOUT, read_request(&mut sock)).await??;
     let authed = match check {
@@ -224,7 +311,78 @@ async fn handle(
         }
         Check::Tokens(tokens) => tokens.check(req.token()).is_some(),
     };
+    // Without a token, a browser's session cookie (saved tokens only).
+    let cookie = Cookie::of(&req, port);
+    let session = match check {
+        Check::Tokens(tokens) if req.token().is_empty() => req
+            .cookie(&cookie.name)
+            .filter(|t| tokens.check(t).is_some())
+            .map(str::to_string),
+        _ => None,
+    };
+    let authed = authed || session.is_some();
+    // A cookie rides along with whatever this browser sends here: a change must come from
+    // this page.
+    let changes = req.method != "GET" && req.method != "HEAD";
+    if changes && (session.is_some() || req.path == "/session") && !req.same_origin() {
+        return respond(&mut sock, "403 Forbidden", "text/plain", b"origin").await;
+    }
     match (req.method.as_str(), req.path.as_str()) {
+        ("GET", "/session") => {
+            let body = json!({ "signed_in": authed, "entry": entry });
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
+        ("POST", "/session") => {
+            let Check::Tokens(tokens) = check else {
+                return respond(&mut sock, "404 Not Found", "text/plain", b"not found").await;
+            };
+            let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let code = v["code"].as_str().unwrap_or("");
+            match tokens.redeem(code)? {
+                Some(s) => {
+                    let left = s.expires_ms.saturating_sub(now_ms()) / 1000;
+                    let body = json!({ "ok": true, "expires_ms": s.expires_ms });
+                    respond_with(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &cookie.set(&s.token, left),
+                        body.to_string().as_bytes(),
+                    )
+                    .await
+                }
+                None => {
+                    let body = json!({ "ok": false, "error": "link", "entry": entry });
+                    respond(
+                        &mut sock,
+                        "401 Unauthorized",
+                        "application/json",
+                        body.to_string().as_bytes(),
+                    )
+                    .await
+                }
+            }
+        }
+        ("DELETE", "/session") => {
+            if let (Check::Tokens(tokens), Some(t)) = (check, &session) {
+                tokens.end(t)?;
+            }
+            let body = json!({ "ok": true, "entry": entry });
+            respond_with(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                &cookie.set("", 0),
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
         ("GET", "/health") => {
             let body = json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") });
             respond(
@@ -258,22 +416,50 @@ async fn handle(
             if !authed {
                 return respond(&mut sock, "401 Unauthorized", "text/plain", b"token").await;
             }
+            // A stream outlives the check that opened it: with saved tokens it checks again at
+            // each ping and, at most once a second, before an event, and ends once the token or
+            // session it came with is revoked or over.
+            let credential = match check {
+                Check::Tokens(tokens) => Some((
+                    tokens.clone(),
+                    session.clone().unwrap_or_else(|| req.token().to_string()),
+                )),
+                Check::OneTime(_) => None,
+            };
+            let still = |last: &mut std::time::Instant| -> bool {
+                *last = std::time::Instant::now();
+                credential
+                    .as_ref()
+                    .is_none_or(|(t, c)| t.check(c).is_some())
+            };
+            let mut checked = std::time::Instant::now();
             let mut rx = host.subscribe();
             sock.write_all(
-                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: keep-alive\r\n\r\n: ready\n\n",
+                format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n{PAGE_HEADERS}Connection: keep-alive\r\n\r\n: ready\n\n")
+                    .as_bytes(),
             )
             .await?;
             let mut ping = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
                 tokio::select! {
-                    ev = rx.recv() => match ev {
-                        Ok(v) => sock.write_all(format!("data: {v}\n\n").as_bytes()).await?,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                            sock.write_all(b"data: {\"kind\":\"resync\"}\n\n").await?
+                    ev = rx.recv() => {
+                        if checked.elapsed() >= std::time::Duration::from_secs(1) && !still(&mut checked) {
+                            return Ok(());
                         }
-                        Err(_) => return Ok(()),
-                    },
-                    _ = ping.tick() => sock.write_all(b": ping\n\n").await?,
+                        match ev {
+                            Ok(v) => sock.write_all(format!("data: {v}\n\n").as_bytes()).await?,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                sock.write_all(b"data: {\"kind\":\"resync\"}\n\n").await?
+                            }
+                            Err(_) => return Ok(()),
+                        }
+                    }
+                    _ = ping.tick() => {
+                        if !still(&mut checked) {
+                            return Ok(());
+                        }
+                        sock.write_all(b": ping\n\n").await?
+                    }
                 }
             }
         }
@@ -283,4 +469,11 @@ async fn handle(
         },
         _ => respond(&mut sock, "405 Method Not Allowed", "text/plain", b"").await,
     }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }

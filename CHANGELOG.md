@@ -56,6 +56,9 @@ Work survives a restart and a stop, and what it waits for is the runtime's (ADR 
   `Labels` (`ix.labels()`), or `Labels::new(vec![])`.
 - `INTERRUPTED` is now the start of a failed task's error, not all of it (the call cut short
   follows).
+- `SurfaceKind::Terminal` and `SurfaceKind::DiffViewer` are gone from `ark-core` (ADR 0036):
+  they are a front-end's panels, not core kinds. Use `SurfaceKind::Other("terminal")` or
+  `Other("diff_viewer")`; the tag a page sends (`kind_tag`) is unchanged.
 
 ### Fixed
 - A delegated task's outputs no longer include the versions before that its calls kept for

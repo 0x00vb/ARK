@@ -143,6 +143,50 @@ fn orchestration_names_no_vendor() {
     );
 }
 
+/// The work model (ark-core's types, ark-orchestrate's agents and tasks) names no coding tool,
+/// front-end panel or worker protocol. Terminals, diffs, worktrees and pull requests are an
+/// app's surfaces or a worker's tools; an agent harness is a worker the work model does not
+/// name (ADR 0036, 0039). Comments and tests may name them.
+#[test]
+fn the_work_model_names_no_coding_or_worker_concept() {
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let words = [
+        "terminal",
+        "worktree",
+        "pull_request",
+        "pullrequest",
+        "diff_viewer",
+        "diffviewer",
+        "lsp",
+        "debugger",
+        "acp",
+    ];
+    let mut hits = Vec::new();
+    for dir in ["ark-core/src", "ark-orchestrate/src"] {
+        for e in std::fs::read_dir(crates.join(dir)).unwrap().flatten() {
+            let text = std::fs::read_to_string(e.path()).unwrap().to_lowercase();
+            for (n, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("#[cfg(test)]") {
+                    break;
+                }
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for w in words {
+                    if line.contains(w) {
+                        hits.push(format!("{}:{}: `{w}`", e.path().display(), n + 1));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "coding or worker concepts in the work model:\n{}",
+        hits.join("\n")
+    );
+}
+
 /// The core model has no field for a concept that only some domains have: an application
 /// that has no source code, processes or binaries should not see them in ARK's types.
 #[test]

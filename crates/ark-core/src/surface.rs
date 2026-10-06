@@ -1,6 +1,6 @@
 //! Surfaces: the composable views that make up the workspace. A `Surface` is a panel
-//! showing one thing — the agent, a code/text editor, a terminal, a browser, an artifact
-//! viewer, a diff, the notebook, structured data. A UI arranges them in splits and tabs;
+//! showing one thing — the agent, a text editor, a browser, an artifact viewer, the
+//! notebook, structured data. A UI arranges them in splits and tabs;
 //! adapters and plugins can contribute their own kinds (hence the `Other` escape hatch),
 //! exactly as they contribute actions and artifacts.
 //!
@@ -14,23 +14,20 @@ use crate::ids::ArtifactId;
 use serde::{Deserialize, Serialize};
 
 /// The kind of a surface. Universal formats and roles, never a tool or domain name. A
-/// domain contributes its own views through `Other` (a security product adds
-/// `Other("decompiler")`; a data agent adds `Other("chart")`).
+/// front-end or domain contributes its own views through `Other` (a window adds
+/// `Other("terminal")`; a security product adds `Other("decompiler")`; a data agent adds
+/// `Other("chart")`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceKind {
     /// The agent conversation/canvas.
     Agent,
-    /// A code/text editor over a workspace file.
+    /// A text editor over a workspace file.
     Editor,
-    /// A shell/terminal.
-    Terminal,
     /// A web browser (a URL).
     Browser,
     /// A generic artifact/file viewer.
     ArtifactViewer,
-    /// A diff view (before/after).
-    DiffViewer,
     /// The notebook.
     Notebook,
     /// A structured-data (JSON/table) view.
@@ -286,6 +283,8 @@ mod tests {
     fn domain_surface_kind_via_other() {
         let s = SurfaceKind::Other("decompiler".into());
         assert_eq!(s.as_tag(), "decompiler");
+        // A front-end's own panels are tags too, not core kinds (ADR 0036).
+        assert_eq!(SurfaceKind::Other("terminal".into()).as_tag(), "terminal");
     }
 }
 

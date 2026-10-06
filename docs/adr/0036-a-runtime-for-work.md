@@ -43,6 +43,8 @@ client shows about work is a record or field in the runtime's store.
 - A coding product on ARK (worktrees, branches, PRs, compare and merge) is a consumer, like
   SecRes, not ARK work.
 - `SurfaceKind::Terminal` and `DiffViewer` move out of `ark-core` at the next breaking release.
+  Done for v0.11.0; `neutral.rs` (`the_work_model_names_no_coding_or_worker_concept`) keeps them
+  out.
 
 ## Check
 - `crates/ark-ui/tests/neutral.rs` for names; review against the table above for new types.

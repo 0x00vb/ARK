@@ -226,7 +226,7 @@ Can wait, each until its trigger:
 | Agent harnesses as workers (Claude Code, Codex, OMP, any ACP agent): H1 to H3, then H4 (ADR 0039) | a person asks to run work on a vendor agent with its own tools, or a coding consumer on ARK needs it; today vendor CLIs are ARK models (ADR 0012) |
 | The protocol in its own crate, out of `ark-ui`, with a version in `hello`, a published schema and a client outside Rust (OMP and Tern both publish theirs) | the first client not served by the runtime it talks to (a Cloud web app, a phone app) |
 | A phone app | after a phone browser on a remote or Cloud runtime falls short (the page has a narrow layout) |
-| `SurfaceKind::Terminal` and `DiffViewer` out of `ark-core`; `present` offers a terminal only where the host has one | the next breaking release |
+| `present` lists the views the host has instead of naming them in `ark-runtime` (today only the window offers `present`, and every window has a Terminal panel) | a host that offers `present` without a terminal or browser |
 
 Kept out: git worktrees, branches, pull requests and terminal multiplexing as runtime concepts.
 They belong to a coding app built on ARK. Also kept out after the Tern and OMP review: LSP, debugger,

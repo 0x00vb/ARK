@@ -1,7 +1,7 @@
-//! Dynamic model routing. Not every step of an investigation needs the strongest
-//! model. Cheap/fast models are fine for classification, planning, summarizing and
+//! Dynamic model routing. Not every step of a task needs the strongest model.
+//! Cheap/fast models are fine for classification, planning, summarizing and
 //! extracting; the strong model earns its cost on reasoning over evidence, forming
-//! vulnerability hypotheses, and synthesizing the final answer. Deterministic code
+//! hypotheses, and synthesizing the final answer. Deterministic code
 //! does whatever it can so no model call is spent on it at all (distillation, dedup,
 //! citation checks live outside this module).
 //!

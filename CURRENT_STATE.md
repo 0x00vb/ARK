@@ -69,7 +69,13 @@ a fake OpenAI-compatible model, stops it with SIGTERM (clean exit, about a secon
 while an agent works for a waiting chat, and starts it again: the task continues, the chapter is
 not saved twice, the chat gets the result once. A change still running when the stop starts is
 let finish: covered in process (`a_stopping_process_lets_a_change_under_way_finish…`), since the
-writer has no slow change to stop a real process in.
+writer has no slow change to stop a real process in. Dogfooded live (2026-10-05, qwen3.5:27b,
+`writer --serve --tokens`): the chat handed a save to an agent and waited; after the save,
+SIGTERM landed in the agent's last model call and the process exited cleanly in 0.1 s. The
+restarted runtime continued the task. The model tried to save twice more and both calls were
+answered from the first save (the file was not written again). The chat's turn shows cancelled
+and the result arrived as one post. An earlier run where the chat's wait got the result live
+posted nothing (`reported`, no second copy).
 
 W1 to W3 dogfooded live (2026-10-05, qwen3.5:27b, `writer --serve --tokens`): an agent asked to
 save a chapter, the process was killed with `kill -9`, the restarted runtime listed

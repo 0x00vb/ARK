@@ -78,6 +78,43 @@ What this changes for step 2:
 Verdict: both behave as workers. State, the question, the answer and the result go through
 ARK's records, not through code glued on the side. Step 1 can start.
 
+## Step 1 results (2026-10-07)
+
+`ark_interact::attention` lists what waits for the person in every project of a runtime. It
+reads records that already exist; the only new record is `attention_cleared` (id, time, an
+empty `by`).
+
+| Item | From | Leaves the list when |
+|---|---|---|
+| A question | an open `TaskRecord::question` | it is answered. It cannot be cleared |
+| Work that did not finish | a failed task a person, chat, schedule or the board started, in the last 7 days; only a schedule's latest run; when it reports to a chat, only once posted there | cleared, or opened. A retry that fails again is a new item (the id holds `finished_ms`) |
+| A result | a task whose result was posted into a chat (a post with its `work`), in the last 7 days. A result a waiting turn took is not one | cleared, or its chat is opened (opening a chat, or a project on that chat, clears what was posted there; a post into the chat on screen is seen on arrival) |
+
+| Front-end | Shows |
+|---|---|
+| Terminal | `/waiting`: a numbered list across projects. `/waiting 2 once` answers a question in any project; `/waiting 2` opens a result or failure; `/waiting clear`. Numbers follow the list printed last, so newer work never takes a number the person read. A dim line before the prompt when the count changes. The terminal now keeps an agent's question open when the turn that showed it ends (it used to deny it) |
+| Window | Results and failures are rows in the tray, above the question cards: a mark, the title, the project and chat or agent. Three rows, then "N more". Open goes to the chat; a failure without a chat shows why under its row; x or Delete clears. Questions stay the tray's cards; an agent's question from another project names it ("In The Lighthouse"), so "Always in this project" is never ambiguous |
+
+What changed from the plan, and why:
+
+| Plan | Shipped | Why |
+|---|---|---|
+| `/attention`, "Needs you" | `/waiting`, "Waiting for you" | one plain word in both front-ends |
+| A sidebar section listing questions too | rows in the tray; questions stay cards | a question twice on one screen (design review blocker) |
+| Numbers per list | numbers bound to the list printed last | a number must never answer different work (design review blocker) |
+| — | an agent's question card names its project when the window is elsewhere | the dogfood: both projects had an agent called editor, and "Always in this project" pointed at the wrong one |
+
+Evidence: `crates/ark-ui/tests/attention.rs` (one list across projects in both front-ends; the
+terminal answers a question in another project; cleared survives a restart, a retry is new,
+opening a chat or project clears its posts), the page test
+`work_that_waits_for_the_person_sits_in_the_tray`, `scripts/ci.sh` with page tests. Dogfood in
+`writer --serve` on qwen3.5:27b with two projects: a handed-off result, failures (an agent on a
+missing model), and an agent's save question answered from the other project after a restart
+(the chapter saved once). Light and dark, 1280 and 390 wide.
+
+Not in step 1: notifications (step 3), items per person, unread marks for a chat's own turn
+finishing in the background.
+
 ## Consequences
 - Developers can bring the agents they already use, and their questions and results land where
   ARK's own agents' do. This brings developers in; it is not the product's message, which stays
@@ -103,7 +140,7 @@ ARK's records, not through code glued on the side. Step 1 can start.
 ## Check
 - `crates/ark-ui/tests/neutral.rs`: the work model and the attention list name no vendor,
   worker protocol or workload.
-- Step 1: `crates/ark-ui/tests/host.rs` compares the attention list in both front-ends.
+- Step 1: `crates/ark-ui/tests/attention.rs` compares the list in both front-ends.
 - Step 0 and step 2: a test where a worker asks, the process restarts, another client answers,
   and the task finishes with its outputs.
 - Review: a new item kind needs a record that already exists, not a new store.

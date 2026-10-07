@@ -38,7 +38,8 @@ What changed for people building on ARK, per release. Not a commit log.
   nobody was in it. One list in both front-ends: `/waiting` in the terminal (numbers answer the
   list you saw: `/waiting 2 once`), and rows in the window's tray above the questions (open goes
   to the chat; a failure with no chat shows why under its row; x or Delete clears). Opening a
-  chat clears what was posted there. Clearing is the only new record (`attention_cleared`) and
+  chat, or a project on it, clears what was posted there. An agent's question from another
+  project names that project on its card (approvals carry `project`). Clearing is the only new record (`attention_cleared`) and
   survives a restart. Host methods `attention`, `attention_open`, `attention_clear`; event
   `attention`. `OrchestratorSet::subscribe` (every project's events) and `answer` (a kept
   question in any project); `ark_orchestrate::all_tasks`.

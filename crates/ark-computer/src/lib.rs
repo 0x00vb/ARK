@@ -32,6 +32,9 @@ use tokio::sync::watch;
 pub mod fake;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub use macos::tree;
 
 pub const APPS: &str = "computer.apps";
 pub const LOOK: &str = "computer.look";
@@ -39,7 +42,15 @@ pub const OPEN: &str = "computer.open";
 pub const CLICK: &str = "computer.click";
 pub const TYPE: &str = "computer.type";
 pub const KEYS: &str = "computer.keys";
-pub const ACTIONS: [&str; 6] = [APPS, LOOK, OPEN, CLICK, TYPE, KEYS];
+pub const MENU: &str = "computer.menu";
+pub const SCROLL: &str = "computer.scroll";
+pub const SEE: &str = "computer.see";
+pub const POINT: &str = "computer.point";
+pub const ACTIONS: [&str; 10] = [
+    APPS, LOOK, OPEN, CLICK, TYPE, KEYS, MENU, SCROLL, SEE, POINT,
+];
+/// The longer side of a picture of a window, in pixels.
+pub const PICTURE: u32 = 1280;
 
 /// How long the screen stays with an agent after its last action, while another waits.
 pub const IDLE: Duration = Duration::from_secs(30);
@@ -77,14 +88,91 @@ pub struct Element {
     pub value: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub disabled: bool,
+    /// The selected row, item or tab.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub selected: bool,
+}
+
+/// Where something is on the screen, in points from the top left of the main display.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Frame {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Frame {
+    pub fn center(&self) -> (f64, f64) {
+        (self.x + self.w / 2.0, self.y + self.h / 2.0)
+    }
+}
+
+/// A picture of one app's front window.
+#[derive(Clone, Debug)]
+pub struct Shot {
+    pub png: Vec<u8>,
+    /// The picture's size in pixels.
+    pub width: u32,
+    pub height: u32,
+    /// Where the window is on screen, so a point in the picture maps to a point on screen.
+    pub frame: Frame,
+}
+
+impl Shot {
+    /// The point on screen under pixel (`x`, `y`) of the picture.
+    pub fn to_screen(&self, x: f64, y: f64) -> (f64, f64) {
+        (
+            self.frame.x + x * self.frame.w / self.width.max(1) as f64,
+            self.frame.y + y * self.frame.h / self.height.max(1) as f64,
+        )
+    }
+}
+
+/// A press with the pointer, for what a control's own press does not do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pointer {
+    Click,
+    /// Open a file, a chat, an item.
+    Double,
+    /// The item's context menu.
+    Right,
+}
+
+/// An item of an app's menu bar.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct MenuItem {
+    pub name: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
+    /// It opens more items.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub submenu: bool,
+    /// Its shortcut (`cmd+shift+s`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keys: Option<String>,
+}
+
+/// What a walk down the menu bar found.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Menu {
+    /// The path ends at a menu: these are its items.
+    Items(Vec<MenuItem>),
+    /// The path ended at an item, and it was chosen. The names as the app spells them.
+    Chosen(Vec<String>),
 }
 
 /// A control the platform can act on.
 pub trait Control: Send + Sync {
-    /// Press it (a button, a checkbox, a link).
+    /// Press it (a button, a checkbox, a link), select it (a row, an item of a list), or focus
+    /// it (a field).
     fn press(&self) -> std::result::Result<(), String>;
     /// Replace its text (a field).
     fn set_text(&self, text: &str) -> std::result::Result<(), String>;
+    /// Where it is on the screen, for the pointer and for scrolling.
+    fn frame(&self) -> Option<Frame> {
+        None
+    }
 }
 
 /// A window as read: its text, its controls in order, and a handle to act on each.
@@ -121,6 +209,19 @@ pub trait Screen: Send + Sync {
     fn type_text(&self, text: &str) -> std::result::Result<(), String>;
     /// How long ago anyone used the keyboard or mouse (this process's own keys included).
     fn since_input(&self) -> Option<Duration>;
+    /// Walk the menu bar of the app named `app` along `path` (empty: the menu bar itself). An
+    /// item at the end is chosen; a menu at the end lists its items.
+    fn menu(&self, app: &str, path: &[String]) -> std::result::Result<Menu, String>;
+    /// Where the front window of `app` is.
+    fn window_frame(&self, app: &str) -> std::result::Result<Frame, String>;
+    /// Scroll what is at the middle of `at` by `pages` (negative: up), without moving the
+    /// pointer.
+    fn scroll(&self, at: Frame, pages: f64) -> std::result::Result<(), String>;
+    /// Click at a point with the pointer, and put the pointer back where it was.
+    fn pointer(&self, x: f64, y: f64, how: Pointer) -> std::result::Result<(), String>;
+    /// A picture of the front window of `app` only (never the whole screen), its longer side at
+    /// most `max` pixels.
+    fn capture(&self, app: &str, max: u32) -> std::result::Result<Shot, String>;
 }
 
 /// A control as the owner's last look listed it, and the handle to act on it.
@@ -136,6 +237,8 @@ struct State {
     own_input: Option<Instant>,
     /// Owners the person took the screen from: refused until their turn or task ends.
     taken: std::collections::HashSet<String>,
+    /// Each owner's last picture: the app, and how its pixels map to the screen.
+    shots: HashMap<String, (String, Shot)>,
 }
 
 /// The computer of one ARK process. Cheap to share.
@@ -198,6 +301,12 @@ impl ComputerService {
         self.holder.subscribe()
     }
 
+    /// The platform underneath, for trying it by hand (`examples/probe.rs`). Calls on it skip
+    /// the lease, the approvals and the quiet wait.
+    pub fn screen(&self) -> Arc<dyn Screen> {
+        self.screen.clone()
+    }
+
     /// Whether ARK may use apps here.
     pub fn access(&self) -> Access {
         self.screen.access()
@@ -210,6 +319,7 @@ impl ComputerService {
         let had = st.lease.take().map(|(o, _)| o);
         if let Some(o) = &had {
             st.looks.remove(o);
+            st.shots.remove(o);
             st.taken.insert(o.clone());
         }
         drop(st);
@@ -220,6 +330,7 @@ impl ComputerService {
     fn release(&self, owner: &str) {
         let mut st = self.state.lock().unwrap();
         st.looks.remove(owner);
+        st.shots.remove(owner);
         st.taken.remove(owner);
         if st.lease.as_ref().is_some_and(|(o, _)| o == owner) {
             st.lease = None;
@@ -252,6 +363,7 @@ impl ComputerService {
                         // A look of the one before is no use to anyone now.
                         if let Some((prev, _)) = st.lease.take() {
                             st.looks.remove(&prev);
+                            st.shots.remove(&prev);
                         }
                     }
                     st.lease = Some((owner.to_string(), Instant::now()));
@@ -419,6 +531,29 @@ impl Computer {
         Ok(c.clone())
     }
 
+    /// A picture of the app's window, kept so `computer.point` can map its pixels to the screen.
+    async fn see(&self, app: &str) -> Result<ActionOutput> {
+        let name = app.to_string();
+        let shot = self
+            .svc
+            .blocking(move |s| s.capture(&name, PICTURE))
+            .await
+            .map_err(tool)?;
+        let out = json!({
+            "app": app,
+            "picture": { "width": shot.width, "height": shot.height },
+        });
+        let png = shot.png.clone();
+        self.svc
+            .state
+            .lock()
+            .unwrap()
+            .shots
+            .insert(self.owner.clone(), (app.to_string(), shot));
+        self.svc.touch(&self.owner);
+        Ok(ActionOutput::json(out).with_image("image/png", png))
+    }
+
     async fn look(&self, app: &str) -> Result<ActionOutput> {
         let name = app.to_string();
         let look = self
@@ -468,11 +603,14 @@ impl Adapter for Computer {
             ActionDescriptor::new(OPEN, "start an app, or bring it to the front", RiskTier::Mutate)
                 .ask_each_time()
                 .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
-            ActionDescriptor::new(CLICK, "press an element of an app (a button, a checkbox, a link), by its number and name", RiskTier::Mutate)
+            ActionDescriptor::new(CLICK, "press an element of an app (a button, a link, a row, an item), by its number and name; double opens it (a file, a chat), right shows its menu", RiskTier::Mutate)
                 .ask_each_time()
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "ref", "name"],
-                    "properties": { "app": app(), "ref": el(), "name": named() }
+                    "properties": {
+                        "app": app(), "ref": el(), "name": named(),
+                        "double": { "type": "boolean" }, "right": { "type": "boolean" }
+                    }
                 })),
             ActionDescriptor::new(TYPE, "type into a field of an app, by its number and name; submit presses Return", RiskTier::Mutate)
                 .ask_each_time()
@@ -489,6 +627,39 @@ impl Adapter for Computer {
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "keys"],
                     "properties": { "app": app(), "keys": { "type": "string" } }
+                })),
+            ActionDescriptor::new(MENU, "use an app's menu bar: a path to an item (\"File > Export as PDF…\") chooses it; a path to a menu, or none, lists its items and their shortcuts", RiskTier::Mutate)
+                .ask_each_time()
+                .with_input_schema(json!({
+                    "type": "object", "required": ["app"],
+                    "properties": { "app": app(), "path": { "type": "string", "description": "menu names joined by >, e.g. File > Export as PDF…" } }
+                })),
+            ActionDescriptor::new(SEE, "a picture of an app's window, for when computer.look shows little (a canvas, a game, a video app); computer.point then clicks a spot in it", RiskTier::Mutate)
+                .volatile()
+                .ask_each_time()
+                .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
+            ActionDescriptor::new(POINT, "click a spot in your last picture of an app (computer.see), by its pixel position; double opens, right shows a menu", RiskTier::Mutate)
+                .ask_each_time()
+                .with_input_schema(json!({
+                    "type": "object", "required": ["app", "x", "y"],
+                    "properties": {
+                        "app": app(),
+                        "x": { "type": "number", "description": "pixels from the picture's left edge" },
+                        "y": { "type": "number", "description": "pixels from the picture's top edge" },
+                        "what": { "type": "string", "description": "what is at that spot, in a few words (the person sees it when asked)" },
+                        "double": { "type": "boolean" }, "right": { "type": "boolean" }
+                    }
+                })),
+            ActionDescriptor::new(SCROLL, "scroll an app's window, or the part of it holding an element, to see more", RiskTier::Mutate)
+                .ask_each_time()
+                .with_input_schema(json!({
+                    "type": "object", "required": ["app", "direction"],
+                    "properties": {
+                        "app": app(),
+                        "direction": { "type": "string", "enum": ["up", "down"] },
+                        "pages": { "type": "number", "description": "how far, in window heights (default 1)" },
+                        "ref": el(), "name": named()
+                    }
                 })),
         ]
     }
@@ -517,7 +688,154 @@ impl Adapter for Computer {
             CLICK => {
                 let n = number(action, &input)?;
                 let c = self.control(action, &app, n, name_of(&input))?;
-                self.svc.blocking(move |_| c.press()).await.map_err(tool)?;
+                let how = if input["right"] == json!(true) {
+                    Some(Pointer::Right)
+                } else if input["double"] == json!(true) {
+                    Some(Pointer::Double)
+                } else {
+                    None
+                };
+                let name = app.clone();
+                // The control's own press first; the pointer when asked for or when the control
+                // takes no press (some web and custom controls).
+                self.svc
+                    .blocking(move |s| match how {
+                        None => c.press().or_else(|e| {
+                            point(s, &name, c.as_ref(), Pointer::Click).map_err(|_| e)
+                        }),
+                        Some(how) => point(s, &name, c.as_ref(), how),
+                    })
+                    .await
+                    .map_err(tool)?;
+                self.svc.sent_input();
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                self.look(&app).await
+            }
+            MENU => {
+                let path: Vec<String> = input["path"]
+                    .as_str()
+                    .unwrap_or("")
+                    .split(['>', '›'])
+                    .map(|p| p.trim().to_string())
+                    .filter(|p| !p.is_empty())
+                    .collect();
+                let name = app.clone();
+                let menu = self
+                    .svc
+                    .blocking(move |s| {
+                        if !path.is_empty() {
+                            in_front(s, &name)?;
+                        }
+                        s.menu(&name, &path)
+                    })
+                    .await
+                    .map_err(tool)?;
+                self.svc.touch(&self.owner);
+                match menu {
+                    Menu::Items(items) => Ok(ActionOutput::json(json!({
+                        "app": app,
+                        "menu": input["path"].as_str().unwrap_or(""),
+                        "items": items,
+                    }))),
+                    Menu::Chosen(walked) => {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let mut out = self.look(&app).await?;
+                        out.output["chose"] = json!(walked.join(" > "));
+                        Ok(out)
+                    }
+                }
+            }
+            SEE => self.see(&app).await,
+            POINT => {
+                let shot = {
+                    let st = self.svc.state.lock().unwrap();
+                    match st.shots.get(&self.owner) {
+                        Some((seen, shot)) if same_app(seen, &app) => shot.clone(),
+                        Some((seen, _)) => {
+                            return Err(AdapterError::bad_input(
+                                action,
+                                format!("your last picture is of {seen}; take one of {app} first (computer.see)"),
+                            ))
+                        }
+                        None => {
+                            return Err(AdapterError::bad_input(
+                                action,
+                                format!("take a picture of {app} first (computer.see)"),
+                            ))
+                        }
+                    }
+                };
+                let (Some(x), Some(y)) = (input["x"].as_f64(), input["y"].as_f64()) else {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        "`x` and `y` are pixels in the picture",
+                    ));
+                };
+                if x < 0.0 || y < 0.0 || x > shot.width as f64 || y > shot.height as f64 {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        format!(
+                            "({x}, {y}) is outside the picture ({} by {})",
+                            shot.width, shot.height
+                        ),
+                    ));
+                }
+                let how = if input["right"] == json!(true) {
+                    Pointer::Right
+                } else if input["double"] == json!(true) {
+                    Pointer::Double
+                } else {
+                    Pointer::Click
+                };
+                let (sx, sy) = shot.to_screen(x, y);
+                let name = app.clone();
+                self.svc
+                    .blocking(move |s| {
+                        // The window may have moved since the picture: a click would land
+                        // elsewhere.
+                        let now = s.window_frame(&name)?;
+                        if (now.x - shot.frame.x).abs() > 2.0
+                            || (now.y - shot.frame.y).abs() > 2.0
+                            || (now.w - shot.frame.w).abs() > 2.0
+                            || (now.h - shot.frame.h).abs() > 2.0
+                        {
+                            return Err(format!(
+                                "{name}'s window moved since the picture; take a new one"
+                            ));
+                        }
+                        in_front(s, &name)?;
+                        s.pointer(sx, sy, how)
+                    })
+                    .await
+                    .map_err(tool)?;
+                self.svc.sent_input();
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                self.see(&app).await
+            }
+            SCROLL => {
+                let down = match input["direction"].as_str().unwrap_or("") {
+                    "down" => true,
+                    "up" => false,
+                    _ => return Err(AdapterError::bad_input(action, "`direction` is up or down")),
+                };
+                let pages = input["pages"].as_f64().unwrap_or(1.0).clamp(0.1, 10.0);
+                let at = match number(action, &input) {
+                    Ok(n) => Some(self.control(action, &app, n, name_of(&input))?),
+                    Err(_) => None,
+                };
+                let name = app.clone();
+                self.svc
+                    .blocking(move |s| {
+                        let frame = match at.and_then(|c| c.frame()) {
+                            Some(f) => f,
+                            None => s.window_frame(&name)?,
+                        };
+                        in_front(s, &name)?;
+                        s.scroll(frame, if down { pages } else { -pages })
+                    })
+                    .await
+                    .map_err(tool)?;
+                self.svc.sent_input();
                 tokio::time::sleep(Duration::from_millis(300)).await;
                 self.look(&app).await
             }
@@ -527,15 +845,22 @@ impl Adapter for Computer {
                 let text = input["text"].as_str().unwrap_or("").to_string();
                 let submit = input["submit"].as_bool().unwrap_or(false);
                 let name = app.clone();
-                // A field that takes its text directly is changed in place. Otherwise the
-                // keys go to the focused field, and Return to the app in front: only once the
-                // approved app is that app.
+                // Typed as a person types: the field focused, what it holds selected, the text
+                // as keys, so the app hears every change (a text set from outside leaves some
+                // apps' Send button off). Keys go to the app in front: only once the approved
+                // app is that app. A field that can't take focus gets its text set directly.
                 self.svc
                     .blocking(move |s| {
-                        if c.set_text(&text).is_err() {
-                            c.press()?;
+                        if c.press().is_ok() {
                             in_front(s, &name)?;
-                            s.type_text(&text)?;
+                            s.keys("cmd+a")?;
+                            if text.is_empty() {
+                                s.keys("delete")?;
+                            } else {
+                                s.type_text(&text)?;
+                            }
+                        } else {
+                            c.set_text(&text)?;
                         }
                         if submit {
                             in_front(s, &name)?;
@@ -590,6 +915,21 @@ fn in_front(s: &dyn Screen, app: &str) -> std::result::Result<(), String> {
     Err(format!(
         "{app} did not come to the front, so nothing was typed"
     ))
+}
+
+/// Press `c` with the pointer, once `app` is in front: a click goes to whatever is at that point.
+fn point(
+    s: &dyn Screen,
+    app: &str,
+    c: &dyn Control,
+    how: Pointer,
+) -> std::result::Result<(), String> {
+    let frame = c
+        .frame()
+        .ok_or("the app did not say where that element is, so it can't be clicked")?;
+    in_front(s, app)?;
+    let (x, y) = frame.center();
+    s.pointer(x, y, how)
 }
 
 fn same_app(listed: &str, asked: &str) -> bool {
@@ -649,14 +989,48 @@ pub fn distill(action: &str, out: &Value) -> Option<(String, Vec<String>)> {
         return None;
     }
     let s = |k: &str| out[k].as_str().unwrap_or("");
+    if let Some(p) = out.get("picture") {
+        return Some((
+            format!(
+                "{}: a picture of its window, {} by {} pixels (x from the left, y from the top); computer.point clicks a spot in it",
+                s("app"),
+                p["width"],
+                p["height"]
+            ),
+            vec![s("app").to_string()],
+        ));
+    }
+    if let Some(items) = out["items"].as_array() {
+        let mut card = match s("menu") {
+            "" => format!("{} menu bar:", s("app")),
+            m => format!("{} › {m}:", s("app")),
+        };
+        for i in items {
+            card.push_str(&format!("\n- {}", i["name"].as_str().unwrap_or("")));
+            if i["submenu"] == json!(true) {
+                card.push_str(" ›");
+            }
+            if let Some(k) = i["keys"].as_str() {
+                card.push_str(&format!(" ({k})"));
+            }
+            if i["disabled"] == json!(true) {
+                card.push_str(" (not available)");
+            }
+        }
+        return Some((card, vec![s("app").to_string()]));
+    }
     let elements = out["elements"].as_array()?;
-    let mut card = format!(
+    let mut card = String::new();
+    if !s("chose").is_empty() {
+        card.push_str(&format!("chose {}\n", s("chose")));
+    }
+    card.push_str(&format!(
         "{} · \"{}\" ({} lines, {} elements)",
         s("app"),
         s("window"),
         out["lines"].as_u64().unwrap_or(0),
         elements.len()
-    );
+    ));
     for e in elements.iter().take(CARD_ELEMENTS) {
         let mut line = format!(
             "\n[{}] {} \"{}\"",
@@ -669,6 +1043,9 @@ pub fn distill(action: &str, out: &Value) -> Option<(String, Vec<String>)> {
         }
         if e["disabled"] == json!(true) {
             line.push_str(" (disabled)");
+        }
+        if e["selected"] == json!(true) {
+            line.push_str(" (selected)");
         }
         card.push_str(&line);
     }

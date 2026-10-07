@@ -123,6 +123,7 @@ impl CodexApp {
         &mut self,
         id: &str,
         input: &str,
+        pictures: &[crate::Picture],
         schema: &Value,
         wait: Duration,
         on_text: Option<TextSink<'_>>,
@@ -133,7 +134,9 @@ impl CodexApp {
                 "turn/start",
                 json!({
                     "threadId": id,
-                    "input": [{"type": "text", "text": input}],
+                    "input": std::iter::once(json!({"type": "text", "text": input}))
+                        .chain(pictures.iter().map(|p| json!({"type": "image", "url": p.data_url()})))
+                        .collect::<Vec<_>>(),
                     "outputSchema": schema,
                 }),
             )

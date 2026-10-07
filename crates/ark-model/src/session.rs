@@ -81,6 +81,10 @@ pub trait SessionBackend: Send + Sync {
     fn label(&self) -> String;
     /// The model identifier, e.g. "claude:sonnet".
     fn model(&self) -> String;
+    /// Whether the vendor's model is sent [`Message::pictures`] ([`Provider::reads_pictures`]).
+    fn reads_pictures(&self) -> bool {
+        false
+    }
     /// The account whose capacity this backend draws on (`claude`, `codex`).
     fn account(&self) -> String;
     /// Start a vendor session from a full request. Returns the vendor's session id.
@@ -751,6 +755,9 @@ impl Provider for ManagedSession {
     async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
         self.backend.web_search(query, limit).await
     }
+    fn reads_pictures(&self) -> bool {
+        self.backend.reads_pictures()
+    }
 
     fn describe(&self) -> String {
         self.backend.label()
@@ -1111,6 +1118,9 @@ struct OneShot {
 
 #[async_trait]
 impl Provider for OneShot {
+    fn reads_pictures(&self) -> bool {
+        self.backend.reads_pictures()
+    }
     async fn complete(
         &self,
         system: &str,
@@ -1163,8 +1173,12 @@ fn now_ms() -> u64 {
 
 /// FNV-1a: stable across processes and Rust versions, unlike the std hasher.
 fn digest(s: &str) -> u64 {
+    digest_bytes(s.as_bytes())
+}
+
+fn digest_bytes(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
-    for b in s.as_bytes() {
+    for b in bytes {
         h ^= *b as u64;
         h = h.wrapping_mul(0x100000001b3);
     }
@@ -1178,8 +1192,14 @@ fn message_digest(m: &Message) -> u64 {
         Role::Assistant => "a",
         Role::Tool => "t",
     };
+    // A picture counts by its bytes' digest, so a new picture is a new message.
+    let pictures: String = m
+        .pictures
+        .iter()
+        .map(|p| format!("\u{1}{:x}", digest_bytes(&p.bytes)))
+        .collect();
     digest(&format!(
-        "{role}\u{1}{}\u{1}{}\u{1}{}",
+        "{role}\u{1}{}\u{1}{}\u{1}{}{pictures}",
         m.tool_call_id.as_deref().unwrap_or(""),
         m.tool_name.as_deref().unwrap_or(""),
         m.content
@@ -1187,7 +1207,7 @@ fn message_digest(m: &Message) -> u64 {
 }
 
 fn message_tokens(m: &Message) -> u32 {
-    estimate_tokens(&m.content) + 4
+    estimate_tokens(&m.content) + 4 + m.pictures.len() as u32 * crate::PICTURE_TOKENS
 }
 
 fn tool_tokens(t: &ToolDef) -> u32 {

@@ -26,6 +26,23 @@ What changed for people building on ARK, per release. Not a commit log.
   connect, programs to install); `AcquisitionProvider::knows` says which need goes where. An
   `acquire_capability` question's yes button is the first word of its line ("Connect",
   "Install").
+- The Computer sees and does more (ADR 0042): `computer.menu` lists and chooses any app's
+  menu items, with their shortcuts; `computer.scroll` scrolls a window or one part of it without
+  moving the pointer; `computer.click` takes `double` (open a file, a chat) and `right` (its
+  menu), and clicks with the pointer when a control takes no press. A look lists rows and list
+  items (Finder's files, a table's rows) and what an app made pressable, and only what is
+  scrolled into sight; names lose invisible marks, and a phone number read out digit by digit
+  comes back whole. Electron apps are asked to build their accessibility tree.
+- Pictures for apps that show little to accessibility (ADR 0042): `computer.see` takes a picture
+  of one app's front window (never the whole screen) and `computer.point` clicks a spot in it.
+  The picture goes to the model with the result: `ark_tools::ActionOutput::pictures`
+  (`with_image`), `ark_model::Message::pictures`, `Provider::reads_pictures`. Sent by the
+  Anthropic and OpenAI APIs, Ollama, Claude Code and Codex's app server; a provider that reads
+  none gets a line instead. Pictures stay in memory, only the newest stays in context, and each
+  counts `PICTURE_TOKENS` in the budget. Taking one needs macOS's Screen Recording permission.
+- `ActionDescriptor::grant_per(group, fields)` (`ark_core::GrantKey`): one session or project
+  answer covers the calls with the same values of some input fields; the approval card says
+  what it covers (`ark_interact::grant_scope`).
 
 ### Changed
 - `present` says what `locator` is for each view: the address for the browser (this machine's
@@ -33,6 +50,9 @@ What changed for people building on ARK, per release. Not a commit log.
   it in the person's Browser view instead of giving up.
 - `browser.open` refusing an address on this machine says to show the page in the person's
   browser view instead.
+- `computer.type` types as keys (the field focused, its text selected, then replaced), so apps
+  that ignore a text set from outside (WhatsApp's Send button) see the change. A field that
+  takes no focus still gets its text set.
 
 ## [0.12.1] - 2026-10-07
 

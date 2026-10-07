@@ -18,6 +18,8 @@ pub struct OpenAi {
     key: String,
     client: reqwest::Client,
     http: HttpConfig,
+    /// The model reads images: OpenAI's own API, not a named endpoint unless told.
+    pictures: bool,
 }
 
 impl OpenAi {
@@ -28,7 +30,8 @@ impl OpenAi {
             std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into()),
             model,
             key,
-        ))
+        )
+        .reads_pictures(true))
     }
 
     /// Construct explicitly against any OpenAI-compatible endpoint.
@@ -41,7 +44,14 @@ impl OpenAi {
             key: key.into(),
             client: http.client(),
             http,
+            pictures: false,
         }
+    }
+
+    /// Whether the model reads images ([`Provider::reads_pictures`]).
+    pub fn reads_pictures(mut self, yes: bool) -> Self {
+        self.pictures = yes;
+        self
     }
 
     /// Report itself as `name` (in `describe` and errors): a named endpoint's provider name.
@@ -71,6 +81,25 @@ fn role_str(r: Role) -> &'static str {
     }
 }
 
+/// One message on the wire, and a tool result's pictures after it: a `tool` message takes only
+/// text, so the pictures go in a `user` message that says where they come from.
+fn to_wire(m: &Message) -> Vec<Value> {
+    let mut out = vec![to_wire_message(m)];
+    if !m.pictures.is_empty() {
+        let mut parts = vec![json!({
+            "type": "text",
+            "text": format!("The picture from {}:", m.tool_name.as_deref().unwrap_or("the last result")),
+        })];
+        parts.extend(
+            m.pictures
+                .iter()
+                .map(|p| json!({ "type": "image_url", "image_url": { "url": p.data_url() } })),
+        );
+        out.push(json!({ "role": "user", "content": parts }));
+    }
+    out
+}
+
 fn to_wire_message(m: &Message) -> Value {
     match m.role {
         Role::Tool => json!({
@@ -93,6 +122,9 @@ fn to_wire_message(m: &Message) -> Value {
 
 #[async_trait]
 impl Provider for OpenAi {
+    fn reads_pictures(&self) -> bool {
+        self.pictures
+    }
     fn describe(&self) -> String {
         format!("{} {}", self.name, self.model)
     }
@@ -174,7 +206,7 @@ impl Provider for OpenAi {
 impl OpenAi {
     fn body(&self, system: &str, messages: &[Message], tools: &[ToolDef], stream: bool) -> Value {
         let mut wire: Vec<Value> = vec![json!({ "role": "system", "content": system })];
-        wire.extend(messages.iter().map(to_wire_message));
+        wire.extend(messages.iter().flat_map(to_wire));
         let tool_defs: Vec<Value> = tools
             .iter()
             .map(|t| json!({
@@ -203,5 +235,35 @@ impl OpenAi {
             req = req.timeout(self.http.request_timeout);
         }
         Ok(req.send().await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Picture;
+
+    #[test]
+    fn a_tool_results_picture_follows_it_in_a_user_message() {
+        let call = ToolCall {
+            id: "t1".into(),
+            name: "app.see".into(),
+            arguments: json!({}),
+        };
+        let pic = Picture {
+            media_type: "image/png".into(),
+            bytes: std::sync::Arc::new(b"png".to_vec()),
+        };
+        let w = to_wire(&Message::tool_result(&call, "a window").with_pictures(vec![pic]));
+        assert_eq!(w.len(), 2);
+        assert_eq!(w[0]["role"], "tool");
+        assert_eq!(w[0]["content"], "a window");
+        assert_eq!(w[1]["role"], "user");
+        assert_eq!(
+            w[1]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,cG5n"
+        );
+        // Without a picture, one message as before.
+        assert_eq!(to_wire(&Message::tool_result(&call, "x")).len(), 1);
     }
 }

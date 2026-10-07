@@ -1324,7 +1324,20 @@ impl Harness {
                     .collect();
                 tracing::info!(action = %p.call.name, %error, "tool call failed");
             }
-            let model_text = card_for_model(&card);
+            let mut model_text = card_for_model(&card);
+            // A picture the call took goes with its result, to a model that reads pictures.
+            let mut pictures: Vec<ark_model::Picture> = engine
+                .take_pictures(inv.id.as_str())
+                .into_iter()
+                .map(|p| ark_model::Picture {
+                    media_type: p.media_type,
+                    bytes: p.bytes,
+                })
+                .collect();
+            if !pictures.is_empty() && !self.router.provider(Role::Reason).reads_pictures() {
+                pictures.clear();
+                model_text.push_str("\n(a picture was taken, but this model is not sent pictures)");
+            }
             let raw_tokens = estimate_tokens(&inv.output.to_string());
             let (mut files, mut before) = (Vec::new(), Vec::new());
             for a in inv
@@ -1354,12 +1367,14 @@ impl Harness {
                 duration_ms: inv.duration_ms(),
                 error: inv.error.clone(),
                 // The same per-message estimate the working set budgets with.
-                context_tokens: estimate_tokens(&model_text) + 4,
+                context_tokens: estimate_tokens(&model_text)
+                    + 4
+                    + pictures.len() as u32 * ark_model::PICTURE_TOKENS,
                 raw_tokens,
                 files,
                 before,
             });
-            round.push(Message::tool_result(&p.call, model_text));
+            round.push(Message::tool_result(&p.call, model_text).with_pictures(pictures));
         }
         Ok(true)
     }

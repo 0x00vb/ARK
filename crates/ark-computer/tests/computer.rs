@@ -73,7 +73,13 @@ async fn an_agent_reads_a_window_and_acts_on_it_by_number() {
     .unwrap();
     assert_eq!(
         *screen.log.lock().unwrap(),
-        vec!["set Notes/Title = \"Plan\"", "press Notes/Save"]
+        vec![
+            "press Notes/Title",
+            "open Notes",
+            "keys cmd+a",
+            "type \"Plan\"",
+            "press Notes/Save"
+        ]
     );
     // The name must be the number's: what the approval showed is what is pressed.
     let e = run(
@@ -107,7 +113,10 @@ async fn an_agent_reads_a_window_and_acts_on_it_by_number() {
         .filter(|d| !d.risk.auto_runs() && d.ask_each_time)
         .map(|d| d.name)
         .collect();
-    assert_eq!(risky, vec![LOOK, OPEN, CLICK, TYPE, KEYS]);
+    assert_eq!(
+        risky,
+        vec![LOOK, OPEN, CLICK, TYPE, KEYS, MENU, SEE, POINT, SCROLL]
+    );
     drop(a);
     assert_eq!(svc.holder(), None, "the screen is free when the turn ends");
 }
@@ -128,6 +137,7 @@ async fn typed_keys_go_only_to_the_approved_app_in_front() {
         vec![
             "press Notes/Title",
             "open Notes",
+            "keys cmd+a",
             "type \"Plan\"",
             "open Notes",
             "keys return"
@@ -153,6 +163,127 @@ async fn typed_keys_go_only_to_the_approved_app_in_front() {
     assert!(
         !log.iter()
             .any(|l| l.starts_with("type") || l.starts_with("keys")),
+        "{log:?}"
+    );
+}
+
+/// Menus are walked by name: a menu lists its items, an item is chosen, a greyed one refused.
+#[tokio::test]
+async fn an_agent_uses_the_menu_bar_by_name() {
+    let screen = notes();
+    let svc = service(&screen);
+    let a = svc.for_owner("p/a");
+    let bar = run(&a, MENU, json!({ "app": "Notes" })).await.unwrap();
+    assert_eq!(bar["items"][0]["name"], "File");
+    let file = run(&a, MENU, json!({ "app": "Notes", "path": "File" }))
+        .await
+        .unwrap();
+    let (card, _) = distill(MENU, &file).unwrap();
+    assert!(card.contains("- Save (cmd+s)"), "{card}");
+    assert!(card.contains("- Export ›"), "{card}");
+    let chosen = run(
+        &a,
+        MENU,
+        json!({ "app": "Notes", "path": "File › Export > PDF…" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(chosen["chose"], "File > Export > PDF…");
+    assert!(chosen["elements"].is_array(), "the window after");
+    let e = run(&a, MENU, json!({ "app": "Notes", "path": "Edit > Undo" }))
+        .await
+        .unwrap_err();
+    assert!(e.contains("not available now"), "{e}");
+    let log = screen.log.lock().unwrap().clone();
+    assert_eq!(
+        log.iter()
+            .filter(|l| l.starts_with("menu"))
+            .collect::<Vec<_>>(),
+        vec!["menu Notes/File > Export > PDF…"]
+    );
+}
+
+/// Scrolling goes to the window, or to the part holding an element; the pointer opens and
+/// shows menus.
+#[tokio::test]
+async fn an_agent_scrolls_and_double_clicks() {
+    let screen = notes();
+    let svc = service(&screen);
+    let a = svc.for_owner("p/a");
+    run(&a, LOOK, json!({ "app": "Notes" })).await.unwrap();
+    run(&a, SCROLL, json!({ "app": "Notes", "direction": "down" }))
+        .await
+        .unwrap();
+    run(
+        &a,
+        SCROLL,
+        json!({ "app": "Notes", "direction": "up", "pages": 2, "ref": 2, "name": "Save" }),
+    )
+    .await
+    .unwrap();
+    run(
+        &a,
+        CLICK,
+        json!({ "app": "Notes", "ref": 2, "name": "Save", "double": true }),
+    )
+    .await
+    .unwrap();
+    let e = run(&a, SCROLL, json!({ "app": "Notes", "direction": "left" }))
+        .await
+        .unwrap_err();
+    assert!(e.contains("up or down"), "{e}");
+    let log: Vec<String> = screen
+        .log
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|l| l.starts_with("scroll") || l.starts_with("pointer"))
+        .cloned()
+        .collect();
+    assert_eq!(
+        log,
+        vec![
+            "scroll 1 at 400,300",
+            "scroll -2 at 60,60",
+            "pointer Double at 60,60"
+        ]
+    );
+}
+
+/// A picture of the window, and a click at a spot in it, mapped to the screen.
+#[tokio::test]
+async fn an_agent_sees_a_window_and_points_at_a_spot() {
+    let screen = notes();
+    let svc = service(&screen);
+    let a = svc.for_owner("p/a");
+    let e = run(&a, POINT, json!({ "app": "Notes", "x": 10, "y": 10 }))
+        .await
+        .unwrap_err();
+    assert!(e.contains("take a picture of Notes first"), "{e}");
+    let c = svc.for_owner("p/a");
+    let out = c
+        .run(SEE, json!({ "app": "Notes" }), &RunCtx::new(&NoBlobs))
+        .await
+        .unwrap();
+    assert_eq!(out.pictures.len(), 1, "the picture goes to the model");
+    assert_eq!(out.output["picture"]["width"], 400);
+    let (card, _) = distill(SEE, &out.output).unwrap();
+    assert!(card.contains("400 by 300 pixels"), "{card}");
+    // The fake's picture is half the window's size: pixel (100, 50) is point (200, 100).
+    run(
+        &c,
+        POINT,
+        json!({ "app": "Notes", "x": 100, "y": 50, "what": "the Save button" }),
+    )
+    .await
+    .unwrap();
+    let e = run(&c, POINT, json!({ "app": "Notes", "x": 900, "y": 50 }))
+        .await
+        .unwrap_err();
+    assert!(e.contains("outside the picture"), "{e}");
+    let log = screen.log.lock().unwrap().clone();
+    assert!(
+        log.contains(&"pointer Click at 200,100".to_string()),
         "{log:?}"
     );
 }

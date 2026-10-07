@@ -80,6 +80,9 @@ fn to_wire_message(m: &Message) -> Value {
                 .collect(),
         );
     }
+    if !m.pictures.is_empty() {
+        obj["images"] = Value::Array(m.pictures.iter().map(|p| json!(p.base64())).collect());
+    }
     if let Some(name) = &m.tool_name {
         // Ollama matches tool results to calls by name.
         obj["tool_name"] = json!(mangle_tool_name(name));
@@ -191,5 +194,27 @@ impl Ollama {
                 "num_predict": self.http.max_output_tokens.unwrap_or(DEFAULT_NUM_PREDICT),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Picture, ToolCall};
+
+    #[test]
+    fn a_picture_goes_in_the_messages_images() {
+        let call = ToolCall {
+            id: "t1".into(),
+            name: "app.see".into(),
+            arguments: json!({}),
+        };
+        let pic = Picture {
+            media_type: "image/png".into(),
+            bytes: std::sync::Arc::new(b"png".to_vec()),
+        };
+        let w = to_wire_message(&Message::tool_result(&call, "a window").with_pictures(vec![pic]));
+        assert_eq!(w["images"], json!(["cG5n"]));
+        assert!(to_wire_message(&Message::user("x")).get("images").is_none());
     }
 }

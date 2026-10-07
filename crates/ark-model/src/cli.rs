@@ -23,8 +23,8 @@ use crate::live::{LiveProcess, ReadError};
 use crate::session::{Base, Delta, SessionBackend};
 use crate::stream::JsonTextField;
 use crate::{
-    Completion, Message, Provider, ProviderError, Result, Role, TextSink, ToolCall, ToolDef, Usage,
-    WebHit,
+    Completion, Message, Picture, Provider, ProviderError, Result, Role, TextSink, ToolCall,
+    ToolDef, Usage, WebHit,
 };
 use async_trait::async_trait;
 use serde::Serialize;
@@ -285,7 +285,7 @@ impl CliModel {
         on_text: Option<TextSink<'_>>,
     ) -> Result<Completion> {
         let sys = protocol(Some(self.cli), system, tools, false);
-        let input = |messages: &[Message]| render_transcript(messages);
+        let input = |messages: &[Message]| Input::of(render_transcript(messages), messages);
         let first = self
             .exec(Mode::OneShot, &sys, input(messages), on_text)
             .await?;
@@ -306,7 +306,7 @@ impl CliModel {
         &self,
         mode: Mode<'_>,
         sys: &str,
-        input: String,
+        input: Input,
         on_text: Option<TextSink<'_>>,
     ) -> Result<Exec> {
         if self.cli == Cli::Claude {
@@ -317,6 +317,11 @@ impl CliModel {
                 return e;
             }
         }
+        // `codex exec` takes text only: a picture is left out.
+        if !input.pictures.is_empty() {
+            tracing::info!("codex exec takes no pictures; sending the text only");
+        }
+        let input = input.text;
         // `codex exec` reads the system prompt from its input; a resumed thread has it.
         let input = match mode {
             Mode::Resume(_) => input,
@@ -343,7 +348,7 @@ impl CliModel {
         &self,
         mode: Mode<'_>,
         sys: &str,
-        input: &str,
+        input: &Input,
         on_text: Option<TextSink<'_>>,
     ) -> Result<Exec> {
         let running = match mode {
@@ -364,7 +369,17 @@ impl CliModel {
                 LiveProcess::spawn(cmd).map_err(|e| self.api(format!("could not start: {e}")))?
             }
         };
-        let message = json!({"type": "user", "message": {"role": "user", "content": input}});
+        // Pictures go as image blocks after the text, as in the Messages API.
+        let content = if input.pictures.is_empty() {
+            json!(input.text)
+        } else {
+            let mut blocks = vec![json!({ "type": "text", "text": input.text })];
+            blocks.extend(input.pictures.iter().map(|p| {
+                json!({ "type": "image", "source": { "type": "base64", "media_type": p.media_type, "data": p.base64() } })
+            }));
+            Value::Array(blocks)
+        };
+        let message = json!({"type": "user", "message": {"role": "user", "content": content}});
         if let Err(e) = proc.send(&message.to_string()).await {
             return Err(self.stopped(&proc, &e.to_string()));
         }
@@ -435,7 +450,7 @@ impl CliModel {
         &self,
         mode: Mode<'_>,
         sys: &str,
-        input: &str,
+        input: &Input,
         on_text: Option<TextSink<'_>>,
     ) -> Option<Result<Exec>> {
         let bin = match self.program() {
@@ -471,7 +486,14 @@ impl CliModel {
         let schema: Value = serde_json::from_str(REPLY_SCHEMA).expect("reply schema");
         let turn = match thread {
             Ok(t) => app
-                .turn(&t, input, &schema, CALL_TIMEOUT, on_text)
+                .turn(
+                    &t,
+                    &input.text,
+                    &input.pictures,
+                    &schema,
+                    CALL_TIMEOUT,
+                    on_text,
+                )
                 .await
                 .map(|turn| (t, turn)),
             Err(e) => Err(e),
@@ -778,6 +800,11 @@ impl CliModel {
 
 #[async_trait]
 impl Provider for CliModel {
+    /// Claude Code takes image blocks on its input, Codex's app server image items. (`codex
+    /// exec`, the fallback, takes text only.)
+    fn reads_pictures(&self) -> bool {
+        true
+    }
     async fn complete(
         &self,
         system: &str,
@@ -936,6 +963,9 @@ enum Mode<'a> {
 
 #[async_trait]
 impl SessionBackend for CliModel {
+    fn reads_pictures(&self) -> bool {
+        true
+    }
     fn label(&self) -> String {
         Provider::describe(self)
     }
@@ -1019,7 +1049,7 @@ impl CliModel {
     ) -> Result<(String, Completion)> {
         let sys = protocol(Some(self.cli), system, tools, true);
         let id = new_session_id();
-        let input = render_transcript(messages);
+        let input = Input::of(render_transcript(messages), messages);
         let first = self.exec(Mode::Open(&id), &sys, input, on_text).await?;
         let vendor = match self.cli {
             Cli::Claude => first.vendor.clone().unwrap_or(id),
@@ -1032,7 +1062,7 @@ impl CliModel {
             return Ok((vendor, first.completion));
         }
         let second = self
-            .exec(Mode::Resume(&vendor), &sys, correction(), on_text)
+            .exec(Mode::Resume(&vendor), &sys, correction().into(), on_text)
             .await?;
         Ok((vendor, second.after(&first)))
     }
@@ -1051,7 +1081,7 @@ impl CliModel {
             .exec(
                 Mode::Resume(vendor),
                 &sys,
-                render_delta_for(Some(self.cli), delta),
+                Input::of(render_delta_for(Some(self.cli), delta), &delta.messages),
                 on_text,
             )
             .await?;
@@ -1064,7 +1094,7 @@ impl CliModel {
             return Ok(first.completion);
         }
         let second = self
-            .exec(Mode::Resume(vendor), &sys, correction(), on_text)
+            .exec(Mode::Resume(vendor), &sys, correction().into(), on_text)
             .await?;
         Ok(second.after(&first))
     }
@@ -1364,6 +1394,30 @@ fn render_delta_for(cli: Option<Cli>, delta: &Delta) -> String {
     s
 }
 
+/// What one call sends the CLI: the rendered text, and the pictures of the messages in it.
+struct Input {
+    text: String,
+    pictures: Vec<Picture>,
+}
+
+impl Input {
+    fn of(text: String, messages: &[Message]) -> Self {
+        Input {
+            text,
+            pictures: messages.iter().flat_map(|m| m.pictures.clone()).collect(),
+        }
+    }
+}
+
+impl From<String> for Input {
+    fn from(text: String) -> Self {
+        Input {
+            text,
+            pictures: Vec::new(),
+        }
+    }
+}
+
 fn render_message(s: &mut String, m: &Message) {
     match m.role {
         Role::System => s.push_str(&format!("<system>\n{}\n</system>\n", m.content)),
@@ -1383,10 +1437,15 @@ fn render_message(s: &mut String, m: &Message) {
             s.push_str("</assistant>\n");
         }
         Role::Tool => s.push_str(&format!(
-            "<tool_result id=\"{}\" name=\"{}\">\n{}\n</tool_result>\n",
+            "<tool_result id=\"{}\" name=\"{}\">\n{}{}\n</tool_result>\n",
             m.tool_call_id.as_deref().unwrap_or(""),
             m.tool_name.as_deref().unwrap_or(""),
-            m.content
+            m.content,
+            if m.pictures.is_empty() {
+                ""
+            } else {
+                "\n(its picture is attached to this message)"
+            }
         )),
     }
 }

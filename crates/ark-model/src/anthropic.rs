@@ -67,6 +67,18 @@ fn error_detail(v: &Value) -> Option<String> {
 /// assistant message. Empty text is dropped (the API rejects empty text blocks).
 fn blocks(m: &Message) -> (&'static str, Vec<Value>) {
     match m.role {
+        Role::Tool if !m.pictures.is_empty() => {
+            let mut content = vec![json!({ "type": "text", "text": m.content })];
+            content.extend(m.pictures.iter().map(|p| {
+                json!({ "type": "image", "source": { "type": "base64", "media_type": p.media_type, "data": p.base64() } })
+            }));
+            (
+                "user",
+                vec![
+                    json!({ "type": "tool_result", "tool_use_id": m.tool_call_id.clone().unwrap_or_default(), "content": content }),
+                ],
+            )
+        }
         Role::Tool => (
             "user",
             vec![
@@ -166,6 +178,9 @@ fn search_hits(reply: &Value, limit: usize) -> Vec<WebHit> {
 
 #[async_trait]
 impl Provider for Anthropic {
+    fn reads_pictures(&self) -> bool {
+        true
+    }
     fn describe(&self) -> String {
         format!("anthropic {}", self.model)
     }
@@ -399,5 +414,30 @@ mod tests {
             "the empty assistant turn is dropped and the users merge"
         );
         assert_eq!(m[0]["content"][0]["cache_control"]["type"], "ephemeral");
+    }
+}
+
+#[cfg(test)]
+mod picture_tests {
+    use super::*;
+    use crate::{Picture, ToolCall};
+
+    #[test]
+    fn a_tool_results_picture_goes_inside_its_result() {
+        let call = ToolCall {
+            id: "t1".into(),
+            name: "app.see".into(),
+            arguments: json!({}),
+        };
+        let pic = Picture {
+            media_type: "image/png".into(),
+            bytes: std::sync::Arc::new(b"png".to_vec()),
+        };
+        let w = wire_messages(&[Message::tool_result(&call, "a window").with_pictures(vec![pic])]);
+        let content = &w[0]["content"][0]["content"];
+        assert_eq!(content[0]["text"], "a window");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["source"]["data"], "cG5n");
     }
 }

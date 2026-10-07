@@ -41,6 +41,9 @@ pub struct Engine {
     skills: Vec<std::path::PathBuf>,
     /// Shared with every engine made by [`scoped`](Engine::scoped): the process is stopping.
     stopping: Arc<Stopping>,
+    /// Pictures a call showed, by invocation, until the harness takes them for the model.
+    /// Never stored.
+    pictures: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<ark_tools::Picture>>>>,
 }
 
 impl Engine {
@@ -54,6 +57,7 @@ impl Engine {
             sources: Vec::new(),
             skills: Vec::new(),
             stopping: Arc::default(),
+            pictures: Arc::default(),
         }
     }
 
@@ -69,6 +73,7 @@ impl Engine {
             sources: Vec::new(),
             skills: self.skills.clone(),
             stopping: self.stopping.clone(),
+            pictures: self.pictures.clone(),
         }
     }
 
@@ -145,6 +150,15 @@ impl Engine {
     /// Whether a turn's tools can differ from the registry (plugins or other sources).
     pub fn has_sources(&self) -> bool {
         self.plugins.is_some() || !self.sources.is_empty()
+    }
+
+    /// The pictures an invocation showed ([`ark_tools::ActionOutput::pictures`]), once.
+    pub fn take_pictures(&self, invocation: &str) -> Vec<ark_tools::Picture> {
+        self.pictures
+            .lock()
+            .unwrap()
+            .remove(invocation)
+            .unwrap_or_default()
     }
 
     /// An engine for one turn: this one, with the plugins connected now in its registry.
@@ -443,6 +457,12 @@ impl Engine {
         match registry.run(action, input, &ctx).await {
             Ok(out) => {
                 inv.command = out.command;
+                if !out.pictures.is_empty() {
+                    self.pictures
+                        .lock()
+                        .unwrap()
+                        .insert(inv.id.as_str().to_string(), out.pictures);
+                }
                 for prod in out.produced {
                     let provenance = prod.provenance.unwrap_or_else(|| Provenance::Produced {
                         invocation: inv.id.clone(),

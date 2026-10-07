@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::{Access, App, Control, Element, Look, Screen};
+use crate::{Access, App, Control, Element, Frame, Look, Menu, MenuItem, Pointer, Screen, Shot};
 
 /// What happened on the fake screen, in order: `open Notes`, `press Notes/Save`,
 /// `set Notes/Title = "x"`, `keys cmd+s`.
@@ -26,6 +26,8 @@ struct Inner {
     /// Opening an app does not bring it to the front.
     stuck_front: bool,
     person_typed: Option<Instant>,
+    /// The field that has the focus: (app, control index).
+    focus: Option<(String, usize)>,
 }
 
 /// A fake [`Screen`].
@@ -112,6 +114,15 @@ impl FakeScreen {
             .clone()
     }
 
+    fn type_into_focus(&self, text: &str) {
+        let mut i = self.inner.lock().unwrap();
+        if let Some((app, k)) = i.focus.clone() {
+            if let Some((_, controls)) = i.apps.iter_mut().find(|(a, _)| *a == app) {
+                controls[k].2 = Some(text.to_string());
+            }
+        }
+    }
+
     fn record(&self, line: String) {
         self.log.lock().unwrap().push(line);
     }
@@ -126,12 +137,25 @@ struct FakeControl {
 impl Control for FakeControl {
     fn press(&self) -> Result<(), String> {
         let name = {
-            let i = self.screen.inner.lock().unwrap();
+            let mut i = self.screen.inner.lock().unwrap();
             let (_, controls) = i.apps.iter().find(|(a, _)| *a == self.app).ok_or("gone")?;
-            controls[self.index].1.clone()
+            let (role, name, _) = controls[self.index].clone();
+            // Pressing a field gives it the focus: typed keys land there.
+            if role.contains("field") || role.contains("area") {
+                i.focus = Some((self.app.clone(), self.index));
+            }
+            name
         };
         self.screen.record(format!("press {}/{name}", self.app));
         Ok(())
+    }
+    fn frame(&self) -> Option<Frame> {
+        Some(Frame {
+            x: 10.0,
+            y: 20.0 + 30.0 * self.index as f64,
+            w: 100.0,
+            h: 20.0,
+        })
     }
     fn set_text(&self, text: &str) -> Result<(), String> {
         if self.screen.inner.lock().unwrap().no_set_text {
@@ -199,6 +223,7 @@ impl Screen for FakeScreen {
                     name: n.clone(),
                     value: v.clone(),
                     disabled: false,
+                    selected: false,
                 }
             })
             .collect();
@@ -232,14 +257,81 @@ impl Screen for FakeScreen {
         Ok(())
     }
     fn keys(&self, keys: &str) -> Result<(), String> {
+        if keys == "delete" {
+            self.type_into_focus("");
+        }
         self.record(format!("keys {keys}"));
         Ok(())
     }
+    /// Typed text replaces the focused field's (an agent selects all first).
     fn type_text(&self, text: &str) -> Result<(), String> {
+        self.type_into_focus(text);
         self.record(format!("type {text:?}"));
         Ok(())
     }
     fn since_input(&self) -> Option<Duration> {
         self.inner.lock().unwrap().person_typed.map(|t| t.elapsed())
+    }
+    /// Every app has a menu bar of File (Save, cmd+s; Export › PDF) and Edit (Undo, greyed).
+    fn menu(&self, app: &str, path: &[String]) -> Result<Menu, String> {
+        let item = |name: &str, submenu: bool, keys: Option<&str>, disabled: bool| MenuItem {
+            name: name.into(),
+            disabled,
+            submenu,
+            keys: keys.map(Into::into),
+        };
+        let p: Vec<String> = path.iter().map(|x| x.to_lowercase()).collect();
+        let p: Vec<&str> = p.iter().map(String::as_str).collect();
+        match p.as_slice() {
+            [] => Ok(Menu::Items(vec![
+                item("File", true, None, false),
+                item("Edit", true, None, false),
+            ])),
+            ["file"] => Ok(Menu::Items(vec![
+                item("Save", false, Some("cmd+s"), false),
+                item("Export", true, None, false),
+            ])),
+            ["file", "export"] => Ok(Menu::Items(vec![item("PDF…", false, None, false)])),
+            ["edit"] => Ok(Menu::Items(vec![item("Undo", false, Some("cmd+z"), true)])),
+            ["edit", "undo"] => Err("“Edit › Undo” is not available now (greyed out)".into()),
+            ["file", "save"] | ["file", "export", "pdf…"] | ["file", "export", "pdf"] => {
+                self.record(format!("menu {app}/{}", path.join(" > ")));
+                Ok(Menu::Chosen(path.to_vec()))
+            }
+            _ => Err(format!("no {} in the menu bar", path.join(" > "))),
+        }
+    }
+    fn window_frame(&self, _app: &str) -> Result<Frame, String> {
+        Ok(Frame {
+            x: 0.0,
+            y: 0.0,
+            w: 800.0,
+            h: 600.0,
+        })
+    }
+    fn scroll(&self, at: Frame, pages: f64) -> Result<(), String> {
+        let (x, y) = at.center();
+        self.record(format!("scroll {pages} at {x},{y}"));
+        Ok(())
+    }
+    fn pointer(&self, x: f64, y: f64, how: Pointer) -> Result<(), String> {
+        self.record(format!("pointer {how:?} at {x},{y}"));
+        Ok(())
+    }
+    /// A 400 by 300 picture of an 800 by 600 window at the screen's corner: a pixel is two
+    /// points.
+    fn capture(&self, app: &str, _max: u32) -> Result<Shot, String> {
+        self.record(format!("capture {app}"));
+        Ok(Shot {
+            png: b"\x89PNG fake".to_vec(),
+            width: 400,
+            height: 300,
+            frame: Frame {
+                x: 0.0,
+                y: 0.0,
+                w: 800.0,
+                h: 600.0,
+            },
+        })
     }
 }

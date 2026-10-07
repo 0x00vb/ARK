@@ -104,6 +104,7 @@ impl Naive {
                 tool_calls: completion.tool_calls.clone(),
                 tool_call_id: None,
                 tool_name: None,
+                pictures: Vec::new(),
             });
             for call in &completion.tool_calls {
                 on_event(HarnessEvent::ToolCall {

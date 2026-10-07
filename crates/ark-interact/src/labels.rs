@@ -494,7 +494,18 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
         "computer.apps" => "Listing the open apps".into(),
         "computer.look" => format!("Looking at {}", s("app")),
         "computer.open" => format!("Opening {}", s("app")),
-        "computer.click" => format!("Clicking {} in {}", element(input), s("app")),
+        "computer.click" => format!(
+            "{} {} in {}",
+            if input.get("right").and_then(Value::as_bool) == Some(true) {
+                "Right-clicking"
+            } else if input.get("double").and_then(Value::as_bool) == Some(true) {
+                "Double-clicking"
+            } else {
+                "Clicking"
+            },
+            element(input),
+            s("app")
+        ),
         "computer.type" => format!(
             "Typing \"{}\" into {} in {}{}",
             clip(s("text"), 60),
@@ -507,6 +518,36 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
             }
         ),
         "computer.keys" => format!("Pressing {} in {}", s("keys"), s("app")),
+        "computer.menu" => match s("path").trim() {
+            "" => format!("Reading the menus of {}", s("app")),
+            p => format!(
+                "Choosing {} in {}",
+                p.split(['>', '›'])
+                    .map(str::trim)
+                    .collect::<Vec<_>>()
+                    .join(" › "),
+                s("app")
+            ),
+        },
+        "computer.see" => format!("Taking a picture of {}'s window", s("app")),
+        "computer.point" => {
+            let how = if input.get("right").and_then(Value::as_bool) == Some(true) {
+                "Right-clicking"
+            } else if input.get("double").and_then(Value::as_bool) == Some(true) {
+                "Double-clicking"
+            } else {
+                "Clicking"
+            };
+            match s("what").trim() {
+                "" => format!("{how} a spot in {}", s("app")),
+                w => format!("{how} {} in {}", clip(w, 60), s("app")),
+            }
+        }
+        "computer.scroll" => format!(
+            "Scrolling {} in {}",
+            if s("direction") == "up" { "up" } else { "down" },
+            s("app")
+        ),
         PROCESS_START => format!(
             "Starting `{}`{}",
             clip(&one_line(s("command")), 60),
@@ -761,6 +802,42 @@ mod tests {
                 &json!({ "app": "Mail", "ref": 2, "name": "" })
             ),
             "Clicking element 2 in Mail"
+        );
+        assert_eq!(
+            l.call_label(
+                "computer.click",
+                &json!({ "app": "Finder", "ref": 4, "name": "report.pdf", "double": true })
+            ),
+            "Double-clicking “report.pdf” in Finder"
+        );
+        assert_eq!(
+            l.call_label(
+                "computer.menu",
+                &json!({ "app": "Pages", "path": "File > Export To›PDF…" })
+            ),
+            "Choosing File › Export To › PDF… in Pages"
+        );
+        assert_eq!(
+            l.call_label("computer.menu", &json!({ "app": "Pages" })),
+            "Reading the menus of Pages"
+        );
+        assert_eq!(
+            l.call_label(
+                "computer.scroll",
+                &json!({ "app": "WhatsApp", "direction": "up" })
+            ),
+            "Scrolling up in WhatsApp"
+        );
+        assert_eq!(
+            l.call_label("computer.see", &json!({ "app": "Spotify" })),
+            "Taking a picture of Spotify's window"
+        );
+        assert_eq!(
+            l.call_label(
+                "computer.point",
+                &json!({ "app": "Spotify", "x": 640, "y": 788, "what": "the play button" })
+            ),
+            "Clicking the play button in Spotify"
         );
     }
 

@@ -36,11 +36,19 @@ impl WorkingSet {
         }
     }
 
-    /// Append a round (kept together forever, or dropped together).
+    /// Append a round (kept together forever, or dropped together). A round with a picture
+    /// takes the pictures out of the rounds before it: only the newest picture of a window
+    /// is worth its tokens, and the text of the older results stays.
     pub fn push_round(&mut self, round: Vec<Message>) {
-        if !round.is_empty() {
-            self.rounds.push(round);
+        if round.is_empty() {
+            return;
         }
+        if round.iter().any(|m| !m.pictures.is_empty()) {
+            for m in self.rounds.iter_mut().flatten() {
+                m.pictures.clear();
+            }
+        }
+        self.rounds.push(round);
     }
 
     /// Tokens of the model's own messages (tool calls, narration) in the rounds the last
@@ -58,7 +66,8 @@ impl WorkingSet {
     /// A rough token cost for one message: its text plus a small structural overhead
     /// per tool call (name + serialized arguments).
     pub fn message_tokens(m: &Message) -> u32 {
-        let mut t = estimate_tokens(&m.content) + 4;
+        let mut t =
+            estimate_tokens(&m.content) + 4 + m.pictures.len() as u32 * ark_model::PICTURE_TOKENS;
         for c in &m.tool_calls {
             t += estimate_tokens(&c.name) + estimate_tokens(&c.arguments.to_string()) + 8;
         }
@@ -113,6 +122,33 @@ impl WorkingSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_newest_picture_stays_and_it_counts() {
+        let pic = || ark_model::Picture {
+            media_type: "image/png".into(),
+            bytes: std::sync::Arc::new(vec![1, 2, 3]),
+        };
+        let call = ark_model::ToolCall {
+            id: "1".into(),
+            name: "app.see".into(),
+            arguments: serde_json::json!({}),
+        };
+        let mut ws = WorkingSet::new(100_000);
+        ws.push_round(vec![
+            Message::tool_result(&call, "first").with_pictures(vec![pic()])
+        ]);
+        let (_, one) = ws.assemble("");
+        assert!(one >= ark_model::PICTURE_TOKENS);
+        ws.push_round(vec![
+            Message::tool_result(&call, "second").with_pictures(vec![pic()])
+        ]);
+        let (msgs, two) = ws.assemble("");
+        assert!(msgs[0].pictures.is_empty(), "the older picture is gone");
+        assert_eq!(msgs[0].content, "first", "its text stays");
+        assert_eq!(msgs[1].pictures.len(), 1);
+        assert!(two < 2 * ark_model::PICTURE_TOKENS);
+    }
     use ark_model::{Message, ToolCall};
 
     fn round(text: &str) -> Vec<Message> {

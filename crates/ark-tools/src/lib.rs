@@ -131,6 +131,16 @@ pub struct ActionOutput {
     /// in-process actions.
     pub command: Option<Vec<String>>,
     pub produced: Vec<ProducedArtifact>,
+    /// Pictures shown to the model with this result (a window, a page), when it reads images.
+    /// Kept in memory for the next request only, never stored.
+    pub pictures: Vec<Picture>,
+}
+
+/// An image a model sees, as its bytes and media type (`image/png`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Picture {
+    pub media_type: String,
+    pub bytes: std::sync::Arc<Vec<u8>>,
 }
 
 impl ActionOutput {
@@ -139,7 +149,16 @@ impl ActionOutput {
             output,
             command: None,
             produced: Vec::new(),
+            pictures: Vec::new(),
         }
+    }
+    /// Show the model a picture with this result ([`ActionOutput::pictures`]).
+    pub fn with_image(mut self, media_type: &str, bytes: Vec<u8>) -> Self {
+        self.pictures.push(Picture {
+            media_type: media_type.to_string(),
+            bytes: std::sync::Arc::new(bytes),
+        });
+        self
     }
     pub fn with_command(mut self, cmd: Vec<String>) -> Self {
         self.command = Some(cmd);

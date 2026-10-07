@@ -142,6 +142,56 @@ pub struct Message {
     pub tool_calls: Vec<ToolCall>,
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
+    /// Images that go with the text (a tool result's picture of a window), for a provider that
+    /// reads them ([`Provider::reads_pictures`]). In memory only: never serialized.
+    #[serde(skip)]
+    pub pictures: Vec<Picture>,
+}
+
+/// An image a model sees.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Picture {
+    /// `image/png`, `image/jpeg`.
+    pub media_type: String,
+    pub bytes: std::sync::Arc<Vec<u8>>,
+}
+
+impl Picture {
+    pub fn base64(&self) -> String {
+        base64(&self.bytes)
+    }
+    /// `data:image/png;base64,…`
+    pub fn data_url(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.base64())
+    }
+}
+
+/// What one picture costs in a request, in tokens: about what the vendors charge for an image
+/// of about 1280 pixels on its longer side.
+pub const PICTURE_TOKENS: u32 = 1600;
+
+/// Standard base64, padded.
+pub fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16
+            | (*c.get(1).unwrap_or(&0) as u32) << 8
+            | *c.get(2).unwrap_or(&0) as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if c.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 impl Message {
@@ -158,6 +208,7 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
+            pictures: Vec::new(),
         }
     }
     /// An assistant turn that requested tool calls.
@@ -168,6 +219,7 @@ impl Message {
             tool_calls: calls,
             tool_call_id: None,
             tool_name: None,
+            pictures: Vec::new(),
         }
     }
     /// A tool result to feed back to the model.
@@ -178,7 +230,13 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: Some(call.id.clone()),
             tool_name: Some(call.name.clone()),
+            pictures: Vec::new(),
         }
+    }
+    /// The same message with images ([`Message::pictures`]).
+    pub fn with_pictures(mut self, pictures: Vec<Picture>) -> Self {
+        self.pictures = pictures;
+        self
     }
 }
 
@@ -323,6 +381,12 @@ pub trait Provider: Send + Sync {
     async fn web_search(&self, _query: &str, _limit: usize) -> Option<Result<Vec<WebHit>>> {
         None
     }
+    /// Whether this provider sends [`Message::pictures`] to a model that reads them. When it
+    /// doesn't, pictures are left out and the text says so. The default doesn't; wrappers
+    /// forward to what they wrap.
+    fn reads_pictures(&self) -> bool {
+        false
+    }
     /// Human description, e.g. "ollama qwen3:4b-instruct".
     fn describe(&self) -> String;
     /// The model identifier this provider targets (e.g. "qwen3:4b-instruct"). Used by
@@ -410,6 +474,19 @@ pub fn mangle_tool_name(action: &str) -> String {
 }
 pub fn unmangle_tool_name(tool: &str) -> String {
     tool.replace("__", ".")
+}
+
+#[cfg(test)]
+mod picture_tests {
+    #[test]
+    fn base64_matches_the_standard() {
+        assert_eq!(super::base64(b""), "");
+        assert_eq!(super::base64(b"f"), "Zg==");
+        assert_eq!(super::base64(b"fo"), "Zm8=");
+        assert_eq!(super::base64(b"foo"), "Zm9v");
+        assert_eq!(super::base64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(super::base64(&[0xff, 0xfe, 0x00]), "//4A");
+    }
 }
 
 #[cfg(test)]

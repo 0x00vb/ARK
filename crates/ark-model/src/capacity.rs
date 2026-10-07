@@ -217,6 +217,9 @@ impl Limited {
 
 #[async_trait]
 impl Provider for Limited {
+    fn reads_pictures(&self) -> bool {
+        self.inner.reads_pictures()
+    }
     async fn complete(
         &self,
         system: &str,

@@ -33,6 +33,8 @@ mod desktop;
 mod files;
 mod frame;
 pub mod host;
+mod notify;
+pub mod push;
 pub mod remote;
 mod serve;
 mod terminal;

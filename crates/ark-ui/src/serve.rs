@@ -57,6 +57,11 @@ frame-src 'self' blob: data: https: http:; worker-src 'self' blob:; object-src '
 base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n\
 Referrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n";
 
+/// How long a typed device code is good for, and how long the session it becomes lasts: a
+/// phone stays signed in for a season; revoking its name ends it (ADR 0047).
+const PAIR_VALID_SECS: u64 = 10 * 60;
+const PAIRED_SESSION_DAYS: u64 = 90;
+
 /// How long a client may take to send a request's head and body.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -91,6 +96,8 @@ pub(crate) async fn serve(
                 token: String::new(),
                 port,
             };
+            // A device that asked for notifications lasts as long as what added it.
+            host.notifier.use_tokens(tokens.clone());
             (served, Check::Tokens(tokens))
         }
     };
@@ -329,7 +336,11 @@ async fn handle(
     }
     match (req.method.as_str(), req.path.as_str()) {
         ("GET", "/session") => {
-            let body = json!({ "signed_in": authed, "entry": entry });
+            // `pairing`: a device without a link signs in here with a code (ADR 0047).
+            let pairing = matches!(check, Check::Tokens(_));
+            // The app's accent, as its manifest says it: the sign-in page looks like the app.
+            let accent = host.manifest("")["theme_color"].clone();
+            let body = json!({ "signed_in": authed, "entry": entry, "pairing": pairing, "accent": accent });
             respond(
                 &mut sock,
                 "200 OK",
@@ -369,6 +380,29 @@ async fn handle(
                 }
             }
         }
+        // A code for another device, from a signed-in one: typed on a phone's Home Screen app,
+        // which cannot open a link (ADR 0047).
+        ("POST", "/pair") => {
+            let (Check::Tokens(tokens), true) = (check, authed) else {
+                return respond(&mut sock, "401 Unauthorized", "text/plain", b"token").await;
+            };
+            let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let name = v["name"].as_str().map(str::trim).filter(|n| !n.is_empty());
+            let name = name.map(str::to_string).unwrap_or_else(|| {
+                format!("device {}", &uuid::Uuid::new_v4().simple().to_string()[..4])
+            });
+            let valid = std::time::Duration::from_secs(PAIR_VALID_SECS);
+            let lasts = std::time::Duration::from_secs(PAIRED_SESSION_DAYS * 24 * 3600);
+            let code = tokens.pair_code(&name, valid, lasts)?;
+            let body = json!({ "code": code, "name": name, "expires_ms": now_ms() + PAIR_VALID_SECS * 1000 });
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
         ("DELETE", "/session") => {
             if let (Check::Tokens(tokens), Some(t)) = (check, &session) {
                 tokens.end(t)?;
@@ -399,7 +433,20 @@ async fn handle(
             }
             let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
             let method = v["method"].as_str().unwrap_or("").to_string();
-            let params = v.get("params").cloned().unwrap_or(json!({}));
+            let mut params = v.get("params").cloned().unwrap_or(json!({}));
+            // A device for notifications is tied to the token or session that added it, and
+            // names the address its page has (ADR 0047). Never taken from the page.
+            if method == "push_add" && params.is_object() {
+                let by = match check {
+                    Check::Tokens(tokens) => session
+                        .as_deref()
+                        .or(Some(req.token()))
+                        .and_then(|t| tokens.check(t)),
+                    Check::OneTime(_) => Some("local".to_string()),
+                };
+                params["_by"] = json!(by.unwrap_or_default());
+                params["_origin"] = json!(req.header("origin").unwrap_or(""));
+            }
             let out = match host.call(&method, params).await {
                 Ok(r) => json!({ "ok": true, "result": r }),
                 Err(e) => json!({ "ok": false, "error": format!("{e:#}") }),
@@ -462,6 +509,17 @@ async fn handle(
                     }
                 }
             }
+        }
+        // What a phone's Home Screen needs to add the page as an app; public, like the page.
+        ("GET", "/manifest.webmanifest") => {
+            let body = host.manifest(assets.title()).to_string();
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/manifest+json",
+                body.as_bytes(),
+            )
+            .await
         }
         ("GET", path) => match assets.get(path) {
             Some((body, mime)) => respond(&mut sock, "200 OK", mime, &body).await,

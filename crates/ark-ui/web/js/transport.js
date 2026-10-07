@@ -108,13 +108,22 @@ export function connect() {
     local: ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname),
     // A page in a browser cannot see the runtime's disk: no native picker.
     pickFolder: async () => undefined,
+    /// Trade a code typed from a signed-in device for a session (ADR 0047). True when it worked.
+    async signIn(code) {
+      const r = await fetch("/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }).catch(() => null);
+      return !!r?.ok;
+    },
     async call(method, params = {}) {
       await ready;
       const r = await fetch("/rpc", { method: "POST", headers, body: JSON.stringify({ method, params }) });
       if (r.status === 401) {
         // Leaving for the entry: the call never settles, so nothing flashes an error.
         if (await enter()) return new Promise(() => {});
-        throw new Error("This page needs the link printed at start (with its token).");
+        // A runtime with saved tokens and no entry: a code from a signed-in device (ADR 0047).
+        const s = await session();
+        const e = new Error(s?.pairing ? "Sign in with a code" : "This page needs the link printed at start (with its token).");
+        e.signIn = !!s?.pairing;
+        throw e;
       }
       const j = await r.json();
       if (!j.ok) throw new Error(j.error);
@@ -143,6 +152,8 @@ export function connect() {
           es.close();
           const s = await session();
           if (s && !s.signed_in && (await enter())) return;
+          // Signed out where a code signs in: the page asks for it; nothing to retry.
+          if (s && !s.signed_in && s.pairing && !token) return;
           if (failures >= tries()) {
             const retry = entry && !token ? () => location.assign(entry) : () => { failures = 0; open(); };
             fn({ kind: "disconnected", retry });

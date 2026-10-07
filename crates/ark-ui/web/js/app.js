@@ -20,6 +20,7 @@ import { registerPlugins } from "./plugins.js";
 import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
 import { Waiting } from "./waiting.js";
+import { registerDevices, keepInStep, openItems } from "./devices.js";
 
 const transport = connect();
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
@@ -719,11 +720,41 @@ async function boot(again = false) {
   }
 }
 
+/// A device with no session, on a runtime with saved tokens: the code another, signed-in device
+/// shows in Settings › Devices signs it in (a phone's Home Screen app cannot open a link).
+function signInScreen() {
+  appEl.dataset.signedOut = "true";
+  fetch("/session", { cache: "no-store" }).then((r) => r.json()).then((s) => {
+    if (s?.accent) document.documentElement.style.setProperty("--accent", s.accent);
+  }, () => {});
+  const input = h("input.pair-input", {
+    type: "text", inputmode: "text", autocomplete: "one-time-code", autocapitalize: "characters",
+    spellcheck: "false", placeholder: "XXXX-XXXX", "aria-label": "Code", maxlength: "12",
+  });
+  const why = h("p.pair-why", { role: "status" });
+  const go = h("button.btn.primary", { type: "submit" }, "Sign in");
+  const form = h("form.pair-form", { onsubmit: async (e) => {
+    e.preventDefault();
+    go.disabled = true;
+    why.textContent = "";
+    if (await transport.signIn(input.value)) return location.reload();
+    why.textContent = "That code did not work. Make a new one on the other device.";
+    go.disabled = false;
+    input.select();
+  } }, input, go);
+  clear($("#thread")).append(h("div.welcome.pair",
+    h("h1", "Sign in"),
+    h("p", "Type the code from Settings › Devices on a device that is signed in."),
+    form, why));
+  input.focus();
+}
+
 async function bootOnce(again) {
   let hello;
   try {
     hello = await transport.call("hello");
   } catch (e) {
+    if (e.signIn) return signInScreen();
     clear($("#thread")).append(h("div.welcome", h("h1", "Not connected"), h("p", e.message)));
     return;
   }
@@ -744,6 +775,14 @@ async function bootOnce(again) {
     registerGrants(window.ark);
     registerPlugins(window.ark);
     registerSkills(window.ark);
+    registerDevices(window.ark);
+    keepInStep(window.ark);
+    // A notification tapped: the item it is about (ADR 0047).
+    openItems((id) => {
+      const chat = id.startsWith("chat:") ? id.split(":")[1] : null;
+      if (chat) return api.openSession(chat);
+      waiting.openById(id);
+    });
     // The project's board, when the app runs agents.
     registerBoard(window.ark);
   }

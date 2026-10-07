@@ -64,6 +64,9 @@ struct Link {
     expires_ms: u64,
     /// How long the session it becomes lasts.
     session_ms: u64,
+    /// A short code a person types ([`Tokens::pair_code`]), not a link.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    short: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -72,13 +75,25 @@ struct File {
     tokens: Vec<Entry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     links: Vec<Link>,
+    /// When a typed code was wrong, lately: past [`PAIR_TRIES`] in [`PAIR_WINDOW_MS`], every
+    /// open code ends.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pair_misses: Vec<u64>,
 }
+
+/// Wrong typed codes allowed in [`PAIR_WINDOW_MS`] before every open code ends.
+const PAIR_TRIES: usize = 5;
+const PAIR_WINDOW_MS: u64 = 10 * 60 * 1000;
+/// The letters of a typed code: no 0, 1, I or O to mistake.
+const PAIR_ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 impl File {
     /// Drop sessions and links whose time is up.
     fn prune(&mut self, now: u64) {
         self.tokens.retain(|t| t.info.live(now));
         self.links.retain(|l| l.expires_ms > now);
+        self.pair_misses
+            .retain(|t| now.saturating_sub(*t) < PAIR_WINDOW_MS);
     }
 }
 
@@ -147,19 +162,76 @@ impl Tokens {
                 sha256: hash(&code),
                 expires_ms: now_ms() + valid_for.as_millis() as u64,
                 session_ms: session.as_millis() as u64,
+                short: false,
             });
             Ok(code)
         })
     }
 
+    /// A code a person types on a device that cannot open a link (a web app on a phone's Home
+    /// Screen has cookies of its own): `K7Q4-ZP2M`, good for `valid_for`, traded once for a
+    /// session lasting `session` and named `name`. A few wrong codes end every open one.
+    pub fn pair_code(
+        &self,
+        name: &str,
+        valid_for: Duration,
+        session: Duration,
+    ) -> anyhow::Result<String> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("a device needs a name");
+        }
+        self.update(|file| {
+            if file
+                .tokens
+                .iter()
+                .any(|t| t.info.name == name && t.info.expires_ms.is_none())
+            {
+                anyhow::bail!("a saved token is named `{name}`; a device needs another name");
+            }
+            let raw: String = uuid::Uuid::new_v4()
+                .as_bytes()
+                .iter()
+                .take(8)
+                .map(|b| PAIR_ALPHABET[(*b % 32) as usize] as char)
+                .collect();
+            file.links.push(Link {
+                name: name.to_string(),
+                sha256: hash(&raw),
+                expires_ms: now_ms() + valid_for.as_millis() as u64,
+                session_ms: session.as_millis() as u64,
+                short: true,
+            });
+            Ok(format!("{}-{}", &raw[..4], &raw[4..]))
+        })
+    }
+
     /// Trade a link code for a session, once. None when the code is unknown, used or late.
     pub fn redeem(&self, code: &str) -> anyhow::Result<Option<Session>> {
+        let code = code.trim();
         if code.is_empty() {
             return Ok(None);
         }
-        let h = hash(code);
+        // A typed code: any case, with or without its dash and spaces.
+        let typed: String = code
+            .chars()
+            .filter(|c| !matches!(c, '-' | ' '))
+            .map(|c| c.to_ascii_uppercase())
+            .collect();
+        let short = typed.len() == 8 && typed.bytes().all(|b| PAIR_ALPHABET.contains(&b));
+        let h = hash(if short { &typed } else { code });
         self.update(|file| {
-            let Some(i) = file.links.iter().position(|l| same(&l.sha256, &h)) else {
+            let found = file
+                .links
+                .iter()
+                .position(|l| same(&l.sha256, &h) && l.short == short);
+            let Some(i) = found else {
+                if short {
+                    file.pair_misses.push(now_ms());
+                    if file.pair_misses.len() >= PAIR_TRIES {
+                        file.links.retain(|l| !l.short);
+                    }
+                }
                 return Ok(None);
             };
             let link = file.links.remove(i);
@@ -305,6 +377,38 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_typed_code_pairs_once_and_wrong_ones_end_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = Tokens::in_store(dir.path());
+        let day = Duration::from_secs(24 * 3600);
+        let code = t
+            .pair_code("iPhone", Duration::from_secs(600), day)
+            .unwrap();
+        assert_eq!(code.len(), 9);
+        assert_eq!(&code[4..5], "-");
+        // Typed in lower case without the dash: the same code, once.
+        let s = t
+            .redeem(&code.replace('-', "").to_lowercase())
+            .unwrap()
+            .unwrap();
+        assert_eq!(s.name, "iPhone");
+        assert_eq!(t.check(&s.token).as_deref(), Some("iPhone"));
+        assert!(t.redeem(&code).unwrap().is_none(), "used");
+        // Wrong codes: past five in ten minutes, every open code ends.
+        let code = t.pair_code("iPad", Duration::from_secs(600), day).unwrap();
+        for _ in 0..5 {
+            assert!(t.redeem("2222-2222").unwrap().is_none());
+        }
+        assert!(
+            t.redeem(&code).unwrap().is_none(),
+            "ended by the wrong tries"
+        );
+        // A link is not a typed code and is not ended by them.
+        let link = t.link("laptop", Duration::from_secs(60), day).unwrap();
+        assert!(t.redeem(&link).unwrap().is_some());
+    }
 
     #[test]
     fn create_check_revoke() {

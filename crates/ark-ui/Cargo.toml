@@ -22,6 +22,8 @@ uuid.workspace = true
 portable-pty.workspace = true
 reqwest.workspace = true
 sha2 = "0.10"
+ring = "0.17"
+tracing.workspace = true
 base64 = "0.22"
 # `unstable`: a window with more than one webview (the Browser panel, ADR 0044). Semver-exempt,
 # so held to 2.12.

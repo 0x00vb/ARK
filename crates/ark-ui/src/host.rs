@@ -104,6 +104,7 @@ async fn forward_attention(
             EventKind::Posted { .. } => {}
             _ => continue,
         }
+        host.notify_soon();
         host.emit(json!({ "kind": "attention" }));
     }
 }
@@ -382,6 +383,8 @@ pub struct Host {
     computer: Option<Arc<ark_sdk::prelude::ark_computer::ComputerService>>,
     /// Project processes, when the app offers them (ADR 0041).
     processes: Option<ark_sdk::prelude::ark_proc::Processes>,
+    /// Notifications to the person's devices (ADR 0047).
+    pub(crate) notifier: Arc<crate::notify::Notifier>,
 }
 
 impl Host {
@@ -451,6 +454,7 @@ impl Host {
             siblings: ix.siblings(),
             computer: ix.ark().computer().cloned(),
             processes: ix.ark().processes().cloned(),
+            notifier: Arc::new(crate::notify::Notifier::new(ix.ark().shared_engine())),
             current: Mutex::new(Conv::new(ix)),
             switching: tokio::sync::Mutex::new(()),
             background: Mutex::new(Vec::new()),
@@ -617,6 +621,72 @@ impl Host {
             }
         }
         Ok(v)
+    }
+
+    /// What a phone's Home Screen shows for the app (`/manifest.webmanifest`): its name, its
+    /// accent, its logo when it has one (ADR 0047).
+    pub(crate) fn manifest(&self, name: &str) -> Value {
+        let mut icons = Vec::new();
+        if let Some(logo) = &self.info.logo {
+            icons.push(json!({ "src": logo, "sizes": "any" }));
+        }
+        json!({
+            "name": name,
+            "short_name": name,
+            "start_url": "/",
+            "scope": "/",
+            "display": "standalone",
+            "theme_color": self.info.accent.clone().unwrap_or_else(|| "#ffffff".into()),
+            "background_color": "#ffffff",
+            "icons": icons,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn engine_for_tests(&self) -> &Arc<Engine> {
+        &self.engine
+    }
+
+    /// What waits for the person now, as notices for their devices: the attention list (any
+    /// project) and the questions chats ask while their turns wait (ADR 0047).
+    fn notices(&self) -> Vec<ark_interact::attention::Notice> {
+        let mut out: Vec<_> = ark_interact::attention::list(&self.engine, &self.labels)
+            .iter()
+            .map(ark_interact::attention::notice)
+            .collect();
+        for (shown, _) in self.approvals.lock().unwrap().values() {
+            // An agent's question is the list's (its task keeps it).
+            if !shown["request"]["agent"].is_null() {
+                continue;
+            }
+            let Some(session) = shown["session"].as_str() else {
+                continue;
+            };
+            let chat = shown["chat"].as_str().unwrap_or("a chat");
+            let at_ms = shown["asked_ms"].as_u64().unwrap_or(0);
+            let words = format!(
+                "{} {}",
+                shown["title"].as_str().unwrap_or(""),
+                shown["line"].as_str().unwrap_or("")
+            );
+            out.push(ark_interact::attention::Notice {
+                id: format!("chat:{session}:{at_ms}"),
+                title: ark_interact::fmt::clip(chat, 60),
+                body: ark_interact::fmt::clip(words.trim(), 140),
+                tag: format!("chat:{session}"),
+                urgent: true,
+                at_ms,
+            });
+        }
+        out
+    }
+
+    /// Something may wait for the person: their devices hear of it once it has waited a while.
+    pub(crate) fn notify_soon(self: &Arc<Self>) {
+        let me = Arc::downgrade(self);
+        self.notifier.soon(Arc::new(move || {
+            me.upgrade().map(|h| h.notices()).unwrap_or_default()
+        }));
     }
 
     /// The project an agent's task works in (`{id, name}`), so its question can say where it
@@ -871,6 +941,28 @@ impl Host {
                 &self.engine,
                 &self.labels,
             ))?),
+            // Notifications to this device (ADR 0047). `_by` and `_origin` come from the server:
+            // the token or session that asked, and the address the page has.
+            "push_key" => Ok(json!({ "key": self.notifier.public_key() })),
+            "push_add" => {
+                self.notifier.add(
+                    &params["subscription"],
+                    &s("name"),
+                    params["_by"].as_str().unwrap_or("local"),
+                    &s("_origin"),
+                )?;
+                Ok(json!({ "ok": true }))
+            }
+            "push_remove" => Ok(json!(match params["id"].as_str() {
+                Some(id) => self.notifier.remove_id(id),
+                None => self.notifier.remove(&s("endpoint")),
+            })),
+            "push_devices" => Ok(self.notifier.listed()),
+            "push_here" => {
+                self.notifier
+                    .in_view(&s("endpoint"), params["visible"].as_bool().unwrap_or(false));
+                Ok(json!({ "ok": true }))
+            }
             // A window shows this chat to the person: what was posted there is seen.
             "attention_seen" => {
                 let n = ark_interact::attention::seen_chat(&self.engine, &s("session"));
@@ -2009,11 +2101,12 @@ async fn forward_approvals(
             None => (Value::Null, Value::Null),
         };
         let project = host.task_project(pending.request.task.as_deref());
-        let shown = json!({ "request": pending.request, "line": line, "title": title, "choices": choices, "session": session, "chat": chat, "project": project });
+        let shown = json!({ "request": pending.request, "line": line, "title": title, "choices": choices, "session": session, "chat": chat, "project": project, "asked_ms": crate::notify::now_ms() });
         host.approvals
             .lock()
             .unwrap()
             .insert(id, (shown.clone(), reply));
+        host.notify_soon();
         host.emit(
             json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line, "title": shown["title"], "choices": shown["choices"], "session": session, "chat": chat, "project": shown["project"] }),
         );

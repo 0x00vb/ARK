@@ -1371,3 +1371,27 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 @media (hover: none) and (pointer: coarse) {
   kbd { display: none; }
 }
+
+/* Devices (devices.js, ADR 0047): a code to sign in another device; the sign-in by code. */
+.pair-code { display: flex; align-items: baseline; gap: 8px; padding: 4px 12px 10px; }
+.pair-code:empty { display: none; }
+.pair-value {
+  font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: 0.08em;
+  color: var(--text); user-select: all;
+}
+.pair-form { display: flex; gap: 8px; margin-top: 18px; width: 100%; max-width: 340px; }
+.pair-input {
+  flex: 1; min-width: 0; font: 600 18px/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 10px 12px; border-radius: 10px; border: 1px solid var(--hair); background: var(--card); color: var(--text);
+}
+.pair-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pair-why { color: var(--err); font-size: 13px; min-height: 1.2em; margin: 8px 0 0; }
+/* Signed out where a code signs in: only the form. */
+.app[data-signed-out] .sidebar,
+.app[data-signed-out] .dock,
+.app[data-signed-out] .asks,
+.app[data-signed-out] .top-actions,
+.app[data-signed-out] .reveal-sidebar { display: none; }
+.welcome.pair { align-items: center; text-align: center; }
+.app[data-signed-out] { grid-template-columns: 0 1fr 0 !important; }
+.devices-others:empty { display: none; }

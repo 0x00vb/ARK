@@ -40,6 +40,11 @@ impl Assets {
         }
     }
 
+    /// The app's name, as the page's title says it.
+    pub(crate) fn title(&self) -> &str {
+        &self.title
+    }
+
     /// A file by path (`index.html`, `js/app.js`, `ext/app.js`), with its media type.
     pub fn get(&self, path: &str) -> Option<(Cow<'static, [u8]>, &'static str)> {
         let path = path.trim_start_matches('/');

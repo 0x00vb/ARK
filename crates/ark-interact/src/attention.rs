@@ -358,6 +358,70 @@ pub fn seen_chat(engine: &Engine, chat: &str) -> usize {
         .count()
 }
 
+/// The record kind of an item a notification went out for (ADR 0047): kept so a restart or a
+/// second process does not send it again.
+pub const NOTIFIED: &str = "attention_notified";
+
+/// What a notification about an item says, the same on every device and in a native window's
+/// own notification.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Notice {
+    /// The item: a tap opens it (`#item=<id>` on the page).
+    pub id: String,
+    /// Where: the project, then the chat or the agent.
+    pub title: String,
+    /// What, as one sentence.
+    pub body: String,
+    /// Notices with one tag replace each other: a question has its own; a project's results and
+    /// failures share one, so a schedule that posts every run does not stack them.
+    pub tag: String,
+    /// It waits for an answer: delivered first.
+    pub urgent: bool,
+    pub at_ms: u64,
+}
+
+/// The notice for an item.
+pub fn notice(item: &Item) -> Notice {
+    Notice {
+        id: item.id.clone(),
+        title: item.place.clone(),
+        body: clip(&item.line, 140),
+        tag: match item.kind {
+            Kind::Question => format!("question/{}", item.id),
+            _ => format!("work/{}", item.project),
+        },
+        urgent: item.is_question(),
+        at_ms: item.at_ms,
+    }
+}
+
+/// The ids notices went out for. Marks older than any item could be are dropped.
+pub fn notified(engine: &Engine) -> HashSet<String> {
+    let now = now_ms();
+    let mut ids = HashSet::new();
+    for v in engine
+        .store
+        .list_records(NOTIFIED, None)
+        .unwrap_or_default()
+    {
+        let Some(id) = v["id"].as_str() else { continue };
+        if now.saturating_sub(v["at_ms"].as_u64().unwrap_or(0)) > 2 * KEPT_MS {
+            let _ = engine.store.delete_record(NOTIFIED, id);
+        } else {
+            ids.insert(id.to_string());
+        }
+    }
+    ids
+}
+
+/// A notice went out for `id`.
+pub fn mark_notified(engine: &Engine, id: &str) -> anyhow::Result<()> {
+    engine
+        .store
+        .put_record(NOTIFIED, id, "", &json!({ "id": id, "at_ms": now_ms() }))?;
+    Ok(())
+}
+
 /// The list as the terminal prints it. `/waiting` numbers the rows.
 pub fn report(items: &[Item]) -> Report {
     if items.is_empty() {

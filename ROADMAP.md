@@ -112,6 +112,15 @@ step 2, and before step 3. The first public ARK Desktop ships a few capabilities
 what you want, ARK finds what it needs, you connect or approve it simply, the agent or team
 does the work. Google's review of ARK's sign-in may gate step 3 (`docs/GOOGLE.md`).
 
+Transact (proposed, 2026-10-07, not approved): an action that costs money is approved with its
+amount (ask each time, never covered by "for this session" or "always"), counted against a
+limit the person made (`Budget.max_spend`, standing limits), and recorded with the merchant's
+order and a receipt. Shopping is a capability crate on top (`ark-commerce`: UCP and ACP
+clients, checkouts the person pays at the merchant, or a wallet seam with a one-time
+credential); ARK never holds funds or card data and names no merchant, protocol or PSP in the
+runtime. Plan, risks and order (T0 to T5): `../ark-cloud/docs/COMMERCE.md`. Trigger: the
+owner's go, after ARK Desktop is public.
+
 | Kept out on purpose | Until |
 |---|---|
 | Remote MCP servers (HTTP/SSE `url` entries) | a consumer needs one; stdio servers only today |

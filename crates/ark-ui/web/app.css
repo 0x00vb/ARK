@@ -546,7 +546,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 /* Questions from orchestrated agents and from chats working in the background: they wait
    here, whatever the main column shows. */
 .asks {
-  position: absolute; right: 20px; bottom: 92px; z-index: 20;
+  position: absolute; right: 20px; bottom: 108px; z-index: 20;
   width: min(380px, calc(100% - 40px));
   display: flex; flex-direction: column; gap: 10px;
   max-height: calc(100% - 140px); overflow-y: auto;
@@ -1409,3 +1409,10 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   .setting-row { flex-wrap: wrap; }
   .setting-row .plugin-detail { white-space: normal; }
 }
+/* What is wrong with a linked computer (step 4): one quiet line. */
+.wait-note { padding: 6px 10px; font-size: 12.5px; color: var(--text-3); }
+.waiting-cards { display: contents; }
+/* A linked computer that stopped answering: its items as last read, not to be acted on. */
+.approval.away .approval-actions { opacity: 0.45; }
+.wait-row[aria-disabled] { cursor: default; opacity: 0.55; }
+.wait-row[aria-disabled]:hover { background: transparent; }

@@ -28,6 +28,7 @@ pub mod inspect;
 pub mod installs;
 pub mod interaction;
 pub mod labels;
+pub mod links;
 pub mod logging;
 pub mod orchestration;
 pub mod plugins;

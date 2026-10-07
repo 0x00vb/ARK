@@ -289,6 +289,7 @@ impl App {
             orchestrator: self.orchestrator,
             orchs,
             sign_in: self.sign_in,
+            links: Arc::new(crate::links::Links::default()),
             waiting: Vec::new(),
         };
         ix.refresh_names();
@@ -557,6 +558,7 @@ pub struct Siblings {
     orchestrator: Option<ark_orchestrate::Orchestrator>,
     orchs: Option<Arc<Orchestrators>>,
     sign_in: Option<crate::capabilities::Opener>,
+    links: Arc<crate::links::Links>,
 }
 
 impl Siblings {
@@ -624,6 +626,7 @@ impl Siblings {
             orchestrator: self.orchestrator.clone(),
             orchs: self.orchs.clone(),
             sign_in: self.sign_in.clone(),
+            links: self.links.clone(),
             waiting: Vec::new(),
         };
         ix.refresh_names();
@@ -794,8 +797,11 @@ pub struct Interaction {
     /// With [`App::orchestrate`]: every project's orchestrator, shared with sibling conversations.
     orchs: Option<Arc<Orchestrators>>,
     sign_in: Option<crate::capabilities::Opener>,
-    /// The ids `/waiting` listed last, in its numbers: a number answers what the person saw.
-    pub(crate) waiting: Vec<String>,
+    /// Other runtimes whose items this one shows too (ADR 0043 step 4), shared with siblings.
+    links: Arc<crate::links::Links>,
+    /// The items `/waiting` listed last, in its numbers (runtime, id): a number answers what
+    /// the person saw.
+    pub(crate) waiting: Vec<(Option<String>, String)>,
 }
 
 impl Interaction {
@@ -868,7 +874,13 @@ impl Interaction {
             orchestrator: self.orchestrator.clone().filter(|_| self.orchs.is_none()),
             orchs: self.orchs.clone(),
             sign_in: self.sign_in.clone(),
+            links: self.links.clone(),
         }
+    }
+
+    /// The other runtimes whose items this one shows too (ADR 0043 step 4).
+    pub fn links(&self) -> &Arc<crate::links::Links> {
+        &self.links
     }
 
     /// Run on the model chosen last in any of this app's conversations.

@@ -14,6 +14,9 @@ What changed for people building on ARK, per release. Not a commit log.
   `cost_micro_usd` and `asked` (ADR 0043 step 2): code that builds either with a struct
   literal adds the fields (`decisions: Vec::new()`, `..Default::default()` for `Usage`). The
   next tag is 0.13.0.
+- `ark_connect::State` has a new variant, `Off` (the Computer while the person has not turned
+  it on): an exhaustive `match` adds an arm. `ark_interact::capabilities::Parts` has a
+  `computer` field; build it with `Parts::of`.
 
 ### Added
 - The Computer is a capability the person turns on (ADR 0045). Off, a turn carries one line
@@ -68,6 +71,18 @@ What changed for people building on ARK, per release. Not a commit log.
   field. Host methods `push_key`, `push_add`, `push_remove`, `push_devices`, `push_here`,
   `devices_signed_in`, `device_sign_out`; `Tokens::info`;
   `ark_ui::push`, `ark_interact::attention::{Notice, notice}`.
+- What waits on another runtime of yours shows here too (ADR 0043 step 4): an app links one with
+  a name, an address and a token (`ArkUi::link`, `ark_interact::links::Links`), and its
+  questions, failures and results join this runtime's list, named ("My machine · novel-b"),
+  each answered, cleared or opened on its own runtime (`attention_all`, `attention_answer`,
+  `attention_go` (the app's own window only), and `runtime` on `attention_open` and
+  `attention_clear`; `/waiting` in the window's command line, and in a terminal connected to
+  it). A link is followed in the background, so a slow or sleeping one never
+  holds up the list; while it does not answer, its items stay, marked, and cannot be answered;
+  one that refused the token says to pair again. The token stays in the app's process. An app's
+  own calls change the links with `HandlerCtx::links()` (a person pairs or forgets a server).
+  `ark_ui::remote::visit_item` opens another runtime's page on an item; a page signed in with a
+  token keeps `#item=`. The writer example: `--link NAME=URL` with `WRITER_LINK_TOKEN`.
 - Settings fit a phone: the sections are a row above the one shown, and a row's controls go
   under its words.
 - What waits for you, in every project (ADR 0043 step 1, `ark_interact::attention`): a question
@@ -157,11 +172,6 @@ What changed for people building on ARK, per release. Not a commit log.
   addresses) over http instead of searching for it.
 - The board's "Needs you" lights for a task waiting on your answer: the host's `board` response
   carries each task's `question`.
-
-### Breaking
-- `ark_connect::State` has a new variant, `Off` (the Computer while the person has not turned
-  it on): an exhaustive `match` adds an arm. `ark_interact::capabilities::Parts` has a
-  `computer` field; build it with `Parts::of`.
 
 ## [0.12.1] - 2026-10-07
 

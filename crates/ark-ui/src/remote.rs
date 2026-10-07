@@ -295,6 +295,11 @@ pub fn run_window(
 /// or refuses `token`.
 #[cfg(feature = "desktop")]
 pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
+    visit_at(url, token, None).await
+}
+
+#[cfg(feature = "desktop")]
+async fn visit_at(url: &str, token: &str, item: Option<&str>) -> anyhow::Result<()> {
     use std::sync::atomic::Ordering;
 
     let app = crate::desktop::APP
@@ -305,7 +310,11 @@ pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
     }
     let client = Client::new(url, token);
     client.hello().await?;
-    let target: tauri::Url = client.page_url().parse()?;
+    // The token in the query, the item in the fragment: the page keeps the fragment.
+    let mut target: tauri::Url = client.page_url().parse()?;
+    if let Some(item) = item {
+        target.set_fragment(Some(&format!("item={}", urlencode(item))));
+    }
     let window = crate::desktop::main_webview(app)
         .ok_or_else(|| anyhow::anyhow!("there is no window to open {url} in"))?;
     // Before leaving: the own page's event channels stop sending from here on.
@@ -316,6 +325,30 @@ pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
         return Err(e.into());
     }
     Ok(())
+}
+
+/// [`visit`], opening the page on one item of what waits there (`#item=`, ADR 0043 step 4).
+#[cfg(feature = "desktop")]
+pub async fn visit_item(url: &str, token: &str, item: &str) -> anyhow::Result<()> {
+    visit_at(url, token, Some(item)).await
+}
+
+/// Without a window there is nowhere to open another runtime's page.
+#[cfg(not(feature = "desktop"))]
+pub async fn visit_item(_url: &str, _token: &str, _item: &str) -> anyhow::Result<()> {
+    anyhow::bail!("only a window opens another computer's page")
+}
+
+#[cfg(feature = "desktop")]
+fn urlencode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// On macOS a window loads plain http only from this computer, its network and names without

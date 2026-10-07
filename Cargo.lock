@@ -492,6 +492,7 @@ dependencies = [
  "base64 0.22.1",
  "portable-pty",
  "reqwest 0.12.28",
+ "ring",
  "serde",
  "serde_json",
  "sha2",
@@ -500,6 +501,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tempfile",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

@@ -68,6 +68,23 @@ and Microsoft's push services, so it needs outbound HTTPS. An iPhone gets notifi
 from a page added to its Home Screen, over https. `sw.js` and `manifest.webmanifest` are
 public, like the page's other files.
 
+## What waits there, shown here
+
+An app can link the runtime on your server to the one on this computer, so what waits there
+(questions, failures, results) shows in this window's list too, answered there (ADR 0043 step
+4):
+
+```rust
+ArkUi::new(app).link("My machine", "https://ark.example.org", &token)
+```
+
+The token is one the server made for this computer. It stays in this process: the window and
+any client of this runtime reach the server only through four calls (its list, answering a
+question, clearing, opening one item). A server that does not answer leaves its items as last
+read, marked; one that revoked the token says to pair again. The writer example takes
+`--link "My machine=URL"` with the token in `WRITER_LINK_TOKEN`. The server does not see this
+computer's list, and each runtime notifies only about its own items.
+
 ## What a token allows
 
 Everything the window can do, on the runtime's machine, as the OS user the app runs as: run

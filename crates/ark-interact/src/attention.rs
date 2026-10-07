@@ -27,7 +27,7 @@ pub const KEPT_MS: u64 = 7 * 24 * 3600 * 1000;
 /// Record kind of a cleared mark: id = the item's id, scope = its project.
 const CLEARED: &str = "attention_cleared";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     /// It waits for an answer.
@@ -39,8 +39,11 @@ pub enum Kind {
 }
 
 /// One thing that waits for the person.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct Item {
+    /// The runtime it waits on, when it is not this one: a link's name (`crate::links`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
     /// The question's id for a question (a client answers it by this id); else
     /// `failed/<task>/<finished>` or `finished/<task>/<finished>`, so the same task failing
     /// again after a retry is a new item.
@@ -48,12 +51,12 @@ pub struct Item {
     pub kind: Kind,
     pub project: String,
     /// The chat a result was posted into.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,
     /// The agent whose work it is.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     /// What: the action asked about, or the work's objective.
     pub title: String,
@@ -63,7 +66,7 @@ pub struct Item {
     pub line: String,
     pub at_ms: u64,
     /// A question's answers.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<Choice>,
 }
 
@@ -138,6 +141,53 @@ impl<'a> Names<'a> {
             (None, None) => p,
         })
     }
+}
+
+/// What waits here and on the linked runtimes (ADR 0043 step 4): this runtime's list and each
+/// link's as last read, questions first, then the newest first. Never waits on the network.
+pub fn everywhere(engine: &Engine, labels: &Labels, links: &crate::links::Links) -> Vec<Item> {
+    let mut items = list(engine, labels);
+    items.extend(links.items());
+    items.sort_by(|a, b| {
+        b.is_question()
+            .cmp(&a.is_question())
+            .then(b.at_ms.cmp(&a.at_ms))
+    });
+    items
+}
+
+/// Links that had items and stopped answering: their items stay listed, as last read, and
+/// cannot be answered until the link answers again.
+pub fn away(links: &crate::links::Links) -> Vec<String> {
+    links
+        .shown()
+        .into_iter()
+        .filter(|l| l.state == crate::links::State::Down && l.had_items)
+        .map(|l| l.name)
+        .collect()
+}
+
+/// What a client says about links that are not well, beside the list: one that refused this
+/// computer or is too old, and with `away`, one that had items and stopped answering (a
+/// window shows that on the items themselves). Nothing while all is well.
+pub fn link_notes(links: &crate::links::Links, away: bool) -> Vec<String> {
+    use crate::links::State;
+    links
+        .shown()
+        .into_iter()
+        .filter_map(|l| match l.state {
+            State::Refused => Some(format!("{} signed this computer out: pair again.", l.name)),
+            State::Down if away && l.had_items => Some(format!(
+                "{} is not answering; its items may be out of date.",
+                l.name
+            )),
+            State::TooOld => Some(format!(
+                "{} runs an older version: what waits there is not shown here.",
+                l.name
+            )),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Everything that waits for the person now: questions first, then the newest first.
@@ -228,6 +278,7 @@ fn list_at(engine: &Engine, labels: &Labels, now: u64) -> Vec<Item> {
             _ => format!("Done: {title}"),
         };
         items.push(Item {
+            runtime: None,
             id,
             kind,
             project: t.project.clone(),
@@ -262,6 +313,7 @@ fn question(
 ) -> Item {
     let title = labels.approval_line(request);
     Item {
+        runtime: None,
         line: format!("{} {title}", approval_title(request)),
         id,
         kind: Kind::Question,
@@ -424,8 +476,17 @@ pub fn mark_notified(engine: &Engine, id: &str) -> anyhow::Result<()> {
 
 /// The list as the terminal prints it. `/waiting` numbers the rows.
 pub fn report(items: &[Item]) -> Report {
+    report_with(items, &[])
+}
+
+/// [`report`], with what is wrong with links (`link_notes`), one muted line each.
+pub fn report_with(items: &[Item], notes: &[String]) -> Report {
     if items.is_empty() {
-        return Report::new().note("Nothing is waiting for you.");
+        let mut r = Report::new().note("Nothing is waiting for you.");
+        for n in notes {
+            r = r.note(n.clone());
+        }
+        return r;
     }
     let mut t = Table::plain(3).right(0);
     for (i, it) in items.iter().enumerate() {
@@ -443,7 +504,11 @@ pub fn report(items: &[Item]) -> Report {
     if items.iter().any(Item::is_question) {
         r = r.note("Answer a question: /waiting <n> once|session|always|deny");
     }
-    r.note("Open one: /waiting <n>. Clear what is done or failed: /waiting clear")
+    r = r.note("Open one: /waiting <n>. Clear what is done or failed: /waiting clear");
+    for n in notes {
+        r = r.note(n.clone());
+    }
+    r
 }
 
 /// The terminal's line when what waits changes: `2 waiting for you · /waiting`.

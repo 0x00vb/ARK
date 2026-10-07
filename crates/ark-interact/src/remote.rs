@@ -63,6 +63,16 @@ impl Client {
     /// channel closes when the connection does; a `{"kind":"resync"}` event means some were
     /// dropped because this client read too slowly.
     pub async fn events(&self) -> anyhow::Result<mpsc::UnboundedReceiver<Value>> {
+        self.stream(false).await
+    }
+
+    /// [`events`](Self::events), with `{"kind": "alive"}` for each of the runtime's pings (every
+    /// 15 s): a follower that hears nothing for longer knows the stream is gone.
+    pub async fn events_alive(&self) -> anyhow::Result<mpsc::UnboundedReceiver<Value>> {
+        self.stream(true).await
+    }
+
+    async fn stream(&self, alive: bool) -> anyhow::Result<mpsc::UnboundedReceiver<Value>> {
         let r = self
             .http
             .get(format!("{}/events", self.base))
@@ -91,7 +101,11 @@ impl Client {
         }
         tokio::spawn(async move {
             while let Some(Ok(chunk)) = body.next().await {
-                for v in lines.push(&chunk).1 {
+                let (ping, events) = lines.push(&chunk);
+                if alive && ping && tx.send(json!({ "kind": "alive" })).is_err() {
+                    return;
+                }
+                for v in events {
                     if tx.send(v).is_err() {
                         return;
                     }

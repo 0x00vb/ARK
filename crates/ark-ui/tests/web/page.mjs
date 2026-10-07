@@ -1231,6 +1231,41 @@ async function waiting(page) {
 }
 scenarios.waiting = waiting;
 
+// What waits on another computer (ADR 0043 step 4): its question is a card in this window's
+// tray, saying where; answering it here decides it there. Its page, opened with a token and an
+// item, signs in and keeps the item to open.
+async function linked(page) {
+  const card = page.locator(".asks .waiting-cards .approval");
+  await card.waitFor();
+  assert.match(await card.innerText(), /In My machine · novel/);
+  // At phone width the card still fits and its choices show.
+  await page.setViewportSize({ width: 390, height: 800 });
+  const allow = card.getByRole("button", { name: "Allow once" });
+  await allow.waitFor();
+  const box = await card.boundingBox();
+  assert.ok(box.x >= 0 && box.x + box.width <= 390, `the card fits: ${JSON.stringify(box)}`);
+
+  // The other computer's page, as a window opens it: the token leaves the address, the item stays.
+  const there = await page.context().browser().newPage();
+  await there.addInitScript(() => {
+    window.__addresses = [];
+    const replace = history.replaceState.bind(history);
+    history.replaceState = (s, t, u) => { window.__addresses.push(String(u)); replace(s, t, u); };
+  });
+  await there.goto(process.env.ARK_TEST_ELSEWHERE);
+  await there.locator("#input").waitFor();
+  await there.locator("#asks .approval").waitFor();
+  const addresses = await there.evaluate(() => window.__addresses);
+  assert.ok(addresses.every((a) => !a.includes("token=")), `the token left the address: ${addresses}`);
+  assert.ok(addresses[0].includes("#item="), `the item stayed for the page: ${addresses}`);
+  assert.equal(new URL(there.url()).hash, "", "and was opened");
+  await there.close();
+
+  await allow.click();
+  await card.waitFor({ state: "detached" });
+}
+scenarios.linked = linked;
+
 const run = scenarios[scenario];
 if (!run) {
   console.error(`unknown scenario ${scenario}`);

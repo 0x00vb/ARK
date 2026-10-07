@@ -120,29 +120,54 @@ impl Command for Waiting {
     }
     async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
         use crate::attention;
-        let items = attention::list(ix.engine(), ix.labels());
+        // This runtime's items and the linked runtimes' (ADR 0043 step 4); each is opened,
+        // cleared and answered on its own runtime.
+        let links = ix.links().clone();
+        let items = attention::everywhere(ix.engine(), ix.labels(), &links);
         let mut words = args.split_whitespace();
         let (first, second) = (words.next(), words.next());
         match first {
             None => {
-                ix.waiting = items.iter().map(|i| i.id.clone()).collect();
-                Ok(attention::report(&items).into())
+                ix.waiting = items
+                    .iter()
+                    .map(|i| (i.runtime.clone(), i.id.clone()))
+                    .collect();
+                Ok(attention::report_with(&items, &attention::link_notes(&links, true)).into())
             }
             Some("clear") => {
-                let n = items
-                    .iter()
-                    .filter(|i| !i.is_question())
-                    .filter(|i| attention::clear(ix.engine(), i).is_ok())
-                    .count();
+                let mut n = 0;
+                // A runtime that does not answer is not waited on item by item: its items stay.
+                let mut failed: Vec<String> = attention::away(&links);
+                for i in items.iter().filter(|i| !i.is_question()) {
+                    let done = match &i.runtime {
+                        None => attention::clear(ix.engine(), i).is_ok(),
+                        Some(r) if failed.contains(r) => false,
+                        Some(r) => {
+                            let ok = links.clear(r, &i.id).await.is_ok();
+                            if !ok {
+                                failed.push(r.clone());
+                            }
+                            ok
+                        }
+                    };
+                    n += usize::from(done);
+                }
                 ix.waiting.clear();
-                Ok(Report::new()
+                let mut r = Report::new()
                     .success(crate::fmt::count(n as u64, "item"))
-                    .note("Cleared. The work stays in its chat and in /agents.")
-                    .into())
+                    .note("Cleared. The work stays in its chat and in /agents.");
+                for name in failed.iter().filter(|f| {
+                    items
+                        .iter()
+                        .any(|i| i.runtime.as_ref() == Some(*f) && !i.is_question())
+                }) {
+                    r = r.warning(format!("{name} is not answering: what waits there stays."));
+                }
+                Ok(r.into())
             }
             Some(n) => {
                 // The number of the list the person saw, never of a newer one.
-                let Some(id) = n
+                let Some(key) = n
                     .parse::<usize>()
                     .ok()
                     .and_then(|n| ix.waiting.get(n.wrapping_sub(1)))
@@ -156,7 +181,10 @@ impl Command for Waiting {
                     };
                     return Ok(Report::new().warning(say).into());
                 };
-                let Some(item) = items.into_iter().find(|i| i.id == id) else {
+                let Some(item) = items
+                    .into_iter()
+                    .find(|i| i.runtime == key.0 && i.id == key.1)
+                else {
                     return Ok(Report::new()
                         .note(format!(
                             "Item {n} is no longer waiting. /waiting lists what waits now."
@@ -164,25 +192,43 @@ impl Command for Waiting {
                         .into());
                 };
                 let n: usize = n.parse().unwrap_or(0);
-                match second {
-                    None => {
+                match (second, &item.runtime) {
+                    (None, None) => {
                         let r = attention::opened(ix.engine(), &item, n);
                         if !item.is_question() {
                             attention::clear(ix.engine(), &item)?;
                         }
                         Ok(r.into())
                     }
-                    Some(word) if item.is_question() => {
+                    // On another runtime: its words from there; its chat is there.
+                    (None, Some(runtime)) => {
+                        let opened = links.open(runtime, &item.id).await?;
+                        let mut r =
+                            Report::titled(item.title.clone()).field("where", item.place.clone());
+                        if let Some(t) = opened["text"].as_str() {
+                            r = r.text(t.to_string());
+                        }
+                        if item.is_question() {
+                            r = r.note(format!(
+                                "Answer here: /waiting {n} once|session|always|deny"
+                            ));
+                        }
+                        Ok(r.note(format!("It is on {runtime}.")).into())
+                    }
+                    (Some(word), runtime) if item.is_question() => {
                         let decision = match crate::orchestration::decision(word) {
                             Ok(d) => d,
                             Err(e) => return Ok(Report::new().warning(e).into()),
                         };
-                        ix.orchestrators().answer(&item.id, decision)?;
+                        match runtime {
+                            None => ix.orchestrators().answer(&item.id, decision)?,
+                            Some(r) => links.answer(r, &item.id, decision).await?,
+                        }
                         Ok(Report::new()
                             .success(format!("Answered: {}", item.title))
                             .into())
                     }
-                    Some(_) => Ok(Report::new()
+                    (Some(_), _) => Ok(Report::new()
                         .warning(format!(
                             "Item {n} is not a question. /waiting {n} opens it."
                         ))

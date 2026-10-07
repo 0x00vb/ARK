@@ -449,7 +449,15 @@ async fn handle(
                 params["_by"] = json!(by.unwrap_or_default());
                 params["_origin"] = json!(req.header("origin").unwrap_or(""));
             }
-            let out = match host.call(&method, params).await {
+            // Only the app's own window goes to another runtime's page; a browser here would
+            // move that window instead of itself (it shows the item's words).
+            let out = match if method == "attention_go" {
+                Err(anyhow::anyhow!(
+                    "only this computer's window opens another runtime's page"
+                ))
+            } else {
+                host.call(&method, params).await
+            } {
                 Ok(r) => json!({ "ok": true, "result": r }),
                 Err(e) => json!({ "ok": false, "error": format!("{e:#}") }),
             };

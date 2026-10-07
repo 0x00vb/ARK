@@ -33,6 +33,7 @@ watches from outside.
 | Which agent does the work | Earned by measurement, not by preference. ARK's own agent stays the default. A worker is compared with it on the same workloads: success rate, cost, time, how often a person is asked, and later quality. Routing and defaults follow those numbers |
 | Where the compute comes from | **Defer ARK-funded compute, not the distributed architecture.** ARK Cloud compute (machines ARK pays for) waits until demand and unit economics justify it. My machine builds and tests the same distributed runtime (a runtime elsewhere, `token link`, notifications, attention across runtimes) on compute the person pays for, so turning Cloud on later is a location and a bill, not new architecture |
 | What ARK charges for | Only what costs ARK something: Cloud compute, ARK's models, team and organization features later. Attention, workers and My machine are free everywhere. A person brings their own way in to My machine (Tailscale, a proxy). A relay run by ARK comes with Cloud's services, if ever |
+| A runtime that shows another's list | Only the app links runtimes, in code (`ArkUi::link`, `Links::set`): a name, an address and a token. The token stays in the app's process, never in an answer, an event, an error or a log. A client of the runtime reaches a linked one only through four fixed calls (its list, answering a kept question, clearing, opening one item), as this runtime's owner; nothing else passes through. One way only: the linked runtime does not see this one's list. Each runtime notifies its own devices about its own items (step 4) |
 | What ARK takes from One and herdr | The jobs: know what needs me, answer it fast, reach it away from the computer, keep work alive. Not their screens: no floating toolbar, no voice router, no terminal panes. Each job goes into what ARK already has: the attention list, approvals, notifications, the runtime |
 
 Order of work. Each step ends with a check, and the next starts only when the earlier one holds.
@@ -212,6 +213,50 @@ Not checked here: an iPhone and an Android phone with their real push services a
 Screen, a real server reached by name or over Tailscale, and ARK Desktop's window switching to
 My machine and back (the owner's checks, on the board).
 
+## Step 4 results (2026-10-07)
+
+What waits on the person's own server shows beside this computer's, and is answered there.
+
+| Part | Where | What |
+|---|---|---|
+| Links | `ark-interact` (`links`) | a link is a name, an address and a token, set by the app. Each is followed in the background: its list once, then again on each of its `attention` events; a silent stream (40 s) or an error starts over with backoff. Reads never wait on the network. States: ok, not answering, signed out (its token refused), too old |
+| One list | `ark-interact` (`attention::everywhere`), `ark-ui` (`attention_all`) | this runtime's items and each link's, named: an item from a link carries `runtime` and its place starts with the link's name ("My machine · novel-b · scribe"). `attention` and notifications stay this runtime's own, so two runtimes linked both ways never loop or notify twice |
+| Answering there | `attention_answer`, `attention_clear`, `attention_open` with `runtime`; `/waiting n once` | the item's own runtime decides: B's kept question by its id. A failed answer keeps the card |
+| The window | `web/js/waiting.js` | a question from a link is a card like this runtime's, its first line saying where. While the link does not answer, its items stay as last read, the line says it is not answering and the choices are off. A link that refused this computer is one quiet line. Opening a result there: a window visits that runtime's page on the item (`remote::visit_item`, `#item=` kept through sign-in); a browser shows its words under the row |
+| The writer | `examples/writing-agent` | `--link NAME=URL`, the token from `WRITER_LINK_TOKEN` (never the command line) |
+
+What changed from the plan, and why: links are followed and cached instead of read on each list
+(plan review: a slow link must not hold up every read); a down link shows on its items instead
+of a note beside the list (dogfood: a second box of text, and answers that would fail, where a
+greyed choice says it); no link from the page itself and no Cloud link (Cloud compute is
+deferred; the consumer is ARK Desktop's My machine). Implementation review: a link tells clients
+only when its list differs, and what a runtime emits because of its own links is marked
+(`linked`) so a runtime following it does not read again (two runtimes linked both ways read
+each other for ever before); only the app's own window may go to another runtime's page; an
+item a newer runtime words differently is left out, not the whole list; `/waiting clear` does
+not wait on a link that does not answer; a stream that ends before a word backs off.
+
+Evidence: `crates/ark-ui/tests/links.rs`: two runtimes, B serving with saved tokens, A linked:
+B's question listed on A, named, and not in A's own list or B's; answered from A's window and
+from A's `/waiting 1 once`, B's task saves once and A's list follows; B's token in no answer or
+error of A; an unknown link refused; a down link and a refused one do not hold A up (a read in
+under a second), only the refused one says so; a question stays, marked, while B does not
+answer; two runtimes linked both ways settle (at most one `attention` event each in 2 s). In WebKit: B's card in A's tray at 1100 and 390 wide, answered there; B's page opened
+with a token and an item signs in and opens the item (fails without the `transport.js` fix).
+Dogfood (two `writer --serve` on this Mac, qwen3.5:27b, B with saved tokens as My machine): an
+agent on B asked to save a chapter; A's tray showed "In My machine · novel-b" in light and
+dark, 1100 and 390 wide; Allow once from A at phone width saved it on B. B killed with a question
+open: A kept the card, "My machine is not answering", choices off; B restarted: the card came
+back live and was answered from A. A with a wrong token: one line, "My machine signed this
+computer out: pair again."
+
+Found while dogfooding, not changed here: after a restart, an ARK agent repeats its step, and a
+local model may write a different change (84 words, then 79): the person is asked again, since
+"once" covers one exact change (ADR 0037).
+
+Not checked here: ARK Desktop linking My machine at start and after pairing (its branch), and a
+real server over the network.
+
 ## Consequences
 - Developers can bring the agents they already use, and their questions and results land where
   ARK's own agents' do. This brings developers in; it is not the product's message, which stays
@@ -240,4 +285,6 @@ My machine and back (the owner's checks, on the board).
 - Step 1: `crates/ark-ui/tests/attention.rs` compares the list in both front-ends.
 - Step 0 and step 2: a test where a worker asks, the process restarts, another client answers,
   and the task finishes with its outputs.
+- Step 4: `crates/ark-ui/tests/links.rs`: a linked runtime's item is answered on it, and its
+  token never leaves the process.
 - Review: a new item kind needs a record that already exists, not a new store.

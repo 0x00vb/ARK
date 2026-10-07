@@ -109,6 +109,21 @@ async fn forward_attention(
     }
 }
 
+/// Tell every window when a linked runtime's list or state changed (`{kind: "attention",
+/// linked: true}`).
+async fn forward_links(host: std::sync::Weak<Host>, mut rx: broadcast::Receiver<()>) {
+    loop {
+        match rx.recv().await {
+            Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                let Some(host) = host.upgrade() else { return };
+                // `linked`: a runtime that follows this one does not read it again for this.
+                host.emit(json!({ "kind": "attention", "linked": true }));
+            }
+            Err(broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
 /// `{kind: "orch", event, line, tone, activity}` for one orchestration event (see
 /// [`forward_orchestration`]).
 fn orch_event(
@@ -138,9 +153,14 @@ pub struct HandlerCtx {
     pub engine: Arc<Engine>,
     pub project: Project,
     emitter: Emitter,
+    links: Arc<ark_interact::links::Links>,
 }
 
 impl HandlerCtx {
+    /// The app's links to other runtimes, to change when the person links or forgets one.
+    pub fn links(&self) -> Arc<ark_interact::links::Links> {
+        self.links.clone()
+    }
     /// Send an event to the consumer's scripts (`ark.on(name, fn)`).
     pub fn emit(&self, name: &str, payload: Value) {
         self.emitter.emit(name, payload)
@@ -385,6 +405,8 @@ pub struct Host {
     processes: Option<ark_sdk::prelude::ark_proc::Processes>,
     /// Notifications to the person's devices (ADR 0047).
     pub(crate) notifier: Arc<crate::notify::Notifier>,
+    /// The app's links to other runtimes, shared with its conversations.
+    links: Arc<ark_interact::links::Links>,
 }
 
 impl Host {
@@ -455,6 +477,7 @@ impl Host {
             computer: ix.ark().computer().cloned(),
             processes: ix.ark().processes().cloned(),
             notifier: Arc::new(crate::notify::Notifier::new(ix.ark().shared_engine())),
+            links: ix.links().clone(),
             current: Mutex::new(Conv::new(ix)),
             switching: tokio::sync::Mutex::new(()),
             background: Mutex::new(Vec::new()),
@@ -475,6 +498,8 @@ impl Host {
         ));
         // What waited before this process started (kept questions, results) is looked at too.
         host.notify_soon();
+        // A linked runtime's list changed: windows read it again.
+        tokio::spawn(forward_links(Arc::downgrade(&host), host.links.subscribe()));
         if let Some(c) = &host.computer {
             tokio::spawn(forward_computer(Arc::downgrade(&host), c.watch()));
         }
@@ -647,6 +672,12 @@ impl Host {
     #[cfg(test)]
     pub(crate) fn engine_for_tests(&self) -> &Arc<Engine> {
         &self.engine
+    }
+
+    /// The other runtimes whose items this one shows too (ADR 0043 step 4). The app sets them
+    /// (`Links::set`, `ArkUi::link`): the people who reach this runtime act on those as its owner.
+    pub fn links(&self) -> Arc<ark_interact::links::Links> {
+        self.links.clone()
     }
 
     /// What waits for the person now, as notices for their devices: the attention list (any
@@ -970,6 +1001,38 @@ impl Host {
                     .in_view(&s("endpoint"), params["visible"].as_bool().unwrap_or(false));
                 Ok(json!({ "ok": true }))
             }
+            // This runtime's items and the linked runtimes' (ADR 0043 step 4), with what is wrong
+            // with a link, if anything. `attention` stays this runtime's own: a runtime that
+            // links this one reads it, and its devices hear only of its own items.
+            "attention_all" => {
+                let links = self.links();
+                Ok(json!({
+                    "items": ark_interact::attention::everywhere(&self.engine, &self.labels, &links),
+                    "notes": ark_interact::attention::link_notes(&links, false),
+                    "away": ark_interact::attention::away(&links),
+                }))
+            }
+            // Answering a question on another runtime: there, by its kept question's id.
+            "attention_answer" => {
+                let decision: ApprovalDecision =
+                    serde_json::from_value(params["decision"].clone())?;
+                self.links()
+                    .answer(&s("runtime"), &s("id"), decision)
+                    .await?;
+                Ok(json!({ "ok": true }))
+            }
+            // Opening an item where it is, in this window: that runtime's page, on the item. Only
+            // a window can; a browser shows the item's words instead (`attention_open`).
+            "attention_go" => {
+                let (links, runtime) = (self.links(), s("runtime"));
+                let (url, token) = links
+                    .page(&runtime)
+                    .ok_or_else(|| anyhow::anyhow!("{runtime} is not linked here"))?;
+                crate::remote::visit_item(&url, &token, &s("id"))
+                    .await
+                    .map_err(|e| anyhow::anyhow!(links.words(&runtime, &e)))?;
+                Ok(json!({}))
+            }
             // A window shows this chat to the person: what was posted there is seen.
             "attention_seen" => {
                 let n = ark_interact::attention::seen_chat(&self.engine, &s("session"));
@@ -980,6 +1043,15 @@ impl Host {
             }
             // Open or clear one item. Opening a result or a failure clears it; the window then
             // shows where it lives (its chat, or its agent's task).
+            // On another runtime: there.
+            "attention_open" | "attention_clear" if !s("runtime").is_empty() => {
+                let links = self.links();
+                if method == "attention_clear" {
+                    links.clear(&s("runtime"), &s("id")).await?;
+                    return Ok(json!({}));
+                }
+                links.open(&s("runtime"), &s("id")).await
+            }
             "attention_open" | "attention_clear" => {
                 let id = s("id");
                 let item = ark_interact::attention::list(&self.engine, &self.labels)
@@ -1706,6 +1778,7 @@ impl Host {
                     engine: self.engine.clone(),
                     project: self.project()?,
                     emitter: self.emitter(),
+                    links: self.links(),
                 };
                 h(ctx, params.get("params").cloned().unwrap_or(Value::Null)).await
             }

@@ -62,9 +62,20 @@ pub struct ArkUi {
     access: Access,
     entry: Option<String>,
     keep_running: bool,
+    links: Vec<ark_interact::links::Link>,
 }
 
 impl ArkUi {
+    /// Show what waits on another runtime too, beside this one's (ADR 0043 step 4): a person's
+    /// own server, reached at `url` with `token`, called `name` ("My machine"). Its items are
+    /// answered there. Whoever reaches this runtime acts on that one as this runtime's owner:
+    /// link only runtimes of the same person. `Host::links()` changes them later.
+    pub fn link(mut self, name: &str, url: &str, token: &str) -> Self {
+        self.links
+            .push(ark_interact::links::Link::new(name, url, token));
+        self
+    }
+
     pub fn new(app: App) -> Self {
         ArkUi {
             app,
@@ -75,6 +86,7 @@ impl ArkUi {
             access: Access::default(),
             entry: None,
             keep_running: false,
+            links: Vec::new(),
         }
     }
     /// The accent colour, any CSS colour.
@@ -179,6 +191,9 @@ impl ArkUi {
             self.info.theme,
         ));
         let host = Host::new(opened.interaction, approvals, self.info, self.handlers).await;
+        if !self.links.is_empty() {
+            host.links().set(self.links);
+        }
         Ok((host, assets))
     }
 

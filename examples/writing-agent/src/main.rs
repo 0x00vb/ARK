@@ -807,7 +807,21 @@ async fn main() -> std::process::ExitCode {
         } else {
             ark_ui::Access::OneTime
         };
-        let ui = ark_ui::ArkUi::new(app)
+        let mut ui = ark_ui::ArkUi::new(app);
+        // Another writer whose waiting work shows here too (ADR 0043 step 4). The token comes
+        // from the environment, never the command line, which other users of the machine see.
+        if let Some(link) = cli.link.as_deref() {
+            let Some((name, url)) = link.split_once('=') else {
+                eprintln!("writer: --link takes NAME=URL, e.g. --link \"My machine=https://writer.example.org\"");
+                return std::process::ExitCode::FAILURE;
+            };
+            let Ok(token) = std::env::var("WRITER_LINK_TOKEN") else {
+                eprintln!("writer: --link needs WRITER_LINK_TOKEN");
+                return std::process::ExitCode::FAILURE;
+            };
+            ui = ui.link(name, url, &token);
+        }
+        let ui = ui
             .start(start)
             .access(access)
             .accent("#b0418f")
@@ -853,6 +867,10 @@ struct Cli {
     /// TLS proxy (docs/REMOTE.md), instead of a one-time link
     #[arg(long, requires = "serve")]
     tokens: bool,
+    /// With --serve: also show what waits on another writer, NAME=URL, with its token in
+    /// WRITER_LINK_TOKEN (e.g. --link "My machine=https://writer.example.org")
+    #[arg(long, value_name = "NAME=URL", requires = "serve")]
+    link: Option<String>,
     /// Create an access token with this name, print it once, and exit
     #[arg(long, value_name = "NAME")]
     new_token: Option<String>,

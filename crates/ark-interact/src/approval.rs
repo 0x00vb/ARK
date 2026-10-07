@@ -23,12 +23,12 @@ pub fn approval_title(req: &ApprovalRequest) -> String {
 }
 
 /// One answer a person can give, as both front-ends show it.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Choice {
     pub label: String,
     pub decision: ApprovalDecision,
     /// A short note beside the label (what "for this session" covers).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
 

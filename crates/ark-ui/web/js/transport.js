@@ -56,7 +56,9 @@ export function connect() {
   const code = new URLSearchParams(url.hash.slice(1)).get("code");
   if (url.searchParams.has("token") || code) {
     url.searchParams.delete("token");
-    history.replaceState(null, "", url.pathname + url.search);
+    // A code leaves the address; an item to open (`#item=`, a notification, another computer's
+    // window) stays for the page to read.
+    history.replaceState(null, "", url.pathname + url.search + (code ? "" : url.hash));
   }
   const ready = code
     ? fetch("/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }).catch(() => {})

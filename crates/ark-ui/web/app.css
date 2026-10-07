@@ -1395,3 +1395,17 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .welcome.pair { align-items: center; text-align: center; }
 .app[data-signed-out] { grid-template-columns: 0 1fr 0 !important; }
 .devices-others:empty { display: none; }
+
+/* Settings on a phone: the sections as a row to scroll above the one shown; a row's controls
+   under its words. */
+@media (max-width: 640px) {
+  .settings { flex-direction: column; gap: 14px; padding: 12px 16px 40px; }
+  .settings-list { width: auto; flex-direction: row; overflow-x: auto; gap: 4px; margin: 0 -16px; padding: 0 16px; scrollbar-width: none; }
+  .settings-list::-webkit-scrollbar { display: none; }
+  .settings-list > * { flex: none; }
+  .settings-list > .nav-row { width: auto; margin: 0; padding-inline: 10px 12px; }
+  .settings-group { display: none; }
+  .setting-row { flex-wrap: wrap; }
+  .setting-row .plugin-detail { white-space: normal; }
+}
+.pair-code { padding: 0 16px 12px; }

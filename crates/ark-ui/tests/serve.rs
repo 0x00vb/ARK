@@ -619,3 +619,102 @@ async fn a_revoked_session_stops_receiving_events_on_a_stream_it_already_had() {
         "an event reached a revoked session: {got}"
     );
 }
+
+/// A device with no link (a phone's Home Screen app) signs in with a code a signed-in one made,
+/// for 90 days; the manifest names the app; a device added for notifications is tied to the
+/// session that added it, and ends with it (ADR 0047).
+#[tokio::test]
+async fn a_typed_code_signs_a_phone_in_and_its_notifications_end_with_its_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let laptop = tokens.create("laptop").unwrap();
+    let (host_, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .accent("#b0418f")
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let port = served.port;
+    let host = "ark.example.dev";
+    let me = "https://ark.example.dev";
+
+    // Signed out, the page learns a code signs in here, and how the app looks.
+    let out = raw(
+        port,
+        format!("GET /session HTTP/1.1\r\nHost: {host}\r\n\r\n"),
+    )
+    .await;
+    assert!(
+        out.contains(r#""pairing":true"#) && out.contains(r##""accent":"#b0418f""##),
+        "{out}"
+    );
+    let manifest = raw(
+        port,
+        format!("GET /manifest.webmanifest HTTP/1.1\r\nHost: {host}\r\n\r\n"),
+    )
+    .await;
+    assert!(
+        manifest.contains("Content-Type: application/manifest+json"),
+        "{manifest}"
+    );
+    assert!(
+        manifest.contains(r#""name":"Test""#) && manifest.contains(r#""display":"standalone""#)
+    );
+    let sw = raw(port, format!("GET /sw.js HTTP/1.1\r\nHost: {host}\r\n\r\n")).await;
+    assert!(
+        sw.starts_with("HTTP/1.1 200") && sw.contains("showNotification"),
+        "the worker is public"
+    );
+
+    // Only a signed-in device makes a code.
+    let none = raw(port, post("/pair", host, Some(me), "", "{}")).await;
+    assert!(none.starts_with("HTTP/1.1 401"), "{none}");
+    let auth = format!("Authorization: Bearer {laptop}\r\n");
+    let made = raw(
+        port,
+        post("/pair", host, Some(me), &auth, r#"{"name":"iPhone"}"#),
+    )
+    .await;
+    assert!(made.starts_with("HTTP/1.1 200"), "{made}");
+    let made: Value = serde_json::from_str(made.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let code = made["code"]
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .replace('-', " ");
+
+    // Typed on the phone: a session for 90 days, in a cookie.
+    let body = json!({ "code": code }).to_string();
+    let signed = raw(port, post("/session", host, Some(me), "", &body)).await;
+    assert!(signed.starts_with("HTTP/1.1 200"), "{signed}");
+    let (session, attrs) = set_cookie(&signed, "__Host-ark-session").expect("a cookie");
+    let age: u64 = attrs
+        .split("Max-Age=")
+        .nth(1)
+        .and_then(|a| a.split(';').next())
+        .and_then(|a| a.trim().parse().ok())
+        .unwrap_or_else(|| panic!("{attrs}"));
+    assert!(age > 89 * 24 * 3600, "{age}");
+    assert_eq!(tokens.check(session).as_deref(), Some("iPhone"));
+
+    // The phone asks for notifications: tied to its session, whatever the page says.
+    let cookie = format!("Cookie: __Host-ark-session={session}\r\n");
+    let add = json!({ "method": "push_add", "params": {
+        "subscription": { "endpoint": "https://web.push.apple.com/abc", "keys": { "p256dh": "BCVx", "auth": "BTBZ" } },
+        "name": "iPhone Safari", "_by": "laptop" } })
+    .to_string();
+    let added = raw(port, post("/rpc", host, Some(me), &cookie, &add)).await;
+    assert!(added.contains(r#""ok":true"#), "{added}");
+    let listed = host_.call("push_devices", json!({})).await.unwrap();
+    assert_eq!(listed[0]["name"], "iPhone Safari");
+    let record = ark_ui::push::Device::id("https://web.push.apple.com/abc");
+    let ark = Ark::builder().store_root(dir.path()).build().unwrap();
+    let d = ark
+        .engine()
+        .store
+        .get_record(ark_ui::push::DEVICE, &record)
+        .unwrap()
+        .unwrap();
+    assert_eq!(d["by"], "iPhone", "the server names who asked");
+    assert_eq!(d["origin"], me);
+}

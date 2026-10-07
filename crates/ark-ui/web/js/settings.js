@@ -72,6 +72,8 @@ export const settingsView = {
     };
 
     pick(params?.section);
+    // On a phone the sections are a row: the one shown is in view.
+    list.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest", inline: "center" });
     return {
       update: (p) => pick(p?.section),
       refresh: () => { mark(); ctl.refresh?.(); },

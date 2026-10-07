@@ -9,6 +9,10 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-07
+
+ARK in any browser and on a phone: files in without drag and drop; Run code on Linux.
+
 ### Added
 - The page: Upload a folder… (the sidebar's add menu, where there is no folder picker) makes a
   new project from a folder on this device, through the upload calls (ADR 0030), and opens it.

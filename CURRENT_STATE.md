@@ -4,14 +4,14 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-06 (v0.12.0: a browser comes in through a one-time link, ADR 0040)
+Last updated: 2026-10-07 (v0.12.1: Upload a folder… and Add files, a touch pass, Run code on Linux fixed and tested)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.12.0 (2026-10-06), on `origin` and `github` |
-| `main` | v0.12.0: a browser comes in through a one-time link and keeps a session in an HttpOnly cookie, an entry for a browser without one, streams that end on revoke, a Content-Security-Policy on served pages (ADR 0040; ARK in the browser from ARK Cloud, ark-cloud ADR 0016). v0.11.0: W1 to W3, W5, W6 (ADR 0036 to 0038: questions kept on tasks and answered from any client, a restart continues work without repeating a change, each agent's step in the graph, a handed-off result reaches its chat once, a SIGTERM lets work reach a safe point and continue in the next process), a fix (a delegated task's outputs no longer include versions before), and `SurfaceKind::Terminal` and `DiffViewer` out of `ark-core`. v0.10.0 brought the browser, a runtime other machines connect to, work without the window, the Computer, Files, Run code, outputs by kind, the board, ARK Accounts, data work (ADR 0015 to 0035). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
+| Latest tag | v0.12.1 (2026-10-07), on `origin` and `github` |
+| `main` | v0.12.1: Upload a folder… (a project from this device's folder) and Add files (the composer's +) for browsers and phones, a touch pass of the page (ark-cloud ADR 0016 W4, W5), and Run code on Linux fixed: uv's Python was not visible in the sandbox; `ark-exec`'s tests pass on Linux (Docker, bookworm, bubblewrap) with `ARK_TEST_PYTHON=1`. v0.12.0: a browser comes in through a one-time link and keeps a session in an HttpOnly cookie, an entry for a browser without one, streams that end on revoke, a Content-Security-Policy on served pages (ADR 0040; ARK in the browser from ARK Cloud, ark-cloud ADR 0016). v0.11.0: W1 to W3, W5, W6 (ADR 0036 to 0038: questions kept on tasks and answered from any client, a restart continues work without repeating a change, each agent's step in the graph, a handed-off result reaches its chat once, a SIGTERM lets work reach a safe point and continue in the next process), a fix (a delegated task's outputs no longer include versions before), and `SurfaceKind::Terminal` and `DiffViewer` out of `ark-core`. v0.10.0 brought the browser, a runtime other machines connect to, work without the window, the Computer, Files, Run code, outputs by kind, the board, ARK Accounts, data work (ADR 0015 to 0035). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | Next tag | none planned. `[Unreleased]` in `CHANGELOG.md` collects what comes next |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | Branch `ci/windows` (pushed to `github`, not merged, 56 commits behind `main`): `ark-os` (ADR 0022) holds every OS difference. Lint clean for Windows; never run on Windows. Code on `main` written after it does not use `ark-os`, and two defects are on `main` today: on Windows a second process on one store re-runs tasks the first still runs (`process_alive` is `false`, ADR 0037 recovery), and `open_in_browser` cuts links at `&`. Analysis and proposed plan (2026-10-05): `ark-desktop/docs/WINDOWS.md`. Proposed for ARK: merge `ci/windows` before the machine run, one runtime per store (a lock), Windows stop events, a Windows cross-lint in `ci.sh`, Office fixes in `ark-files`. Waits for the owner's go |
@@ -56,8 +56,8 @@ on `main` (ADR 0027), and A3 (`FileSecrets`: keys and tokens in an encrypted fil
 ADR 0028), and A6 (the window opens a runtime elsewhere and comes back, `remote::visit`, ADR
 0029, for ARK Desktop's This Mac | Cloud), and a folder sent to a runtime elsewhere becomes a
 project there (`remote::send_folder`, ADR 0030, for Copy to Cloud); and A4 (Run code on Linux,
-bubblewrap, ADR 0032), for Cloud Phase 2. A4 still needs a run on a Linux machine (Docker on
-the dev Mac is broken).
+bubblewrap, ADR 0032), for Cloud Phase 2. A4 ran on Linux on 2026-10-07 (Docker, Debian bookworm, bubblewrap, uv 0.12.23; `/proc`
+unmasked as in a VM): all 10 `ark-exec` tests pass after the fix in v0.12.1.
 
 W1 to W3, W5 and W6 of [`ROADMAP.md`](ROADMAP.md) › Work runtime are on `main` (ADR 0037,
 0038). The runtime has no known blocker left for Cloud running work nobody watches; next is an

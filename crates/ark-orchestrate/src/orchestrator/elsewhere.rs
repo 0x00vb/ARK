@@ -26,7 +26,7 @@ use crate::OrchError;
 /// run (its session, its process), by task.
 const KEPT: &str = "orch_worker";
 /// The action of the call that records a run's work.
-const WORK: &str = "agent.work";
+const WORK: &str = "program.files";
 /// The most written files kept as a run's outputs, and the largest one.
 const MAX_OUTPUTS: usize = 50;
 const MAX_OUTPUT_BYTES: u64 = 25 * 1024 * 1024;

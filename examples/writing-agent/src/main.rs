@@ -388,6 +388,8 @@ fn build_ark(
         .browser(true)
         // Work in the writer's own apps: paste a chapter into Pages, file notes in Notes.
         .computer(computer)
+        // An agent can work on Claude Code or Codex when installed (`agent:claude-code`).
+        .workers(true)
         .profile(writer_profile());
     if let Some(s) = secrets {
         b = b.secrets(s);

@@ -18,9 +18,9 @@ use tokio::process::{ChildStdin, ChildStdout};
 use crate::{Entry, ModelSetting, BASE_ENV};
 
 /// The action of a request to change files, to run a command, and anything else.
-pub const CHANGE: &str = "agent.change";
-pub const RUN: &str = "agent.run";
-pub const OTHER: &str = "agent.other";
+pub const CHANGE: &str = "program.change";
+pub const RUN: &str = "program.run";
+pub const OTHER: &str = "program.other";
 
 /// Said before the brief when a task runs again in the program's own session after a restart.
 const RESUMED: &str = "This task ran before and stopped when the program running it restarted. \
@@ -63,6 +63,21 @@ impl Worker for Acp {
                 cmd.env(k, v);
             }
         }
+        // The adapter reads the person's settings from its home: it gets an empty one. The
+        // program it starts gets the person's real home (its login, its sessions) through the
+        // session's options, exactly as when the person runs it.
+        let settings_home: Vec<(String, std::ffi::OsString)> = match self.entry.settings_dir {
+            Some(var) => {
+                let empty = std::env::temp_dir().join("ark-acp-home");
+                let _ = std::fs::create_dir_all(&empty);
+                cmd.env("HOME", &empty).env_remove(var);
+                ["HOME", var]
+                    .into_iter()
+                    .filter_map(|k| std::env::var_os(k).map(|v| (k.to_string(), v)))
+                    .collect()
+            }
+            None => Vec::new(),
+        };
         cmd.current_dir(&folder)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -87,9 +102,17 @@ impl Worker for Acp {
             lines: BufReader::new(child.stdout.take().ok_or("no stdout")?).lines(),
             next: 0,
         };
-        let mut turn = Turn::new(&folder);
+        let mut turn = Turn::new(&folder, title);
         let ran = self
-            .session(&job, &folder, &mut conn, &mut turn, kept_session, group.0)
+            .session(
+                &job,
+                &folder,
+                &mut conn,
+                &mut turn,
+                kept_session,
+                group.0,
+                settings_home,
+            )
             .await;
         let out = match ran {
             Ok(run) => Ok(run),
@@ -122,6 +145,7 @@ impl Worker for Acp {
 }
 
 impl Acp {
+    #[allow(clippy::too_many_arguments)]
     async fn session(
         &self,
         job: &WorkerJob<'_>,
@@ -130,6 +154,7 @@ impl Acp {
         turn: &mut Turn,
         kept_session: Option<String>,
         group: Option<u32>,
+        settings_home: Vec<(String, std::ffi::OsString)>,
     ) -> Result<WorkerRun, String> {
         let title = self.entry.title;
         let init = conn
@@ -152,6 +177,9 @@ impl Acp {
             (self.entry.model, job.model.or(self.entry.default_model))
         {
             meta["claudeCode"]["options"]["model"] = json!(m);
+        }
+        for (var, real) in &settings_home {
+            meta["claudeCode"]["options"]["env"][var] = json!(real.to_string_lossy());
         }
         let can_load = init["agentCapabilities"]["loadSession"].as_bool() == Some(true);
         let mut resumed = false;
@@ -322,8 +350,12 @@ impl Conn {
                 None if msg["id"].as_u64() == Some(id) => {
                     return match msg.get("error") {
                         Some(e) => Err(format!(
-                            "{method}: {}",
-                            e["message"].as_str().unwrap_or(&e.to_string())
+                            "{method}: {}{}",
+                            e["message"].as_str().unwrap_or(&e.to_string()),
+                            e["data"]["details"]
+                                .as_str()
+                                .map(|d| format!(" ({d})"))
+                                .unwrap_or_default()
                         )),
                         None => Ok(msg["result"].clone()),
                     };
@@ -356,6 +388,8 @@ impl Conn {
 /// What one run said and did.
 struct Turn {
     folder: PathBuf,
+    /// The program, as a person calls it.
+    by: &'static str,
     session: String,
     text: String,
     since_tool: String,
@@ -364,9 +398,10 @@ struct Turn {
 }
 
 impl Turn {
-    fn new(folder: &Path) -> Turn {
+    fn new(folder: &Path, by: &'static str) -> Turn {
         Turn {
             folder: folder.to_path_buf(),
+            by,
             session: String::new(),
             text: String::new(),
             since_tool: String::new(),
@@ -400,7 +435,7 @@ impl Turn {
                 let title = u["title"].as_str().unwrap_or("").to_string();
                 (job.on_event)(HarnessEvent::ToolCall {
                     id: id.clone(),
-                    action: format!("agent.{kind}"),
+                    action: format!("program.{kind}"),
                     input: json!({ "title": title }),
                 });
                 self.calls.insert(id, (kind, title));
@@ -417,7 +452,7 @@ impl Turn {
                     }
                     (job.on_event)(HarnessEvent::ToolResult {
                         id: id.to_string(),
-                        action: format!("agent.{kind}"),
+                        action: format!("program.{kind}"),
                         ok: status == "completed",
                         summary: title.clone(),
                         invocation: String::new(),
@@ -442,7 +477,7 @@ impl Turn {
     /// A permission request, asked as an ARK question. ARK answers with the program's "once"
     /// options only: a grant is ARK's, kept by its gate, and names the file or the command.
     async fn permission(&mut self, params: &Value, job: &WorkerJob<'_>) -> Result<Value, String> {
-        let request = request(&params["toolCall"], &self.folder);
+        let request = request(&params["toolCall"], &self.folder, self.by);
         let inside_change = request.action == CHANGE && !request.ask_each_time;
         let allowed = if job.allow_mutate && inside_change {
             true
@@ -467,8 +502,9 @@ impl Turn {
 }
 
 /// The ARK question for a program's permission request: what it wants to change or run, in
-/// plain words, with a grant that names exactly that (ADR 0043 › Authority over work).
-pub fn request(call: &Value, folder: &Path) -> ApprovalRequest {
+/// plain words, with a grant that names exactly that (ADR 0043 › Authority over work). `by` is
+/// the program as a person calls it: the question says who acts, and where.
+pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
     let kind = call["kind"].as_str().unwrap_or("other");
     let title = call["title"].as_str().unwrap_or("something").to_string();
     let mut paths = Vec::new();
@@ -500,23 +536,25 @@ pub fn request(call: &Value, folder: &Path) -> ApprovalRequest {
     .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
     .filter(|c| !c.is_empty());
     let base =
-        |action: &str, input: Value, class: Option<String>, preview: String| ApprovalRequest {
-            action: action.into(),
-            summary: preview.clone(),
-            risk: RiskTier::Mutate,
-            input,
-            ask_each_time: class.is_none(),
-            class: class.unwrap_or_else(|| action.to_string()),
-            preview,
-            agent: None,
-            task: None,
+        |action: &str, input: Value, class: Option<String>, preview: String, summary: String| {
+            ApprovalRequest {
+                action: action.into(),
+                summary,
+                risk: RiskTier::Mutate,
+                input,
+                ask_each_time: class.is_none(),
+                class: class.unwrap_or_else(|| action.to_string()),
+                preview,
+                agent: None,
+                task: None,
+            }
         };
     match (kind, command) {
         ("edit" | "delete" | "move", _) if !paths.is_empty() => {
-            let verb = match kind {
-                "delete" => "Remove",
-                "move" => "Move",
-                _ => "Change",
+            let (verb, does) = match kind {
+                "delete" => ("Remove", "removes"),
+                "move" => ("Move", "moves"),
+                _ => ("Change", "changes"),
             };
             let class = (!outside).then(|| format!("{CHANGE}:{}", paths.join(" ")));
             base(
@@ -524,6 +562,7 @@ pub fn request(call: &Value, folder: &Path) -> ApprovalRequest {
                 json!({ "paths": paths }),
                 class,
                 format!("{verb} {}", paths.join(", ")),
+                format!("{by} {does} it in the project folder"),
             )
         }
         ("execute", Some(c)) => {
@@ -533,10 +572,17 @@ pub fn request(call: &Value, folder: &Path) -> ApprovalRequest {
                 json!({ "command": c, "folder": "." }),
                 class,
                 format!("Run `{c}`"),
+                format!("{by} runs it on this computer, in the project folder"),
             )
         }
         // Nothing concrete to name: asked every time, never granted.
-        _ => base(OTHER, json!({ "title": title }), None, title),
+        _ => base(
+            OTHER,
+            json!({ "title": title }),
+            None,
+            title,
+            format!("{by} asks for this"),
+        ),
     }
 }
 
@@ -658,31 +704,40 @@ mod tests {
             &json!({ "kind": "edit", "title": "Write report.md", "locations": [
                 { "path": root.join("report.md") }, { "path": root.join("web/a.md") } ] }),
             &root,
+            "Fake",
         );
         assert_eq!(edit.action, CHANGE);
-        assert_eq!(edit.class, "agent.change:report.md web/a.md");
+        assert_eq!(edit.class, "program.change:report.md web/a.md");
         assert_eq!(edit.preview, "Change report.md, web/a.md");
+        assert_eq!(edit.summary, "Fake changes it in the project folder");
         assert!(!edit.ask_each_time);
 
         let run = request(
             &json!({ "kind": "execute", "title": "x", "rawInput": { "command": "npm  test" } }),
             &root,
+            "Fake",
         );
-        assert_eq!(run.class, "agent.run:npm test@.");
+        assert_eq!(run.class, "program.run:npm test@.");
         assert_eq!(run.preview, "Run `npm test`");
 
         // Outside the folder, or nothing to name: asked every time.
         let outside = request(
             &json!({ "kind": "edit", "title": "x", "locations": [{ "path": "/etc/hosts" }] }),
             &root,
+            "Fake",
         );
         assert!(outside.ask_each_time);
-        let other = request(&json!({ "kind": "fetch", "title": "Fetch a page" }), &root);
+        let other = request(
+            &json!({ "kind": "fetch", "title": "Fetch a page" }),
+            &root,
+            "Fake",
+        );
         assert_eq!(other.action, OTHER);
         assert!(other.ask_each_time);
         let up = request(
             &json!({ "kind": "edit", "title": "x", "locations": [{ "path": root.join("../x.md") }] }),
             &root,
+            "Fake",
         );
         assert!(up.ask_each_time);
     }

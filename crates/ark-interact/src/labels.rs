@@ -491,6 +491,10 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
             _ if !s("blocked").is_empty() => format!("Marking {} blocked", s("item")),
             _ => format!("Updating {} on the board", s("item")),
         },
+        // An agent program's own steps, in its own words ("Read File"); what it changed in
+        // the folder, found when the task ends (ADR 0043).
+        "program.files" => "Looking at what changed in the folder".into(),
+        a if a.starts_with("program.") && !s("title").is_empty() => s("title").to_string(),
         "computer.apps" => "Listing the open apps".into(),
         "computer.look" => format!("Looking at {}", s("app")),
         "computer.open" => format!("Opening {}", s("app")),

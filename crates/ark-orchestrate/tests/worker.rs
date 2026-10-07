@@ -157,6 +157,7 @@ fn catalog() -> Arc<dyn ark_runtime::worker::Workers> {
         default_model: None,
         session_meta: || json!({ "claudeCode": { "options": { "settingSources": [] } } }),
         mode: Some("default"),
+        settings_dir: None,
         env: &["ARK_FAKE_PROGRAM", "FAKE_MODE", "FAKE_KIND", "FAKE_HANG"],
         setup: "",
     }]))
@@ -253,9 +254,9 @@ async fn a_program_asks_ark_keeps_the_question_and_another_client_answers() {
 
     let waiting = until_asked(&o, &id).await;
     let q = waiting.question.unwrap();
-    assert_eq!(q.request.action, "agent.change");
+    assert_eq!(q.request.action, "program.change");
     assert_eq!(q.request.preview, "Change report.md");
-    assert_eq!(q.request.class, "agent.change:report.md");
+    assert_eq!(q.request.class, "program.change:report.md");
     assert_eq!(waiting.state, TaskState::Waiting);
     assert!(
         !folder(&ark).join("report.md").exists(),
@@ -303,7 +304,7 @@ async fn a_shell_write_is_found_in_the_folder() {
     let id = o.submit("w", TaskSpec::new("take notes")).unwrap();
     let q = until_asked(&o, &id).await.question.unwrap();
     assert_eq!(q.request.preview, "Run `printf done > notes.txt`");
-    assert_eq!(q.request.class, "agent.run:printf done > notes.txt@.");
+    assert_eq!(q.request.class, "program.run:printf done > notes.txt@.");
     o.answer(&id, ApprovalDecision::AllowOnce).unwrap();
     let done = o.wait(&id).await.unwrap();
     std::env::remove_var("FAKE_KIND");

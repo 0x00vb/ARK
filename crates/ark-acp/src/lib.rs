@@ -44,6 +44,11 @@ pub struct Entry {
     pub session_meta: fn() -> serde_json::Value,
     /// The mode it must be in, when it has modes: the one that asks before a change.
     pub mode: Option<&'static str>,
+    /// The adapter reads the person's settings from their home, or from the folder this
+    /// variable names. It gets an empty home and not the variable, so the person's own mode
+    /// and rules never apply; the program it starts gets both, as set, through the session
+    /// (its login and its sessions stay the person's).
+    pub settings_dir: Option<&'static str>,
     /// Environment variables it may see besides the base ones (its own login's location).
     pub env: &'static [&'static str],
     /// How a person sets it up when it is missing.
@@ -88,7 +93,8 @@ pub fn entries() -> Vec<Entry> {
             default_model: None,
             session_meta: claude_meta,
             mode: Some("default"),
-            env: &["CLAUDE_CONFIG_DIR"],
+            settings_dir: Some("CLAUDE_CONFIG_DIR"),
+            env: &[],
             setup: "install Claude Code and its protocol adapter (`npm install -g @zed-industries/claude-agent-acp`), then sign in with `claude`",
         },
         Entry {
@@ -107,6 +113,7 @@ pub fn entries() -> Vec<Entry> {
             default_model: Some("gpt-5.5"),
             session_meta: no_meta,
             mode: None,
+            settings_dir: None,
             env: &["CODEX_HOME"],
             setup: "install Codex and its protocol adapter (`npm install -g @zed-industries/codex-acp`), then sign in with `codex`",
         },

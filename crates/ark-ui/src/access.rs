@@ -256,7 +256,13 @@ impl Tokens {
             // A typed code's device is named under who made the code, and apart from the
             // devices signed in before it.
             let name = if link.short {
-                let device: String = device.trim().chars().take(40).collect();
+                // A device names itself, but not as if it were under another one.
+                let device: String = device
+                    .replace(UNDER.trim(), "-")
+                    .trim()
+                    .chars()
+                    .take(40)
+                    .collect();
                 let base = format!(
                     "{}{UNDER}{}",
                     link.name,

@@ -130,7 +130,13 @@ impl Notifier {
         );
         let id = Device::id(endpoint);
         let store = &self.engine.store;
-        if store.get_record(REMOVED, &id).ok().flatten().is_some() {
+        // A removal is remembered for 90 days: a page not opened since then asks again.
+        let removed = store.get_record(REMOVED, &id).ok().flatten();
+        if removed.as_ref().is_some_and(|r| {
+            now_ms().saturating_sub(r["at_ms"].as_u64().unwrap_or(0)) > 90 * 24 * 3600 * 1000
+        }) {
+            let _ = store.delete_record(REMOVED, &id);
+        } else if removed.is_some() {
             if renew {
                 return Ok(false);
             }

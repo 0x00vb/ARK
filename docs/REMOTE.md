@@ -51,6 +51,23 @@ one-time link instead of a token (ADR 0040):
 A change the cookie carries must come from the page itself (`Origin`). Every answer has a
 Content-Security-Policy that runs only the runtime's own scripts.
 
+## A phone, and notifications
+
+A runtime with saved tokens and no entry (your own server) signs a device in with a code
+(ADR 0047): a signed-in device makes one in Settings › Devices (`POST /pair`; ARK Desktop:
+`token pair`); on the other device, the page shows a code field. The code is 8 characters,
+good for 10 minutes; the session it becomes lasts 90 days under the device's name, and
+`Tokens::revoke(name)` ends it. `Tokens::pair_code(name, valid_for, session)` makes one from
+Rust.
+
+Settings › Devices › Notifications on this device subscribes the browser to Web Push from the
+runtime itself: what waits (questions, failures, results nobody saw) reaches the device after a
+minute if it still waits and no window of it is in view. The runtime keeps its key in
+`<store>/push-key` and each device as a record; it sends only to Apple's, Google's, Mozilla's
+and Microsoft's push services, so it needs outbound HTTPS. An iPhone gets notifications only
+from a page added to its Home Screen, over https. `sw.js` and `manifest.webmanifest` are
+public, like the page's other files.
+
 ## What a token allows
 
 Everything the window can do, on the runtime's machine, as the OS user the app runs as: run

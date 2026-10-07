@@ -173,6 +173,41 @@ Limits:
   nothing in the window offers the installed ones yet. Which way to offer them is the owner's
   call (a board card).
 
+## Step 3 results (2026-10-07)
+
+What waits reaches a person's phone, and their own server is a place in the window. Design and
+details: ADR 0047.
+
+| Part | Where | What |
+|---|---|---|
+| Notifications | `ark-ui` (`push`, `notify`), `ark-interact` (`attention::notice`) | Web Push from the runtime itself, encrypted to each device; once per item, a minute after it appeared, only while it waits and only to devices not looking at it; the list's words; a tap opens the item |
+| Signing a device in | `ark-ui` (`Tokens::pair_code`, `POST /pair`, the sign-in page) | an 8-character code from a signed-in device, typed on the new one (a phone's Home Screen app opens no links), for 90 days |
+| Settings › Devices | `web/js/devices.js` | Notifications on this device (Off \| On, with why when it cannot work), a code for another device, the devices that get notifications. Settings now fit a phone |
+| My machine | ARK Desktop (branch `my-machine`) | `token pair` prints the address, a QR code and the code; Settings › My machine takes the address and the code; the switch above the projects reads This Mac \| My machine (\| Cloud) without an account; the deploy gets limits, the public address and a loopback port for `tailscale serve` |
+
+What changed from the plan, and why: a chat's own question notifies too (it is not on the list:
+plan review); the runtime decides not to send to a device in view instead of the worker hiding a
+notification (iOS stops delivering to a worker that shows nothing); a phone signs in with a code
+it types, for 90 days (a Home Screen app has its own cookies and no address bar); My machine
+replaces `--connect`'s saved address instead of sitting beside it; the push key stays in the
+store (ADR 0047). Dropped: the install script (`docker compose` on the server is the one
+command; a prebuilt image per tag would make it fast on a small server, and publishing one waits
+for the owner).
+
+Evidence: RFC 8291's example sealed byte for byte, a device opening its message, the VAPID
+signature (`push.rs`); what is sent and to whom (`notify.rs`, also through a host); pairing,
+the 90-day session, the public worker and manifest, a device tied to its session (`serve.rs`);
+typed codes (`access.rs`); Desktop's `token pair` and a code signing it in at a real runtime
+(ark-desktop `remote.rs`). Dogfood on this Mac (writer with saved tokens, as a server would run
+it): Chromium subscribed through Google's push service; a failed task in another project arrived
+as a notification with the list's words; a Claude Code agent's command question arrived on a
+device not looking, the tap's page opened on its card at phone width, Allow once, the program
+wrote its file. Light and dark, 1280 and 390 wide.
+
+Not checked here: an iPhone and an Android phone with their real push services and Home
+Screen, a real server reached by name or over Tailscale, and ARK Desktop's window switching to
+My machine and back (the owner's checks, on the board).
+
 ## Consequences
 - Developers can bring the agents they already use, and their questions and results land where
   ARK's own agents' do. This brings developers in; it is not the product's message, which stays

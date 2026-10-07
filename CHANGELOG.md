@@ -54,6 +54,19 @@ What changed for people building on ARK, per release. Not a commit log.
   `Usage::cost_micro_usd` and `Usage::asked`. Measured against ARK's own agent:
   `bench/RESULTS.md`. ARK's agent stays the default. `ark_exec::written_since` is now
   `ark_runtime::folder::written_since`, re-exported.
+- What waits for you reaches your phone (ADR 0043 step 3, ADR 0047): Web Push sent by the
+  runtime itself, encrypted to the device, with no ARK service in between. Settings › Devices:
+  Notifications on this device, a code to sign in another device, the devices that get
+  notifications. Something waiting (a question, a failure, a result nobody saw, a chat's own
+  question) reaches each device once, a minute after it appeared, if it still waits and that
+  device's page is not in view; a tap opens the page on it (`#item=`). A device signs in with an
+  8-character code from a signed-in one (`POST /pair`, `Tokens::pair_code`) for 90 days; its
+  notifications end with its session. The page has a manifest (the app's name, accent and logo)
+  and a service worker (`sw.js`); a browser with no session on such a runtime sees only the code
+  field. Host methods `push_key`, `push_add`, `push_remove`, `push_devices`, `push_here`;
+  `ark_ui::push`, `ark_interact::attention::{Notice, notice}`.
+- Settings fit a phone: the sections are a row above the one shown, and a row's controls go
+  under its words.
 - What waits for you, in every project (ADR 0043 step 1, `ark_interact::attention`): a question
   an agent's task keeps, work you started that failed, and a result posted into a chat while
   nobody was in it. One list in both front-ends: `/waiting` in the terminal (numbers answer the

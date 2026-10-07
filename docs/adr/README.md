@@ -52,6 +52,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0044](0044-the-browser-panel-is-a-view-of-its-own-in-the-window.md) | The Browser panel is a native webview over the pane in the window (any page shows, no IPC, never the app's own page, steps aside for ARK's menus and dialogs); a plain browser keeps the iframe and says when a page refuses frames (`frame_check`, public addresses only) | Accepted |
 | [0045](0045-a-capability-the-person-turns-on-mid-task.md) | A capability an app offers can be off until the person turns it on; an agent asks for it mid-task (Allow, Not now) and its tools join the turn. The Computer first: one offer line instead of its schemas, no grant covers a request, a person always answers, Turn off in Settings | Accepted |
 | [0046](0046-the-agents-browser-opens-its-projects-own-pages.md) | The agent's browser opens public pages and the pages a running process of its project serves itself (its own listening socket), in the fresh browser only; every action's landing address is checked; amends 0015 and 0041 | Accepted |
+| [0047](0047-what-waits-reaches-a-phone.md) | What waits reaches a person's phone: Web Push sent by the runtime itself, encrypted to the device, once per item after a minute and only while it waits; a device signed in with a typed code for 90 days, its notifications ending with its session | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

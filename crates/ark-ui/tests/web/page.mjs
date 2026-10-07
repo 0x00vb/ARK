@@ -52,6 +52,21 @@ const scenarios = {
     assert.equal(await page.locator(".work[data-summary] > .work-head").isVisible(), true);
   },
 
+  // A model call that breaks off after some text is tried again: its text leaves the page, the
+  // retry's shows once, and the turn replays as it was shown (ADR 0049).
+  async withdrawn(page) {
+    await finished(page, () => page.locator("#input").fill("What do the notes say?").then(() => page.keyboard.press("Enter")));
+    const live = await shape(page);
+    const all = live.join("\n");
+    assert.ok(!all.includes("then I wi"), all);
+    assert.equal(live.filter((s) => s === "text: Reading the notes now.").length, 1, all);
+    assert.equal(live.filter((s) => s.startsWith("answer: ")).length, 1, all);
+    assert.ok(all.includes("retrying"), all);
+    await page.reload();
+    await page.locator(".turn.stored").first().waitFor();
+    assert.deepEqual(await shape(page), live);
+  },
+
   // A row that arrives after the streamed answer (a failed self-check) does not make the page
   // draw the answer a second time.
   async selfcheck(page) {

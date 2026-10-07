@@ -4,9 +4,11 @@
 //!
 //! The CLIs are agents with their own tools. Here those tools are off (`claude --tools ""`;
 //! Codex runs read-only and is told it has none), and ARK's tools are described in the system
-//! prompt instead. The reply is JSON checked against [`REPLY_SCHEMA`]: either text for the
-//! person or a list of tool calls. ARK's loop runs the tools, so approvals, traces and budgets
-//! work as with any other provider.
+//! prompt instead. The reply is JSON checked against a schema: either text for the person or a
+//! list of tool calls. For Codex the schema is built from the tools of the call, so each call's
+//! arguments arrive as an object of the tool's own shape (ADR 0049, `reply.rs`); Claude Code
+//! takes arguments as an open object ([`CLAUDE_REPLY_SCHEMA`]). ARK's loop runs the tools, so
+//! approvals, traces and budgets work as with any other provider.
 //!
 //! As a plain [`Provider`], each call starts a process and resends the whole transcript. As a
 //! [`SessionBackend`], driven by a [`crate::session::ManagedSession`], a vendor session is
@@ -20,6 +22,7 @@
 
 use crate::codex_app::{AppError, CodexApp};
 use crate::live::{LiveProcess, ReadError};
+use crate::reply::ReplyShape;
 use crate::session::{Base, Delta, SessionBackend};
 use crate::stream::JsonTextField;
 use crate::{
@@ -40,8 +43,14 @@ use tokio::io::AsyncWriteExt;
 /// How long one completion may take before the CLI is stopped.
 const CALL_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// The shape every reply must have. Strict enough for OpenAI structured outputs: tool
-/// arguments travel as a JSON string because an open object is not allowed there.
+/// Codex models (`codex:<model>`) that refused a typed reply schema in this process: their
+/// replies use [`REPLY_SCHEMA`] from then on.
+static REFUSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The older reply shape for Codex, strict, with tool arguments as a JSON string (an open
+/// object is not allowed in OpenAI's strict schemas). Codex now gets a schema built from the
+/// tools of the call (ADR 0049); this one is used when that cannot be: no tools, a schema over
+/// OpenAI's limits, or a typed schema Codex refused.
 pub const REPLY_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"properties":{"action":{"type":"string","enum":["reply","call_tools"]},"text":{"type":"string"},"tool_calls":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"arguments":{"type":"string"}},"required":["name","arguments"]}}},"required":["action","text","tool_calls"]}"#;
 
 /// [`REPLY_SCHEMA`] for Claude Code, whose schemas allow an open object: tool arguments are an
@@ -287,7 +296,7 @@ impl CliModel {
         let sys = protocol(Some(self.cli), system, tools, false);
         let input = |messages: &[Message]| Input::of(render_transcript(messages), messages);
         let first = self
-            .exec(Mode::OneShot, &sys, input(messages), on_text)
+            .exec(Mode::OneShot, &sys, input(messages), tools, on_text)
             .await?;
         if !(first.gave_up && !tools.is_empty()) {
             return Ok(first.completion);
@@ -295,25 +304,28 @@ impl CliModel {
         let mut again = messages.to_vec();
         again.push(Message::user(GAVE_UP));
         let second = self
-            .exec(Mode::OneShot, &sys, input(&again), on_text)
+            .exec(Mode::OneShot, &sys, input(&again), tools, on_text)
             .await?;
         Ok(second.after(&first))
     }
 
     /// Run the CLI for one completion. `sys` is the full system prompt; `input` what this
-    /// call adds. Returns the completion and the vendor's session id when it reported one.
+    /// call adds; `tools` every tool the model may call in it (Codex's reply schema is built
+    /// from them). Returns the completion and the vendor's session id when it reported one.
     async fn exec(
         &self,
         mode: Mode<'_>,
         sys: &str,
         input: Input,
+        tools: &[ToolDef],
         on_text: Option<TextSink<'_>>,
     ) -> Result<Exec> {
         if self.cli == Cli::Claude {
             return self.claude(mode, sys, &input, on_text).await;
         }
+        let shape = self.codex_shape(tools);
         if !matches!(mode, Mode::OneShot) && !self.no_app.load(Ordering::Relaxed) {
-            if let Some(e) = self.codex_app(mode, sys, &input, on_text).await {
+            if let Some(e) = self.codex_app(mode, sys, &input, &shape, on_text).await {
                 return e;
             }
         }
@@ -328,9 +340,10 @@ impl CliModel {
             _ => format!("{sys}\n\n{input}"),
         };
         let p = self
-            .invoke(mode, Some(sys), input, REPLY_SCHEMA, false)
-            .await?;
-        let c = self.completion(&p.reply, p.usage)?;
+            .invoke(mode, Some(sys), input, &shape.schema.to_string(), false)
+            .await
+            .map_err(|e| self.refused(e, &shape))?;
+        let c = self.completion(&p.reply, p.usage, &shape)?;
         if let Some(f) = on_text.filter(|_| !c.content.is_empty()) {
             f(&c.content);
         }
@@ -418,7 +431,7 @@ impl CliModel {
         };
         let p = parse_claude_result(&result)
             .map_err(|d| self.classify_with(self.signed_out_hint(d), reset))?;
-        let c = self.completion(&p.reply, p.usage)?;
+        let c = self.completion(&p.reply, p.usage, &ReplyShape::open())?;
         let gave_up = p.turns > 2 && c.tool_calls.is_empty();
         if let (Some(f), false) = (on_text, gave_up) {
             // What the stream did not show (text after a refused native call, or a reply not
@@ -451,6 +464,7 @@ impl CliModel {
         mode: Mode<'_>,
         sys: &str,
         input: &Input,
+        shape: &ReplyShape,
         on_text: Option<TextSink<'_>>,
     ) -> Option<Result<Exec>> {
         let bin = match self.program() {
@@ -483,14 +497,13 @@ impl CliModel {
                 .map(|_| id.to_string()),
             Mode::OneShot => unreachable!("one-shot calls run codex exec"),
         };
-        let schema: Value = serde_json::from_str(REPLY_SCHEMA).expect("reply schema");
         let turn = match thread {
             Ok(t) => app
                 .turn(
                     &t,
                     &input.text,
                     &input.pictures,
-                    &schema,
+                    &shape.schema,
                     CALL_TIMEOUT,
                     on_text,
                 )
@@ -506,7 +519,7 @@ impl CliModel {
                 if matches!(e, AppError::Failed(_)) {
                     *self.app.lock().unwrap() = Some(app);
                 }
-                return Some(Err(err));
+                return Some(Err(self.refused(err, shape)));
             }
         };
         *self.app.lock().unwrap() = Some(app);
@@ -519,7 +532,7 @@ impl CliModel {
                 }))
             }
         };
-        Some(self.completion(&reply, turn.usage).map(|c| Exec {
+        Some(self.completion(&reply, turn.usage, shape).map(|c| Exec {
             completion: c,
             vendor: Some(thread),
             gave_up: false,
@@ -535,6 +548,40 @@ impl CliModel {
             AppError::TimedOut => format!("no reply within {}s", CALL_TIMEOUT.as_secs()),
         };
         self.classify(self.signed_out_hint(detail))
+    }
+
+    /// Codex's reply shape for a call offering `tools`: a closed variant per tool, or the older
+    /// string form once Codex refused a typed schema for this model.
+    fn codex_shape(&self, tools: &[ToolDef]) -> ReplyShape {
+        let model = Provider::model_id(self);
+        if REFUSED.lock().unwrap().contains(&model) {
+            ReplyShape::legacy()
+        } else {
+            ReplyShape::typed(tools)
+        }
+    }
+
+    /// `e`, unless it says Codex refused a typed reply schema (OpenAI's strict check). Then this
+    /// model uses the string form from now on, in every lane, and the call fails as a
+    /// malformed reply, which is retried. A vendor session reopens after a failure, so nothing
+    /// is sent twice to a thread.
+    fn refused(&self, e: ProviderError, shape: &ReplyShape) -> ProviderError {
+        let detail = e.to_string();
+        let refused = detail.contains("invalid_json_schema")
+            || detail.contains("Invalid schema for response_format");
+        if !shape.typed || !refused {
+            return e;
+        }
+        let model = Provider::model_id(self);
+        tracing::warn!(model = %model, error = %detail, "codex refused the typed reply schema; tool arguments travel as JSON strings from now on");
+        let mut r = REFUSED.lock().unwrap();
+        if !r.contains(&model) {
+            r.push(model);
+        }
+        ProviderError::Malformed {
+            provider: self.cli.name().into(),
+            detail: format!("the reply schema was refused ({})", clip(&detail)),
+        }
     }
 
     /// The running process of vendor session `id`, if there is one that has not exited.
@@ -606,9 +653,9 @@ impl CliModel {
             }
             Cli::Codex => {
                 let schema_text = schema;
-                let n = self.calls.fetch_add(1, Ordering::Relaxed);
-                let tag = format!("{}-{n}", std::process::id());
-                let schema = dir.join(format!("schema-{tag}.json"));
+                // One file per call: models of one process run at once, each call with its
+                // own schema.
+                let schema = dir.join(format!("schema-{}.json", new_session_id()));
                 std::fs::write(&schema, schema_text).map_err(io_err)?;
                 let mut c = command(&bin);
                 if search {
@@ -756,7 +803,9 @@ impl CliModel {
         }
     }
 
-    fn completion(&self, reply: &Value, usage: Usage) -> Result<Completion> {
+    /// The completion in a reply shaped by `shape`. Arguments that are not what the shape
+    /// promised are a malformed reply: nothing runs with guessed arguments.
+    fn completion(&self, reply: &Value, usage: Usage, shape: &ReplyShape) -> Result<Completion> {
         let text = reply["text"].as_str().unwrap_or("").to_string();
         let mut calls = Vec::new();
         if reply["action"].as_str() != Some("reply") {
@@ -771,18 +820,12 @@ impl CliModel {
                 if name.is_empty() {
                     continue;
                 }
-                // An object (Claude Code), or a JSON string (Codex).
-                let raw = c["arguments"].as_str().unwrap_or("").trim();
-                let arguments = if c["arguments"].is_object() {
-                    c["arguments"].clone()
-                } else if raw.is_empty() {
-                    json!({})
-                } else {
-                    serde_json::from_str(raw).map_err(|e| ProviderError::Malformed {
+                let arguments = shape.arguments(&name, &c["arguments"]).map_err(|e| {
+                    ProviderError::Malformed {
                         provider: self.cli.name().into(),
-                        detail: format!("arguments for {name} are not JSON: {e}"),
-                    })?
-                };
+                        detail: format!("arguments for {name}: {e}"),
+                    }
+                })?;
                 calls.push(ToolCall {
                     id: format!("{}_{base}_{i}", self.cli.name()),
                     name,
@@ -1050,7 +1093,9 @@ impl CliModel {
         let sys = protocol(Some(self.cli), system, tools, true);
         let id = new_session_id();
         let input = Input::of(render_transcript(messages), messages);
-        let first = self.exec(Mode::Open(&id), &sys, input, on_text).await?;
+        let first = self
+            .exec(Mode::Open(&id), &sys, input, tools, on_text)
+            .await?;
         let vendor = match self.cli {
             Cli::Claude => first.vendor.clone().unwrap_or(id),
             Cli::Codex => first
@@ -1062,7 +1107,13 @@ impl CliModel {
             return Ok((vendor, first.completion));
         }
         let second = self
-            .exec(Mode::Resume(&vendor), &sys, correction().into(), on_text)
+            .exec(
+                Mode::Resume(&vendor),
+                &sys,
+                correction().into(),
+                tools,
+                on_text,
+            )
             .await?;
         Ok((vendor, second.after(&first)))
     }
@@ -1082,6 +1133,7 @@ impl CliModel {
                 Mode::Resume(vendor),
                 &sys,
                 Input::of(render_delta_for(Some(self.cli), delta), &delta.messages),
+                &delta.tools,
                 on_text,
             )
             .await?;
@@ -1094,7 +1146,13 @@ impl CliModel {
             return Ok(first.completion);
         }
         let second = self
-            .exec(Mode::Resume(vendor), &sys, correction().into(), on_text)
+            .exec(
+                Mode::Resume(vendor),
+                &sys,
+                correction().into(),
+                &delta.tools,
+                on_text,
+            )
             .await?;
         Ok(second.after(&first))
     }
@@ -1244,6 +1302,15 @@ fn io_err(e: std::io::Error) -> ProviderError {
     }
 }
 
+/// The reply schema Codex gets for a call offering `tools`: one closed variant per tool, its
+/// arguments the tool's schema in OpenAI's strict form (ADR 0049). [`REPLY_SCHEMA`] when that
+/// cannot be built (no tools, over a limit).
+pub fn codex_reply_schema(tools: &[ToolDef]) -> Value {
+    ReplyShape::typed(tools).schema
+}
+
+pub use crate::reply::strict_problems;
+
 /// The system prompt the CLI sees: the reply protocol, ARK's tools, then the app's own prompt.
 pub fn protocol_prompt(system: &str, tools: &[ToolDef]) -> String {
     protocol(None, system, tools, false)
@@ -1282,7 +1349,7 @@ fn protocol(cli: Option<Cli>, system: &str, tools: &[ToolDef], session: bool) ->
     let mut s = String::from(opening(cli));
     let arguments = match cli {
         Some(Cli::Claude) => "a JSON object",
-        _ => "a JSON object string",
+        _ => "a JSON object, as the reply schema shapes it",
     };
     s.push_str(&format!(
         "Answer every turn with exactly one action:\n\
@@ -1950,6 +2017,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*) echo "{\"id\":$id,\"result\":{}}" ;;
+    *'"method":"account/rateLimits/read"'*) echo "{\"id\":$id,\"result\":{}}" ;;
     *'"method":"thread/start"'*) echo "{\"id\":$id,\"result\":{\"thread\":{\"id\":\"T1\"}}}" ;;
     *'"method":"thread/resume"'*) echo "{\"id\":$id,\"result\":{}}" ;;
     *'"method":"turn/start"'*) echo "{\"id\":$id,\"result\":{\"turn\":{\"id\":\"u1\"}}}"; cat "$d/turn" ;;
@@ -2191,13 +2259,15 @@ done
     }
 
     #[test]
-    fn claude_arguments_are_an_object_and_codex_a_string() {
+    fn claude_arguments_are_an_object_and_codex_arguments_are_typed() {
         let m = CliModel::new(Cli::Claude, "");
         let reply = json!({"action":"call_tools","text":"","tool_calls":[
             {"name":"code.run","arguments":{"code":"print(\"a\\nb\")"}},
             {"name":"fs.read","arguments":"{\"path\": \"a\"}"}
         ]});
-        let c = m.completion(&reply, Usage::default()).unwrap();
+        let c = m
+            .completion(&reply, Usage::default(), &ReplyShape::open())
+            .unwrap();
         assert_eq!(
             c.tool_calls[0].arguments,
             json!({"code":"print(\"a\\nb\")"})
@@ -2209,7 +2279,20 @@ done
             "object"
         );
         assert!(protocol(Some(Cli::Claude), "", &[], false).contains("arguments as a JSON object)"));
-        assert!(protocol(Some(Cli::Codex), "", &[], false).contains("a JSON object string"));
+        assert!(protocol(Some(Cli::Codex), "", &[], false)
+            .contains("arguments as a JSON object, as the reply schema shapes it"));
+        let schema = codex_reply_schema(&tools());
+        assert_eq!(strict_problems(&schema), Vec::<String>::new());
+        let call = &schema["properties"]["tool_calls"]["items"]["properties"];
+        assert_eq!(call["name"]["enum"], json!(["fs.read"]));
+        assert_eq!(
+            call["arguments"]["properties"]["path"],
+            json!({"anyOf":[{"type":"string"},{"type":"null"}]})
+        );
+        assert_eq!(
+            codex_reply_schema(&[]).to_string(),
+            json!(serde_json::from_str::<Value>(REPLY_SCHEMA).unwrap()).to_string()
+        );
     }
 
     #[test]
@@ -2234,5 +2317,259 @@ done
             .await
             .unwrap_err();
         assert!(e.to_string().contains("claude auth login"), "{e}");
+    }
+    /// `files.edit` as ark-files describes it (ADR 0049): each edit a closed variant.
+    fn edit_tool() -> ToolDef {
+        ToolDef {
+            name: "files.edit".into(),
+            description: "Change part of a file".into(),
+            parameters: json!({
+                "type": "object", "required": ["path", "edits"],
+                "properties": {
+                    "path": { "type": "string" },
+                    "edits": { "type": "array", "items": { "anyOf": [
+                        { "type": "object", "required": ["find", "replace"], "properties": { "find": { "type": "string" }, "replace": { "type": "string" } } },
+                        { "type": "object", "required": ["block", "text"], "properties": { "block": { "type": "integer" }, "text": { "type": "string" } } }
+                    ] } },
+                    "version": { "type": "string" }
+                }
+            }),
+        }
+    }
+
+    /// JavaScript like the 6,043-character edit Codex once sent as a string with one quote
+    /// left unescaped: quotes, backslashes, newlines, tabs, braces, non-ASCII.
+    fn long_code() -> String {
+        "const sep = (area.value.endsWith(\"\\n\") ? \" \" : \"\");\n\tif (a) { b = {x: [1, \"two\"]}; }\n"
+            .repeat(70)
+            + "console.log('done ✓ é', \"\\\"quoted\\\"\");"
+    }
+
+    #[tokio::test]
+    async fn codex_app_turns_get_the_tools_schema_and_long_calls_arrive_whole() {
+        let code = long_code();
+        let answer = json!({"action":"call_tools","text":"Editing the file.","tool_calls":[
+            {"name":"files.edit","arguments":{"path":"src/app.js","edits":[
+                {"find":"const a = \"x\";","replace": code},
+                {"block":2,"text":"# Title\n- a\n- b"}
+            ],"version":null}},
+            {"name":"fs.read","arguments":{"path":"src/app.js"}}
+        ]})
+        .to_string();
+        let (bin, log) = codex_app("codex-long", &answer);
+        let m = CliModel::new(Cli::Codex, "").with_program(bin);
+        let shown = Mutex::new(String::new());
+        let sink = |t: &str| shown.lock().unwrap().push_str(t);
+        let tools = vec![edit_tool(), tools().remove(0)];
+        let (_, c) =
+            SessionBackend::open_streaming(&m, "", &tools, &[Message::user("edit it")], &sink)
+                .await
+                .unwrap();
+        assert_eq!(c.tool_calls.len(), 2, "several tools in one reply");
+        assert_eq!(
+            c.tool_calls[0].arguments,
+            json!({"path":"src/app.js","edits":[
+                {"find":"const a = \"x\";","replace": code},
+                {"block":2,"text":"# Title\n- a\n- b"}
+            ]}),
+            "the arguments reach the tool exactly; a null optional key is left out"
+        );
+        assert_eq!(c.tool_calls[1].arguments, json!({"path":"src/app.js"}));
+        assert_eq!(
+            shown.into_inner().unwrap(),
+            "Editing the file.",
+            "only the reply's own text is shown, not a `text` key in the arguments"
+        );
+        let log = std::fs::read_to_string(&log).unwrap();
+        let turn = log
+            .lines()
+            .find(|l| l.contains(r#""method":"turn/start""#))
+            .unwrap();
+        let sent: Value = serde_json::from_str(turn).unwrap();
+        let schema = &sent["params"]["outputSchema"];
+        assert_eq!(strict_problems(schema), Vec::<String>::new(), "{schema}");
+        let names: Vec<&Value> = schema["properties"]["tool_calls"]["items"]["anyOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| &v["properties"]["name"]["enum"][0])
+            .collect();
+        assert_eq!(names, [&json!("files.edit"), &json!("fs.read")]);
+    }
+
+    #[tokio::test]
+    async fn a_resumed_codex_session_gets_the_schema_of_the_tools_available_now() {
+        let (bin, log) = codex_app(
+            "codex-tools-now",
+            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
+        );
+        let m = CliModel::new(Cli::Codex, "").with_program(bin);
+        let first = tools();
+        let (vendor, _) = SessionBackend::open(&m, "", &first, &[Message::user("hi")])
+            .await
+            .unwrap();
+        let delta = Delta {
+            messages: vec![Message::user("now edit")],
+            new_tools: vec![edit_tool()],
+            tools_now: Some(vec!["fs.read".into(), "files.edit".into()]),
+            tools: vec![tools().remove(0), edit_tool()],
+            ..Default::default()
+        };
+        let base = Base {
+            system: "",
+            tools: &first,
+        };
+        SessionBackend::resume(&m, &vendor, base, &delta)
+            .await
+            .unwrap();
+        let log = std::fs::read_to_string(&log).unwrap();
+        let turns: Vec<&str> = log
+            .lines()
+            .filter(|l| l.contains(r#""method":"turn/start""#))
+            .collect();
+        assert_eq!(turns.len(), 2);
+        assert!(!turns[0].contains(r#""enum":["files.edit"]"#));
+        assert!(
+            turns[1].contains(r#""enum":["files.edit"]"#),
+            "{}",
+            turns[1]
+        );
+    }
+
+    /// A fake `codex exec` that keeps each reply schema it is given (`schema-<n>.json` next to
+    /// it) and answers with `reply`. With `refuse`, a typed schema is refused as OpenAI refuses
+    /// one it cannot check.
+    fn codex_exec(name: &str, reply: &Value, refuse: bool) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("ark-codex-exec-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let events = [
+            json!({"type":"item.completed","item":{"id":"i","type":"agent_message","text": reply.to_string()}}),
+            json!({"type":"turn.completed","usage":{"input_tokens":50,"output_tokens":4}}),
+        ];
+        let out: String = events.iter().map(|e| format!("{e}\n")).collect();
+        std::fs::write(dir.join("reply"), out).unwrap();
+        let refusal = r#"{"type":"turn.failed","error":{"message":"Invalid schema for response_format codex_output_schema: ... (invalid_json_schema)"}}"#;
+        let p = dir.join(name);
+        std::fs::write(
+            &p,
+            format!(
+                r#"#!/bin/sh
+[ "$1" = app-server ] && exit 1
+d=$(dirname "$0")
+cat > /dev/null
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--output-schema" ]; then
+    n=$(ls "$d" | grep -c '^schema-')
+    cp "$a" "$d/schema-$n.json"
+    s="$a"
+  fi
+  prev="$a"
+done
+if [ {refuse} = 1 ] && grep -q '"arguments":{{"type":"object"' "$s"; then
+  echo '{refusal}'
+  exit 1
+fi
+cat "$d/reply"
+"#,
+                refuse = u8::from(refuse)
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        p
+    }
+
+    #[tokio::test]
+    async fn codex_exec_gets_the_tools_schema_and_returns_objects() {
+        let reply = json!({"action":"call_tools","text":"","tool_calls":[
+            {"name":"files.edit","arguments":{"path":"a.js","edits":[{"find":"x","replace": long_code()}],"version":"v1"}}
+        ]});
+        let bin = codex_exec("codex", &reply, false);
+        let m = CliModel::new(Cli::Codex, "").with_program(&bin);
+        let c = m
+            .complete("", &[Message::user("edit")], &[edit_tool()])
+            .await
+            .unwrap();
+        assert_eq!(
+            c.tool_calls[0].arguments,
+            json!({"path":"a.js","edits":[{"find":"x","replace": long_code()}],"version":"v1"})
+        );
+        let schema: Value = serde_json::from_str(
+            &std::fs::read_to_string(bin.with_file_name("schema-0.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(strict_problems(&schema), Vec::<String>::new());
+        assert_eq!(
+            schema["properties"]["tool_calls"]["items"]["properties"]["name"]["enum"],
+            json!(["files.edit"])
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_arguments_that_are_not_json_where_json_is_due_are_malformed() {
+        let open = ToolDef {
+            name: "mcp.put".into(),
+            description: String::new(),
+            parameters: json!({"type":"object","required":["data"],"properties":{"data":{"type":"object"}}}),
+        };
+        let reply = json!({"action":"call_tools","text":"","tool_calls":[
+            {"name":"mcp.put","arguments":{"data":"{\"a\": \"cut off"}}
+        ]});
+        let m = CliModel::new(Cli::Codex, "").with_program(codex_exec("codex-bad", &reply, false));
+        let e = m
+            .complete("", &[Message::user("put")], &[open])
+            .await
+            .unwrap_err();
+        assert!(matches!(e, ProviderError::Malformed { .. }), "{e}");
+        assert!(e.is_transient(), "a new reply may be well formed");
+        assert!(
+            e.to_string()
+                .contains("arguments for mcp.put: `data` is not JSON"),
+            "{e}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_schema_switches_the_model_to_strings_and_the_call_is_retryable() {
+        // The reply is in the older form, as Codex writes it under REPLY_SCHEMA.
+        let reply = json!({"action":"call_tools","text":"","tool_calls":[
+            {"name":"fs.read","arguments":"{\"path\": \"a\"}"}
+        ]});
+        let bin = codex_exec("codex-refuse", &reply, true);
+        let m = CliModel::new(Cli::Codex, "refusing-model").with_program(&bin);
+        let e = m
+            .complete("", &[Message::user("read a")], &tools())
+            .await
+            .unwrap_err();
+        assert!(matches!(e, ProviderError::Malformed { .. }), "{e}");
+        assert!(e.is_transient());
+        // The retry, and every later call of this model, sends the string form.
+        let c = m
+            .complete("", &[Message::user("read a")], &tools())
+            .await
+            .unwrap();
+        assert_eq!(c.tool_calls[0].arguments, json!({"path":"a"}));
+        let second = std::fs::read_to_string(bin.with_file_name("schema-1.json")).unwrap();
+        assert!(
+            second.contains(r#""arguments":{"type":"string"}"#),
+            "{second}"
+        );
+        let other = CliModel::new(Cli::Codex, "refusing-model").with_program(&bin);
+        other
+            .complete("", &[Message::user("read a")], &tools())
+            .await
+            .unwrap();
+        let third = std::fs::read_to_string(bin.with_file_name("schema-2.json")).unwrap();
+        assert!(
+            third.contains(r#""arguments":{"type":"string"}"#),
+            "another lane of the same model does not pay the refusal again"
+        );
     }
 }

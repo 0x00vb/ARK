@@ -39,6 +39,22 @@ pub struct TurnRecord {
 
 impl TurnRecord {
     pub fn push(&mut self, at_ms: u64, ev: &HarnessEvent) {
+        // Withdrawn text was never part of the turn: it leaves the narration it was merged
+        // into, and only the event says it was there.
+        if let HarnessEvent::TextWithdrawn { text } = ev {
+            if let Some(Timed {
+                event: HarnessEvent::TextDelta { text: prev },
+                ..
+            }) = self.events.last_mut()
+            {
+                if let Some(kept) = prev.strip_suffix(text.as_str()) {
+                    *prev = kept.to_string();
+                    if prev.is_empty() {
+                        self.events.pop();
+                    }
+                }
+            }
+        }
         if let HarnessEvent::TextDelta { text } = ev {
             if let Some(Timed {
                 event: HarnessEvent::TextDelta { text: prev },
@@ -447,6 +463,12 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             Some(clip(text, 100)),
             Tone::Accent,
         ),
+        HarnessEvent::TextWithdrawn { text } => (
+            E::Retry,
+            format!("text withdrawn {} chars", text.chars().count()),
+            Some(clip(text, 80)),
+            Tone::Muted,
+        ),
         HarnessEvent::Retry {
             role,
             attempt,
@@ -846,5 +868,38 @@ mod tests {
         let t = interpret(&r);
         assert_eq!(t.calls[0].status, CallStatus::NotRun);
         assert_eq!(t.entries[0].detail.as_deref(), Some("Hello"));
+    }
+
+    #[test]
+    fn withdrawn_text_leaves_the_record() {
+        let r = rec(vec![
+            HarnessEvent::TextDelta {
+                text: "Reading. ".into(),
+            },
+            call("c1", "notes.read"),
+            HarnessEvent::TextDelta {
+                text: "The no".into(),
+            },
+            HarnessEvent::TextDelta { text: "tes".into() },
+            HarnessEvent::TextWithdrawn {
+                text: "The notes".into(),
+            },
+            HarnessEvent::TextDelta {
+                text: "They say".into(),
+            },
+        ]);
+        let texts: Vec<&str> = r
+            .events
+            .iter()
+            .filter_map(|e| match &e.event {
+                HarnessEvent::TextDelta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["Reading. ", "They say"]);
+        assert!(r
+            .events
+            .iter()
+            .any(|e| matches!(e.event, HarnessEvent::TextWithdrawn { .. })));
     }
 }

@@ -140,6 +140,11 @@ impl<'a> TurnView<'a> {
                 out.text(&styled);
                 return;
             }
+            // A terminal cannot take text back: the line ends, and the retry's warning follows.
+            HarnessEvent::TextWithdrawn { .. } => {
+                self.close_stream(out);
+                return;
+            }
             HarnessEvent::Answer { text, streamed } => {
                 self.close_stream(out);
                 if !streamed {

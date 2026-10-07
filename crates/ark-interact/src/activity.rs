@@ -112,6 +112,7 @@ pub fn describe(
         | HarnessEvent::Step { .. }
         | HarnessEvent::Context { .. }
         | HarnessEvent::TextDelta { .. }
+        | HarnessEvent::TextWithdrawn { .. }
         | HarnessEvent::ModelCall { .. }
         | HarnessEvent::ApprovalRequested { .. }
         | HarnessEvent::Answer { .. } => return None,

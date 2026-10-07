@@ -145,6 +145,8 @@ export class Thread {
       if (ev.type === "answer") {
         if (!ev.streamed) t.text(ev.text, true);
         else t.markAnswer();
+      } else if (ev.type === "text_withdrawn") {
+        t.withdraw(ev.text);
       } else if (ev.type === "steered") {
         t.userLine(ev.text, true);
       } else if (msg.activity) {
@@ -400,6 +402,22 @@ class TurnView {
         el.innerHTML = markdown(el._md);
       });
     }
+  }
+
+  /// Text of a model call that failed and is tried again: it leaves the element it streamed
+  /// into, which goes when nothing is left. The retry streams its own text.
+  withdraw(text) {
+    const el = this.textEl;
+    if (!el || !text || !this.textBuf.endsWith(text)) return;
+    this.textBuf = this.textBuf.slice(0, this.textBuf.length - text.length);
+    el._md = this.textBuf;
+    if (this.textBuf.trim()) {
+      el.innerHTML = markdown(this.textBuf);
+      return;
+    }
+    el.remove();
+    this.textEl = null;
+    if (this.lastStream === el) this.lastStream = null;
   }
 
   /// The streamed text was the answer. A row (a failed self-check, say) may have closed the

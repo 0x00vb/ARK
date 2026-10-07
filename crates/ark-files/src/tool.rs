@@ -46,6 +46,39 @@ fn path_schema(desc: &str) -> Json {
     json!({ "type": "object", "properties": { "path": { "type": "string", "description": desc } } })
 }
 
+/// Rows of cells: text, a number, true or false, or empty.
+fn rows_schema(description: &str) -> Json {
+    let mut s = json!({
+        "type": "array",
+        "items": { "type": "array", "items": { "type": ["string", "number", "boolean", "null"] } }
+    });
+    if !description.is_empty() {
+        s["description"] = json!(description);
+    }
+    s
+}
+
+/// Each edit `files.edit` takes, as a closed object: the shapes `Edit::parse` reads. Closed,
+/// a model's reply schema can hold them as objects (ADR 0049).
+fn edit_schema() -> Json {
+    let edit = |required: &[&str], props: Json| json!({ "type": "object", "required": required, "properties": props, "additionalProperties": false });
+    let s = json!({ "type": "string" });
+    let n = json!({ "type": "integer" });
+    let cell_value = json!({ "type": ["string", "number", "boolean"] });
+    json!({ "anyOf": [
+        edit(&["find", "replace"], json!({ "find": s, "replace": s })),
+        edit(&["cell", "value"], json!({ "cell": s, "value": cell_value, "sheet": s })),
+        edit(&["cell", "rows"], json!({ "cell": s, "rows": rows_schema(""), "sheet": s })),
+        edit(&["clear"], json!({ "clear": s, "sheet": s })),
+        edit(&["add_sheet"], json!({ "add_sheet": s, "rows": rows_schema("") })),
+        edit(&["rename_sheet", "to"], json!({ "rename_sheet": s, "to": s })),
+        edit(&["delete_sheet"], json!({ "delete_sheet": s })),
+        edit(&["block", "text"], json!({ "block": n, "text": s })),
+        edit(&["after", "text"], json!({ "after": n, "text": s })),
+        edit(&["delete"], json!({ "delete": n })),
+    ] })
+}
+
 #[async_trait]
 impl Adapter for Files {
     fn name(&self) -> &str {
@@ -88,10 +121,10 @@ impl Adapter for Files {
                 "properties": {
                     "path": { "type": "string", "description": "relative to the project root; the extension picks the format" },
                     "text": { "type": "string", "description": "the whole text; for .docx, Markdown: # headings, - and 1. lists, | tables, **bold**, *italic*" },
-                    "rows": { "type": "array", "items": { "type": "array" }, "description": "spreadsheets with one sheet: rows of values; a value starting with = is a formula (=SUM(B2:B9))" },
+                    "rows": rows_schema("spreadsheets with one sheet: rows of values; a value starting with = is a formula (=SUM(B2:B9))"),
                     "sheets": {
                         "type": "array", "description": "spreadsheets with several sheets",
-                        "items": { "type": "object", "properties": { "name": { "type": "string" }, "rows": { "type": "array", "items": { "type": "array" } } } }
+                        "items": { "type": "object", "properties": { "name": { "type": "string" }, "rows": rows_schema("") } }
                     }
                 }
             })),
@@ -107,7 +140,7 @@ impl Adapter for Files {
                     "edits": {
                         "type": "array",
                         "description": "in order. Spreadsheets: {cell:\"B4\", value:150}, {cell:\"A10\", rows:[[\"Total\",\"=SUM(B2:B9)\"]]}, {sheet:\"Name\", ...} for another sheet, {clear:\"A2:C9\"}, {add_sheet:\"Summary\", rows:[[...]]}, {rename_sheet:\"Old\", to:\"New\"}, {delete_sheet:\"Name\"}. Documents, with the block numbers of the last read: {block:3, text:\"Markdown\"} replaces (empty text deletes), {after:3, text:\"Markdown\"} inserts (after:0 is the start), {delete:3}. Any file: {find:\"old\", replace:\"new\"}",
-                        "items": { "type": "object" }
+                        "items": edit_schema()
                     },
                     "version": { "type": "string", "description": "the version the last read gave; the edit is refused if the file changed since" }
                 }

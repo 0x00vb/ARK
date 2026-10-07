@@ -18,6 +18,9 @@ What changed for people building on ARK, per release. Not a commit log.
   arm, a literal adds the field.
 - `TranscriptTurn::unfinished` is now the whole sentence to show ("Interrupted before it
   finished.", "Did not finish: <error>"); a front-end that added "Did not finish: " drops it.
+- `ark_model::session::Delta` has a `tools` field (every tool available now, for a backend that
+  shapes its reply by them). Code that builds a `Delta` with a struct literal adds
+  `tools: Vec::new()` or `..Default::default()`.
 
 ### Added
 - A chat turn keeps its progress and continues where it stopped (ADR 0048). Its calls name the
@@ -36,6 +39,18 @@ What changed for people building on ARK, per release. Not a commit log.
 - A stop by the app (SIGTERM, quit) leaves the chat's turn interrupted, not cancelled, and
   ends it with `HarnessEvent::Interrupted` (amends ADR 0038).
 - `ARK_MODEL_RETRIES` defaults to 4 (was 2).
+- Codex gets a reply schema built from the tools of the call (ADR 0049): each tool is a closed
+  variant whose `arguments` is the tool's own schema in OpenAI's strict form, so arguments
+  arrive as an object the grammar checked, not as JSON written inside a string. What strict mode
+  cannot express travels as JSON in a string for that part only; nothing is repaired. A schema
+  Codex refuses switches that model to the older string form and the call is retried.
+  `ark_model::cli::codex_reply_schema`, `strict_problems`.
+- A model call that fails with a temporary error is retried even after some of its text was
+  shown. That text is withdrawn first (a new event, `HarnessEvent::TextWithdrawn`) and the retry streams its
+  own: the window takes it back, the turn record drops it, text mode ends the line. Before, any
+  shown text made the failure end the turn.
+- `files.edit` describes each of its edits as a closed shape, and `files.write` the cells of a
+  row.
 
 ### Fixed
 - After a crash and a reboot, a reused pid no longer keeps a dead turn, call or task "running";
@@ -44,6 +59,11 @@ What changed for people building on ARK, per release. Not a commit log.
 - A turn stored in full just before the process stopped is no longer shown unfinished.
 - `Store::put_blob` flushes the bytes and the folder before naming an object, and rewrites an
   object of the wrong size.
+- An agent on Codex no longer stops with "arguments for files.edit are not JSON" on a long edit
+  (an unescaped quote in JSON inside a string).
+- Two Codex models running `codex exec` at once in one process no longer write and delete the
+  same schema file.
+- A vendor session that failed is discarded (its files removed unless kept), not left behind.
 
 ## [0.13.0] - 2026-10-07
 

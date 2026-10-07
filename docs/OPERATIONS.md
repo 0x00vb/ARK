@@ -47,9 +47,11 @@ ARK never reads their credentials.
 
 How a call works: the CLI runs with its own tools off (`claude --tools ""`; Codex read-only,
 told it has none), in an empty directory. ARK's tools and the app prompt go in the system
-prompt, and the reply is JSON checked against `ark_model::cli::REPLY_SCHEMA` (`reply` with
-text, or `call_tools`). ARK's loop runs the calls, so approvals, traces and budgets behave as
-with an API.
+prompt, and the reply is JSON checked against a schema (`reply` with text, or `call_tools`).
+Codex's schema is built from the tools of the call, so each call's arguments arrive as an object
+the grammar checked ([ADR 0049](adr/0049-tool-arguments-are-objects-and-shown-text-does-not-block-a-retry.md));
+Claude Code takes arguments as an open object. ARK's loop runs the calls, so approvals, traces
+and budgets behave as with an API.
 
 A conversation or agent on a subscription keeps its CLI running between calls
 ([ADR 0012](adr/0012-vendor-cli-processes-live-with-their-session.md)): Claude Code with
@@ -132,8 +134,9 @@ a laptop's network gone), it keeps trying until `ARK_MODEL_OFFLINE_S` have passe
 first failure. A turn that still fails, or that the app's stop or a crash cut short, is
 continued by the person's next message (ADR 0048). Two rules keep retries safe:
 
-- A call is retried only if none of its text reached the user. Otherwise the turn fails: a
-  second answer after half of a first would duplicate output.
+- Text a failed attempt had shown is withdrawn first (`HarnessEvent::TextWithdrawn`), and the
+  retry streams its own: the window takes it back, text mode ends the line, the terminal keeps
+  it above the retry's warning (ADR 0049).
 - A retry repeats the model request, never a tool. Tools run only after a model call
   succeeds, so a state-changing action cannot run twice because of a retry.
 

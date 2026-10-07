@@ -163,6 +163,9 @@ impl StdoutText {
                 self.segment.push_str(text);
                 text.clone()
             }
+            // Written text cannot be taken back from stdout: the line ends, and the answer is
+            // compared with what the retry streams only.
+            HarnessEvent::TextWithdrawn { .. } => self.end_segment(),
             HarnessEvent::Step { .. }
             | HarnessEvent::ToolCall { .. }
             | HarnessEvent::Steered { .. } => self.end_segment(),
@@ -235,5 +238,19 @@ mod tests {
             answer("Revised answer.", true),
         ]);
         assert_eq!(out, "Draft answer.\nRevised answer.\n");
+    }
+
+    #[test]
+    fn a_retried_answer_is_printed_once_after_the_withdrawn_text() {
+        let out = run(vec![
+            delta("Half an ans"),
+            HarnessEvent::TextWithdrawn {
+                text: "Half an ans".into(),
+            },
+            delta("Whole "),
+            delta("answer."),
+            answer("Whole answer.", true),
+        ]);
+        assert_eq!(out, "Half an ans\nWhole answer.\n");
     }
 }

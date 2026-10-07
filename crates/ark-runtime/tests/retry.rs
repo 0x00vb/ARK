@@ -1,5 +1,5 @@
-//! Model-call retries: bounded, observable, never after text was shown, never re-running a
-//! tool, and cancellable while waiting.
+//! Model-call retries: bounded, observable, never re-running a tool, cancellable while waiting,
+//! and possible after text was shown, which is then withdrawn (ADR 0049).
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -148,8 +148,12 @@ fn fast_policy(n: u32) -> RetryPolicy {
 
 struct Seen {
     retries: Vec<u32>,
+    /// Text as a front-end that takes withdrawn text back shows it.
     text: String,
+    withdrawn: Vec<String>,
     model_retries: Vec<u32>,
+    /// Streamed text, withdrawals, retries and the answer, in order.
+    order: Vec<String>,
 }
 
 async fn run(
@@ -173,7 +177,9 @@ async fn run(
     let mut seen = Seen {
         retries: vec![],
         text: String::new(),
+        withdrawn: vec![],
         model_retries: vec![],
+        order: vec![],
     };
     let out = Harness::new(ModelRouter::single(p))
         .planner(false)
@@ -187,8 +193,23 @@ async fn run(
             &project,
             "save it",
             |e| match e {
-                HarnessEvent::Retry { attempt, .. } => seen.retries.push(attempt),
-                HarnessEvent::TextDelta { text } => seen.text.push_str(&text),
+                HarnessEvent::Retry { attempt, .. } => {
+                    seen.order.push(format!("retry {attempt}"));
+                    seen.retries.push(attempt)
+                }
+                HarnessEvent::TextDelta { text } => {
+                    seen.order.push(format!("text {text}"));
+                    seen.text.push_str(&text)
+                }
+                HarnessEvent::TextWithdrawn { text } => {
+                    seen.order.push(format!("withdrawn {text}"));
+                    let kept = seen.text.strip_suffix(text.as_str()).map(str::to_string);
+                    seen.text = kept.expect("only shown text is withdrawn");
+                    seen.withdrawn.push(text)
+                }
+                HarnessEvent::Answer { text, streamed } => seen
+                    .order
+                    .push(format!("answer {text} streamed={streamed}")),
                 HarnessEvent::ModelCall { retries, .. } => seen.model_retries.push(retries),
                 _ => {}
             },
@@ -235,19 +256,112 @@ async fn a_bad_request_is_not_retried() {
     assert_eq!(m.calls.load(Ordering::SeqCst), 1);
 }
 
+fn malformed() -> ProviderError {
+    ProviderError::Malformed {
+        provider: "x".into(),
+        detail: "arguments for notes.save: not JSON: expected `,` or `}` at line 1 column 1573"
+            .into(),
+    }
+}
+
 #[tokio::test]
-async fn no_retry_after_text_reached_the_user() {
+async fn text_then_a_failure_is_withdrawn_and_the_call_retried() {
     let m = Flaky::new(vec![
         Step::TextThenFail("half an ans", overloaded),
         Step::Ok(answer("whole answer")),
     ]);
     let (out, seen, _) = run(m.clone(), fast_policy(2), None).await;
-    assert!(
-        out.is_err(),
-        "the turn fails instead of streaming a second answer"
+    assert_eq!(out.unwrap().answer, "whole answer");
+    assert_eq!(
+        seen.order,
+        [
+            "text half an ans",
+            "withdrawn half an ans",
+            "retry 1",
+            "text whole answer",
+            "answer whole answer streamed=true"
+        ]
     );
-    assert!(seen.retries.is_empty());
-    assert_eq!(seen.text, "half an ans", "no duplicated output");
+    assert_eq!(seen.text, "whole answer", "nothing shown twice");
+    assert_eq!(m.calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn a_malformed_reply_after_its_note_recovers_and_the_tool_runs_once() {
+    // Codex's case: the reply's note streamed, then its tool arguments did not parse.
+    let m = Flaky::new(vec![
+        Step::TextThenFail("Plan: (1) keep the textarea", malformed),
+        Step::Ok(call("notes.save")),
+        Step::Ok(answer("saved")),
+    ]);
+    let (out, seen, saves) = run(m.clone(), fast_policy(2), None).await;
+    assert_eq!(out.unwrap().answer, "saved");
+    assert_eq!(seen.withdrawn, ["Plan: (1) keep the textarea"]);
+    assert_eq!(seen.retries, vec![1]);
+    assert_eq!(saves.load(Ordering::SeqCst), 1, "the save ran once");
+    assert_eq!(seen.text, "saved");
+}
+
+#[tokio::test]
+async fn a_failure_after_text_that_follows_a_completed_change_does_not_repeat_it() {
+    let m = Flaky::new(vec![
+        Step::Ok(call("notes.save")),
+        Step::TextThenFail("Saved. The no", overloaded),
+        Step::Ok(answer("Saved. The note is stored.")),
+    ]);
+    let (out, seen, saves) = run(m.clone(), fast_policy(2), None).await;
+    assert_eq!(out.unwrap().answer, "Saved. The note is stored.");
+    assert_eq!(
+        saves.load(Ordering::SeqCst),
+        1,
+        "the completed save is not run again"
+    );
+    assert_eq!(seen.text, "Saved. The note is stored.");
+}
+
+#[tokio::test]
+async fn every_failed_attempt_withdraws_its_own_text() {
+    // Several bytes per character; a shorter retry; then a longer one.
+    let m = Flaky::new(vec![
+        Step::TextThenFail("Résumé ✓ — first try, long", overloaded),
+        Step::TextThenFail("Ré", malformed),
+        Step::Ok(answer("Résumé ✓ done")),
+    ]);
+    let (out, seen, _) = run(m.clone(), fast_policy(3), None).await;
+    assert_eq!(out.unwrap().answer, "Résumé ✓ done");
+    assert_eq!(seen.withdrawn, ["Résumé ✓ — first try, long", "Ré"]);
+    assert_eq!(seen.retries, vec![1, 2]);
+    assert_eq!(seen.text, "Résumé ✓ done");
+}
+
+#[tokio::test]
+async fn a_bad_request_after_text_is_not_retried_and_nothing_is_withdrawn() {
+    let m = Flaky::new(vec![
+        Step::TextThenFail("half an ans", bad_request),
+        Step::Ok(answer("never")),
+    ]);
+    let (out, seen, _) = run(m.clone(), fast_policy(2), None).await;
+    assert!(out.is_err());
+    assert!(seen.retries.is_empty() && seen.withdrawn.is_empty());
+    assert_eq!(m.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn retries_after_text_stop_at_the_limit() {
+    let m = Flaky::new(vec![
+        Step::TextThenFail("a", overloaded),
+        Step::TextThenFail("b", overloaded),
+        Step::TextThenFail("c", overloaded),
+        Step::Ok(answer("never")),
+    ]);
+    let (out, seen, _) = run(m.clone(), fast_policy(2), None).await;
+    assert!(out.is_err());
+    assert_eq!(
+        seen.withdrawn,
+        ["a", "b"],
+        "the last attempt's text stays with the error"
+    );
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
 }
 
 #[tokio::test]

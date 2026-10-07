@@ -82,8 +82,14 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         )
         .unwrap();
     }
-    let model: Arc<dyn ark_model::Provider> =
+    let mut model: Arc<dyn ark_model::Provider> =
         Arc::new(MockProvider::new("m", script).with_chunk_delay(chunk));
+    if scenario == "withdrawn" {
+        model = Arc::new(CutOff {
+            inner: model,
+            cut: std::sync::atomic::AtomicBool::new(false),
+        });
+    }
     let mut builder = Ark::builder()
         .store_root(dir.path())
         .tool(Arc::new(Notes))
@@ -224,6 +230,58 @@ async fn streamed_text_keeps_its_last_chunk_and_answers_once() {
         say("The notes mention a locket.", false),
     ];
     drive("stream", script, Duration::from_millis(40)).await;
+}
+
+/// A model whose first reply breaks off after some text (an overloaded service mid-stream);
+/// every later call is `inner`'s.
+struct CutOff {
+    inner: Arc<dyn ark_model::Provider>,
+    cut: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl ark_model::Provider for CutOff {
+    async fn complete(
+        &self,
+        system: &str,
+        messages: &[ark_model::Message],
+        tools: &[ark_model::ToolDef],
+    ) -> ark_model::Result<Completion> {
+        self.inner.complete(system, messages, tools).await
+    }
+    async fn complete_streaming(
+        &self,
+        system: &str,
+        messages: &[ark_model::Message],
+        tools: &[ark_model::ToolDef],
+        on_text: ark_model::TextSink<'_>,
+    ) -> ark_model::Result<Completion> {
+        if !self.cut.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            for piece in ["Reading the notes, ", "then I wi"] {
+                on_text(piece);
+                tokio::time::sleep(Duration::from_millis(80)).await;
+            }
+            return Err(ark_model::ProviderError::Overloaded {
+                provider: "m".into(),
+                detail: "overloaded mid-stream".into(),
+            });
+        }
+        self.inner
+            .complete_streaming(system, messages, tools, on_text)
+            .await
+    }
+    fn describe(&self) -> String {
+        self.inner.describe()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn text_of_a_failed_attempt_is_taken_back_and_the_retry_shows_once() {
+    let script = vec![
+        say("Reading the notes now.", true),
+        say("The notes mention a locket.", false),
+    ];
+    drive("withdrawn", script, Duration::from_millis(40)).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -73,6 +73,13 @@ pub enum HarnessEvent {
     TextDelta {
         text: String,
     },
+    /// The last `text` streamed as [`TextDelta`](HarnessEvent::TextDelta)s belongs to a model
+    /// call that then failed and is tried again ([`Retry`](HarnessEvent::Retry) follows): it is
+    /// not part of the conversation. A front-end takes it back where it can; the retry streams
+    /// its own text (ADR 0049).
+    TextWithdrawn {
+        text: String,
+    },
     /// A model call finished: which role, which model, what it cost.
     ModelCall {
         role: String,
@@ -162,9 +169,10 @@ pub enum HarnessEvent {
     Steered {
         text: String,
     },
-    /// A model call failed with a temporary error and is tried again after `delay_ms`. No
-    /// text of the failed attempt had reached the user, and no tool runs twice: tools run
-    /// only after a model call succeeds.
+    /// A model call failed with a temporary error and is tried again after `delay_ms`. Text
+    /// the failed attempt had streamed was withdrawn just before
+    /// ([`TextWithdrawn`](HarnessEvent::TextWithdrawn)). No tool runs twice: tools run only
+    /// after a model call succeeds.
     Retry {
         role: String,
         attempt: u32,
@@ -1495,6 +1503,8 @@ impl Harness {
             };
             let attempt_started = std::time::Instant::now();
             let mut first_token_ms: Option<u64> = None;
+            // What this attempt showed: withdrawn if the attempt fails and is retried.
+            let mut shown = String::new();
             let fut = provider.complete_streaming(system, messages, tools, &sink);
             tokio::pin!(fut);
             let result = loop {
@@ -1504,6 +1514,7 @@ impl Harness {
                     Some(text) = rx.recv() => {
                         first_token_ms.get_or_insert(attempt_started.elapsed().as_millis() as u64);
                         if stream {
+                            shown.push_str(&text);
                             on_event(HarnessEvent::TextDelta { text });
                         }
                     }
@@ -1513,23 +1524,27 @@ impl Harness {
             while let Ok(text) = rx.try_recv() {
                 first_token_ms.get_or_insert(attempt_started.elapsed().as_millis() as u64);
                 if stream {
+                    shown.push_str(&text);
                     on_event(HarnessEvent::TextDelta { text });
                 }
             }
             let completion = match result {
                 Ok(c) => c,
-                // Retry only when nothing of this attempt was shown: a second answer after
-                // half of a first one would duplicate output.
+                // What was shown does not decide whether to retry: the shown text is withdrawn
+                // and the retry streams its own (ADR 0049). Tools run only after a call
+                // succeeds, so none runs twice.
                 Err(e)
-                    if first_token_ms.is_none()
-                        && self.retry.should_retry_for(
-                            &e,
-                            retries,
-                            failing_since
-                                .get_or_insert_with(std::time::Instant::now)
-                                .elapsed(),
-                        ) =>
+                    if self.retry.should_retry_for(
+                        &e,
+                        retries,
+                        failing_since
+                            .get_or_insert_with(std::time::Instant::now)
+                            .elapsed(),
+                    ) =>
                 {
+                    if !shown.is_empty() {
+                        on_event(HarnessEvent::TextWithdrawn { text: shown });
+                    }
                     let delay = self.retry.delay(retries, &e);
                     retries += 1;
                     metrics.record_retry();

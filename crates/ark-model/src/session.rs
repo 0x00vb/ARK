@@ -50,6 +50,9 @@ pub struct Delta {
     /// New user and tool messages, in order. Assistant messages are never resent: the
     /// vendor has its own record of what it said.
     pub messages: Vec<Message>,
+    /// Every tool available now, in full. Not sent as such: a backend that shapes the reply by
+    /// the tools (Codex's reply schema, ADR 0049) reads it.
+    pub tools: Vec<ToolDef>,
 }
 
 impl Delta {
@@ -572,6 +575,7 @@ impl ManagedSession {
                 .cloned()
                 .collect(),
             messages: fresh,
+            tools: tools.to_vec(),
         };
         if r.context_tokens + delta.tokens() > self.policy.max_context_tokens {
             return Plan::Open(OpenReason::ContextFull);
@@ -611,6 +615,7 @@ impl ManagedSession {
             vendor: old_vendor.clone(),
             done: false,
         };
+        let resumed = matches!(plan, Plan::Resume(_));
         let result = match &plan {
             Plan::Open(_) => {
                 if let Some(v) = old_vendor.as_ref().filter(|_| !self.policy.keep_files) {
@@ -725,6 +730,13 @@ impl ManagedSession {
         {
             let st = self.state.lock().unwrap();
             self.ledger.save(&self.lane, &st.record);
+        }
+        // A vendor session that failed is never resumed (the next call opens a new one): its
+        // files go now, unless they are kept.
+        if let (Err(_), true, Some(v)) = (&result, resumed, &old_vendor) {
+            if !self.policy.keep_files {
+                self.backend.discard(v).await;
+            }
         }
         self.emit(event);
         result.map(|(_, c)| c)
@@ -1511,7 +1523,11 @@ mod tests {
             .unwrap();
         let calls = backend.calls();
         assert!(matches!(calls[1], Call::Resume { .. }));
-        assert!(matches!(&calls[2], Call::Open { messages, .. } if messages.len() == 2));
+        assert!(
+            matches!(&calls[2], Call::Discard { .. }),
+            "the failed vendor session is discarded: {calls:?}"
+        );
+        assert!(matches!(&calls[3], Call::Open { messages, .. } if messages.len() == 2));
         assert!(matches!(
             s.snapshot().last_event.unwrap().kind,
             SessionEventKind::Opened {

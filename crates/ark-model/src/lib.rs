@@ -23,6 +23,7 @@ mod live;
 pub mod mock;
 mod ollama;
 mod openai;
+mod reply;
 pub mod resilience;
 pub mod session;
 mod stream;

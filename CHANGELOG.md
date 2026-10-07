@@ -9,6 +9,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-07
+
 ### Breaking
 - `ark_orchestrate::TaskRecord` has `decisions` and `ark_orchestrate::Usage` has
   `cost_micro_usd` and `asked` (ADR 0043 step 2): code that builds either with a struct

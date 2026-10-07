@@ -11,6 +11,7 @@ lowest **cost per successful task** for any app built on it.
 | File | Holds | Read |
 |---|---|---|
 | `AGENTS.md` | how to work in this repo | always |
+| [`../AGENTS.md`](../AGENTS.md) | workspace rules: UI and UX, the board, quality gates | always |
 | [`CURRENT_STATE.md`](CURRENT_STATE.md) | what is in progress, blocked, next | always |
 | [`ROADMAP.md`](ROADMAP.md) | where ARK is going, limits, rejected ideas | before starting a change |
 | [`CHANGELOG.md`](CHANGELOG.md) | what shipped, per version | when touching public API |

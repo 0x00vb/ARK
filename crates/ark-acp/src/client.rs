@@ -566,11 +566,14 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
             let parts: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
             Some(match parts.as_slice() {
                 // A shell running a script: the script is the command.
-                [_, flag, script] if matches!(*flag, "-c" | "-lc") => script.to_string(),
+                [shell, flag, script] if is_shell(shell) && matches!(*flag, "-c" | "-lc") => {
+                    script.to_string()
+                }
                 _ => parts
                     .iter()
                     .map(|p| {
-                        if p.contains(char::is_whitespace) || p.is_empty() {
+                        let plain = |c: char| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c);
+                        if p.is_empty() || !p.chars().all(plain) {
                             format!("'{}'", p.replace('\'', "'\\''"))
                         } else {
                             p.to_string()
@@ -662,6 +665,14 @@ fn without_cd_here(command: &str, folder: &Path) -> String {
     } else {
         command.to_string()
     }
+}
+
+/// `sh`, `bash` or `zsh`, by name or path.
+fn is_shell(program: &str) -> bool {
+    matches!(
+        program.rsplit('/').next().unwrap_or(program),
+        "sh" | "bash" | "zsh" | "dash"
+    )
 }
 
 /// What the program is doing when a call fails, in words.
@@ -887,6 +898,12 @@ mod tests {
             "Fake",
         );
         assert_eq!(args.preview, "Run grep 'two words' a.md");
+        let python = request(
+            &json!({ "kind": "execute", "title": "x", "rawInput": { "command": ["python3", "-c", "print(1)"] } }),
+            &root,
+            "Fake",
+        );
+        assert_eq!(python.preview, "Run python3 -c 'print(1)'", "not a shell");
         // A `cd` into the folder it runs in anyway is the same command; any other is not.
         let here = request(
             &json!({ "kind": "execute", "title": "x",

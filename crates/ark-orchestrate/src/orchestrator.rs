@@ -155,6 +155,7 @@ impl<'a> OrchestratorBuilder<'a> {
             per_agent: self.ark.per_agent().to_vec(),
             workers: self.ark.workers().cloned(),
             folders: Mutex::new(HashMap::new()),
+            holding: Mutex::new(HashMap::new()),
             max_parallel: self.max_parallel,
             global: Arc::new(Semaphore::new(self.max_parallel)),
             accounts: Mutex::new(HashMap::new()),
@@ -683,6 +684,8 @@ pub(crate) struct Inner {
     workers: Option<Arc<dyn ark_runtime::worker::Workers>>,
     /// One agent program at a time in a project folder: what changed there is that task's.
     folders: Mutex<HashMap<std::path::PathBuf, Arc<tokio::sync::Mutex<()>>>>,
+    /// The folder each such task holds, from its first run until it ends (a pause included).
+    holding: Mutex<HashMap<String, tokio::sync::OwnedMutexGuard<()>>>,
     pub max_parallel: usize,
     global: Arc<Semaphore>,
     accounts: Mutex<HashMap<String, Arc<Semaphore>>>,

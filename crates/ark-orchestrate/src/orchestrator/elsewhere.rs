@@ -105,15 +105,19 @@ impl Inner {
             Ok(d) => d,
             Err(e) => return Attempt::Failed(e.to_string()),
         };
-        // One program at a time in a folder: what changes there is this task's.
-        let lock = {
-            let mut f = self.folders.lock().unwrap();
-            f.entry(folder.clone()).or_default().clone()
-        };
-        let _one = tokio::select! {
-            g = lock.lock_owned() => g,
-            _ = cancel.cancelled() => return Attempt::Stopped(self.stopped(id)),
-        };
+        // One program's task at a time in a folder, from its first run until it ends: what
+        // changes there meanwhile is that task's.
+        if !self.holding.lock().unwrap().contains_key(id) {
+            let lock = {
+                let mut f = self.folders.lock().unwrap();
+                f.entry(folder.clone()).or_default().clone()
+            };
+            let held = tokio::select! {
+                g = lock.lock_owned() => g,
+                _ = cancel.cancelled() => return Attempt::Stopped(self.stopped(id)),
+            };
+            self.holding.lock().unwrap().insert(id.to_string(), held);
+        }
         let dir = self.work_dir(id);
         if let Err(e) = self.folder_before(&folder, &dir).await {
             return Attempt::Failed(e);
@@ -181,6 +185,8 @@ impl Inner {
     /// folder state. Nothing for a task that never ran on a program.
     pub(super) async fn end_work(self: &Arc<Self>, id: &str) {
         let dir = self.work_dir(id);
+        // The folder is free for the next task once this one's work is recorded.
+        let _held = self.holding.lock().unwrap().remove(id);
         let Some(before) = Before::load(&dir.join("before.json")) else {
             return;
         };

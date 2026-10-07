@@ -9,6 +9,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Fixed
+- Run code on Linux: Python failed to start in the sandbox when uv reached the interpreter
+  through its `cpython-3.12-…` link (every uv 0.8+ install). A folder a run reads through a
+  link is now mounted at both paths. First run of `ark-exec`'s tests on Linux: all pass with
+  `ARK_TEST_PYTHON=1` (bubblewrap 0.8, uv 0.12.23, Debian bookworm).
+
 ## [0.12.0] - 2026-10-06
 
 A browser comes in through a one-time link and keeps a session in a cookie (ADR 0040).

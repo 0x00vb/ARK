@@ -79,22 +79,28 @@ pub(super) fn wrap(
     .iter()
     .map(|a| a.to_string())
     .collect();
-    let mut bind = |how: &str, p: &Path| {
-        out.push(how.to_string());
-        out.push(s(p));
-        out.push(s(p));
+    let mut mount = |how: &str, from: &Path, to: &Path| {
+        out.extend([how.to_string(), s(from), s(to)]);
     };
     for p in SYSTEM {
-        bind("--ro-bind-try", Path::new(p));
+        mount("--ro-bind-try", Path::new(p), Path::new(p));
     }
     for r in &b.reads {
-        bind("--ro-bind-try", &real(r));
+        let at = real(r);
+        mount("--ro-bind-try", &at, &at);
+        // A read reached through a link (uv's `cpython-3.12-…` names the newest 3.12.x, and
+        // an environment's `python` points through it) is also where the link says.
+        if r.is_absolute() && *r != at {
+            mount("--ro-bind-try", &at, r);
+        }
     }
     let project = real(&b.project);
-    bind("--bind", &project);
-    bind("--bind", &real(&b.scratch));
+    mount("--bind", &project, &project);
+    let scratch = real(&b.scratch);
+    mount("--bind", &scratch, &scratch);
     for k in KEPT {
-        bind("--ro-bind-try", &project.join(k));
+        let kept = project.join(k);
+        mount("--ro-bind-try", &kept, &kept);
     }
     out.extend(["--chdir".to_string(), s(&project), "--".to_string()]);
     out.push(s(program));
@@ -134,5 +140,31 @@ mod tests {
         assert!(line.find("--bind /work/p ").unwrap() < line.find("/work/p/.git").unwrap());
         assert!(line.ends_with("--chdir /work/p -- /py x.py"), "{line}");
         assert!(!line.contains("--share-net"));
+    }
+
+    #[test]
+    fn a_read_through_a_link_is_there_under_both_names() {
+        let dir = std::env::temp_dir().join(format!("ark-bwrap-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("cpython-3.12.11")).unwrap();
+        std::os::unix::fs::symlink(dir.join("cpython-3.12.11"), dir.join("cpython-3.12")).unwrap();
+        let b = Bounds {
+            project: "/work/p".into(),
+            scratch: "/store/runs/1".into(),
+            reads: vec![dir.join("cpython-3.12")],
+        };
+        let (_, a) = wrap(Path::new("/usr/bin/bwrap"), &b, Path::new("/py"), &[]);
+        let line = a.join(" ");
+        let target = real(&dir.join("cpython-3.12.11")).display().to_string();
+        assert!(
+            line.contains(&format!("--ro-bind-try {target} {target}")),
+            "{line}"
+        );
+        let link = dir.join("cpython-3.12").display().to_string();
+        assert!(
+            line.contains(&format!("--ro-bind-try {target} {link}")),
+            "{line}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

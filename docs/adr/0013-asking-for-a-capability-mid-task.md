@@ -1,6 +1,6 @@
 # 0013. Asking for a capability mid-task
 
-Status: Accepted
+Status: Accepted, amended by 0045 (a capability the person turns on; no grant covers a request)
 Date: 2026-10-04
 
 ## Context

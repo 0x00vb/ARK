@@ -1,6 +1,7 @@
 // Settings › Capabilities: what ARK can use (`capabilities`, `capability_connect`,
-// `capability_disconnect`; the same list as `/connect` in a terminal). Connect opens the
-// provider's sign-in in the browser; the row turns ready once the person allows it there.
+// `capability_disconnect`, `capability_turn`; the same list as `/connect` in a terminal).
+// Connect opens the provider's sign-in in the browser; the row turns ready once the person
+// allows it there. A capability with a switch (the Computer) turns on and off in place.
 
 import { h, clear } from "./dom.js";
 
@@ -24,7 +25,15 @@ function section(el, ark) {
       if (c.added) detail = `${says} · managed in Tool servers`;
       // Why it cannot be used is for the curious: on hover.
       if (c.state === "unavailable") actions.append(h("span.plugin-hint", { title: c.why }, "Not available yet"));
-      if (c.state === "connect") {
+      if (c.switch) {
+        const on = c.state === "ready";
+        const flip = h(`button.btn.small.${on ? "ghost" : "primary"}`, { type: "button" }, on ? "Turn off" : "Turn on");
+        flip.onclick = async () => {
+          flip.disabled = true;
+          await act(() => ark.call("capability_turn", { id: c.id, on: !on }));
+        };
+        actions.append(flip);
+      } else if (c.state === "connect") {
         const go = h("button.btn.primary.small", { type: "button" }, waiting === c.id ? "Waiting for sign-in…" : `Connect ${c.provider || ""}`.trim());
         go.disabled = waiting === c.id;
         go.onclick = () => connect(c);
@@ -46,7 +55,7 @@ function section(el, ark) {
       }
       const state = c.state === "ready" ? "" : ".off";
       list.append(h(`div.plugin-row.capability-row${state}`, { "data-id": c.id },
-        h("span.plugin-dot", { title: c.state === "ready" ? "Ready" : c.state === "connect" ? "Not connected" : "Unavailable" }),
+        h("span.plugin-dot", { title: c.state === "ready" ? "Ready" : c.state === "connect" ? "Not connected" : c.state === "off" ? "Off" : "Unavailable" }),
         h("div.plugin-main",
           h("div.plugin-name", c.label),
           h("div.plugin-detail", { title: detail }, detail)),

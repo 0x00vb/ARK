@@ -240,6 +240,7 @@ impl App {
         // A yes to "ARK needs Mail" connects it before the turn goes on; a yes to "Install
         // Node.js" installs it.
         let approver = crate::installs::wrap(approver, &ark);
+        let approver = crate::capabilities::wrap_computer(approver, &ark);
         let approver: Arc<dyn Approver> = match ark.connections() {
             Some(c) => {
                 let mut connector = crate::capabilities::Connector::new(approver, c.clone());
@@ -541,6 +542,7 @@ impl Siblings {
             .get_project(session.project())?
             .ok_or_else(|| anyhow::anyhow!("the session's project is gone"))?;
         let approver = crate::installs::wrap(approver, &ark);
+        let approver = crate::capabilities::wrap_computer(approver, &ark);
         let approver: Arc<dyn Approver> = match ark.connections() {
             Some(c) => {
                 let mut connector = crate::capabilities::Connector::new(approver, c.clone());

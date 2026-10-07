@@ -19,6 +19,8 @@
 //! and an app there offers no Computer.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -63,6 +65,8 @@ const LEASE_WAIT: Duration = Duration::from_secs(600);
 /// How long an action waits for the person to allow ARK in the system's settings.
 const PERMISSION_WAIT: Duration = Duration::from_secs(120);
 const CARD_TEXT: usize = 800;
+const OFF: &str =
+    "the person turned the Computer off; stop using it and tell them what is left to do";
 const TAKEN: &str =
     "the person took the computer back; stop using it and tell them what is left to do";
 const CARD_ELEMENTS: usize = 40;
@@ -251,6 +255,9 @@ pub struct ComputerService {
     screen: Arc<dyn Screen>,
     idle: Duration,
     quiet: Duration,
+    /// Where the person's on or off is kept; `None`: always on.
+    switch: Option<PathBuf>,
+    on: AtomicBool,
     state: Mutex<State>,
     holder: watch::Sender<Option<String>>,
 }
@@ -274,6 +281,8 @@ impl ComputerService {
             screen,
             idle: IDLE,
             quiet: QUIET,
+            switch: None,
+            on: AtomicBool::new(true),
             state: Mutex::new(State::default()),
             holder: watch::channel(None).0,
         })
@@ -287,12 +296,62 @@ impl ComputerService {
         Arc::new(s)
     }
 
+    /// Off until the person turns it on, and their answer kept in `file` (ADR 0045). While
+    /// off, an owner's tools offer no action and an agent asks for it with
+    /// `acquire_capability` ([`TurnOn`]). Call it on a new service, before it is shared
+    /// (like [`timing`](ComputerService::timing)): a shared one panics.
+    pub fn switched(self: Arc<Self>, file: PathBuf) -> Arc<Self> {
+        let mut s = Arc::try_unwrap(self).unwrap_or_else(|_| panic!("set before sharing"));
+        let on = std::fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .is_some_and(|v| v["on"] == json!(true));
+        s.on = AtomicBool::new(on);
+        s.switch = Some(file);
+        Arc::new(s)
+    }
+
+    /// Whether agents may use the apps now.
+    pub fn is_on(&self) -> bool {
+        self.on.load(Ordering::SeqCst)
+    }
+
+    /// Whether the person turns it on and off (it has a switch).
+    pub fn switchable(&self) -> bool {
+        self.switch.is_some()
+    }
+
+    /// Turn it on or off, and keep the answer. Off also takes the screen back from whoever
+    /// holds it, so a running turn or task stops at its next action.
+    pub fn set_on(&self, on: bool) -> std::result::Result<(), String> {
+        if let Some(file) = &self.switch {
+            if let Some(dir) = file.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(file, json!({ "on": on }).to_string()).map_err(|e| e.to_string())?;
+        }
+        self.on.store(on, Ordering::SeqCst);
+        if !on {
+            self.take_back();
+        }
+        Ok(())
+    }
+
+    /// Ask the system to show its permission prompt now, without waiting for the answer
+    /// (turning it on in Settings).
+    pub fn ask_permission(&self) {
+        if self.screen.access() != Access::Allowed {
+            self.screen.request_access();
+        }
+    }
+
     /// The tools of one agent (or conversation), named `owner`. Dropping them gives the screen
     /// back if this owner holds it, so the screen is free when the turn or task ends.
     pub fn for_owner(self: &Arc<Self>, owner: &str) -> Computer {
         Computer {
             svc: self.clone(),
             owner: owner.to_string(),
+            listing: false,
         }
     }
 
@@ -471,6 +530,8 @@ impl ComputerService {
 pub struct Computer {
     svc: Arc<ComputerService>,
     owner: String,
+    /// Lists every action, also while off: what the app offers, not what a turn gets.
+    listing: bool,
 }
 
 impl Drop for Computer {
@@ -499,6 +560,9 @@ fn app_of(action: &str, input: &Value) -> Result<String> {
 impl Computer {
     /// Hold the screen and have the person's go-ahead to act now.
     async fn ready(&self) -> Result<()> {
+        if !self.svc.is_on() {
+            return Err(tool(OFF.into()));
+        }
         self.svc.allowed().await.map_err(tool)?;
         self.svc.lease(&self.owner).await.map_err(tool)?;
         self.svc.person_quiet().await.map_err(tool)?;
@@ -616,6 +680,9 @@ impl Adapter for Computer {
     }
 
     fn actions(&self) -> Vec<ActionDescriptor> {
+        if !self.listing && !self.svc.is_on() {
+            return Vec::new();
+        }
         let app = || json!({ "type": "string", "description": "the app's name, as computer.apps lists it" });
         let el = || json!({ "type": "integer", "description": "the element's number from your last computer.look" });
         let named = || json!({ "type": "string", "description": "the element's name as computer.look listed it (empty if it has none)" });
@@ -629,7 +696,7 @@ impl Adapter for Computer {
             .volatile()
             .ask_each_time()
             .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
-            ActionDescriptor::new(OPEN, "start an app, or bring it to the front", RiskTier::Mutate)
+            ActionDescriptor::new(OPEN, "start an app on this computer, or bring it to the front. When the person names an app, use it here, not its website", RiskTier::Mutate)
                 .ask_each_time()
                 .with_input_schema(json!({ "type": "object", "required": ["app"], "properties": { "app": app() } })),
             ActionDescriptor::new(CLICK, "press an element of an app (a button, a link, a row, an item), by its number and name; double opens it (a file, a chat), right shows its menu", RiskTier::Mutate)
@@ -694,6 +761,9 @@ impl Adapter for Computer {
     }
 
     async fn run(&self, action: &str, input: Value, _ctx: &RunCtx<'_>) -> Result<ActionOutput> {
+        if !self.svc.is_on() {
+            return Err(tool(OFF.into()));
+        }
         if action == APPS {
             let apps = self.svc.blocking(|s| s.apps()).await.map_err(tool)?;
             return Ok(ActionOutput::json(json!({ "apps": apps })));
@@ -1107,12 +1177,117 @@ pub struct Computers(pub Arc<ComputerService>);
 
 impl ark_runtime::per_agent::PerAgent for Computers {
     fn listing(&self) -> Arc<dyn Adapter> {
-        Arc::new(self.0.for_owner(""))
+        let mut c = self.0.for_owner("");
+        c.listing = true;
+        Arc::new(c)
     }
     fn for_owner(&self, owner: &ark_runtime::per_agent::Owner) -> Arc<dyn Adapter> {
         Arc::new(self.0.for_owner(owner.name))
     }
     fn distiller(&self) -> Option<ark_runtime::Distiller> {
         Some(Arc::new(distill))
+    }
+    fn acquisition(
+        &self,
+        owner: &ark_runtime::per_agent::Owner,
+    ) -> Option<Arc<dyn ark_runtime::AcquisitionProvider>> {
+        self.0.switchable().then(|| {
+            Arc::new(TurnOn {
+                svc: self.0.clone(),
+                owner: owner.name.to_string(),
+            }) as Arc<dyn ark_runtime::AcquisitionProvider>
+        })
+    }
+}
+
+/// The capability's id, as `acquire_capability` and `/connect` name it.
+pub const ID: &str = "computer";
+
+/// Whether a free-text need asks for the Computer: its id, or a word for apps on this
+/// computer. Whole words only, so "WhatsApp" or "mail" are not "app".
+pub fn names_the_computer(need: &str) -> bool {
+    const WORDS: [&str; 8] = [
+        ID,
+        "app",
+        "apps",
+        "application",
+        "applications",
+        "desktop",
+        "native",
+        "screen",
+    ];
+    need.to_lowercase()
+        .split(|c: char| !(c.is_alphanumeric() || c == '.' || c == '*'))
+        .any(|w| WORDS.contains(&w) || w.starts_with("computer."))
+}
+
+/// An owner asks the person to turn the Computer on mid-task (ADR 0045): the yes waits for the
+/// system's permission, turns it on for good, and hands this owner's tools to the running turn.
+pub struct TurnOn {
+    svc: Arc<ComputerService>,
+    owner: String,
+}
+
+impl TurnOn {
+    fn tools(&self) -> Vec<Arc<dyn Adapter>> {
+        vec![Arc::new(self.svc.for_owner(&self.owner))]
+    }
+}
+
+#[async_trait]
+impl ark_runtime::AcquisitionProvider for TurnOn {
+    fn active(&self) -> bool {
+        !self.svc.is_on()
+    }
+
+    fn knows(&self, need: &str) -> bool {
+        names_the_computer(need)
+    }
+
+    fn asks_a_person(&self, _need: &str) -> bool {
+        true
+    }
+
+    fn offer(&self) -> Option<String> {
+        (!self.svc.is_on()).then(|| {
+            "Off until the person turns it on. When the task needs it, call acquire_capability with its name; the person allows it in a click:\n\
+- computer: use the apps on this computer (open one, read its window, click and type in it). When the person names an app, use the app, not its website".into()
+        })
+    }
+
+    async fn find(&self, _need: &str) -> String {
+        if self.svc.is_on() {
+            return "The Computer is on: its tools are computer.*".into();
+        }
+        "The Computer (use the apps on this computer) is off. acquire_capability with need \"computer\" asks the person to turn it on.".into()
+    }
+
+    async fn propose(&self, _need: &str) -> String {
+        "Turning on the Computer lets you open the apps on this computer, read their windows, click and type in them. The person allows it once, and still allows each step.".into()
+    }
+
+    async fn acquire(&self, _need: &str, approved: bool) -> ark_runtime::AcquisitionResult {
+        use ark_runtime::AcquisitionResult;
+        if self.svc.is_on() {
+            return AcquisitionResult::changed(
+                "The Computer is on. Its tools are ready to call: computer.*.",
+            )
+            .with_tools(self.tools());
+        }
+        if !approved {
+            return AcquisitionResult::info(
+                "The person did not turn on the Computer. Do what you can without it and say what is missing.",
+            );
+        }
+        if let Err(e) = self.svc.allowed().await {
+            return AcquisitionResult::info(format!(
+                "The Computer stays off: {e} Tell the person, then do what you can without it."
+            ));
+        }
+        if let Err(e) = self.svc.set_on(true) {
+            return AcquisitionResult::info(format!("The Computer could not be turned on: {e}"));
+        }
+        AcquisitionResult::changed("The Computer is on. Its tools are ready to call: computer.*.")
+            .with_tools(self.tools())
     }
 }

@@ -2348,12 +2348,28 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         let owner_name = format!("{}/{}", self.project.id, owner);
         let mut per_agent_actions: Vec<String> = Vec::new();
         let mut per_agent_distillers = Vec::new();
+        // What it can ask to turn on mid-task (the Computer), as far as its `tools` allow.
+        let mut turn_on: Vec<Arc<dyn ark_runtime::AcquisitionProvider>> = Vec::new();
         for p in &self.per_agent {
             let model = models.router.provider(ark_runtime::Role::Plan);
-            let adapter = p.for_owner(&ark_runtime::per_agent::Owner {
+            let who = ark_runtime::per_agent::Owner {
                 name: &owner_name,
                 model,
-            });
+            };
+            if let Some(acq) = p.acquisition(&who) {
+                let may = p
+                    .listing()
+                    .actions()
+                    .iter()
+                    .any(|d| spec.tools.iter().any(|pat| action_matches(pat, &d.name)));
+                if may {
+                    turn_on.push(Arc::new(Allowed {
+                        inner: acq,
+                        tools: spec.tools.clone(),
+                    }));
+                }
+            }
+            let adapter = p.for_owner(&who);
             let allowed: Vec<String> = adapter
                 .actions()
                 .into_iter()
@@ -2394,6 +2410,12 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         }
         let engine = self.engine.scoped(registry);
         let mut profile = self.agent_profile(spec, &delegates);
+        if !turn_on.is_empty() {
+            // The app's sources first (accounts, installs), then the agent's own.
+            let mut sources: Vec<_> = profile.acquisition.take().into_iter().collect();
+            sources.extend(turn_on);
+            profile.acquisition = Some(Arc::new(ark_runtime::Sources(sources)));
+        }
         if catalog.is_some() {
             // The catalog says to call it, so it is loaded, not left to discovery.
             profile.distillers.push(skills::distiller());
@@ -3426,4 +3448,107 @@ fn process_alive(pid: u32) -> bool {
 #[cfg(not(unix))]
 fn process_alive(_pid: u32) -> bool {
     false
+}
+
+/// An agent's own acquisition source, handing back only the actions its `tools` allow.
+struct Allowed {
+    inner: Arc<dyn ark_runtime::AcquisitionProvider>,
+    tools: Vec<String>,
+}
+
+#[async_trait::async_trait]
+impl ark_runtime::AcquisitionProvider for Allowed {
+    async fn find(&self, need: &str) -> String {
+        self.inner.find(need).await
+    }
+    async fn propose(&self, need: &str) -> String {
+        self.inner.propose(need).await
+    }
+    async fn acquire(&self, need: &str, approved: bool) -> ark_runtime::AcquisitionResult {
+        let mut got = self.inner.acquire(need, approved).await;
+        let mut all = Registry::new();
+        for t in got.tools.drain(..) {
+            all.register(t);
+        }
+        got.tools = all
+            .filtered(|a| self.tools.iter().any(|pat| action_matches(pat, a)))
+            .adapters()
+            .to_vec();
+        got
+    }
+    fn active(&self) -> bool {
+        self.inner.active()
+    }
+    fn offer(&self) -> Option<String> {
+        self.inner.offer()
+    }
+    fn knows(&self, need: &str) -> bool {
+        self.inner.knows(need)
+    }
+    fn asks_a_person(&self, need: &str) -> bool {
+        self.inner.asks_a_person(need)
+    }
+}
+
+#[cfg(test)]
+mod allowed_tests {
+    use super::*;
+    use ark_core::{ActionDescriptor, RiskTier};
+    use ark_runtime::{AcquisitionProvider, AcquisitionResult};
+
+    struct Two;
+    #[async_trait::async_trait]
+    impl ark_tools::Adapter for Two {
+        fn name(&self) -> &str {
+            "computer"
+        }
+        fn actions(&self) -> Vec<ActionDescriptor> {
+            ["computer.look", "computer.click"]
+                .map(|n| ActionDescriptor::new(n, n, RiskTier::Mutate))
+                .to_vec()
+        }
+        async fn run(
+            &self,
+            a: &str,
+            _: serde_json::Value,
+            _: &ark_tools::RunCtx<'_>,
+        ) -> ark_tools::Result<ark_tools::ActionOutput> {
+            Err(ark_tools::AdapterError::UnknownAction(a.into()))
+        }
+    }
+
+    struct On;
+    #[async_trait::async_trait]
+    impl AcquisitionProvider for On {
+        async fn find(&self, _: &str) -> String {
+            String::new()
+        }
+        async fn propose(&self, _: &str) -> String {
+            String::new()
+        }
+        async fn acquire(&self, _: &str, _: bool) -> AcquisitionResult {
+            AcquisitionResult::changed("on").with_tools(vec![Arc::new(Two)])
+        }
+        fn asks_a_person(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    /// An agent allowed only `computer.look` gets only that once the Computer is on.
+    #[tokio::test]
+    async fn an_agent_gets_only_the_acquired_actions_its_tools_allow() {
+        let a = Allowed {
+            inner: Arc::new(On),
+            tools: vec!["computer.look".into()],
+        };
+        let got = a.acquire("computer", true).await;
+        let names: Vec<String> = got
+            .tools
+            .iter()
+            .flat_map(|t| t.actions())
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(names, ["computer.look"]);
+        assert!(a.asks_a_person("computer"));
+    }
 }

@@ -55,6 +55,8 @@ pub enum State {
     Ready,
     /// One sign-in away.
     Connect,
+    /// The app offers it; the person turns it on (the Computer, ADR 0045).
+    Off,
     /// This build cannot connect it, and why.
     Unavailable(String),
 }

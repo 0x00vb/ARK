@@ -1772,7 +1772,9 @@ impl Harness {
                             // Acquisition is gated by the same approval as a Mutate action. Its
                             // tools join this turn from the next step.
                             _ => {
-                                let approved = self.allow_mutate
+                                // A switch the person turns on waits for them, whatever
+                                // the agent may do without asking.
+                                let approved = (self.allow_mutate && !acq.asks_a_person(&need))
                                     || self.approve_acquisition(profile, &need, on_event).await;
                                 let got = acq.acquire(&need, approved).await;
                                 added.extend(got.tools);
@@ -1850,7 +1852,10 @@ impl Harness {
             catalog::ACQUIRE_CAPABILITY,
             "acquire a new capability",
             RiskTier::Mutate,
-        );
+        )
+        // A yes connects, installs or turns on one thing once. No grant covers the next ask:
+        // a capability the person turned off is asked for again (ADR 0045).
+        .ask_each_time();
         let call = ark_model::ToolCall {
             id: String::new(),
             name: catalog::ACQUIRE_CAPABILITY.into(),

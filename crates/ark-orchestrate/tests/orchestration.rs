@@ -2386,3 +2386,99 @@ async fn a_stopping_process_drops_a_model_call_and_the_task_continues_after() {
     assert_eq!(o.agent("w").unwrap().state, AgentState::Idle);
     assert_eq!(m.texts().len(), 1);
 }
+
+/// Says yes to every question, counting them.
+struct Yes(Arc<AtomicUsize>);
+
+#[async_trait::async_trait]
+impl Approver for Yes {
+    async fn decide(&self, _: &ApprovalRequest) -> ApprovalDecision {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        ApprovalDecision::AllowOnce
+    }
+}
+
+/// ADR 0045: an agent whose tools allow a computer action sees the offer, asks, and gets only
+/// what its tools allow; an agent without one is not offered the Computer.
+#[tokio::test]
+async fn an_agent_asks_for_the_computer_only_when_its_tools_allow_it() {
+    use ark_sdk::prelude::ark_computer::{fake::FakeScreen, ComputerService};
+    let dir = tempfile::tempdir().unwrap();
+    let svc = ComputerService::with_screen(Arc::new(
+        FakeScreen::new().app("Lumen", &[("button", "Go")]),
+    ))
+    .switched(dir.path().join("computer.json"));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Arc::new(ark_model::MockProvider::new("unused", vec![])))
+        .computer_with(svc.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("p", "").unwrap();
+    let looking = Arc::new(Searcher {
+        script: Script::new(
+            "looking",
+            vec![
+                calls(vec![("acquire_capability", json!({ "need": "computer" }))]),
+                answer("looked"),
+            ],
+        ),
+        tools: Mutex::new(Vec::new()),
+    });
+    let writing = Arc::new(Searcher {
+        script: Script::new("writing", vec![answer("wrote")]),
+        tools: Mutex::new(Vec::new()),
+    });
+    let asked = Arc::new(AtomicUsize::new(0));
+    let (l, w) = (looking.clone(), writing.clone());
+    let o = Orchestrator::builder(&ark, &project)
+        .approvals(Arc::new(ApprovalGate::new(Arc::new(Yes(asked.clone())))))
+        .configure_models(move |m| {
+            m.provider("looking", l as Arc<dyn Provider>)
+                .provider("writing", w as Arc<dyn Provider>)
+        })
+        .build()
+        .unwrap();
+    o.spawn(
+        AgentSpec::new("checker")
+            .model("looking")
+            .tools(["computer.look"]),
+    )
+    .await
+    .unwrap();
+    o.spawn(AgentSpec::new("writer").model("writing").tools(["notes.*"]))
+        .await
+        .unwrap();
+    o.run("writer", TaskSpec::new("write")).await.unwrap();
+    let offered = writing.tools.lock().unwrap()[0].clone();
+    assert!(
+        !offered
+            .iter()
+            .any(|t| t.starts_with("computer.") || t == "acquire_capability"),
+        "{offered:?}"
+    );
+
+    o.run("checker", TaskSpec::new("look at Lumen"))
+        .await
+        .unwrap();
+    let steps = looking.tools.lock().unwrap().clone();
+    assert!(
+        steps[0].iter().any(|t| t == "acquire_capability"),
+        "{:?}",
+        steps[0]
+    );
+    assert!(
+        !steps[0].iter().any(|t| t.starts_with("computer.")),
+        "{:?}",
+        steps[0]
+    );
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+    assert!(svc.is_on());
+    let computer: Vec<&String> = steps[1]
+        .iter()
+        .filter(|t| t.starts_with("computer."))
+        .collect();
+    assert_eq!(computer, ["computer.look"], "only what its tools allow");
+}

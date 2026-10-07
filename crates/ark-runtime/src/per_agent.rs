@@ -8,6 +8,7 @@ use std::sync::Arc;
 use ark_model::Provider;
 use ark_tools::Adapter;
 
+use crate::acquire::AcquisitionProvider;
 use crate::distill::Distiller;
 
 /// Who a turn's tools act for.
@@ -27,6 +28,12 @@ pub trait PerAgent: Send + Sync {
     fn for_owner(&self, owner: &Owner) -> Arc<dyn Adapter>;
     /// Writes the evidence cards of their results.
     fn distiller(&self) -> Option<Distiller> {
+        None
+    }
+    /// What one owner can ask to turn on mid-turn, when the source is off until the person
+    /// allows it (the Computer, ADR 0045). Its tools are the owner's own, so the source is made
+    /// per owner. Default: none.
+    fn acquisition(&self, _owner: &Owner) -> Option<Arc<dyn AcquisitionProvider>> {
         None
     }
 }

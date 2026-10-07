@@ -208,7 +208,10 @@ impl Command for Connect {
     async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
         let which = args.trim();
         let mut r = Report::new();
-        if !which.is_empty() {
+        if crate::capabilities::switchable(ix.ark().computer(), which) {
+            crate::capabilities::turn(ix.ark().computer(), which, true)?;
+            r = r.success("The Computer is on. Agents still ask before each step.");
+        } else if !which.is_empty() {
             let url = crate::capabilities::connect(ix.ark().connections(), which).await?;
             r = if crate::capabilities::open_in_browser(&url) {
                 r.success("Opened the sign-in in your browser. Once you allow it there, the capability is ready for the next turn.")
@@ -307,6 +310,14 @@ impl Command for Disconnect {
         let which = args.trim();
         if which.is_empty() {
             anyhow::bail!("usage: /disconnect {}", self.usage());
+        }
+        if crate::capabilities::switchable(ix.ark().computer(), which) {
+            crate::capabilities::turn(ix.ark().computer(), which, false)?;
+            let mut r = Report::new()
+                .success("The Computer is off. Agents ask before they use your apps again.");
+            r.blocks
+                .extend(crate::capabilities::report(&crate::capabilities::list(ix.ark())).blocks);
+            return Ok(r.into());
         }
         let account = crate::capabilities::disconnect(ix.ark().connections(), which).await?;
         let mut r = Report::new().success(format!(

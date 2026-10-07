@@ -21,4 +21,5 @@ core-foundation = "0.10"
 
 [dev-dependencies]
 ark-core.workspace = true
+ark-model.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -1377,6 +1377,18 @@ impl Host {
                 )
                 .await?
             })),
+            // A capability the app offers and the person turns on or off (the Computer).
+            "capability_turn" => {
+                ark_interact::capabilities::turn(
+                    self.caps.computer.as_ref(),
+                    &s("id"),
+                    params
+                        .get("on")
+                        .and_then(|v| v.as_bool())
+                        .ok_or_else(|| anyhow::anyhow!("capability_turn needs `on`"))?,
+                )?;
+                Ok(json!({}))
+            }
             "capability_disconnect" => Ok(serde_json::to_value(
                 ark_interact::capabilities::disconnect(self.caps.connections.as_ref(), &s("id"))
                     .await?,

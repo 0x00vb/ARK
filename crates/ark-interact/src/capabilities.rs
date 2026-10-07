@@ -8,6 +8,7 @@
 
 use std::time::Duration;
 
+use ark_sdk::prelude::ark_computer::{self, ComputerService};
 use ark_sdk::prelude::ark_connect::{Account, CapabilityStatus, Catalog, Connections, State};
 use ark_sdk::prelude::{ApprovalDecision, ApprovalRequest, Approver, Ark, Engine};
 use serde::Serialize;
@@ -24,6 +25,9 @@ pub struct Listed {
     pub status: CapabilityStatus,
     /// Added by the person as a tool server (advanced), not from ARK's catalog.
     pub added: bool,
+    /// The person turns it on and off here (the Computer), instead of connecting an account.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub switch: bool,
 }
 
 /// What a front-end needs to list and connect capabilities without holding the [`Ark`] (a
@@ -33,6 +37,8 @@ pub struct Parts {
     pub engine: std::sync::Arc<Engine>,
     pub per_agent: Vec<std::sync::Arc<dyn ark_sdk::prelude::ark_runtime::per_agent::PerAgent>>,
     pub connections: Option<Connections>,
+    /// The Computer, when the app offers it: the person turns it on and off.
+    pub computer: Option<std::sync::Arc<ComputerService>>,
 }
 
 impl Parts {
@@ -41,6 +47,7 @@ impl Parts {
             engine: ark.shared_engine(),
             per_agent: ark.per_agent().to_vec(),
             connections: ark.connections().cloned(),
+            computer: ark.computer().cloned(),
         }
     }
 }
@@ -74,9 +81,16 @@ pub fn list_parts(p: &Parts) -> Vec<Listed> {
             .collect(),
     }
     .into_iter()
-    .map(|status| Listed {
-        status,
-        added: false,
+    .map(|mut status| {
+        let switch = status.id == ark_computer::ID && switchable(p.computer.as_ref(), &status.id);
+        if switch && p.computer.as_ref().is_some_and(|c| !c.is_on()) {
+            status.state = State::Off;
+        }
+        Listed {
+            status,
+            added: false,
+            switch,
+        }
     })
     .collect();
     for s in crate::plugins::list(&p.engine) {
@@ -94,9 +108,89 @@ pub fn list_parts(p: &Parts) -> Vec<Listed> {
                 account: None,
             },
             added: true,
+            switch: false,
         });
     }
     rows
+}
+
+/// Turn a capability the app offers on or off (the Computer, ADR 0045). On asks the system
+/// for its permission prompt at once, so the first action does not wait for it.
+pub fn turn(
+    computer: Option<&std::sync::Arc<ComputerService>>,
+    capability: &str,
+    on: bool,
+) -> anyhow::Result<()> {
+    let c = computer
+        .filter(|c| c.switchable() && capability.trim().eq_ignore_ascii_case(ark_computer::ID))
+        .ok_or_else(|| anyhow::anyhow!("`{capability}` is not one this app turns on and off"))?;
+    c.set_on(on).map_err(|e| {
+        anyhow::anyhow!(
+            "the Computer could not be turned {}: {e}",
+            if on { "on" } else { "off" }
+        )
+    })?;
+    if on {
+        c.ask_permission();
+    }
+    Ok(())
+}
+
+/// Whether `capability` is one the person turns on and off here.
+pub fn switchable(computer: Option<&std::sync::Arc<ComputerService>>, capability: &str) -> bool {
+    computer.is_some_and(|c| c.switchable())
+        && capability.trim().eq_ignore_ascii_case(ark_computer::ID)
+}
+
+/// Words an agent's request to turn on the Computer: "Allow ARK to use the apps on this
+/// computer", Allow or Not now. Already on, it passes without a question. Every other question goes on unchanged.
+struct TurnOnComputer {
+    inner: std::sync::Arc<dyn Approver>,
+    computer: std::sync::Arc<ComputerService>,
+    /// The app's own sources (accounts, installs). A turn asks them before the Computer, so a
+    /// need one of them knows ("node to run the app") is theirs to word, never this one's.
+    app: Option<std::sync::Arc<dyn ark_sdk::prelude::AcquisitionProvider>>,
+}
+
+/// `approver`, with the Computer's request worded when the app offers it with a switch.
+pub(crate) fn wrap_computer(
+    approver: std::sync::Arc<dyn Approver>,
+    ark: &Ark,
+) -> std::sync::Arc<dyn Approver> {
+    match ark.computer().filter(|c| c.switchable()) {
+        Some(c) => std::sync::Arc::new(TurnOnComputer {
+            inner: approver,
+            computer: c.clone(),
+            app: ark.profile().acquisition.clone(),
+        }),
+        None => approver,
+    }
+}
+
+#[async_trait::async_trait]
+impl Approver for TurnOnComputer {
+    async fn decide(&self, request: &ApprovalRequest) -> ApprovalDecision {
+        let need = request.input["need"].as_str().unwrap_or("");
+        let theirs = self.app.as_ref().is_some_and(|a| a.knows(need));
+        if request.action != "acquire_capability"
+            || theirs
+            || !ark_computer::names_the_computer(need)
+        {
+            return self.inner.decide(request).await;
+        }
+        if self.computer.is_on() {
+            return ApprovalDecision::AllowOnce;
+        }
+        let mut ask = request.clone();
+        // The line says what the yes allows (its first word is the button); the summary what
+        // it does not: each step still asks.
+        ask.preview = "Allow ARK to use the apps on this computer".into();
+        ask.summary = "It still asks before each step.".into();
+        match self.inner.decide(&ask).await {
+            ApprovalDecision::Deny => ApprovalDecision::Deny,
+            _ => ApprovalDecision::AllowOnce,
+        }
+    }
 }
 
 /// Start connecting a capability: returns the sign-in page to open, and finishes in the
@@ -255,6 +349,12 @@ pub fn report(rows: &[Listed]) -> Report {
                 format!("{} · /connect {}", s.says, s.id),
                 Some(format!("/connect {}", s.id)),
             ),
+            State::Off => (
+                "○",
+                Tone::Muted,
+                format!("{} · /connect {}", s.says, s.id),
+                Some(format!("/connect {}", s.id)),
+            ),
             State::Unavailable(why) => ("!", Tone::Warning, format!("{} · {why}", s.says), None),
         };
         t.push(Row {
@@ -264,7 +364,9 @@ pub fn report(rows: &[Listed]) -> Report {
                 Cell::new(detail, Tone::Muted),
             ],
             tone: Tone::Normal,
-            command,
+            command: command.or_else(|| {
+                (r.switch && s.state == State::Ready).then(|| format!("/disconnect {}", s.id))
+            }),
         });
     }
     Report::new().table(t)

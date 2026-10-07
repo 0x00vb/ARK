@@ -10,9 +10,10 @@ use crate::Connections;
 
 impl Connections {
     /// The capability a free-text need names: its id or label, or a word of its line.
+    /// Only a capability that needs an account: one an app turns on is not connected (ADR 0045).
     pub fn capability_for(&self, need: &str) -> Option<&Capability> {
         let cat = self.catalog();
-        if let Some(c) = cat.capability(need) {
+        if let Some(c) = cat.capability(need).filter(|c| c.provider.is_some()) {
             return Some(c);
         }
         let need = need.to_lowercase();
@@ -135,6 +136,9 @@ mod tests {
         assert_eq!(c.capability_for("send an email to bob").unwrap().id, "mail");
         assert_eq!(c.capability_for("calendar.create").unwrap().id, "calendar");
         assert!(c.capability_for("a spreadsheet").is_none());
+        // The Computer needs no account: never "not connected".
+        assert!(c.capability_for("computer").is_none());
+        assert!(!c.knows("Computer"));
         assert!(c.find("mail").await.contains("not connected"));
         let r = c.acquire("mail", false).await;
         assert!(!r.changed && r.tools.is_empty() && r.summary.contains("did not connect"));

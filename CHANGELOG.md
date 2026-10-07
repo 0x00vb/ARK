@@ -10,6 +10,15 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- The Computer is a capability the person turns on (ADR 0045). Off, a turn carries one line
+  saying the agent can ask for it, and no computer schema. An agent that needs an app calls
+  `acquire_capability`; the person sees "Allow ARK to use the apps on this computer" with Allow and Not now;
+  Allow asks for macOS's permission, turns it on for good (the store's `computer.json`) and the
+  tools join the running turn. Settings › Capabilities and `/connect computer`,
+  `/disconnect computer` turn it on and off; off takes the screen back at once.
+  `ComputerService::switched`, `is_on`, `set_on`; `ark_computer::TurnOn`,
+  `names_the_computer`; `PerAgent::acquisition`; `AcquisitionProvider::asks_a_person`;
+  `Ark::acquisition_for`; `State::Off` in the capability list; the page's `capability_turn`.
 - The Browser panel shows any page in the window (ADR 0044): it is a webview of its own over the
   pane, so pages that refuse frames (`X-Frame-Options`, `frame-ancestors`: most sites, and dev
   servers with security headers) show instead of a white panel. It gets no IPC and never loads
@@ -66,6 +75,11 @@ What changed for people building on ARK, per release. Not a commit log.
   `picture`; `ComputerService::picture`, `Engine::picture`.
 
 ### Changed
+- `ArkBuilder::computer(true)` starts with the Computer off until the person turns it on, asked
+  the first time a task needs it (writer users allow it once). `computer_with` is as the service
+  says: on unless it has a switch.
+- No grant covers `acquire_capability`: each request asks (ADR 0045), and one for a capability
+  that `asks_a_person` asks also when the agent may change things without asking.
 - On macOS, `remote::visit` and `run_window` refuse a runtime elsewhere by name over plain
   http (use https); IP addresses, names without a dot and `.local` still open over http. The
   token is no longer sent in clear there.
@@ -81,8 +95,15 @@ What changed for people building on ARK, per release. Not a commit log.
   takes no focus still gets its text set.
 
 ### Fixed
+- `find_capability {need: "computer"}` no longer answers "Computer is not connected": account
+  sign-ins resolve only capabilities that need an account.
 - The Browser's address bar opens `localhost:3000` (and `127.0.0.1`, `[::1]`, `*.localhost`
   addresses) over http instead of searching for it.
+
+### Breaking
+- `ark_connect::State` has a new variant, `Off` (the Computer while the person has not turned
+  it on): an exhaustive `match` adds an arm. `ark_interact::capabilities::Parts` has a
+  `computer` field; build it with `Parts::of`.
 
 ## [0.12.1] - 2026-10-07
 

@@ -407,3 +407,117 @@ async fn the_native_screen_lists_apps_and_reads_the_front_window() {
     }
     eprintln!("{} lines of text; elements: {roles:?}", look["lines"]);
 }
+
+fn switch_file(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("ark-computer-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir.join("computer.json")
+}
+
+fn owner_of<'a>(
+    name: &'a str,
+    model: &'a Arc<dyn ark_model::Provider>,
+) -> ark_runtime::per_agent::Owner<'a> {
+    ark_runtime::per_agent::Owner { name, model }
+}
+
+/// ADR 0045: off until the person turns it on, asked for mid-task, remembered, and off again
+/// stops an owner that still holds the tools at its next action.
+#[tokio::test]
+async fn the_computer_is_off_until_the_person_turns_it_on_and_remembers_it() {
+    use ark_runtime::per_agent::PerAgent;
+    let file = switch_file("switch");
+    let screen = FakeScreen::new().app("Lumen", &[("button", "Go")]);
+    let svc = service(&screen).switched(file.clone());
+    assert!(!svc.is_on() && svc.switchable());
+
+    let model: Arc<dyn ark_model::Provider> = Arc::new(ark_model::MockProvider::new("m", vec![]));
+    let src = Computers(svc.clone());
+    let owner = owner_of("session:1", &model);
+    assert!(
+        src.for_owner(&owner).actions().is_empty(),
+        "no tools while off"
+    );
+    assert_eq!(
+        src.listing().actions().len(),
+        ACTIONS.len(),
+        "the app still offers it"
+    );
+
+    let ask = src.acquisition(&owner).expect("an owner can ask for it");
+    assert!(ask.active() && ask.asks_a_person("computer"));
+    assert!(ask
+        .offer()
+        .unwrap()
+        .contains("- computer: use the apps on this computer"));
+    assert!(ask.find("computer").await.contains("is off"));
+
+    let no = ask.acquire("computer", false).await;
+    assert!(!no.changed && no.tools.is_empty() && !svc.is_on());
+
+    let yes = ask.acquire("computer", true).await;
+    assert!(yes.changed && svc.is_on(), "{}", yes.summary);
+    assert_eq!(yes.tools[0].actions().len(), ACTIONS.len());
+    assert!(!ask.active() && ask.offer().is_none());
+
+    // Kept: a new process starts with it on.
+    let again = service(&screen).switched(file.clone());
+    assert!(again.is_on());
+
+    // Off while an owner holds its tools: the next action refuses.
+    let c = svc.for_owner("session:1");
+    run(&c, LOOK, json!({ "app": "Lumen" })).await.unwrap();
+    svc.set_on(false).unwrap();
+    let err = run(&c, LOOK, json!({ "app": "Lumen" })).await.unwrap_err();
+    assert!(err.contains("turned the Computer off"), "{err}");
+    assert!(!service(&screen).switched(file).is_on());
+}
+
+/// Turning it on asks the system for its permission then, not at the first action.
+#[tokio::test]
+async fn turning_it_on_asks_for_the_permission_and_waits_for_it() {
+    use ark_runtime::per_agent::PerAgent;
+    let screen = FakeScreen::new()
+        .app("Lumen", &[("button", "Go")])
+        .not_allowed_until_asked(Duration::from_millis(100));
+    let svc = service(&screen).switched(switch_file("permission"));
+    let model: Arc<dyn ark_model::Provider> = Arc::new(ark_model::MockProvider::new("m", vec![]));
+    let ask = Computers(svc.clone())
+        .acquisition(&owner_of("session:1", &model))
+        .unwrap();
+    let got = ask.acquire("computer", true).await;
+    assert!(got.changed && svc.is_on(), "{}", got.summary);
+    assert_eq!(svc.access(), Access::Allowed);
+}
+
+#[test]
+fn a_need_names_the_computer_by_whole_words() {
+    for yes in [
+        "computer",
+        "use the apps on this computer",
+        "native app control",
+        "desktop application",
+        "computer.open",
+    ] {
+        assert!(names_the_computer(yes), "{yes}");
+    }
+    for no in [
+        "WhatsApp",
+        "send mail",
+        "calendar",
+        "mapping",
+        "screenshots",
+    ] {
+        assert!(!names_the_computer(no), "{no}");
+    }
+}
+
+/// A service without a switch (an app's own, tests) is on, as before ADR 0045.
+#[test]
+fn a_service_without_a_switch_is_on_and_asks_nothing() {
+    use ark_runtime::per_agent::PerAgent;
+    let svc = service(&notes());
+    let model: Arc<dyn ark_model::Provider> = Arc::new(ark_model::MockProvider::new("m", vec![]));
+    assert!(svc.is_on() && !svc.switchable());
+    assert!(Computers(svc).acquisition(&owner_of("x", &model)).is_none());
+}

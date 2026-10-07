@@ -1154,3 +1154,285 @@ async fn sibling_conversations_share_the_agents_and_scheduled_work_wakes_at_open
     let woke = built.lock().unwrap().clone();
     assert!(woke.contains(&"evenings".to_string()), "{woke:?}");
 }
+
+/// ADR 0045, the conversation this came from: "open <an app> and write to <a chat>" with the
+/// Computer off. The agent asks; the person sees "Allow ARK to use the apps on this computer", Allow and
+/// Not now; the same turn goes on in the app. Once on, the next chat has the tools from its first
+/// step; turned off, it asks again, also after an earlier "Always".
+#[tokio::test]
+async fn an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app() {
+    use ark_sdk::prelude::ark_computer::{fake::FakeScreen, ComputerService};
+    let dir = tempfile::tempdir().unwrap();
+    let screen = FakeScreen::new().app("Lumen", &[("row", "Notes"), ("text field", "Message")]);
+    let svc = ComputerService::with_screen(Arc::new(screen.clone()))
+        .timing(
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_millis(1),
+        )
+        .switched(dir.path().join("computer.json"));
+    let model = Arc::new(MockProvider::new(
+        "m",
+        vec![
+            // Turn 1: off, so it asks, then opens the app in the same turn.
+            call(
+                "acquire_capability",
+                serde_json::json!({ "need": "use the apps on this computer" }),
+            ),
+            call("computer.open", serde_json::json!({ "app": "Lumen" })),
+            Completion {
+                content: "Lumen is open.".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(60, 6),
+            },
+            // Turn 2: on, so the tools are there from the start.
+            call("computer.open", serde_json::json!({ "app": "Lumen" })),
+            Completion {
+                content: "Again.".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(60, 6),
+            },
+            // Turn 3: turned off, asks again; the person says Not now.
+            call(
+                "acquire_capability",
+                serde_json::json!({ "need": "use the apps on this computer" }),
+            ),
+            Completion {
+                content: "I need the Computer for that.".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(60, 6),
+            },
+        ],
+    ));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model.clone())
+        .computer_with(svc.clone())
+        // Even an app that lets agents change things unasked asks before turning it on.
+        .allow_mutate(true)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, mut rx) = ChannelApprover::channel();
+    // Title, summary, answers offered, whether it asks each time, and its line.
+    type Asked = (String, String, Vec<String>, bool, String);
+    let asked: Arc<std::sync::Mutex<Vec<Asked>>> = Arc::default();
+    let seen = asked.clone();
+    tokio::spawn(async move {
+        while let Some(p) = rx.recv().await {
+            let n = {
+                let mut s = seen.lock().unwrap();
+                s.push((
+                    ark_interact::approval_title(&p.request),
+                    p.request.summary.clone(),
+                    ark_interact::approval_choices(&p.request)
+                        .into_iter()
+                        .map(|c| c.label)
+                        .collect(),
+                    p.request.ask_each_time,
+                    p.request.preview.clone(),
+                ));
+                s.len()
+            };
+            // First "Always" (no grant may cover a later ask), then Not now.
+            p.answer(if n == 1 {
+                ApprovalDecision::AllowAlways
+            } else {
+                ApprovalDecision::Deny
+            });
+        }
+    });
+    let mut ix = App::new("Test")
+        .ark(ark)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+
+    let list = ix.execute("/connect").await.report.plain_text();
+    let row = list.lines().find(|l| l.contains("Computer")).unwrap_or("");
+    assert!(
+        row.trim_start().starts_with('○') && row.contains("/connect computer"),
+        "{list}"
+    );
+
+    let end = ix
+        .run_turn(
+            "Open Lumen and write to Notes",
+            &TurnControl::new(),
+            |_, _| {},
+        )
+        .await;
+    assert!(end.result.unwrap().answer.contains("open"));
+    {
+        let asked = asked.lock().unwrap();
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert_eq!(asked[0].0, "ARK needs this to finish:");
+        assert_eq!(asked[0].1, "It still asks before each step.");
+        assert_eq!(asked[0].4, "Allow ARK to use the apps on this computer");
+        assert_eq!(asked[0].2, ["Allow", "Not now"]);
+        assert!(asked[0].3, "no grant covers a later request");
+    }
+    assert!(svc.is_on());
+    assert!(
+        screen
+            .log
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("open Lumen")),
+        "{:?}",
+        screen.log.lock().unwrap()
+    );
+    let requests = model.recorded();
+    let first = &requests[0].messages[0].content;
+    assert!(
+        first.contains("- computer: use the apps on this computer"),
+        "{first}"
+    );
+    assert!(!requests[0]
+        .tools
+        .iter()
+        .any(|t| t.name.starts_with("computer.")));
+    assert!(
+        requests[1].tools.iter().any(|t| t.name == "computer.open"),
+        "joined the turn"
+    );
+
+    // On: a new turn has the tools from its first step, and no offer.
+    ix.run_turn("Open Lumen again", &TurnControl::new(), |_, _| {})
+        .await
+        .result
+        .unwrap();
+    let requests = model.recorded();
+    let t2 = &requests[3];
+    assert!(t2.tools.iter().any(|t| t.name == "computer.open"));
+    assert!(!t2.messages[0].content.contains("- computer:"));
+    assert_eq!(
+        asked.lock().unwrap().len(),
+        1,
+        "nothing asked to turn it on again"
+    );
+
+    // Off: asks again although the first answer was "Always".
+    let list = ix.execute("/disconnect computer").await.report.plain_text();
+    assert!(list.contains("The Computer is off"), "{list}");
+    assert!(!svc.is_on());
+    ix.run_turn("Open Lumen", &TurnControl::new(), |_, _| {})
+        .await
+        .result
+        .unwrap();
+    assert_eq!(asked.lock().unwrap().len(), 2, "asked again after Turn off");
+    assert!(!svc.is_on(), "Not now leaves it off");
+}
+
+/// The app's sources come first: "calendar app" is Calendar, "the apps on this computer" is
+/// the Computer, and "computer" never reaches the account sign-ins.
+#[tokio::test]
+async fn a_need_reaches_the_source_that_serves_it() {
+    use ark_sdk::prelude::ark_computer::{fake::FakeScreen, ComputerService};
+    use ark_sdk::prelude::ark_connect::{Catalog, Connections, MemorySecrets};
+    use ark_sdk::prelude::ark_runtime::per_agent::Owner;
+    let dir = tempfile::tempdir().unwrap();
+    let mut catalog = Catalog::builtin();
+    for p in &mut catalog.providers {
+        p.oauth.client_id = "test".into();
+        p.oauth.client_id_env = None;
+    }
+    let conns = Connections::open(dir.path(), catalog, Arc::new(MemorySecrets::default()));
+    let svc = ComputerService::with_screen(Arc::new(FakeScreen::new()))
+        .switched(dir.path().join("computer.json"));
+    let model: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new("m", vec![]));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model.clone())
+        .connections_with(conns)
+        .computer_with(svc)
+        .build()
+        .unwrap();
+    let acq = ark
+        .acquisition_for(
+            ark.profile().acquisition.clone(),
+            &Owner {
+                name: "session:1",
+                model: &model,
+            },
+        )
+        .unwrap();
+    assert!(acq
+        .find("add it to my calendar app")
+        .await
+        .contains("Calendar"));
+    assert!(acq
+        .find("use the apps on this computer")
+        .await
+        .contains("The Computer"));
+    assert!(acq.find("computer").await.contains("The Computer"));
+    assert!(acq.asks_a_person("computer") && !acq.asks_a_person("mail"));
+    let offer = acq.offer().unwrap();
+    assert!(
+        offer.contains("- mail:") && offer.contains("- computer:"),
+        "{offer}"
+    );
+}
+
+/// A need the app's own sources serve is theirs to ask, also when it says "app": with the
+/// Computer on, "node to run the app" is the install question, never a silent yes.
+#[tokio::test]
+async fn an_install_that_names_an_app_is_asked_as_an_install() {
+    use ark_sdk::prelude::ark_computer::{fake::FakeScreen, ComputerService};
+    use ark_sdk::prelude::ark_proc::{Processes, Shell};
+    let dir = tempfile::tempdir().unwrap();
+    let svc = ComputerService::with_screen(Arc::new(FakeScreen::new()))
+        .switched(dir.path().join("computer.json"));
+    svc.set_on(true).unwrap();
+    let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> =
+        std::env::vars_os().filter(|(k, _)| k != "PATH").collect();
+    env.push(("PATH".into(), "/usr/bin:/bin".into()));
+    let procs =
+        Processes::with_shell(dir.path().join("processes"), Shell::fixed("/bin/sh", env)).unwrap();
+    let model = Arc::new(MockProvider::new(
+        "m",
+        vec![
+            call(
+                "acquire_capability",
+                serde_json::json!({ "need": "node to run the app" }),
+            ),
+            Completion {
+                content: "Node is needed.".into(),
+                tool_calls: vec![],
+                usage: Usage::measured(60, 6),
+            },
+        ],
+    ));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model)
+        .computer_with(svc)
+        .processes_with(procs.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (approver, mut rx) = ChannelApprover::channel();
+    let asked: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let seen = asked.clone();
+    tokio::spawn(async move {
+        while let Some(p) = rx.recv().await {
+            seen.lock().unwrap().push(p.request.summary.clone());
+            p.answer(ApprovalDecision::Deny);
+        }
+    });
+    let mut ix = App::new("Test")
+        .ark(ark)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    ix.run_turn("Run the app", &TurnControl::new(), |_, _| {})
+        .await
+        .result
+        .unwrap();
+    let asked = asked.lock().unwrap().clone();
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(asked[0].starts_with("Install Node.js"), "{asked:?}");
+    assert!(procs.list().is_empty(), "nothing installed");
+}

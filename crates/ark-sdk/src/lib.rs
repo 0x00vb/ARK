@@ -315,6 +315,7 @@ impl Ark {
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(&opts.tools, &router, &owner);
         let (engine, mut profile) = self.with_tools(engine, &tools);
+        self.owned(&mut profile, &owner, &router);
         if catalog.is_some() {
             // The catalog says to call it, so it is loaded, not left to discovery.
             let p = profile.to_mut();
@@ -492,6 +493,45 @@ impl Ark {
         all
     }
 
+    /// What one owner can ask to turn on mid-turn ([`PerAgent::acquisition`]), after the app's
+    /// own sources (accounts, installs): a need goes to the first that knows it.
+    pub fn acquisition_for(
+        &self,
+        base: Option<Arc<dyn ark_runtime::AcquisitionProvider>>,
+        owner: &Owner,
+    ) -> Option<Arc<dyn ark_runtime::AcquisitionProvider>> {
+        let mut sources: Vec<Arc<dyn ark_runtime::AcquisitionProvider>> =
+            base.into_iter().collect();
+        sources.extend(self.per_agent.iter().filter_map(|p| p.acquisition(owner)));
+        match sources.len() {
+            0 => None,
+            1 => sources.pop(),
+            _ => Some(Arc::new(ark_runtime::Sources(sources))),
+        }
+    }
+
+    /// A turn's profile with what its owner can ask to turn on.
+    fn owned(
+        &self,
+        profile: &mut std::borrow::Cow<'_, AgentProfile>,
+        owner: &str,
+        router: &ModelRouter,
+    ) {
+        let owner = Owner {
+            name: owner,
+            model: router.provider(Role::Plan),
+        };
+        if !self
+            .per_agent
+            .iter()
+            .any(|p| p.acquisition(&owner).is_some())
+        {
+            return;
+        }
+        let p = profile.to_mut();
+        p.acquisition = self.acquisition_for(p.acquisition.take(), &owner);
+    }
+
     /// The engine and profile of a turn with `tools` added: their adapters registered, their
     /// actions offered directly, their distillers first.
     fn with_tools(
@@ -548,6 +588,7 @@ impl Ark {
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(tools, &self.router, &owner);
         let (engine, mut profile) = self.with_tools(engine, &tools);
+        self.owned(&mut profile, &owner, &self.router);
         if catalog.is_some() {
             let p = profile.to_mut();
             p.distillers.push(skills::distiller());
@@ -576,7 +617,8 @@ impl Ark {
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
         let tools = self.turn_tools(&[], &self.router, "ark");
-        let (engine, profile) = self.with_tools(self.turn_engine(), &tools);
+        let (engine, mut profile) = self.with_tools(self.turn_engine(), &tools);
+        self.owned(&mut profile, "ark", &self.router);
         Ok(self
             .harness()
             .ask(&engine, &profile, project, task, on_event)
@@ -800,10 +842,12 @@ impl ArkBuilder {
         self
     }
 
-    /// Offer the Computer (`computer.apps`, `look`, `open`, `click`, `type`, `keys`;
+    /// Offer the Computer (`computer.apps`, `look`, `open`, `click`, `type`, `keys`, ...;
     /// [`ark_computer`]): agents use the apps on this computer, one agent at a time, every
-    /// action asked. Where the platform has no support (only macOS for now) it is not offered.
-    /// Off by default.
+    /// action asked. It stays off until the person turns it on: an agent that needs it asks
+    /// mid-task (`acquire_capability`), or the person turns it on in the capability list. The
+    /// answer is kept in the store's `computer.json` (ADR 0045). Where the platform has no
+    /// support (only macOS for now) it is not offered. Not offered by default.
     pub fn computer(mut self, yes: bool) -> Self {
         self.computer = yes.then_some(ComputerChoice::Native);
         self
@@ -955,7 +999,9 @@ impl ArkBuilder {
             per_agent.push(Arc::new(ark_browser::Browsers(svc)));
         }
         let computer = match self.computer {
-            Some(ComputerChoice::Native) => ark_computer::ComputerService::native(),
+            // Off until the person turns it on; their answer kept in the store (ADR 0045).
+            Some(ComputerChoice::Native) => ark_computer::ComputerService::native()
+                .map(|s| s.switched(engine.store.root().join("computer.json"))),
             Some(ComputerChoice::Given(svc)) => Some(svc),
             None => None,
         };

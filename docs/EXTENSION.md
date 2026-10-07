@@ -236,6 +236,16 @@ Tools each agent gets its own of (the web on its model, the browser) are `PerAge
 offered elsewhere), read through the accessibility interface: a window is its text and a
 numbered list of controls, as a page is in the browser ([ADR 0018](adr/0018-the-computer-one-screen-every-action-asked.md)).
 
+It starts off. While off, a turn carries one line saying the agent can ask for it, and no
+computer schema; an agent that needs an app calls `acquire_capability`, the person answers
+"Allow ARK to use the apps on this computer" (Allow, Not now), and the tools join the running
+turn. The answer is kept in the store's `computer.json`; Settings › Capabilities and
+`/connect computer`, `/disconnect computer` turn it on and off
+([ADR 0045](adr/0045-a-capability-the-person-turns-on-mid-task.md)). A source of per-agent tools
+that is off until the person allows it does the same through `PerAgent::acquisition`.
+`computer_with(svc)` gives a service that is on unless it was made with
+`ComputerService::switched`.
+
 | Action | What |
 |---|---|
 | `computer.apps` | The open apps. Runs on its own |

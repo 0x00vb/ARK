@@ -1,6 +1,6 @@
 # 0018. The Computer: one screen, one agent, every action asked
 
-Status: Accepted, amended by 0042 (rows and items, menus, scrolling, pictures)
+Status: Accepted, amended by 0042 (rows and items, menus, scrolling, pictures) and 0045 (off until the person turns it on)
 Date: 2026-10-04
 
 ## Context

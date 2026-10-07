@@ -105,6 +105,13 @@ pub trait AcquisitionProvider: Send + Sync {
     fn knows(&self, _need: &str) -> bool {
         true
     }
+
+    /// Whether acquiring `need` always waits for a person's answer, also for an agent allowed
+    /// to change things without asking (the Computer: a switch the person turns on, ADR 0045).
+    /// Default: no.
+    fn asks_a_person(&self, _need: &str) -> bool {
+        false
+    }
 }
 
 /// Several sources behind a profile's one acquisition slot (accounts to connect, programs to
@@ -156,6 +163,10 @@ impl AcquisitionProvider for Sources {
 
     fn knows(&self, need: &str) -> bool {
         self.pick(need).is_some()
+    }
+
+    fn asks_a_person(&self, need: &str) -> bool {
+        self.pick(need).is_some_and(|s| s.asks_a_person(need))
     }
 }
 

@@ -3,8 +3,9 @@
 // model at its next step), esc stops. Queued messages wait above the composer and can be sent
 // in early or removed.
 
-import { h, icon, clear, clip, $ } from "./dom.js";
+import { h, icon, clear, clip, touch, $ } from "./dom.js";
 import { registry } from "./ext.js";
+import { chooseFiles } from "./drop.js";
 
 export class Composer {
   constructor(api) {
@@ -29,6 +30,7 @@ export class Composer {
       else this.submit(false);
     });
     this.model.addEventListener("click", () => this.modelMenu());
+    $("#attach").addEventListener("click", () => chooseFiles(api, this));
     this.changed();
   }
 
@@ -65,7 +67,7 @@ export class Composer {
     this.running = on;
     this.form.dataset.running = String(on);
     this.send.setAttribute("aria-label", on ? "Stop" : "Send");
-    this.input.placeholder = on ? "Queue a message · ⌘↩ sends it now" : this.placeholder || "Ask anything";
+    this.input.placeholder = on ? (touch() ? "Queue a message" : "Queue a message · ⌘↩ sends it now") : this.placeholder || "Ask anything";
   }
 
   /// Name the model on its button: the app's words when it draws the picker. With nothing

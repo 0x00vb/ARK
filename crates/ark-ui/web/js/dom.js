@@ -90,6 +90,12 @@ const PATHS = {
   person: '<circle cx="8" cy="5.25" r="2.75"/><path d="M2.75 14.25c.55-2.6 2.65-4.25 5.25-4.25s4.7 1.65 5.25 4.25"/>',
 };
 
+/// A touch screen without a keyboard (a phone, a tablet): no shortcuts to mention, and no
+/// field focused on its own (that opens the on-screen keyboard over the page).
+export function touch() {
+  return matchMedia("(hover: none) and (pointer: coarse)").matches;
+}
+
 export function icon(name, cls = "") {
   const span = document.createElement("span");
   span.className = "ico" + (cls ? " " + cls : "");

@@ -3,9 +3,10 @@
 // the host (`projects`, `sessions`); nothing is kept here that could drift from the store, except
 // which projects the person folded or unfolded since they last changed project.
 
-import { h, icon, clear, ago, clip, $ } from "./dom.js";
+import { h, icon, clear, ago, clip, touch, $ } from "./dom.js";
 import { registry } from "./ext.js";
 import { SETTINGS } from "./settings.js";
+import { uploadFolder } from "./drop.js";
 
 // Chats listed per project before "Show more".
 const SHOWN = 8;
@@ -204,22 +205,25 @@ export class Sidebar {
 
   addMenu(anchor) {
     const name = h("input.menu-input", { placeholder: "New project…", "aria-label": "New project name" });
+    const item = (label, run) => h("button.menu-item", { type: "button", onclick: () => { menu.close(); run(); } }, h("span", label));
+    // A folder on the runtime's computer: picked in the window, typed in a browser there. A
+    // folder on this device, wherever the runtime runs: sent (a browser cannot name a path).
     const menu = this.api.popover(anchor, [
-      h("button.menu-item", { type: "button", onclick: async () => {
-        menu.close();
+      (this.api.canPickFolder || this.api.isLocal()) && item("Choose a folder…", async () => {
         const path = await this.folder(anchor, "Open a folder as a project");
         if (path) this.api.addProject({ path });
-      } }, h("span", "Choose a folder…")),
+      }),
+      !this.api.canPickFolder && item("Upload a folder…", () => uploadFolder(this.api)),
       h("div.menu-sep"),
       name,
-    ]);
+    ].filter(Boolean));
     name.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && name.value.trim()) {
         menu.close();
         this.api.addProject({ name: name.value.trim() });
       }
     });
-    name.focus();
+    if (!touch()) name.focus();
   }
 
   /// A folder from the window's picker; where there is none (a browser), a typed path.

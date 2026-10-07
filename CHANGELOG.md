@@ -9,6 +9,14 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- The page: Upload a folder… (the sidebar's add menu, where there is no folder picker) makes a
+  new project from a folder on this device, through the upload calls (ADR 0030), and opens it.
+  A browser on a runtime elsewhere has nothing else; a browser on the runtime's computer keeps
+  Choose a folder… (a typed path) too.
+- The page: Add files (the composer's +) puts chosen files in the project, as a drop does (ADR
+  0035). A phone has no drag and drop.
+
 ### Fixed
 - Run code on Linux: Python failed to start in the sandbox when uv reached the interpreter
   through its `cpython-3.12-…` link (every uv 0.8+ install). A folder a run reads through a

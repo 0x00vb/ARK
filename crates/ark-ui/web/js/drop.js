@@ -1,7 +1,8 @@
-// Files and folders dropped on the conversation go into the project's folder (ADR 0035), through
-// the upload calls a folder sent from another computer uses (ADR 0030). The composer then names
-// them, so the message the person sends tells the agent. Works the same with a runtime on this
-// computer or elsewhere.
+// Files and folders dropped on the conversation, or chosen with the composer's add button, go
+// into the project's folder (ADR 0035), through the upload calls a folder sent from another
+// computer uses (ADR 0030). The composer then names them, so the message the person sends tells
+// the agent. A folder chosen from the sidebar becomes a new project the same way. Works the same
+// with a runtime on this computer or elsewhere.
 
 import { h, icon, $ } from "./dom.js";
 
@@ -11,8 +12,10 @@ const CALL_FILES = 200;
 /// Tries of one call when the connection fails; every upload call can be sent again.
 const TRIES = 3;
 
+/// One set of files on its way at a time, from a drop or a picker.
+let busy = null;
+
 export function acceptDrops(api, composer, zone) {
-  let busy = null;
   let depth = 0;
   const hint = h("div.drop-hint", { hidden: true }, h("div.drop-hint-box", icon("plus"), h("span", "Drop to add to the project")));
   zone.append(hint);
@@ -45,92 +48,134 @@ export function acceptDrops(api, composer, zone) {
     // The dropped items are readable only during this event: take them now.
     const entries = [...(e.dataTransfer.items || [])].map((i) => i.kind === "file" && i.webkitGetAsEntry?.()).filter(Boolean);
     const files = [...e.dataTransfer.files];
-    if (busy) return api.toast("Files are still being added. Wait for them, or stop them first.");
-    busy = add(entries, files).finally(() => (busy = null));
-  });
-
-  async function add(entries, files) {
     // Entries see into folders. Files that have no place on a disk (made by a page) cannot be
     // read through them: then the files as dropped.
     const plain = () => files.map((file) => ({ path: file.name, file }));
-    const list = entries.length ? await walkAll(entries).catch(plain) : plain();
+    once(api, async () => addToProject(api, composer, entries.length ? await walkAll(entries).catch(plain) : plain()));
+  });
+}
+
+/// The system's file chooser (a phone has no drag and drop): the files go into the project.
+export function chooseFiles(api, composer) {
+  choose({ multiple: true }, (files) =>
+    once(api, () => addToProject(api, composer, files.map((file) => ({ path: file.name, file })))));
+}
+
+/// A folder from this device becomes a new project on the runtime, wherever it runs (ADR 0030
+/// calls), and opens. A browser cannot hand the runtime a path, so it sends the files.
+export function uploadFolder(api) {
+  choose({ multiple: true, webkitdirectory: true }, (files) => once(api, async () => {
+    // `top/inner/file.txt`: the folder's name, then the path inside it.
+    const name = (files[0]?.webkitRelativePath || "").split("/")[0] || "Project";
+    const list = files.map((file) => ({ path: file.webkitRelativePath.split("/").slice(1).join("/") || file.name, file }));
     if (!list.length) return api.toast("There is nothing to add: only files are added, and the folders had none.");
-    const progress = new Progress(list);
+    const progress = new Progress(list, "Uploading", name);
     try {
-      const { added } = await send(list, progress);
-      composer.addLine(`Added to the project: ${added.join(", ")}`);
+      const project = await send(api, list, progress, { method: "upload_project", params: { name } });
+      await api.openProject(project.id);
     } catch (e) {
-      api.toast(progress.stopped ? "Stopped. Nothing was added." : `The files were not added: ${e.message}`);
+      api.toast(progress.stopped ? "Stopped. Nothing was added." : `The folder was not uploaded: ${e.message}`);
     } finally {
       progress.remove();
     }
-  }
+  }));
+}
 
-  /// Send `list` in calls of at most `CALL` bytes (a part of a large file, or many small ones),
-  /// then put it in the project. A stop or a failure removes what was sent.
-  async function send(list, progress) {
-    const upload = "drop-" + [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
-    const call = (method, params) => retry(() => api.call(method, { upload, ...params }));
-    try {
-      await call("upload_parts", { parts: [] });
-      let batch = [];
-      let bytes = 0;
-      const flush = async () => {
-        if (!batch.length) return;
-        if (progress.stopped) throw new Error("stopped");
-        await call("upload_parts", { parts: batch });
-        progress.sent(bytes);
-        batch = [];
-        bytes = 0;
-      };
-      for (const { path, file } of list) {
-        let offset = 0;
-        do {
-          const piece = file.slice(offset, offset + CALL - bytes);
-          batch.push({ path, offset, data: await base64(piece) });
-          bytes += piece.size;
-          offset += piece.size;
-          if (bytes >= CALL || batch.length >= CALL_FILES) await flush();
-        } while (offset < file.size);
-      }
-      await flush();
+function once(api, work) {
+  if (busy) return api.toast("Files are still being added. Wait for them, or stop them first.");
+  busy = work().finally(() => (busy = null));
+}
+
+function choose(attrs, picked) {
+  const input = h("input", { type: "file", hidden: true, ...attrs });
+  input.addEventListener("change", () => {
+    const files = [...(input.files || [])];
+    input.remove();
+    if (files.length) picked(files);
+  });
+  input.addEventListener("cancel", () => input.remove());
+  document.body.append(input);
+  input.click();
+}
+
+async function addToProject(api, composer, list) {
+  if (!list.length) return api.toast("There is nothing to add: only files are added, and the folders had none.");
+  const progress = new Progress(list, "Adding");
+  try {
+    const { added } = await send(api, list, progress, { method: "upload_add", params: {} });
+    composer.addLine(`Added to the project: ${added.join(", ")}`);
+  } catch (e) {
+    api.toast(progress.stopped ? "Stopped. Nothing was added." : `The files were not added: ${e.message}`);
+  } finally {
+    progress.remove();
+  }
+}
+
+/// Send `list` in calls of at most `CALL` bytes (a part of a large file, or many small ones),
+/// then finish the upload with `last` (into the open project, or a new one). A stop or a
+/// failure removes what was sent.
+async function send(api, list, progress, last) {
+  const upload = "drop-" + [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const call = (method, params) => retry(() => api.call(method, { upload, ...params }));
+  try {
+    await call("upload_parts", { parts: [] });
+    let batch = [];
+    let bytes = 0;
+    const flush = async () => {
+      if (!batch.length) return;
       if (progress.stopped) throw new Error("stopped");
-      return await call("upload_add", {});
-    } catch (e) {
-      api.call("upload_cancel", { upload }).catch(() => {});
-      throw e;
+      await call("upload_parts", { parts: batch });
+      progress.sent(bytes);
+      batch = [];
+      bytes = 0;
+    };
+    for (const { path, file } of list) {
+      let offset = 0;
+      do {
+        const piece = file.slice(offset, offset + CALL - bytes);
+        batch.push({ path, offset, data: await base64(piece) });
+        bytes += piece.size;
+        offset += piece.size;
+        if (bytes >= CALL || batch.length >= CALL_FILES) await flush();
+      } while (offset < file.size);
     }
+    await flush();
+    if (progress.stopped) throw new Error("stopped");
+    return await call(last.method, last.params);
+  } catch (e) {
+    api.call("upload_cancel", { upload }).catch(() => {});
+    throw e;
   }
+}
 
-  /// The line above the composer while files are sent: what, how far, and Stop.
-  class Progress {
-    constructor(list) {
-      this.total = list.reduce((n, f) => n + f.file.size, 0);
-      this.done = 0;
-      this.stopped = false;
-      this.text = h("span.queued-t");
-      this.what = list.length === 1 ? list[0].path : `${list.length} files`;
-      this.el = h("div.queued.adding", h("span.queued-k", "Adding"), this.text,
-        h("button.icon-btn.small", { title: "Stop", "aria-label": "Stop", onclick: () => this.stop() }, icon("x")));
-      $("#queue").before(this.el);
-      this.paint();
-    }
-    sent(bytes) {
-      this.done += bytes;
-      this.paint();
-    }
-    paint() {
-      const p = this.total ? Math.min(100, Math.round((this.done / this.total) * 100)) : 0;
-      this.text.textContent = `${this.what} · ${p}%`;
-      this.el.style.setProperty("--p", `${p}%`);
-    }
-    stop() {
-      this.stopped = true;
-      this.text.textContent = `${this.what} · stopping`;
-    }
-    remove() {
-      this.el.remove();
-    }
+/// The line above the composer while files are sent: what, how far, and Stop.
+class Progress {
+  constructor(list, verb, what) {
+    this.total = list.reduce((n, f) => n + f.file.size, 0);
+    this.done = 0;
+    this.stopped = false;
+    this.text = h("span.queued-t");
+    this.what = what || (list.length === 1 ? list[0].path : `${list.length} files`);
+    this.el = h("div.queued.adding", h("span.queued-k", verb), this.text,
+      h("button.icon-btn.small", { title: "Stop", "aria-label": "Stop", onclick: () => this.stop() }, icon("x")));
+    $("#queue").before(this.el);
+    this.paint();
+  }
+  sent(bytes) {
+    this.done += bytes;
+    this.paint();
+  }
+  paint() {
+    const p = this.total ? Math.min(100, Math.round((this.done / this.total) * 100)) : 0;
+    this.text.textContent = `${this.what} · ${p}%`;
+    this.el.style.setProperty("--p", `${p}%`);
+  }
+  stop() {
+    this.stopped = true;
+    this.text.textContent = `${this.what} · stopping`;
+  }
+  remove() {
+    this.el.remove();
   }
 }
 

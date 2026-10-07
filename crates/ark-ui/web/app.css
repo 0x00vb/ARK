@@ -310,8 +310,9 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   flex: 1; min-width: 0;
   font-size: 13px; font-weight: 500; color: var(--text-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  display: flex;
 }
+/* Renaming: the field fills the title's place. */
+.title:has(input) { display: flex; }
 .top-actions { display: flex; align-items: center; gap: 4px; }
 .panel-launchers { display: contents; }
 /* The current project's views. */
@@ -1304,4 +1305,11 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   .bd-p-x:hover { background: var(--hover); color: var(--text); }
   .bd-p-delete:hover { color: var(--err); }
   .bd-p-title:hover, .bd-p-note:hover { background: var(--hover); }
+}
+/* Add files: before the model, with the same left edge as the text above. */
+.composer-bar .attach { flex: none; margin-left: -6px; }
+.composer-bar .attach + .chip { margin-left: -4px; }
+/* A touch screen has no keyboard to hint at (↩, esc, ⌘N). */
+@media (hover: none) and (pointer: coarse) {
+  kbd { display: none; }
 }

@@ -5,7 +5,7 @@
 // works and folds into one line when the turn ends. A tool row opens on click to show the
 // call: arguments, result, duration, approval, and what it added to the model's context.
 
-import { h, icon, clear, clip, secs, tokens, esc } from "./dom.js";
+import { h, icon, clear, clip, secs, tokens, esc, touch } from "./dom.js";
 import { markdown } from "./md.js";
 import { renderReport } from "./report.js";
 import { registry } from "./ext.js";
@@ -230,7 +230,7 @@ class TurnView {
       this.agent.append(this.workEl);
       this.timer = setInterval(() => {
         const s = Math.floor((performance.now() - this.started) / 1000);
-        this.workEl.querySelector(".elapsed").textContent = s >= 1 ? `${s}s · esc to stop` : "";
+        this.workEl.querySelector(".elapsed").textContent = s >= 1 ? (touch() ? `${s}s` : `${s}s · esc to stop`) : "";
       }, 500);
     }
     this.workEl.querySelector(".shimmer").textContent = label;

@@ -67,10 +67,10 @@ are.** Advanced controls stay, behind simple primitives (progressive disclosure)
 | 2 | **Claude Code and Codex first-class** (done in v0.9.0, 2026-10-04): a running CLI per vendor session, streamed answers, cancel that drops the vendor session, usage limits that say when they reset (ADR 0012); subscription usage as `ark_model::subscription_usage` and the window method `subscription_usage`; agents follow the session's model (ADR 0014). A longer live task passed on `claude:sonnet`, `claude:haiku` and `codex:default` (`bench/RESULTS.md`). Later, not in this step: start the CLI before the first call, deeper provider telemetry | no process per call; output streams; cancel stops the work; failures say what to do; a long task feels as good as the vendor CLI |
 | 3 | **ARK Desktop public**: signed and notarized release, aiark.dev live, a real download flow, onboarding that asks almost nothing | a non-expert passes the product test above on a clean machine |
 | 4 | **Prove the advantage** on hosted models and real workflows: the hosted-model runs and P3 (ARK against the naive loop). Metrics: task success, tokens, cost, latency, retries, context growth. Time-boxed: enough evidence to state the thesis, not an open milestone | headline numbers in `bench/RESULTS.md`, reproducible, usable on aiark.dev |
-| 5 | **Persistent, headless ARK**: runs without a window. Several sessions, persistence, real auth, saved approval and policy rules, background execution, scheduled tasks. A runtime primitive, not Desktop infrastructure. On `main`, unreleased: a runtime clients connect to with saved access tokens (ADR 0016, [`docs/REMOTE.md`](docs/REMOTE.md)); several live chats, orchestrators that outlive chats, and schedules (ADR 0017; a scheduled run ran live with no window). Saved approval rules are C3's grants per project. The terminal is a client too: `app --connect URL` (ADR 0024). A schedule's runs post their results into the chat that asked (ADR 0025). W1 to W3 below are on `main` (ADR 0037): questions kept on tasks, a restart continues work, each agent's step in the graph. Left: sign-in and the signed-in browser on a remote runtime, notifications when a background question waits (the client's) | Desktop and the CLI connect to a running ARK as clients; a scheduled task runs with no window open |
+| 5 | **Persistent, headless ARK**: runs without a window. Several sessions, persistence, real auth, saved approval and policy rules, background execution, scheduled tasks. A runtime primitive, not Desktop infrastructure. On `main`, unreleased: a runtime clients connect to with saved access tokens (ADR 0016, [`docs/REMOTE.md`](docs/REMOTE.md)); several live chats, orchestrators that outlive chats, and schedules (ADR 0017; a scheduled run ran live with no window). Saved approval rules are C3's grants per project. The terminal is a client too: `app --connect URL` (ADR 0024). A schedule's runs post their results into the chat that asked (ADR 0025). W1 to W3 below are on `main` (ADR 0037): questions kept on tasks, a restart continues work, each agent's step in the graph. Left: sign-in and the signed-in browser on a remote runtime, notifications when a background question waits (the client's; to a phone in ADR 0043 step 3) | Desktop and the CLI connect to a running ARK as clients; a scheduled task runs with no window open |
 | 6 | **ARK Cloud**: managed ARK on the same runtime, not a second one. Cloud adds hosted execution, auth, persistence, remote capabilities (MCP, connectors), scheduling, observability, billing. Plan and phases: `../ark-cloud/docs/CLOUD.md`. A cloud project is the app's binary in one machine per workspace; ARK models are an OpenAI-compatible gateway in ark-cloud; money stays out of the runtime. Started: ARK Accounts (ADR 0026), the optional `ark-account` client and the account service in `ark-cloud`; ARK Desktop signs in from Settings › Account. What ARK itself needs: named OpenAI-compatible endpoints (A1, done, ADR 0027), an out-of-credit error front-ends act on (A2, done, ADR 0027), a file-backed `Secrets` for servers (A3, done, ADR 0028), the window opening a runtime elsewhere and coming back (A6, done, ADR 0029), Run code on Linux (A4, done with bubblewrap, ADR 0032; needs a run on a Linux machine) | Cloud runs the step 5 runtime unchanged; ARK still self-hosts with no cloud dependency |
 
-Throughout: ARK is a runtime for work; coding is one workload (ADR 0036). One runtime, many clients. Desktop, CLI, Cloud and domain products use the same
+Throughout: ARK is where agents work together: the control plane and runtime for agent work, with ARK's own agent first and other agents as workers (ADR 0043); coding is one workload (ADR 0036). One runtime, many clients. Desktop, CLI, Cloud and domain products use the same
 ARK capabilities; prefer a reusable primitive in the right layer over a feature-specific
 implementation.
 
@@ -197,7 +197,7 @@ output, blocks and an agents API. Sources and detail: ADR 0039 › Context.
 | Coding tools | OMP: LSP, DAP, AST and hashline edits, git, per-model edit formats | none, on purpose | not ARK's to build: comes with a worker |
 | Agent harness as a worker | Tern runs any agent in a pane, omp natively. OMP speaks ACP | vendor CLIs are models only; every task runs in ARK's `Harness` | gap, structural (below) |
 
-Agent harnesses as workers (ADR 0039, Accepted; not built until a concrete external-worker use case validates the seam). ARK's task boundary already fits a worker: a
+Agent harnesses as workers (ADR 0039, Accepted; started by ADR 0043: the ACP spike first, then H1 to H3). ARK's task boundary already fits a worker: a
 brief in (ADR 0005), an answer and outputs out, `HarnessEvent`s in between. Five gaps block it.
 None is a new work type:
 
@@ -209,7 +209,7 @@ None is a new work type:
 | H4 | Outputs, versions before and "never repeat a change" come from ARK's invocation log; a worker's own writes are invisible | writes through ARK where the agent allows; else a folder checkpoint per task (the deferred copy per task) |
 | H5 | ADR 0004 says vendor sessions are disposable; a worker's transcript is its own | canonical at the task boundary; the worker's session is a cache (`session/load` when it exists) |
 
-First slice, when triggered: one ACP worker (OMP natively; Claude Code and Codex through their
+First slice (ADR 0043 step 2, after the spike): one ACP worker (OMP natively; Claude Code and Codex through their
 adapters), H1 to H3, file writes through ARK, measured against ARK's own agent on two
 workloads. Direct bridges (Claude Code `stream-json` with tools on, Codex `app-server` with
 approvals) only where ACP measurably falls short. H4 is not solved until a test records how
@@ -225,6 +225,49 @@ the terminal prints as text. Start from ACP's own `plan` and `diff` content and 
 not build a parallel UI system. Trigger: the first worker or MCP tool whose progress shows only
 as text.
 
+#### Reviewed against One and herdr (2026-10-07): attention, workers, where work runs (ADR 0043)
+
+herdr (herdr.dev, Apache-2.0, one founder, YC F26) keeps coding agents in persistent terminal
+panes across machines and guesses each one's state from its screen. One (getone.one, Mac,
+closed) puts an inbox, a toolbar of agent states, a voice router and an iPhone app on top of
+herdr. Checked 2026-10-07:
+
+| Signal | Value | Weight |
+|---|---|---|
+| herdr stars | 42.7k since 2026-03-27; steady growth, one HN front page (July), no one-day jump | real (stargazer sample not possible) |
+| herdr Homebrew installs | about 16k a month (formulae.brew.sh) | the hardest to fake |
+| herdr issues | about 600 a month from about 90 authors | real use |
+| herdr "1.29M installs", "$6M seed" | release downloads (every update counts again); the seed only on herdr's blog | soft |
+| One | domain from 2026-08; Pro $12.99 a month, a lifetime ladder; no public reception found | no traction yet |
+
+What users value: which agent needs them, jumping to it, sessions that survive a disconnect,
+10+ agents at once. What they complain about: wrong states from screen rules, lag with several
+remote machines, the phone, Windows, and "this will fold into Claude Code and Codex". The
+vendors are taking the single-vendor part: Claude Code's `claude agents` (local, Claude only,
+lost on shutdown) and Remote Control (phone), the Codex app. Nobody has shown people pay for
+supervision alone (ARK's business note: `../BUSINESS`).
+
+| Area | One / herdr | ARK | Verdict |
+|---|---|---|---|
+| Agent state | guessed from the screen | records: task state, kept question, each agent's step (ADR 0037) | ahead; keep it a record |
+| What needs me | One's inbox, keys to answer, 2 s undo | questions per task, answered from any client; no single list | gap: one attention list (step 1) |
+| Away from the computer | One's iPhone app and relay; herdr has none | the page works on a phone; no notification reaches it | gap: notifications (step 3) |
+| Other agents | any agent in a pane | vendor CLIs as models only | gap: workers by protocol (ADR 0039; steps 0, 2) |
+| Machines | herdr over SSH; One's connector (Node, systemd with limits, E2E, pairing by QR) | a runtime anywhere with tokens (ADR 0016, 0040); no install or pairing for a person's server | gap: My machine as a location (step 3) |
+
+The order (ADR 0043). Each step starts when the one before holds:
+
+| # | Step | Done means |
+|---|---|---|
+| 0 | ACP spike: an ARK task on Claude Code and on Codex through their ACP adapters | permission asked, kept as a question, answered by ARK, worker continues, result and written file back; a restart with a question open recorded per agent |
+| 1 | Attention in one runtime: questions, failures and handed-off results, any workload, one list in `ark-interact`, a cleared mark per item | the same list in both front-ends; one key answers or opens; cleared survives a restart |
+| 2 | One ACP worker, H1 to H3, shaped by step 0 | its permission request is an item like any other; measured against ARK's agent on two workloads |
+| 3 | Reach: Web Push from the runtime's page; My machine as a location (install with a service and limits, pairing with `token link`) | a VPS paired in one command; its question reaches the phone, is answered there, the task continues |
+| 4 | Attention across runtimes | when a person has more than one runtime: one list, each item answered on its own runtime |
+
+Not taken: a floating toolbar, a voice router, terminal panes, typing into terminals, ARK's own
+model calls on a person's vendor subscription, a paid tier for attention.
+
 Can wait, each until its trigger:
 
 | Item | Trigger |
@@ -233,12 +276,13 @@ Can wait, each until its trigger:
 | A done-check on a work item (acceptance criteria the runtime verifies) | the board workload on a hosted model shows items marked done that are not |
 | Teams from the chat (`agents.create` with `delegates_to`), inputs and `after` on the chat's `agents.delegate` | the same workload shows the chat needs them |
 | Remote MCP servers with sign-in on ARK's connections | after Desktop is public, before ARK builds more services itself: the scalable way to business apps. OMP, Claude Code and Codex all have it: the floor for capabilities |
-| Agent harnesses as workers (Claude Code, Codex, OMP, any ACP agent): H1 to H3, then H4 (ADR 0039) | a person asks to run work on a vendor agent with its own tools, or a coding consumer on ARK needs it; today vendor CLIs are ARK models (ADR 0012) |
-| The protocol in its own crate, out of `ark-ui`, with a version in `hello`, a published schema and a client outside Rust (OMP and Tern both publish theirs) | the first client not served by the runtime it talks to (a Cloud web app, a phone app) |
-| A phone app | after a phone browser on a remote or Cloud runtime falls short (the page has a narrow layout) |
+| The protocol in its own crate, out of `ark-ui`, with a version in `hello`, a published schema and a client outside Rust (OMP and Tern both publish theirs) | the first client not served by the runtime it talks to (a Cloud web app, a phone app, or attention across runtimes, ADR 0043 step 4) |
+| A phone app | after the phone's browser with notifications (ADR 0043 step 3) falls short on a remote or Cloud runtime |
 | `present` lists the views the host has instead of naming them in `ark-runtime` (today only the window offers `present`, and every window has a Terminal panel) | a host that offers `present` without a terminal or browser |
 
 Kept out: git worktrees, branches, pull requests and terminal multiplexing as runtime concepts.
+Watching or controlling agents ARK did not start (screen scraping, other tools' session files,
+typing into terminals), ADR 0043.
 They belong to a coding app built on ARK. Also kept out after the Tern and OMP review: LSP, debugger,
 AST and hash-anchored edit tools, per-model edit formats (a worker brings them); a terminal
 emulator, an in-band pty UI protocol, a plugin language in the runtime (Adapters, MCP and skills

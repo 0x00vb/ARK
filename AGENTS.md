@@ -63,7 +63,7 @@ runtime       ark-core .. ark-orchestrate: loop, context, tools, several agents 
 ## Lifecycle
 
 ```text
-Understand -> Change -> Test -> Benchmark (when relevant) -> Dogfood -> Docs/roadmap -> Commit -> Release (when appropriate)
+Understand -> Change -> Test -> Benchmark (when relevant) -> Dogfood -> Docs/roadmap -> Commit -> Release (when appropriate) -> Clean up
 ```
 
 | Step | Done means |
@@ -76,6 +76,7 @@ Understand -> Change -> Test -> Benchmark (when relevant) -> Dogfood -> Docs/roa
 | Docs/roadmap | `CHANGELOG.md` `[Unreleased]` for any user- or developer-visible change; the matching doc in `docs/`; `ROADMAP.md` if a limit, priority or state changed; an ADR in `docs/adr/` for a decision a later change could undo; `CURRENT_STATE.md` |
 | Commit | one logical change, message `area: what changed` in plain words |
 | Release | only when asked or when a fix must reach consumers; follow [`docs/RELEASING.md`](docs/RELEASING.md) exactly |
+| Clean up | at the end of the session, `cargo clean` in this tree unless another session builds in it; a merged worktree is cleaned, then removed (`../AGENTS.md`, section 7) |
 
 ## Releases and consumers
 

@@ -8,6 +8,9 @@
 //! cd crates/ark-ui/tests/web && npm ci && npx playwright-core install webkit
 //! ARK_UI_PAGE_TESTS=1 cargo test -p ark-ui --test page
 //! ```
+//!
+//! `ARK_UI_BROWSER=chromium` (after `npx playwright-core install chromium`) runs them in
+//! Chromium, the engine behind WebView2 on Windows.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -378,6 +381,11 @@ async fn an_interrupted_turn_shows_what_it_did_and_continues_on_one_click() {
         Duration::ZERO,
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn on_windows_shortcuts_read_and_work_with_ctrl() {
+    drive("windows", vec![], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

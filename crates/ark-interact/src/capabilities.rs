@@ -307,22 +307,10 @@ pub async fn disconnect(conns: Option<&Connections>, which: &str) -> anyhow::Res
     Ok(conns.disconnect(which).await?)
 }
 
-/// Open a page in the person's browser, on the machine ARK runs on. Best effort.
+/// Open a page in the person's browser, on the machine ARK runs on. Best effort. The link
+/// goes to the system whole (`ark_os::open`): an OAuth link keeps every `&`.
 pub fn open_in_browser(url: &str) -> bool {
-    let mut cmd = if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
-    } else if cfg!(windows) {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", ""]);
-        c
-    } else {
-        std::process::Command::new("xdg-open")
-    };
-    cmd.arg(url)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    ark_os::open::open(url).is_ok()
 }
 
 /// The list as a report: ✓ ready, ○ one sign-in away (with a Connect action), ! unavailable.

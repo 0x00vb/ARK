@@ -3,47 +3,20 @@
 //! reproducible.
 
 use crate::AdapterError;
+use ark_os::process::Tree;
 use tokio::process::Command;
 
-/// A spawned tool in its own process group. Dropping the guard while the tool runs (a
-/// cancelled turn drops the call's future) kills the whole group, so a shell's children die
-/// with it: `kill_on_drop` alone stops `sh -c "sleep 30"` but leaves the `sleep` running.
-struct Group(Option<u32>);
-
-impl Group {
-    fn of(child: &tokio::process::Child) -> Self {
-        Group(child.id())
-    }
-    fn kill(&mut self) {
-        #[cfg(unix)]
-        if let Some(pid) = self.0.take() {
-            // SAFETY: killpg only sends a signal; the group id is the child's own pid.
-            unsafe {
-                libc::killpg(pid as libc::pid_t, libc::SIGKILL);
-            }
-        }
-    }
-    /// The tool finished on its own; leave anything it started deliberately alone.
-    fn disarm(&mut self) {
-        self.0 = None;
-    }
-}
-
-impl Drop for Group {
-    fn drop(&mut self) {
-        self.kill();
-    }
-}
-
+/// A tool started the way ARK starts every program (`ark_os::process::command`): in its own
+/// group, so a cancelled call (its future dropped) or a timeout stops the tool together with
+/// what it started (`ark_os::process::Tree`). `kill_on_drop` alone stops `sh -c "sleep 30"` but
+/// leaves the `sleep` running.
 fn tool_command(resolved: &std::path::Path, args: &[String]) -> Command {
-    let mut c = Command::new(resolved);
+    let mut c = ark_os::process::command(resolved);
     c.args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
-    #[cfg(unix)]
-    c.process_group(0);
     c
 }
 
@@ -60,15 +33,10 @@ pub fn tool_exists(tool: &str) -> bool {
     which(tool).is_some()
 }
 
-/// Resolve a tool to an absolute path via the same lookup a shell would use.
+/// Resolve a tool to an absolute path the way a shell would (`PATHEXT` on Windows), also
+/// where installers put programs a GUI app's short `PATH` misses (`ark_os::find::program`).
 pub fn which(tool: &str) -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    // Fall back to common Homebrew/Apple locations even if PATH is minimal (GUI apps).
-    let extra = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
-    std::env::split_paths(&path)
-        .chain(extra.iter().map(std::path::PathBuf::from))
-        .map(|dir| dir.join(tool))
-        .find(|p| p.is_file())
+    ark_os::find::program(tool)
 }
 
 /// Run `tool` with `args`, capturing everything. Does not treat a non-zero exit
@@ -89,7 +57,7 @@ pub async fn run(tool: &str, args: &[String]) -> Result<Run, AdapterError> {
                 tool: tool.to_string(),
                 detail: e.to_string(),
             })?;
-    let mut group = Group::of(&child);
+    let mut group = Tree::of(child.id());
     let out = child
         .wait_with_output()
         .await
@@ -135,7 +103,7 @@ pub struct Spec {
     pub cwd: Option<std::path::PathBuf>,
     /// Start from an empty environment with only these variables (`None`: inherit).
     pub env: Option<Vec<(String, String)>>,
-    /// Kill the process group after this long; the run ends with code 124.
+    /// Stop the program and what it started after this long; the run ends with code 124.
     pub timeout: Option<std::time::Duration>,
     /// Keep only the last this-many bytes of each stream (`None`: all of it).
     pub keep: Option<usize>,
@@ -155,8 +123,8 @@ impl Spec {
 }
 
 /// Run a [`Spec`]. Both streams are read while the process runs, so a chatty process never
-/// blocks on a full pipe. A cancelled call (the future dropped) or a timeout kills the whole
-/// process group. A non-zero exit is not an error.
+/// blocks on a full pipe. A cancelled call (the future dropped) or a timeout stops the program
+/// and everything it started. A non-zero exit is not an error.
 pub async fn run_spec(spec: &Spec) -> Result<Run, AdapterError> {
     let mut command = vec![spec.program.display().to_string()];
     command.extend(spec.args.iter().cloned());
@@ -171,7 +139,7 @@ pub async fn run_spec(spec: &Spec) -> Result<Run, AdapterError> {
         tool: command[0].clone(),
         detail: e.to_string(),
     })?;
-    let mut group = Group::of(&child);
+    let mut group = Tree::of(child.id());
     let out = tokio::spawn(drain(child.stdout.take(), spec.keep));
     let err = tokio::spawn(drain(child.stderr.take(), spec.keep));
 
@@ -292,8 +260,7 @@ mod rt_tests {
             .parse()
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        // SAFETY: signal 0 only checks whether the process exists.
-        let alive = unsafe { libc::kill(pid, 0) } == 0;
+        let alive = ark_os::process::alive(pid as u32);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             !alive,

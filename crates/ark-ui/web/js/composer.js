@@ -6,6 +6,7 @@
 import { h, icon, clear, clip, touch, $ } from "./dom.js";
 import { registry } from "./ext.js";
 import { chooseFiles } from "./drop.js";
+import { label } from "./keys.js";
 
 export class Composer {
   constructor(api) {
@@ -67,7 +68,7 @@ export class Composer {
     this.running = on;
     this.form.dataset.running = String(on);
     this.send.setAttribute("aria-label", on ? "Stop" : "Send");
-    this.input.placeholder = on ? (touch() ? "Queue a message" : "Queue a message · ⌘↩ sends it now") : this.placeholder || "Ask anything";
+    this.input.placeholder = on ? (touch() ? "Queue a message" : label("Queue a message · ⌘↩ sends it now")) : this.placeholder || "Ask anything";
   }
 
   /// Name the model on its button: the app's words when it draws the picker. With nothing

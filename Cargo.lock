@@ -216,6 +216,7 @@ name = "ark-browser"
 version = "0.13.0"
 dependencies = [
  "ark-core",
+ "ark-os",
  "ark-runtime",
  "ark-tools",
  "async-trait",
@@ -269,6 +270,7 @@ version = "0.13.0"
 dependencies = [
  "ark-core",
  "ark-model",
+ "ark-os",
  "ark-runtime",
  "ark-tools",
  "async-trait",
@@ -320,6 +322,7 @@ name = "ark-files"
 version = "0.13.0"
 dependencies = [
  "ark-core",
+ "ark-os",
  "ark-tools",
  "async-trait",
  "blake3",
@@ -338,6 +341,7 @@ version = "0.13.0"
 dependencies = [
  "anyhow",
  "ark-orchestrate",
+ "ark-os",
  "ark-sdk",
  "async-trait",
  "futures",
@@ -355,6 +359,7 @@ dependencies = [
 name = "ark-model"
 version = "0.13.0"
 dependencies = [
+ "ark-os",
  "async-trait",
  "futures",
  "reqwest 0.12.28",
@@ -373,6 +378,7 @@ dependencies = [
  "ark-acp",
  "ark-core",
  "ark-model",
+ "ark-os",
  "ark-runtime",
  "ark-sdk",
  "ark-store",
@@ -380,7 +386,6 @@ dependencies = [
  "async-trait",
  "blake3",
  "futures",
- "libc",
  "serde",
  "serde_json",
  "tempfile",
@@ -389,6 +394,18 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "ark-os"
+version = "0.13.0"
+dependencies = [
+ "dirs",
+ "dunce",
+ "libc",
+ "tempfile",
+ "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -414,6 +431,7 @@ version = "0.13.0"
 dependencies = [
  "ark-core",
  "ark-model",
+ "ark-os",
  "ark-store",
  "ark-tools",
  "async-trait",
@@ -440,6 +458,7 @@ dependencies = [
  "ark-exec",
  "ark-files",
  "ark-model",
+ "ark-os",
  "ark-proc",
  "ark-runtime",
  "ark-tools",
@@ -457,6 +476,7 @@ name = "ark-store"
 version = "0.13.0"
 dependencies = [
  "ark-core",
+ "ark-os",
  "rusqlite",
  "serde",
  "serde_json",
@@ -472,8 +492,8 @@ name = "ark-tools"
 version = "0.13.0"
 dependencies = [
  "ark-core",
+ "ark-os",
  "async-trait",
- "libc",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -487,6 +507,7 @@ version = "0.13.0"
 dependencies = [
  "anyhow",
  "ark-interact",
+ "ark-os",
  "ark-sdk",
  "async-trait",
  "base64 0.22.1",
@@ -499,6 +520,7 @@ dependencies = [
  "tauri",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
+ "tauri-plugin-single-instance",
  "tempfile",
  "tokio",
  "tracing",
@@ -5578,6 +5600,22 @@ dependencies = [
  "thiserror 2.0.21",
  "time",
  "url",
+]
+
+[[package]]
+name = "tauri-plugin-single-instance"
+version = "2.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee2c8fe2d6b75caed0153f91eda30ea1dea3bfb6710d5adb80456d2c035a569d"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "windows-sys 0.61.2",
+ "zbus",
 ]
 
 [[package]]

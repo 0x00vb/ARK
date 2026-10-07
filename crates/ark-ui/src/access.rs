@@ -398,12 +398,8 @@ impl Tokens {
         }
         let tmp = self.path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(file)?)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
-        }
-        std::fs::rename(&tmp, &self.path)?;
+        ark_os::fs::owner_only(&tmp)?;
+        ark_os::fs::replace(&tmp, &self.path)?;
         Ok(())
     }
 }

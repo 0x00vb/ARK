@@ -10,6 +10,7 @@
 import { h, icon, clear } from "./dom.js";
 import { KIND_ICON } from "./file.js";
 import { processes, watchProcesses } from "./processes.js";
+import { mod } from "./keys.js";
 
 /// What the agent may put at the prompt: one line, no control characters, so it cannot run
 /// a command itself (that would skip approval). The person presses Enter.
@@ -460,7 +461,7 @@ function size(n) {
 /// The built-in panels with their keys, in + menu order. `key` matches a keydown.
 export const BUILTINS = [
   { id: "terminal", title: "Terminal", icon: "terminal", presents: ["terminal"], wide: true, fill: true, keys: "⌃`", key: (e) => e.ctrlKey && !e.metaKey && e.key === "`", render: terminal },
-  { id: "browser", title: "Browser", icon: "globe", presents: ["browser"], wide: true, fill: true, keys: "⌘T", key: (e) => e.metaKey && !e.shiftKey && e.key.toLowerCase() === "t", render: browser },
+  { id: "browser", title: "Browser", icon: "globe", presents: ["browser"], wide: true, fill: true, keys: "⌘T", key: (e) => mod(e) && !e.shiftKey && e.key.toLowerCase() === "t", render: browser },
   { id: "files", title: "Files", icon: "folder", presents: ["file", "folder"], wide: true, fill: true, keys: "⌘P", key: (e) => (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "p", render: files },
 ];
 

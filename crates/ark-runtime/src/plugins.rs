@@ -325,7 +325,7 @@ impl Plugins {
         let text = serde_json::to_string_pretty(&Value::Object(doc))?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, text + "\n")?;
-        std::fs::rename(&tmp, &path)?;
+        ark_os::fs::replace(&tmp, &path)?;
         Ok(())
     }
 }

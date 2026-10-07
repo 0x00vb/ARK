@@ -44,7 +44,7 @@ pub struct Python {
 
 impl Python {
     /// The environment lives in `home` (made when needed). `uv` is looked up on PATH and in
-    /// its usual install folders.
+    /// its usual install folders (`~/.local/bin`, `~/.cargo/bin`).
     pub fn new(home: impl Into<PathBuf>) -> Self {
         let exe = format!("uv{}", std::env::consts::EXE_SUFFIX);
         let uv = subprocess::which(&exe).or_else(|| {

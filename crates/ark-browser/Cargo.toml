@@ -8,6 +8,7 @@ description = "ARK's Browser capability: drives an installed Chromium-family bro
 
 [dependencies]
 ark-core.workspace = true
+ark-os.workspace = true
 ark-tools.workspace = true
 ark-runtime.workspace = true
 serde.workspace = true

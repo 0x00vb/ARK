@@ -3,6 +3,7 @@
 // Files, then the app's) in the side pane.
 
 import { h, icon, clear, $ } from "./dom.js";
+import { label as keyLabel } from "./keys.js";
 import { registry } from "./ext.js";
 
 export class Topbar {
@@ -42,7 +43,7 @@ export class Topbar {
       const label = p.nav === true ? p.title : p.nav;
       return h("button.menu-item.open-item", { type: "button", role: "menuitem", "data-panel": p.id, onclick: () => { pop.close(); this.api.openPanel(p.id); } },
         h("span.open-label", icon(p.icon || "box"), label),
-        p.keys ? h("kbd.menu-key", p.keys) : null);
+        p.keys ? h("kbd.menu-key", keyLabel(p.keys)) : null);
     }), { end: true });
     const items = [...pop.querySelectorAll("button")];
     pop.addEventListener("keydown", (e) => {

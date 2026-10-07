@@ -187,7 +187,8 @@ impl Store {
             let written = std::fs::File::create(&tmp).and_then(|mut f| {
                 f.write_all(bytes)?;
                 f.sync_all()?;
-                std::fs::rename(&tmp, &path)
+                // Replaces an object of the wrong size too, also on Windows.
+                ark_os::fs::replace(&tmp, &path)
             });
             if let Err(e) = written {
                 let _ = std::fs::remove_file(&tmp);

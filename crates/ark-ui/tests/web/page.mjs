@@ -1,11 +1,12 @@
 // Drives the real ark-ui page in WebKit (the engine behind the macOS desktop window) against a
-// host that `tests/page.rs` starts with a scripted mock model.
+// host that `tests/page.rs` starts with a scripted mock model. `ARK_UI_BROWSER=chromium` uses
+// Chromium instead, the engine behind WebView2 on Windows.
 //
 //   node page.mjs <scenario> <url>
 //
 // Each scenario guards a rendering bug found while dogfooding. Exit code 0 means it held.
 
-import { webkit } from "playwright-core";
+import { chromium, webkit } from "playwright-core";
 import assert from "node:assert/strict";
 
 const [scenario, url] = process.argv.slice(2);
@@ -1057,6 +1058,19 @@ async function skills(page) {
 }
 scenarios.skills = skills;
 
+// On Windows the same page reads the Windows way: Ctrl in every shortcut label, and Ctrl (not
+// the Windows key) runs them. The system is the one the browser reports.
+async function windows(page) {
+  await page.locator("#input").waitFor();
+  assert.equal(await page.locator("#app").getAttribute("data-os"), "windows");
+  assert.equal((await page.locator("kbd").first().innerText()).trim(), "Ctrl+N");
+  assert.match(await page.locator("#toggle-sidebar").getAttribute("title"), /\(Ctrl\+B\)/);
+  assert.equal(await page.locator("body").evaluate((b) => b.innerHTML.includes("⌘")), false, "no ⌘ left");
+  await page.keyboard.press("Control+k");
+  await page.locator(".palette-input").waitFor();
+}
+scenarios.windows = windows;
+
 const NARRATION = "Reading the notes slowly, one line at a time, so that a window can reload in between. ".repeat(3).trim();
 
 // Scripts that run before the page, for scenarios that replace a browser API.
@@ -1065,14 +1079,21 @@ const inits = {
   visit: () => {
     window.__TAURI__ = {};
   },
+  // The browser says it runs on Windows.
+  windows: () => {
+    Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+    Object.defineProperty(navigator, "userAgentData", { get: () => ({ platform: "Windows" }) });
+  },
   // An EventSource that always fails, and timers that fire at once (recording how long the
   // page asked to wait) so ten backoffs take milliseconds.
   backoff: () => {
     window.__es = { opened: 0, delays: [] };
     const realTimeout = window.setTimeout.bind(window);
-    window.setTimeout = (fn, ms, ...a) => {
-      // Only the transport's reconnect waits are compressed and recorded.
-      const caller = (new Error().stack || "").split("\n")[1] || "";
+    window.setTimeout = function arkTestTimeout(fn, ms, ...a) {
+      // Only the transport's reconnect waits are compressed and recorded. The caller is the
+      // frame after this one (V8 starts its stack with an "Error" line, WebKit does not).
+      const frames = (new Error().stack || "").split("\n");
+      const caller = frames[frames.findIndex((f) => f.includes("arkTestTimeout")) + 1] || "";
       if (ms >= 500 && caller.includes("transport.js")) {
         window.__es.delays.push(ms);
         return realTimeout(fn, 1, ...a);
@@ -1342,7 +1363,8 @@ if (!run) {
   console.error(`unknown scenario ${scenario}`);
   process.exit(2);
 }
-const browser = await webkit.launch();
+const engine = process.env.ARK_UI_BROWSER === "chromium" ? chromium : webkit;
+const browser = await engine.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   const errors = [];

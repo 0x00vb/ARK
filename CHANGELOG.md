@@ -32,6 +32,22 @@ What changed for people building on ARK, per release. Not a commit log.
   `tools: Vec::new()` or `..Default::default()`.
 
 ### Added
+- `ark-os` (ADR 0022): what differs between operating systems, behind one API. Folders
+  (`dirs::home`, `app_home`, `documents`), finding programs with `PATHEXT` and installers'
+  folders (`find::program`, `find::app`), starting any program in its own group with no
+  console window and stopping it with everything it started (`process::command`, `Tree`),
+  opening links and files without a shell (`open::open`), `fs::replace` and `write_atomic`
+  that retry while another program holds the file, `fs::name_problem`, `time::local_offset`,
+  `shell::interactive`. Re-exported as `ark_sdk::prelude::ark_os`.
+- The page tests run in Chromium too (`ARK_UI_BROWSER=chromium`), the engine of Windows' WebView2.
+- The window reads the local way: Ctrl in shortcuts and their labels on Windows and Linux
+  (`web/js/keys.js`, `data-os` on the app); the room for the Mac window buttons only on
+  macOS. In the desktop window, no reload or print keys and no browser menu except on text.
+- The desktop window: a second launch brings the open window forward (one runtime per store),
+  and a window larger than the screen is fitted to it and centered.
+- `ark_os::process::login_path` (a windowed app gets the terminal's `PATH` on macOS and Linux)
+  and `attach_console` (on Windows, a windowed app started from a terminal prints there).
+- `ark_connect::secrets::Keychain::lasting()`: whether saved secrets outlive a restart here.
 - An agent never loses its task (ADR 0050). The first message of a turn (the task, the goal it
   continues, the carry-over) is pinned in the working set and never dropped; dropped steps leave
   a ledger, one line per call (action, file or query, result, `inv:`) and the model's last note.
@@ -103,6 +119,17 @@ What changed for people building on ARK, per release. Not a commit log.
   row.
 
 ### Fixed
+- Windows: Claude Code, Codex, `npx` and tools are found (`PATHEXT`, npm's `.cmd`
+  launchers run their target directly, not through `cmd.exe`); a cancelled call stops what it
+  started; Connect's sign-in link opens whole; schedules run at local time; a live process
+  counts as alive; data folders no longer depend on `HOME`.
+- Every program ARK starts (vendor CLIs, MCP servers, the browser) runs in its own process
+  group, so a cancelled call or a closed browser stops its children too, on macOS as well.
+- Files ARK creates must have a name every system accepts (no `:`, `?`, `CON`, ...).
+- A fresh browser starts in a new profile folder each time.
+- Text files keep how they are stored when the agent or the person edits them: CRLF lines stay
+  CRLF, UTF-16 stays UTF-16 (and now reads as text). Skills saved with CRLF read cleanly.
+- Paths ARK shows or compares no longer carry Windows' `\\?\` prefix.
 - An agent on Codex no longer forgets its task part of the way through: the task left the
   working set after two file reads, and a vendor session that rotated started without it. A
   follow-up "continue" no longer becomes the goal (ADR 0050).

@@ -70,8 +70,7 @@ impl Terminals {
             pixel_width: 0,
             pixel_height: 0,
         })?;
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-        let mut cmd = CommandBuilder::new(shell);
+        let mut cmd = CommandBuilder::new(ark_os::shell::interactive());
         cmd.cwd(&cwd);
         cmd.env("TERM", "xterm-256color");
         let mut child = pair.slave.spawn_command(cmd)?;

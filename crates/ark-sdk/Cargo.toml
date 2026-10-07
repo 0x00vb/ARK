@@ -9,6 +9,7 @@ description = "ARK SDK: the small, stable facade for building an agent: one buil
 [dependencies]
 serde.workspace = true
 ark-core.workspace = true
+ark-os.workspace = true
 ark-model.workspace = true
 ark-tools.workspace = true
 ark-files.workspace = true

@@ -405,7 +405,11 @@ impl Engine {
             .store
             .get_project(project)?
             .ok_or_else(|| AgentError::ProjectNotFound(project.to_string()))?;
-        p.workspace = Some(dir.canonicalize()?.to_string_lossy().into_owned());
+        p.workspace = Some(
+            ark_os::dirs::canonicalize(dir)?
+                .to_string_lossy()
+                .into_owned(),
+        );
         self.store.put_project(&p)?;
         Ok(p)
     }

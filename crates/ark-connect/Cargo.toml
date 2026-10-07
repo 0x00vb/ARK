@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "ARK capabilities that need an account: providers, sign-in, accounts, and the service tools they give."
 
 [dependencies]
+ark-os.workspace = true
 ark-core.workspace = true
 ark-tools.workspace = true
 ark-runtime.workspace = true

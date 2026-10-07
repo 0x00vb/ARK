@@ -727,12 +727,8 @@ async fn main() -> std::process::ExitCode {
     ark_sdk::prelude::ark_exec::entry();
     let root = std::env::var_os("WRITER_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join(".writer")
-        });
+        .or_else(|| ark_os::dirs::app_home(".writer", "Writer"))
+        .unwrap_or_else(|| PathBuf::from(".writer"));
     let cli = <Cli as clap::Parser>::parse();
     let tokens = ark_ui::access::Tokens::in_store(&root);
     if let Some(name) = &cli.new_token {

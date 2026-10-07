@@ -136,37 +136,18 @@ impl Cli {
         }
     }
 
-    /// Find the executable. A GUI app on macOS starts with a minimal `PATH`, so the usual
-    /// install places are searched too.
+    /// Find the executable: `PATH`, Claude Code's older own folder (`~/.claude/local`), then
+    /// where installers put programs that a GUI app's short `PATH` misses
+    /// (`ark_os::find::program_in`; npm's `claude.cmd` on Windows).
     pub fn locate(self) -> Option<PathBuf> {
         if let Ok(p) = std::env::var(self.env_override()) {
             let p = PathBuf::from(p);
             return p.is_file().then_some(p);
         }
-        let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
-            .map(|p| std::env::split_paths(&p).collect())
+        let extra = ark_os::dirs::home()
+            .map(|h| vec![h.join(".claude").join("local")])
             .unwrap_or_default();
-        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-            for d in [
-                ".local/bin",
-                ".claude/local",
-                ".npm-global/bin",
-                ".bun/bin",
-                ".volta/bin",
-            ] {
-                dirs.push(home.join(d));
-            }
-            // nvm keeps one bin directory per Node version; newest name last after sorting.
-            if let Ok(rd) = std::fs::read_dir(home.join(".nvm/versions/node")) {
-                let mut v: Vec<PathBuf> = rd.flatten().map(|e| e.path().join("bin")).collect();
-                v.sort();
-                dirs.extend(v.into_iter().rev());
-            }
-        }
-        dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
-        dirs.into_iter()
-            .map(|d| d.join(self.program()))
-            .find(|p| p.is_file())
+        ark_os::find::program_in(self.program(), extra)
     }
 }
 
@@ -704,11 +685,16 @@ impl CliModel {
             let mut child = cmd
                 .spawn()
                 .map_err(|e| self.api(format!("could not start: {e}")))?;
+            // A cancelled or timed-out call stops the CLI with what it started.
+            let mut tree = ark_os::process::Tree::of(child.id());
             if let Some(mut w) = child.stdin.take() {
                 w.write_all(input.as_bytes()).await.map_err(io_err)?;
             }
             match tokio::time::timeout(CALL_TIMEOUT, child.wait_with_output()).await {
-                Ok(r) => r.map_err(io_err),
+                Ok(r) => {
+                    tree.disarm();
+                    r.map_err(io_err)
+                }
                 Err(_) => Err(self.api(format!("no reply within {}s", CALL_TIMEOUT.as_secs()))),
             }
         }
@@ -1183,7 +1169,7 @@ impl CliModel {
         if !valid_session_id(vendor) {
             return Vec::new();
         }
-        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let home = ark_os::dirs::home();
         match self.cli {
             Cli::Claude => {
                 let config = std::env::var_os("CLAUDE_CONFIG_DIR")
@@ -1192,7 +1178,7 @@ impl CliModel {
                 let (Some(config), Ok(dir)) = (config, work_dir()) else {
                     return Vec::new();
                 };
-                let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+                let dir = ark_os::dirs::canonicalize(&dir).unwrap_or(dir);
                 vec![claude_session_file(&config, &dir, vendor)]
             }
             Cli::Codex => {
@@ -1271,10 +1257,11 @@ fn new_session_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// A command with the executable's own directory first on `PATH`: Codex is a Node script,
-/// and `node` usually sits next to it.
+/// A command started the way ARK starts every program (`ark_os::process::command`), with the
+/// executable's own directory first on `PATH`: Codex is a Node script, and `node` usually sits
+/// next to it.
 pub(crate) fn command(bin: &Path) -> tokio::process::Command {
-    let mut c = tokio::process::Command::new(bin);
+    let mut c = ark_os::process::command(bin);
     if let Some(dir) = bin.parent() {
         let mut paths = vec![dir.to_path_buf()];
         if let Some(p) = std::env::var_os("PATH") {
@@ -1652,11 +1639,13 @@ mod tests {
     use super::*;
 
     /// A fake CLI that reads all of stdin, then runs `script`.
+    #[cfg(unix)]
     fn fake(name: &str, script: &str) -> PathBuf {
         fake_raw(name, &format!("cat > /dev/null\n{script}"))
     }
 
     /// A fake CLI that runs `script` as it is.
+    #[cfg(unix)]
     fn fake_raw(name: &str, script: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ark-cli-test-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1685,6 +1674,7 @@ mod tests {
     /// The events Claude Code streams for one structured reply (shapes from a live
     /// `claude -p --output-format stream-json --include-partial-messages` run, trimmed): the
     /// reply in three pieces, then the result.
+    #[cfg(unix)]
     fn stream_reply(structured: Value, result: Value) -> String {
         let text = structured.to_string();
         let cut = text.len() / 3;
@@ -1707,6 +1697,7 @@ mod tests {
     /// A fake `claude` speaking streaming JSON. It logs its arguments once per start and each
     /// line it reads, and answers the n-th line (counted across starts) with `replies[n]`, the
     /// last one again when they run out. Returns the program and its log.
+    #[cfg(unix)]
     fn claude_stream(name: &str, replies: &[String]) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("ark-cli-live-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1744,10 +1735,12 @@ done
         (p, log)
     }
 
+    #[cfg(unix)]
     fn reply(text: &str) -> Value {
         json!({"action":"reply","text":text,"tool_calls":[]})
     }
 
+    #[cfg(unix)]
     fn usage(session: &str, turns: u32, input: u32) -> Value {
         json!({"is_error":false,"num_turns":turns,"session_id":session,"usage":{"input_tokens":input,"output_tokens":2}})
     }
@@ -1799,6 +1792,7 @@ done
         assert!(!parse_status(Cli::Codex, false, "Not logged in\n").0);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn claude_tool_calls_become_ark_calls() {
         let out = stream_reply(
@@ -1821,6 +1815,7 @@ done
     }
 
     // Event lines have the shape of real `codex exec --json` output.
+    #[cfg(unix)]
     #[tokio::test]
     async fn codex_reply_is_text() {
         let script = r#"echo '{"type":"thread.started","thread_id":"t"}'
@@ -1835,6 +1830,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
     }
 
     /// A fake CLI that records its arguments and stdin next to itself, then prints `out`.
+    #[cfg(unix)]
     fn recording(name: &str, out: &str) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("ark-cli-rec-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1859,6 +1855,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
 
     // The flags are the ones a live search was run with (2026-10-03, Claude Code 2.1, Codex
     // 0.153): Claude Code's WebSearch is the one tool it may use; Codex gets `--search`.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_search_turns_on_the_clis_own_web_search_and_nothing_else() {
         let out = r#"echo '{"is_error":false,"structured_output":{"results":[{"title":"Tea","url":"https://tea.example/","snippet":"About tea."},{"title":"Not a page","url":"javascript:x","snippet":""}]},"usage":{"input_tokens":10,"output_tokens":2}}'"#;
@@ -1899,6 +1896,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
         assert!(log.contains("--ephemeral"), "{log}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn claude_sessions_open_with_an_id_and_resume_with_a_delta() {
         let (bin, log) = claude_stream("claude", &[stream_reply(reply("ok"), usage("S1", 2, 10))]);
@@ -1964,6 +1962,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
             .contains("--resume\nS1"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn codex_sessions_report_their_thread_and_resume_it() {
         let out = r#"echo '{"type":"thread.started","thread_id":"T9"}'
@@ -2001,6 +2000,7 @@ echo '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":
     /// A fake `codex app-server`: answers the handshake, starts thread T1, and answers each
     /// turn with `reply` in pieces, after sending one request of its own (to be declined).
     /// It logs its arguments and every line it reads.
+    #[cfg(unix)]
     fn codex_app(name: &str, reply: &str) -> (PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("ark-codex-app-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2049,6 +2049,7 @@ done
         (p, dir.join("log"))
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn codex_sessions_run_on_one_app_server_and_stream() {
         let answer = r#"{"action":"reply","text":"Hello there.","tool_calls":[]}"#;
@@ -2113,6 +2114,7 @@ done
         assert!(log.contains("thread/resume"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_model_that_gave_up_after_refused_native_calls_is_asked_once_more() {
         // The first run tries a native call, is refused and gives up; the next calls the tool.
@@ -2155,6 +2157,7 @@ done
         assert_eq!(c.usage.prompt_tokens, 900);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn claude_text_streams_while_the_reply_is_written() {
         let answer = "Line one.\nLine \"two\".";
@@ -2180,6 +2183,7 @@ done
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_claude_process_that_stops_mid_reply_is_an_error_with_its_last_words() {
         let bin = fake_raw(
@@ -2257,6 +2261,7 @@ done
         assert!(e.to_string().contains("resets in 2 h"), "{e}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn bad_arguments_are_malformed_and_retryable() {
         let out = stream_reply(
@@ -2319,6 +2324,7 @@ done
         );
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn signed_out_error_says_how_to_sign_in() {
         let out =

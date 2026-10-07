@@ -74,6 +74,11 @@ write it, and each sees the other's changes.
 
 ## Keys
 
+Written the Mac way. On Windows and Linux ⌘ is Ctrl, and the page shows them that way ("Ctrl+K")
+(`web/js/keys.js`: `mod(e)` and `label()`; the system is the one the browser reports). In the
+desktop window, reload and print keys do nothing and the browser's menu shows only on text, a
+link or a selection.
+
 | Key | Action |
 |---|---|
 | ↩ | Send. While the agent works: queue for the next turn |
@@ -281,8 +286,9 @@ connect to ([`REMOTE.md`](REMOTE.md), ADR 0016). A token is read from `Authoriza
   `ARK_UI_ASSETS=<dir>` does the same for the app's. Reload the browser to see a change.
 - `ARK_PROVIDER=mock ARK_MOCK_SCRIPT=<file>` gives a scripted model (see `CLI.md`).
 - `cargo test -p ark-ui` runs the protocol tests (`tests/host.rs`) and the neutrality test.
-- The page tests drive the real page in WebKit, the engine behind the macOS window. They
-  need Node and a browser, so they run only when asked:
+- The page tests drive the real page in WebKit, the engine behind the macOS window, and with
+  `ARK_UI_BROWSER=chromium` in Chromium, the engine behind WebView2 on Windows. They need Node
+  and a browser, so they run only when asked:
 
   ```text
   cd crates/ark-ui/tests/web && npm ci && npx playwright-core install webkit

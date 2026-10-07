@@ -18,7 +18,6 @@
 //! capability is not offered: a run that could reach anything is not one a person can allow for
 //! a whole project.
 
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -50,14 +49,6 @@ const SHOW_ERR: usize = 2_000;
 const MAX_LISTED: usize = 50;
 const MAX_FILES: usize = 20;
 const MAX_FILE_BYTES: u64 = 25 * 1024 * 1024;
-/// Entries looked at when finding what a run wrote; a larger project is only partly looked at.
-const MAX_WALK: usize = 20_000;
-/// Folders never looked into for written files: tool and package caches.
-const SKIP: &[&str] = &["node_modules", "target", "__pycache__", "venv", ".venv"];
-/// Files copied before a run, to keep the version before of what it changes (ADR 0034): the
-/// largest one, and all of them together.
-const BEFORE_FILE: u64 = 256 * 1024 * 1024;
-const BEFORE_TOTAL: u64 = 512 * 1024 * 1024;
 
 /// One language or environment programs run in.
 #[async_trait]
@@ -319,160 +310,8 @@ fn io(e: std::io::Error) -> AdapterError {
     AdapterError::Io(e)
 }
 
-/// Files under `root` modified at or after `since`, relative with `/`, newest first. Hidden
-/// folders and package caches are not looked into.
-pub fn written_since(root: &Path, since: SystemTime) -> Vec<(String, u64)> {
-    let mut found: Vec<(String, Seen)> = project_files(root)
-        .into_iter()
-        .filter(|(_, f)| f.modified >= since)
-        .collect();
-    found.sort_by(|a, b| b.1.modified.cmp(&a.1.modified).then(a.0.cmp(&b.0)));
-    found.into_iter().map(|(p, f)| (p, f.len)).collect()
-}
-
-/// A file as a listing saw it.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Seen {
-    len: u64,
-    modified: SystemTime,
-}
-
-/// The files under `root` a run may change, relative with `/`. Hidden folders and package
-/// caches are not looked into; a project past `MAX_WALK` entries is only partly listed.
-fn project_files(root: &Path) -> Vec<(String, Seen)> {
-    let mut found = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    let mut seen = 0usize;
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            seen += 1;
-            if seen > MAX_WALK {
-                break;
-            }
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            let Ok(kind) = entry.file_type() else {
-                continue;
-            };
-            if kind.is_dir() {
-                if !name.starts_with('.') && !SKIP.contains(&name.as_ref()) {
-                    stack.push(entry.path());
-                }
-            } else if kind.is_file() {
-                let Ok(meta) = entry.metadata() else {
-                    continue;
-                };
-                let Ok(modified) = meta.modified() else {
-                    continue;
-                };
-                let rel = entry
-                    .path()
-                    .strip_prefix(root)
-                    .map(|p| {
-                        p.components()
-                            .map(|c| c.as_os_str().to_string_lossy())
-                            .collect::<Vec<_>>()
-                            .join("/")
-                    })
-                    .unwrap_or_default();
-                found.push((
-                    rel,
-                    Seen {
-                        len: meta.len(),
-                        modified,
-                    },
-                ));
-            }
-        }
-    }
-    found
-}
-
-/// The project's files before a run, and a copy of each (ADR 0034). `std::fs::copy` clones a
-/// file where the disk can (APFS, btrfs, XFS), so a copy there costs almost nothing.
-struct Before {
-    files: Vec<(String, Seen)>,
-    copies: PathBuf,
-    copied: HashSet<String>,
-}
-
-/// What a run changed or removed: the versions before it, kept as artifacts.
-struct Kept {
-    versions: Vec<ProducedArtifact>,
-    removed: Vec<String>,
-    /// Files changed or removed whose version before was not copied (too large, or past the
-    /// total).
-    no_copy: Vec<String>,
-}
-
-impl Before {
-    fn take(root: &Path, copies: &Path) -> Before {
-        let files = project_files(root);
-        let mut copied = HashSet::new();
-        let mut total = 0u64;
-        for (rel, f) in &files {
-            if f.len > BEFORE_FILE || total + f.len > BEFORE_TOTAL {
-                continue;
-            }
-            let to = copies.join(rel);
-            let made = to
-                .parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|_| std::fs::copy(root.join(rel), &to));
-            if made.is_ok() {
-                total += f.len;
-                copied.insert(rel.clone());
-            }
-        }
-        Before {
-            files,
-            copies: copies.to_path_buf(),
-            copied,
-        }
-    }
-
-    /// Compare with the project now: each file that changed or is gone keeps its copy.
-    fn changed(&self, root: &Path) -> Kept {
-        let now: HashMap<String, Seen> = project_files(root).into_iter().collect();
-        let mut kept = Kept {
-            versions: Vec::new(),
-            removed: Vec::new(),
-            no_copy: Vec::new(),
-        };
-        for (rel, was) in &self.files {
-            let gone = match now.get(rel) {
-                Some(f) if f == was => continue,
-                Some(_) => false,
-                None => !root.join(rel).exists(),
-            };
-            if gone {
-                kept.removed.push(rel.clone());
-            }
-            let copy = self.copies.join(rel);
-            let bytes = self
-                .copied
-                .contains(rel)
-                .then(|| std::fs::read(&copy).ok())
-                .flatten();
-            match bytes {
-                // Written again with the same bytes: nothing to put back.
-                Some(b) if !gone && std::fs::read(root.join(rel)).is_ok_and(|n| n == b) => {}
-                Some(b) if kept.versions.len() < MAX_LISTED => {
-                    kept.versions.push(ProducedArtifact::before(
-                        ArtifactKind::Blob,
-                        rel.as_str(),
-                        b,
-                    ));
-                }
-                _ => kept.no_copy.push(rel.clone()),
-            }
-        }
-        kept
-    }
-}
+pub use ark_runtime::folder::written_since;
+use ark_runtime::folder::Before;
 
 #[async_trait]
 impl Adapter for Exec {

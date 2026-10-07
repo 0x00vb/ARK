@@ -17,6 +17,7 @@ ark-connect.workspace = true
 ark-browser.workspace = true
 ark-computer.workspace = true
 ark-proc.workspace = true
+ark-acp.workspace = true
 ark-runtime.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true

@@ -26,6 +26,7 @@ pub mod distill;
 pub mod engine;
 pub mod error;
 pub mod evidence;
+pub mod folder;
 pub mod harness;
 pub mod knowledge;
 pub mod ledger;
@@ -41,6 +42,7 @@ pub mod session;
 pub mod skills;
 pub mod steer;
 pub mod web;
+pub mod worker;
 
 mod blobs;
 

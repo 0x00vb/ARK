@@ -216,6 +216,7 @@ mod tests {
             report_to: None,
             reported: false,
             question: None,
+            decisions: Vec::new(),
         }
     }
 

@@ -112,11 +112,8 @@ fn runtime_code_names_no_domain() {
 fn orchestration_names_no_vendor() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut hits = Vec::new();
-    for e in std::fs::read_dir(crates.join("ark-orchestrate/src"))
-        .unwrap()
-        .flatten()
-    {
-        let text = std::fs::read_to_string(e.path()).unwrap().to_lowercase();
+    for path in files_under(&crates.join("ark-orchestrate/src")) {
+        let text = std::fs::read_to_string(&path).unwrap().to_lowercase();
         for (n, line) in text.lines().enumerate() {
             if line.trim_start().starts_with("#[cfg(test)]") {
                 break;
@@ -133,7 +130,7 @@ fn orchestration_names_no_vendor() {
                 "chatgpt",
             ] {
                 if line.contains(w) {
-                    hits.push(format!("{}:{}: `{w}`", e.path().display(), n + 1));
+                    hits.push(format!("{}:{}: `{w}`", path.display(), n + 1));
                 }
             }
         }
@@ -165,8 +162,8 @@ fn the_work_model_names_no_coding_or_worker_concept() {
     ];
     let mut hits = Vec::new();
     for dir in ["ark-core/src", "ark-orchestrate/src"] {
-        for e in std::fs::read_dir(crates.join(dir)).unwrap().flatten() {
-            let text = std::fs::read_to_string(e.path()).unwrap().to_lowercase();
+        for path in files_under(&crates.join(dir)) {
+            let text = std::fs::read_to_string(&path).unwrap().to_lowercase();
             for (n, line) in text.lines().enumerate() {
                 if line.trim_start().starts_with("#[cfg(test)]") {
                     break;
@@ -176,7 +173,7 @@ fn the_work_model_names_no_coding_or_worker_concept() {
                 }
                 for w in words {
                     if line.contains(w) {
-                        hits.push(format!("{}:{}: `{w}`", e.path().display(), n + 1));
+                        hits.push(format!("{}:{}: `{w}`", path.display(), n + 1));
                     }
                 }
             }
@@ -252,4 +249,18 @@ fn core_names_no_file_format() {
         "file formats in ark-core:\n{}",
         hits.join("\n")
     );
+}
+
+/// Every `.rs` file under `dir`, in its subfolders too.
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_under(&p));
+        } else if p.extension().is_some_and(|x| x == "rs") {
+            out.push(p);
+        }
+    }
+    out
 }

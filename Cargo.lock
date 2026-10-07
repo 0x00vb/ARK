@@ -181,6 +181,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-acp"
+version = "0.12.1"
+dependencies = [
+ "ark-core",
+ "ark-model",
+ "ark-runtime",
+ "async-trait",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ark-bench"
 version = "0.12.1"
 dependencies = [
@@ -355,6 +370,7 @@ dependencies = [
 name = "ark-orchestrate"
 version = "0.12.1"
 dependencies = [
+ "ark-acp",
  "ark-core",
  "ark-model",
  "ark-runtime",
@@ -415,6 +431,7 @@ dependencies = [
 name = "ark-sdk"
 version = "0.12.1"
 dependencies = [
+ "ark-acp",
  "ark-browser",
  "ark-computer",
  "ark-connect",

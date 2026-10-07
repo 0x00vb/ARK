@@ -91,6 +91,21 @@ pub struct Usage {
     /// False once any call's usage was estimated.
     #[serde(default = "yes")]
     pub measured: bool,
+    /// What the work cost as its agent reported it, in millionths of a US dollar (an agent
+    /// program that reports cost; ARK's own agent's cost comes from its model calls).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cost_micro_usd: u64,
+    /// How many times the person was asked.
+    #[serde(default, skip_serializing_if = "is_zero32")]
+    pub asked: u32,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
+}
+
+fn is_zero32(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Usage {
@@ -105,6 +120,8 @@ impl Usage {
         self.tool_calls += o.tool_calls;
         self.steps += o.steps;
         self.measured &= o.measured;
+        self.cost_micro_usd += o.cost_micro_usd;
+        self.asked += o.asked;
     }
 }
 
@@ -148,6 +165,17 @@ pub struct Question {
     /// and this answers the same call when it asks again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer: Option<ApprovalDecision>,
+}
+
+/// An answer the person gave in a task: a later run of the task (after a restart) takes it for
+/// the same call instead of asking again.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Decision {
+    pub action: String,
+    pub input: serde_json::Value,
+    pub decision: ApprovalDecision,
+    /// The run (`TaskRecord::attempts`) it was given in.
+    pub attempt: u32,
 }
 
 impl Question {
@@ -294,6 +322,9 @@ pub struct TaskRecord {
     /// The question it waits for the person to answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub question: Option<Question>,
+    /// The answers given in this task, for its later runs ([`Decision`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decisions: Vec<Decision>,
 }
 
 fn one() -> u32 {

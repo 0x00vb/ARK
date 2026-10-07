@@ -28,3 +28,5 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true
+ark-acp.workspace = true
+ark-model.workspace = true

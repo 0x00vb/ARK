@@ -45,6 +45,8 @@ use crate::spec::{AgentSpec, TaskSpec};
 use crate::tools::{self, AgentTools};
 use crate::OrchError;
 
+mod elsewhere;
+
 const AGENT: &str = "orch_agent";
 pub(crate) const TASK: &str = "orch_task";
 const MESSAGE: &str = "orch_message";
@@ -151,6 +153,7 @@ impl<'a> OrchestratorBuilder<'a> {
             models,
             approvals: self.approvals,
             per_agent: self.ark.per_agent().to_vec(),
+            workers: self.ark.workers().cloned(),
             max_parallel: self.max_parallel,
             global: Arc::new(Semaphore::new(self.max_parallel)),
             accounts: Mutex::new(HashMap::new()),
@@ -626,6 +629,8 @@ pub(crate) struct AgentRt {
     status: watch::Sender<AgentState>,
     steering: Option<Steering>,
     pub models: Option<Arc<AgentModels>>,
+    /// The agent program its tasks run on, when its model names one (ADR 0043).
+    worker: Option<Arc<dyn ark_runtime::worker::Worker>>,
     /// The resolver's default version when `models` was resolved.
     default_version: u64,
     /// Its current call (see [`Step`]).
@@ -673,6 +678,8 @@ pub(crate) struct Inner {
     /// Tools each agent gets its own of (the web on its model, its own browser), built at each
     /// task from the agent's current model.
     per_agent: Vec<Arc<dyn ark_runtime::per_agent::PerAgent>>,
+    /// The agent programs an agent may run on (`agent:<name>`), when the app offers them.
+    workers: Option<Arc<dyn ark_runtime::worker::Workers>>,
     pub max_parallel: usize,
     global: Arc<Semaphore>,
     accounts: Mutex<HashMap<String, Arc<Semaphore>>>,
@@ -1159,6 +1166,7 @@ impl Inner {
                         status,
                         steering: None,
                         models: None,
+                        worker: None,
                         default_version: 0,
                         step: None,
                     },
@@ -1295,11 +1303,19 @@ impl Inner {
             }
         }
         let default_version = self.models.default_version();
-        let models = Arc::new(
-            self.models
-                .resolve(&self.lane(&spec.name), spec.model.as_deref())
-                .await?,
-        );
+        let worker = self.worker_for(spec.model.as_deref())?;
+        let models = match &worker {
+            Some(w) => Arc::new(elsewhere::models(
+                w.as_ref(),
+                spec.model.as_deref(),
+                &*self.models,
+            )),
+            None => Arc::new(
+                self.models
+                    .resolve(&self.lane(&spec.name), spec.model.as_deref())
+                    .await?,
+            ),
+        };
         if let Some(s) = &models.session {
             let weak = self.me.clone();
             let agent = spec.name.clone();
@@ -1361,6 +1377,7 @@ impl Inner {
                 Some(a) => {
                     a.record = record.clone();
                     a.models = Some(models.clone());
+                    a.worker = worker.clone();
                     a.default_version = default_version;
                     a.status.send_replace(record.state);
                 }
@@ -1374,6 +1391,7 @@ impl Inner {
                             status,
                             steering: None,
                             models: Some(models.clone()),
+                            worker: worker.clone(),
                             default_version,
                             step: None,
                         },
@@ -1594,6 +1612,7 @@ impl Inner {
             report_to: spec.report_to.clone(),
             reported: false,
             question: None,
+            decisions: Vec::new(),
         };
         let (parent_rec, linked) = {
             let mut st = self.state.lock().unwrap();
@@ -2046,7 +2065,8 @@ impl Inner {
                 request: request.clone(),
                 asked_ms: now_ms(),
                 answer: None,
-            })
+            });
+            t.usage.asked += 1;
         });
         self.park(task, &[ANSWER.to_string()]).await;
         self.emit(EventKind::Asked {
@@ -2273,6 +2293,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         models: &AgentModels,
         resumed: bool,
     ) -> Attempt {
+        let worker;
         let (task, agent, deps, children, inbox, cancel, roster, item) = {
             let mut st = self.state.lock().unwrap();
             let task = st.tasks[id].record.clone();
@@ -2301,6 +2322,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 .collect();
             let a = st.agents.get_mut(owner).expect("the owner exists");
             let inbox = std::mem::take(&mut a.record.inbox);
+            worker = a.worker.clone();
             (
                 task,
                 a.record.clone(),
@@ -2545,6 +2567,28 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 me.limit(&id, format!("time: {secs}s"));
             })
         });
+        // An agent program does the task with its own tools; ARK keeps the task (ADR 0043).
+        if let Some(w) = worker {
+            let ran = self
+                .run_worker(
+                    id,
+                    owner,
+                    w,
+                    &scope,
+                    &brief,
+                    &cancel,
+                    spec.allow_mutate,
+                    &models.model,
+                )
+                .await;
+            if let Some(t) = timer {
+                t.abort();
+            }
+            if let Some(a) = self.state.lock().unwrap().agents.get_mut(owner) {
+                a.steering = None;
+            }
+            return ran;
+        }
         if let Err(e) = session.begin_turn(&self.engine, &brief) {
             tracing::warn!(task = %id, "could not record the turn start: {e}");
         }
@@ -3375,6 +3419,11 @@ impl Approver for OnBehalf {
         r.task = Some(self.task.clone());
         // Answered while no run waited (after a restart): the same call needs no new question.
         if let Some(d) = self.orch.take_answer(&self.task, &r) {
+            self.orch.decided(&self.task, &r, d);
+            return d;
+        }
+        // Answered in an earlier run of this task: the person is not asked twice.
+        if let Some(d) = self.orch.decided_before(&self.task, &r) {
             return d;
         }
         // A grant answers without the person: nothing to wait for.
@@ -3391,6 +3440,7 @@ impl Approver for OnBehalf {
             }
         };
         self.orch.answered(&self.task, &question, decision).await;
+        self.orch.decided(&self.task, &r, decision);
         decision
     }
 }

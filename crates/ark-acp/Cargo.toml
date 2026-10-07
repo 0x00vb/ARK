@@ -1,0 +1,23 @@
+[package]
+name = "ark-acp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK's agents on other agent programs (Claude Code, Codex) over the Agent Client Protocol: the task stays ARK's, its questions go through ARK, its results come from the folder."
+
+[dependencies]
+ark-core.workspace = true
+ark-model.workspace = true
+ark-runtime.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["process", "time", "sync", "io-util", "macros", "rt"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true

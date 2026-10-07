@@ -140,6 +140,9 @@ pub struct Ark {
     computer: Option<Arc<ark_computer::ComputerService>>,
     /// Project processes, when the app turned them on ([`ArkBuilder::processes`]).
     processes: Option<ark_proc::Processes>,
+    /// Other agent programs an agent can run on, when the app offers them
+    /// ([`ArkBuilder::workers`]).
+    workers: Option<Arc<dyn ark_runtime::worker::Workers>>,
 }
 
 /// Another handle on the same agent: the store, tools, model sessions and capabilities are
@@ -163,6 +166,7 @@ impl Clone for Ark {
             connections: self.connections.clone(),
             computer: self.computer.clone(),
             processes: self.processes.clone(),
+            workers: self.workers.clone(),
         }
     }
 }
@@ -248,6 +252,12 @@ impl Ark {
     /// Project processes, when the app offers them: what runs, its output, stopping it.
     pub fn processes(&self) -> Option<&ark_proc::Processes> {
         self.processes.as_ref()
+    }
+
+    /// The other agent programs an agent can run on (`agent:<name>` as its model), when the
+    /// app offers them (ADR 0043).
+    pub fn workers(&self) -> Option<&Arc<dyn ark_runtime::worker::Workers>> {
+        self.workers.as_ref()
     }
 
     /// The model this `Ark` runs on now, as a handle that sees later
@@ -647,6 +657,7 @@ pub struct ArkBuilder {
     browser: Option<BrowserChoice>,
     computer: Option<ComputerChoice>,
     processes: Option<ProcessesChoice>,
+    workers: Option<Arc<dyn ark_runtime::worker::Workers>>,
     connections: Option<ConnectionsChoice>,
     secrets: Option<Arc<dyn ark_connect::Secrets>>,
 }
@@ -705,6 +716,7 @@ impl Default for ArkBuilder {
             browser: None,
             computer: None,
             processes: None,
+            workers: None,
             connections: None,
             secrets: None,
         }
@@ -861,6 +873,23 @@ impl ArkBuilder {
     /// `acquire_capability` after the person allows it. macOS and Linux. Off by default.
     pub fn processes(mut self, yes: bool) -> Self {
         self.processes = yes.then_some(ProcessesChoice::Default);
+        self
+    }
+
+    /// Let an agent run on another agent program installed here, with its own tools (Claude
+    /// Code, Codex; ADR 0043): its model spec names it (`agent:claude-code`). The task stays
+    /// ARK's: what the program wants to change asks the person through ARK, and its results
+    /// come from the project folder. ARK's own agent stays the default.
+    pub fn workers(mut self, yes: bool) -> Self {
+        self.workers = yes.then(|| {
+            Arc::new(ark_acp::Catalog::installed()) as Arc<dyn ark_runtime::worker::Workers>
+        });
+        self
+    }
+
+    /// [`workers`](ArkBuilder::workers) with the app's own catalog.
+    pub fn workers_with(mut self, w: Arc<dyn ark_runtime::worker::Workers>) -> Self {
+        self.workers = Some(w);
         self
     }
 
@@ -1030,6 +1059,7 @@ impl ArkBuilder {
             connections,
             computer,
             processes,
+            workers: self.workers,
         })
     }
 }

@@ -492,36 +492,7 @@ impl Engine {
                         .unwrap()
                         .insert(inv.id.as_str().to_string(), out.pictures);
                 }
-                for prod in out.produced {
-                    let provenance = prod.provenance.unwrap_or_else(|| Provenance::Produced {
-                        invocation: inv.id.clone(),
-                    });
-                    // A Blob is re-sniffed so produced bytes land as their real kind.
-                    let kind = if prod.kind == ArtifactKind::Blob {
-                        self.detect_kind(&prod.name, &prod.bytes)
-                    } else {
-                        prod.kind
-                    };
-                    // A file's version before the call is kept, not indexed: it is not what
-                    // the file says now.
-                    let mut art = if prod.before {
-                        self.keep_bytes(project, &prod.name, kind, &prod.bytes, provenance)?
-                    } else {
-                        self.ingest_bytes(project, &prod.name, kind, &prod.bytes, provenance)?
-                    };
-                    // A snapshot of a project file names the file, so a front-end opens the
-                    // file itself, as it is now. The file's version before the call names it
-                    // too, so a front-end can put it back (ADR 0034).
-                    if let Some(path) = prod.path {
-                        art.meta = if prod.before {
-                            serde_json::json!({ "path": path, "before": true })
-                        } else {
-                            serde_json::json!({ "path": path })
-                        };
-                        self.store.put_artifact(project, &art)?;
-                    }
-                    inv.produced.push(art.id);
-                }
+                self.keep_produced(project, &mut inv, out.produced)?;
                 inv.mark_ok(out.output);
             }
             Err(e) => inv.mark_failed(e.to_string()),
@@ -533,6 +504,48 @@ impl Engine {
 }
 
 impl Engine {
+    /// Store what a call produced on `inv`: written files as artifacts that name their file, a
+    /// file's version before as a kept artifact (ADR 0034). For work recorded outside
+    /// [`Engine::run_action`] (an agent's work elsewhere, ADR 0043).
+    pub fn keep_produced(
+        &self,
+        project: &ProjectId,
+        inv: &mut Invocation,
+        produced: Vec<ark_tools::ProducedArtifact>,
+    ) -> Result<(), AgentError> {
+        for prod in produced {
+            let provenance = prod.provenance.unwrap_or_else(|| Provenance::Produced {
+                invocation: inv.id.clone(),
+            });
+            // A Blob is re-sniffed so produced bytes land as their real kind.
+            let kind = if prod.kind == ArtifactKind::Blob {
+                self.detect_kind(&prod.name, &prod.bytes)
+            } else {
+                prod.kind
+            };
+            // A file's version before the call is kept, not indexed: it is not what
+            // the file says now.
+            let mut art = if prod.before {
+                self.keep_bytes(project, &prod.name, kind, &prod.bytes, provenance)?
+            } else {
+                self.ingest_bytes(project, &prod.name, kind, &prod.bytes, provenance)?
+            };
+            // A snapshot of a project file names the file, so a front-end opens the
+            // file itself, as it is now. The file's version before the call names it
+            // too, so a front-end can put it back (ADR 0034).
+            if let Some(path) = prod.path {
+                art.meta = if prod.before {
+                    serde_json::json!({ "path": path, "before": true })
+                } else {
+                    serde_json::json!({ "path": path })
+                };
+                self.store.put_artifact(project, &art)?;
+            }
+            inv.produced.push(art.id);
+        }
+        Ok(())
+    }
+
     /// The model reads artifacts as short ids (`art:dc3b0c93c72c`) and passes them back that
     /// way; adapters look blobs up by full id. Rewrite an `artifact` argument given as a full
     /// id, a short prefix (with or without `art:`) or an exact name to the full id. An

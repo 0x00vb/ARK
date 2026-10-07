@@ -850,8 +850,9 @@ impl Harness {
                 break;
             }
 
-            // The model's note with its calls stays in the round (its plan, seen again next
-            // step) and goes on each call's record, so work that stops continues with it.
+            // The model's note with its calls stays in the round for the ledger (it is not sent
+            // while the round is shown: `budget::sent`) and goes on each call's record, so work
+            // that stops continues with it.
             let mut said = Message::assistant_tool_calls(completion.tool_calls.clone());
             said.content = completion.content.clone();
             let mut round = vec![said];

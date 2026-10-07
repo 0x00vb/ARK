@@ -1,0 +1,1415 @@
+{
+  "schema_version": 1,
+  "label": "main",
+  "ark_version": "0.13.0",
+  "created_at": "2026-10-07T15:35:16.548982Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 2,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "300"
+  },
+  "workloads": [
+    {
+      "name": "multi-step",
+      "class": "multi-step",
+      "description": "find a customer, list her orders, add the amounts",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 3.5,
+        "input_tokens": 6061.5,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 6061.5,
+        "output_tokens": 249.5,
+        "total_tokens": 6311.0,
+        "cost_usd": 0.014617999999999999,
+        "cost_per_success_usd": 0.014617999999999999,
+        "tool_calls": 2.5,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.5,
+        "peak_context_tokens": 1529.0,
+        "mean_context_tokens": 1403.0,
+        "tool_schema_tokens": 2205.0,
+        "prefix_reuse_tokens": 3290.0,
+        "median_turn_ms": 5936.0,
+        "p95_turn_ms": 9667.0,
+        "median_first_token_ms": 300.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "multi-step",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "I have found the customer named Ada Lovelace (ID: C-1042) and retrieved her orders. The amounts of her orders are: $120.50, $89.99, $310.00, and $45.25.\n\nNow, I will calculate the total of these amounts.\n\n**Calculation:**  \n120.50 + 89.99 + 310.00 + 45.25 = 565.74\n\nI will record this as a finding.\n\n**Finding:** The total amount of Ada Lovelace's orders is $565.74. [cites inv:9e523825]\n\nNext step: ",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5305
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5081,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5081,
+          "cache_write_tokens": 0,
+          "output_tokens": 224,
+          "total_tokens": 5305,
+          "tokens_measured": true,
+          "cost_usd": 0.012402,
+          "wall_ms": 9667,
+          "turn_ms": [
+            9667
+          ],
+          "first_token_ms": [
+            300
+          ],
+          "model_latency_ms": [
+            6126,
+            677,
+            2857
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1463,
+          "mean_context_tokens": 1385,
+          "context_sources": {
+            "Capability index": 819,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 67,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 114,
+            "Tool results": 144,
+            "Tool schemas": 1890,
+            "Working state": 111,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1890,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 104,
+          "result_raw_tokens": 50,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2592,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "multi-step",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Facts:**\n- Ada Lovelace is a customer with ID C-1042 and tier gold. [cites: inv:f85a6649]\n- Ada Lovelace has four orders with amounts: $120.50, $89.99, $310.00, and $45.25. [cites: inv:984214b3]\n- The total amount of all her orders is $565.74. [cites: inv:6fd4f8c5]\n\n**Inference:**  \nThe sum of all Ada Lovelace's order amounts is $565.74.\n\n**Next step:**  \nNo further action is needed to fulfill t",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 7317
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 7042,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 7042,
+          "cache_write_tokens": 0,
+          "output_tokens": 275,
+          "total_tokens": 7317,
+          "tokens_measured": true,
+          "cost_usd": 0.016834,
+          "wall_ms": 5936,
+          "turn_ms": [
+            5936
+          ],
+          "first_token_ms": [
+            303
+          ],
+          "model_latency_ms": [
+            543,
+            751,
+            1059,
+            3577
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1529,
+          "mean_context_tokens": 1421,
+          "context_sources": {
+            "Capability index": 1092,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 136,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 289,
+            "Tool schemas": 2520,
+            "Working state": 148,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2520,
+          "tools_exposed_max": 7,
+          "tools_used": 3,
+          "result_context_tokens": 145,
+          "result_raw_tokens": 64,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3988,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "large-output",
+      "class": "large-output",
+      "description": "find the one error code in 3,000 log lines",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 4.5,
+        "input_tokens": 7343.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 7343.0,
+        "output_tokens": 499.0,
+        "total_tokens": 7842.0,
+        "cost_usd": 0.019676,
+        "cost_per_success_usd": 0.019676,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.5,
+        "peak_context_tokens": 1463.0,
+        "mean_context_tokens": 1339.5,
+        "tool_schema_tokens": 2641.5,
+        "prefix_reuse_tokens": 4448.0,
+        "median_turn_ms": 6311.0,
+        "p95_turn_ms": 12866.0,
+        "median_first_token_ms": 221.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "large-output",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Fact**: The payments service logged an error entry at 10:31:13 with the message \"ERROR charge failed code=E4721 card=visa retry=false\" [cites inv:b2e48e17].\n\n**Inference**: The error code in the log is \"E4721\".\n\n**Next step**: Confirm whether \"E4721\" is the only error code logged today by searching for other entries with error codes or further filtering the logs.\n\n**Hypothesis**: All error codes",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 8879
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 5
+          },
+          "input_tokens": 8254,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8254,
+          "cache_write_tokens": 0,
+          "output_tokens": 625,
+          "total_tokens": 8879,
+          "tokens_measured": true,
+          "cost_usd": 0.022758,
+          "wall_ms": 12866,
+          "turn_ms": [
+            12866
+          ],
+          "first_token_ms": [
+            222,
+            191,
+            243
+          ],
+          "model_latency_ms": [
+            627,
+            854,
+            2771,
+            4661,
+            3944
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 3
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1463,
+          "mean_context_tokens": 1353,
+          "context_sources": {
+            "Capability index": 1275,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 248,
+            "Project": 250,
+            "Retrieved context": 148,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 125,
+            "Tool results": 232,
+            "Tool schemas": 2935,
+            "Working state": 120,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2935,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 58,
+          "result_raw_tokens": 42763,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5119,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "large-output",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The log entry with an error indicates \"code=E4721\", but the pattern `code=\\d+` did not match, suggesting the code is not purely numeric or is formatted differently. \n\n- **Finding**: The error log shows \"code=E4721\" in a log entry with timestamp \"10:31:13\" and message \"ERROR charge failed\". [cites inv:f0411193]  \n- **Hypothesis**: The error code is E4721, as it is explicitly listed in the log entry",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 6805
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 6432,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 6432,
+          "cache_write_tokens": 0,
+          "output_tokens": 373,
+          "total_tokens": 6805,
+          "tokens_measured": true,
+          "cost_usd": 0.016594,
+          "wall_ms": 6311,
+          "turn_ms": [
+            6311
+          ],
+          "first_token_ms": [
+            221,
+            177
+          ],
+          "model_latency_ms": [
+            408,
+            790,
+            2430,
+            2672
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1405,
+          "mean_context_tokens": 1326,
+          "context_sources": {
+            "Capability index": 1020,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 145,
+            "Project": 200,
+            "Retrieved context": 74,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 100,
+            "Tool results": 174,
+            "Tool schemas": 2348,
+            "Working state": 96,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2348,
+          "tools_exposed_max": 6,
+          "tools_used": 1,
+          "result_context_tokens": 58,
+          "result_raw_tokens": 42763,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3777,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "failure-recovery",
+      "class": "failure-recovery",
+      "description": "primary mirror is down; retry at most once, then use the backup",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 3.0,
+        "input_tokens": 5006.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 5006.0,
+        "output_tokens": 156.5,
+        "total_tokens": 5162.5,
+        "cost_usd": 0.011577,
+        "cost_per_success_usd": 0.011577,
+        "tool_calls": 2.0,
+        "tool_failed": 1.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.0,
+        "peak_context_tokens": 1459.0,
+        "mean_context_tokens": 1390.0,
+        "tool_schema_tokens": 1884.0,
+        "prefix_reuse_tokens": 2608.0,
+        "median_turn_ms": 2752.0,
+        "p95_turn_ms": 3426.0,
+        "median_first_token_ms": 263.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "failure-recovery",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Fact: The version listed in release.txt from the backup mirror is 4.2.1. [cites: inv:2c8be349]\n\nNext step: Confirm that this is the latest version or verify if there are any additional details in the file that might be relevant. However, since the goal was to retrieve and report the version, this task is complete.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5124
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5001,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5001,
+          "cache_write_tokens": 0,
+          "output_tokens": 123,
+          "total_tokens": 5124,
+          "tokens_measured": true,
+          "cost_usd": 0.011232,
+          "wall_ms": 2752,
+          "turn_ms": [
+            2752
+          ],
+          "first_token_ms": [
+            265
+          ],
+          "model_latency_ms": [
+            788,
+            533,
+            1426
+          ],
+          "tool_calls": 2,
+          "tool_ok": 1,
+          "tool_failed": 1,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1459,
+          "mean_context_tokens": 1390,
+          "context_sources": {
+            "Capability index": 825,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 66,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 120,
+            "Tool results": 148,
+            "Tool schemas": 1884,
+            "Working state": 117,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1884,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 96,
+          "result_raw_tokens": 19,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2608,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "failure-recovery",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Fact**: The version listed in `release.txt` from the backup mirror is **4.2.1**.  \n**Evidence**: [inv:9b31c174] mirror.backup: notes=fixes and speedups, path=release.txt, version=4.2.1  \n\n**Next step**: Confirm whether this version is the latest or if there are any updates available (e.g., via checking the release history or logs).  \n\n**Hypothesis**: The version 4.2.1 is the current stable relea",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5201
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5011,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5011,
+          "cache_write_tokens": 0,
+          "output_tokens": 190,
+          "total_tokens": 5201,
+          "tokens_measured": true,
+          "cost_usd": 0.011922,
+          "wall_ms": 3426,
+          "turn_ms": [
+            3426
+          ],
+          "first_token_ms": [
+            263
+          ],
+          "model_latency_ms": [
+            430,
+            566,
+            2423
+          ],
+          "tool_calls": 2,
+          "tool_ok": 1,
+          "tool_failed": 1,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1459,
+          "mean_context_tokens": 1390,
+          "context_sources": {
+            "Capability index": 825,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 66,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 120,
+            "Tool results": 148,
+            "Tool schemas": 1884,
+            "Working state": 117,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1884,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 96,
+          "result_raw_tokens": 19,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2608,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "runaway",
+      "class": "repetition",
+      "description": "the model repeats one search forever; the stall guard must stop it",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 4.0,
+        "input_tokens": 6534.5,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 6534.5,
+        "output_tokens": 414.5,
+        "total_tokens": 6949.0,
+        "cost_usd": 0.017214,
+        "cost_per_success_usd": 0.017214,
+        "tool_calls": 0.5,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.5,
+        "peak_context_tokens": 1767.0,
+        "mean_context_tokens": 1374.0,
+        "tool_schema_tokens": 2289.0,
+        "prefix_reuse_tokens": 3569.5,
+        "median_turn_ms": 5882.0,
+        "p95_turn_ms": 9901.0,
+        "median_first_token_ms": 212.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "runaway",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "No stored evidence matches \"Q3 budget\". The search in the stored artifacts returned no results, indicating that either there is no record of a Q3 budget in the current project artifacts, or it has not been ingested yet.\n\nEvidence: The stored artifacts (as per current state) contain no records matching a query for \"Q3 budget\" in files, mail, CRM, or other data sources. This is confirmed by a search",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 3,
+          "calls_by_role": {
+            "critic": 1,
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "critic": 914,
+            "reason": 3423
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 4002,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 4002,
+          "cache_write_tokens": 0,
+          "output_tokens": 335,
+          "total_tokens": 4337,
+          "tokens_measured": true,
+          "cost_usd": 0.011354,
+          "wall_ms": 5882,
+          "turn_ms": [
+            5882
+          ],
+          "first_token_ms": [
+            212,
+            374
+          ],
+          "model_latency_ms": [
+            808,
+            2290,
+            2780
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "search_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1402,
+          "mean_context_tokens": 1185,
+          "context_sources": {
+            "Capability index": 538,
+            "Conversation": 0,
+            "Instructions": 858,
+            "Model output": 203,
+            "Project": 360,
+            "Retrieved context": 59,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 146,
+            "Tool results": 0,
+            "Tool schemas": 1308,
+            "Working state": 81,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1308,
+          "tools_exposed_max": 7,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 1285,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "runaway",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "get_evidence(\"inv:00b529ca\") reveals a search result in the \"finance\" folder for the term \"budget\". Since no specific document or file was returned, I now verify the content of the result to determine if it contains any reference to Q3 or financial planning.\n\nI will retrieve the full output of the file search result to examine its contents.  \n\nNext step: Inspect the contents of the file search res",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 9561
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 5
+          },
+          "input_tokens": 9067,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 9067,
+          "cache_write_tokens": 0,
+          "output_tokens": 494,
+          "total_tokens": 9561,
+          "tokens_measured": true,
+          "cost_usd": 0.023074,
+          "wall_ms": 9901,
+          "turn_ms": [
+            9901
+          ],
+          "first_token_ms": [
+            212,
+            213,
+            212
+          ],
+          "model_latency_ms": [
+            1910,
+            1965,
+            756,
+            2886,
+            2375
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "search_evidence": 2
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1767,
+          "mean_context_tokens": 1563,
+          "context_sources": {
+            "Capability index": 1345,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 638,
+            "Project": 250,
+            "Retrieved context": 358,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 155,
+            "Tool results": 216,
+            "Tool schemas": 3270,
+            "Working state": 150,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3270,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 36,
+          "result_raw_tokens": 9,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5854,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "resume",
+      "class": "resume",
+      "description": "look up a customer, restart, then ask about the same customer",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 4.5,
+        "input_tokens": 7650.5,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 7650.5,
+        "output_tokens": 304.5,
+        "total_tokens": 7955.0,
+        "cost_usd": 0.018346,
+        "cost_per_success_usd": 0.018346,
+        "tool_calls": 1.5,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.5,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.5,
+        "peak_context_tokens": 1604.0,
+        "mean_context_tokens": 1392.0,
+        "tool_schema_tokens": 2835.0,
+        "prefix_reuse_tokens": 4484.0,
+        "median_turn_ms": 2695.0,
+        "p95_turn_ms": 4701.0,
+        "median_first_token_ms": 259.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "resume",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Fact**: Customer Ada Lovelace is in the **gold** tier.  \n[Citation: inv:8e9759c4]\n\n**Inference**: Since the customer ID C-1042 corresponds to Ada Lovelace and the result explicitly states her tier is \"gold\", this confirms the tier classification.\n\n**Next step**: Verify if there are any orders associated with this customer that might indicate usage patterns typical of a gold-tier customer (e.g., ",
+          "turns": 2,
+          "steps": 6,
+          "model_calls": 6,
+          "calls_by_role": {
+            "reason": 6
+          },
+          "tokens_by_role": {
+            "reason": 10736
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 6
+          },
+          "input_tokens": 10383,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 10383,
+          "cache_write_tokens": 0,
+          "output_tokens": 353,
+          "total_tokens": 10736,
+          "tokens_measured": true,
+          "cost_usd": 0.024296,
+          "wall_ms": 7255,
+          "turn_ms": [
+            4701,
+            2554
+          ],
+          "first_token_ms": [
+            259,
+            260,
+            259
+          ],
+          "model_latency_ms": [
+            840,
+            2154,
+            1166,
+            518,
+            667,
+            1881
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 1,
+          "meta_calls": {
+            "record_state": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1604,
+          "mean_context_tokens": 1425,
+          "context_sources": {
+            "Capability index": 1638,
+            "Conversation": 78,
+            "Instructions": 1716,
+            "Model output": 364,
+            "Project": 300,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 172,
+            "Tool results": 289,
+            "Tool schemas": 3780,
+            "Working state": 208,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3780,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 80,
+          "result_raw_tokens": 26,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 6534,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "resume",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Fact**: The customer named Ada Lovelace has the ID **C-1042** and is in the **gold** tier. This is directly from the result of `crm.find_customer` with name \"Ada Lovelace\", which returned `id=C-1042`, `name=Ada Lovelace`, and `tier=gold`. No further action is needed to achieve the goal. ✅ Goal achieved.\n\n**Next step**: No further action is required. The query was specifically about the customer ",
+          "turns": 2,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5174
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 4918,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 4918,
+          "cache_write_tokens": 0,
+          "output_tokens": 256,
+          "total_tokens": 5174,
+          "tokens_measured": true,
+          "cost_usd": 0.012396,
+          "wall_ms": 5419,
+          "turn_ms": [
+            2695,
+            2724
+          ],
+          "first_token_ms": [
+            206,
+            383
+          ],
+          "model_latency_ms": [
+            567,
+            2124,
+            2722
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1420,
+          "mean_context_tokens": 1359,
+          "context_sources": {
+            "Capability index": 819,
+            "Conversation": 132,
+            "Instructions": 858,
+            "Model output": 23,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 87,
+            "Tool results": 40,
+            "Tool schemas": 1890,
+            "Working state": 75,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1890,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 40,
+          "result_raw_tokens": 13,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2434,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "stale-read",
+      "class": "reuse",
+      "description": "read a setting, change it, read it again",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 4.0,
+        "input_tokens": 6734.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 6734.0,
+        "output_tokens": 162.5,
+        "total_tokens": 6896.5,
+        "cost_usd": 0.015092999999999999,
+        "cost_per_success_usd": 0.015092999999999999,
+        "tool_calls": 3.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.0,
+        "peak_context_tokens": 1444.0,
+        "mean_context_tokens": 1362.0,
+        "tool_schema_tokens": 2472.0,
+        "prefix_reuse_tokens": 3856.0,
+        "median_turn_ms": 3143.0,
+        "p95_turn_ms": 3883.0,
+        "median_first_token_ms": 214.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "stale-read",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- Fact: The initial value of the `mode` setting was `slow` ([inv:9f76d4b0]).  \n- Fact: The `mode` setting was successfully set to `fast` ([inv:ab47a427]).  \n- Fact: The current value of the `mode` setting is `fast` ([inv:5252d6c6]).  \n\nFinal value of the `mode` setting: **fast**.",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 6902
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 6734,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 6734,
+          "cache_write_tokens": 0,
+          "output_tokens": 168,
+          "total_tokens": 6902,
+          "tokens_measured": true,
+          "cost_usd": 0.015148,
+          "wall_ms": 3883,
+          "turn_ms": [
+            3883
+          ],
+          "first_token_ms": [
+            214
+          ],
+          "model_latency_ms": [
+            882,
+            695,
+            538,
+            1761
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1444,
+          "mean_context_tokens": 1362,
+          "context_sources": {
+            "Capability index": 1032,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 122,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 136,
+            "Tool results": 206,
+            "Tool schemas": 2472,
+            "Working state": 132,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2472,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 103,
+          "result_raw_tokens": 24,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3856,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "stale-read",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "- The initial value of the `mode` setting was `slow` ([inv:507a4012]).\n- The setting was successfully updated to `fast` ([inv:0da2c14b]).\n- The current value of the `mode` setting is `fast` ([inv:5c7371a2]).\n\nFinal value of the `mode` setting: **fast**.",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 6891
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 6734,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 6734,
+          "cache_write_tokens": 0,
+          "output_tokens": 157,
+          "total_tokens": 6891,
+          "tokens_measured": true,
+          "cost_usd": 0.015038,
+          "wall_ms": 3143,
+          "turn_ms": [
+            3143
+          ],
+          "first_token_ms": [
+            236
+          ],
+          "model_latency_ms": [
+            441,
+            639,
+            526,
+            1527
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1444,
+          "mean_context_tokens": 1362,
+          "context_sources": {
+            "Capability index": 1032,
+            "Conversation": 0,
+            "Instructions": 1144,
+            "Model output": 122,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 136,
+            "Tool results": 206,
+            "Tool schemas": 2472,
+            "Working state": 132,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2472,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 103,
+          "result_raw_tokens": 24,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 3856,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "files-edit",
+      "class": "files",
+      "description": "a computed column and a total row in a real spreadsheet; the saved file is checked",
+      "summary": {
+        "runs": 2,
+        "successes": 0,
+        "success_rate": 0.0,
+        "model_calls": 7.5,
+        "input_tokens": 24720.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 24720.0,
+        "output_tokens": 1499.0,
+        "total_tokens": 26219.0,
+        "cost_usd": 0.06443,
+        "cost_per_success_usd": null,
+        "tool_calls": 6.5,
+        "tool_failed": 1.5,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 7.5,
+        "peak_context_tokens": 3537.0,
+        "mean_context_tokens": 2465.0,
+        "tool_schema_tokens": 9075.0,
+        "prefix_reuse_tokens": 15530.0,
+        "median_turn_ms": 15613.0,
+        "p95_turn_ms": 48192.0,
+        "median_first_token_ms": 702.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "files-edit",
+          "rep": 0,
+          "success": false,
+          "verdict": "no Total row with the total units",
+          "answer": "- Found the file `sales.xlsx` with data for months January to March.\n- Verified the structure: columns for Month, Units, and Price.\n- Calculated Revenue as Units × Price for each month:\n  - January: 120 × 10 = 1200\n  - February: 135 × 10 = 1350\n  - March: 150 × 12 = 1800\n- Added a Revenue column (D) and updated the total row (D5) to sum revenues: 1200 + 1350 + 1800 = 4350.\n- Updated the Price in t",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 14373
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 5
+          },
+          "input_tokens": 13678,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 13678,
+          "cache_write_tokens": 0,
+          "output_tokens": 695,
+          "total_tokens": 14373,
+          "tokens_measured": true,
+          "cost_usd": 0.034306,
+          "wall_ms": 15613,
+          "turn_ms": [
+            15613
+          ],
+          "first_token_ms": [
+            2985,
+            238,
+            702
+          ],
+          "model_latency_ms": [
+            3843,
+            764,
+            779,
+            5150,
+            5035
+          ],
+          "tool_calls": 4,
+          "tool_ok": 4,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2449,
+          "mean_context_tokens": 2222,
+          "context_sources": {
+            "Capability index": 2055,
+            "Conversation": 0,
+            "Instructions": 1430,
+            "Model output": 275,
+            "Project": 250,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 240,
+            "Tool results": 575,
+            "Tool schemas": 6050,
+            "Working state": 235,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 6050,
+          "tools_exposed_max": 9,
+          "tools_used": 4,
+          "result_context_tokens": 246,
+          "result_raw_tokens": 158,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 8385,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "files-edit",
+          "rep": 1,
+          "success": false,
+          "verdict": "a month's revenue is missing from its row",
+          "answer": "- Fact: The file `sales.xlsx` exists and contains a sheet named \"Sales\" with months (January, February, March), Units, and Price columns. [cites inv:560c93eb]\n- Fact: The file `sales.xlsx` has a version identifier \"96c08ca523b85a71\". [cites inv:560c93eb]\n- Inference: The current structure of the spreadsheet does not include a \"Revenue\" column or a \"Total\" row. Adding a Revenue column (Units × Pric",
+          "turns": 1,
+          "steps": 10,
+          "model_calls": 10,
+          "calls_by_role": {
+            "reason": 10
+          },
+          "tokens_by_role": {
+            "reason": 38065
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 10
+          },
+          "input_tokens": 35762,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 35762,
+          "cache_write_tokens": 0,
+          "output_tokens": 2303,
+          "total_tokens": 38065,
+          "tokens_measured": true,
+          "cost_usd": 0.094554,
+          "wall_ms": 48192,
+          "turn_ms": [
+            48192
+          ],
+          "first_token_ms": [
+            144,
+            232,
+            971,
+            898,
+            524,
+            942,
+            500,
+            856
+          ],
+          "model_latency_ms": [
+            1018,
+            802,
+            834,
+            8596,
+            7281,
+            2736,
+            8131,
+            2943,
+            6991,
+            8732
+          ],
+          "tool_calls": 9,
+          "tool_ok": 6,
+          "tool_failed": 3,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 4,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 3537,
+          "mean_context_tokens": 2708,
+          "context_sources": {
+            "Capability index": 4110,
+            "Conversation": 0,
+            "Instructions": 2860,
+            "Model output": 2708,
+            "Project": 500,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 480,
+            "Tool results": 3854,
+            "Tool schemas": 12100,
+            "Working state": 470,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 12100,
+          "tools_exposed_max": 9,
+          "tools_used": 4,
+          "result_context_tokens": 861,
+          "result_raw_tokens": 354,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 22675,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 14,
+    "successes": 12,
+    "success_rate": 0.8571428571428571,
+    "model_calls": 4.428571428571429,
+    "input_tokens": 9149.92857142857,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 9149.92857142857,
+    "output_tokens": 469.35714285714283,
+    "total_tokens": 9619.285714285714,
+    "cost_usd": 0.02299342857142857,
+    "cost_per_success_usd": 0.026825666666666664,
+    "tool_calls": 2.4285714285714284,
+    "tool_failed": 0.35714285714285715,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.07142857142857142,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 4.357142857142857,
+    "peak_context_tokens": 3537.0,
+    "mean_context_tokens": 1532.2142857142858,
+    "tool_schema_tokens": 3343.0714285714284,
+    "prefix_reuse_tokens": 5397.928571428572,
+    "median_turn_ms": 4701.0,
+    "p95_turn_ms": 48192.0,
+    "median_first_token_ms": 259.0,
+    "stall_stops": 0.0
+  }
+}

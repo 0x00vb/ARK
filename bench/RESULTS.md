@@ -594,6 +594,7 @@ after).
 |---|---|---|
 | Planner off | success 0.85 to 0.72, cost per success +29% (`m5/live-qwen3-4b-noplanner.json`) | planner stayed on; after P2 it measured the other way and is off (ADR 0008) |
 | Planning and critic on qwen2.5:3b (fast tier) | success 0.85 to 0.69, cost per success +19%; Ollama also swaps models on every plan call (`m5/live-qwen3-4b-fasttier.json`) | single tier by default; the router stays available |
+| The model's note with its tool calls sent again in kept rounds (ADR 0050, first cut) | `large-output` 5/6 to 3/6 over two runs, about twice the calls: the model went on calling tools after it had E4721 (`reliability/qwen3-4b-notes-sent.json`) | the note is kept for the ledger, not sent while the round is shown |
 | One-line summaries per action in the capability index | tool-lookup 0/3 to 0/3, approval 0/3 to 0/3, multi-step 3/3 to 2/3, tokens +15 to 40% (`m5/rejected-index-summaries-live.json`) | reverted |
 
 ## Where the model calls go (live M5)
@@ -728,3 +729,39 @@ What the runs showed:
   (`haiku-skill-pointer.json`), so it was taken out.
 - For data work, Sonnet- and Codex-class models are what ARK can recommend today. Haiku and a
   27B local model finish the work but make the mistakes a careful analyst would not.
+
+## An agent never loses its task (ADR 0050, 2026-10-07)
+
+The owner's lost task: on Codex, a syntax-highlighting task in ARK Desktop lost its goal after
+two file reads, a vendor session rotated without it, and "cointinue" became the goal.
+
+Live, the owner's exact message on a copy of `crates/ark-ui/web`, the process killed (SIGKILL)
+after 6 calls, then "cointinue" in a new process (`crates/ark-sdk/tests/live_lost_task.rs`):
+
+| Model | Continued turn | Goal in every request | Result |
+|---|---|---|---|
+| `codex:default` (vendor session, budget 16,000) | 10 steps, 136 s, 380k prompt tokens | yes (task 89 tokens each step; 5 to 6 rounds dropped, ledger 450 to 520 tokens) | highlighting layer and theme colours in `file.js` and `app.css` |
+| `codex:default`, again with `Adapter::summary` | 8 steps, 97 s, 204k prompt tokens | yes | same; "no project test command was run" (the copy has none) |
+| `claude:sonnet` (vendor session, budget 16,000) | 11 steps, 102 s, 305k prompt tokens | yes | same; says it did not run the app |
+
+The same task in Claude Code (`claude -p --model sonnet`), one uninterrupted run, against ARK
+on `claude:sonnet` killed and continued (both turns):
+
+| | ARK (killed + continued) | Claude Code (one run) |
+|---|---:|---:|
+| Input tokens | 338,522 (295,188 cached) | 780,844 (733,166 cache reads, 47,646 cache writes) |
+| Output tokens | 14,666 | 16,099 |
+| Model calls | 17 | 28 |
+| Claude Code's own cost | not reported | $0.498 |
+
+Live qwen3:4b, 7 workloads x 2, `main` (edbbd25) against this branch (`reliability/`):
+
+| | main | reliability |
+|---|---:|---:|
+| Success | 12/14 | 12/14 (`files-edit` 0/2 in both) |
+| Total tokens per run | 9,619 | 10,353 (+7.6%: `files-edit` +23% from ADR 0049's schemas, `multi-step` +0.5 calls) |
+| `resume` tokens | 7,955 | 5,168 (-35%) |
+
+Simulated suite: ADR 0050 alone leaves 20 workloads unchanged and `workbooks` -1.5%; ADR 0049's
+typed Files schemas move `files-edit` +18% and `workbooks` +6.5% (baseline regenerated).
+

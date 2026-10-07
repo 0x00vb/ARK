@@ -74,7 +74,9 @@ What changed for people building on ARK, per release. Not a commit log.
   After that the turn fails with `AgentError::UnusableReply`, which both front-ends word as "The
   model's reply could not be used." A refused reply schema is `ProviderError::Refused`, retried
   as before.
-- The model's note with its tool calls stays in its round, so it sees its own plan next step.
+- The model's note with its tool calls is kept in its round for the ledger and on each call
+  (`Invocation::narration`), but not sent while the round is shown: live on qwen3:4b, sending it
+  made the model keep calling tools after it had its answer.
 - `code.run` says it is contained and points a project's commands to `process.start`;
   `process.start` says it runs tests and builds with the person's own programs.
   `Adapter::summary` (default none) puts a few words beside an adapter's actions in the tool

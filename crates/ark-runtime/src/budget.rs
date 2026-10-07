@@ -118,7 +118,7 @@ impl WorkingSet {
             .skip(self.last_compressed)
             .flatten()
             .filter(|m| m.role == Role::Assistant)
-            .map(Self::message_tokens)
+            .map(|m| Self::message_tokens(&sent(m)))
             .sum()
     }
 
@@ -134,7 +134,7 @@ impl WorkingSet {
     }
 
     fn round_tokens(round: &[Message]) -> u32 {
-        round.iter().map(Self::message_tokens).sum()
+        round.iter().map(|m| Self::message_tokens(&sent(m))).sum()
     }
 
     /// Lines of ledger this budget affords.
@@ -201,10 +201,24 @@ impl WorkingSet {
             0
         };
         for round in self.rounds.iter().skip(dropped) {
-            out.extend(round.iter().cloned());
+            out.extend(round.iter().map(sent));
         }
         let total = sys_tokens + head_tokens + ledger_tokens + used + reserve;
         (out, total)
+    }
+}
+
+/// A message as a kept round sends it. The model's note beside its tool calls is kept in the
+/// round for the ledger (its plan, once the round is dropped) but not sent while the round is
+/// shown: live on qwen3:4b, sending it again made the model keep calling tools after it had its
+/// answer (`large-output` 2 of 4 against 4 of 4 without it, `bench/RESULTS.md`, ADR 0050).
+fn sent(m: &Message) -> Message {
+    if m.role == Role::Assistant && !m.tool_calls.is_empty() && !m.content.is_empty() {
+        let mut m = m.clone();
+        m.content.clear();
+        m
+    } else {
+        m.clone()
     }
 }
 
@@ -572,5 +586,25 @@ mod tests {
             "never over half a small window"
         );
         assert_eq!(budget_for(Some(32_768)), 8_192);
+    }
+
+    #[test]
+    fn a_kept_round_does_not_send_the_note_but_the_ledger_keeps_it() {
+        let mut ws = WorkingSet::new(100_000);
+        ws.push_round(read("a", "src/a.rs", "[inv:aa] files.read: src/a.rs"));
+        let (msgs, _) = ws.assemble("sys");
+        assert_eq!(msgs[0].content, "", "not sent while shown");
+        assert_eq!(msgs[0].tool_calls.len(), 1);
+        let mut small = WorkingSet::new(1024);
+        small.push_round(read("a", "src/a.rs", "[inv:aa] files.read: src/a.rs"));
+        small.push_round(round(&"x ".repeat(2000)));
+        let (msgs, _) = small.assemble("sys");
+        assert!(
+            msgs[0]
+                .content
+                .contains("Your last note in those steps: \"Reading src/a.rs next.\""),
+            "{}",
+            msgs[0].content
+        );
     }
 }

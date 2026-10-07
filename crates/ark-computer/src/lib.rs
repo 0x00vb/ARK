@@ -237,8 +237,13 @@ struct State {
     own_input: Option<Instant>,
     /// Owners the person took the screen from: refused until their turn or task ends.
     taken: std::collections::HashSet<String>,
-    /// Each owner's last picture: the app, and how its pixels map to the screen.
-    shots: HashMap<String, (String, Shot)>,
+    /// Each owner's last picture: the app, its number, and how its pixels map to the screen.
+    shots: HashMap<String, (String, u64, Shot)>,
+    /// The newest picture of each app (by its name in lower case), and its number, for the
+    /// window to show beside a question to click in it ([`ComputerService::picture`]).
+    latest: HashMap<String, (u64, Shot)>,
+    /// The number of the last picture taken.
+    pictures: u64,
 }
 
 /// The computer of one ARK process. Cheap to share.
@@ -305,6 +310,16 @@ impl ComputerService {
     /// the lease, the approvals and the quiet wait.
     pub fn screen(&self) -> Arc<dyn Screen> {
         self.screen.clone()
+    }
+
+    /// The newest picture of `app`'s window, as an agent saw it: what a question to click a spot
+    /// in it is about. A click is refused once a newer picture of that app is taken, so the
+    /// person always approves on the picture the click maps from.
+    pub fn picture(&self, app: &str) -> Option<Shot> {
+        let st = self.state.lock().unwrap();
+        st.latest
+            .get(&app.trim().to_lowercase())
+            .map(|(_, s)| s.clone())
     }
 
     /// Whether ARK may use apps here.
@@ -544,12 +559,26 @@ impl Computer {
             "picture": { "width": shot.width, "height": shot.height },
         });
         let png = shot.png.clone();
-        self.svc
-            .state
-            .lock()
-            .unwrap()
-            .shots
-            .insert(self.owner.clone(), (app.to_string(), shot));
+        {
+            let mut st = self.svc.state.lock().unwrap();
+            st.pictures += 1;
+            let n = st.pictures;
+            st.latest
+                .insert(app.trim().to_lowercase(), (n, shot.clone()));
+            // A few apps' pictures at most stay in memory.
+            while st.latest.len() > 8 {
+                let oldest = st
+                    .latest
+                    .iter()
+                    .min_by_key(|(_, (n, _))| *n)
+                    .map(|(k, _)| k.clone());
+                if let Some(k) = oldest {
+                    st.latest.remove(&k);
+                }
+            }
+            st.shots
+                .insert(self.owner.clone(), (app.to_string(), n, shot));
+        }
         self.svc.touch(&self.owner);
         Ok(ActionOutput::json(out).with_image("image/png", png))
     }
@@ -750,8 +779,17 @@ impl Adapter for Computer {
                 let shot = {
                     let st = self.svc.state.lock().unwrap();
                     match st.shots.get(&self.owner) {
-                        Some((seen, shot)) if same_app(seen, &app) => shot.clone(),
-                        Some((seen, _)) => {
+                        Some((seen, n, shot)) if same_app(seen, &app) => {
+                            let newest = st.latest.get(&app.trim().to_lowercase()).map(|l| l.0);
+                            if newest != Some(*n) {
+                                return Err(AdapterError::bad_input(
+                                    action,
+                                    format!("a newer picture of {app} was taken since yours; take one again (computer.see)"),
+                                ));
+                            }
+                            shot.clone()
+                        }
+                        Some((seen, _, _)) => {
                             return Err(AdapterError::bad_input(
                                 action,
                                 format!("your last picture is of {seen}; take one of {app} first (computer.see)"),

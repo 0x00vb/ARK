@@ -61,12 +61,30 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
             choice("Deny", ApprovalDecision::Deny, None),
         ];
     }
+    // A grant narrower than the action names what it covers on its button: one app, one
+    // command. The question above already shows which.
+    if let Some(what) = grant_scope(req) {
+        return vec![
+            choice("Allow once", ApprovalDecision::AllowOnce, None),
+            choice(
+                &format!("Allow {what} for this session"),
+                ApprovalDecision::AllowSession,
+                None,
+            ),
+            choice(
+                &format!("Always allow {what}"),
+                ApprovalDecision::AllowAlways,
+                None,
+            ),
+            choice("Deny", ApprovalDecision::Deny, None),
+        ];
+    }
     vec![
         choice("Allow once", ApprovalDecision::AllowOnce, None),
         choice(
             "Allow for this session",
             ApprovalDecision::AllowSession,
-            Some(grant_scope(req)),
+            Some(format!("don't ask again for `{}`", req.class)),
         ),
         choice(
             "Always in this project",
@@ -77,41 +95,19 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
     ]
 }
 
-/// What a "for this session" or "always" answer covers, in words: every Computer action in
-/// one app, or the approval class.
-pub fn grant_scope(req: &ApprovalRequest) -> String {
+/// What a lasting answer covers when a grant is narrower than the action, as a button names
+/// it: the app (`WhatsApp`) for the Computer, `this command` for a process. `None`: the action.
+pub fn grant_scope(req: &ApprovalRequest) -> Option<String> {
     match req.class.split_once(':') {
-        Some(("computer", _)) => {
-            let app = req.input.get("app").and_then(|v| v.as_str()).unwrap_or("");
-            format!("don't ask again for anything in {}", app.trim())
-        }
-        Some(("process.start", _)) => {
-            let s = |k: &str| {
-                req.input
-                    .get(k)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .trim()
-                    .to_string()
-            };
-            let folder = s("folder")
-                .trim_start_matches("./")
-                .trim_matches('/')
-                .to_string();
-            let place = if folder.is_empty() {
-                "the project folder".to_string()
-            } else {
-                folder
-            };
-            format!(
-                "don't ask again for `{}` in {place}",
-                s("command")
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        }
-        _ => format!("don't ask again for `{}`", req.class),
+        Some(("computer", _)) => req
+            .input
+            .get("app")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+            .map(str::to_string),
+        Some(("process.start", _)) => Some("this command".into()),
+        _ => None,
     }
 }
 
@@ -196,5 +192,41 @@ mod tests {
         let task = tokio::spawn(async move { approver.decide(&req()).await });
         drop(rx.recv().await.unwrap());
         assert_eq!(task.await.unwrap(), ApprovalDecision::Deny);
+    }
+
+    /// A grant narrower than the action names it on the button; the question says which.
+    #[test]
+    fn a_narrow_grant_names_what_it_covers_on_its_button() {
+        let labels = |r: &ApprovalRequest| {
+            approval_choices(r)
+                .into_iter()
+                .map(|c| c.label)
+                .collect::<Vec<_>>()
+        };
+        let mut app = req();
+        app.action = "computer.click".into();
+        app.class = "computer:whatsapp".into();
+        app.input = serde_json::json!({ "app": "WhatsApp", "ref": 3, "name": "Send" });
+        assert_eq!(
+            labels(&app),
+            [
+                "Allow once",
+                "Allow WhatsApp for this session",
+                "Always allow WhatsApp",
+                "Deny"
+            ]
+        );
+        let mut cmd = req();
+        cmd.class = "process.start:npm run dev@".into();
+        assert_eq!(labels(&cmd)[1], "Allow this command for this session");
+        assert_eq!(
+            labels(&req()),
+            [
+                "Allow once",
+                "Allow for this session",
+                "Always in this project",
+                "Deny"
+            ]
+        );
     }
 }

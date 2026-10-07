@@ -32,6 +32,7 @@ ChatGPT, Spotify) found these limits:
 | Pictures | `computer.see {app}`: a picture of the app's front window only (`screencapture -l <window>`), at most 1280 pixels on its longer side. Never the whole screen: other windows can hold anything |
 | Clicks in a picture | `computer.point {app, x, y, what?}` in the pixels of the owner's last picture of that app. Refused outside the picture, for another app, or when the window moved since |
 | Pictures to the model | `ActionOutput::pictures`, kept by the engine per invocation, then attached to the tool result message (`Message::pictures`, never serialized). Anthropic: image blocks in the `tool_result`. OpenAI: a `user` message after the `tool` message. Ollama: `images`. Claude Code: image blocks in its stream input. Codex: `image` items on the app server. `codex exec` and other providers: none, and the result says so (`Provider::reads_pictures`) |
+| What the person sees | A question to click a spot in a picture shows that picture with a ring on the spot (`computer_picture`: the newest picture of the app). A click is refused once a newer picture of that app was taken, so the card's picture is the one the click maps from. A step that took a picture shows it under the step while the engine keeps it (the last 12, in memory) |
 | Pictures in context | A new picture removes the older ones from the working set (their text stays). Each costs `PICTURE_TOKENS` (1600) in the budget |
 | Approvals | Unchanged from 0018: every action but `apps` asks each time. Grants per app (`grant_per`, one answer for every action in one app) are built in `ark-core` but not used by the Computer until the owner turns them on |
 
@@ -48,6 +49,8 @@ ChatGPT, Spotify) found these limits:
 - `crates/ark-computer/tests/computer.rs`: typing as keys, menus by name (a greyed item refused),
   scrolling and double-click positions, a picture and a point mapped to the screen (refused
   outside the picture), and the 0018 checks.
+- `crates/ark-ui/tests/page.rs` (WebKit), `the_person_sees_what_the_agent_saw_and_where_it_will_click`:
+  the picture under its step, the ring at the spot, no caption, the click at the mapped point.
 - `crates/ark-runtime/src/budget.rs`, `only_the_newest_picture_stays_and_it_counts`.
 - `crates/ark-model/src/{anthropic,openai,ollama}.rs`: where each puts a tool result's picture.
 - `crates/ark-core/src/action.rs`, `a_grant_key_splits_answers_by_input_and_never_widens`.

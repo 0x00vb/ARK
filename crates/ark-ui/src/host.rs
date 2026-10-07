@@ -748,6 +748,35 @@ impl Host {
                 Some(c) => Ok(json!({ "stopped": c.take_back() })),
                 None => anyhow::bail!("this app does not use the computer"),
             },
+            // The newest picture an agent took of an app's window, shown beside a question to
+            // click a spot in it (`{media_type, data, width, height}`).
+            "computer_picture" => {
+                use base64::Engine as _;
+                let shot = self
+                    .computer
+                    .as_ref()
+                    .and_then(|c| c.picture(&s("app")))
+                    .ok_or_else(|| anyhow::anyhow!("no picture of {} yet", s("app")))?;
+                Ok(json!({
+                    "media_type": "image/png",
+                    "data": base64::engine::general_purpose::STANDARD.encode(&shot.png),
+                    "width": shot.width,
+                    "height": shot.height,
+                }))
+            }
+            // The picture a step showed the model (`computer.see`), while the runtime still
+            // holds it (`{media_type, data}`).
+            "picture" => {
+                use base64::Engine as _;
+                let p = self
+                    .engine
+                    .picture(&s("invocation"))
+                    .ok_or_else(|| anyhow::anyhow!("that picture is no longer kept"))?;
+                Ok(json!({
+                    "media_type": p.media_type,
+                    "data": base64::engine::general_purpose::STANDARD.encode(p.bytes.as_slice()),
+                }))
+            }
             // Every chat running a turn now (`{session, title, project, input}`).
             "working" => Ok(Value::Array(self.working())),
             "summary" => Ok(self.summary()),

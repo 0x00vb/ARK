@@ -878,6 +878,32 @@ async function computer(page) {
 }
 scenarios.computer = computer;
 
+// ADR 0042: the picture the agent took shows under its step; a click in it is asked with the
+// picture and a ring on the spot, so the person judges the spot itself.
+async function computerPicture(page) {
+  const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
+  await page.locator("#input").fill("Press Save in Notes");
+  await page.keyboard.press("Enter");
+  const see = page.locator("#thread .approval:not(.decided)");
+  await see.waitFor();
+  assert.match(await see.innerText(), /Taking a picture of Notes's window/);
+  await see.locator("button", { hasText: "Allow once" }).click();
+  const point = page.locator("#thread .approval:not(.decided)", { hasText: "Clicking the Save button in Notes" });
+  await point.waitFor();
+  const shot = point.locator(".approval-shot");
+  await shot.waitFor();
+  assert.match(await shot.locator("img").getAttribute("src"), /^data:image\/png;base64,/);
+  // The fake picture is 400 by 300: (100, 150) is a quarter across and half down.
+  const ring = await shot.locator(".approval-spot").evaluate((r) => [r.style.left, r.style.top]);
+  assert.deepEqual(ring, ["25%", "50%"]);
+  assert.equal(await point.locator(".approval-class, .approval-summary").count(), 0, "no caption");
+  await point.locator("button", { hasText: "Allow once" }).click();
+  await done;
+  // What the agent saw, under its step.
+  await page.locator(".act[data-action='computer.see'] .act-shot img").waitFor({ state: "attached" });
+}
+scenarios["computer-picture"] = computerPicture;
+
 // The window on a runtime it visits (ADR 0029): the page talks HTTP but leaves room for the
 // window's controls, and `ark.openLocal()` loads the address the window catches to go back to
 // its own page. An app's row sits above the projects.
@@ -939,7 +965,7 @@ async function processes(page) {
   const words = await ask.innerText();
   assert.match(words, /Keep this running in the project folder, then open \/home in the browser\. Not contained: it runs as you\.\n\s*python3 -u -m http\.server 0 --bind 127\.0\.0\.1/);
   const buttons = (await ask.locator(".approval-actions button").allInnerTexts()).map((t) => t.split("\n")[0]);
-  assert.deepEqual(buttons, ["Allow once", "Allow for this session", "Always in this project", "Deny"]);
+  assert.deepEqual(buttons, ["Allow once", "Allow this command for this session", "Always allow this command", "Deny"]);
   await ask.locator('button[data-decision="allow_once"]').click();
 
   // The panel opens with the process and its output; the row turns ready (by then the Browser

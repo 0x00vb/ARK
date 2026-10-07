@@ -118,7 +118,7 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     // A screen in memory for the `computer` scenario: what was pressed is checked after.
     let screen = ark_sdk::prelude::ark_computer::fake::FakeScreen::new()
         .app("Notes", &[("text field", "Title"), ("button", "Save")]);
-    if scenario == "computer" {
+    if scenario.starts_with("computer") {
         builder = builder.computer_with(
             ark_sdk::prelude::ark_computer::ComputerService::with_screen(Arc::new(screen.clone())),
         );
@@ -199,6 +199,14 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         assert!(
             !log.iter().any(|l| l.starts_with("press")),
             "taken back before the click: {log:?}"
+        );
+    }
+    if scenario == "computer-picture" {
+        // The fake picture is half the window's size: pixel (100, 150) is point (200, 300).
+        let log = screen.log.lock().unwrap().clone();
+        assert!(
+            log.contains(&"pointer Click at 200,300".to_string()),
+            "{log:?}"
         );
     }
 }
@@ -692,6 +700,30 @@ async fn the_person_sees_who_uses_the_computer_and_takes_it_back() {
         ),
     ];
     drive("computer", script, Duration::ZERO).await;
+}
+
+/// A picture the agent took shows under its step, and a click in it is asked with the picture and
+/// a ring on the spot (ADR 0042).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_person_sees_what_the_agent_saw_and_where_it_will_click() {
+    let call = |name: &str, args: Value| Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: name.into(),
+            name: name.into(),
+            arguments: args,
+        }],
+        usage: Usage::default(),
+    };
+    let script = vec![
+        call("computer.see", json!({ "app": "Notes" })),
+        call(
+            "computer.point",
+            json!({ "app": "Notes", "x": 100, "y": 150, "what": "the Save button" }),
+        ),
+        say("Clicked Save.", false),
+    ];
+    drive("computer-picture", script, Duration::ZERO).await;
 }
 
 /// "Run the app and show me /home": the start asks with its command and folder, the Processes

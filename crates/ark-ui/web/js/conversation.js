@@ -343,6 +343,15 @@ class TurnView {
     if (row.dataset.status === "running") row.dataset.status = ok ? "ok" : "failed";
     if (a.label) this.detail(row, a.label, ok ? "muted" : "error");
     if (ev?.duration_ms != null) row.querySelector(".act-meta").textContent = secs(ev.duration_ms);
+    // A picture the agent took of a window: what it saw, under its step. Click to enlarge.
+    if (ok && ev?.invocation && /^computer\.(see|point)$/.test(row.dataset.action)) {
+      this.api.call("picture", { invocation: ev.invocation }).then((p) => {
+        if (!p?.data) return;
+        const img = h("img", { alt: "", src: `data:${p.media_type};base64,${p.data}` });
+        const shot = h("button.act-shot", { type: "button", onclick: () => shot.classList.toggle("open") }, img);
+        row.querySelector(".act-detail")?.after(shot) || row.querySelector(".act-line").after(shot);
+      }).catch(() => {});
+    }
   }
 
   async toggleCall(row) {
@@ -492,6 +501,25 @@ function fileCard(api, path, here, before) {
   return h("div.file-item", card, btn);
 }
 
+/// The agent's newest picture of the app, with a ring where it wants to click. Nothing when
+/// there is no picture to show.
+function spotPicture(input) {
+  const box = h("div.approval-shot");
+  const img = h("img", { alt: "" });
+  const ring = h("span.approval-spot");
+  box.append(img, ring);
+  box.hidden = true;
+  window.ark?.call("computer_picture", { app: input.app }).then((p) => {
+    const x = Number(input.x), y = Number(input.y);
+    if (!p?.data || !(x >= 0 && y >= 0 && x <= p.width && y <= p.height)) return box.remove();
+    ring.style.left = `${(x / p.width) * 100}%`;
+    ring.style.top = `${(y / p.height) * 100}%`;
+    img.src = `data:${p.media_type};base64,${p.data}`;
+    box.hidden = false;
+  }).catch(() => box.remove());
+  return box;
+}
+
 /// The question card for a pending approval. An orchestrated agent's question names the
 /// agent and its task; the conversation's own has the keyboard hints.
 export function approvalCard(msg, onDecide) {
@@ -511,8 +539,11 @@ export function approvalCard(msg, onDecide) {
     h("div.approval-title", msg.title || (own ? "ARK wants to:" : `${req.agent} wants to:`)),
     h("div.approval-line", what),
     preview ? h("pre.approval-preview", preview) : null,
+    // A click in a picture shows the picture with the spot: the person judges the spot, not
+    // the agent's words for it.
+    req.action === "computer.point" ? spotPicture(req.input || {}) : null,
     // What the action does in general, unless the preview already shows what this call does.
-    req.summary && !preview ? h("div.approval-summary", req.summary) : null,
+    req.summary && !preview && req.action !== "computer.point" ? h("div.approval-summary", req.summary) : null,
     // The answers come from ark-interact, as the terminal's do: the first is the default.
     h("div.approval-actions", ...(msg.choices || [
       { label: "Allow once", decision: "allow_once" },
@@ -523,10 +554,6 @@ export function approvalCard(msg, onDecide) {
       c.label,
       own && i === 0 ? h("kbd", "↩") : null,
       own && c.decision === "deny" ? h("kbd", "esc") : null))),
-    // What a lasting answer covers, in ark-interact's words (every action in one app).
-    req.class && req.class !== req.action && req.action !== "acquire_capability"
-      ? h("div.approval-class", `“Allow for this session”: ${(msg.choices || []).find((c) => c.decision === "allow_session")?.hint || `covers ${req.class}`}`)
-      : null,
   );
   card.decide = decide;
   return card;

@@ -41,8 +41,14 @@ What changed for people building on ARK, per release. Not a commit log.
   none gets a line instead. Pictures stay in memory, only the newest stays in context, and each
   counts `PICTURE_TOKENS` in the budget. Taking one needs macOS's Screen Recording permission.
 - `ActionDescriptor::grant_per(group, fields)` (`ark_core::GrantKey`): one session or project
-  answer covers the calls with the same values of some input fields; the approval card says
-  what it covers (`ark_interact::grant_scope`).
+  answer covers the calls with the same values of some input fields. Its buttons name what they
+  cover: "Allow WhatsApp for this session", "Always allow this command"
+  (`ark_interact::grant_scope`).
+- A question to click a spot in a picture (`computer.point`) shows the picture with a ring on the
+  spot, so the person judges the spot, not the agent's words for it. A click is refused once a
+  newer picture of that app was taken. A step that took a picture shows it, small, under the step
+  (click to enlarge) while the runtime keeps it (the last 12). Host calls `computer_picture` and
+  `picture`; `ComputerService::picture`, `Engine::picture`.
 
 ### Changed
 - `present` says what `locator` is for each view: the address for the browser (this machine's
@@ -50,6 +56,8 @@ What changed for people building on ARK, per release. Not a commit log.
   it in the person's Browser view instead of giving up.
 - `browser.open` refusing an address on this machine says to show the page in the person's
   browser view instead.
+- The approval card has no caption under its buttons: what "for this session" covers is on the
+  button itself when it is narrower than the action.
 - `computer.type` types as keys (the field focused, its text selected, then replaced), so apps
   that ignore a text set from outside (WhatsApp's Send button) see the change. A field that
   takes no focus still gets its text set.

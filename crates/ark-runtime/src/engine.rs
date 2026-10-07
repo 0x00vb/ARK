@@ -44,7 +44,12 @@ pub struct Engine {
     /// Pictures a call showed, by invocation, until the harness takes them for the model.
     /// Never stored.
     pictures: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<ark_tools::Picture>>>>,
+    /// The last pictures the harness took, by invocation, for a window to show in their step.
+    shown: Arc<std::sync::Mutex<std::collections::VecDeque<(String, ark_tools::Picture)>>>,
 }
+
+/// How many pictures stay for windows to show after the model got them.
+const SHOWN: usize = 12;
 
 impl Engine {
     /// Construct with a store and a consumer-supplied registry.
@@ -58,6 +63,7 @@ impl Engine {
             skills: Vec::new(),
             stopping: Arc::default(),
             pictures: Arc::default(),
+            shown: Arc::default(),
         }
     }
 
@@ -74,6 +80,7 @@ impl Engine {
             skills: self.skills.clone(),
             stopping: self.stopping.clone(),
             pictures: self.pictures.clone(),
+            shown: self.shown.clone(),
         }
     }
 
@@ -154,11 +161,33 @@ impl Engine {
 
     /// The pictures an invocation showed ([`ark_tools::ActionOutput::pictures`]), once.
     pub fn take_pictures(&self, invocation: &str) -> Vec<ark_tools::Picture> {
-        self.pictures
+        let taken = self
+            .pictures
             .lock()
             .unwrap()
             .remove(invocation)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if let Some(p) = taken.first() {
+            let mut shown = self.shown.lock().unwrap();
+            shown.push_back((invocation.to_string(), p.clone()));
+            while shown.len() > SHOWN {
+                shown.pop_front();
+            }
+        }
+        taken
+    }
+
+    /// The picture an invocation showed the model, while it is among the last few: what an
+    /// agent saw, for a window to show in that step. Never stored.
+    pub fn picture(&self, invocation: &str) -> Option<ark_tools::Picture> {
+        let id = invocation.trim_start_matches("inv:");
+        self.shown
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|(i, _)| i == id)
+            .map(|(_, p)| p.clone())
     }
 
     /// An engine for one turn: this one, with the plugins connected now in its registry.

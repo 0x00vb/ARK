@@ -42,6 +42,10 @@ held for an API stream that breaks after some text (an `overloaded_error` event 
   `REPLY_SCHEMA`, same prompt, uncached `codex exec`). Output fell from 448 tokens (118 of them
   reasoning) to 242, since the model no longer escapes JSON. Optional keys are written as `null`.
   A turn usually offers fewer tools.
+- Every provider gets the typed `files.edit` and `files.write` schemas. Simulated bench
+  (2026-10-07): `files-edit` 11,592 → 13,730 tokens (+18%), `workbooks` 21,163 → 22,547
+  (+6.5%), the other 20 workloads unchanged; `bench/baseline.json` regenerated for it. With the
+  earlier Files schemas and ADR 0050's changes, the two read 11,600 and 20,843.
 - An optional key whose own schema accepts null cannot be left out by Codex: it is sent as null.
   `properties` without `additionalProperties` is treated as closed.
 - A retry after shown text pays for a whole new answer. Before, the turn failed.

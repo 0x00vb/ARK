@@ -36,6 +36,15 @@
   --grid-head: #f5f5f4;
   --grid-line: rgba(0, 0, 0, 0.07);
 
+  /* Code colours in the editor (js/highlight.js), muted and their own (BRAND.md › Product UI):
+     never the status colours, and keywords take the person's accent mixed toward grey, not the
+     blue itself. Dark has its own below. */
+  --tok-key: color-mix(in oklab, var(--accent) 62%, var(--text-2));
+  --tok-str: #4f7a60;
+  --tok-num: #8a683c;
+  --tok-lit: var(--tok-num);
+  --tok-com: var(--text-2);
+
   --seg-0: #8e9aaf; --seg-1: #b8a07e; --seg-2: #7fa7a0; --seg-3: #6f8fd6; --seg-4: #b98bb3;
   --seg-5: #c9a24a; --seg-6: #9aa66b; --seg-7: #d08770; --seg-8: #7ab8d6;
   color-scheme: light;
@@ -69,6 +78,8 @@
   --grid-head: #1f1f1f;
   --grid-line: rgba(255, 255, 255, 0.07);
   --shadow-menu: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 34px rgba(0, 0, 0, 0.5);
+  --tok-str: #8db59a;
+  --tok-num: #c7a676;
 }
 
 * { box-sizing: border-box; }
@@ -1014,6 +1025,22 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   padding: 14px 16px; border: 0; background: var(--pane); color: var(--text);
   font: 12.5px/1.6 var(--mono); tab-size: 2; outline: none;
 }
+/* Code colours (js/highlight.js): a layer behind a textarea whose own text is transparent. Both
+   share font, padding and no wrapping; file.js moves the layer's text by the textarea's scroll. */
+.wb-code { position: relative; flex: 1; min-height: 0; display: flex; background: var(--pane); }
+.wb-code .wb-editor { position: relative; z-index: 1; background: transparent; color: transparent; caret-color: var(--text); white-space: pre; overflow: auto; }
+.wb-hl {
+  position: absolute; inset: 0; margin: 0; overflow: hidden; pointer-events: none;
+  padding: 14px 16px; font: 12.5px/1.6 var(--mono); tab-size: 2; white-space: pre; color: var(--text);
+}
+.wb-hl code { display: block; font: inherit; will-change: transform; }
+.wb-code.wb-plain .wb-editor { color: var(--text); }
+.wb-code.wb-plain .wb-hl { display: none; }
+.tk-key { color: var(--tok-key); }
+.tk-str { color: var(--tok-str); }
+.tk-num { color: var(--tok-num); }
+.tk-lit { color: var(--tok-lit); }
+.tk-com { color: var(--tok-com); }
 
 /* ---- files: cards in the conversation, and a file in its own tab (file.js, sheet.js,
    document.js) ------------------------------------------------------------------------------ */

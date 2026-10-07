@@ -623,6 +623,74 @@ async function workbench(page) {
   await md.locator(".btn", { hasText: "Done" }).click();
   await page.locator(".md-page p", { hasText: "Ship it today." }).waitFor();
 
+  // Code is coloured behind the editor, with the same text, font and scroll; typing and Save
+  // keep the exact text. Plain text has no colours and wraps as before.
+  const source = "// sum\nconst total = items.reduce((a, b) => a + b, 0);\n" + "let n = 1;\n".repeat(80);
+  await page.evaluate((text) => window.ark.call("file_write", { path: "app.js", text }), source);
+  await page.evaluate(() => window.ark.openFile("app.js"));
+  const js = page.locator(".fv").filter({ has: page.locator('textarea[aria-label="app.js"]') });
+  await js.locator(".wb-hl .tk-key", { hasText: "const" }).first().waitFor();
+  assert.equal(await js.locator(".wb-hl .tk-com").first().innerText(), "// sum");
+  const layout = await js.evaluate((fv) => {
+    const area = fv.querySelector(".wb-editor");
+    const layer = fv.querySelector(".wb-hl");
+    const a = getComputedStyle(area);
+    const l = getComputedStyle(layer);
+    return {
+      same: ["fontFamily", "fontSize", "lineHeight", "paddingTop", "paddingLeft", "tabSize", "whiteSpace"].filter((k) => a[k] !== l[k]),
+      text: layer.textContent === area.value + "\n",
+      transparent: a.color,
+    };
+  });
+  assert.deepEqual(layout.same, [], "the editor and its colours differ in layout");
+  assert.ok(layout.text, "the colours show other text than the editor");
+  assert.equal(layout.transparent, "rgba(0, 0, 0, 0)");
+  await js.locator(".wb-editor").evaluate((area) => {
+    area.scrollTop = 200;
+    area.dispatchEvent(new Event("scroll"));
+  });
+  assert.match(await js.locator(".wb-hl code").evaluate((c) => c.style.transform), /translate\(0px, -\d+px\)/);
+  await js.locator(".wb-editor").focus();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+End" : "Control+End");
+  await page.keyboard.type("return 'done';");
+  await js.locator(".wb-hl .tk-str", { hasText: "'done'" }).waitFor();
+  await js.locator(".wb-save").click();
+  for (let i = 0; (await page.evaluate(() => window.ark.call("file_read", { path: "app.js" }))).text !== source + "return 'done';"; i++) {
+    assert.ok(i < 50, "app.js was not saved as typed");
+    await page.waitForTimeout(100);
+  }
+  for (let i = 0; !(await js.locator(".wb-save").isDisabled()); i++) {
+    assert.ok(i < 50, "Save stayed on after saving");
+    await page.waitForTimeout(100);
+  }
+  // A selection stays visible over the colours.
+  await js.locator(".wb-editor").evaluate((area) => {
+    area.focus();
+    area.setSelectionRange(0, 60);
+    area.scrollTop = 0;
+    area.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForTimeout(400);
+  await shot(page, "editor-code");
+  await page.evaluate(() => window.arkTheme.set("dark"));
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+  // Colours ease into the new theme.
+  await page.waitForTimeout(400);
+  await shot(page, "editor-code-dark");
+  await page.evaluate(() => window.arkTheme.set("system"));
+  // A huge file is the plain editor: no layer to repaint, its own text shown.
+  await page.evaluate((text) => window.ark.call("file_write", { path: "big.js", text }), "let x = 1;\n".repeat(16000));
+  await page.evaluate(() => window.ark.openFile("big.js"));
+  const big = page.locator(".fv").filter({ has: page.locator('textarea[aria-label="big.js"]') });
+  await big.locator(".wb-code.wb-plain").waitFor();
+  assert.equal(await big.locator(".wb-hl code").innerHTML(), "");
+  assert.notEqual(await big.locator(".wb-editor").evaluate((a) => getComputedStyle(a).color), "rgba(0, 0, 0, 0)");
+  await page.evaluate(() => window.ark.openFile("draft.txt"));
+  const txt = page.locator(".fv").filter({ has: page.locator('textarea[aria-label="draft.txt"]') });
+  await txt.locator(".wb-editor").waitFor();
+  assert.equal(await txt.locator(".wb-hl").count(), 0);
+  assert.equal(await txt.locator(".wb-editor").getAttribute("wrap"), null);
+
   await page.evaluate(() => window.ark.openPanel("terminal"));
   // A shell under load can miss a line typed before its prompt: type it again until it answers.
   const term = page.locator(".xterm-helper-textarea");

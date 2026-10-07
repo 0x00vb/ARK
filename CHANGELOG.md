@@ -9,6 +9,10 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- Window: code in the file editor is coloured from the theme (keywords, strings, numbers,
+  literals, comments) for 12 language families. Other files keep the plain editor.
+
 ## [0.14.0] - 2026-10-07
 
 ### Breaking

@@ -11,6 +11,7 @@ import { h, icon, clear } from "./dom.js";
 import { markdown } from "./md.js";
 import { sheetView } from "./sheet.js";
 import { documentView } from "./document.js";
+import { highlight, languageOf, MAX_CHARS } from "./highlight.js";
 
 /// The view for each kind of file (`ark_files::Kind`). A new kind is one more entry; a new
 /// format of an existing kind needs none.
@@ -161,7 +162,35 @@ function textView(el, file, ctx, params) {
   const { ark } = ctx;
   const s = { text: file.text, dirty: false, line: 1, version: file.version, path: file.path };
   const name = file.path.split("/").pop();
-  const area = h("textarea.wb-editor", { spellcheck: "false", "aria-label": name });
+  // Code gets colours: a layer behind the textarea, whose own text is transparent, so typing,
+  // selection and undo stay the textarea's. Lines do not wrap there, so both lay out alike.
+  // Any other file is the plain editor, wrapping as before.
+  const code = languageOf(file.path) != null;
+  const area = h("textarea.wb-editor", { spellcheck: "false", "aria-label": name, ...(code ? { wrap: "off" } : {}) });
+  const text = h("code");
+  const body = code ? h("div.wb-code", h("pre.wb-hl", { "aria-hidden": "true" }, text), area) : area;
+  // The layer moves by the textarea's scroll offsets instead of scrolling itself, so it cannot
+  // stop short where the textarea's scroll bars make its own range larger.
+  const sync = () => {
+    text.style.transform = `translate(${-area.scrollLeft}px, ${-area.scrollTop}px)`;
+  };
+  // Over MAX_CHARS the layer goes and the textarea shows its own text, so a huge file costs
+  // nothing per keystroke.
+  const draw = () => {
+    const big = area.value.length > MAX_CHARS;
+    body.classList.toggle("wb-plain", big);
+    text.innerHTML = big ? "" : highlight(area.value, s.path);
+    sync();
+  };
+  // At most one repaint per frame, however fast the typing.
+  let frame = 0;
+  const paint = () => {
+    if (!code || frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      draw();
+    });
+  };
   const save = h("button.wb-save", { type: "button", disabled: true, onclick: () => store() }, "Save");
   const state = h("span.wb-status");
   const mark = () => {
@@ -187,13 +216,18 @@ function textView(el, file, ctx, params) {
     }
   }
   area.value = file.text;
-  area.addEventListener("input", mark);
+  if (code) draw();
+  area.addEventListener("input", () => {
+    mark();
+    paint();
+  });
+  if (code) area.addEventListener("scroll", sync);
   area.addEventListener("click", where);
   area.addEventListener("keyup", where);
   area.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); e.stopPropagation(); store(); }
   });
-  el.append(h("div.wb-bar", h("span.wb-file-name", file.path), h("span.spacer"), state, save, ctx.tools), area);
+  el.append(h("div.wb-bar", h("span.wb-file-name", file.path), h("span.spacer"), state, save, ctx.tools), body);
   if (params?.locator && /^\d+$/.test(params.locator)) goToLine(area, Number(params.locator));
   return {
     focus: () => ({ selection: { line: s.line } }),
@@ -203,6 +237,7 @@ function textView(el, file, ctx, params) {
       s.text = area.value = f.text;
       s.version = f.version;
       mark();
+      paint();
     },
     reveal: (loc) => /^\d+$/.test(loc) && goToLine(area, Number(loc)),
   };

@@ -303,7 +303,7 @@ async fn a_shell_write_is_found_in_the_folder() {
         .unwrap();
     let id = o.submit("w", TaskSpec::new("take notes")).unwrap();
     let q = until_asked(&o, &id).await.question.unwrap();
-    assert_eq!(q.request.preview, "Run `printf done > notes.txt`");
+    assert_eq!(q.request.preview, "Run printf done > notes.txt");
     assert_eq!(q.request.class, "program.run:printf done > notes.txt@.");
     o.answer(&id, ApprovalDecision::AllowOnce).unwrap();
     let done = o.wait(&id).await.unwrap();

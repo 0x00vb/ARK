@@ -534,6 +534,7 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
         _ => None,
     }
     .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
+    .map(|c| without_cd_here(&c, folder))
     .filter(|c| !c.is_empty());
     let base =
         |action: &str, input: Value, class: Option<String>, preview: String, summary: String| {
@@ -562,7 +563,7 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
                 json!({ "paths": paths }),
                 class,
                 format!("{verb} {}", paths.join(", ")),
-                format!("{by} {does} it in the project folder"),
+                format!("{by} {does} it"),
             )
         }
         ("execute", Some(c)) => {
@@ -571,8 +572,8 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
                 RUN,
                 json!({ "command": c, "folder": "." }),
                 class,
-                format!("Run `{c}`"),
-                format!("{by} runs it on this computer, in the project folder"),
+                format!("Run {c}"),
+                format!("{by} runs it"),
             )
         }
         // Nothing concrete to name: asked every time, never granted.
@@ -583,6 +584,35 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
             title,
             format!("{by} asks for this"),
         ),
+    }
+}
+
+/// A command without a leading `cd` into the folder it already runs in (`cd "<folder>" &&
+/// wc -w *.md` is `wc -w *.md`), so a grant for a command covers it. Any other `cd` stays.
+fn without_cd_here(command: &str, folder: &Path) -> String {
+    let Some(rest) = command.strip_prefix("cd ") else {
+        return command.to_string();
+    };
+    let (dir, after) = match rest.chars().next() {
+        Some(q @ ('"' | '\'')) => match rest[1..].split_once(q) {
+            Some((d, a)) => (d.to_string(), a),
+            None => return command.to_string(),
+        },
+        _ => match rest.split_once(' ') {
+            Some((d, a)) => (d.to_string(), a),
+            None => return command.to_string(),
+        },
+    };
+    let Some(after) = after.trim_start().strip_prefix("&&") else {
+        return command.to_string();
+    };
+    let here = Path::new(&dir)
+        .canonicalize()
+        .is_ok_and(|d| d == folder || dir == ".");
+    if here {
+        after.trim().to_string()
+    } else {
+        command.to_string()
     }
 }
 
@@ -709,7 +739,7 @@ mod tests {
         assert_eq!(edit.action, CHANGE);
         assert_eq!(edit.class, "program.change:report.md web/a.md");
         assert_eq!(edit.preview, "Change report.md, web/a.md");
-        assert_eq!(edit.summary, "Fake changes it in the project folder");
+        assert_eq!(edit.summary, "Fake changes it");
         assert!(!edit.ask_each_time);
 
         let run = request(
@@ -718,7 +748,21 @@ mod tests {
             "Fake",
         );
         assert_eq!(run.class, "program.run:npm test@.");
-        assert_eq!(run.preview, "Run `npm test`");
+        assert_eq!(run.preview, "Run npm test");
+        // A `cd` into the folder it runs in anyway is the same command; any other is not.
+        let here = request(
+            &json!({ "kind": "execute", "title": "x",
+                "rawInput": { "command": format!("cd \"{}\" && npm test", root.display()) } }),
+            &root,
+            "Fake",
+        );
+        assert_eq!(here.class, "program.run:npm test@.");
+        let elsewhere = request(
+            &json!({ "kind": "execute", "title": "x", "rawInput": { "command": "cd web && npm test" } }),
+            &root,
+            "Fake",
+        );
+        assert_eq!(elsewhere.class, "program.run:cd web && npm test@.");
 
         // Outside the folder, or nothing to name: asked every time.
         let outside = request(

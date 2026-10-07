@@ -137,6 +137,7 @@ impl Labels {
             .or_else(|| file_approval(&request.action, &request.input))
             .or_else(|| run_approval(&request.action, &request.input))
             .or_else(|| process_approval(&request.action, &request.input))
+            .or_else(|| program_approval(&request.action, &request.input))
             .or_else(|| runtime_label(&request.action, &request.input))
             .unwrap_or_else(|| request.preview.clone())
     }
@@ -389,6 +390,19 @@ fn run_result(summary: &str) -> String {
 
 /// A process start, for its approval: the command, where, what it can reach, and the page it
 /// will open.
+/// A command an agent program wants to run (ADR 0043), as a process start reads: one sentence,
+/// then the command alone.
+fn program_approval(action: &str, input: &Value) -> Option<String> {
+    if action != "program.run" {
+        return None;
+    }
+    let command = input.get("command").and_then(Value::as_str).unwrap_or("");
+    Some(format!(
+        "Run this in the project folder. Not contained: it runs as you.\n  {}",
+        clip(&one_line(command), 200)
+    ))
+}
+
 fn process_approval(action: &str, input: &Value) -> Option<String> {
     if action != PROCESS_START {
         return None;

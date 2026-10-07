@@ -80,6 +80,53 @@ pub struct ActionDescriptor {
     /// person's computer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_each_time: bool,
+    /// What one "for this session" or "always" answer covers, when it is not the action name:
+    /// the calls of a group with the same values of some input fields (every Computer action in
+    /// one app). See [`GrantKey`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<GrantKey>,
+}
+
+/// Splits approval answers by input: a grant covers the calls of `group` whose `fields` have
+/// the same values. The approval class is `group:value` (`computer:whatsapp`), with several
+/// fields joined by `@` (`process.start:npm run dev@web`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantKey {
+    pub group: String,
+    pub fields: Vec<String>,
+    /// Values that differ only in case are the same (app names).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fold_case: bool,
+}
+
+impl GrantKey {
+    /// The approval class of a call, or `None` when every field is missing or empty (the call
+    /// then gets the default class). One empty field among others stays an empty value
+    /// (`process.start:npm run dev@`), so a grant never widens to calls that left it out.
+    pub fn class(&self, input: &serde_json::Value) -> Option<String> {
+        let values: Vec<String> = self
+            .fields
+            .iter()
+            .map(|f| {
+                let v = match &input[f.as_str()] {
+                    serde_json::Value::String(s) => {
+                        s.split_whitespace().collect::<Vec<_>>().join(" ")
+                    }
+                    serde_json::Value::Null => String::new(),
+                    other => other.to_string(),
+                };
+                if self.fold_case {
+                    v.to_lowercase()
+                } else {
+                    v
+                }
+            })
+            .collect();
+        if values.iter().all(String::is_empty) {
+            return None;
+        }
+        Some(format!("{}:{}", self.group, values.join("@")))
+    }
 }
 
 impl ActionDescriptor {
@@ -95,7 +142,28 @@ impl ActionDescriptor {
             capabilities: Vec::new(),
             reuse: Reuse::Auto,
             ask_each_time: false,
+            grant: None,
         }
+    }
+
+    /// One answer covers the calls of `group` with the same values of `fields`
+    /// ([`GrantKey`]).
+    pub fn grant_per(mut self, group: &str, fields: &[&str]) -> Self {
+        self.grant = Some(GrantKey {
+            group: group.into(),
+            fields: fields.iter().map(|f| f.to_string()).collect(),
+            fold_case: false,
+        });
+        self
+    }
+
+    /// Like [`Self::grant_per`], with values that differ only in case taken as the same.
+    pub fn grant_per_any_case(mut self, group: &str, fields: &[&str]) -> Self {
+        self = self.grant_per(group, fields);
+        if let Some(g) = &mut self.grant {
+            g.fold_case = true;
+        }
+        self
     }
 
     /// Ask the person at every call; no earlier answer covers it ([`Self::ask_each_time`]).
@@ -135,5 +203,37 @@ impl ActionDescriptor {
     /// The adapter portion of the action name (`fs` in `fs.read`).
     pub fn adapter_name(&self) -> &str {
         self.name.split('.').next().unwrap_or(&self.name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_grant_key_splits_answers_by_input_and_never_widens() {
+        let d = ActionDescriptor::new("process.start", "start", RiskTier::Mutate)
+            .grant_per("process.start", &["command", "folder"]);
+        let g = d.grant.unwrap();
+        assert_eq!(
+            g.class(&json!({ "command": "npm  run dev", "folder": "web" }))
+                .as_deref(),
+            Some("process.start:npm run dev@web")
+        );
+        // One field left out stays empty: the grant covers only calls that leave it out too.
+        assert_eq!(
+            g.class(&json!({ "command": "npm run dev" })).as_deref(),
+            Some("process.start:npm run dev@")
+        );
+        assert_eq!(g.class(&json!({})), None);
+        let any = ActionDescriptor::new("app.use", "use", RiskTier::Mutate)
+            .grant_per_any_case("app", &["app"])
+            .grant
+            .unwrap();
+        assert_eq!(
+            any.class(&json!({ "app": "WhatsApp" })).as_deref(),
+            Some("app:whatsapp")
+        );
     }
 }

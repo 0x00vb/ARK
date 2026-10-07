@@ -523,7 +523,10 @@ export function approvalCard(msg, onDecide) {
       c.label,
       own && i === 0 ? h("kbd", "↩") : null,
       own && c.decision === "deny" ? h("kbd", "esc") : null))),
-    req.class && req.class !== req.action && req.action !== "acquire_capability" ? h("div.approval-class", `“Allow for session” covers ${req.class}`) : null,
+    // What a lasting answer covers, in ark-interact's words (every action in one app).
+    req.class && req.class !== req.action && req.action !== "acquire_capability"
+      ? h("div.approval-class", `“Allow for this session”: ${(msg.choices || []).find((c) => c.decision === "allow_session")?.hint || `covers ${req.class}`}`)
+      : null,
   );
   card.decide = decide;
   return card;

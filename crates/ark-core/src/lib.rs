@@ -36,7 +36,7 @@ pub mod research;
 pub mod rules;
 pub mod surface;
 
-pub use action::{ActionDescriptor, Reuse, RiskTier};
+pub use action::{ActionDescriptor, GrantKey, Reuse, RiskTier};
 pub use artifact::{Artifact, ArtifactKind, Provenance};
 pub use capability::{Capability, CapabilityCatalog, CapabilitySpec};
 pub use context::WorkspaceContext;

@@ -1516,7 +1516,11 @@ impl Harness {
             summary: desc.summary.clone(),
             risk: desc.risk,
             input: call.arguments.clone(),
-            class: profile.approval_class(&call.name, &call.arguments),
+            class: desc
+                .grant
+                .as_ref()
+                .and_then(|g| g.class(&call.arguments))
+                .unwrap_or_else(|| profile.approval_class(&call.name, &call.arguments)),
             preview: preview_call(&call.name, &call.arguments),
             agent: None,
             task: None,

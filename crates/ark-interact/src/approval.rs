@@ -58,7 +58,7 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
         choice(
             "Allow for this session",
             ApprovalDecision::AllowSession,
-            Some(format!("don't ask again for `{}`", req.class)),
+            Some(grant_scope(req)),
         ),
         choice(
             "Always in this project",
@@ -67,6 +67,44 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
         ),
         choice("Deny", ApprovalDecision::Deny, None),
     ]
+}
+
+/// What a "for this session" or "always" answer covers, in words: every Computer action in
+/// one app, or the approval class.
+pub fn grant_scope(req: &ApprovalRequest) -> String {
+    match req.class.split_once(':') {
+        Some(("computer", _)) => {
+            let app = req.input.get("app").and_then(|v| v.as_str()).unwrap_or("");
+            format!("don't ask again for anything in {}", app.trim())
+        }
+        Some(("process.start", _)) => {
+            let s = |k: &str| {
+                req.input
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            };
+            let folder = s("folder")
+                .trim_start_matches("./")
+                .trim_matches('/')
+                .to_string();
+            let place = if folder.is_empty() {
+                "the project folder".to_string()
+            } else {
+                folder
+            };
+            format!(
+                "don't ask again for `{}` in {place}",
+                s("command")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        }
+        _ => format!("don't ask again for `{}`", req.class),
+    }
 }
 
 /// A question waiting for a person. Dropping it answers "deny".

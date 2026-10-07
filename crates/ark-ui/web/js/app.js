@@ -169,7 +169,7 @@ function popover(anchor, children, { above = false, end = false } = {}) {
     document.removeEventListener("mousedown", onDown, true);
     document.removeEventListener("keydown", onKey, true);
     el.classList.remove("open");
-    setTimeout(() => el.remove(), 140);
+    setTimeout(() => el.remove(), 120);
   }
   el.close = close;
   setTimeout(() => {
@@ -603,13 +603,12 @@ function palette() {
   overlay.hidden = false;
   overlay.onmousedown = (e) => e.target === overlay && closePalette();
   paint();
-  requestAnimationFrame(() => { overlay.classList.add("open"); input.focus(); });
+  input.focus();
 }
 
 function closePalette() {
   const overlay = $("#overlay");
-  overlay.classList.remove("open");
-  setTimeout(() => (overlay.hidden = true), 120);
+  overlay.hidden = true;
   composer.focus();
 }
 

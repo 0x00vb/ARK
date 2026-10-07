@@ -26,7 +26,8 @@
   --err: #c53030;
   --shadow-float: 0 0 0 1px rgba(0, 0, 0, 0.055), 0 2px 4px rgba(0, 0, 0, 0.03), 0 10px 28px rgba(0, 0, 0, 0.07);
   --shadow-menu: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 30px rgba(0, 0, 0, 0.12);
-  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --col: 740px;
 
   /* Files: a tint per kind, and the grid's headers. */
@@ -98,7 +99,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   grid-template-columns: var(--sb) minmax(0, 1fr) var(--pw);
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
-  transition: grid-template-columns 300ms var(--ease);
+  transition: grid-template-columns 240ms var(--ease-drawer);
 }
 .app[data-sidebar="closed"] { --sb: 0px; }
 /* The pane never leaves the conversation less than --chat-min (unless the window is narrow). */
@@ -299,10 +300,10 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 }
 /* Animate only once the drawer has been used, not when a narrow window first loads. */
 .app[data-compact="true"][data-drawer="closed"] .sidebar {
-  transition: translate 240ms var(--ease), visibility 0s linear 240ms;
+  transition: translate 200ms var(--ease-drawer), visibility 0s linear 200ms;
 }
 .app[data-compact="true"][data-drawer="open"] .sidebar {
-  translate: 0 0; visibility: visible; transition: translate 240ms var(--ease);
+  translate: 0 0; visibility: visible; transition: translate 240ms var(--ease-drawer);
   box-shadow: 0 0 0 1px var(--hair), 0 16px 48px rgba(0, 0, 0, 0.18);
 }
 .app[data-shell="desktop"][data-sidebar="closed"] .topbar { padding-left: 84px; }
@@ -742,7 +743,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   position: absolute; bottom: calc(100% - 10px); left: 28px; right: 28px;
   background: var(--card); border-radius: 14px; box-shadow: var(--shadow-menu);
   padding: 6px; max-height: 320px; overflow-y: auto; z-index: 20;
-  animation: pop 160ms var(--ease) both;
 }
 .slash-item { display: flex; align-items: baseline; gap: 14px; padding: 6px 10px; border-radius: 9px; cursor: pointer; font-size: 13px; }
 .slash-item[aria-selected="true"] { background: var(--hover); }
@@ -803,11 +803,11 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   padding: 5px; max-height: 60vh; overflow-y: auto;
   opacity: 0; translate: 0 -4px; scale: 0.98; transform-origin: top left;
   transition-property: opacity, translate, scale;
-  transition-duration: 150ms;
+  transition-duration: 110ms;
   transition-timing-function: var(--ease);
 }
 .popover.above { translate: 0 4px; }
-.popover.open { opacity: 1; translate: 0 0; scale: 1; }
+.popover.open { opacity: 1; translate: 0 0; scale: 1; transition-duration: 160ms; }
 .menu-item {
   width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
   border: 0; background: transparent; text-align: left;
@@ -839,20 +839,16 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   border-radius: 8px; padding: 7px 10px; font: 13px var(--font);
 }
 
+/* ⌘K is opened from the keyboard many times a day: it appears and goes at once, no motion. */
 .overlay {
   position: fixed; inset: 0; z-index: 70;
   background: rgba(0, 0, 0, 0.14);
-  opacity: 0; transition: opacity 140ms var(--ease);
 }
-.overlay.open { opacity: 1; }
 .palette-box {
   width: min(560px, 92vw); margin: 13vh auto 0;
   background: var(--card); border-radius: 16px; box-shadow: var(--shadow-menu);
   overflow: hidden;
-  translate: 0 -6px; scale: 0.985;
-  transition: translate 160ms var(--ease), scale 160ms var(--ease);
 }
-.overlay.open .palette-box { translate: 0 0; scale: 1; }
 .palette-input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--text); font: 15px var(--font); padding: 15px 18px; box-shadow: inset 0 -1px 0 var(--hair); }
 .palette-list { max-height: 52vh; overflow-y: auto; padding: 6px; }
 .palette-item { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 7px 12px; border-radius: 10px; font-size: 13.5px; cursor: pointer; }
@@ -866,9 +862,9 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   padding: 8px 14px; border-radius: 10px; font-size: 13px;
   max-width: min(520px, 90vw);
   pointer-events: none;
-  transition: opacity 180ms var(--ease), translate 180ms var(--ease);
+  transition: opacity 140ms var(--ease), translate 140ms var(--ease);
 }
-.toast[data-show="true"] { opacity: 1; translate: -50% 0; }
+.toast[data-show="true"] { opacity: 1; translate: -50% 0; transition-duration: 200ms; }
 .toast[data-persist] { pointer-events: auto; }
 .toast .link { color: inherit; text-decoration: underline; }
 
@@ -1176,7 +1172,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   color: var(--text-3); cursor: pointer;
   transition: scale 120ms var(--ease), color 150ms var(--ease);
 }
-.bd-check:active { scale: 0.86; }
+.bd-check:active { scale: 0.95; }
 .bd-mark { display: block; width: 16px; height: 16px; }
 .bd-mark svg { display: block; width: 16px; height: 16px; }
 .bd-mark[data-state="doing"] { color: var(--accent); }

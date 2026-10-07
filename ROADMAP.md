@@ -259,7 +259,7 @@ The order (ADR 0043). Each step starts when the one before holds:
 
 | # | Step | Done means |
 |---|---|---|
-| 0 | ACP spike: an ARK task on Claude Code and on Codex through their ACP adapters | permission asked, kept as a question, answered by ARK, worker continues, result and written file back; a restart with a question open recorded per agent |
+| 0 (done 2026-10-07) | ACP spike: an ARK task on Claude Code and on Codex through their ACP adapters. Both passed, also across a restart; findings for step 2 in ADR 0043 › Step 0 results | permission asked, kept as a question, answered by ARK, worker continues, result and written file back; a restart with a question open recorded per agent |
 | 1 | Attention in one runtime: questions, failures and handed-off results, any workload, one list in `ark-interact`, a cleared mark per item | the same list in both front-ends; one key answers or opens; cleared survives a restart |
 | 2 | One ACP worker, H1 to H3, shaped by step 0 | its permission request is an item like any other; measured against ARK's agent on two workloads |
 | 3 | Reach: Web Push from the runtime's page; My machine as a location (install with a service and limits, pairing with `token link`) | a VPS paired in one command; its question reaches the phone, is answered there, the task continues |

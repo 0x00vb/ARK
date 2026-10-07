@@ -41,6 +41,37 @@ Order of work. Each step ends with a check, and the next starts only when the ea
 | 3 | **Reach**: a notification when an item appears, to a phone through the runtime's page (Web Push), and My machine as a location (install with a service and limits, pairing through `token link`) | a VPS paired in one command; a question there reaches the phone and is answered from it; the task continues |
 | 4 | **Attention across runtimes**, when a person has more than one | This computer and My machine in one list, each item answered on its own runtime |
 
+## Step 0 results (2026-10-07)
+
+Branch `spike/acp-worker` (not for `main`): `AgentSpec::worker(cmd)` runs a task on an ACP agent
+inside `Orchestrator::attempt`; its permission requests go through `OnBehalf`. Live tests
+`crates/ark-orchestrate/tests/acp_spike.rs` and the protocol probe `spike/acp-probe.mjs`, on
+claude-agent-acp 0.23.1 (Claude Code 2.1.292, Claude subscription) and codex-acp 0.16.0 (ChatGPT
+plan, gpt-5.5). Task: read a CSV, write `report.md`.
+
+| Check | Claude Code | Codex |
+|---|---|---|
+| The worker asks before it writes | yes: `edit`, "Write …/report.md", with the path | yes: `execute`, `printf … > report.md`, no path (another run used an `edit`) |
+| The request becomes the task's kept question; task `Waiting` on "your answer"; agent `Waiting`; nothing written yet | yes (22 s) | yes (19 s) |
+| Another client answers (`Orchestrator::answer`); the worker continues; task `Done` with the worker's answer; `report.md` an output; person asked once | yes (30 s) | yes (27 s) |
+| Process stops with the question open: the question survives, is answered in the next process, the task runs again on a new worker session and finishes | yes; the repeated request matched the kept answer, person not asked again | yes, the same. The probe saw Codex choose a different call after a restart once: then the person is asked again |
+| `session/load` after a restart | works, replays the history | works, replays the history |
+| Uses the client's `fs/*` when offered | no: writes with its own tools | no: writes with its shell |
+| Reads ask permission | no | no |
+| Reports usage | tokens and cost per turn ($0.17, 92.7k tokens, 73k of them cached, for this task) | context used of its window |
+
+What this changes for step 2:
+
+| Finding | Step 2 does |
+|---|---|
+| Writes never go through ARK; Codex's shell writes carry no path | Outputs from the folder (the copy per task of ADR 0039 H4); the version before from the request when it names a path. ACP `fs/*` and `terminal/*` (H2) do not help these two agents |
+| An approval class per ACP kind (`worker.execute`) is too wide for "Always in this project": it would allow every command | a class per command or path, as ARK's own processes do (ADR 0041) |
+| The adapters lag their CLIs: codex-acp refused the model in the person's Codex settings; claude-agent-acp refused `defaultMode: auto` | ARK sets the worker's model and permission mode per task, never inherits them |
+| A small task costs Claude Code about 90k tokens | measure cost per success against ARK's own agent before offering workers by default |
+
+Verdict: both behave as workers. State, the question, the answer and the result go through
+ARK's records, not through code glued on the side. Step 1 can start.
+
 ## Consequences
 - Developers can bring the agents they already use, and their questions and results land where
   ARK's own agents' do. This brings developers in; it is not the product's message, which stays

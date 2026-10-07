@@ -29,6 +29,7 @@ use tokio::sync::{broadcast, Notify};
 
 pub mod install;
 pub mod ready;
+mod serve;
 pub mod shell;
 mod tool;
 
@@ -225,6 +226,16 @@ impl Drop for Inner {
     }
 }
 
+/// [`Processes`] without keeping them alive ([`Processes::downgrade`]).
+#[derive(Clone)]
+pub struct WeakProcesses(std::sync::Weak<Inner>);
+
+impl WeakProcesses {
+    pub fn upgrade(&self) -> Option<Processes> {
+        self.0.upgrade().map(|inner| Processes { inner })
+    }
+}
+
 /// The processes of one runtime. Cheap to clone.
 #[derive(Clone)]
 pub struct Processes {
@@ -279,6 +290,39 @@ impl Processes {
         let mut v: Vec<Info> = procs.iter().rev().map(|p| p.info()).collect();
         v.sort_by_key(|i| !matches!(i.state, State::Running | State::Ready));
         v
+    }
+
+    /// The ports on this computer that running processes of project `root` serve themselves:
+    /// the port of their address, when the socket listening there belongs to the process (not
+    /// another app that answers on it). What an agent's browser may open (ADR 0046). `root` is
+    /// compared as given to [`start`](Processes::start). Asks the system, so call it off the
+    /// async threads.
+    pub fn serving(&self, root: &Path) -> Vec<u16> {
+        let wanted: Vec<(u32, u16)> = self
+            .inner
+            .procs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.root == root && p.running())
+            .filter_map(|p| Some((p.pid, p.st.lock().unwrap().url.as_ref()?.1)))
+            .collect();
+        let groups = wanted.iter().map(|(pid, _)| *pid).collect();
+        let listening = serve::listeners(&groups);
+        let mut ports: Vec<u16> = wanted
+            .into_iter()
+            .filter(|(pid, port)| listening.contains(&(*port, *pid)))
+            .map(|(_, port)| port)
+            .collect();
+        ports.sort_unstable();
+        ports.dedup();
+        ports
+    }
+
+    /// A handle that does not keep the service alive: what runs is still stopped when the
+    /// runtime goes away, and the handle then gives nothing.
+    pub fn downgrade(&self) -> WeakProcesses {
+        WeakProcesses(Arc::downgrade(&self.inner))
     }
 
     pub fn get(&self, id: &str) -> Option<Info> {

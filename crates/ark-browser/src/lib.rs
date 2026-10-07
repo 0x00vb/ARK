@@ -12,11 +12,13 @@
 //! Each agent (or conversation) gets its own [`Browser`] adapter from [`BrowserService::for_owner`];
 //! its pages stay open between its turns. Opening and reading pages only observes; clicking and
 //! typing change things, so they go through the approval gate. Addresses on this machine or a
-//! private network are refused, as `web.fetch` refuses them.
+//! private network are refused, as `web.fetch` refuses them, except a page on this computer
+//! that a process of the agent's project serves itself ([`LocalPages`], ADR 0046), in the
+//! fresh browser. A page an action lands on (a link, a redirect, back) is checked too.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use ark_core::{ActionDescriptor, RiskTier};
@@ -67,6 +69,10 @@ struct State {
     lease: Option<(String, Instant)>,
 }
 
+/// The ports on this computer that the project in `workspace` serves itself, now: pages there
+/// the agent's browser may open (ADR 0046). Called off the async threads.
+pub type LocalPages = Arc<dyn Fn(&Path) -> Vec<u16> + Send + Sync>;
+
 /// The browsers of one ARK process. Cheap to share; browsers start on first use.
 pub struct BrowserService {
     bin: Option<PathBuf>,
@@ -75,6 +81,7 @@ pub struct BrowserService {
     private: bool,
     signed_headless: bool,
     idle: Duration,
+    local_pages: OnceLock<LocalPages>,
     state: tokio::sync::Mutex<State>,
 }
 
@@ -87,6 +94,7 @@ impl BrowserService {
             private: false,
             signed_headless: std::env::var_os("ARK_BROWSER_HEADLESS").is_some(),
             idle: IDLE,
+            local_pages: OnceLock::new(),
             state: tokio::sync::Mutex::new(State::default()),
         })
     }
@@ -110,6 +118,13 @@ impl BrowserService {
         let mut s = Arc::try_unwrap(self).unwrap_or_else(|_| panic!("set before sharing"));
         s.idle = idle;
         Arc::new(s)
+    }
+
+    /// Let agents open the pages their project's own processes serve on this computer. The
+    /// first call wins: `false` when already set (an app that set its own keeps it; a service
+    /// shared by two runtimes serves the first one's processes only).
+    pub fn serve_local_pages(&self, pages: LocalPages) -> bool {
+        self.local_pages.set(pages).is_ok()
     }
 
     /// The browser ARK found, if any.
@@ -400,34 +415,114 @@ fn element_ref(action: &str, input: &Value) -> Result<u64> {
 }
 
 impl Browser {
-    async fn open(&self, input: &Value) -> Result<ActionOutput> {
+    async fn open(&self, input: &Value, workspace: Option<&Path>) -> Result<ActionOutput> {
         let raw = input["url"].as_str().unwrap_or("").trim();
-        let url = reqwest::Url::parse(raw)
-            .or_else(|_| reqwest::Url::parse(&format!("https://{raw}")))
-            .map_err(|_| AdapterError::bad_input(OPEN, format!("`{raw}` is not an address")))?;
+        // `localhost:3000` parses with `localhost` as its scheme: without `://`, an address on
+        // this computer is http (as a dev server serves it), anything else https.
+        let typed = reqwest::Url::parse(raw)
+            .ok()
+            .filter(|u| matches!(u.scheme(), "http" | "https") || raw.contains("://"));
+        let mut url = match typed {
+            Some(u) => u,
+            None => reqwest::Url::parse(&format!("http://{raw}"))
+                .ok()
+                .filter(this_computer)
+                .or_else(|| reqwest::Url::parse(&format!("https://{raw}")).ok())
+                .ok_or_else(|| {
+                    AdapterError::bad_input(OPEN, format!("`{raw}` is not an address"))
+                })?,
+        };
         if !matches!(url.scheme(), "http" | "https") {
             return Err(AdapterError::bad_input(
                 OPEN,
                 "only http and https pages can be opened",
             ));
         }
-        if !self.svc.private {
-            ark_tools::web::check_public(&url).await.map_err(|e| {
-                tool(format!(
-                    "{e}. This browser opens public pages only. To show the person a page on \
-                     this machine, show it in their browser view instead (it opens any address)."
-                ))
-            })?;
+        // A server listening on every address is reached here; browsers refuse 0.0.0.0.
+        if matches!(url.host_str(), Some("0.0.0.0" | "[::]")) {
+            let _ = url.set_host(Some("localhost"));
         }
         let signed = input["signed_in"].as_bool().unwrap_or(false);
+        if !self.svc.private {
+            if let Err(e) = ark_tools::web::check_public(&url).await {
+                if !self.serves(&url, signed, workspace).await {
+                    return Err(tool(self.refusal(&e, signed && this_computer(&url))));
+                }
+            }
+        }
         let page = self.svc.page(&self.owner, signed).await.map_err(tool)?;
         self.svc.choose(&self.owner, signed).await;
         page.navigate(url.as_str()).await.map_err(tool)?;
-        self.done(&page, signed).await
+        self.done(&page, signed, workspace).await
     }
 
-    async fn done(&self, page: &Page, signed: bool) -> Result<ActionOutput> {
+    /// Whether `url` is a page on this computer that a process of the project in `workspace`
+    /// serves itself, in the fresh browser (the signed-in one keeps the person's cookies, which
+    /// `localhost` shares across ports).
+    async fn serves(&self, url: &reqwest::Url, signed: bool, workspace: Option<&Path>) -> bool {
+        let (Some(pages), Some(ws), Some(port)) = (
+            self.svc.local_pages.get().cloned(),
+            workspace.map(Path::to_path_buf),
+            url.port_or_known_default(),
+        ) else {
+            return false;
+        };
+        if signed || !this_computer(url) {
+            return false;
+        }
+        tokio::task::spawn_blocking(move || pages(&ws).contains(&port))
+            .await
+            .unwrap_or(false)
+    }
+
+    /// Why the page an action landed on may not be read: an address on this computer or a
+    /// private network, judged by its host alone (a name that resolves privately is not
+    /// caught here), that the project does not serve.
+    async fn landed(&self, href: &str, signed: bool, workspace: Option<&Path>) -> Option<String> {
+        if self.svc.private {
+            return None;
+        }
+        let url = reqwest::Url::parse(href.strip_prefix("blob:").unwrap_or(href)).ok()?;
+        let why = private_by_host(&url)?;
+        if self.serves(&url, signed, workspace).await {
+            return None;
+        }
+        Some(self.refusal(&why, signed && this_computer(&url)))
+    }
+
+    /// What an agent is told when a page is refused: what this browser opens, and where any
+    /// address can be shown to the person instead.
+    fn refusal(&self, why: &str, signed_local: bool) -> String {
+        if signed_local {
+            return format!(
+                "{why}. The signed-in browser opens public pages only; open this page without \
+                 `signed_in`."
+            );
+        }
+        let opens = if self.svc.local_pages.get().is_some() {
+            "public pages, and pages on this computer that a process of this project serves \
+             itself (`process.start`)"
+        } else {
+            "public pages only"
+        };
+        format!(
+            "{why}. This browser opens {opens}. To show the person any address, show it in their \
+             browser view instead (it opens any address)."
+        )
+    }
+
+    async fn done(
+        &self,
+        page: &Page,
+        signed: bool,
+        workspace: Option<&Path>,
+    ) -> Result<ActionOutput> {
         let mut snap = page.snapshot().await.map_err(tool)?;
+        let href = snap["url"].as_str().unwrap_or("").to_string();
+        if let Some(why) = self.landed(&href, signed, workspace).await {
+            let _ = page.navigate("about:blank").await;
+            return Err(tool(why));
+        }
         if signed {
             self.svc.touch(&self.owner).await;
         }
@@ -435,7 +530,12 @@ impl Browser {
         Ok(ActionOutput::json(snap))
     }
 
-    async fn act(&self, action: &str, input: &Value) -> Result<ActionOutput> {
+    async fn act(
+        &self,
+        action: &str,
+        input: &Value,
+        workspace: Option<&Path>,
+    ) -> Result<ActionOutput> {
         let signed = {
             let st = self.svc.state.lock().await;
             st.owners.get(&self.owner).is_some_and(|p| p.on_signed)
@@ -486,7 +586,7 @@ impl Browser {
             }
             other => return Err(AdapterError::UnknownAction(other.into())),
         }
-        self.done(&page, signed).await
+        self.done(&page, signed, workspace).await
     }
 }
 
@@ -501,7 +601,11 @@ impl Adapter for Browser {
         vec![
             ActionDescriptor::new(
                 OPEN,
-                "open a page in a browser and see its text and the elements you can act on, each with a number",
+                if self.svc.local_pages.get().is_some() {
+                    "open a page in a browser and see its text and the elements you can act on, each with a number. Public pages, and pages on this computer that a process of this project serves (process.start)"
+                } else {
+                    "open a page in a browser and see its text and the elements you can act on, each with a number"
+                },
                 RiskTier::Observe,
             )
             .volatile()
@@ -531,13 +635,49 @@ impl Adapter for Browser {
         ]
     }
 
-    async fn run(&self, action: &str, input: Value, _ctx: &RunCtx<'_>) -> Result<ActionOutput> {
+    async fn run(&self, action: &str, input: Value, ctx: &RunCtx<'_>) -> Result<ActionOutput> {
+        let workspace = ctx.workspace.as_deref();
         match action {
-            OPEN => self.open(&input).await,
-            READ | BACK | CLICK | TYPE => self.act(action, &input).await,
+            OPEN => self.open(&input, workspace).await,
+            READ | BACK | CLICK | TYPE => self.act(action, &input, workspace).await,
             other => Err(AdapterError::UnknownAction(other.into())),
         }
     }
+}
+
+/// This computer by its host alone: `localhost` (and its subdomains), loopback, unspecified.
+fn this_computer(url: &reqwest::Url) -> bool {
+    let host = url.host_str().unwrap_or("");
+    let bare = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    match bare.parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.is_loopback() || ip.is_unspecified(),
+        Err(_) => bare == "localhost" || bare.ends_with(".localhost"),
+    }
+}
+
+/// Why `url` is an address on this computer or a private network, judged by its host alone (no
+/// DNS): private, loopback, link-local and shared addresses, `localhost`, names without a dot
+/// and `.local`. `None` for anything else, and for what is not http or https (`about:`,
+/// `data:`, an error page).
+fn private_by_host(url: &reqwest::Url) -> Option<String> {
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    if let Some(why) = ark_tools::web::local_host(url) {
+        return Some(why);
+    }
+    let host = url.host_str()?;
+    // An address by number was judged above; only names go on.
+    if host.starts_with('[') || host.parse::<std::net::IpAddr>().is_ok() {
+        return None;
+    }
+    let name = host.trim_end_matches('.').to_ascii_lowercase();
+    (!name.contains('.') || name.ends_with(".local"))
+        .then(|| format!("refused: {name} is this machine or a private network"))
 }
 
 /// The evidence card of a page: where it is, its first elements, the start of its text.
@@ -601,5 +741,64 @@ impl ark_runtime::per_agent::PerAgent for Browsers {
     }
     fn distiller(&self) -> Option<ark_runtime::Distiller> {
         Some(Arc::new(distill))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{private_by_host, this_computer};
+
+    fn url(u: &str) -> reqwest::Url {
+        reqwest::Url::parse(u).unwrap()
+    }
+
+    #[test]
+    fn an_address_is_private_by_its_host_alone() {
+        for private in [
+            "http://localhost:3000/",
+            "http://localhost.:3000/",
+            "http://app.localhost/",
+            "http://127.0.0.1:8080/",
+            "http://[::1]:8080/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://10.0.0.1/",
+            "http://192.168.1.5/",
+            "http://printer.local/",
+            "http://router/",
+        ] {
+            assert!(private_by_host(&url(private)).is_some(), "{private}");
+        }
+        for public in [
+            "https://example.com/",
+            "https://example.com./",
+            "http://[2606:4700::1111]/",
+            "http://1.1.1.1/",
+            "about:blank",
+            "chrome-error://chromewebdata/",
+            "data:text/html,hi",
+        ] {
+            assert!(private_by_host(&url(public)).is_none(), "{public}");
+        }
+    }
+
+    #[test]
+    fn this_computer_is_localhost_loopback_and_unspecified() {
+        for here in [
+            "http://localhost:3000/",
+            "http://localhost.:3000/",
+            "http://foo.localhost/",
+            "http://127.0.0.1/",
+            "http://[::1]/",
+            "http://0.0.0.0/",
+        ] {
+            assert!(this_computer(&url(here)), "{here}");
+        }
+        for not in [
+            "http://192.168.1.5/",
+            "http://printer.local/",
+            "https://example.com/",
+        ] {
+            assert!(!this_computer(&url(not)), "{not}");
+        }
     }
 }

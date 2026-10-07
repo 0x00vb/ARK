@@ -17,6 +17,9 @@ What changed for people building on ARK, per release. Not a commit log.
   own overlays carry `data-ark-overlay`. In a plain browser the panel stays a frame and says
   when a page refuses (`frame_check`). `ark-ui` now needs Tauri's `unstable` feature (`~2.12`).
 - `ark_tools::web::public_client()`: a client that only connects to public addresses.
+- An agent's browser opens the pages a running process of its project serves itself (a dev
+  server it started), in the fresh browser; a page an action lands on is checked too (ADR 0046).
+  `Processes::serving`, `BrowserService::serve_local_pages`; `web::local_host`, `private_ip`.
 - The Browser view says when an address does not answer ("localhost:3000 can't be reached",
   Try again) instead of staying white, shows a loading line in the bar until the page
   finishes, and shows the pane's colour, not a white block, until the page arrives

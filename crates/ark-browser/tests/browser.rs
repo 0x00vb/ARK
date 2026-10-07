@@ -197,3 +197,134 @@ async fn this_machine_is_refused_unless_allowed() {
     assert!(e.contains("refused"), "{e}");
     let _ = Arc::strong_count(&svc);
 }
+
+/// A page server: `/` links to `other`, `/away` redirects there (302), anything else says `name`.
+fn pages(name: &'static str, other: Arc<std::sync::Mutex<String>>) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut s in listener.incoming().flatten() {
+            let mut buf = [0u8; 8192];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+            let other = other.lock().unwrap().clone();
+            let reply = if path == "/away" {
+                format!("HTTP/1.1 302 Found\r\nlocation: {other}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+            } else {
+                let body = format!(
+                    "<title>{name}</title><h1>This is {name}</h1><a href=\"{other}\">Elsewhere</a>"
+                );
+                format!("HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
+            };
+            let _ = s.write_all(reply.as_bytes());
+        }
+    });
+    port
+}
+
+/// The pages a project's own processes serve open (ADR 0046); nothing else on this computer
+/// does, also when a link, a redirect or Back leads there, nor in the signed-in browser.
+#[tokio::test]
+async fn a_project_opens_the_pages_its_processes_serve_and_nothing_else_here() {
+    let dir = tempfile::tempdir().unwrap();
+    let svc = BrowserService::new(dir.path().join("b"));
+    if svc.browser().is_none() {
+        eprintln!("skipped: no Chromium-family browser");
+        return;
+    }
+    let to_theirs = Arc::new(std::sync::Mutex::new(String::new()));
+    let ours = pages("ours", to_theirs.clone());
+    let theirs = pages("theirs", Arc::new(std::sync::Mutex::new("/".into())));
+    *to_theirs.lock().unwrap() = format!("http://127.0.0.1:{theirs}/");
+    let project = dir.path().join("project");
+    let p = project.clone();
+    assert!(svc.serve_local_pages(Arc::new(move |ws| if ws == p {
+        vec![ours]
+    } else {
+        vec![]
+    })));
+    assert!(
+        !svc.serve_local_pages(Arc::new(|_| vec![])),
+        "the first wins"
+    );
+
+    let agent = svc.for_owner("a");
+    let in_project = RunCtx::new(&NoBlobs).with_workspace(project.clone());
+    let elsewhere = RunCtx::new(&NoBlobs).with_workspace(dir.path().join("other"));
+    let open = |url: String, ctx: &'static RunCtx<'static>| {
+        let agent = agent.clone();
+        async move { agent.run(OPEN, json!({ "url": url }), ctx).await }
+    };
+    let in_project: &'static RunCtx<'static> = Box::leak(Box::new(in_project));
+    let elsewhere: &'static RunCtx<'static> = Box::leak(Box::new(elsewhere));
+
+    let page = open(format!("http://localhost:{ours}/"), in_project)
+        .await
+        .unwrap();
+    assert!(
+        page.output["text"]
+            .as_str()
+            .unwrap()
+            .contains("This is ours"),
+        "{}",
+        page.output
+    );
+    let page = open(format!("http://0.0.0.0:{ours}/"), in_project)
+        .await
+        .unwrap();
+    assert!(page.output["text"]
+        .as_str()
+        .unwrap()
+        .contains("This is ours"));
+    for typed in [
+        format!("http://127.0.0.1:{ours}/"),
+        format!("localhost:{ours}"),
+    ] {
+        // The second as a person types it, without a scheme: http on this computer.
+        let page = open(typed, in_project).await.unwrap();
+        assert!(page.output["text"]
+            .as_str()
+            .unwrap()
+            .contains("This is ours"));
+    }
+
+    let refused = |r: ark_tools::Result<ark_tools::ActionOutput>| {
+        let e = r.err().expect("refused").to_string();
+        assert!(e.contains("refused"), "{e}");
+        e
+    };
+    let e = refused(open(format!("http://127.0.0.1:{theirs}/"), in_project).await);
+    assert!(e.contains("process of this project serves itself"), "{e}");
+    refused(open(format!("http://localhost:{ours}/"), elsewhere).await);
+    let e = refused(
+        agent
+            .run(
+                OPEN,
+                json!({ "url": format!("http://localhost:{ours}/"), "signed_in": true }),
+                in_project,
+            )
+            .await,
+    );
+    assert!(
+        e.contains("signed-in browser opens public pages only"),
+        "{e}"
+    );
+
+    // A redirect from our page to theirs: refused, and the page is left blank.
+    refused(open(format!("http://localhost:{ours}/away"), in_project).await);
+    let now = agent.run(READ, json!({}), in_project).await.unwrap();
+    assert!(
+        !now.output["text"].as_str().unwrap_or("").contains("theirs"),
+        "{}",
+        now.output
+    );
+
+    // A link to theirs, then Back into it from the blank page.
+    let page = open(format!("http://localhost:{ours}/"), in_project)
+        .await
+        .unwrap();
+    let link = element(&page.output, "link", "Elsewhere");
+    refused(agent.run(CLICK, json!({ "ref": link }), in_project).await);
+    refused(agent.run(ark_browser::BACK, json!({}), in_project).await);
+}

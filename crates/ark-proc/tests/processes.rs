@@ -290,3 +290,56 @@ async fn dropping_the_service_ends_what_it_started() {
     assert!(!group_alive(a.pid), "a process outlived its runtime");
     assert!(!dir.path().join("store").join("running.json").exists());
 }
+
+/// An agent's browser may open only what a process of the project serves itself (ADR 0046):
+/// not a port another program listens on, not another project's, not a stopped one.
+#[tokio::test]
+async fn only_a_port_the_process_itself_listens_on_is_served() {
+    if !has_python() {
+        eprintln!("skipped: no python3");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (project, other) = (dir.path().join("p"), dir.path().join("q"));
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let p = service(dir.path());
+
+    // Something else listens on a port; a process names it and serves nothing.
+    let theirs = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let their_port = theirs.local_addr().unwrap().port();
+    let borrow = Start {
+        command: format!("echo http://localhost:{their_port}/; sleep 60"),
+        port: Some(their_port),
+        ..Start::default()
+    };
+    let lender = p.start(&project, &borrow).await.unwrap();
+    let now = p.settle(&lender.id, Duration::from_secs(20)).await.unwrap();
+    assert_eq!(
+        now.state,
+        State::Ready,
+        "it answers, so the person may see it"
+    );
+    assert!(
+        p.serving(&project).is_empty(),
+        "but it is not the process's own"
+    );
+
+    // A server the process runs itself.
+    let port = free_port();
+    let req = Start {
+        command: format!("python3 -u -m http.server {port} --bind 127.0.0.1"),
+        port: Some(port),
+        ..Start::default()
+    };
+    let server = p.start(&project, &req).await.unwrap();
+    let now = p.settle(&server.id, Duration::from_secs(20)).await.unwrap();
+    assert_eq!(now.state, State::Ready, "{:?}", p.output(&server.id, 2000));
+    assert_eq!(p.serving(&project), vec![port]);
+    assert!(p.serving(&other).is_empty(), "another project's process");
+
+    p.stop(&server.id).await;
+    p.stop(&lender.id).await;
+    assert!(p.serving(&project).is_empty(), "a stopped process");
+    drop(theirs);
+}

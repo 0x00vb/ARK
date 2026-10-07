@@ -223,7 +223,8 @@ driven over the DevTools protocol ([ADR 0015](adr/0015-a-native-browser-shared-s
 Each agent (and the conversation) has its own fresh browser context, so agents browse at once
 without sharing cookies. The signed-in browser is one at a time: an agent that wants it waits
 until the one using it has been idle for a minute. Addresses on this machine and private
-networks are refused. Profiles live in the store root's `browser` folder; `ARK_BROWSER_BIN`
+networks are refused, except the pages a running process of the agent's project serves itself,
+in the fresh browser (ADR 0046). Profiles live in the store root's `browser` folder; `ARK_BROWSER_BIN`
 picks another browser.
 
 Tools each agent gets its own of (the web on its model, the browser) are `PerAgent` sources

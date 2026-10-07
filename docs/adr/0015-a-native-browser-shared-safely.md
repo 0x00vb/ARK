@@ -1,6 +1,6 @@
 # 0015. A native browser, shared safely between agents
 
-Status: Accepted
+Status: Accepted, amended by 0046 (the pages a project's own processes serve; every action's landing address checked)
 Date: 2026-10-04
 
 ## Context

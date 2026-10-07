@@ -936,12 +936,23 @@ impl ArkBuilder {
         if let Some(w) = self.web {
             per_agent.push(Arc::new(ark_runtime::web::Web(w)));
         }
-        match self.browser {
-            Some(BrowserChoice::Default) => per_agent.push(Arc::new(ark_browser::Browsers(
-                ark_browser::BrowserService::new(engine.store.root().join("browser")),
-            ))),
-            Some(BrowserChoice::Given(svc)) => per_agent.push(Arc::new(ark_browser::Browsers(svc))),
-            None => {}
+        let browser = match self.browser {
+            Some(BrowserChoice::Default) => Some(ark_browser::BrowserService::new(
+                engine.store.root().join("browser"),
+            )),
+            Some(BrowserChoice::Given(svc)) => Some(svc),
+            None => None,
+        };
+        if let Some(svc) = browser {
+            // Agents open the pages their project's own processes serve (ADR 0046). A weak
+            // handle: what runs still stops with the runtime.
+            if let Some(p) = &processes {
+                let p = p.downgrade();
+                svc.serve_local_pages(Arc::new(move |ws| {
+                    p.upgrade().map(|p| p.serving(ws)).unwrap_or_default()
+                }));
+            }
+            per_agent.push(Arc::new(ark_browser::Browsers(svc)));
         }
         let computer = match self.computer {
             Some(ComputerChoice::Native) => ark_computer::ComputerService::native(),

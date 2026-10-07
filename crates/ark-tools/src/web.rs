@@ -374,8 +374,8 @@ pub async fn check_public(url: &reqwest::Url) -> std::result::Result<(), String>
     Ok(())
 }
 
-/// Why `url` names this machine or a private network, when it does by its host alone.
-fn local_host(url: &reqwest::Url) -> Option<String> {
+/// Why `url` names this machine or a private network, when it does by its host alone (no DNS).
+pub fn local_host(url: &reqwest::Url) -> Option<String> {
     let host = url.host_str()?;
     let bare = host.trim_start_matches('[').trim_end_matches(']');
     let blocked = match bare.parse::<IpAddr>() {
@@ -389,7 +389,7 @@ fn local_host(url: &reqwest::Url) -> Option<String> {
 }
 
 /// Loopback, private, link-local, shared (CGNAT) and unspecified addresses.
-fn private_ip(ip: IpAddr) -> bool {
+pub fn private_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             let o = v4.octets();

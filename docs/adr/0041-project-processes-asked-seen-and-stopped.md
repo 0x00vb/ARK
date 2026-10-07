@@ -1,6 +1,6 @@
 # 0041. Project processes: asked, seen and stopped
 
-Status: Accepted
+Status: Accepted, amended by 0046 (the agent's browser opens the pages a process serves itself)
 Date: 2026-10-06
 
 ## Context
@@ -55,7 +55,7 @@ A crate, `ark-proc`, with one service per runtime (`Processes`) and one tool, `p
   window's. Opening it in the Browser view needs the runtime's server to forward the port.
   Later.
 - The agent's own browser still refuses this machine's addresses. Letting it read the pages of
-  processes ARK started is a later, narrow exception.
+  processes ARK started is a later, narrow exception (ADR 0046).
 - Output is kept per process in memory (the last 256 KB). Logs are not written to the store.
 - Installs use Homebrew where it is installed, else the tool's official installer. A machine
   without either for a tool gets the reason, and the agent says what is missing.

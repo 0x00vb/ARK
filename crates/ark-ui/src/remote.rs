@@ -294,7 +294,6 @@ pub fn run_window(
 #[cfg(feature = "desktop")]
 pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
     use std::sync::atomic::Ordering;
-    use tauri::Manager;
 
     let app = crate::desktop::APP
         .get()
@@ -302,14 +301,13 @@ pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
     let client = Client::new(url, token);
     client.hello().await?;
     let target: tauri::Url = client.page_url().parse()?;
-    let window = app
-        .get_webview_window("main")
+    let window = crate::desktop::main_webview(app)
         .ok_or_else(|| anyhow::anyhow!("there is no window to open {url} in"))?;
     // Before leaving: the own page's event channels stop sending from here on.
     crate::desktop::VISITS.fetch_add(1, Ordering::SeqCst);
     if let Err(e) = window.navigate(target) {
         // Still on the own page, with its channels stopped: load it again to start over.
-        crate::desktop::go_home(window.as_ref());
+        crate::desktop::go_home(&window);
         return Err(e.into());
     }
     Ok(())

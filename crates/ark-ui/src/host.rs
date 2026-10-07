@@ -991,6 +991,8 @@ impl Host {
                 })
                 .await
             }
+            // The Browser panel in a plain browser: whether a page lets a frame show it.
+            "frame_check" => Ok(crate::frame::check(&s("url")).await),
             // The Terminal panel: the project's shell in its folder (see `terminal`).
             "term_open" => {
                 let project = self.project()?;

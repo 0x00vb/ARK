@@ -247,6 +247,16 @@ async fn the_plus_menu_opens_files_and_a_terminal_in_the_project_folder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_browser_view_follows_the_panel_and_steps_aside_for_menus() {
+    drive("browserview", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_that_refuses_frames_says_so_in_a_browser() {
+    drive("framerefused", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_window_on_a_runtime_elsewhere_has_its_controls_and_a_way_back() {
     drive("visit", vec![], Duration::ZERO).await;
 }

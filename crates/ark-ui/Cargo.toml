@@ -20,9 +20,12 @@ tokio.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
 portable-pty.workspace = true
+reqwest.workspace = true
 sha2 = "0.10"
 base64 = "0.22"
-tauri = { version = "2", optional = true, features = ["tray-icon"] }
+# `unstable`: a window with more than one webview (the Browser panel, ADR 0044). Semver-exempt,
+# so held to 2.12.
+tauri = { version = "~2.12", optional = true, features = ["tray-icon", "unstable"] }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 

@@ -30,6 +30,17 @@ export function connect() {
         tauri.core.invoke("ark_subscribe", { channel: ch });
       },
       pickFolder: (title) => tauri.core.invoke("ark_pick_folder", { title: title || null }),
+      // The Browser panel's page in a webview of the window's own, placed over the panel
+      // (ADR 0044): pages that refuse to be framed show too.
+      browserView: {
+        show: (r, url) => tauri.core.invoke("ark_browser_show", { url: url || null, x: r.x, y: r.y, width: r.width, height: r.height }),
+        act: (action) => tauri.core.invoke("ark_browser", { action }),
+        listen(fn) {
+          const ch = new tauri.core.Channel();
+          ch.onmessage = fn;
+          return tauri.core.invoke("ark_browser_events", { channel: ch });
+        },
+      },
     };
   }
   const url = new URL(location.href);

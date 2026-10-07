@@ -38,6 +38,10 @@
 //                      (`ark:turn_finished`, `ark:event`, `ark:summary`, ...)
 //
 // A panel's or viewer's `render` may return `{ update(params), refresh(), focus(), dispose() }`.
+//
+// In the window, the Browser panel's page is a view of its own over the pane (ADR 0044) and is
+// drawn above the page. An app's element that can cover the pane (a dialog, a menu, a sheet)
+// carries `data-ark-overlay`: the Browser view steps aside while it is shown.
 // `focus()` says what it shows (`{ surface, selection }`); the agent sees it while visible.
 // `wide` asks for a wider side pane; `fill` drops the pane's padding (editors, terminals).
 //

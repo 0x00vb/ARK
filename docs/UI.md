@@ -37,7 +37,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Top bar | The title (the chat's, or the project's over one of its views). With app views marked `nav`: tabs, "Chat" first. On the right, a + menu: Terminal, Browser, Files, then app panels marked `nav`. |
 | Side pane | What the person or the agent opened, beside the conversation: Terminal, Browser, Files, an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
 | Terminal | The project's shell, in its folder (one per project; closing the tab keeps it, reopening re-attaches with its scrollback). The agent's `present` may type a command at the prompt; the person presses Enter. |
-| Browser | A page in a frame with an address bar; words become a search. Sites that refuse framing show blank: "open in your browser" opens them outside. |
+| Browser | A page with an address bar; words become a search, and `localhost:3000` (or `127.0.0.1`, `[::1]`, `*.localhost`) opens over http. In the window the page is a view of its own over the pane (ADR 0044), so any site shows; it steps aside while ARK's menus, palette or dialogs cover it. In a browser it is a frame: a page that refuses frames says so, with Open in your browser (`frame_check`; pages on this machine or a private network are not asked and may show blank). |
 | Processes | When the app offers processes (ADR 0041): what agents started (command, folder, state, address), the selected one's live output, Stop, and Open in the Browser. Opens when a process starts in the project the window shows; a process started with `open` opens that page in the Browser once ready. |
 | Files | The project's folder. A file opens in a tab of its own (see [Files](#files)). A path outside the folder is refused. |
 | A file | A spreadsheet as a grid, a document as a page, text in an editor: the file the agent works on, edited in place. A turn that wrote files ends with a card per file that opens it. |
@@ -189,6 +189,11 @@ false for a runtime elsewhere; `<html data-runtime="local|remote">` says the sam
 Offer actions that need the person's own computer (open a local app, a native picker, "on
 this Mac") only when it is true.
 
+In the window the Browser panel's page is drawn above the page (ADR 0044). An app's element that
+can cover the pane (a dialog, a menu, a sheet) carries `data-ark-overlay`, and the Browser steps
+aside while it is shown. `ark.browserView` is the window's carrier for the Browser panel
+(`undefined` in a browser); apps do not need it.
+
 A small real viewer, ARK Desktop's diagrams (`ui/diagram.js`, trimmed):
 
 ```js
@@ -216,7 +221,7 @@ front-end uses the same.
 |---|---|
 | Skills | `skills` (each: `name`, `description`, `scope` `project` or `store`, `chat`: the conversation may read it). Does not wait for a running turn |
 | Plugins | `plugins` (each: `name`, `command`, `args`, `env_keys`, `running`, `tools`, `error`; null when the app has none), `plugin_add {text}` or `{spec}` (answers the plugins added), `plugin_remove {name}`, `plugin_restart {name}`. None waits for a running turn |
-| Workbench | `term_open {cols, rows}` (the project's shell: `session`, `cwd`, `history`), `term_write {session, data}`, `term_resize`, `term_close`, `files {path?}` (entries with `kind`) |
+| Workbench | `frame_check {url}` (whether a frame may show the page, from its headers: `{framable, reason?}`; public addresses only), `term_open {cols, rows}` (the project's shell: `session`, `cwd`, `history`), `term_write {session, data}`, `term_resize`, `term_close`, `files {path?}` (entries with `kind`) |
 | Files | `file_read {path}` (`kind`, `version` and `text`, `sheets` or `blocks`; or `why` it cannot be shown), `file_edit {path, edits, base?}` (the file as saved), `file_write {path, text, base?}` (text files), `file_version {path}`, `file_media {path}` (a PDF or an image: `media_type`, `version`, base64 `data`), `file_open {path}` (in its app), `file_restore {artifact}` (puts a file back as a version kept before a call changed it, ADR 0034: `{path, undo}`, `undo` puts back what it replaced). All inside the project folder; none waits for a running turn |
 | Uploads | `upload_parts {upload, parts}`, then `upload_project {upload, name}` (a new project, ADR 0030) or `upload_add {upload}` (into the open project's folder: `{added}`, names in use get a number, ADR 0035), or `upload_cancel {upload}`. None waits for a running turn |
 | Session | `hello`, `summary`, `sessions {project?}`, `projects`, `new_session`, `open_session`, `rename_session`, `switch_project`, `open_project {id}` (back to its last chat), `add_project {path?, name?}` (a folder becomes a project, or opens the one it is), `rename_project {id, name}`, `project_folder {id, path}`, `workspace {path?}` (the project's folder; `/folder` in the terminal), `model`, `models`, `subscription_usage` (each subscription's limits as its CLI last reported them: `[{account, plan?, windows: [{minutes, used_percent, resets_at}], limited, reported_ms}]`) |
@@ -297,8 +302,10 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
 - The page is plain ES modules with no build step and no CDN. xterm.js 5.3 (MIT) ships in
   `web/vendor/xterm/` for the terminal. App scripts may ship their own libraries (ARK Desktop
   ships Mermaid in its `ui/vendor/`).
-- The Browser is a frame: many sites refuse to be framed and show blank. The editor is a plain
-  text area (no highlighting).
+- In the window, while the person types in the Browser's page, ARK's keys (⌘K, ⌘N, Esc) go to
+  the page; a click in ARK gives them back. In a browser the Browser is a frame, and a page on
+  this machine that refuses frames shows blank. The editor is a plain text area (no
+  highlighting).
 - A spreadsheet tab shows values, not cell styles (colours, fonts, merged cells); a document
   shows headings, lists, tables, bold and italic, not fonts or images (an image is a marker).
   Both survive edits. No undo beyond the browser's own while typing.

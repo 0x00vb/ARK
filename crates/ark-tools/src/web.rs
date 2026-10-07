@@ -431,6 +431,13 @@ impl reqwest::dns::Resolve for PublicOnly {
     }
 }
 
+/// A client that only ever connects to public addresses: names resolve to public addresses only
+/// (so a name cannot be checked as public and then connect to this machine), and redirects to
+/// this machine or a private network fail. For a runtime that fetches an address someone named.
+pub fn public_client() -> reqwest::Client {
+    client(false)
+}
+
 fn client(private: bool) -> reqwest::Client {
     let mut b = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))

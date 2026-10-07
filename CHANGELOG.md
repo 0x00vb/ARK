@@ -10,6 +10,14 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- The Browser panel shows any page in the window (ADR 0044): it is a webview of its own over the
+  pane, so pages that refuse frames (`X-Frame-Options`, `frame-ancestors`: most sites, and dev
+  servers with security headers) show instead of a white panel. It gets no IPC and never loads
+  the app's own page, and steps aside while ARK's menus, palette or dialogs cover it; an app's
+  own overlays carry `data-ark-overlay`. In a plain browser the panel stays a frame and says
+  when a page refuses (`frame_check`). `ark-ui` now needs Tauri's `unstable` feature (`~2.12`).
+- `ark_tools::web::public_client()`: a client that only connects to public addresses.
+
 - Project processes (ADR 0041, `ark-proc`, `ArkBuilder::processes`): agents start, watch and
   stop long-running commands in the project (`process.start`, `list`, `stop`): a dev server, a
   watcher, a worker, with the person's own shell and tools. Not contained, so every start asks,
@@ -61,6 +69,10 @@ What changed for people building on ARK, per release. Not a commit log.
 - `computer.type` types as keys (the field focused, its text selected, then replaced), so apps
   that ignore a text set from outside (WhatsApp's Send button) see the change. A field that
   takes no focus still gets its text set.
+
+### Fixed
+- The Browser's address bar opens `localhost:3000` (and `127.0.0.1`, `[::1]`, `*.localhost`
+  addresses) over http instead of searching for it.
 
 ## [0.12.1] - 2026-10-07
 

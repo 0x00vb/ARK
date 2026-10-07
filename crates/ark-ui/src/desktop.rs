@@ -13,19 +13,24 @@
 //! commands above answer only the app's own page, and the event channel stops when the window
 //! leaves it. The page elsewhere comes back by loading [`OWN_PAGE`], which the window catches.
 //!
+//! The Browser panel shows its page in a webview of its own placed over the panel
+//! (`ark_browser_*`, ADR 0044), so pages that refuse to be framed still show. That view is a
+//! page elsewhere: it gets no IPC and never loads the app's own page.
+//!
 //! A question that waits while the window is not in front shows a system notification. With
 //! [`ArkUi::keep_running`](crate::ArkUi::keep_running), closing the window hides it: the app
 //! stays in the menu bar (the tray elsewhere) with Open and Quit, and the Dock icon opens it.
 
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::Value;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
-use tauri::{Manager, RunEvent, WindowEvent, Wry};
+use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent};
+use tauri::{LogicalPosition, LogicalSize, Manager, RunEvent, WebviewUrl, WindowEvent, Wry};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::assets::Assets;
@@ -62,6 +67,25 @@ impl tauri::Assets<Wry> for UiAssets {
 
 struct State(Arc<Host>);
 
+/// The window (and its own page's webview).
+const MAIN: &str = "main";
+/// The Browser panel's webview, added to the window over the panel.
+const BROWSER: &str = "ark-browser";
+/// The Browser's cookies and storage, apart from the app's own page (macOS 14 and later; before,
+/// the system's default store).
+const BROWSER_STORE: [u8; 16] = *b"ark-browser-view";
+
+/// Changes each time the window's page loads again: a Browser view being created for the page
+/// before is closed as soon as it exists.
+static PAGE_LOADS: AtomicU64 = AtomicU64::new(0);
+/// When the Browser last sent a download to the person's browser (ms since the epoch): at most
+/// one every few seconds, so a page cannot open tab after tab.
+static LAST_DOWNLOAD: AtomicU64 = AtomicU64::new(0);
+
+/// Where the Browser panel's events go: the page that last showed it.
+#[derive(Default)]
+struct BrowserEvents(Mutex<Option<tauri::ipc::Channel<Value>>>);
+
 /// The running app, once its window exists.
 pub(crate) static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 /// The address of the window's own page, from the first time it is seen there.
@@ -96,6 +120,36 @@ fn from_own_page(webview: &tauri::Webview) -> Result<(), String> {
     }
 }
 
+/// The window, found by label: once the Browser's webview is added, the window has two webviews
+/// and is no longer a `WebviewWindow`.
+pub(crate) fn main_window(app: &tauri::AppHandle) -> Option<tauri::Window> {
+    app.get_window(MAIN)
+}
+
+/// The window's own page (or the runtime elsewhere it visits).
+pub(crate) fn main_webview(app: &tauri::AppHandle) -> Option<tauri::Webview> {
+    app.get_webview(MAIN)
+}
+
+/// Whether the Browser's webview may load `url`: anything but the app's own page and the
+/// schemes that reach the app (its assets, IPC, files). Frames inside a page ask too, so
+/// `about:`, `data:` and `blob:` frames stay allowed.
+fn browser_may_open(url: &tauri::Url) -> bool {
+    const APP_HOSTS: [&str; 4] = [
+        "tauri.localhost",
+        "ipc.localhost",
+        "asset.localhost",
+        "ark-local.invalid",
+    ];
+    if url.as_str() == OWN_PAGE || own_page(url) {
+        return false;
+    }
+    if matches!(url.scheme(), "tauri" | "asset" | "ipc" | "file") {
+        return false;
+    }
+    !url.host_str().is_some_and(|h| APP_HOSTS.contains(&h))
+}
+
 /// The window back on its own page.
 pub(crate) fn go_home(webview: &tauri::Webview) {
     if let Some(home) = HOME.get() {
@@ -108,10 +162,13 @@ pub(crate) fn go_home(webview: &tauri::Webview) {
 fn window_plugin() -> tauri::plugin::TauriPlugin<Wry> {
     tauri::plugin::Builder::<Wry>::new("ark-window")
         .on_navigation(|webview, url| {
+            if webview.label() == BROWSER {
+                return browser_may_open(url);
+            }
             if url.as_str() != OWN_PAGE {
                 return true;
             }
-            if !on_own_page(webview) {
+            if webview.label() == MAIN && !on_own_page(webview) {
                 let webview = webview.clone();
                 // Not from inside the navigation callback.
                 tauri::async_runtime::spawn(async move { go_home(&webview) });
@@ -195,6 +252,141 @@ async fn ark_pick_folder(
     Some(path.display().to_string())
 }
 
+fn browser_event(app: &tauri::AppHandle, ev: Value) {
+    if let Some(ch) = app.state::<BrowserEvents>().0.lock().unwrap().as_ref() {
+        let _ = ch.send(ev);
+    }
+}
+
+/// The Browser's webview: its loads go to the page; a new window opens in the same view; a
+/// download is not saved (the person's browser opens its address instead, at most one every
+/// few seconds).
+fn browser_builder(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::WebviewBuilder<Wry> {
+    let (loads, opens) = (app.clone(), app.clone());
+    tauri::webview::WebviewBuilder::new(BROWSER, WebviewUrl::External(url))
+        .data_store_identifier(BROWSER_STORE)
+        .on_page_load(move |_, p| {
+            let loading = matches!(p.event(), PageLoadEvent::Started);
+            browser_event(
+                &loads,
+                serde_json::json!({ "url": p.url().as_str(), "loading": loading }),
+            );
+        })
+        .on_new_window(move |url, _| {
+            if browser_may_open(&url) {
+                let app = opens.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(w) = app.get_webview(BROWSER) {
+                        let _ = w.navigate(url);
+                    }
+                });
+            }
+            NewWindowResponse::Deny
+        })
+        .on_download(|_, ev| {
+            if let DownloadEvent::Requested { url, .. } = ev {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as u64);
+                let last = LAST_DOWNLOAD.load(Ordering::SeqCst);
+                if matches!(url.scheme(), "http" | "https")
+                    && now.saturating_sub(last) > 3000
+                    && LAST_DOWNLOAD
+                        .compare_exchange(last, now, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                {
+                    ark_interact::capabilities::open_in_browser(url.as_str());
+                }
+            }
+            false
+        })
+}
+
+/// Show the Browser panel's page at the panel's place (logical pixels in the window), creating
+/// the view the first time. `url` loads an address.
+/// Creating a view brings the app to the front on macOS, so it waits while the window is not
+/// in front: `{ shown: false }`, and the page asks again.
+#[tauri::command]
+async fn ark_browser_show(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    url: Option<String>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<Value, String> {
+    from_own_page(&webview)?;
+    let target = match url.as_deref().map(str::parse::<tauri::Url>) {
+        None => None,
+        Some(Ok(u)) if browser_may_open(&u) => Some(u),
+        Some(_) => return Err("the Browser does not open that address".into()),
+    };
+    let position = LogicalPosition::new(x.max(0.0), y.max(0.0));
+    let size = LogicalSize::new(width.max(1.0), height.max(1.0));
+    let err = |e: tauri::Error| e.to_string();
+    if let Some(view) = app.get_webview(BROWSER) {
+        view.set_position(position).map_err(err)?;
+        view.set_size(size).map_err(err)?;
+        view.show().map_err(err)?;
+        if let Some(u) = target {
+            view.navigate(u).map_err(err)?;
+        }
+        return Ok(serde_json::json!({ "shown": true }));
+    }
+    let window = webview.window();
+    let Some(u) = target else {
+        return Ok(serde_json::json!({ "shown": false }));
+    };
+    if !window.is_focused().unwrap_or(false) {
+        return Ok(serde_json::json!({ "shown": false }));
+    }
+    let loads = PAGE_LOADS.load(Ordering::SeqCst);
+    let view = window
+        .add_child(browser_builder(&app, u), position, size)
+        .map_err(err)?;
+    // The page that asked loaded again (or left) while the view was made: nobody will place it.
+    if PAGE_LOADS.load(Ordering::SeqCst) != loads {
+        let _ = view.close();
+        return Ok(serde_json::json!({ "shown": false }));
+    }
+    Ok(serde_json::json!({ "shown": true }))
+}
+
+/// Where the Browser's loads (`{url, loading}`) go: the page that asks.
+#[tauri::command]
+fn ark_browser_events(
+    webview: tauri::Webview,
+    events: tauri::State<'_, BrowserEvents>,
+    channel: tauri::ipc::Channel<Value>,
+) -> Result<(), String> {
+    from_own_page(&webview)?;
+    *events.0.lock().unwrap() = Some(channel);
+    Ok(())
+}
+
+/// `hide` keeps the page, `close` ends it, `back`, `forward` and `reload` act on it.
+#[tauri::command]
+fn ark_browser(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    action: String,
+) -> Result<(), String> {
+    from_own_page(&webview)?;
+    let Some(view) = app.get_webview(BROWSER) else {
+        return Ok(());
+    };
+    let done = match action.as_str() {
+        "hide" => view.hide(),
+        "close" => view.close(),
+        "back" => view.eval("history.back()"),
+        "forward" => view.eval("history.forward()"),
+        "reload" => view.reload(),
+        _ => return Err(format!("unknown Browser action {action}")),
+    };
+    done.map_err(|e| e.to_string())
+}
+
 pub(crate) fn run(
     host: Arc<Host>,
     assets: Arc<Assets>,
@@ -215,14 +407,28 @@ pub(crate) fn run(
     let events = host.subscribe();
     let built = tauri::Builder::default()
         .manage(State(host))
+        .manage(BrowserEvents::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(window_plugin())
         .invoke_handler(tauri::generate_handler![
             ark_call,
             ark_subscribe,
-            ark_pick_folder
+            ark_pick_folder,
+            ark_browser_show,
+            ark_browser_events,
+            ark_browser
         ])
+        // The window's page loads again (a reload, a visit to a runtime elsewhere, the way
+        // back): the Browser's view belonged to the page before.
+        .on_page_load(|webview, p| {
+            if webview.label() == MAIN && matches!(p.event(), PageLoadEvent::Started) {
+                PAGE_LOADS.fetch_add(1, Ordering::SeqCst);
+                if let Some(view) = webview.app_handle().get_webview(BROWSER) {
+                    let _ = view.close();
+                }
+            }
+        })
         .on_window_event(move |w, ev| {
             if let WindowEvent::CloseRequested { api, .. } = ev {
                 if keep_running {
@@ -233,10 +439,12 @@ pub(crate) fn run(
         })
         .setup(move |app| {
             let _ = APP.set(app.handle().clone());
-            if let Some(w) = app.get_webview_window("main") {
-                if let Some(url) = w.url().ok().filter(own_page) {
+            if let Some(v) = main_webview(app.handle()) {
+                if let Some(url) = v.url().ok().filter(own_page) {
                     let _ = HOME.set(url);
                 }
+            }
+            if let Some(w) = main_window(app.handle()) {
                 let _ = w.show();
             }
             if keep_running {
@@ -275,7 +483,7 @@ pub(crate) fn run(
 }
 
 fn show(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
+    if let Some(w) = main_window(app) {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
@@ -321,11 +529,10 @@ fn notify_questions(
                 continue;
             }
             // In front and showing this runtime: a page elsewhere does not show its questions.
-            let in_front = app.get_webview_window("main").is_some_and(|w| {
-                w.is_visible().unwrap_or(false)
-                    && w.is_focused().unwrap_or(false)
-                    && w.url().is_ok_and(|u| own_page(&u))
-            });
+            let in_front = main_window(&app).is_some_and(|w| {
+                w.is_visible().unwrap_or(false) && w.is_focused().unwrap_or(false)
+            }) && main_webview(&app)
+                .is_some_and(|v| v.url().is_ok_and(|u| own_page(&u)));
             if in_front {
                 continue;
             }
@@ -373,5 +580,34 @@ mod tests {
         assert!(!own("http://127.0.0.1:8420/"));
         assert!(!own("http://tauri.localhost.example.com/"));
         assert!(!own(OWN_PAGE));
+    }
+
+    #[test]
+    fn the_browser_never_loads_the_apps_own_page() {
+        let may = |u: &str| browser_may_open(&u.parse().unwrap());
+        for refused in [
+            "tauri://localhost/index.html",
+            "http://tauri.localhost/",
+            "https://tauri.localhost/",
+            "ipc://localhost/ark_call",
+            "http://ipc.localhost/ark_call",
+            "asset://localhost/x",
+            "file:///etc/passwd",
+            OWN_PAGE,
+            "https://ark-local.invalid/elsewhere",
+        ] {
+            assert!(!may(refused), "{refused}");
+        }
+        for allowed in [
+            "http://localhost:3000/",
+            "http://app.localhost:5173/",
+            "https://github.com/",
+            "about:blank",
+            "about:srcdoc",
+            "data:text/html,hi",
+            "blob:https://example.com/0b1c",
+        ] {
+            assert!(may(allowed), "{allowed}");
+        }
     }
 }

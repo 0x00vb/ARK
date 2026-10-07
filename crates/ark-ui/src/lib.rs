@@ -31,6 +31,7 @@ mod assets;
 #[cfg(feature = "desktop")]
 mod desktop;
 mod files;
+mod frame;
 pub mod host;
 pub mod remote;
 mod serve;

@@ -568,6 +568,97 @@ async function workbench(page) {
 }
 scenarios.workbench = workbench;
 
+// The window's Browser view (ADR 0044) is drawn above the page, so the panel tells it where to
+// be and when to step aside. A stub in place of the window records what the page asks.
+async function browserview(page) {
+  await page.evaluate(() => {
+    window.calls = [];
+    window.ark.browserView = {
+      show: (r, url) => {
+        window.calls.push(["show", r, url || null]);
+        return url?.startsWith("file:") ? Promise.reject(new Error("the Browser does not open that address")) : Promise.resolve({ shown: true });
+      },
+      act: (a) => (window.calls.push([a]), Promise.resolve()),
+      listen: (fn) => ((window.emitBrowser = fn), Promise.resolve()),
+    };
+  });
+  const last = () => page.evaluate(() => window.calls.at(-1));
+  const until = (what) => page.waitForFunction((w) => window.calls.at(-1)?.[0] === w, what);
+
+  // A local address typed without a scheme opens over http, at the panel's place in the pane.
+  await page.evaluate(() => window.ark.openPanel("browser", { locator: "localhost:3000" }));
+  await page.waitForFunction(() => window.calls.some((c) => c[0] === "show" && c[2] === "http://localhost:3000"));
+  // Wait for the pane to finish opening, then compare the last place with the pane.
+  await page.waitForTimeout(400);
+  const [, r] = await last();
+  const pane = await page.locator("#pane").boundingBox();
+  const bar = await page.locator(".wb-bar").boundingBox();
+  // Inside the pane, clear of its resize grip.
+  assert.ok(r.x >= Math.floor(pane.x) + 6 && r.x + r.width <= Math.ceil(pane.x + pane.width), JSON.stringify({ r, pane }));
+  assert.ok(r.y >= Math.floor(bar.y + bar.height) - 1, JSON.stringify({ r, bar }));
+  assert.ok(r.width > 200 && r.height > 200, JSON.stringify(r));
+  // Nothing more is asked while nothing moves.
+  const n = await page.evaluate(() => window.calls.length);
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => window.calls.length), n);
+
+  // A page that loads inside the view reaches the address bar and the tab.
+  await page.evaluate(() => window.emitBrowser({ url: "http://localhost:3000/home", loading: false }));
+  assert.equal(await page.locator(".wb-input").inputValue(), "http://localhost:3000/home");
+
+  // An address the view refuses says why, and the bar goes back to the page shown.
+  await page.locator(".wb-input").fill("file:///etc/passwd");
+  await page.locator(".wb-input").press("Enter");
+  await page.locator(".toast", { hasText: "does not open that address" }).waitFor();
+  assert.equal(await page.locator(".wb-input").inputValue(), "http://localhost:3000/home");
+  await page.locator("#input").focus();
+
+  // The palette covers the pane: the view steps aside, and comes back where it was.
+  await page.keyboard.press("Meta+k");
+  await until("hide");
+  await page.keyboard.press("Escape");
+  await until("show");
+  assert.deepEqual((await last())[1], r);
+  assert.equal((await last())[2], null, "coming back does not load the page again");
+
+  // Another tab in front, then the Browser again.
+  await page.evaluate(() => window.ark.openPanel("files"));
+  await until("hide");
+  await page.locator(".pane-tab", { hasText: "localhost" }).click();
+  await until("show");
+
+  // Closing the pane hides the view; the toggle brings it back.
+  await page.locator("#close-pane").click();
+  await until("hide");
+  await page.evaluate(() => window.ark.openPanel("browser"));
+  await until("show");
+
+  await page.locator('.wb-bar button[aria-label="Back"]').click();
+  await until("back");
+  await page.locator('.wb-bar button[aria-label="Reload"]').click();
+  await until("reload");
+
+  // Closing the tab ends the view.
+  await page.locator(".pane-tab", { hasText: "localhost" }).locator(".pane-tab-x").click();
+  await until("close");
+}
+scenarios.browserview = browserview;
+
+// In a browser the panel is a frame: a page that refuses frames says so, with a way out.
+async function framerefused(page) {
+  await page.evaluate(() => {
+    const call = window.ark.call;
+    window.ark.call = (m, p) => (m === "frame_check" ? Promise.resolve({ framable: false, reason: "X-Frame-Options: DENY" }) : call(m, p));
+  });
+  await page.evaluate(() => window.ark.openPanel("browser", { locator: "https://example.com/a" }));
+  const refused = page.locator(".wb-refused");
+  await refused.waitFor();
+  assert.equal(await refused.locator("p").innerText(), "example.com can't be shown here");
+  assert.equal(await refused.locator("button").innerText(), "Open in your browser");
+  assert.equal(await page.locator("iframe.wb-frame").getAttribute("src"), "https://example.com/a");
+}
+scenarios.framerefused = framerefused;
+
 // An app's Settings sections come first, ARK's own after; advanced ones (the app's, then
 // ARK's Skills and Tool servers) under Advanced. A section added while Settings is open joins
 // the list. Appearance › Dark darkens the page and is remembered. `ark.compose` fills the

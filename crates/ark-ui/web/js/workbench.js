@@ -130,26 +130,75 @@ const hostOf = (u) => {
   try { return new URL(u).hostname; } catch { return u; }
 };
 
+// What ARK draws over the pane: menus, the palette, dialogs, toasts, the narrow window's sidebar,
+// and anything an app marks `data-ark-overlay`. The window's Browser view sits above the page,
+// so it steps aside while one of these covers it.
+const OVERLAYS = ".popover, .overlay, .toast[data-show='true'], dialog[open], [data-ark-overlay], .app[data-compact='true'] .sidebar";
+
+// An address on this machine typed without a scheme (`localhost:3000`, `127.0.0.1:8080/x`):
+// plain http, as a dev server serves it.
+const LOCAL = /^(localhost|[\w-]+\.localhost|127(\.\d{1,3}){3}|0\.0\.0\.0|\[::1\])(:\d+)?([/?#]\S*)?$/i;
+
+const intersects = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+/// Where the Browser view may show: the host's rectangle inside the open pane, or null when the
+/// tab is hidden, the pane closed, the window's page hidden, or something of ARK's covers it.
+function placeOf(host) {
+  if (!host.isConnected || document.hidden) return null;
+  const pane = host.closest(".pane");
+  if (pane && document.querySelector(".app")?.dataset.pane === "closed") return null;
+  const r = host.getBoundingClientRect();
+  const p = pane ? pane.getBoundingClientRect() : r;
+  // The pane's resize grip stays reachable along its edge.
+  const grip = pane?.querySelector(".pane-grip")?.offsetWidth || 0;
+  const box = { left: Math.max(r.left, p.left + grip), top: Math.max(r.top, p.top), right: Math.min(r.right, p.right), bottom: Math.min(r.bottom, p.bottom) };
+  if (box.right - box.left < 2 || box.bottom - box.top < 2) return null;
+  for (const o of document.querySelectorAll(OVERLAYS)) {
+    const or = o.getBoundingClientRect();
+    if (or.width && or.height && intersects(or, box) && getComputedStyle(o).visibility !== "hidden") return null;
+  }
+  return { x: Math.round(box.left), y: Math.round(box.top), width: Math.round(box.right - box.left), height: Math.round(box.bottom - box.top) };
+}
+
 function browser(el, params, ark) {
   el.classList.add("wb-col");
-  const s = { url: "" };
+  const view = ark.browserView;
+  const s = { url: "", shown: "" };
   const address = h("input.wb-input", { placeholder: "Search or enter an address", spellcheck: "false", "aria-label": "Address" });
-  const frame = h("iframe.wb-frame", { sandbox: "allow-scripts allow-same-origin allow-forms allow-popups", referrerpolicy: "no-referrer", title: "Page" });
-  const blank = h("div.wb-empty", "Enter an address. Some sites refuse to be shown inside another app; open those in your browser.");
-  const back = h("button.icon-btn", { type: "button", title: "Back", "aria-label": "Back", onclick: () => { try { frame.contentWindow.history.back(); } catch {} } }, icon("arrow-left"));
-  const reload = h("button.icon-btn", { type: "button", title: "Reload", "aria-label": "Reload", onclick: () => s.url && (frame.src = s.url) }, icon("reload"));
-  const out = h("button.icon-btn", { type: "button", title: "Open in your browser", "aria-label": "Open in your browser", onclick: () => s.url && window.open(s.url, "_blank", "noopener") }, icon("external"));
-  el.append(h("div.wb-bar", back, reload, address, out), h("div.wb-frame-host", frame, blank));
+  const host = h("div.wb-frame-host");
+  const blank = h("div.wb-empty", "Search or enter an address");
+  const out = () => s.url && window.open(s.url, "_blank", "noopener");
+  const back = h("button.icon-btn", { type: "button", title: "Back", "aria-label": "Back", onclick: () => nav.back() }, icon("arrow-left"));
+  const reload = h("button.icon-btn", { type: "button", title: "Reload", "aria-label": "Reload", onclick: () => s.url && nav.reload() }, icon("reload"));
+  const outBtn = h("button.icon-btn", { type: "button", title: "Open in your browser", "aria-label": "Open in your browser", onclick: out }, icon("external"));
+  el.append(h("div.wb-bar", back, reload, address, outBtn), host);
+
+  const shown = (u) => {
+    s.url = u;
+    if (document.activeElement !== address) address.value = u;
+    ark.setPanelTitle("browser", hostOf(u));
+    ark.reportFocus();
+  };
+  // An address the view refuses (the app's own pages, files): the bar goes back to the page.
+  const failed = (u, e) => {
+    ark.toast(e?.message || String(e));
+    if (s.url !== u) return;
+    address.value = s.url = s.shown;
+    blank.hidden = !!s.shown;
+    ark.setPanelTitle("browser", s.shown ? hostOf(s.shown) : "Browser");
+    ark.reportFocus();
+  };
+  const nav = view ? nativeBrowser(host, view, (u) => shown((s.shown = u)), failed) : framedBrowser(host, ark, out);
+  host.append(blank);
 
   const go = (u) => {
     u = String(u || "").trim();
     if (!u) return;
-    if (!/^[a-z]+:\/\//i.test(u)) u = /\s/.test(u) || !/\./.test(u) ? `https://duckduckgo.com/?q=${encodeURIComponent(u)}` : `https://${u}`;
-    s.url = address.value = u;
+    if (!/^[a-z]+:\/\//i.test(u)) u = LOCAL.test(u) ? `http://${u}` : /\s/.test(u) || !/\./.test(u) ? `https://duckduckgo.com/?q=${encodeURIComponent(u)}` : `https://${u}`;
     blank.hidden = true;
-    frame.src = u;
-    ark.setPanelTitle("browser", hostOf(u));
-    ark.reportFocus();
+    address.value = u;
+    shown(u);
+    nav.load(u);
   };
   address.addEventListener("keydown", (e) => { if (e.key === "Enter") go(address.value); });
   if (params?.locator) go(params.locator);
@@ -157,6 +206,97 @@ function browser(el, params, ark) {
   return {
     focus: () => ({ surface: { kind_tag: "browser", title: s.url ? hostOf(s.url) : "Browser", locator: s.url || undefined } }),
     update: (p) => p?.locator && go(p.locator),
+    dispose: () => nav.dispose(),
+  };
+}
+
+/// In the window: the page in a webview of its own, kept over `host`. Its place is sent once it
+/// holds still for a frame (not every frame of the pane opening), one call at a time; while the
+/// tab is out of sight the place is looked at a few times a second only.
+function nativeBrowser(host, view, shown, failed) {
+  const s = { alive: true, busy: false, created: false, visible: false, wait: false, last: "", prev: "", frame: 0, pending: "" };
+  view.listen((ev) => {
+    if (ev.url && !ev.loading && /^https?:/i.test(ev.url)) shown(ev.url);
+  }).catch(() => {});
+  // The view is made only while the person is in the window (making it brings the app to the
+  // front); the window coming to the front asks again.
+  const onFocus = () => (s.wait = false);
+  addEventListener("focus", onFocus);
+  const tick = () => {
+    if (!s.alive) return;
+    requestAnimationFrame(tick);
+    if (s.busy || (!s.visible && !s.pending && s.frame++ % 8)) return;
+    const place = placeOf(host);
+    const key = place ? `${place.x},${place.y},${place.width},${place.height}` : "";
+    const still = key === s.prev;
+    s.prev = key;
+    if (key === s.last && !s.pending) return;
+    if (!place) {
+      s.last = key;
+      if (s.visible) {
+        s.visible = false;
+        view.act("hide").catch(() => {});
+      }
+      return;
+    }
+    if (!still) return;
+    if (!s.created && (!s.pending || s.wait || !document.hasFocus())) return;
+    const url = s.pending;
+    s.busy = true;
+    view.show(place, url).then((r) => {
+      s.busy = false;
+      if (!s.alive) return view.act("close").catch(() => {});
+      if (s.pending === url) s.pending = "";
+      if (!r?.shown) {
+        s.pending ||= url;
+        s.wait = true;
+        return;
+      }
+      s.created = s.visible = true;
+      s.last = key;
+    }, (e) => {
+      s.busy = false;
+      if (s.pending === url) s.pending = "";
+      if (url) failed(url, e);
+    });
+  };
+  requestAnimationFrame(tick);
+  return {
+    load: (u) => (s.pending = u),
+    back: () => view.act("back").catch(() => {}),
+    reload: () => view.act("reload").catch(() => {}),
+    dispose: () => {
+      s.alive = false;
+      removeEventListener("focus", onFocus);
+      view.act("close").catch(() => {});
+    },
+  };
+}
+
+/// In a browser: an iframe. A page that refuses frames would stay white, so the runtime is asked
+/// whether it refuses (`frame_check`) and the panel says so.
+function framedBrowser(host, ark, out) {
+  const frame = h("iframe.wb-frame", { sandbox: "allow-scripts allow-same-origin allow-forms allow-popups", referrerpolicy: "no-referrer", title: "Page" });
+  const refused = h("div.wb-empty.wb-refused", { hidden: true });
+  host.append(frame, refused);
+  let current = "";
+  return {
+    load(u) {
+      current = u;
+      refused.hidden = true;
+      frame.src = u;
+      ark.call("frame_check", { url: u }).then((r) => {
+        if (r?.framable !== false || current !== u) return;
+        refused.replaceChildren(
+          h("p", `${hostOf(u)} can't be shown here`),
+          h("button.btn", { type: "button", onclick: out }, icon("external"), "Open in your browser"),
+        );
+        refused.hidden = false;
+      }).catch(() => {});
+    },
+    back: () => { try { frame.contentWindow.history.back(); } catch {} },
+    reload: () => current && (frame.src = current),
+    dispose: () => {},
   };
 }
 

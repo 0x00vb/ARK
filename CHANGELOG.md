@@ -10,8 +10,21 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Added
+- ADR 0051: each conversation turn reads the project folder's `AGENTS.md` as the project's
+  rules (sections within 1,500 tokens, the rest named, subfolders with their own listed).
+  `ArkBuilder::project_instructions(names)` names other files, or none to turn it off;
+  `rules::project_instructions` (sections chosen by the task) and `RuleSelection::with_project`
+  are new.
 - Window: code in the file editor is coloured from the theme (keywords, strings, numbers,
   literals, comments) for 12 language families. Other files keep the plain editor.
+
+### Changed
+- ADR 0051: a project folder with an `AGENTS.md` changes every conversation turn's first
+  message (its rules block). Apps that do not want it call `.project_instructions(Vec::<String>::new())`.
+- The rules activity line reads "Following N rules (M more not shown)" and names the file or
+  set the rules come from.
+- ADR 0051: a turn whose model restates its full answer beside a second check of the files it
+  changed ends on that answer; the check does not run.
 
 ## [0.14.0] - 2026-10-07
 

@@ -320,6 +320,12 @@ and `rules.get`. The selection is recorded on the task (`TaskRecord.rules`, as
 `set@version:id`) and in the trace (`RulesApplied`). Project bindings apply to a
 single-agent `Ark` too.
 
+A project folder's own instructions (`AGENTS.md` by default, `ArkBuilder::project_instructions`)
+go before the bound rules in each conversation turn: its first section and those closest to the
+task within 1,500 tokens, the rest named, and the subfolders that have their own file listed
+(ADR 0051). They show as
+rules of the file's name (`AGENTS.md@0:<heading>`). Agents of an orchestrator do not read it yet.
+
 ## Skills
 
 An agent with `skills(["release-notes"])` (or `["*"]`) gets those skills of the project folder's

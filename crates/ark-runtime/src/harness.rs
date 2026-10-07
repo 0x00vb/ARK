@@ -678,6 +678,8 @@ impl Harness {
         let mut corrected_claim = false;
         // Whether the model was told once that its answer announced work it had not done.
         let mut corrected_announce = false;
+        // The answer the model last wrote beside a check of its own changes (see `rechecks`).
+        let mut checked: Option<String> = None;
         let mut steered: Vec<String> = Vec::new();
         // Tools an acquisition added this turn, and the turn's engine once it has them.
         let outer = engine;
@@ -750,7 +752,7 @@ impl Harness {
                     Some(&mut unusable),
                 )
                 .await;
-            let Some(completion) = (match called {
+            let Some(mut completion) = (match called {
                 Ok(c) => c,
                 // The model's reply could not be used: tell it why and let it send it again,
                 // a bounded number of times (ADR 0050). Nothing ran.
@@ -782,6 +784,32 @@ impl Harness {
                 break;
             };
             repairs_in_row = 0;
+
+            // A full answer beside reads of what this turn changed is a check of its own work.
+            // A second one that repeats the first is the model restating its answer, not
+            // working: its reads do not run and the reply is taken as the answer, through the
+            // same checks as any other (ADR 0051). A change in between starts over.
+            if rechecks(&completion, engine, &written) {
+                if checked
+                    .as_deref()
+                    .is_some_and(|before| restates(before, &completion.content))
+                {
+                    tracing::info!(
+                        calls = completion.tool_calls.len(),
+                        "the answer was restated beside another check of the same changes; ending the turn"
+                    );
+                    completion.tool_calls.clear();
+                } else {
+                    checked = Some(completion.content.clone());
+                }
+            } else if completion.tool_calls.iter().any(|c| {
+                engine
+                    .registry
+                    .descriptor(&c.name)
+                    .is_some_and(|d| d.risk == RiskTier::Mutate)
+            }) {
+                checked = None;
+            }
 
             if completion.tool_calls.is_empty() {
                 // The user said more while this answer was being written: treat the text as
@@ -2630,6 +2658,66 @@ const CUT_SHORT_NOTE: &str = "not run: this exact change was under way when the 
 const REPEATED_CHANGE_NOTE: &str = "not run: this exact call already ran twice in this task, with the results above. Running it again gives the same result. Change the input to fix what went wrong (for a program, fix the error it reported), or answer from what you have.";
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";
+
+/// Text at least this long, over at least [`ANSWER_LINES`] lines, reads as a full answer rather
+/// than a note on the next step. From the owner's run (ADR 0051): notes beside tool calls were
+/// 39 to 205 characters on one line, the answers 1,431 to 1,798 over 13 to 25 lines.
+const ANSWER_CHARS: usize = 600;
+const ANSWER_LINES: usize = 3;
+/// Share of the shorter answer's words the next one repeats when it restates it. The owner's
+/// run: 0.61 to 0.67 between consecutive restated answers.
+const RESTATED: f32 = 0.5;
+
+/// Whether a reply is a full answer written beside reads of files this turn already changed
+/// (or folders holding them), and nothing else: the model checking its own work.
+fn rechecks(c: &Completion, engine: &Engine, written: &[String]) -> bool {
+    let text = c.content.trim();
+    if c.tool_calls.is_empty()
+        || written.is_empty()
+        || text.chars().count() < ANSWER_CHARS
+        || text.lines().filter(|l| !l.trim().is_empty()).count() < ANSWER_LINES
+    {
+        return false;
+    }
+    let norm = |p: &str| {
+        p.trim()
+            .replace('\\', "/")
+            .trim_start_matches("./")
+            .trim_end_matches('/')
+            .to_string()
+    };
+    let written: Vec<String> = written.iter().map(|w| norm(w)).collect();
+    c.tool_calls.iter().all(|call| {
+        let read_only = !catalog::is_meta_tool(&call.name)
+            && engine
+                .registry
+                .descriptor(&call.name)
+                .is_some_and(|d| d.risk != RiskTier::Mutate);
+        let Some(path) = call.arguments.get("path").and_then(|p| p.as_str()) else {
+            return false;
+        };
+        let path = norm(path);
+        read_only
+            && !path.is_empty()
+            && path != "."
+            && written
+                .iter()
+                .any(|w| *w == path || w.starts_with(&format!("{path}/")))
+    })
+}
+
+/// Whether `now` repeats most of the words of `before`: the same answer said again.
+fn restates(before: &str, now: &str) -> bool {
+    let words = |t: &str| -> HashSet<String> {
+        t.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.chars().count() >= 3)
+            .map(str::to_lowercase)
+            .collect()
+    };
+    let (a, b) = (words(before), words(now));
+    let smaller = a.len().min(b.len());
+    smaller > 0 && a.intersection(&b).count() as f32 / smaller as f32 >= RESTATED
+}
 
 /// Whether the end of an answer announces work the model is about to do ("I will now call
 /// `files__edit`", "Let me now update the file"), the way a model ends a reply instead of making

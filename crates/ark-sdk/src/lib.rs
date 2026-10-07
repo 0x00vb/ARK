@@ -132,6 +132,8 @@ pub struct Ark {
     allow_mutate: bool,
     /// The skills the conversation may read (`*`, names; empty: none).
     skills: Vec<String>,
+    /// File names of the project folder's own instructions ([`ArkBuilder::project_instructions`]).
+    instructions: Vec<String>,
     /// Tools each agent gets its own of: the web, the browser ([`ArkBuilder::web`],
     /// [`ArkBuilder::browser`]).
     per_agent: Vec<Arc<dyn PerAgent>>,
@@ -164,6 +166,7 @@ impl Clone for Ark {
             critic: self.critic,
             allow_mutate: self.allow_mutate,
             skills: self.skills.clone(),
+            instructions: self.instructions.clone(),
             per_agent: self.per_agent.clone(),
             connections: self.connections.clone(),
             computer: self.computer.clone(),
@@ -468,10 +471,25 @@ impl Ark {
         let sets = self
             .rule_book()
             .resolve(&[RuleScope::Project(project.to_string())])?;
+        let instructions = engine.workspace_dir(project).ok().and_then(|dir| {
+            ark_runtime::rules::project_instructions(
+                &dir,
+                &self.instructions,
+                input,
+                ark_runtime::rules::INSTRUCTIONS_BUDGET,
+            )
+        });
         if sets.is_empty() {
-            return Ok((engine, None));
+            return Ok((
+                engine,
+                instructions.map(|p| RuleSelection::default().with_project(p)),
+            ));
         }
-        let selection = ark_runtime::rules::select(&sets, input, ark_runtime::rules::RULES_BUDGET);
+        let mut selection =
+            ark_runtime::rules::select(&sets, input, ark_runtime::rules::RULES_BUDGET);
+        if let Some(p) = instructions {
+            selection = selection.with_project(p);
+        }
         let registry = engine.registry.clone().with(Arc::new(RulesTool::new(sets)));
         Ok((Arc::new(engine.scoped(registry)), Some(selection)))
     }
@@ -699,6 +717,7 @@ pub struct ArkBuilder {
     allow_mutate: bool,
     subscriptions: Option<SubscriptionRuntime>,
     skills: Vec<String>,
+    instructions: Vec<String>,
     web: Option<WebAdapter>,
     files: bool,
     code: Option<CodeChoice>,
@@ -755,6 +774,7 @@ impl Default for ArkBuilder {
             allow_mutate: false,
             subscriptions: None,
             skills: vec!["*".into()],
+            instructions: vec!["AGENTS.md".into()],
             web: None,
             files: false,
             code: None,
@@ -834,6 +854,18 @@ impl ArkBuilder {
     /// orchestrator choose their own (`AgentSpec::skills`).
     pub fn skills<S: Into<String>>(mut self, names: impl IntoIterator<Item = S>) -> Self {
         self.skills = names.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// The project folder's own instructions for agents, by file name, the first found at the
+    /// folder's root: its sections go into each conversation turn as the project's rules, within
+    /// a budget, with the subfolders that have their own named (ADR 0051). Default
+    /// `["AGENTS.md"]`; none turns it off. A name is a file name, not a path.
+    pub fn project_instructions<S: Into<String>>(
+        mut self,
+        names: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.instructions = names.into_iter().map(Into::into).collect();
         self
     }
 
@@ -1102,6 +1134,7 @@ impl ArkBuilder {
             critic: self.critic,
             allow_mutate: self.allow_mutate,
             skills: self.skills,
+            instructions: self.instructions,
             per_agent,
             connections,
             computer,
@@ -1524,6 +1557,66 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(plain.call_count(), 1);
+    }
+
+    /// A chat turn carries the project folder's AGENTS.md as the project's rules (ADR 0051), and
+    /// an app that turns it off sends none.
+    #[tokio::test]
+    async fn a_turn_follows_the_project_folders_agents_file() {
+        for on in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let mock = Arc::new(MockProvider::new(
+                "mock",
+                vec![Completion {
+                    content: "ok".into(),
+                    tool_calls: vec![],
+                    usage: Usage::measured(10, 2),
+                }],
+            ));
+            let provider: Arc<dyn ark_model::Provider> = mock.clone();
+            let mut b = Ark::builder()
+                .store_root(dir.path())
+                .provider(provider)
+                .planner(false)
+                .critic(false);
+            if !on {
+                b = b.project_instructions(Vec::<String>::new());
+            }
+            let ark = b.build().unwrap();
+            let project = ark.create_project("t", "").unwrap();
+            let folder = ark.engine.workspace_dir(&project.id).unwrap();
+            std::fs::write(
+                folder.join("AGENTS.md"),
+                "# Book\n\nChapters are `chNN.md`.\n",
+            )
+            .unwrap();
+            let mut session = ark.start_session(&project.id).unwrap();
+            let mut rules = Vec::new();
+            ark.ask_session(&mut session, "hi", TurnOptions::default(), |e| {
+                if let HarnessEvent::Rules { applied, .. } = e {
+                    rules = applied;
+                }
+            })
+            .await
+            .unwrap();
+            let sent: String = mock.recorded()[0]
+                .messages
+                .iter()
+                .map(|m| m.content.clone())
+                .collect();
+            assert_eq!(
+                sent.contains("From the project's own file AGENTS.md"),
+                on,
+                "on: {on}"
+            );
+            assert_eq!(sent.contains("Chapters are `chNN.md`."), on, "on: {on}");
+            assert_eq!(
+                rules.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+                if on { vec!["Book"] } else { vec![] }
+            );
+            let report = ark.context_preview(&session).await.unwrap();
+            assert_eq!(report.rules > 0, on, "the context report counts it");
+        }
     }
 
     /// Run code's Python comes with the data-analysis skill; a skill of the same name in the

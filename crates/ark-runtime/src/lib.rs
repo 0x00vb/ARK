@@ -64,7 +64,7 @@ pub use metrics::{role_name, Metrics};
 pub use plugins::{PluginSpec, PluginStatus, Plugins};
 pub use profile::{AgentProfile, AgentProfileBuilder, Prompts};
 pub use router::{ModelRouter, Role};
-pub use rules::{RuleBook, RuleSelection, RulesTool};
+pub use rules::{ProjectInstructions, RuleBook, RuleSelection, RulesTool};
 pub use session::{
     CarryPolicy, CompactReport, Post, Session, SessionRecord, SessionUsage, Turn, POSTS_CARRIED,
 };

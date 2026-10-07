@@ -237,9 +237,20 @@ pub fn describe(
         HarnessEvent::Rules { applied, .. } if applied.is_empty() => return None,
         HarnessEvent::Rules { applied, held_back } => {
             let n = applied.len();
-            let ids: Vec<String> = applied.iter().map(|r| r.id.clone()).collect();
+            // By where they come from: "AGENTS.md: Intro, Style; engineering: E1".
+            let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+            for r in applied {
+                match groups.last_mut() {
+                    Some((set, ids)) if *set == r.set => ids.push(r.id.clone()),
+                    _ => groups.push((r.set.clone(), vec![r.id.clone()])),
+                }
+            }
+            let ids: Vec<String> = groups
+                .into_iter()
+                .map(|(set, ids)| format!("{set}: {}", ids.join(", ")))
+                .collect();
             let more = if *held_back > 0 {
-                format!(" ({held_back} more on request)")
+                format!(" ({held_back} more not shown)")
             } else {
                 String::new()
             };
@@ -250,7 +261,7 @@ pub fn describe(
                     if n == 1 { "rule" } else { "rules" }
                 ),
             )
-            .detail(ids.join(", "))
+            .detail(ids.join("; "))
             .tone(Tone::Muted)
         }
         HarnessEvent::Cancelled => Activity::new(K::Stopped, STOPPED).tone(Tone::Warning),
@@ -364,6 +375,31 @@ pub fn with_artifact_names(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn rules_name_the_file_they_come_from() {
+        let r = |set: &str, id: &str| {
+            serde_json::from_value(json!({ "set": set, "version": 0, "id": id })).unwrap()
+        };
+        let a = describe(
+            &Labels::default(),
+            &HashMap::new(),
+            &HarnessEvent::Rules {
+                applied: vec![
+                    r("AGENTS.md", "Intro"),
+                    r("AGENTS.md", "Style"),
+                    r("eng", "E1"),
+                ],
+                held_back: 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(a.label, "Following 3 rules (2 more not shown)");
+        assert_eq!(
+            a.detail.as_deref(),
+            Some("AGENTS.md: Intro, Style; eng: E1")
+        );
+    }
 
     #[test]
     fn calls_and_results_pair_by_id() {

@@ -276,7 +276,7 @@ Can wait, each until its trigger:
 | A done-check on a work item (acceptance criteria the runtime verifies) | the board workload on a hosted model shows items marked done that are not |
 | Teams from the chat (`agents.create` with `delegates_to`), inputs and `after` on the chat's `agents.delegate` | the same workload shows the chat needs them |
 | Remote MCP servers with sign-in on ARK's connections | after Desktop is public, before ARK builds more services itself: the scalable way to business apps. OMP, Claude Code and Codex all have it: the floor for capabilities |
-| The protocol in its own crate, out of `ark-ui`, with a version in `hello`, a published schema and a client outside Rust (OMP and Tern both publish theirs) | the first client not served by the runtime it talks to (a Cloud web app, a phone app, or attention across runtimes, ADR 0043 step 4) |
+| The protocol in its own crate, out of `ark-ui`, with a version in `hello`, a published schema and a client outside Rust (OMP and Tern both publish theirs) | the first client outside Rust (a Cloud web app, a phone app). Attention across runtimes (ADR 0043 step 4) is a client of another runtime, but in Rust in `ark-interact`, and it reads an older or newer runtime without a version: a missing method is "too old", items are read one by one |
 | A phone app | after the phone's browser with notifications (ADR 0043 step 3) falls short on a remote or Cloud runtime |
 | `present` lists the views the host has instead of naming them in `ark-runtime` (today only the window offers `present`, and every window has a Terminal panel) | a host that offers `present` without a terminal or browser |
 

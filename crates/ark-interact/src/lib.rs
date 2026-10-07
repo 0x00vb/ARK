@@ -24,6 +24,7 @@ pub mod capabilities;
 pub mod command;
 pub mod fmt;
 pub mod inspect;
+pub mod installs;
 pub mod interaction;
 pub mod labels;
 pub mod logging;

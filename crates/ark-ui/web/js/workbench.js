@@ -5,19 +5,21 @@
 //   terminal  the project's shell (`term_*`); the agent may fill the prompt, never press Enter
 //   browser   a page in a frame, with an address bar
 //   files     the project's folder; a file opens in a tab of its own (file.js)
+//   processes what agents started, with output and Stop (processes.js), when the app offers it
 
 import { h, icon, clear } from "./dom.js";
 import { KIND_ICON } from "./file.js";
+import { processes, watchProcesses } from "./processes.js";
 
 /// What the agent may put at the prompt: one line, no control characters, so it cannot run
 /// a command itself (that would skip approval). The person presses Enter.
 export const typedCommand = (cmd) => String(cmd ?? "").replace(/[\x00-\x1f\x7f-\x9f]+/g, " ");
 
-const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+export const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /// Load a script or stylesheet once.
 const loaded = new Map();
-function load(src) {
+export function load(src) {
   if (!loaded.has(src)) {
     loaded.set(src, new Promise((ok, fail) => {
       const el = src.endsWith(".css")
@@ -31,7 +33,7 @@ function load(src) {
   return loaded.get(src);
 }
 
-async function xterm() {
+export async function xterm() {
   await Promise.all([load("vendor/xterm/xterm.css"), load("vendor/xterm/xterm.js")]);
   await load("vendor/xterm/xterm-addon-fit.js");
   return window.Terminal;
@@ -236,4 +238,15 @@ export const BUILTINS = [
 
 export function registerBuiltins(ark) {
   for (const p of BUILTINS) ark.panel({ ...p, nav: true, builtin: true, render: (el, params) => p.render(el, params, ark) });
+  // Processes, only where the app lets agents start them (`procs` fails otherwise).
+  let added = false;
+  const add = async () => {
+    if (added) return;
+    try { await ark.call("procs"); } catch { return; }
+    added = true;
+    ark.panel({ id: "processes", title: "Processes", icon: "play", presents: ["processes"], nav: true, builtin: true, wide: true, fill: true, render: (el, params) => processes(el, params, ark) });
+    watchProcesses(ark);
+  };
+  add();
+  ark.on("ark:connected", add);
 }

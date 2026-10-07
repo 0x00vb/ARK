@@ -5,6 +5,9 @@
 
 use std::sync::Arc;
 
+use ark_sdk::prelude::ark_proc::{
+    LIST as PROCESS_LIST, START as PROCESS_START, STOP as PROCESS_STOP,
+};
 use ark_sdk::prelude::{ark_exec, ark_files, ApprovalRequest};
 use serde_json::Value;
 
@@ -114,6 +117,9 @@ impl Labels {
                 if action == ark_exec::RUN {
                     return run_result(summary);
                 }
+                if action.starts_with("process.") {
+                    return process_result(summary);
+                }
                 match action.starts_with("files.") {
                     true => match line.rfind(" (version ") {
                         Some(i) => line[..i].to_string(),
@@ -130,6 +136,7 @@ impl Labels {
             .find_map(|r| r.approval(request))
             .or_else(|| file_approval(&request.action, &request.input))
             .or_else(|| run_approval(&request.action, &request.input))
+            .or_else(|| process_approval(&request.action, &request.input))
             .or_else(|| runtime_label(&request.action, &request.input))
             .unwrap_or_else(|| request.preview.clone())
     }
@@ -380,6 +387,54 @@ fn run_result(summary: &str) -> String {
     }
 }
 
+/// A process start, for its approval: the command, where, what it can reach, and the page it
+/// will open.
+fn process_approval(action: &str, input: &Value) -> Option<String> {
+    if action != PROCESS_START {
+        return None;
+    }
+    let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").trim();
+    let place = match folder(input) {
+        "" => "the project folder".to_string(),
+        f => format!("{f} in the project"),
+    };
+    // One sentence, then the command alone: a card shows the lines after the first as code.
+    let then = match s("open") {
+        "" => String::new(),
+        o => format!(", then open {} in the browser", clip(o, 80)),
+    };
+    let out = format!(
+        "Start this command in {place} and keep it running{then}. Not contained: it runs as you, with your files and the network. You can stop it in Processes.\n  {}",
+        clip(&one_line(s("command")), 200)
+    );
+    Some(out)
+}
+
+/// `folder` as the person reads it: no `./`, no slashes at the ends.
+fn folder(input: &Value) -> &str {
+    input
+        .get("folder")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .trim_start_matches("./")
+        .trim_matches('/')
+}
+
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A process call's result in one line: `Ready at http://localhost:3000/`.
+fn process_result(summary: &str) -> String {
+    let first = summary.lines().next().unwrap_or("");
+    let said = first.split_once(": ").map(|(_, r)| r).unwrap_or(first);
+    let mut c = said.chars();
+    c.next()
+        .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
+        .unwrap_or_default()
+}
+
 fn row_line(row: &Value) -> String {
     match row {
         Value::Array(cells) => cells
@@ -452,6 +507,19 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
             }
         ),
         "computer.keys" => format!("Pressing {} in {}", s("keys"), s("app")),
+        PROCESS_START => format!(
+            "Starting `{}`{}",
+            clip(&one_line(s("command")), 60),
+            match folder(input) {
+                "" => String::new(),
+                f => format!(" in {f}"),
+            }
+        ),
+        PROCESS_LIST => match s("id") {
+            "" => "Checking the processes".into(),
+            id => format!("Reading the output of {id}"),
+        },
+        PROCESS_STOP => format!("Stopping {}", s("id")),
         ark_exec::RUN => match (purpose(input), runtime_name(input).trim()) {
             (Some(p), _) => clip(&p, 80),
             (None, "") => "Running code".into(),
@@ -619,6 +687,47 @@ mod tests {
         assert_eq!(
             l.result_detail(ark_exec::RUN, true, "exit 0\nstdout:\n12"),
             "Done"
+        );
+    }
+
+    #[test]
+    fn a_process_start_asks_with_its_command_and_folder() {
+        let l = Labels::new(vec![]);
+        let input = json!({ "command": "npm  run dev", "folder": "./web/", "open": "/home" });
+        let req = ApprovalRequest {
+            action: "process.start".into(),
+            summary: String::new(),
+            risk: ark_sdk::prelude::RiskTier::Mutate,
+            input: input.clone(),
+            class: "process.start:npm run dev@./web/".into(),
+            preview: String::new(),
+            agent: None,
+            task: None,
+            ask_each_time: false,
+        };
+        assert_eq!(
+            l.approval_line(&req),
+            "Start this command in web in the project and keep it running, then open /home in the browser. Not contained: it runs as you, with your files and the network. You can stop it in Processes.\n  npm run dev"
+        );
+        assert_eq!(
+            l.call_label("process.start", &input),
+            "Starting `npm run dev` in web"
+        );
+        assert_eq!(
+            l.result_detail(
+                "process.start",
+                true,
+                "p1 npm run dev (in web): ready at http://localhost:3000/\noutput:\n..."
+            ),
+            "Ready at http://localhost:3000/"
+        );
+        assert_eq!(
+            l.call_label("process.list", &json!({ "id": "p1" })),
+            "Reading the output of p1"
+        );
+        assert_eq!(
+            l.call_label("process.stop", &json!({ "id": "p1" })),
+            "Stopping p1"
         );
     }
 

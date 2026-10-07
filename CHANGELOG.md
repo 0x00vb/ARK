@@ -9,6 +9,24 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- Project processes (ADR 0041, `ark-proc`, `ArkBuilder::processes`): agents start, watch and
+  stop long-running commands in the project (`process.start`, `list`, `stop`): a dev server, a
+  watcher, a worker, with the person's own shell and tools. Not contained, so every start asks,
+  showing the command and the folder, and "Always in this project" covers only that command in
+  that folder. Ready is decided by code (a local address in the output that answers, or a
+  `port`). The page has a Processes panel (live output, Stop) that opens on a start, and opens
+  the process's page (`open`) in the Browser panel once ready. `/processes` lists and stops
+  them in both front-ends. Processes stop when the runtime stops; a crash leaves a record that
+  the next start sweeps. macOS and Linux.
+- A program a process needs and does not find (Node.js, pnpm, Yarn, Bun, Deno, uv, Rust) is
+  installed through `acquire_capability` after the person allows it ("Install Node.js", with
+  the exact command); the install runs as a process they can watch.
+- `ark_runtime::Sources`: several acquisition sources behind a profile's one slot (accounts to
+  connect, programs to install); `AcquisitionProvider::knows` says which need goes where. An
+  `acquire_capability` question's yes button is the first word of its line ("Connect",
+  "Install").
+
 ### Changed
 - `present` says what `locator` is for each view: the address for the browser (this machine's
   too) and the command for the terminal. An agent asked to show a page on `localhost` now opens

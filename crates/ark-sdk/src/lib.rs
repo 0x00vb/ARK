@@ -61,7 +61,7 @@ pub mod prelude {
     // The underlying crates, so tool authors can name `ark_tools::Result`, build a provider
     // with `ark_model::from_env_arc()`, etc., from the prelude alone.
     pub use {
-        ark_browser, ark_computer, ark_connect, ark_core, ark_exec, ark_files, ark_model,
+        ark_browser, ark_computer, ark_connect, ark_core, ark_exec, ark_files, ark_model, ark_proc,
         ark_runtime, ark_tools,
     };
 }
@@ -138,6 +138,8 @@ pub struct Ark {
     connections: Option<Connections>,
     /// The Computer, when the app turned it on ([`ArkBuilder::computer`]).
     computer: Option<Arc<ark_computer::ComputerService>>,
+    /// Project processes, when the app turned them on ([`ArkBuilder::processes`]).
+    processes: Option<ark_proc::Processes>,
 }
 
 /// Another handle on the same agent: the store, tools, model sessions and capabilities are
@@ -160,6 +162,7 @@ impl Clone for Ark {
             per_agent: self.per_agent.clone(),
             connections: self.connections.clone(),
             computer: self.computer.clone(),
+            processes: self.processes.clone(),
         }
     }
 }
@@ -240,6 +243,11 @@ impl Ark {
     /// The Computer, when the app offers it: who uses the screen, and taking it back.
     pub fn computer(&self) -> Option<&Arc<ark_computer::ComputerService>> {
         self.computer.as_ref()
+    }
+
+    /// Project processes, when the app offers them: what runs, its output, stopping it.
+    pub fn processes(&self) -> Option<&ark_proc::Processes> {
+        self.processes.as_ref()
     }
 
     /// The model this `Ark` runs on now, as a handle that sees later
@@ -596,12 +604,19 @@ pub struct ArkBuilder {
     code: Option<CodeChoice>,
     browser: Option<BrowserChoice>,
     computer: Option<ComputerChoice>,
+    processes: Option<ProcessesChoice>,
     connections: Option<ConnectionsChoice>,
     secrets: Option<Arc<dyn ark_connect::Secrets>>,
 }
 enum CodeChoice {
     Default,
     Given(Box<ark_exec::Exec>),
+}
+
+enum ProcessesChoice {
+    /// The person's shell, records in the store root's `processes` folder.
+    Default,
+    Given(ark_proc::Processes),
 }
 
 enum ComputerChoice {
@@ -647,6 +662,7 @@ impl Default for ArkBuilder {
             code: None,
             browser: None,
             computer: None,
+            processes: None,
             connections: None,
             secrets: None,
         }
@@ -793,6 +809,23 @@ impl ArkBuilder {
         self
     }
 
+    /// Offer project processes (`process.start`, `list`, `stop`; [`ark_proc`]): agents start
+    /// long-running commands in the project folder (a dev server, a watcher) with the person's
+    /// shell and tools. Not contained: every start asks, per command and folder, and "Always in
+    /// this project" covers only that command there. The window shows each process and its
+    /// output and stops it; a missing program (Node.js, Rust, ...) is installed through
+    /// `acquire_capability` after the person allows it. macOS and Linux. Off by default.
+    pub fn processes(mut self, yes: bool) -> Self {
+        self.processes = yes.then_some(ProcessesChoice::Default);
+        self
+    }
+
+    /// [`processes`](ArkBuilder::processes) with a service the app set up (its own shell).
+    pub fn processes_with(mut self, p: ark_proc::Processes) -> Self {
+        self.processes = Some(ProcessesChoice::Given(p));
+        self
+    }
+
     /// [`computer`](ArkBuilder::computer) with a service the app set up (tests, another screen).
     pub fn computer_with(mut self, service: Arc<ark_computer::ComputerService>) -> Self {
         self.computer = Some(ComputerChoice::Given(service));
@@ -869,6 +902,15 @@ impl ArkBuilder {
             engine.register(Arc::new(ark_files::Files));
             profile.distillers.push(ark_files::distill());
         }
+        let processes = match self.processes {
+            Some(ProcessesChoice::Default) => {
+                ark_proc::Processes::open(engine.store.root().join("processes"))
+            }
+            Some(ProcessesChoice::Given(p)) => Some(p),
+            None => None,
+        };
+        // What an agent may ask for mid-task: accounts to connect, programs to install.
+        let mut sources: Vec<Arc<dyn ark_runtime::AcquisitionProvider>> = Vec::new();
         if let Some(c) = &connections {
             // Saved API keys reach the model APIs; the environment still comes first.
             ark_model::keys::set_source(Arc::new(c.api_keys().clone()));
@@ -876,10 +918,19 @@ impl ArkBuilder {
             profile
                 .distillers
                 .push(Arc::new(ark_connect::services::distill));
-            // An agent that needs a capability not connected yet can ask for it mid-task.
-            if profile.acquisition.is_none() {
-                profile.acquisition = Some(Arc::new(c.clone()));
-            }
+            sources.push(Arc::new(c.clone()));
+        }
+        if let Some(p) = &processes {
+            engine.register(Arc::new(ark_proc::ProcessTool(p.clone())));
+            profile.distillers.push(ark_proc::distill());
+            sources.push(Arc::new(ark_proc::Installs::new(p.clone())));
+        }
+        if profile.acquisition.is_none() {
+            profile.acquisition = match sources.len() {
+                0 => None,
+                1 => sources.pop(),
+                _ => Some(Arc::new(ark_runtime::Sources(sources))),
+            };
         }
         let mut per_agent: Vec<Arc<dyn PerAgent>> = Vec::new();
         if let Some(w) = self.web {
@@ -921,6 +972,7 @@ impl ArkBuilder {
             per_agent,
             connections,
             computer,
+            processes,
         })
     }
 }

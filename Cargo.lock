@@ -374,6 +374,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-proc"
+version = "0.12.1"
+dependencies = [
+ "ark-core",
+ "ark-runtime",
+ "ark-tools",
+ "async-trait",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ark-runtime"
 version = "0.12.1"
 dependencies = [
@@ -404,6 +421,7 @@ dependencies = [
  "ark-exec",
  "ark-files",
  "ark-model",
+ "ark-proc",
  "ark-runtime",
  "ark-tools",
  "async-trait",

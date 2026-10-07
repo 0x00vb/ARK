@@ -1,0 +1,26 @@
+[package]
+name = "ark-proc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "ARK's project processes: agents start, watch and stop long-running commands (a dev server, a watcher) in the project folder, with the person's own tools, asked first and always visible."
+
+[dependencies]
+ark-core.workspace = true
+ark-tools.workspace = true
+ark-runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["process", "net", "time", "sync", "io-util", "macros", "rt"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true
+serde_json.workspace = true

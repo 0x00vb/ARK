@@ -44,7 +44,7 @@ pub mod web;
 
 mod blobs;
 
-pub use acquire::{AcquisitionProvider, AcquisitionResult};
+pub use acquire::{AcquisitionProvider, AcquisitionResult, Sources};
 pub use agent::{Agent, AgentEvent, AgentOutcome};
 pub use approval::{
     lasting_grants, remove_lasting_grant, ApprovalClassifier, ApprovalDecision, ApprovalGate,

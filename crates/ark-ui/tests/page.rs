@@ -123,6 +123,21 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             ark_sdk::prelude::ark_computer::ComputerService::with_screen(Arc::new(screen.clone())),
         );
     }
+    if scenario == "processes" {
+        // The test's own PATH, read as is (no login shell), records under the store.
+        let path = std::env::var("PATH").unwrap_or_default();
+        let shell = ark_sdk::prelude::ark_proc::Shell::fixed(
+            "/bin/sh",
+            vec![
+                ("PATH".into(), path.into()),
+                ("HOME".into(), dir.path().into()),
+            ],
+        );
+        builder = builder.processes_with(
+            ark_sdk::prelude::ark_proc::Processes::with_shell(dir.path().join("processes"), shell)
+                .unwrap(),
+        );
+    }
     if scenario == "files" || scenario == "drop" {
         builder = builder.files(true);
     }
@@ -677,4 +692,30 @@ async fn the_person_sees_who_uses_the_computer_and_takes_it_back() {
         ),
     ];
     drive("computer", script, Duration::ZERO).await;
+}
+
+/// "Run the app and show me /home": the start asks with its command and folder, the Processes
+/// panel shows it with its output, the page opens in the Browser once its address answers, and
+/// Stop ends it (ADR 0041).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_process_shows_its_output_and_opens_its_page() {
+    if std::process::Command::new("python3")
+        .arg("-V")
+        .output()
+        .is_err()
+    {
+        eprintln!("skipped: no python3");
+        return;
+    }
+    let script = vec![
+        call(
+            "process.start",
+            json!({ "command": "python3 -u -m http.server 0 --bind 127.0.0.1", "open": "/home", "wait": 20 }),
+        ),
+        say(
+            "The app runs; its home page is open beside the chat.",
+            false,
+        ),
+    ];
+    drive("processes", script, Duration::ZERO).await;
 }

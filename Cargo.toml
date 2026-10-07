@@ -11,6 +11,7 @@ members = [
     "crates/ark-browser",
     "crates/ark-computer",
     "crates/ark-exec",
+    "crates/ark-proc",
     "crates/ark-runtime",
     "crates/ark-sdk",
     "crates/ark-orchestrate",
@@ -61,6 +62,7 @@ ark-account = { path = "crates/ark-account", version = "0.12.1" }
 ark-browser = { path = "crates/ark-browser", version = "0.12.1" }
 ark-computer = { path = "crates/ark-computer", version = "0.12.1" }
 ark-exec = { path = "crates/ark-exec", version = "0.12.1" }
+ark-proc = { path = "crates/ark-proc", version = "0.12.1" }
 ark-runtime = { path = "crates/ark-runtime", version = "0.12.1" }
 ark-sdk = { path = "crates/ark-sdk", version = "0.12.1" }
 ark-orchestrate = { path = "crates/ark-orchestrate", version = "0.12.1" }

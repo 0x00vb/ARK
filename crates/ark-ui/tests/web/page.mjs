@@ -928,6 +928,39 @@ async function projectAction(page) {
 }
 scenarios["project-action"] = projectAction;
 
+// ADR 0041: a process start asks with its command and where, then runs beside the chat: the
+// Processes panel shows its output, its page opens in the Browser once ready, Stop ends it.
+async function processes(page) {
+  const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
+  await page.locator("#input").fill("Run the app and show me the home page");
+  await page.keyboard.press("Enter");
+  const ask = page.locator(".approval");
+  await ask.waitFor();
+  const words = await ask.innerText();
+  assert.match(words, /Start this command in the project folder and keep it running, then open \/home in the browser\. Not contained: it runs as you, with your files and the network\. You can stop it in Processes\.\n\s*python3 -u -m http\.server 0 --bind 127\.0\.0\.1/);
+  const buttons = (await ask.locator(".approval-actions button").allInnerTexts()).map((t) => t.split("\n")[0]);
+  assert.deepEqual(buttons, ["Allow once", "Allow for this session", "Always in this project", "Deny"]);
+  await ask.locator('button[data-decision="allow_once"]').click();
+
+  // The panel opens with the process and its output; the row turns ready (by then the Browser
+  // tab is in front, so it is checked in the page, not for visibility).
+  await page.locator(".proc-row").first().waitFor();
+  await page.waitForFunction(() => document.querySelector(".proc-out .xterm-rows")?.textContent.includes("Serving HTTP"), null, { timeout: 20000 });
+  await page.waitForFunction(() => document.querySelector('.proc-row[data-state="ready"]'), null, { timeout: 20000 });
+  // The page the agent asked for, in the Browser panel, in front.
+  await page.waitForFunction(() => /^http:\/\/localhost:\d+\/home$/.test(document.querySelector("iframe.wb-frame")?.src || ""));
+  assert.equal(await page.locator(".pane-tab[aria-selected=true]").innerText(), "localhost");
+  await done;
+
+  // Stop ends it, and it stays listed as stopped.
+  await page.locator('.pane-tab', { hasText: "Processes" }).click();
+  await page.locator(".proc-stop").click();
+  await page.locator('.proc-row[data-state="stopped"]').waitFor();
+  const list = await page.evaluate(() => window.ark.call("procs"));
+  assert.equal(list[0].state, "stopped");
+}
+scenarios.processes = processes;
+
 const run = scenarios[scenario];
 if (!run) {
   console.error(`unknown scenario ${scenario}`);

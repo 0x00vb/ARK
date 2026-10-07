@@ -38,6 +38,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Side pane | What the person or the agent opened, beside the conversation: Terminal, Browser, Files, an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
 | Terminal | The project's shell, in its folder (one per project; closing the tab keeps it, reopening re-attaches with its scrollback). The agent's `present` may type a command at the prompt; the person presses Enter. |
 | Browser | A page in a frame with an address bar; words become a search. Sites that refuse framing show blank: "open in your browser" opens them outside. |
+| Processes | When the app offers processes (ADR 0041): what agents started (command, folder, state, address), the selected one's live output, Stop, and Open in the Browser. Opens when a process starts in the project the window shows; a process started with `open` opens that page in the Browser once ready. |
 | Files | The project's folder. A file opens in a tab of its own (see [Files](#files)). A path outside the folder is refused. |
 | A file | A spreadsheet as a grid, a document as a page, text in an editor: the file the agent works on, edited in place. A turn that wrote files ends with a card per file that opens it. |
 | Inline reports | `/context`, `/usage`, `/state`, `/trace` and every other command render in the conversation. There is no permanent inspector. |

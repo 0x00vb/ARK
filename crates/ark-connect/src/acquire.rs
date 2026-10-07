@@ -33,6 +33,10 @@ impl AcquisitionProvider for Connections {
         !self.connectable().is_empty()
     }
 
+    fn knows(&self, need: &str) -> bool {
+        self.capability_for(need).is_some()
+    }
+
     fn offer(&self) -> Option<String> {
         let open = self.connectable();
         if open.is_empty() {

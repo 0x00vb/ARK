@@ -41,8 +41,16 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
         hint,
     };
     if req.action == "acquire_capability" {
+        // A source words its question ("Connect Google", "Install Node.js"); its first word is
+        // the yes. A question no source worded keeps "Connect".
+        let yes = req
+            .preview
+            .split_whitespace()
+            .next()
+            .filter(|w| !w.contains('('))
+            .unwrap_or("Connect");
         return vec![
-            choice("Connect", ApprovalDecision::AllowOnce, None),
+            choice(yes, ApprovalDecision::AllowOnce, None),
             choice("Not now", ApprovalDecision::Deny, None),
         ];
     }

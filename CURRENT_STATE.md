@@ -21,6 +21,7 @@ Last updated: 2026-10-07 (v0.12.1: Upload a folder… and Add files, a touch pas
 
 | What | Owner |
 |---|---|
+| Project processes (ADR 0041, on `main`, untagged): ARK Desktop turns them on (`.processes(true)`) after the next tag. Later: a runtime elsewhere forwards a process's port so the Browser view reaches it (ARK Cloud), the agent's own browser reads pages of processes ARK started, Windows (a job object), a dogfood on a hosted model | ARK Desktop; ARK Cloud |
 | Rename "Allow for this session" in approvals | the owner decides the words |
 | Agent harnesses as workers (ADR 0039, accepted; ROADMAP › Work runtime, H1 to H5): Claude Code, Codex, OMP or any ACP agent runs a task under ARK's work model. Not built; ACP first; how each agent behaves over ACP (writes, permissions, outputs, resume) is tested before H4 counts as solved | a concrete external-worker use case |
 | Board: whether the chat uses the board unasked for project-sized work, and hosted models (the `board` workload passes 3/3 live on qwen3:4b when asked); board tools for code-defined team leads | before turning anything on or off by default (ADR 0023) |

@@ -344,6 +344,8 @@ pub struct Host {
     terminals: crate::terminal::Terminals,
     /// The Computer, when the app offers it.
     computer: Option<Arc<ark_sdk::prelude::ark_computer::ComputerService>>,
+    /// Project processes, when the app offers them (ADR 0041).
+    processes: Option<ark_sdk::prelude::ark_proc::Processes>,
 }
 
 impl Host {
@@ -365,7 +367,12 @@ impl Host {
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         };
-        tokio::time::timeout(grace, settled).await.is_ok()
+        let settled = tokio::time::timeout(grace, settled).await.is_ok();
+        // Nothing an agent started outlives the runtime (ADR 0041).
+        if let Some(p) = &self.processes {
+            p.stop_all().await;
+        }
+        settled
     }
 
     /// Wrap an opened interaction. `approvals` is the receiving end of the channel approver
@@ -407,6 +414,7 @@ impl Host {
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
             siblings: ix.siblings(),
             computer: ix.ark().computer().cloned(),
+            processes: ix.ark().processes().cloned(),
             current: Mutex::new(Conv::new(ix)),
             switching: tokio::sync::Mutex::new(()),
             background: Mutex::new(Vec::new()),
@@ -423,6 +431,9 @@ impl Host {
         tokio::spawn(forward_approvals(host.clone(), approvals, first));
         if let Some(c) = &host.computer {
             tokio::spawn(forward_computer(Arc::downgrade(&host), c.watch()));
+        }
+        if let Some(p) = &host.processes {
+            tokio::spawn(forward_processes(Arc::downgrade(&host), p.subscribe()));
         }
         host
     }
@@ -978,6 +989,22 @@ impl Host {
                 self.terminals.close(&s("session"));
                 Ok(Value::Null)
             }
+            // The Processes panel (ADR 0041): what agents started, its output, and Stop.
+            "procs" => match &self.processes {
+                Some(p) => Ok(json!(p.list())),
+                None => anyhow::bail!("this app does not start processes"),
+            },
+            "proc_output" => match self.processes.as_ref().and_then(|p| p.raw_output(&s("id"))) {
+                Some(out) => Ok(json!({ "data": out })),
+                None => anyhow::bail!("there is no process `{}`", s("id")),
+            },
+            "proc_stop" => match &self.processes {
+                Some(p) => match p.stop(&s("id")).await {
+                    Some(info) => Ok(json!(info)),
+                    None => anyhow::bail!("there is no process `{}`", s("id")),
+                },
+                None => anyhow::bail!("this app does not start processes"),
+            },
             // The Files panel: the project's folder (see `files`).
             "files" => {
                 let dir = self.engine.workspace_dir(&self.project()?.id)?;
@@ -1762,6 +1789,42 @@ impl Host {
             "summary": current.then(|| self.summary()),
         }));
         self.emit_working();
+    }
+}
+
+/// Tell windows what project processes do (`{kind: "proc", event}`): started, output, ready
+/// (with the page to open), ended.
+async fn forward_processes(
+    host: std::sync::Weak<Host>,
+    mut rx: broadcast::Receiver<ark_sdk::prelude::ark_proc::Event>,
+) {
+    loop {
+        match rx.recv().await {
+            Ok(ev) => {
+                let Some(h) = host.upgrade() else { break };
+                // `here`: the process runs in the project the window shows, so a page it opens
+                // belongs there.
+                let here = h
+                    .project()
+                    .ok()
+                    .and_then(|p| h.engine.workspace_dir(&p.id).ok())
+                    .is_some_and(|dir| {
+                        proc_project(&ev).is_some_and(|p| std::path::Path::new(p) == dir)
+                    });
+                h.emit(json!({ "kind": "proc", "event": ev, "here": here }));
+            }
+            // A window that missed output reads it again (`proc_output`).
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
+    }
+}
+
+fn proc_project(ev: &ark_sdk::prelude::ark_proc::Event) -> Option<&str> {
+    use ark_sdk::prelude::ark_proc::Event;
+    match ev {
+        Event::Started { process } | Event::Changed { process, .. } => Some(&process.project),
+        Event::Output { .. } => None,
     }
 }
 

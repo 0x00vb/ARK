@@ -1,0 +1,29 @@
+/* The Processes panel (js/processes.js). */
+.proc-list { flex: none; max-height: 40%; overflow-y: auto; padding: 6px; box-shadow: inset 0 -1px 0 var(--hair); }
+.proc-row {
+  width: 100%; display: flex; align-items: center; gap: 10px; min-height: 32px;
+  padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text);
+  font: 13px var(--font); text-align: left; cursor: pointer;
+}
+.proc-row:hover { background: var(--hover); }
+.proc-row[aria-current="true"] { background: var(--hover); }
+.proc-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--text-3); }
+.proc-row[data-state="running"] .proc-dot { background: var(--warn); }
+.proc-row[data-state="ready"] .proc-dot { background: var(--ok); }
+.proc-cmd { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+.proc-where { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.proc-state { color: var(--text-3); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.proc-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 12px; box-shadow: inset 0 -1px 0 var(--hair); }
+.proc-head:empty { display: none; }
+.proc-head .spacer { flex: 1; }
+.proc-url { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-family: var(--mono); font-size: 12px; }
+.proc-stop {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  border: 0; border-radius: 8px; cursor: pointer; background: var(--hover); color: var(--text);
+  font: 500 12.5px var(--font);
+}
+.proc-stop:active { scale: 0.97; }
+.proc-stop:disabled { opacity: 0.4; cursor: default; scale: 1; }
+.proc-out { flex: 1; min-height: 0; padding: 8px 6px 8px 14px; background: var(--pane); }
+.proc-out .xterm { height: 100%; }
+.proc-out .xterm-viewport { background: transparent !important; }

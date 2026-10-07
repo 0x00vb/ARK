@@ -632,3 +632,81 @@ impl Command for Config {
             .into())
     }
 }
+
+pub struct Processes;
+#[async_trait::async_trait]
+impl Command for Processes {
+    meta!(
+        "processes",
+        "What agents started and still runs; stop one with /processes stop <id>"
+    );
+    fn usage(&self) -> &str {
+        "[stop <id> | <id>]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        use ark_sdk::prelude::ark_proc::State;
+        let Some(procs) = ix.ark().processes().cloned() else {
+            return Ok(Report::new()
+                .note("This app does not let agents start processes.")
+                .into());
+        };
+        let (verb, rest) = args.trim().split_once(' ').unwrap_or((args.trim(), ""));
+        let mut r = Report::new();
+        match (verb, rest.trim()) {
+            ("" | "list", _) => {}
+            ("stop", id) if !id.is_empty() => {
+                r = match procs.stop(id).await {
+                    Some(p) => r.success(format!("Stopped {} `{}`.", p.id, p.command)),
+                    None => r.warning(format!("No process `{id}`.")),
+                };
+            }
+            (id, "") if procs.get(id).is_some() => {
+                let p = procs.get(id).unwrap_or_else(|| unreachable!());
+                let out = procs.output(id, 4_000).unwrap_or_default();
+                return Ok(r
+                    .heading(format!("{} {}", p.id, p.command))
+                    .text(if out.trim().is_empty() {
+                        "(no output yet)".into()
+                    } else {
+                        out
+                    })
+                    .into());
+            }
+            _ => anyhow::bail!("usage: /processes {}", self.usage()),
+        }
+        let all = procs.list();
+        if all.is_empty() {
+            return Ok(r
+                .note("Nothing runs. Agents ask before they start a process.")
+                .into());
+        }
+        let mut t = Table::plain(4);
+        for p in &all {
+            let (state, tone) = match p.state {
+                State::Ready => (
+                    format!("ready {}", p.url.clone().unwrap_or_default()),
+                    Tone::Success,
+                ),
+                State::Running => ("running".to_string(), Tone::Normal),
+                State::Exited => (format!("ended, exit {}", p.code.unwrap_or(-1)), Tone::Muted),
+                State::Stopped => ("stopped".to_string(), Tone::Muted),
+            };
+            let running = matches!(p.state, State::Running | State::Ready);
+            let place = match p.folder.as_str() {
+                "" => p.project.clone(),
+                f => format!("{}/{f}", p.project),
+            };
+            t.push(Row {
+                cells: vec![
+                    Cell::new(p.id.clone(), Tone::Accent),
+                    Cell::new(clip(&p.command, 60), Tone::Normal),
+                    Cell::new(state, tone),
+                    Cell::new(place, Tone::Muted),
+                ],
+                tone: Tone::Normal,
+                command: running.then(|| format!("/processes stop {}", p.id)),
+            });
+        }
+        Ok(r.table(t).into())
+    }
+}

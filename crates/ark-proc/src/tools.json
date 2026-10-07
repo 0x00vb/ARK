@@ -1,0 +1,71 @@
+[
+  {
+    "id": "node",
+    "label": "Node.js",
+    "says": "run JavaScript and TypeScript projects (npm, npx)",
+    "programs": ["node", "npm", "npx", "corepack"],
+    "install": [
+      { "needs": "brew", "run": "brew install node" },
+      { "needs": "curl", "run": "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && . \"$HOME/.nvm/nvm.sh\" && nvm install --lts" }
+    ]
+  },
+  {
+    "id": "pnpm",
+    "label": "pnpm",
+    "says": "install and run projects that use pnpm",
+    "programs": ["pnpm", "pnpx"],
+    "install": [
+      { "needs": "brew", "run": "brew install pnpm" },
+      { "needs": "curl", "run": "curl -fsSL https://get.pnpm.io/install.sh | sh -" }
+    ]
+  },
+  {
+    "id": "yarn",
+    "label": "Yarn",
+    "says": "install and run projects that use Yarn",
+    "programs": ["yarn"],
+    "install": [
+      { "needs": "brew", "run": "brew install yarn" },
+      { "needs": "npm", "run": "npm install --global yarn" }
+    ]
+  },
+  {
+    "id": "bun",
+    "label": "Bun",
+    "says": "run projects that use Bun",
+    "programs": ["bun", "bunx"],
+    "install": [
+      { "needs": "brew", "run": "brew install oven-sh/bun/bun" },
+      { "needs": "curl", "run": "curl -fsSL https://bun.sh/install | bash" }
+    ]
+  },
+  {
+    "id": "deno",
+    "label": "Deno",
+    "says": "run projects that use Deno",
+    "programs": ["deno"],
+    "install": [
+      { "needs": "brew", "run": "brew install deno" },
+      { "needs": "curl", "run": "curl -fsSL https://deno.land/install.sh | sh -s -- -y" }
+    ]
+  },
+  {
+    "id": "uv",
+    "label": "uv",
+    "says": "run Python projects (uv, uvx)",
+    "programs": ["uv", "uvx"],
+    "install": [
+      { "needs": "brew", "run": "brew install uv" },
+      { "needs": "curl", "run": "curl -LsSf https://astral.sh/uv/install.sh | sh" }
+    ]
+  },
+  {
+    "id": "rust",
+    "label": "Rust",
+    "says": "build and run Rust projects (cargo)",
+    "programs": ["cargo", "rustc", "rustup"],
+    "install": [
+      { "needs": "curl", "run": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y" }
+    ]
+  }
+]

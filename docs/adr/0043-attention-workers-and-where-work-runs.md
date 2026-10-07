@@ -28,16 +28,22 @@ watches from outside.
 | Attention | One generic list of what waits for a person, for any kind of work: a question or approval, a failure, a result handed off that nobody has opened. It is a view over records ARK already keeps (`TaskRecord::question`, failed tasks, results that report to a chat, ADR 0025), worded once in `ark-interact`. It is not a second store and has no item type per workload. The only new stored thing is a mark per item: cleared, by whom, when |
 | Attention later | An item says who it is for. Today that is always the runtime's owner and the field stays empty. With several people in a runtime, an item can name a person or a group, and clearing it is recorded per person. Across runtimes, a client merges each runtime's list; it never copies items into another store |
 | Where work runs | A project's location: **This computer**, **My machine** (a runtime the person runs on their own server or computer, reached with a token, ADR 0016), **ARK Cloud**. One work model, one protocol, the same window. The only difference the person sees is the location, plus a sign-in for Cloud |
+| Authority over work | ARK decides what any work may do, also when a worker acts with its own tools. A grant names the concrete thing: a command, a path, a capability, within a task or a project. Never a whole category: "always allow edits" or "always allow commands" are not offered. The person still sees one short question about the concrete action; "always" applies to that action only. This is a constraint on step 2 and later, not a new permission system now |
+| A worker's results | ARK adapts a worker to the work model and does not take its own tools away. The boundary is the folder ARK gives the task: ARK records the folder before the worker runs and compares it after. New and changed files are the task's outputs; the recorded state is the version before (ADR 0034). Paths a worker names in its messages are hints, the folder is the record. ARK file tools stay offered, never required |
+| Which agent does the work | Earned by measurement, not by preference. ARK's own agent stays the default. A worker is compared with it on the same workloads: success rate, cost, time, how often a person is asked, and later quality. Routing and defaults follow those numbers |
+| Where the compute comes from | **Defer ARK-funded compute, not the distributed architecture.** ARK Cloud compute (machines ARK pays for) waits until demand and unit economics justify it. My machine builds and tests the same distributed runtime (a runtime elsewhere, `token link`, notifications, attention across runtimes) on compute the person pays for, so turning Cloud on later is a location and a bill, not new architecture |
 | What ARK charges for | Only what costs ARK something: Cloud compute, ARK's models, team and organization features later. Attention, workers and My machine are free everywhere. A person brings their own way in to My machine (Tailscale, a proxy). A relay run by ARK comes with Cloud's services, if ever |
 | What ARK takes from One and herdr | The jobs: know what needs me, answer it fast, reach it away from the computer, keep work alive. Not their screens: no floating toolbar, no voice router, no terminal panes. Each job goes into what ARK already has: the attention list, approvals, notifications, the runtime |
 
-Order of work. Each step ends with a check, and the next starts only when the earlier one holds:
+Order of work. Each step ends with a check, and the next starts only when the earlier one holds.
+Step 1 does not wait for workers: the attention list serves ARK's own agents first, and workers'
+questions join it later as records like any other:
 
 | # | Step | Done means |
 |---|---|---|
 | 0 | **ACP spike**: one ARK task on Claude Code (`claude-agent-acp`) and on Codex (`codex-acp`) | the worker asks permission; the request becomes a kept question; ARK answers it; the worker continues; its result and written file come back as the task's answer and output. Plus what happens when the process restarts while a question is open. Recorded per agent, as ADR 0039 › Consequences asks |
 | 1 | **Attention in one runtime** | the same list in the terminal and the window (`host.rs`); questions, failures and handed-off results from different projects; one key answers or opens an item, and clearing it is kept across a restart |
-| 2 | **One ACP worker** (ADR 0039 H1 to H3), shaped by step 0 | a worker's permission request shows in the attention list like any other question; measured against ARK's own agent on two workloads |
+| 2 | **One ACP worker** (ADR 0039 H1 to H3), shaped by step 0. Reassessed against the step 0 results after step 1, before any code | a worker's permission request shows in the attention list like any other question; grants are per command or path; outputs come from the task's folder; measured against ARK's own agent on two workloads (success, cost, time, times asked) |
 | 3 | **Reach**: a notification when an item appears, to a phone through the runtime's page (Web Push), and My machine as a location (install with a service and limits, pairing through `token link`) | a VPS paired in one command; a question there reaches the phone and is answered from it; the task continues |
 | 4 | **Attention across runtimes**, when a person has more than one | This computer and My machine in one list, each item answered on its own runtime |
 
@@ -64,10 +70,10 @@ What this changes for step 2:
 
 | Finding | Step 2 does |
 |---|---|
-| Writes never go through ARK; Codex's shell writes carry no path | Outputs from the folder (the copy per task of ADR 0039 H4); the version before from the request when it names a path. ACP `fs/*` and `terminal/*` (H2) do not help these two agents |
-| An approval class per ACP kind (`worker.execute`) is too wide for "Always in this project": it would allow every command | a class per command or path, as ARK's own processes do (ADR 0041) |
+| Writes never go through ARK; Codex's shell writes carry no path | Outputs from the task's folder (Decision › A worker's results; the copy per task of ADR 0039 H4). ACP `fs/*` and `terminal/*` (H2) do not help these two agents, and ARK does not force them |
+| An approval class per ACP kind (`worker.execute`) is too wide for "Always in this project": it would allow every command | a grant per command or path, as ARK's own processes do (ADR 0041). Treated as a constraint on ARK's authority (Decision › Authority over work), not as an adapter detail |
 | The adapters lag their CLIs: codex-acp refused the model in the person's Codex settings; claude-agent-acp refused `defaultMode: auto` | ARK sets the worker's model and permission mode per task, never inherits them |
-| A small task costs Claude Code about 90k tokens | measure cost per success against ARK's own agent before offering workers by default |
+| A small task costs Claude Code about 90k tokens | measure success, cost, time and times asked against ARK's own agent before offering workers by default (Decision › Which agent does the work) |
 
 Verdict: both behave as workers. State, the question, the answer and the result go through
 ARK's records, not through code glued on the side. Step 1 can start.
@@ -84,8 +90,9 @@ ARK's records, not through code glued on the side. Step 1 can start.
 - Teams and organizations add a person to an item and to its cleared mark. They do not need a
   different list.
 - My machine exercises the same path Cloud uses (a runtime elsewhere, `token link`, attention
-  across runtimes, notifications). It does not delay Cloud, which keeps its own plan
-  (`../ark-cloud/docs/CLOUD.md`).
+  across runtimes, notifications) without ARK paying for compute. ARK-funded Cloud compute stays
+  deferred for cost and unit-economics risk until demand justifies it
+  (`../ark-cloud/docs/CLOUD.md`); when it comes, it is one more location.
 - Ruled out: watching or controlling agents ARK did not start; terminal multiplexing; a paid
   tier for attention; ARK's own model calls on a person's vendor subscription through ARK's own
   sign-in (ADR 0012: ARK never reads vendor credentials); a phone app before the page with

@@ -50,8 +50,9 @@ questions join it later as records like any other:
 
 ## Step 0 results (2026-10-07)
 
-Branch `spike/acp-worker` (not for `main`): `AgentSpec::worker(cmd)` runs a task on an ACP agent
-inside `Orchestrator::attempt`; its permission requests go through `OnBehalf`. Live tests
+The spike (branch `spike/acp-worker`, ce0eae7, not kept: `ark-acp` replaced it in step 2):
+`AgentSpec::worker(cmd)` ran a task on an ACP agent inside `Orchestrator::attempt`; its
+permission requests went through `OnBehalf`. Live tests
 `crates/ark-orchestrate/tests/acp_spike.rs` and the protocol probe `spike/acp-probe.mjs`, on
 claude-agent-acp 0.23.1 (Claude Code 2.1.292, Claude subscription) and codex-acp 0.16.0 (ChatGPT
 plan, gpt-5.5). Task: read a CSV, write `report.md`.
@@ -249,6 +250,16 @@ dark, 1100 and 390 wide; Allow once from A at phone width saved it on B. B kille
 open: A kept the card, "My machine is not answering", choices off; B restarted: the card came
 back live and was answered from A. A with a wrong token: one line, "My machine signed this
 computer out: pair again."
+
+End to end, as a new user (2026-10-07, release build, new stores): B (`writer --serve
+--tokens`, as My machine) with an agent on Claude Code (`agent:claude-code`, the pinned
+adapter installed as its setup line says); A (`writer --serve --link`) linked to B; a phone
+(WebKit, 390 wide, dark) signed in to B with a typed code. The agent read the chapter and asked
+to write `notes.md`, with the diff; the card showed in A's tray ("In My machine · novel-b") and
+on the phone. B killed (`kill -9`) with the question open and started again; A's card came back
+and Allow once from A at phone width let the program, on its loaded session, write the file
+once without asking again; the task finished with `notes.md` as its output, and both lists
+were empty. Not in this run: Web Push delivery (step 3 checked it through Google's push service).
 
 Found while dogfooding, not changed here: after a restart, an ARK agent repeats its step, and a
 local model may write a different change (84 words, then 79): the person is asked again, since

@@ -9,6 +9,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-07
+
 ### Breaking
 - ADR 0049: `HarnessEvent::TextWithdrawn` is a new event; an exhaustive `match` adds it.
 - ADR 0050: `Settings::context_budget` is `Option<u32>` (`None`: sized from each agent's model).

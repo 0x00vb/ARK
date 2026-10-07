@@ -56,6 +56,7 @@ impl Store {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(root.join("objects"))?;
+        sweep_temp_blobs(&root.join("objects"));
         let db = Connection::open(root.join("meta.db"))?;
         db.execute_batch(
             "PRAGMA journal_mode=WAL;
@@ -171,11 +172,32 @@ impl Store {
     pub fn put_blob(&self, bytes: &[u8]) -> Result<ArtifactId> {
         let id = ArtifactId::of_bytes(bytes);
         let path = self.object_path(&id);
-        if !path.exists() {
-            // write-to-temp-then-rename so a concurrent reader never sees a partial blob
-            let tmp = path.with_extension("tmp");
-            std::fs::write(&tmp, bytes)?;
-            std::fs::rename(&tmp, &path)?;
+        // An object of another size was cut short (an OS crash after the rename reached the
+        // disk and before its bytes did): write it again.
+        let whole = std::fs::metadata(&path).is_ok_and(|m| m.len() == bytes.len() as u64);
+        if !whole {
+            // Write to a temp file, flush it to the disk, then rename: a concurrent reader never
+            // sees a partial blob, and a record that names it never outlives its bytes.
+            use std::io::Write as _;
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            // Each writer its own temp file: two threads storing the same bytes never share one.
+            let n = NEXT.fetch_add(1, Ordering::Relaxed);
+            let tmp = path.with_extension(format!("tmp{}-{n}", std::process::id()));
+            let written = std::fs::File::create(&tmp).and_then(|mut f| {
+                f.write_all(bytes)?;
+                f.sync_all()?;
+                std::fs::rename(&tmp, &path)
+            });
+            if let Err(e) = written {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e.into());
+            }
+            // The rename itself is durable once the folder is.
+            #[cfg(unix)]
+            if let Some(dir) = path.parent() {
+                std::fs::File::open(dir)?.sync_all()?;
+            }
         }
         Ok(id)
     }
@@ -296,6 +318,24 @@ impl Store {
         let mut stmt =
             db.prepare("SELECT json FROM invocations WHERE project_id=?1 ORDER BY created_at ASC")?;
         let rows = stmt.query_map([project.as_str()], |r| r.get::<_, String>(0))?;
+        collect(rows)
+    }
+
+    /// The invocations made for `work` (`Invocation::work`), oldest first. Only those rows are
+    /// read.
+    pub fn list_invocations_of_work(
+        &self,
+        project: &ProjectId,
+        work: &str,
+    ) -> Result<Vec<Invocation>> {
+        let db = self.db.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT json FROM invocations WHERE project_id=?1 AND json_extract(json, '$.work')=?2
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![project.as_str(), work], |r| {
+            r.get::<_, String>(0)
+        })?;
         collect(rows)
     }
 
@@ -543,6 +583,21 @@ impl Store {
                 collect(rows)
             }
         }
+    }
+
+    /// Sessions with a turn stored past the turns their header counts: one begun and not yet
+    /// recorded (it runs, or the process running it stopped).
+    pub fn sessions_with_begun_turns(&self) -> Result<Vec<String>> {
+        let db = self.db.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT s.id FROM sessions s JOIN session_turns t
+               ON t.session_id = s.id AND t.idx >= json_extract(s.json, '$.turn_count')
+             ORDER BY s.id",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut ids: Vec<String> = rows.collect::<std::result::Result<_, _>>()?;
+        ids.dedup();
+        Ok(ids)
     }
 
     /// Resolve a session by full id or unique prefix.
@@ -824,6 +879,30 @@ fn add_column(db: &Connection, table: &str, column: &str, backfill: &str) -> Res
     Ok(())
 }
 
+/// Remove temp files a crash left in `objects` (an object written but never renamed). Only
+/// old ones: another process on the store may be writing one now.
+fn sweep_temp_blobs(objects: &Path) {
+    let Ok(entries) = std::fs::read_dir(objects) else {
+        return;
+    };
+    let hour = std::time::Duration::from_secs(3600);
+    for e in entries.flatten() {
+        let temp = e
+            .path()
+            .extension()
+            .is_some_and(|x| x.to_string_lossy().starts_with("tmp"));
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > hour);
+        if temp && old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -935,6 +1014,25 @@ mod tests {
         let after = s.list_events("run", a, 10).unwrap();
         assert_eq!(after.len(), 1);
         assert_eq!(after[0].1["e"], "b");
+    }
+
+    #[test]
+    fn a_blob_cut_short_by_a_crash_is_written_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path()).unwrap();
+        let bytes = b"the whole chapter".to_vec();
+        let id = s.put_blob(&bytes).unwrap();
+        // An OS crash after the rename reached the disk and before the bytes did.
+        std::fs::write(s.object_path(&id), b"").unwrap();
+        assert_eq!(s.put_blob(&bytes).unwrap(), id);
+        assert_eq!(s.read_blob(&id).unwrap(), bytes);
+        // No temp files are left behind.
+        let left: Vec<_> = std::fs::read_dir(dir.path().join("objects"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(left.is_empty());
     }
 
     #[test]

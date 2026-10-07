@@ -138,7 +138,7 @@ floor it must not be under.
 
 | Area | ARK today | Verdict |
 |---|---|---|
-| Work that persists | the runtime runs without a window (ADR 0016, 0017), schedules, keep running; a restart continues open work, keeps questions, never repeats a change (ADR 0037); a stop (SIGTERM, quit) leaves work to continue and handed-off results reach their chat once (ADR 0038) | at par since W1, W2, W5, W6 (v0.11.0) |
+| Work that persists | the runtime runs without a window (ADR 0016, 0017), schedules, keep running; a restart continues open work, keeps questions, never repeats a change (ADR 0037); a stop (SIGTERM, quit) leaves work to continue and handed-off results reach their chat once (ADR 0038); a chat's own turn keeps its progress through a crash, shows where it stopped, and continues on the person's next word without repeating a change or a hand-off (ADR 0048) | at par since W1, W2, W5, W6 (v0.11.0); the chat's turn since ADR 0048 |
 | Agent state at a glance | `AgentState`, `TaskState`, `waiting_on`, a task's `question`, each agent's `step` worded once for every client (ADR 0037) | at par since W1, W3 (v0.11.0) |
 | Parallel work | many agents, capacity-aware scheduling, dependencies, up to 4 delegations per reply; one task at a time per agent | at par. No "same task N ways, compare": can wait |
 | Isolation on shared files | one folder per project; version guard, versions before (ADR 0034) | enough for now. A copy per task when a workload shows conflicts |

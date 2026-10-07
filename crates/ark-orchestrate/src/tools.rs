@@ -373,11 +373,40 @@ impl Adapter for ChatTools {
         ]
     }
 
+    /// The work a stopped turn of this chat handed off, for the turn that continues it.
+    fn continued(&self, works: &[String]) -> Vec<String> {
+        self.orch
+            .tasks_of_work(works)
+            .into_iter()
+            .map(|t| {
+                let objective = crate::brief::clip(&t.objective, 100);
+                let state = if t.state.is_final() {
+                    match (&t.result, &t.error) {
+                        (_, Some(e)) => {
+                            format!("{}: {}", t.state.as_str(), crate::brief::clip(e, 120))
+                        }
+                        (Some(r), _) => format!("finished: {}", crate::brief::clip(r, 160)),
+                        _ => t.state.as_str().to_string(),
+                    }
+                } else {
+                    format!(
+                        "{}, still under way; its result is posted in this chat",
+                        t.state.as_str()
+                    )
+                };
+                format!(
+                    "handed off to {} (task {}): {objective} ({state})",
+                    t.owner, t.id
+                )
+            })
+            .collect()
+    }
+
     async fn run(
         &self,
         action: &str,
         input: Value,
-        _ctx: &RunCtx<'_>,
+        ctx: &RunCtx<'_>,
     ) -> ark_tools::Result<ActionOutput> {
         let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").trim();
         let fail = |e: crate::OrchError| AdapterError::Tool(e.to_string());
@@ -401,23 +430,52 @@ impl Adapter for ChatTools {
                 if let Some(chat) = &self.chat {
                     spec = spec.report_to(chat);
                 }
-                let id = self
-                    .orch
-                    .submit(to, spec)
-                    .map_err(|e| AdapterError::bad_input(action, e.to_string()))?;
-                if !input.get("wait").and_then(Value::as_bool).unwrap_or(true) {
-                    let mut v = json!({ "task": id, "agent": to, "state": "queued" });
+                // A turn that stopped handed work to this agent and it is still under way: the
+                // turn continuing it takes that up, once, instead of handing it off twice. The
+                // model sees what it was; a second hand-off to the agent in this turn is new.
+                let taken = ctx.work.as_deref().and_then(|w| {
+                    self.orch
+                        .take_up(to, &ctx.continues, w)
+                        .map(|t| (t.id, t.objective))
+                });
+                if let Some(w) = &ctx.work {
+                    spec = spec.work(w);
+                }
+                let (id, joined) = match taken {
+                    Some((id, objective)) => (id, Some(objective)),
+                    None => (
+                        self.orch
+                            .submit(to, spec)
+                            .map_err(|e| AdapterError::bad_input(action, e.to_string()))?,
+                        None,
+                    ),
+                };
+                // In other words than before, it may be other work: say what is under way, and
+                // do not wait for it. The model hands off again if it wants something else.
+                let wait = input.get("wait").and_then(Value::as_bool).unwrap_or(true)
+                    && joined.as_deref().is_none_or(|o| o == s("objective"));
+                let mark = |mut v: Value| {
+                    if let Some(o) = &joined {
+                        v["taken_up"] = json!(format!(
+                            "this is the hand-off made before the interruption, still under way: {o}. Hand off again only for different work"
+                        ));
+                    }
+                    v
+                };
+                if !wait {
+                    let state = self.orch.task(&id).map(|t| t.state.as_str().to_string());
+                    let mut v = json!({ "task": id, "agent": to, "state": state.unwrap_or_else(|| "queued".into()) });
                     if self.chat.is_some() {
                         v["result"] = json!("posted in this chat when it ends");
                     }
-                    return Ok(ActionOutput::json(v));
+                    return Ok(ActionOutput::json(mark(v)));
                 }
                 let done = self
                     .orch
                     .wait_in(&id, self.chat.as_deref())
                     .await
                     .map_err(fail)?;
-                Ok(ActionOutput::json(result_json(&done)))
+                Ok(ActionOutput::json(mark(result_json(&done))))
             }
             WAIT => {
                 let ids: Vec<&str> = input
@@ -806,6 +864,9 @@ pub(crate) fn distiller() -> Distiller {
             let mut line = format!("{} {} task {}", g("agent"), g("state"), g("task"));
             if !g("error").is_empty() {
                 line.push_str(&format!(" (error: {})", g("error")));
+            }
+            if !g("taken_up").is_empty() {
+                line.push_str(&format!(" ({})", g("taken_up")));
             }
             if !g("result").is_empty() {
                 line.push_str(&format!(

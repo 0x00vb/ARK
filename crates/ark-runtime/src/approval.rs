@@ -43,6 +43,10 @@ pub struct ApprovalRequest {
     /// and an answer is never remembered.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_each_time: bool,
+    /// The same call was under way when the app stopped, so it may already have happened. The
+    /// person is asked whatever was granted, and the answer is not remembered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_short: bool,
 }
 
 /// A human's answer to an [`ApprovalRequest`].
@@ -292,6 +296,7 @@ mod tests {
             agent: None,
             task: None,
             ask_each_time: false,
+            cut_short: false,
         }
     }
 

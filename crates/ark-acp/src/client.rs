@@ -599,6 +599,7 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
                 preview,
                 agent: None,
                 task: None,
+                cut_short: false,
             }
         };
     match (kind, command) {

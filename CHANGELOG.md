@@ -9,6 +9,42 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Breaking
+- New fields for ADR 0048: `Invocation::{work, pid_start}`, `session::Turn::pid_start`,
+  `TaskSpec::work`, `TaskRecord::{work, pid_start}`, `ApprovalRequest::cut_short`,
+  `RetryPolicy::offline`, `RunCtx::{work, continues}`, `TranscriptTurn::{interrupted, resume}`.
+  Struct literals add them (`None`, `false`, `Duration::ZERO`, `Vec::new()`). `HarnessEvent`
+  has `Interrupted`, and `HarnessOutcome` has `interrupted`: an exhaustive `match` adds an
+  arm, a literal adds the field.
+- `TranscriptTurn::unfinished` is now the whole sentence to show ("Interrupted before it
+  finished.", "Did not finish: <error>"); a front-end that added "Did not finish: " drops it.
+
+### Added
+- A chat turn keeps its progress and continues where it stopped (ADR 0048). Its calls name the
+  turn (`Engine::for_work`, `Invocation::work`); its trace is saved as it runs; a stopped turn
+  shows each call done, failed, cut short or not run, "Interrupted before it finished." and,
+  on the chat's last turn, one Continue. The next turn, whatever the person says, is told what
+  the stopped turn did (`Session::unfinished`, `Unfinished::carry`), gets its changes as
+  `done_before`, asks again about a change cut short (`Harness::cut_short`), and takes up a
+  hand-off still under way (`Orchestrator::take_up`, `Adapter::continued`).
+- `ark_runtime::process::{own_start, start_of, writer_alive}`: a record's writer is its pid and
+  its process start, so a pid reused after a reboot is not taken for it.
+- `ARK_MODEL_OFFLINE_S` (default 60): a model that cannot be reached is waited for that long
+  (`RetryPolicy::should_retry_for`, `ProviderError::is_unreachable`).
+
+### Changed
+- A stop by the app (SIGTERM, quit) leaves the chat's turn interrupted, not cancelled, and
+  ends it with `HarnessEvent::Interrupted` (amends ADR 0038).
+- `ARK_MODEL_RETRIES` defaults to 4 (was 2).
+
+### Fixed
+- After a crash and a reboot, a reused pid no longer keeps a dead turn, call or task "running";
+  the next turn no longer overwrites the stopped one.
+- A chat whose first turn was cut short is listed (with its title) as soon as the store opens.
+- A turn stored in full just before the process stopped is no longer shown unfinished.
+- `Store::put_blob` flushes the bytes and the folder before naming an object, and rewrites an
+  object of the wrong size.
+
 ## [0.13.0] - 2026-10-07
 
 ### Breaking

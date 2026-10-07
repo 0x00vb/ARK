@@ -44,6 +44,12 @@ pub struct RunCtx<'a> {
     /// The project's on-disk workspace root, if one is sited. Adapters that write files
     /// confine their operations to it; adapters that don't need it ignore it.
     pub workspace: Option<PathBuf>,
+    /// The work this call is made for (a conversation's turn), when the caller names one. An
+    /// adapter that creates records of its own (a task) can keep it on them.
+    pub work: Option<String>,
+    /// Earlier work this call's work continues: runs of it that stopped before they finished.
+    /// An adapter can take up a record they left open instead of making another.
+    pub continues: Vec<String>,
 }
 
 impl<'a> RunCtx<'a> {
@@ -51,10 +57,17 @@ impl<'a> RunCtx<'a> {
         RunCtx {
             blobs,
             workspace: None,
+            work: None,
+            continues: Vec::new(),
         }
     }
     pub fn with_workspace(mut self, workspace: PathBuf) -> Self {
         self.workspace = Some(workspace);
+        self
+    }
+    pub fn with_work(mut self, work: Option<String>, continues: Vec<String>) -> Self {
+        self.work = work;
+        self.continues = continues;
         self
     }
 }
@@ -193,6 +206,13 @@ pub trait Adapter: Send + Sync {
         input: serde_json::Value,
         ctx: &RunCtx<'_>,
     ) -> Result<ActionOutput>;
+
+    /// For a model continuing `works` (runs that stopped before they finished, see
+    /// [`RunCtx::continues`]): one line per record this adapter keeps from them that the model
+    /// should know about (work handed off and still under way). Default: none.
+    fn continued(&self, _works: &[String]) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

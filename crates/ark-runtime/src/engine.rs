@@ -46,6 +46,11 @@ pub struct Engine {
     pictures: Arc<std::sync::Mutex<std::collections::HashMap<String, Vec<ark_tools::Picture>>>>,
     /// The last pictures the harness took, by invocation, for a window to show in their step.
     shown: Arc<std::sync::Mutex<std::collections::VecDeque<(String, ark_tools::Picture)>>>,
+    /// The work this engine's calls are made for ([`Invocation::work`]), set by
+    /// [`for_work`](Engine::for_work). Kept by the engines scoped from it.
+    work: Option<String>,
+    /// Earlier runs of that work this one continues ([`continuing`](Engine::continuing)).
+    continues: Vec<String>,
 }
 
 /// How many pictures stay for windows to show after the model got them.
@@ -64,6 +69,8 @@ impl Engine {
             stopping: Arc::default(),
             pictures: Arc::default(),
             shown: Arc::default(),
+            work: None,
+            continues: Vec::new(),
         }
     }
 
@@ -81,7 +88,53 @@ impl Engine {
             stopping: self.stopping.clone(),
             pictures: self.pictures.clone(),
             shown: self.shown.clone(),
+            work: self.work.clone(),
+            continues: self.continues.clone(),
         }
+    }
+
+    /// This engine, with every call it runs naming `work` ([`Invocation::work`]): a
+    /// conversation's turn, so the calls of a turn that stopped can be found when it continues.
+    pub fn for_work(&self, work: impl Into<String>) -> Engine {
+        Engine {
+            store: self.store.clone(),
+            registry: self.registry.clone(),
+            sniffers: self.sniffers.clone(),
+            plugins: self.plugins.clone(),
+            sources: self.sources.clone(),
+            skills: self.skills.clone(),
+            stopping: self.stopping.clone(),
+            pictures: self.pictures.clone(),
+            shown: self.shown.clone(),
+            work: Some(work.into()),
+            continues: self.continues.clone(),
+        }
+    }
+
+    /// This engine, telling the tools its work continues `works`, runs of it that stopped
+    /// ([`RunCtx::continues`](ark_tools::RunCtx)).
+    pub fn continuing(mut self, works: Vec<String>) -> Engine {
+        self.continues = works;
+        self
+    }
+
+    /// What the tools keep from `works` that a model continuing them should know
+    /// ([`Adapter::continued`](ark_tools::Adapter::continued)), one line each.
+    pub fn continued(&self, works: &[String]) -> Vec<String> {
+        self.tools()
+            .adapters()
+            .iter()
+            .flat_map(|a| a.continued(works))
+            .collect()
+    }
+
+    /// The calls made for `work` in `project` ([`for_work`](Engine::for_work)), oldest first.
+    pub fn work_calls(
+        &self,
+        project: &ProjectId,
+        work: &str,
+    ) -> Result<Vec<Invocation>, AgentError> {
+        Ok(self.store.list_invocations_of_work(project, work)?)
     }
 
     /// The process is about to exit (a deploy, SIGTERM, the app quitting). Every run of this
@@ -235,12 +288,22 @@ impl Engine {
     pub fn recover_interrupted(&self) -> Result<usize, AgentError> {
         let mut n = 0;
         for (project, mut inv) in self.store.list_running_invocations()? {
-            if inv.pid.is_some_and(crate::process::alive) {
+            if inv
+                .pid
+                .is_some_and(|p| crate::process::writer_alive(p, inv.pid_start))
+            {
                 continue;
             }
             inv.mark_failed(INTERRUPTED_CALL);
             self.store.put_invocation(&project, &inv)?;
             n += 1;
+        }
+        // A chat's turn a stopped process left begun: opening its session marks it, so the
+        // chat lists it, interrupted, before anyone opens it (ADR 0048).
+        for id in self.store.sessions_with_begun_turns()? {
+            if let Err(e) = crate::session::Session::open(self, &id) {
+                tracing::warn!(session = %id, "an interrupted turn was not marked: {e}");
+            }
         }
         Ok(n)
     }
@@ -464,6 +527,7 @@ impl Engine {
 
         let input = self.resolve_artifact_arg(project, input);
         let mut inv = Invocation::new(action, desc.risk, input.clone());
+        inv.work = self.work.clone();
 
         // record which artifact this call reads, if any, for the provenance graph
         if let Some(a) = input.get("artifact").and_then(|v| v.as_str()) {
@@ -478,10 +542,13 @@ impl Engine {
         // Recorded before it runs: a crash mid-call leaves a trace that recovery can mark.
         inv.status = InvocationStatus::Running;
         inv.pid = Some(std::process::id());
+        inv.pid_start = crate::process::own_start();
         self.store.put_invocation(project, &inv)?;
 
         let blobs = StoreBlobs(&self.store);
-        let ctx = RunCtx::new(&blobs).with_workspace(self.workspace_dir(project)?);
+        let ctx = RunCtx::new(&blobs)
+            .with_workspace(self.workspace_dir(project)?)
+            .with_work(self.work.clone(), self.continues.clone());
 
         match registry.run(action, input, &ctx).await {
             Ok(out) => {

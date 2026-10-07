@@ -334,9 +334,32 @@ impl Ark {
         }
         // What work this chat set up has posted since its last answer.
         session.read_posts(&self.engine)?;
+        // The turn before did not finish (the app stopped, it failed, the person stopped it):
+        // this one continues it. Its changes are not made again, one cut short is asked about
+        // again, and the model is told what it did.
+        let unfinished = session.unfinished(&self.engine)?;
+        let carry = unfinished
+            .as_ref()
+            .map(|u| u.carry(&engine.continued(&u.works)));
+        let digest = match (carry, session.conversation_digest()) {
+            (Some(c), Some(d)) => Some(format!("{d}\n{c}")),
+            (c, d) => c.or(d),
+        };
+        let (done_before, cut_short, works) = unfinished
+            .map(|u| (u.calls.clone(), u.cut_short(), u.works))
+            .unwrap_or_default();
+        // Its calls name the turn, so the next one finds them if this one stops too; the tools
+        // know which stopped turns it continues.
+        let engine = Arc::new(
+            engine
+                .for_work(session.work_of(session.turn_count()))
+                .continuing(works),
+        );
         let harness = self
             .harness_with(router)
-            .conversation(session.conversation_digest())
+            .conversation(digest)
+            .done_before(done_before)
+            .cut_short(cut_short)
             .approvals(opts.approvals)
             .cancel(opts.cancel)
             .steering(opts.steer)

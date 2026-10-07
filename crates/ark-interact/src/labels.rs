@@ -676,6 +676,7 @@ mod tests {
             agent: None,
             task: None,
             ask_each_time: false,
+            cut_short: false,
         };
         assert_eq!(
             l.approval_line(&req),
@@ -709,6 +710,7 @@ mod tests {
             agent: None,
             task: None,
             ask_each_time: false,
+            cut_short: false,
         };
         assert_eq!(
             l.approval_line(&req),
@@ -764,6 +766,7 @@ mod tests {
             agent: None,
             task: None,
             ask_each_time: false,
+            cut_short: false,
         };
         assert_eq!(
             l.approval_line(&req),

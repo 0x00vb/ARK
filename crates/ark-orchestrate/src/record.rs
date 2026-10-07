@@ -320,6 +320,9 @@ pub struct TaskRecord {
     /// The process running it, while it runs.
     #[serde(default)]
     pub pid: Option<u32>,
+    /// When that process started, to tell it from a later one with the same pid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid_start: Option<u64>,
     /// The schedule that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<String>,
@@ -329,6 +332,10 @@ pub struct TaskRecord {
     /// The chat its result is posted into when it ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_to: Option<String>,
+    /// The work that handed it off ([`crate::TaskSpec::work`]); a turn that continues that
+    /// work and takes it up writes its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work: Option<String>,
     /// Its result reached the chat it reports to: as the answer to that chat's own wait for it,
     /// or as a post. Only a finished task's counts; a restart posts a result that did not
     /// (ADR 0038). A record saved before this field existed was reported when it finished.

@@ -263,6 +263,10 @@ pub struct TaskSpec {
     /// reports to the chat that asked for the schedule (`ark_runtime::session::Post`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_to: Option<String>,
+    /// The work that handed it off (a chat's turn, `ark_tools::RunCtx::work`), so a later turn
+    /// that continues that work finds it instead of handing it off again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work: Option<String>,
 }
 
 impl TaskSpec {
@@ -299,6 +303,11 @@ impl TaskSpec {
     /// Work on a board item: it moves with this task.
     pub fn item(mut self, id: impl Into<String>) -> Self {
         self.item = Some(id.into());
+        self
+    }
+    /// Handed off by `work` ([`TaskSpec::work`]).
+    pub fn work(mut self, work: impl Into<String>) -> Self {
+        self.work = Some(work.into());
         self
     }
     /// Post the result into the chat `session` when the task ends.

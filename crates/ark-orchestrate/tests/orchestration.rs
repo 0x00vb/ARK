@@ -1025,6 +1025,7 @@ async fn a_question_survives_a_restart_and_its_answer_runs_the_call_once() {
         agent: Some("w".into()),
         task: Some("t-dead0005".into()),
         ask_each_time: false,
+        cut_short: false,
     };
     r.left_open(
         "t-dead0005",
@@ -2481,4 +2482,94 @@ async fn an_agent_asks_for_the_computer_only_when_its_tools_allow_it() {
         .filter(|t| t.starts_with("computer."))
         .collect();
     assert_eq!(computer, ["computer.look"], "only what its tools allow");
+}
+
+/// ADR 0048: a chat's turn handed work to an agent and stopped before it finished (here the
+/// person stopped it; a crash leaves the same records). The turn that continues it, asked in
+/// other words, takes that hand-off up instead of handing the work off a second time, and is
+/// told it is under way.
+#[tokio::test]
+async fn a_turn_that_continues_a_stopped_one_takes_up_its_handoff_instead_of_making_another() {
+    let chat = Script::new(
+        "chat",
+        vec![
+            calls(vec![(
+                "agents.delegate",
+                json!({"to": "w", "objective": "count the chapters"}),
+            )]),
+            // The continuation words the same work differently (and would wait for it).
+            calls(vec![(
+                "agents.delegate",
+                json!({"to": "w", "objective": "count all chapters in the book"}),
+            )]),
+            answer("w is counting them"),
+        ],
+    );
+    let gate = Arc::new(Notify::new());
+    let agent = Script::with(
+        "m",
+        vec![answer("12 chapters")],
+        Duration::ZERO,
+        Some(gate.clone()),
+    );
+    let c = chat_and_agent(&chat, &agent).await;
+    let mut session = c.ark.start_session(&c.project.id).unwrap();
+    let id = session.id().as_str().to_string();
+    let tools = || TurnOptions {
+        tools: vec![c.o.chat_tools_for(&id)],
+        ..Default::default()
+    };
+
+    // The first turn waits for the agent; it is stopped while the agent works.
+    let cancel = CancelToken::new();
+    let stop = cancel.clone();
+    let o = c.o.clone();
+    tokio::spawn(async move {
+        while o.tasks().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        stop.cancel();
+    });
+    let first = c
+        .ark
+        .ask_session(
+            &mut session,
+            "count the chapters",
+            TurnOptions {
+                cancel: Some(cancel),
+                ..tools()
+            },
+            |_| {},
+        )
+        .await
+        .unwrap();
+    assert!(first.cancelled);
+    let task = c.o.tasks()[0].clone();
+    assert_eq!(task.work.as_deref(), Some(session.work_of(0).as_str()));
+
+    c.ark
+        .ask_session(&mut session, "continue", tools(), |_| {})
+        .await
+        .unwrap();
+    let tasks = c.o.tasks();
+    assert_eq!(tasks.len(), 1, "handed off once: {tasks:#?}");
+    // It now belongs to the turn that took it up, so a later continuation finds it there.
+    assert_eq!(tasks[0].work.as_deref(), Some(session.work_of(1).as_str()));
+    let texts = chat.texts();
+    assert!(
+        texts[1].contains(&format!("handed off to w (task {})", task.id)),
+        "the model is told: {}",
+        texts[1]
+    );
+    assert!(
+        texts[2].contains("hand-off made before the interruption"),
+        "{}",
+        texts[2]
+    );
+
+    // The work ends once and reports to the chat once.
+    gate.notify_one();
+    let done = c.o.wait(&task.id).await.unwrap();
+    assert_eq!(done.state, TaskState::Done);
+    assert_eq!(c.posts(&id).len(), 1);
 }

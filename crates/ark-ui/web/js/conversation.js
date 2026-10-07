@@ -103,9 +103,12 @@ export class Thread {
     }
     turn.closeBlocks();
     // A replayed "stopped" activity already said so, as it did live.
-    if (t.cancelled && !acts.some((a) => a.kind === "stopped")) turn.notice("Stopped.", "muted");
-    else if (t.unfinished) turn.notice(`Did not finish: ${t.unfinished}`, "error");
+    const stopped = acts.some((a) => a.kind === "stopped");
+    if (t.cancelled && !stopped) turn.notice("Stopped.", "muted");
+    else if (t.unfinished && !(t.interrupted && stopped)) turn.notice(t.unfinished, t.interrupted ? "muted" : "error");
     else if (t.answer) turn.text(t.answer, true);
+    // The chat's last turn did not finish: one way on. It is the person's next message.
+    if (t.resume) turn.resume();
     turn.fileCards();
     turn.footer(t.footer, t.index);
     for (const p of t.posts || []) turn.el.append(postView(p));
@@ -123,6 +126,7 @@ export class Thread {
 
   begin(input) {
     this.dropWelcome();
+    for (const b of this.root.querySelectorAll(".resume")) b.remove();
     this.live = new TurnView(this, input, null);
     this.live.live = true;
     this.live.working("Thinking");
@@ -281,7 +285,7 @@ class TurnView {
     if (kind === "warning" && /needs approval/.test(a.label)) return this.attach(a, ev, (row) => (row.dataset.status = "refused"), "needs approval; not run");
     if (kind === "stopped") {
       this.closeBlocks();
-      return this.notice("Stopped.", "muted");
+      return this.notice(a.label || "Stopped.", "muted");
     }
     const blk = this.currentBlock();
     if (!TOOLISH.has(kind)) return;
@@ -340,7 +344,8 @@ class TurnView {
     const row = this.rows.get(a.call);
     if (!row) return;
     const ok = ev ? ev.ok : a.tone !== "error";
-    if (row.dataset.status === "running") row.dataset.status = ok ? "ok" : "failed";
+    // Replayed from records: "warning" is a call cut short by the stop, or never run.
+    if (row.dataset.status === "running") row.dataset.status = !ev && a.tone === "warning" ? "cut" : ok ? "ok" : "failed";
     if (a.label) this.detail(row, a.label, ok ? "muted" : "error");
     if (ev?.duration_ms != null) row.querySelector(".act-meta").textContent = secs(ev.duration_ms);
     // A picture the agent took of a window: what it saw, under its step. Click to enlarge.
@@ -462,6 +467,12 @@ class TurnView {
     this.fileCards();
     this.footer(msg.footer, msg.index);
     for (const card of this.agent.querySelectorAll(".approval:not(.decided)")) card.remove();
+    if (msg.resume) this.resume();
+  }
+
+  /// One way on for a turn that did not finish: it sends what a person would type.
+  resume() {
+    this.agent.append(h("button.btn.primary.resume", { type: "button", onclick: () => this.api.send("Continue") }, "Continue"));
   }
 }
 

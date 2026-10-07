@@ -2102,6 +2102,8 @@ impl Host {
             "steps": steps,
             "footer": end.footer,
             "index": end.index,
+            // It failed and is stored: the person can continue it (ADR 0048).
+            "resume": error.is_some() && end.index.is_some(),
             "elapsed_ms": end.elapsed_ms,
             "undelivered": end.undelivered,
             "summary": current.then(|| self.summary()),

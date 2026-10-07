@@ -100,6 +100,34 @@ impl ProviderError {
         }
     }
 
+    /// Whether the model could not be reached at all: no connection, or no answer in time.
+    /// It is worth waiting for (a network coming back), unlike an answer that refused.
+    ///
+    /// Not a server on this machine, and not a refused connection: nothing listens there (a
+    /// local model that is not running), and waiting does not start it.
+    pub fn is_unreachable(&self) -> bool {
+        let ProviderError::Http(e) = self else {
+            return false;
+        };
+        if !(e.is_connect() || e.is_timeout()) {
+            return false;
+        }
+        let local = e.url().and_then(|u| u.host_str()).is_some_and(|h| {
+            h == "localhost"
+                || h.parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+        });
+        let mut source: Option<&dyn std::error::Error> = std::error::Error::source(e);
+        let mut refused = false;
+        while let Some(s) = source {
+            if let Some(io) = s.downcast_ref::<std::io::Error>() {
+                refused |= io.kind() == std::io::ErrorKind::ConnectionRefused;
+            }
+            source = s.source();
+        }
+        !local && !refused
+    }
+
     /// Whether the account behind the key is out of credit ([`ProviderError::OutOfCredit`]).
     pub fn is_out_of_credit(&self) -> bool {
         matches!(self, ProviderError::OutOfCredit { .. })

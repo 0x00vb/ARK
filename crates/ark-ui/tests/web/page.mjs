@@ -80,6 +80,27 @@ const scenarios = {
     assert.deepEqual(await shape(page), live);
   },
 
+  // A turn a crash cut short (ADR 0048): reopened, it shows what it did, says it was
+  // interrupted, and offers one Continue on the chat's last turn. Continue is the person's next
+  // message; once it is sent the offer is gone.
+  async interrupted(page) {
+    await page.locator(".session", { hasText: "Read the notes, then summarize them" }).first().click();
+    const resume = page.locator(".turn .resume");
+    await resume.waitFor();
+    assert.equal(await resume.count(), 1);
+    assert.equal((await resume.innerText()).trim(), "Continue");
+    const notice = await page.locator(".turn .notice").last().innerText();
+    assert.equal(notice.trim(), "Interrupted before it finished.");
+    assert.equal(await page.locator(".turn .tone-error").count(), 0, "not shown as a failure");
+    assert.equal(await page.locator('.turn .act[data-status="ok"]').count(), 1, "the read is done");
+    assert.equal(await page.locator(".turn .turn-foot").count(), 0, "no counts for a turn that kept none");
+    await finished(page, () => resume.click());
+    assert.equal(await page.locator(".turn .resume").count(), 0);
+    const turns = page.locator(".turn");
+    assert.equal(await turns.count(), 2);
+    assert.match(await turns.last().innerText(), /Continue[\s\S]*Picked up where it stopped/);
+  },
+
   // A narrow window folds the sidebar into a drawer the reveal button opens; it closes on a
   // pick, and the width never scrolls sideways.
   async narrow(page) {

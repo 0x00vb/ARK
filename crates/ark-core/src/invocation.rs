@@ -51,6 +51,14 @@ pub struct Invocation {
     /// interrupted (see the runtime's recovery on open).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
+    /// When that process started (`ark_runtime::process::own_start`), so a later process
+    /// that got the same pid is not taken for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid_start: Option<u64>,
+    /// The work the call was made for (a conversation's turn), so the calls of a run that
+    /// stopped can be found and not made again when the work continues.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work: Option<String>,
 }
 
 impl Invocation {
@@ -74,6 +82,8 @@ impl Invocation {
             created_at: OffsetDateTime::now_utc(),
             finished_at: None,
             pid: None,
+            pid_start: None,
+            work: None,
         }
     }
 

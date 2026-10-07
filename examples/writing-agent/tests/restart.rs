@@ -89,72 +89,7 @@ fn call(name: &str, args: Value) -> Value {
 
 /// Serve the fake model; returns its base URL.
 async fn serve(model: Arc<Model>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut sock, _)) = listener.accept().await else {
-                return;
-            };
-            let model = model.clone();
-            tokio::spawn(async move {
-                let mut buf = Vec::new();
-                let mut tmp = [0u8; 16384];
-                let (head, body) = loop {
-                    let n = match sock.read(&mut tmp).await {
-                        Ok(0) | Err(_) => return,
-                        Ok(n) => n,
-                    };
-                    buf.extend_from_slice(&tmp[..n]);
-                    let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
-                        continue;
-                    };
-                    let head = String::from_utf8_lossy(&buf[..end]).to_string();
-                    let len: usize = head
-                        .to_lowercase()
-                        .lines()
-                        .find_map(|l| l.strip_prefix("content-length:").map(str::to_string))
-                        .and_then(|v| v.trim().parse().ok())
-                        .unwrap_or(0);
-                    while buf.len() < end + 4 + len {
-                        match sock.read(&mut tmp).await {
-                            Ok(0) | Err(_) => return,
-                            Ok(n) => buf.extend_from_slice(&tmp[..n]),
-                        }
-                    }
-                    break (head, buf[end + 4..end + 4 + len].to_vec());
-                };
-                if head.starts_with("GET") {
-                    let list = r#"{"object":"list","data":[{"id":"fake"}]}"#;
-                    let _ = sock
-                        .write_all(
-                            format!(
-                                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{list}",
-                                list.len()
-                            )
-                            .as_bytes(),
-                        )
-                        .await;
-                    return;
-                }
-                let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-                let Some(delta) = model.reply(&body) else {
-                    // Hang until the process on the other end goes away.
-                    let _ = sock.read(&mut tmp).await;
-                    return;
-                };
-                let mut out = String::from(
-                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
-                );
-                let chunk = json!({ "choices": [{ "index": 0, "delta": delta }] });
-                out.push_str(&format!("data: {chunk}\n\n"));
-                let usage = json!({ "choices": [], "usage": { "prompt_tokens": 50, "completion_tokens": 10 } });
-                out.push_str(&format!("data: {usage}\n\ndata: [DONE]\n\n"));
-                let _ = sock.write_all(out.as_bytes()).await;
-            });
-        }
-    });
-    format!("http://{addr}/v1")
+    serve_with(Arc::new(move |b: &Value| model.reply(b))).await
 }
 
 /// One `writer --serve` process over the store at `root`.
@@ -346,8 +281,11 @@ fn stopped_while_an_agent_works(signal: &str) -> (Duration, bool) {
         .iter()
         .flat_map(|t| t["posts"].as_array().into_iter().flatten())
         .collect();
-    // A SIGTERM ends the chat's turn as cancelled; a SIGKILL leaves it unfinished.
-    assert_eq!(turns[0]["cancelled"], signal == "-TERM", "{turns}");
+    // Either stop leaves the chat's turn interrupted, not stopped by the person, with a way to
+    // continue it (ADR 0048).
+    assert_eq!(turns[0]["cancelled"], false, "{turns}");
+    assert_eq!(turns[0]["interrupted"], true, "{turns}");
+    assert_eq!(turns[0]["resume"], true, "{turns}");
     assert_eq!(posts.len(), 1, "{turns}");
     assert_eq!(posts[0]["text"], "Saved notes.md. [inv:1]");
     drop(second);
@@ -365,4 +303,200 @@ fn sigterm_while_an_agent_works_continues_it_after_the_restart_and_reports_once(
 fn sigkill_while_an_agent_works_continues_it_after_the_restart_and_reports_once() {
     let (_, clean) = stopped_while_an_agent_works("-KILL");
     assert!(!clean);
+}
+
+/// The fake model for a chat's own turn (ADR 0048): asked to save chapter one, it saves, then
+/// hangs (the process is killed then). Told to continue, it saves the same chapter again, then
+/// answers.
+struct ChatModel {
+    log: Mutex<Vec<String>>,
+}
+
+impl ChatModel {
+    fn reply(&self, body: &Value) -> Option<Value> {
+        let messages = body["messages"].as_array().cloned().unwrap_or_default();
+        let text: String = messages
+            .iter()
+            .map(|m| m["content"].as_str().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let results = messages.iter().filter(|m| m["role"] == "tool").count();
+        self.log.lock().unwrap().push(text.clone());
+        let save = || {
+            call(
+                "manuscript__save",
+                json!({ "file": "chapter-one.md", "text": "It rained all night." }),
+            )
+        };
+        if text.contains("== TASK ==\nContinue") {
+            return Some(if results == 0 {
+                save()
+            } else {
+                say("Chapter one is saved.")
+            });
+        }
+        if text.contains("save chapter one") {
+            return (results == 0).then(save);
+        }
+        Some(say("OK"))
+    }
+}
+
+/// A fake model's answer to a request body (a streamed delta), or `None` to hang.
+type Reply = Arc<dyn Fn(&Value) -> Option<Value> + Send + Sync>;
+
+/// Serve `reply` as an OpenAI-compatible model; `None` hangs. Returns the base URL.
+async fn serve_with(reply: Reply) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            let reply = reply.clone();
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 16384];
+                let (head, body) = loop {
+                    let n = match sock.read(&mut tmp).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => n,
+                    };
+                    buf.extend_from_slice(&tmp[..n]);
+                    let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&buf[..end]).to_string();
+                    let len: usize = head
+                        .to_lowercase()
+                        .lines()
+                        .find_map(|l| l.strip_prefix("content-length:").map(str::to_string))
+                        .and_then(|v| v.trim().parse().ok())
+                        .unwrap_or(0);
+                    while buf.len() < end + 4 + len {
+                        match sock.read(&mut tmp).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                        }
+                    }
+                    break (head, buf[end + 4..end + 4 + len].to_vec());
+                };
+                if head.starts_with("GET") {
+                    let list = r#"{"object":"list","data":[{"id":"fake"}]}"#;
+                    let _ = sock
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{list}",
+                                list.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                    return;
+                }
+                let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                let Some(delta) = reply(&body) else {
+                    let _ = sock.read(&mut tmp).await;
+                    return;
+                };
+                let mut out = String::from(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n",
+                );
+                let chunk = json!({ "choices": [{ "index": 0, "delta": delta }] });
+                out.push_str(&format!("data: {chunk}\n\n"));
+                let usage = json!({ "choices": [], "usage": { "prompt_tokens": 50, "completion_tokens": 10 } });
+                out.push_str(&format!("data: {usage}\n\ndata: [DONE]\n\n"));
+                let _ = sock.write_all(out.as_bytes()).await;
+            });
+        }
+    });
+    format!("http://{addr}/v1")
+}
+
+/// Answer the window's open question "allow once", when one comes within `secs`.
+fn allow_once(served: &Served, secs: u64) {
+    let id = until("a question", secs, || {
+        served.rpc("hello", json!({}))["approvals"]
+            .as_array()
+            .and_then(|a| a.first().cloned())
+            .map(|a| a["id"].clone())
+    });
+    served.rpc("approve", json!({ "id": id, "decision": "allow_once" }));
+}
+
+/// ADR 0048, end to end in a real process: the chat's own turn saves a chapter, the process is
+/// killed (SIGKILL, as a crash) in its next model call, and starts again. The chat shows the
+/// turn interrupted, with the save done and a way to continue; "Continue" finishes the work and
+/// the chapter is not saved a second time.
+#[test]
+fn a_chat_turn_killed_after_a_save_continues_without_saving_again() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let model = Arc::new(ChatModel {
+        log: Mutex::new(Vec::new()),
+    });
+    let m = model.clone();
+    let base = rt.block_on(serve_with(Arc::new(move |b: &Value| m.reply(b))));
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("store");
+    let token = Command::new(WRITER)
+        .args(["--new-token", "test"])
+        .env("WRITER_ROOT", &root)
+        .output()
+        .unwrap();
+    let token = String::from_utf8_lossy(&token.stdout).trim().to_string();
+
+    let first = Served::start(&root, &base, &token);
+    let chat = first.rpc("summary", json!({}))["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    first.rpc("send", json!({ "text": "save chapter one" }));
+    allow_once(&first, 30);
+    let saved = until("the save, then the next model call", 30, || {
+        let after = model.log.lock().unwrap().len() >= 2;
+        after.then(|| find(&root, "chapter-one.md")).flatten()
+    });
+    let written = std::fs::metadata(&saved).unwrap().modified().unwrap();
+    let (_, _) = first.stop("-KILL");
+
+    let second = Served::start(&root, &base, &token);
+    let turns = second.rpc("transcript", json!({ "session": chat }));
+    let t = &turns[0];
+    assert_eq!(t["interrupted"], true, "{turns}");
+    assert_eq!(t["resume"], true, "{turns}");
+    assert_eq!(t["unfinished"], "Interrupted before it finished.");
+    let results: Vec<&Value> = t["activity"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|a| a["kind"] == "result")
+        .collect();
+    assert_eq!(results.len(), 1, "{turns}");
+    assert_ne!(
+        results[0]["label"], "cut short",
+        "the save is shown done: {turns}"
+    );
+
+    // What the Continue button sends.
+    second.rpc("open_session", json!({ "id": chat }));
+    second.rpc("send", json!({ "text": "Continue" }));
+    let turns = until("the continuation to finish", 30, || {
+        let turns = second.rpc("transcript", json!({ "session": chat }));
+        (turns.as_array().map_or(0, Vec::len) == 2).then_some(turns)
+    });
+    assert_eq!(turns[1]["answer"], "Chapter one is saved.", "{turns}");
+    assert!(turns[1].get("resume").is_none_or(|r| r == false));
+    assert_eq!(
+        std::fs::metadata(&saved).unwrap().modified().unwrap(),
+        written,
+        "saved once"
+    );
+    let log = model.log.lock().unwrap().clone();
+    let continued = log
+        .iter()
+        .find(|l| l.contains("== TASK ==\nContinue"))
+        .unwrap();
+    assert!(continued.contains("done manuscript.save"), "{continued}");
+    assert!(log.iter().any(|l| l.contains("not run again")), "{log:#?}");
 }

@@ -185,6 +185,10 @@ pub enum HarnessEvent {
     },
     /// The turn was cancelled; no answer follows.
     Cancelled,
+    /// The process is stopping ([`Engine::stop_soon`]) and the turn stopped at a safe point; no
+    /// answer follows. Unlike [`Cancelled`](HarnessEvent::Cancelled), nobody asked it to stop:
+    /// the work continues later.
+    Interrupted,
     /// The final answer. `streamed` is true when its text already arrived as `TextDelta`s.
     Answer {
         text: String,
@@ -205,6 +209,9 @@ pub struct HarnessOutcome {
     pub state: ResearchState,
     /// True when the run stopped on a [`CancelToken`]; `answer` is then empty.
     pub cancelled: bool,
+    /// It stopped because the process is stopping, not because it was cancelled
+    /// ([`HarnessEvent::Interrupted`]): the work continues later. Implies `cancelled`.
+    pub interrupted: bool,
     /// Messages the user sent while the turn ran that reached the model, in order.
     pub steered: Vec<String>,
 }
@@ -245,6 +252,9 @@ pub struct Harness {
     /// State-changing calls that already succeeded in an earlier run of the same work, which
     /// stopped before it finished (see [`Harness::done_before`]).
     done_before: Vec<Invocation>,
+    /// State-changing calls an earlier run of the same work had under way when it stopped
+    /// (see [`Harness::cut_short`]).
+    cut_short: Vec<Invocation>,
 }
 
 /// The pieces of the first user message, kept separate so the context report can attribute
@@ -323,6 +333,7 @@ impl Harness {
             rules: None,
             skills: None,
             done_before: Vec::new(),
+            cut_short: Vec::new(),
         }
     }
 
@@ -350,6 +361,17 @@ impl Harness {
         self.done_before = invocations
             .into_iter()
             .filter(|i| i.risk == RiskTier::Mutate && i.status == InvocationStatus::Ok)
+            .collect();
+        self
+    }
+
+    /// Changes an earlier run of this work had under way when it stopped: whether they happened
+    /// is unknown. An identical call is asked of the person, whatever was granted, saying so;
+    /// with no one to ask it is not run, and the model is told why.
+    pub fn cut_short(mut self, invocations: Vec<Invocation>) -> Self {
+        self.cut_short = invocations
+            .into_iter()
+            .filter(|i| i.risk == RiskTier::Mutate)
             .collect();
         self
     }
@@ -568,6 +590,13 @@ impl Harness {
                 let canonical = engine.canonical_input(project, i.input.clone());
                 (call_digest(&i.action, &canonical), i)
             })
+            .collect();
+        // Changes an earlier run had under way when it stopped, by digest (`cut_short`). Each is
+        // checked once: after the person or the model decided, the call runs as any other.
+        let mut cut_short: HashSet<String> = self
+            .cut_short
+            .iter()
+            .map(|i| call_digest(&i.action, &engine.canonical_input(project, i.input.clone())))
             .collect();
         // When an action that changes state last ran this turn. Reads before it are not
         // reused after it.
@@ -832,16 +861,23 @@ impl Harness {
                     // A change waits for the reads before it, and runs alone.
                     flush!();
                 }
+                // Asked of the person until they allow it once; with no one to ask, it is never
+                // run again on its own: only the person can tell whether it happened.
+                let again = desc.risk == RiskTier::Mutate && cut_short.contains(&digest);
+                if again && self.approvals.is_none() {
+                    round.push(Message::tool_result(call, CUT_SHORT_NOTE));
+                    continue;
+                }
                 on_event(HarnessEvent::ToolCall {
                     id: call.id.clone(),
                     action: call.name.clone(),
                     input: call.arguments.clone(),
                 });
 
-                let mut approved = self.allow_mutate;
-                if desc.risk == RiskTier::Mutate && !self.allow_mutate {
+                let mut approved = self.allow_mutate && !again;
+                if desc.risk == RiskTier::Mutate && !approved {
                     match self
-                        .request_approval(profile, &desc, call, &mut on_event)
+                        .request_approval(profile, &desc, call, again, &mut on_event)
                         .await
                     {
                         None => {
@@ -855,7 +891,10 @@ impl Harness {
                             ));
                             continue;
                         }
-                        Some(Some(_)) => approved = true,
+                        Some(Some(_)) => {
+                            approved = true;
+                            cut_short.remove(&digest);
+                        }
                         Some(None) => {
                             on_event(HarnessEvent::NeedsApproval {
                                 action: call.name.clone(),
@@ -987,7 +1026,9 @@ impl Harness {
             state.touch();
             engine.store.put_research_state(project, &state)?;
             metrics.finish();
-            on_event(HarnessEvent::Cancelled);
+            let stopped = self.stopped_event();
+            let interrupted = matches!(stopped, HarnessEvent::Interrupted);
+            on_event(stopped);
             return Ok(HarnessOutcome {
                 answer: String::new(),
                 cited,
@@ -996,6 +1037,7 @@ impl Harness {
                 metrics,
                 state,
                 cancelled: true,
+                interrupted,
                 steered,
             });
         }
@@ -1019,7 +1061,9 @@ impl Harness {
                 }
                 None => {
                     metrics.finish();
-                    on_event(HarnessEvent::Cancelled);
+                    let stopped = self.stopped_event();
+                    let interrupted = matches!(stopped, HarnessEvent::Interrupted);
+                    on_event(stopped);
                     return Ok(HarnessOutcome {
                         answer: String::new(),
                         cited,
@@ -1028,6 +1072,7 @@ impl Harness {
                         metrics,
                         state,
                         cancelled: true,
+                        interrupted,
                         steered,
                     });
                 }
@@ -1096,6 +1141,7 @@ impl Harness {
             metrics,
             state,
             cancelled: false,
+            interrupted: false,
             steered,
         })
     }
@@ -1396,6 +1442,17 @@ impl Harness {
         }
     }
 
+    /// The event a run that stopped ends with: the person's cancel, or the process stopping.
+    fn stopped_event(&self) -> HarnessEvent {
+        let asked = self.cancel.as_ref().is_some_and(|c| c.is_cancelled());
+        let stopping = self.stopping.as_ref().is_some_and(|c| c.is_cancelled());
+        if stopping && !asked {
+            HarnessEvent::Interrupted
+        } else {
+            HarnessEvent::Cancelled
+        }
+    }
+
     fn is_cancelled(&self) -> bool {
         [&self.cancel, &self.stopping]
             .into_iter()
@@ -1429,6 +1486,8 @@ impl Harness {
         let provider = self.router.provider(role).clone();
         let started = std::time::Instant::now();
         let mut retries = 0u32;
+        // When this call first failed: an unreachable model is waited for that long.
+        let mut failing_since: Option<std::time::Instant> = None;
         loop {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             let sink = move |t: &str| {
@@ -1461,7 +1520,16 @@ impl Harness {
                 Ok(c) => c,
                 // Retry only when nothing of this attempt was shown: a second answer after
                 // half of a first one would duplicate output.
-                Err(e) if first_token_ms.is_none() && self.retry.should_retry(&e, retries) => {
+                Err(e)
+                    if first_token_ms.is_none()
+                        && self.retry.should_retry_for(
+                            &e,
+                            retries,
+                            failing_since
+                                .get_or_insert_with(std::time::Instant::now)
+                                .elapsed(),
+                        ) =>
+                {
                     let delay = self.retry.delay(retries, &e);
                     retries += 1;
                     metrics.record_retry();
@@ -1520,6 +1588,7 @@ impl Harness {
         profile: &AgentProfile,
         desc: &ark_core::ActionDescriptor,
         call: &ark_model::ToolCall,
+        cut_short: bool,
         on_event: &mut impl FnMut(HarnessEvent),
     ) -> Option<Option<ApprovalDecision>> {
         let gate = match &self.approvals {
@@ -1539,7 +1608,8 @@ impl Harness {
             preview: preview_call(&call.name, &call.arguments),
             agent: None,
             task: None,
-            ask_each_time: desc.ask_each_time,
+            ask_each_time: desc.ask_each_time || cut_short,
+            cut_short,
         };
         if request.ask_each_time || !gate.is_granted(&request.class) {
             on_event(HarnessEvent::ApprovalRequested {
@@ -1875,7 +1945,7 @@ impl Harness {
                     None => class,
                 }
             }));
-        matches!(self.request_approval(&profile, &desc, &call, on_event).await, Some(Some(d)) if d.allows())
+        matches!(self.request_approval(&profile, &desc, &call, false, on_event).await, Some(Some(d)) if d.allows())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2364,6 +2434,7 @@ fn unwritten_note(missing: &[String], written: &[String]) -> String {
 pub const MAX_IDENTICAL_CHANGES: u32 = 2;
 
 const DONE_BEFORE_NOTE: &str = "not run again: this exact change already ran before the work was interrupted, so running it again would make it twice. Its result";
+const CUT_SHORT_NOTE: &str = "not run: this exact change was under way when the work was interrupted, so it may already have happened, and only the person can tell. Do not try it again; say in your answer that it was cut short and may need to be checked.";
 const REPEATED_CHANGE_NOTE: &str = "not run: this exact call already ran twice in this task, with the results above. Running it again gives the same result. Change the input to fix what went wrong (for a program, fix the error it reported), or answer from what you have.";
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";

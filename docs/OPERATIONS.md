@@ -10,7 +10,8 @@ any application on ARK.
 |---|---:|---|
 | `ARK_PROVIDER`, `ARK_MODEL` | `ollama`, per provider | the model; two tiers with `ARK_PROVIDER_FAST` / `ARK_MODEL_FAST` and `ARK_PROVIDER_STRONG` / `ARK_MODEL_STRONG` |
 | `ARK_CTX_BUDGET` | 6000 | prompt-token budget per request (tool schemas not counted) |
-| `ARK_MODEL_RETRIES` | 2 | retries of a model call after a temporary failure |
+| `ARK_MODEL_RETRIES` | 4 | retries of a model call after a temporary failure |
+| `ARK_MODEL_OFFLINE_S` | 60 | how long a model that cannot be reached (no connection, a timeout) is waited for, past the retries |
 | `ARK_HTTP_CONNECT_TIMEOUT_S` | 10 | connecting to a provider |
 | `ARK_HTTP_IDLE_TIMEOUT_S` | 120 | silence while waiting for the next bytes of a reply |
 | `ARK_HTTP_TIMEOUT_S` | 600 | a whole non-streaming request |
@@ -126,7 +127,10 @@ A provider error is classified as temporary or not (`ProviderError::is_transient
 
 The harness retries a temporary failure with exponential backoff and jitter (500 ms doubling,
 at most 30 s per wait, never shorter than the server's `retry-after`), up to
-`ARK_MODEL_RETRIES` times. Two rules keep retries safe:
+`ARK_MODEL_RETRIES` times. When the model cannot be reached at all (no connection, a timeout:
+a laptop's network gone), it keeps trying until `ARK_MODEL_OFFLINE_S` have passed since the
+first failure. A turn that still fails, or that the app's stop or a crash cut short, is
+continued by the person's next message (ADR 0048). Two rules keep retries safe:
 
 - A call is retried only if none of its text reached the user. Otherwise the turn fails: a
   second answer after half of a first would duplicate output.

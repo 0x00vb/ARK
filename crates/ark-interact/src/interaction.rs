@@ -398,6 +398,7 @@ fn transcript_page(
 ) -> anyhow::Result<Vec<TranscriptTurn>> {
     let sid = session.id().as_str().to_string();
     let posts = ark_sdk::prelude::ark_runtime::session::posts(engine, &sid, 0, usize::MAX)?;
+    let last = session.turn_count().checked_sub(1);
     Ok(session
         .transcript_page(engine, before, limit)?
         .iter()
@@ -422,7 +423,25 @@ fn transcript_page(
                         .collect()
                 })
                 .unwrap_or_default();
+            let mut activity = activity;
+            // A turn that did not finish: each call as its record says, even one the trace
+            // never got to (the app stopped between the call and the trace's next save).
+            if t.incomplete || t.cancelled {
+                let reported: std::collections::HashSet<String> = rec
+                    .iter()
+                    .flat_map(|r| &r.events)
+                    .filter_map(|e| match &e.event {
+                        HarnessEvent::ToolResult { invocation, .. } => Some(invocation.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                let calls = engine
+                    .work_calls(session.project(), &session.work_of(t.index))
+                    .unwrap_or_default();
+                activity::settle(&mut activity, &reported, &calls, labels, names);
+            }
             let mut turn = TranscriptTurn::of(t, activity, rec.is_some());
+            turn.resume = t.incomplete && Some(t.index) == last;
             // Each post goes after the turn that was last when it came.
             turn.posts = posts
                 .iter()
@@ -1305,9 +1324,13 @@ impl Interaction {
         } = self;
         let rec = ctl.recorder.clone();
         let turns_before = session.turn_count();
+        // The trace is saved as the turn runs, so a turn the app never finished (a crash, the
+        // computer stopping) still shows what it did up to there.
+        let mut journal = Journal::new(ark.shared_engine(), session.id().as_str(), turns_before);
         let result = ark
             .ask_session(session, input, opts, |ev| {
                 rec.lock().unwrap().record(&ev);
+                journal.saw(&ev, &rec);
                 // The conversation's own requests; the planner's and critic's are separate.
                 if let HarnessEvent::Context { report } = &ev {
                     if !matches!(report.role.as_str(), "plan" | "critic") {
@@ -1503,6 +1526,66 @@ impl Interaction {
         let last = self.transcript(None, 2).unwrap_or_default();
         let session = SessionSummary::of(self.session.record(), &self.project.name, true);
         inspect::recap("Resumed", &session, &last)
+    }
+}
+
+/// Saves a running turn's trace while it runs (see [`Journal::saw`]). The record is saved
+/// `live`; the turn's last save replaces it.
+struct Journal {
+    engine: Arc<Engine>,
+    session: String,
+    index: u32,
+    mode: crate::trace::TraceMode,
+    last: Option<std::time::Instant>,
+}
+
+/// How often events that can wait save the trace.
+const JOURNAL_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
+
+impl Journal {
+    fn new(engine: Arc<Engine>, session: &str, index: u32) -> Journal {
+        Journal {
+            engine,
+            session: session.to_string(),
+            index,
+            mode: crate::trace::TraceMode::from_env(),
+            last: None,
+        }
+    }
+
+    fn saw(&mut self, ev: &HarnessEvent, rec: &crate::trace::SharedRecorder) {
+        // What a person needs to see after a stop is saved at once: results, questions and
+        // answers, steering, the end. Anything else (a call starting, streamed text) at most
+        // every second; a call under way is also in its own record.
+        let due = match ev {
+            HarnessEvent::ToolResult { .. }
+            | HarnessEvent::Duplicate { .. }
+            | HarnessEvent::NeedsApproval { .. }
+            | HarnessEvent::ApprovalRequested { .. }
+            | HarnessEvent::ApprovalResolved { .. }
+            | HarnessEvent::Steered { .. }
+            | HarnessEvent::Answer { .. }
+            | HarnessEvent::Cancelled
+            | HarnessEvent::Interrupted => true,
+            HarnessEvent::Context { .. } | HarnessEvent::ModelCall { .. } => false,
+            _ => self.last.is_none_or(|t| t.elapsed() >= JOURNAL_EVERY),
+        };
+        if !due {
+            return;
+        }
+        self.last = Some(std::time::Instant::now());
+        let snapshot = rec.lock().unwrap().snapshot();
+        if let Some(v) = crate::trace::for_storage(&snapshot, self.mode)
+            .and_then(|r| serde_json::to_value(&r).ok())
+        {
+            if let Err(e) = self
+                .engine
+                .store
+                .put_turn_trace(&self.session, self.index, &v)
+            {
+                tracing::warn!("a running turn's trace was not saved: {e}");
+            }
+        }
     }
 }
 

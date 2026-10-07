@@ -447,7 +447,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .act-glyph { width: 5px; height: 5px; border-radius: 50%; background: var(--text-3); flex: none; margin: 0 1px; transition: background-color 200ms; }
 .act[data-status="running"] .act-glyph { background: var(--accent); animation: pulse 1.2s var(--ease) infinite; }
 .act[data-status="failed"] .act-glyph { background: var(--err); }
-.act[data-status="denied"] .act-glyph, .act[data-status="refused"] .act-glyph { background: var(--warn); }
+.act[data-status="denied"] .act-glyph, .act[data-status="refused"] .act-glyph, .act[data-status="cut"] .act-glyph { background: var(--warn); }
 .act-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .act[data-status="running"] .act-label { background: linear-gradient(90deg, var(--text-2) 30%, var(--text) 50%, var(--text-2) 70%); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.8s linear infinite; }
 .act-count { color: var(--text-3); font-size: 12px; }
@@ -493,6 +493,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .elapsed { font-size: 12px; color: var(--text-3); }
 
 .notice { font-size: 13px; color: var(--text-3); }
+.resume { align-self: flex-start; }
 .notice.tone-error { color: var(--err); white-space: pre-wrap; }
 .post { margin: 14px 0 6px; padding: 10px 14px; border-left: 2px solid var(--accent); background: var(--sunken); border-radius: 0 8px 8px 0; }
 .post.failed { border-left-color: var(--warn); }

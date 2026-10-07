@@ -10,6 +10,11 @@ use tokio::sync::{mpsc, oneshot};
 
 /// The question's headline, the same in every front-end: who asks, and for which task.
 pub fn approval_title(req: &ApprovalRequest) -> String {
+    // The same call was under way when the work stopped (ADR 0048): the question is whether to
+    // make it again, not whether to make it.
+    if req.cut_short {
+        return CUT_SHORT_TITLE.into();
+    }
     if req.action == "acquire_capability" {
         return match &req.agent {
             Some(a) => format!("{a} needs this to finish:"),
@@ -21,6 +26,9 @@ pub fn approval_title(req: &ApprovalRequest) -> String {
         None => "ARK wants to:".into(),
     }
 }
+
+/// The headline of a change asked again because it was cut short.
+pub const CUT_SHORT_TITLE: &str = "This was cut short and may already have happened. Do it again?";
 
 /// One answer a person can give, as both front-ends show it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -52,6 +60,13 @@ pub fn approval_choices(req: &ApprovalRequest) -> Vec<Choice> {
         return vec![
             choice(yes, ApprovalDecision::AllowOnce, None),
             choice("Not now", ApprovalDecision::Deny, None),
+        ];
+    }
+    // It may already have happened: not doing it again is the default.
+    if req.cut_short {
+        return vec![
+            choice("Skip", ApprovalDecision::Deny, None),
+            choice("Do it again", ApprovalDecision::AllowOnce, None),
         ];
     }
     // Nothing covers it ahead: each call is its own question.
@@ -179,6 +194,7 @@ mod tests {
             agent: None,
             task: None,
             ask_each_time: false,
+            cut_short: false,
         }
     }
 
@@ -213,6 +229,25 @@ mod tests {
     }
 
     /// A grant narrower than the action names it on the button; the question says which.
+    #[test]
+    fn a_change_cut_short_asks_whether_to_do_it_again_and_skipping_is_the_default() {
+        let mut r = req();
+        r.cut_short = true;
+        r.ask_each_time = true;
+        assert_eq!(approval_title(&r), CUT_SHORT_TITLE);
+        let choices = approval_choices(&r);
+        assert_eq!(
+            choices
+                .iter()
+                .map(|c| (c.label.as_str(), c.decision))
+                .collect::<Vec<_>>(),
+            [
+                ("Skip", ApprovalDecision::Deny),
+                ("Do it again", ApprovalDecision::AllowOnce)
+            ]
+        );
+    }
+
     #[test]
     fn a_narrow_grant_names_what_it_covers_on_its_button() {
         let labels = |r: &ApprovalRequest| {

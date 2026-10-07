@@ -484,6 +484,12 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             Tone::Muted,
         ),
         HarnessEvent::Cancelled => (E::Cancelled, "cancelled".into(), None, Tone::Warning),
+        HarnessEvent::Interrupted => (
+            E::Cancelled,
+            "interrupted: the app stopped".into(),
+            None,
+            Tone::Warning,
+        ),
         HarnessEvent::Answer { text, streamed } => (
             E::Answer,
             format!(
@@ -777,6 +783,7 @@ mod tests {
                     agent: None,
                     task: None,
                     ask_each_time: false,
+                    cut_short: false,
                 },
             },
             HarnessEvent::ApprovalResolved {

@@ -1,6 +1,6 @@
 # 0038. A result reaches the chat that asked, once, and a stop lets work reach a safe point
 
-Status: Accepted
+Status: Accepted, amended by 0048 (a stop by the app leaves the chat's turn interrupted, and the next turn continues it)
 Date: 2026-10-05
 
 ## Context

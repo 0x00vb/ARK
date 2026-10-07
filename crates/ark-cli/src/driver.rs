@@ -219,6 +219,7 @@ mod tests {
             agent: Some("scribe".into()),
             task: Some("t-1".into()),
             ask_each_time: false,
+            cut_short: false,
         };
         let mut tasks = Vec::new();
         let mut asks = VecDeque::new();

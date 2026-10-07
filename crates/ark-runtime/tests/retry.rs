@@ -142,6 +142,7 @@ fn fast_policy(n: u32) -> RetryPolicy {
         max_retries: n,
         base_delay: Duration::from_millis(5),
         max_delay: Duration::from_millis(20),
+        offline: Duration::ZERO,
     }
 }
 
@@ -279,6 +280,7 @@ async fn cancelling_during_the_backoff_returns_at_once() {
         max_retries: 3,
         base_delay: Duration::from_secs(10),
         max_delay: Duration::from_secs(10),
+        offline: Duration::ZERO,
     };
     let m = Flaky::new(vec![Step::Fail(overloaded), Step::Ok(answer("late"))]);
     let started = Instant::now();

@@ -62,12 +62,16 @@ impl HttpConfig {
 /// How often and how patiently to retry a failed model call.
 #[derive(Clone, Debug)]
 pub struct RetryPolicy {
-    /// Retries after the first attempt (`ARK_MODEL_RETRIES`, default 2).
+    /// Retries after the first attempt (`ARK_MODEL_RETRIES`, default 4).
     pub max_retries: u32,
     /// First backoff; it doubles each retry.
     pub base_delay: Duration,
     /// Longest single wait, including a server's `retry-after`.
     pub max_delay: Duration,
+    /// How long to keep trying, past `max_retries`, while the model cannot be reached at all
+    /// (no connection, a timeout): a laptop's network coming back
+    /// (`ARK_MODEL_OFFLINE_S`, default 60).
+    pub offline: Duration,
 }
 
 impl Default for RetryPolicy {
@@ -76,9 +80,15 @@ impl Default for RetryPolicy {
             max_retries: std::env::var("ARK_MODEL_RETRIES")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(2),
+                .unwrap_or(4),
             base_delay: Duration::from_millis(500),
             max_delay: Duration::from_secs(30),
+            offline: Duration::from_secs(
+                std::env::var("ARK_MODEL_OFFLINE_S")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(60),
+            ),
         }
     }
 }
@@ -87,6 +97,7 @@ impl RetryPolicy {
     pub fn none() -> Self {
         RetryPolicy {
             max_retries: 0,
+            offline: Duration::ZERO,
             ..RetryPolicy::default()
         }
     }
@@ -94,6 +105,18 @@ impl RetryPolicy {
     /// Whether `err` after `attempt` retries is worth another try.
     pub fn should_retry(&self, err: &ProviderError, attempt: u32) -> bool {
         attempt < self.max_retries && err.is_transient()
+    }
+
+    /// [`should_retry`](RetryPolicy::should_retry), and also while the model has been
+    /// unreachable ([`ProviderError::is_unreachable`]) for less than `offline`, the first
+    /// failure `failing_for` ago.
+    pub fn should_retry_for(
+        &self,
+        err: &ProviderError,
+        attempt: u32,
+        failing_for: Duration,
+    ) -> bool {
+        self.should_retry(err, attempt) || (err.is_unreachable() && failing_for < self.offline)
     }
 
     /// The wait before retry number `attempt + 1`: exponential with full jitter, never
@@ -209,6 +232,7 @@ mod tests {
             max_retries: 5,
             base_delay: Duration::from_millis(100),
             max_delay: Duration::from_secs(2),
+            offline: Duration::ZERO,
         };
         let e = status(503);
         for attempt in 0..6 {
@@ -233,5 +257,47 @@ mod tests {
         assert!(!p.should_retry(&e, 5));
         assert!(p.should_retry(&e, 4));
         assert!(!p.should_retry(&status(400), 0));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_model_is_waited_for_then_given_up() {
+        // A local server that is not running refuses at once: not waited for.
+        let refused = reqwest::Client::new()
+            .get("http://127.0.0.1:9/")
+            .send()
+            .await
+            .unwrap_err();
+        let refused = ProviderError::Http(refused);
+        assert!(refused.is_transient() && !refused.is_unreachable());
+        // An address nothing answers (a network that is gone): it times out.
+        let gone = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(200))
+            .build()
+            .unwrap()
+            .get("http://10.255.255.1:81/")
+            .send()
+            .await
+            .unwrap_err();
+        let gone = ProviderError::Http(gone);
+        assert!(gone.is_unreachable(), "{gone}");
+        let p = RetryPolicy {
+            max_retries: 1,
+            base_delay: Duration::from_millis(1),
+            max_delay: Duration::from_millis(2),
+            offline: Duration::from_secs(60),
+        };
+        assert!(
+            p.should_retry_for(&gone, 9, Duration::from_secs(10)),
+            "past the count, within the minute"
+        );
+        assert!(!p.should_retry_for(&gone, 9, Duration::from_secs(61)));
+        assert!(
+            !p.should_retry_for(&refused, 9, Duration::from_secs(10)),
+            "by count only"
+        );
+        // A server that answers with an error is retried by count only.
+        assert!(p.should_retry_for(&status(503), 0, Duration::ZERO));
+        assert!(!p.should_retry_for(&status(503), 1, Duration::ZERO));
+        assert!(!status(503).is_unreachable());
     }
 }

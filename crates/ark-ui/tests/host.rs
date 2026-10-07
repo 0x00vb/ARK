@@ -610,3 +610,57 @@ async fn a_chat_keeps_working_while_the_window_moves_to_another() {
         1
     );
 }
+
+/// A model that refuses every request (a permanent error: not retried).
+struct Refuses;
+
+#[async_trait::async_trait]
+impl ark_model::Provider for Refuses {
+    async fn complete(
+        &self,
+        _system: &str,
+        _messages: &[ark_model::Message],
+        _tools: &[ark_model::ToolDef],
+    ) -> ark_model::Result<Completion> {
+        Err(ark_model::ProviderError::Api {
+            provider: "test".into(),
+            detail: "the model refused".into(),
+        })
+    }
+    fn describe(&self) -> String {
+        "refuses".into()
+    }
+}
+
+/// ADR 0048: a turn that fails says so and offers to continue at once, in the live window and
+/// in the stored chat; the next turn takes it away.
+#[tokio::test]
+async fn a_failed_turn_offers_to_continue_live_and_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Arc::new(Refuses) as Arc<dyn ark_model::Provider>)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let (host, _) = ArkUi::new(App::new("Test").ark(ark)).open().await.unwrap();
+    let mut rx = host.subscribe();
+    host.call("send", json!({ "text": "hello" })).await.unwrap();
+    let done = next(&mut rx, "turn_finished").await;
+    assert!(
+        done["error"].as_str().unwrap().contains("refused"),
+        "{done}"
+    );
+    assert_eq!(done["resume"], true, "{done}");
+    let session = host.call("summary", json!({})).await.unwrap()["session"]["id"].clone();
+    let turns = host
+        .call("transcript", json!({ "session": session }))
+        .await
+        .unwrap();
+    assert_eq!(turns[0]["resume"], true, "{turns}");
+    assert!(turns[0]["unfinished"]
+        .as_str()
+        .unwrap()
+        .starts_with("Did not finish: "));
+}

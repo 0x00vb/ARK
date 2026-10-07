@@ -247,6 +247,9 @@ pub struct Turn {
     /// The process running the turn, while it runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid: Option<u32>,
+    /// When that process started, to tell it from a later one with the same pid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid_start: Option<u64>,
 }
 
 impl Turn {
@@ -263,12 +266,97 @@ impl Turn {
             incomplete: true,
             error: None,
             pid: Some(std::process::id()),
+            pid_start: crate::process::own_start(),
         }
     }
 }
 
 /// Why a turn that never finished is marked so.
 pub const INTERRUPTED: &str = "interrupted: the app stopped before this turn finished";
+
+/// Unfinished turns in a row a continuation looks back over.
+const UNFINISHED_TURNS: usize = 3;
+/// Calls of unfinished turns the next turn is told about, newest kept.
+const CALLS_CARRIED: usize = 10;
+
+/// The unfinished turns at the end of a conversation and the calls they made
+/// ([`Session::unfinished`]).
+#[derive(Clone, Debug, Default)]
+pub struct Unfinished {
+    pub turns: Vec<u32>,
+    /// Their work names ([`Session::work_of`]), as their calls and the records tools made
+    /// for them carry them.
+    pub works: Vec<String>,
+    /// Oldest first.
+    pub calls: Vec<ark_core::Invocation>,
+}
+
+impl Unfinished {
+    /// What the turns did, for the model: one clipped line per call, the newest
+    /// [`CALLS_CARRIED`], what the tools keep from them (`held`, [`Engine::continued`]), and
+    /// what to do with them.
+    pub fn carry(&self, held: &[String]) -> String {
+        use ark_core::InvocationStatus as S;
+        use std::fmt::Write as _;
+        let mut s = String::from(
+            "Your last turn stopped before it finished. The calls it made are below: do not make \
+             a change marked done again; continue from where it stopped when asked to continue \
+             or retry.",
+        );
+        let ran: Vec<&ark_core::Invocation> = self
+            .calls
+            .iter()
+            .filter(|c| c.status != S::PendingApproval)
+            .collect();
+        for h in held.iter().take(CALLS_CARRIED) {
+            let _ = write!(s, "\n  - {}", clip(h, 240));
+        }
+        if ran.is_empty() {
+            if held.is_empty() {
+                s.push_str("\n  (it made no calls)");
+            }
+            return s;
+        }
+        let older = ran.len().saturating_sub(CALLS_CARRIED);
+        if older > 0 {
+            let _ = write!(s, "\n  (+{older} earlier calls)");
+        }
+        for c in &ran[older..] {
+            let call = clip(&format!("{} {}", c.action, c.input), 120);
+            let line = match c.status {
+                S::Ok => format!("done {call} → {}", clip(&c.output.to_string(), 120)),
+                S::Failed if c.error.as_deref() == Some(crate::engine::INTERRUPTED_CALL) => {
+                    if c.risk == ark_core::RiskTier::Mutate {
+                        format!("cut short {call}: it may or may not have happened")
+                    } else {
+                        format!("cut short {call}")
+                    }
+                }
+                S::Failed => format!(
+                    "failed {call}: {}",
+                    clip(c.error.as_deref().unwrap_or("unknown error"), 120)
+                ),
+                _ => format!("cut short {call}"),
+            };
+            let _ = write!(s, "\n  - {line}");
+        }
+        s
+    }
+
+    /// Changes that were running when the process stopped: whether they happened is unknown.
+    pub fn cut_short(&self) -> Vec<ark_core::Invocation> {
+        self.calls
+            .iter()
+            .filter(|c| {
+                // Running: the person's stop dropped it under way (the process lives on).
+                c.risk == ark_core::RiskTier::Mutate
+                    && (c.status == ark_core::InvocationStatus::Running
+                        || c.error.as_deref() == Some(crate::engine::INTERRUPTED_CALL))
+            })
+            .cloned()
+            .collect()
+    }
+}
 
 /// What a compaction changed, in estimated tokens.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -379,15 +467,27 @@ impl Session {
             recent,
             unread: Vec::new(),
         };
-        // A turn begun by a process that is gone was interrupted: keep it, marked, so the
-        // person sees what they asked and the next turn's carry-over says it did not finish.
         if let Some(mut t) = begun {
-            if !t.pid.is_some_and(crate::process::alive) {
-                t.index = count;
-                t.incomplete = true;
-                t.error = Some(INTERRUPTED.to_string());
-                t.pid = None;
-                session.push_turn(engine, t, &Metrics::default())?;
+            match t.pid {
+                // Stored in full (finished, or failed with its error), and the process stopped
+                // before the header counted it: count it as it is.
+                None => {
+                    // The posts it carried are read, as when it was counted on time.
+                    session.read_posts(engine)?;
+                    let metrics = t.metrics.clone();
+                    session.push_turn(engine, t, &metrics)?;
+                }
+                // A turn begun by a process that is gone was interrupted: keep it, marked, so
+                // the person sees what they asked and the next turn continues it.
+                Some(pid) if !crate::process::writer_alive(pid, t.pid_start) => {
+                    t.index = count;
+                    t.incomplete = true;
+                    t.error = Some(INTERRUPTED.to_string());
+                    t.pid = None;
+                    t.pid_start = None;
+                    session.push_turn(engine, t, &Metrics::default())?;
+                }
+                Some(_) => {}
             }
         }
         // After marking an interrupted turn: it never carried them.
@@ -575,6 +675,40 @@ impl Session {
         Some(s.trim_end().to_string())
     }
 
+    /// The work name of turn `index` ([`Engine::for_work`]): its calls carry it.
+    pub fn work_of(&self, index: u32) -> String {
+        format!("session:{}/{index}", self.record.id)
+    }
+
+    /// The turns at the end of this conversation that did not finish (the app stopped, it
+    /// failed, or the person stopped it), newest last, with the calls they made. The next turn
+    /// continues from them: it does not make their changes again and is told what they did.
+    /// `None` when the last turn finished.
+    pub fn unfinished(&self, engine: &Engine) -> Result<Option<Unfinished>, AgentError> {
+        let mut turns: Vec<u32> = self
+            .recent
+            .iter()
+            .rev()
+            .take_while(|t| t.incomplete || t.cancelled)
+            .take(UNFINISHED_TURNS)
+            .map(|t| t.index)
+            .collect();
+        if turns.is_empty() {
+            return Ok(None);
+        }
+        turns.reverse();
+        let works: Vec<String> = turns.iter().map(|i| self.work_of(*i)).collect();
+        let mut calls = Vec::new();
+        for w in &works {
+            calls.extend(engine.work_calls(&self.record.project, w)?);
+        }
+        Ok(Some(Unfinished {
+            turns,
+            works,
+            calls,
+        }))
+    }
+
     /// Record that a turn started, before it runs. If the process stops before
     /// [`record_turn`](Session::record_turn) or [`fail_turn`](Session::fail_turn), the next
     /// open marks the turn interrupted instead of losing it.
@@ -588,13 +722,16 @@ impl Session {
         Ok(())
     }
 
-    /// Store a finished turn and slide the carry-over window.
+    /// Store a finished turn and slide the carry-over window. A turn the process stopping cut
+    /// short ([`HarnessOutcome::interrupted`]) is stored as interrupted, as after a crash, not
+    /// as one the person stopped.
     pub fn record_turn(
         &mut self,
         engine: &Engine,
         input: &str,
         outcome: &HarnessOutcome,
     ) -> Result<(), AgentError> {
+        let interrupted = outcome.interrupted;
         let turn = Turn {
             index: self.record.turn_count,
             input: input.to_string(),
@@ -604,13 +741,14 @@ impl Session {
                 .iter()
                 .map(|c| c.short().to_string())
                 .collect(),
-            cancelled: outcome.cancelled,
+            cancelled: outcome.cancelled && !interrupted,
             steered: outcome.steered.clone(),
             metrics: outcome.metrics.clone(),
             at: OffsetDateTime::now_utc(),
-            incomplete: false,
-            error: None,
+            incomplete: interrupted,
+            error: interrupted.then(|| INTERRUPTED.to_string()),
             pid: None,
+            pid_start: None,
         };
         self.push_turn(engine, turn, &outcome.metrics)
     }
@@ -625,6 +763,7 @@ impl Session {
         let mut t = Turn::placeholder(self.record.turn_count, input);
         t.error = Some(error.to_string());
         t.pid = None;
+        t.pid_start = None;
         self.push_turn(engine, t, &Metrics::default())
     }
 
@@ -734,6 +873,7 @@ fn readable_turn(v: serde_json::Value) -> Turn {
     serde_json::from_value(v).unwrap_or_else(|e| {
         let mut t = Turn::placeholder(index, &input);
         t.pid = None;
+        t.pid_start = None;
         t.error = Some(format!("this turn's record could not be read ({e})"));
         t
     })
@@ -805,6 +945,7 @@ mod tests {
             metrics: Metrics::start(),
             state: ResearchState::default(),
             cancelled: false,
+            interrupted: false,
             steered: vec![],
         }
     }

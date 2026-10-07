@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use ark_core::{Project, ProjectId, RuleBinding, RuleScope};
 use ark_model::estimate_tokens;
+use ark_runtime::process;
 use ark_runtime::rules::{select, RULES_BUDGET};
 use ark_runtime::skills;
 use ark_runtime::{
@@ -309,6 +310,26 @@ impl Orchestrator {
 
     /// [`wait`](Self::wait) in a turn of `chat`: a task that reports to it gets its result there
     /// as this answer, not as a post too.
+    /// The tasks handed off by any of `works` ([`TaskSpec::work`]), oldest first.
+    pub fn tasks_of_work(&self, works: &[String]) -> Vec<TaskRecord> {
+        self.tasks()
+            .into_iter()
+            .filter(|t| t.work.as_ref().is_some_and(|w| works.contains(w)))
+            .collect()
+    }
+
+    /// A task still open that one of `works` handed to `agent`, now taken up by `work`: a
+    /// turn that continues a stopped one joins its hand-off instead of making it twice.
+    pub(crate) fn take_up(&self, agent: &str, works: &[String], work: &str) -> Option<TaskRecord> {
+        let id = self
+            .tasks_of_work(works)
+            .into_iter()
+            .find(|t| t.owner == agent && !t.state.is_final())?
+            .id;
+        self.inner
+            .update_task(&id, |t| t.work = Some(work.to_string()))
+    }
+
     pub(crate) async fn wait_in(
         &self,
         task: &str,
@@ -1190,9 +1211,12 @@ impl Inner {
                 } else {
                     // Its result has not been anywhere yet.
                     r.reported = false;
-                    let alive = r.pid.is_some_and(|p| p != pid && process_alive(p));
+                    let alive = r
+                        .pid
+                        .is_some_and(|p| p != pid && process::writer_alive(p, r.pid_start));
                     if !alive {
                         r.pid = None;
+                        r.pid_start = None;
                         close_open_calls(&mut r);
                         carry_decisions(&mut r);
                         let asking = r.question.as_ref().is_some_and(Question::open);
@@ -1614,9 +1638,11 @@ impl Inner {
             finished_ms: None,
             run_ms: 0,
             pid: None,
+            pid_start: None,
             schedule: None,
             item: spec.item.clone(),
             report_to: spec.report_to.clone(),
+            work: spec.work.clone(),
             reported: false,
             question: None,
             decisions: Vec::new(),
@@ -1997,7 +2023,7 @@ impl Inner {
             .filter(|i| i.created_at.unix_timestamp_nanos() / 1_000_000 >= started_ms as i128)
             .find(|i| {
                 let left_running = i.status == ark_core::InvocationStatus::Running
-                    && !i.pid.is_some_and(process_alive);
+                    && !i.pid.is_some_and(|p| process::writer_alive(p, i.pid_start));
                 i.risk == ark_core::RiskTier::Mutate
                     && (left_running
                         || i.error.as_deref() == Some(ark_runtime::engine::INTERRUPTED_CALL))
@@ -2539,6 +2565,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 t.attempts += 1;
                 t.started_ms.get_or_insert(now_ms());
                 t.pid = Some(std::process::id());
+                t.pid_start = ark_runtime::process::own_start();
                 t.model = models.model.clone();
                 t.brief_tokens = brief_tokens;
                 if let Some(s) = &selection {
@@ -2865,6 +2892,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             t.waiting_on = None;
             t.finished_ms = Some(now_ms());
             t.pid = None;
+            t.pid_start = None;
             t.question = None;
         });
         if let Some(t) = self.state.lock().unwrap().tasks.get_mut(id) {
@@ -3031,6 +3059,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
     fn leave(&self, id: &str) {
         let rec = self.update_task(id, |t| {
             t.pid = None;
+            t.pid_start = None;
             close_open_calls(t);
             carry_decisions(t);
             if t.question.as_ref().is_some_and(Question::open) {
@@ -3520,18 +3549,6 @@ fn waiting_text(on: &[String]) -> String {
         parts.push(format!("tasks {}", tasks.join(", ")));
     }
     parts.join("; ")
-}
-
-#[cfg(unix)]
-fn process_alive(pid: u32) -> bool {
-    // SAFETY: signal 0 only checks that the process exists; nothing is delivered.
-    let r = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(not(unix))]
-fn process_alive(_pid: u32) -> bool {
-    false
 }
 
 /// An agent's own acquisition source, handing back only the actions its `tools` allow.

@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use ark_sdk::prelude::ark_core::{Artifact, ResearchState};
+use ark_sdk::prelude::ark_runtime::session::INTERRUPTED;
 use ark_sdk::prelude::ark_runtime::{Metrics, Post, SessionRecord, Turn};
 use ark_sdk::prelude::ContextReport;
 use serde::{Deserialize, Serialize};
@@ -592,7 +593,7 @@ pub fn recap(heading: &str, s: &SessionSummary, last: &[TranscriptTurn]) -> Repo
         r = r.text(format!("› {}", clip(&t.input, 100)));
         r = r.note(match (&t.unfinished, t.cancelled) {
             (_, true) => "  (stopped)".to_string(),
-            (Some(why), _) => format!("  (did not finish: {why})"),
+            (Some(why), _) => format!("  ({why})"),
             (None, _) => format!("  {}", clip(&t.answer, 160)),
         });
         for p in &t.posts {
@@ -622,9 +623,17 @@ pub struct TranscriptTurn {
     #[serde(default)]
     pub steered: Vec<String>,
     pub cancelled: bool,
-    /// Why the turn did not finish (it failed, or the app stopped while it ran).
+    /// Why the turn did not finish, in a sentence: the app stopped while it ran, or it failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unfinished: Option<String>,
+    /// It did not finish because the app stopped (quit, crashed, the computer stopped), not
+    /// because it failed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub interrupted: bool,
+    /// The conversation's last turn did not finish: a front-end offers to continue it (the
+    /// window's Continue sends "Continue" as the person's message; the terminal's person types).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resume: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub at: OffsetDateTime,
     pub footer: Vec<String>,
@@ -646,16 +655,25 @@ impl TranscriptTurn {
             answer: t.answer.clone(),
             steered: t.steered.clone(),
             cancelled: t.cancelled,
-            unfinished: t
-                .incomplete
-                .then(|| t.error.clone().unwrap_or_else(|| "did not finish".into())),
+            unfinished: t.incomplete.then(|| match t.error.as_deref() {
+                Some(INTERRUPTED) => crate::activity::INTERRUPTED.to_string(),
+                Some(e) => format!("Did not finish: {e}"),
+                None => "Did not finish.".to_string(),
+            }),
+            interrupted: t.incomplete && t.error.as_deref() == Some(INTERRUPTED),
+            resume: false,
             at: t.at,
-            footer: footer(
-                &t.metrics,
-                t.metrics.elapsed_ms,
-                !t.cited.is_empty(),
-                trivial,
-            ),
+            // A turn the app stopped kept no counts: nothing to sum up.
+            footer: if t.incomplete && t.metrics.total_model_calls() == 0 {
+                Vec::new()
+            } else {
+                footer(
+                    &t.metrics,
+                    t.metrics.elapsed_ms,
+                    !t.cited.is_empty(),
+                    trivial,
+                )
+            },
             activity,
             has_trace,
             elapsed_ms: t.metrics.elapsed_ms,

@@ -249,8 +249,87 @@ pub fn describe(
             .detail(ids.join(", "))
             .tone(Tone::Muted)
         }
-        HarnessEvent::Cancelled => Activity::new(K::Stopped, "Stopped.").tone(Tone::Warning),
+        HarnessEvent::Cancelled => Activity::new(K::Stopped, STOPPED).tone(Tone::Warning),
+        HarnessEvent::Interrupted => Activity::new(K::Stopped, INTERRUPTED).tone(Tone::Warning),
     })
+}
+
+/// A turn the person stopped.
+pub const STOPPED: &str = "Stopped.";
+/// A turn the app stopped (it quit, crashed, or the computer did) before it finished.
+pub const INTERRUPTED: &str = "Interrupted before it finished.";
+/// A call that was under way when its turn was interrupted.
+pub const CUT_SHORT: &str = "cut short";
+/// A call asked about that never ran because its turn was interrupted.
+pub const NOT_RUN: &str = "not run";
+
+/// The calls of a turn that did not finish, as its records say, put into its replayed
+/// activity: a call whose result the trace never got shows done, failed, cut short, or not run
+/// (it waited for an answer). With no trace at all, the calls alone are the activity.
+/// `reported` holds the invocations the trace has a result for.
+pub fn settle(
+    activity: &mut Vec<Activity>,
+    reported: &std::collections::HashSet<String>,
+    calls: &[ark_sdk::prelude::ark_core::Invocation],
+    labels: &Labels,
+    artifact_names: &HashMap<String, String>,
+) {
+    use ark_sdk::prelude::ark_core::InvocationStatus as S;
+    use ActivityKind as K;
+    let mut open: Vec<&ark_sdk::prelude::ark_core::Invocation> = calls
+        .iter()
+        .filter(|c| !reported.contains(c.id.as_str()))
+        .collect();
+    let result =
+        |call: Option<String>, action: &str, c: Option<&ark_sdk::prelude::ark_core::Invocation>| {
+            let mut a = match c.map(|c| (&c.status, c.error.as_deref())) {
+                Some((S::Ok, _)) => {
+                    let summary = c.map(|c| c.output.to_string()).unwrap_or_default();
+                    Activity::new(K::Result, labels.result_detail(action, true, &summary))
+                        .tone(Tone::Muted)
+                }
+                Some((S::Failed, Some(e)))
+                    if e != ark_sdk::prelude::ark_runtime::engine::INTERRUPTED_CALL =>
+                {
+                    Activity::new(K::Result, e.lines().next().unwrap_or("").to_string())
+                        .tone(Tone::Error)
+                }
+                Some((S::PendingApproval, _)) | None => {
+                    Activity::new(K::Result, NOT_RUN).tone(Tone::Warning)
+                }
+                _ => Activity::new(K::Result, CUT_SHORT).tone(Tone::Warning),
+            };
+            a.call = call;
+            a.action = Some(action.to_string());
+            a
+        };
+    let answered: std::collections::HashSet<String> = activity
+        .iter()
+        .filter(|a| a.kind == K::Result)
+        .filter_map(|a| a.call.clone())
+        .collect();
+    let mut out = Vec::with_capacity(activity.len());
+    for a in activity.drain(..) {
+        let pending = a.kind == K::Tool && a.call.as_ref().is_some_and(|c| !answered.contains(c));
+        let (call, action) = (a.call.clone(), a.action.clone().unwrap_or_default());
+        out.push(a);
+        if pending {
+            let i = open.iter().position(|c| c.action == action);
+            let c = i.map(|i| open.remove(i));
+            out.push(result(call, &action, c));
+        }
+    }
+    // Calls the trace never saw (it was not saved, or not yet): from their records alone.
+    for (n, c) in open.into_iter().enumerate() {
+        let id = format!("stored-{n}");
+        let shown = with_artifact_names(&c.input, artifact_names);
+        let mut a = Activity::new(K::Tool, labels.call_label(&c.action, &shown));
+        a.call = Some(id.clone());
+        a.action = Some(c.action.clone());
+        out.push(a);
+        out.push(result(Some(id), &c.action, Some(c)));
+    }
+    *activity = out;
 }
 
 /// Replace an `artifact` id argument with the artifact's name, for display.

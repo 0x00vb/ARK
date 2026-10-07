@@ -180,6 +180,9 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     if scenario == "waiting" {
         seed_waiting(&host, dir.path()).await;
     }
+    if scenario == "interrupted" {
+        seed_interrupted(&host, dir.path()).await;
+    }
     let out = tokio::process::Command::new("node")
         .arg("page.mjs")
         .arg(scenario)
@@ -240,6 +243,19 @@ async fn a_stopped_turn_replays_as_it_was_shown() {
         "cancel",
         vec![say(&long, true), say("unused", false)],
         Duration::from_millis(120),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_turn_shows_what_it_did_and_continues_on_one_click() {
+    drive(
+        "interrupted",
+        vec![say(
+            "Picked up where it stopped: the notes mention a locket.",
+            false,
+        )],
+        Duration::ZERO,
     )
     .await;
 }
@@ -663,6 +679,39 @@ async fn an_app_view_takes_the_main_column_and_agents_ask_from_the_tray() {
 
 /// What waits for the person (ADR 0043): a chat named "hi" with a result posted into it while
 /// the person was in another chat, and three failures with no chat.
+/// A chat whose turn a crashed process left begun (ADR 0048): it read the notes, then the
+/// process died. The next process to open the store marks it interrupted.
+async fn seed_interrupted(host: &Arc<ark_ui::Host>, dir: &std::path::Path) {
+    let s = host.call("summary", json!({})).await.unwrap();
+    let project = ProjectId(s["project"]["id"].as_str().unwrap().to_string());
+    let ark = Ark::builder().store_root(dir).build().unwrap();
+    let mut chat = ark.start_session(&project).unwrap();
+    chat.set_title(ark.engine(), "Read the notes, then summarize them")
+        .unwrap();
+    let id = chat.id().as_str().to_string();
+    let store = &ark.engine().store;
+    store
+        .put_session_turn(
+            &id,
+            0,
+            &json!({
+                "index": 0, "input": "Read the notes, then summarize them", "answer": "",
+                "cancelled": false, "steered": [], "at": "2026-10-07T02:00:00Z",
+                "incomplete": true, "pid": u32::MAX - 1, "pid_start": 1
+            }),
+        )
+        .unwrap();
+    let mut read =
+        ark_sdk::prelude::ark_core::Invocation::new("notes.read", RiskTier::Read, json!({}));
+    read.work = Some(chat.work_of(0));
+    read.mark_ok(json!({ "text": "remember the locket" }));
+    store.put_invocation(&project, &read).unwrap();
+    drop(chat);
+    drop(ark);
+    // The next process opens the store.
+    Ark::builder().store_root(dir).build().unwrap();
+}
+
 async fn seed_waiting(host: &Arc<ark_ui::Host>, dir: &std::path::Path) {
     let mut rx = host.subscribe();
     host.call("send", json!({ "text": "hi" })).await.unwrap();

@@ -34,7 +34,7 @@ pub mod metrics;
 pub mod notebook;
 pub mod per_agent;
 pub mod plugins;
-mod process;
+pub mod process;
 pub mod profile;
 pub mod router;
 pub mod rules;

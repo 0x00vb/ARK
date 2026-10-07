@@ -161,6 +161,7 @@ mod tests {
             agent: None,
             task: None,
             ask_each_time: false,
+            cut_short: false,
         }
     }
 

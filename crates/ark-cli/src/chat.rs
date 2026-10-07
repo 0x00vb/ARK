@@ -406,6 +406,7 @@ mod tests {
             agent: agent.map(str::to_string),
             task: agent.map(|_| "t-1".to_string()),
             ask_each_time: false,
+            cut_short: false,
         }
     }
 

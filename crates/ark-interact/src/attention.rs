@@ -146,7 +146,15 @@ pub fn list(engine: &Engine, labels: &Labels) -> Vec<Item> {
 }
 
 fn list_at(engine: &Engine, labels: &Labels, now: u64) -> Vec<Item> {
-    let tasks = ark_orchestrate::all_tasks(&engine.store);
+    // Only tasks that can make an item are read in full: an open question, a finish in the
+    // window, or a schedule's runs (its latest run decides).
+    let tasks = ark_orchestrate::tasks_where(&engine.store, |v| {
+        !v["question"].is_null()
+            || !v["schedule"].is_null()
+            || v["finished_ms"]
+                .as_u64()
+                .is_some_and(|f| now.saturating_sub(f) <= KEPT_MS)
+    });
     let cleared = cleared(engine, now);
     let mut names = Names::new(engine);
     let mut items = Vec::new();

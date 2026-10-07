@@ -342,10 +342,20 @@ pub fn scheduled_projects(store: &ark_store::Store) -> Vec<String> {
 /// Every task in the store, in every project, oldest update first. Read without opening an
 /// orchestrator, for views across projects.
 pub fn all_tasks(store: &ark_store::Store) -> Vec<crate::TaskRecord> {
+    tasks_where(store, |_| true)
+}
+
+/// The tasks whose stored record passes `keep`, which sees the raw record, so a view across
+/// projects reads in full only the tasks it shows.
+pub fn tasks_where(
+    store: &ark_store::Store,
+    keep: impl Fn(&serde_json::Value) -> bool,
+) -> Vec<crate::TaskRecord> {
     store
         .list_records(crate::orchestrator::TASK, None)
         .unwrap_or_default()
         .into_iter()
+        .filter(|v| keep(v))
         .filter_map(|v| serde_json::from_value(v).ok())
         .collect()
 }

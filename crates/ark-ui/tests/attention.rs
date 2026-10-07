@@ -416,3 +416,36 @@ fn cleared_stays_cleared_and_opening_a_chat_clears_what_was_posted_there() {
             .is_err());
     });
 }
+
+/// A result posted into the chat the host has open is not seen until a window says it shows
+/// that chat: the host has a current chat also when no window is open (a closed tab).
+#[tokio::test]
+async fn a_post_waits_until_a_window_shows_its_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let (_, chat) = chat_in(&host, "books").await;
+    host.call(
+        "spawn_agent",
+        json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
+    )
+    .await
+    .unwrap();
+    let mut rx = host.subscribe();
+    host.call(
+        "submit_task",
+        json!({ "agent": "scribe", "task": { "objective": "say hello", "report_to": chat } }),
+    )
+    .await
+    .unwrap();
+    wait_for(&mut rx, "the post", |v| v["kind"] == "post").await;
+    wait_for(&mut rx, "the list to change", |v| v["kind"] == "attention").await;
+    let items = list(&host).await;
+    assert_eq!(items.len(), 1, "{items:#?}");
+    assert_eq!(items[0]["kind"], "finished");
+    assert_eq!(items[0]["chat"], chat.as_str());
+
+    host.call("attention_seen", json!({ "session": chat }))
+        .await
+        .unwrap();
+    assert!(list(&host).await.is_empty(), "the window showed it");
+}

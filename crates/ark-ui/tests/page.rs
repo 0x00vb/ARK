@@ -661,8 +661,6 @@ async fn an_app_view_takes_the_main_column_and_agents_ask_from_the_tray() {
     .await;
 }
 
-/// The board: add, drag, complete, open an item, hand it to an agent and see it move by itself,
-/// what needs the person, delete with undo.
 /// What waits for the person (ADR 0043): a chat named "hi" with a result posted into it while
 /// the person was in another chat, and three failures with no chat.
 async fn seed_waiting(host: &Arc<ark_ui::Host>, dir: &std::path::Path) {
@@ -718,6 +716,8 @@ async fn work_that_waits_for_the_person_sits_in_the_tray() {
     drive_app("waiting", vec![say("Hello.", false)], Duration::ZERO, true).await;
 }
 
+/// The board: add, drag, complete, open an item, hand it to an agent and see it move by itself,
+/// what needs the person, delete with undo.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_board_is_worked_by_the_person_and_the_agents() {
     drive_app(

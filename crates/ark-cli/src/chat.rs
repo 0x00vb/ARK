@@ -76,6 +76,14 @@ impl Question {
         }
     }
 
+    /// Answered or given up elsewhere while it waited to be shown.
+    pub(crate) fn is_closed(&self) -> bool {
+        match &self.to {
+            Asker::Local(p) => p.is_closed(),
+            Asker::Remote(_) => false,
+        }
+    }
+
     pub(crate) fn answer(self, d: ApprovalDecision) {
         match self.to {
             Asker::Local(p) => p.answer(d),
@@ -196,6 +204,32 @@ pub(crate) struct Local {
     pub approvals: mpsc::UnboundedReceiver<PendingApproval>,
     /// Agents' questions still open when the last turn ended ([`Question::end_of_turn`]).
     pub held: Vec<PendingApproval>,
+}
+
+impl Drop for Local {
+    /// The terminal closes: questions nobody answered stay open. Dropping one would answer
+    /// "deny", and an agent's task would keep a refusal the person never gave; its task keeps
+    /// the question for the next process (`/waiting`, a window).
+    fn drop(&mut self) {
+        leave_open(&mut self.held, &mut self.approvals);
+    }
+}
+
+fn leave_open(
+    held: &mut Vec<PendingApproval>,
+    asked: &mut mpsc::UnboundedReceiver<PendingApproval>,
+) {
+    for p in held.drain(..) {
+        keep_open(p);
+    }
+    while let Ok(p) = asked.try_recv() {
+        keep_open(p);
+    }
+}
+
+/// Leave a question unanswered for good: nothing ever sends its answer.
+fn keep_open(p: PendingApproval) {
+    std::mem::forget(p);
 }
 
 pub(crate) enum Chat {
@@ -352,5 +386,66 @@ impl Local {
             control,
             end,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_interact::ChannelApprover;
+    use std::sync::Arc;
+
+    fn request(agent: Option<&str>) -> ApprovalRequest {
+        ApprovalRequest {
+            action: "notes.save".into(),
+            summary: "save".into(),
+            risk: RiskTier::Mutate,
+            input: json!({}),
+            class: "notes.save".into(),
+            preview: "notes.save()".into(),
+            agent: agent.map(str::to_string),
+            task: agent.map(|_| "t-1".to_string()),
+            ask_each_time: false,
+        }
+    }
+
+    /// The turn that showed an agent's question ends: the question stays open for the next
+    /// turn. A chat's own question is refused with its turn.
+    #[tokio::test]
+    async fn an_agents_question_outlives_the_turn_that_showed_it() {
+        let (approver, mut rx) = ChannelApprover::channel();
+        let approver = Arc::new(approver);
+        let a = approver.clone();
+        let agent = tokio::spawn(async move { a.decide(&request(Some("scribe"))).await });
+        let own = tokio::spawn(async move { approver.decide(&request(None)).await });
+        let mut held = Vec::new();
+        for _ in 0..2 {
+            let p = rx.recv().await.unwrap();
+            held.extend(Question::local(p, String::new()).end_of_turn());
+        }
+        assert_eq!(own.await.unwrap(), ApprovalDecision::Deny);
+        assert_eq!(held.len(), 1);
+        assert!(!agent.is_finished());
+        held.pop().unwrap().answer(ApprovalDecision::AllowOnce);
+        assert_eq!(agent.await.unwrap(), ApprovalDecision::AllowOnce);
+    }
+
+    /// The terminal closes with questions unanswered, held or not shown yet: none is refused.
+    #[tokio::test]
+    async fn closing_the_terminal_refuses_nothing() {
+        let (approver, mut rx) = ChannelApprover::channel();
+        let approver = Arc::new(approver);
+        let a = approver.clone();
+        let first = tokio::spawn(async move { a.decide(&request(Some("scribe"))).await });
+        let mut held = vec![rx.recv().await.unwrap()];
+        let second = tokio::spawn(async move { approver.decide(&request(Some("scribe"))).await });
+        tokio::task::yield_now().await;
+        leave_open(&mut held, &mut rx);
+        drop(rx);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !first.is_finished() && !second.is_finished(),
+            "nobody answered"
+        );
     }
 }

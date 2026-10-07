@@ -11,6 +11,7 @@
 //! The runtime never sees the terminal. The turn runs here or on a runtime elsewhere
 //! ([`crate::chat`]); the loop is the same.
 
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use ark_sdk::prelude::*;
@@ -19,8 +20,9 @@ use futures::StreamExt;
 
 use crate::app::ShellState;
 use crate::approval::{Menu, MenuKey};
-use crate::chat::Update;
-use crate::term::RawMode;
+use crate::chat::{Question, Update};
+use crate::term::{Out, RawMode};
+use crate::theme::Theme;
 use crate::view::TurnView;
 
 /// What the person set up for after the turn.
@@ -49,6 +51,8 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
     };
     let mut tick = tokio::time::interval(Duration::from_millis(120));
     let mut menu: Option<Menu> = None;
+    // Questions that came while another was shown: one menu at a time, the next when it goes.
+    let mut asks: VecDeque<Question> = VecDeque::new();
     let mut queued: Option<String> = None;
 
     let mut turn = chat.turn(input, true);
@@ -59,23 +63,15 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
             biased;
             Some(u) = turn.updates.recv() => match u {
                 Update::Event(ev, a) => view.event(ev, a, out),
-                Update::Ask(q) => {
-                    let mut m = Menu::new(q);
-                    out.clear_status();
-                    let lines = m.render(&cfg.theme);
-                    for l in &lines {
-                        out.line(l);
-                    }
-                    m.lines = lines.len();
-                    view.in_menu = true;
-                    menu = Some(m);
-                }
+                Update::Ask(q) if menu.is_some() => asks.push_back(q),
+                Update::Ask(q) => menu = Some(show(q, &cfg.theme, out, &mut view)),
                 // Answered in another window: take the menu away.
                 Update::Closed(id) => {
                     if menu.as_ref().is_some_and(|m| m.id() == Some(id)) {
                         out.rewind(menu.take().map_or(0, |m| m.lines));
                         view.in_menu = false;
                     }
+                    asks.retain(|q| q.id != id);
                 }
             },
             Some(key) = next_key(&mut keys) => {
@@ -105,6 +101,9 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
                         }
                         MenuKey::Ignore => {}
                     }
+                    if menu.is_none() {
+                        menu = next_open(&mut asks).map(|q| show(q, &cfg.theme, out, &mut view));
+                    }
                     continue;
                 }
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -129,6 +128,9 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
             _ = tick.tick() => {
                 out.refresh_width();
                 view.tick(out);
+                if menu.is_none() {
+                    menu = next_open(&mut asks).map(|q| show(q, &cfg.theme, out, &mut view));
+                }
             }
             end = &mut turn.end => break end,
         }
@@ -144,6 +146,7 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
     if let Some(q) = menu.take().and_then(|mut m| m.question.take()) {
         held.extend(q.end_of_turn());
     }
+    held.extend(asks.into_iter().filter_map(Question::end_of_turn));
     drop(turn);
     chat.hold(held);
     let draft = std::mem::take(&mut view.typeahead);
@@ -157,6 +160,29 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
     Next { submit, draft }
 }
 
+/// Draw a question's menu.
+fn show(q: Question, theme: &Theme, out: &mut Out, view: &mut TurnView) -> Menu {
+    let mut m = Menu::new(q);
+    out.clear_status();
+    let lines = m.render(theme);
+    for l in &lines {
+        out.line(l);
+    }
+    m.lines = lines.len();
+    view.in_menu = true;
+    m
+}
+
+/// The next queued question nobody has answered yet.
+fn next_open(asks: &mut VecDeque<Question>) -> Option<Question> {
+    while let Some(q) = asks.pop_front() {
+        if !q.is_closed() {
+            return Some(q);
+        }
+    }
+    None
+}
+
 /// The next key press, or pend forever when there is no terminal to read.
 async fn next_key(keys: &mut Option<EventStream>) -> Option<crossterm::event::KeyEvent> {
     let Some(stream) = keys.as_mut() else {
@@ -168,5 +194,45 @@ async fn next_key(keys: &mut Option<EventStream>) -> Option<crossterm::event::Ke
             Some(Ok(_)) => continue,
             Some(Err(_)) | None => return std::future::pending().await,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_interact::ChannelApprover;
+    use std::sync::Arc;
+
+    /// Two questions in one turn: the second waits for the first, and one answered elsewhere
+    /// meanwhile is skipped, never shown and never refused.
+    #[tokio::test]
+    async fn questions_wait_their_turn_and_answered_ones_are_skipped() {
+        let (approver, mut rx) = ChannelApprover::channel();
+        let approver = Arc::new(approver);
+        let req = |n: &str| ApprovalRequest {
+            action: n.into(),
+            summary: n.into(),
+            risk: RiskTier::Mutate,
+            input: serde_json::json!({}),
+            class: n.into(),
+            preview: n.into(),
+            agent: Some("scribe".into()),
+            task: Some("t-1".into()),
+            ask_each_time: false,
+        };
+        let mut tasks = Vec::new();
+        let mut asks = VecDeque::new();
+        for n in ["a.save", "b.save", "c.save"] {
+            let a = approver.clone();
+            let r = req(n);
+            tasks.push(tokio::spawn(async move { a.decide(&r).await }));
+            asks.push_back(Question::local(rx.recv().await.unwrap(), n.into()));
+        }
+        // "b" is answered in another window: its asker stops waiting.
+        tasks.remove(1).abort();
+        tokio::task::yield_now().await;
+        assert_eq!(next_open(&mut asks).unwrap().line, "a.save");
+        assert_eq!(next_open(&mut asks).unwrap().line, "c.save");
+        assert!(next_open(&mut asks).is_none());
     }
 }

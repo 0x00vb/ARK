@@ -73,8 +73,9 @@ async fn forward_orchestration(
 }
 
 /// Tell every window when what waits for the person may have changed, in any project
-/// (`{kind: "attention"}`; a window reads `attention` again). A result posted into the chat
-/// windows show is seen there, so it never waits.
+/// (`{kind: "attention"}`; a window reads `attention` again). A result posted into the chat a
+/// window shows is seen only when that window says so (`attention_seen`): a host has a current
+/// chat also when no window is open.
 async fn forward_attention(
     host: std::sync::Weak<Host>,
     mut rx: broadcast::Receiver<ark_interact::ark_orchestrate::OrchEvent>,
@@ -92,16 +93,15 @@ async fn forward_attention(
         };
         let Some(host) = host.upgrade() else { return };
         match &ev.kind {
-            EventKind::Asked { .. } | EventKind::TaskFinished { .. } => {}
+            // A retry takes a failed task out of the list (`TaskQueued`).
+            EventKind::Asked { .. }
+            | EventKind::TaskFinished { .. }
+            | EventKind::TaskQueued { .. } => {}
             // Answered from any client (the terminal's `/waiting` too): its card goes.
             EventKind::Answered { question, .. } => {
                 host.emit(json!({ "kind": "approval_closed", "id": question }));
             }
-            EventKind::Posted { session, .. } => {
-                if *session == host.session_id() {
-                    ark_interact::attention::seen_chat(&host.engine, session);
-                }
-            }
+            EventKind::Posted { .. } => {}
             _ => continue,
         }
         host.emit(json!({ "kind": "attention" }));
@@ -619,8 +619,6 @@ impl Host {
         Ok(v)
     }
 
-    /// Questions tasks keep whose run is not waiting live in this process (it restarted), in
-    /// the shape `hello` lists questions. Their id is the question's.
     /// The project an agent's task works in (`{id, name}`), so its question can say where it
     /// comes from when the window shows another project.
     fn task_project(&self, task: Option<&str>) -> Value {
@@ -633,6 +631,8 @@ impl Host {
             .unwrap_or(Value::Null)
     }
 
+    /// Questions tasks keep whose run is not waiting live in this process (it restarted), in
+    /// the shape `hello` lists questions. Their id is the question's.
     fn kept_questions(&self, live: &[Value]) -> Vec<Value> {
         let asked_live = |task: &str| live.iter().any(|q| q["request"]["task"] == json!(task));
         self.orchs
@@ -871,6 +871,14 @@ impl Host {
                 &self.engine,
                 &self.labels,
             ))?),
+            // A window shows this chat to the person: what was posted there is seen.
+            "attention_seen" => {
+                let n = ark_interact::attention::seen_chat(&self.engine, &s("session"));
+                if n > 0 {
+                    self.emit(json!({ "kind": "attention" }));
+                }
+                Ok(json!(n))
+            }
             // Open or clear one item. Opening a result or a failure clears it; the window then
             // shows where it lives (its chat, or its agent's task).
             "attention_open" | "attention_clear" => {
@@ -1621,9 +1629,6 @@ impl Host {
         Ok(summary)
     }
 
-    /// Move the windows to another chat. A chat running a turn stays live in the background and
-    /// a new conversation takes its place; a chat already live (`target`, or wherever `f` lands)
-    /// is brought forward as it is, so no session is ever open twice.
     /// The chat now shown has been seen: what was posted into it no longer waits. A chat that
     /// was live in the background is brought forward without `Interaction::resume`, and a
     /// project opens on its latest chat, so this runs after every move to another chat.
@@ -1632,6 +1637,9 @@ impl Host {
         self.emit(json!({ "kind": "attention" }));
     }
 
+    /// Move the windows to another chat. A chat running a turn stays live in the background and
+    /// a new conversation takes its place; a chat already live (`target`, or wherever `f` lands)
+    /// is brought forward as it is, so no session is ever open twice.
     async fn switch(
         self: &Arc<Self>,
         target: Target,

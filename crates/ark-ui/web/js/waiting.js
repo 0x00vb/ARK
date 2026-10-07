@@ -10,7 +10,8 @@ import { h, icon, clip, $ } from "./dom.js";
 const SHOWN = 3;
 
 export class Waiting {
-  constructor(api, transport) {
+  /// `chat` says which chat the window shows.
+  constructor(api, transport, chat) {
     this.api = api;
     this.transport = transport;
     this.box = h("div.waiting", { role: "list" });
@@ -19,6 +20,18 @@ export class Waiting {
     // Rows opened here that have no chat: their text shows under the row until closed.
     this.open = new Map();
     this.gen = 0;
+    this.chat = chat;
+    document.addEventListener("visibilitychange", () => {
+      const chat = this.chat();
+      if (chat && this.items.some((i) => i.chat === chat)) this.seen(chat);
+    });
+  }
+
+  /// The person sees this chat: what was posted there no longer waits. Only while the page is
+  /// in view; a hidden tab says so when it comes back (see the constructor).
+  seen(chat) {
+    if (document.visibilityState !== "visible") return;
+    this.transport.call("attention_seen", { session: chat }).catch(() => {});
   }
 
   async refresh() {

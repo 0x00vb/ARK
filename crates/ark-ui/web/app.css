@@ -597,7 +597,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .wait-place { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wait-clear { opacity: 0; transition: opacity 120ms var(--ease); }
 .wait-row:hover .wait-clear, .wait-row:focus-within .wait-clear { opacity: 1; }
-@media (hover: none) { .wait-clear { opacity: 1; } }
+@media (hover: none) { .wait-clear { opacity: 1; min-width: 40px; min-height: 40px; } }
 .wait-detail {
   grid-column: 2 / -1; margin: 6px 0 2px; max-height: 180px; overflow: auto;
   font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2);

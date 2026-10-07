@@ -234,7 +234,7 @@ front-end uses the same.
 | Agents | `graph` (each agent has `doing`: what it does now in words, as `/agents` shows it), `agents`, `tools`, `profiles` (what `AgentSpec.profile_name` may name), `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
 | Tasks | `submit_task {agent, task}`, `task {task}` (record and timeline lines), `task_trace`, `cancel_task`, `retry_task`, `unschedule {schedule}`, `orch_events {after, limit}` |
 | Board | `board` (`items`, the `tasks` run for them, the live `agents`; null without an orchestrator), `board_add {title, note?, owner?, state?, blocked?, before?}`, `board_change {item, change}` (a `WorkChange`), `board_remove {item}`, `board_give {item, agent}` (answers the `task`). Follow it with `orch` events of type `work` and `work_removed` |
-| Waiting for you | `attention` (what waits in any project: questions tasks keep, failures, results posted into a chat; `ark_interact::attention::Item`), `attention_open {id}` (clears a failure or a result and returns it with `text`), `attention_clear {id}` (not a question: it leaves when answered) |
+| Waiting for you | `attention` (what waits in any project: questions tasks keep, failures, results posted into a chat; `ark_interact::attention::Item`), `attention_open {id}` (clears a failure or a result and returns it with `text`), `attention_clear {id}` (not a question: it leaves when answered), `attention_seen {session}` (the window shows this chat to the person: what was posted there is seen; a window sends it on a post into the chat it shows while in view, and when it comes back into view) |
 | Page | `focus`, `ext` (an app handler) |
 
 | Events (`kind`) | |
@@ -243,8 +243,8 @@ front-end uses the same.
 | `working` | The chats running a turn changed (`working`, as the method answers) |
 | `computer` | Who uses the screen changed (`user`: `{owner, who, session}` or null) |
 | `term` | A terminal's output (`session`, `data`), or `exit: true`. Not replayed to a window that rejoins a turn; `term_open` returns the scrollback |
-| `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`, and for a chat's question `session` and `chat`, its title), and its end (answered, or the turn ended) |
-| `attention` | What waits for the person may have changed in some project (a question asked or answered, a task finished, a post, a clear): read `attention` again |
+| `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`; for a chat's question `session` and `chat`, its title; for an agent's question `project`, `{id, name}`), and its end (answered, or the turn ended) |
+| `attention` | What waits for the person may have changed in some project (a question asked or answered, a task queued or finished, a post, a clear): read `attention` again |
 | `post` | Work a chat set up posted its result there (`session`, `post`: `{from, title, text, ok, at, after}`, ADR 0025). Stored turns from `transcript` carry theirs in `posts` |
 | `summary` | Session, model, project or context changed |
 | `files_changed` | Files of a project changed without a tool call: a restore or files added (`project`, `paths`) |

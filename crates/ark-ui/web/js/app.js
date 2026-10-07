@@ -427,6 +427,7 @@ function onEvent(msg) {
       break;
     case "post":
       thread.post(msg.post);
+      if (msg.session === state.sessionId) waiting.seen(state.sessionId);
       break;
     case "turn_finished": {
       thread.finish(msg);
@@ -779,7 +780,7 @@ async function start() {
   composer = new Composer(api);
   acceptDrops(api, composer, $(".main"));
   sidebar = new Sidebar(api);
-  waiting = new Waiting(api, transport);
+  waiting = new Waiting(api, transport, () => state.sessionId);
   topbar = new Topbar(api);
   pane = new Pane(appEl, api);
   fit();

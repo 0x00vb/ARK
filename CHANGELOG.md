@@ -95,7 +95,9 @@ What changed for people building on ARK, per release. Not a commit log.
 - The terminal keeps an agent's question open when the turn that showed it ends, instead of
   refusing it: the task keeps waiting, `/waiting` answers it, and the next turn asks again. A
   question answered meanwhile is not asked again (`PendingApproval::is_closed`). A chat's own
-  question is still refused when its turn ends.
+  question is still refused when its turn ends. Several questions in one turn are asked one
+  after another (a second one used to replace the first, which was refused), and closing the
+  terminal refuses none: the tasks keep them for the next process.
 - `present` says what `locator` is for each view: the address for the browser (this machine's
   too) and the command for the terminal. An agent asked to show a page on `localhost` now opens
   it in the person's Browser view instead of giving up.

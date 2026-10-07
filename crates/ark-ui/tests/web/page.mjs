@@ -29,6 +29,12 @@ async function shape(page) {
   });
 }
 
+// A picture of the page for a person to check, when `ARK_UI_SHOTS` names a folder.
+async function shot(page, name) {
+  const dir = process.env.ARK_UI_SHOTS;
+  if (dir) await page.screenshot({ path: `${dir}/${name}.png` });
+}
+
 async function finished(page, send) {
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
   await send();
@@ -65,6 +71,35 @@ const scenarios = {
     await page.reload();
     await page.locator(".turn.stored").first().waitFor();
     assert.deepEqual(await shape(page), live);
+  },
+
+  // A reply the model could not use is taken back and redone: one quiet row, no failure, the
+  // answer once (ADR 0050).
+  async repair(page) {
+    await finished(page, () => page.locator("#input").fill("What do the notes say?").then(() => page.keyboard.press("Enter")));
+    const live = await shape(page);
+    const all = live.join("\n");
+    assert.ok(!all.includes("Writing the edit now."), all);
+    assert.equal(live.filter((s) => s.startsWith("answer: ")).length, 1, all);
+    const text = await page.locator(".turn").last().innerText();
+    assert.ok(text.includes("Redoing its last step"), text);
+    assert.ok(!/not JSON|malformed|retrying/i.test(text), text);
+    await shot(page, "repair");
+  },
+
+  // One it never gets right ends the turn in plain words, with no runtime terms, and Continue.
+  async unusable(page) {
+    await finished(page, () => page.locator("#input").fill("What do the notes say?").then(() => page.keyboard.press("Enter")));
+    const text = await page.locator(".turn").last().innerText();
+    assert.ok(text.includes("The model's reply could not be used."), text);
+    assert.ok(!/not JSON|malformed|provider|column 1573/i.test(text), text);
+    assert.equal((await page.locator(".turn .resume").innerText()).trim(), "Continue");
+    await shot(page, "unusable");
+    await page.reload();
+    await page.locator(".turn.stored").first().waitFor();
+    const stored = await page.locator(".turn").last().innerText();
+    assert.ok(stored.includes("The model's reply could not be used."), stored);
+    assert.ok(!/not JSON|malformed|column 1573/i.test(stored), stored);
   },
 
   // A row that arrives after the streamed answer (a failed self-check) does not make the page

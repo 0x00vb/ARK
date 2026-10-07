@@ -122,6 +122,10 @@ impl Adapter for ProcessTool {
         "process"
     }
 
+    fn summary(&self) -> Option<&str> {
+        Some("run the project's own commands with the person's shell: tests, builds, dev servers")
+    }
+
     fn actions(&self) -> Vec<ActionDescriptor> {
         vec![
             ActionDescriptor::new(

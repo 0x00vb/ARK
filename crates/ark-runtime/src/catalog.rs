@@ -98,6 +98,11 @@ pub fn capability_index(registry: &Registry) -> String {
         let (ns, verb) = split_action(&d.name);
         by_adapter.entry(ns).or_default().push((verb, d.risk));
     }
+    let summaries: BTreeMap<String, String> = registry
+        .adapters()
+        .iter()
+        .filter_map(|a| a.summary().map(|s| (a.name().to_string(), s.to_string())))
+        .collect();
     let mut s = String::from(
         "Tools (use load_action(name) to get an action's schema before calling it):\n",
     );
@@ -109,8 +114,12 @@ pub fn capability_index(registry: &Registry) -> String {
             .max_by_key(|r| *r as u8)
             .unwrap_or(RiskTier::Read);
         let names: Vec<String> = verbs.iter().map(|(v, _)| format!("{ns}.{v}")).collect();
+        let about = summaries
+            .get(&ns)
+            .map(|a| format!(" ({a})"))
+            .unwrap_or_default();
         s.push_str(&format!(
-            "- {ns} [{}]: {}\n",
+            "- {ns} [{}]: {}{about}\n",
             risk_word(highest),
             names.join(", ")
         ));
@@ -459,5 +468,40 @@ mod tests {
             assert!(base.iter().all(|t| t.name != name), "{name} offered");
             assert!(is_meta_tool(name), "{name} is still handled");
         }
+    }
+
+    #[test]
+    fn an_adapters_summary_follows_its_names_in_the_index() {
+        use ark_core::{ActionDescriptor, RiskTier};
+        struct P;
+        #[async_trait::async_trait]
+        impl ark_tools::Adapter for P {
+            fn name(&self) -> &str {
+                "process"
+            }
+            fn actions(&self) -> Vec<ActionDescriptor> {
+                vec![ActionDescriptor::new(
+                    "process.start",
+                    "run",
+                    RiskTier::Mutate,
+                )]
+            }
+            fn summary(&self) -> Option<&str> {
+                Some("run the project's commands: tests, builds")
+            }
+            async fn run(
+                &self,
+                _a: &str,
+                _i: serde_json::Value,
+                _c: &ark_tools::RunCtx<'_>,
+            ) -> ark_tools::Result<ark_tools::ActionOutput> {
+                unreachable!()
+            }
+        }
+        let index = capability_index(&Registry::new().with(std::sync::Arc::new(P)));
+        assert!(
+            index.contains("- process [changes-state]: process.start (run the project's commands: tests, builds)"),
+            "{index}"
+        );
     }
 }

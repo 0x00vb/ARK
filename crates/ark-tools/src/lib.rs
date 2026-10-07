@@ -213,6 +213,13 @@ pub trait Adapter: Send + Sync {
     fn continued(&self, _works: &[String]) -> Vec<String> {
         Vec::new()
     }
+
+    /// A few words on what its actions are for, shown beside their names in the tool index a
+    /// model reads before it loads any schema ("run a project's commands: tests, builds").
+    /// Default: none, the names alone.
+    fn summary(&self) -> Option<&str> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

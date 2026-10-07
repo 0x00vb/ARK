@@ -90,6 +90,12 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             cut: std::sync::atomic::AtomicBool::new(false),
         });
     }
+    if scenario == "repair" || scenario == "unusable" {
+        model = Arc::new(Unusable {
+            inner: model,
+            left: std::sync::atomic::AtomicUsize::new(if scenario == "repair" { 1 } else { 99 }),
+        });
+    }
     let mut builder = Ark::builder()
         .store_root(dir.path())
         .tool(Arc::new(Notes))
@@ -282,6 +288,62 @@ async fn text_of_a_failed_attempt_is_taken_back_and_the_retry_shows_once() {
         say("The notes mention a locket.", false),
     ];
     drive("withdrawn", script, Duration::from_millis(40)).await;
+}
+
+/// A model whose first `left` replies cannot be used (arguments that do not parse, after some
+/// text), as Codex's long edit was; then `inner`'s.
+struct Unusable {
+    inner: Arc<dyn ark_model::Provider>,
+    left: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl ark_model::Provider for Unusable {
+    async fn complete(
+        &self,
+        system: &str,
+        messages: &[ark_model::Message],
+        tools: &[ark_model::ToolDef],
+    ) -> ark_model::Result<Completion> {
+        self.inner.complete(system, messages, tools).await
+    }
+    async fn complete_streaming(
+        &self,
+        system: &str,
+        messages: &[ark_model::Message],
+        tools: &[ark_model::ToolDef],
+        on_text: ark_model::TextSink<'_>,
+    ) -> ark_model::Result<Completion> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if self.left.load(SeqCst) > 0 {
+            self.left.fetch_sub(1, SeqCst);
+            on_text("Writing the edit now.");
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            return Err(ark_model::ProviderError::Malformed {
+                provider: "m".into(),
+                detail: "arguments for notes.read are not JSON: expected `,` or `}` at line 1 column 1573".into(),
+            });
+        }
+        self.inner
+            .complete_streaming(system, messages, tools, on_text)
+            .await
+    }
+    fn describe(&self) -> String {
+        self.inner.describe()
+    }
+}
+
+/// A reply the model could not use is redone quietly; one it never gets right ends the turn in
+/// the person's words, with Continue (ADR 0050).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_the_model_redoes_shows_once_and_one_it_cannot_fix_says_so_plainly() {
+    drive(
+        "repair",
+        vec![say("The notes mention a locket.", false)],
+        Duration::from_millis(20),
+    )
+    .await;
+    drive("unusable", vec![], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

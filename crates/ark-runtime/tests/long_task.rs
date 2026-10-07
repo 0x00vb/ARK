@@ -329,7 +329,7 @@ async fn a_small_window_is_never_overrun() {
     assert!(peak < 8_192, "a request went over the window: {peak}");
     let head = &model.recorded()[0].messages[0].content;
     assert!(head.contains(REQUEST), "the request leads, clipped: {head}");
-    assert!(head.contains("(+4 earlier messages)"), "{head}");
+    assert!(head.contains("(+8 earlier messages)"), "{head}");
 }
 
 /// A turn that reaches its step limit answers, and says the work may not be done, so the next

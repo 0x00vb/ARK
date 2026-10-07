@@ -125,7 +125,7 @@ A provider error is classified as temporary or not (`ProviderError::is_transient
 
 | Temporary (retried) | Not retried |
 |---|---|
-| connection failures and timeouts, 408, 425, 429, 5xx, 529, an overload event inside a stream, a reply whose tool-call arguments are not valid JSON | 400, 401, 403, 404, other client errors, missing credentials, a malformed protocol message; 402 is out of credit (below) |
+| connection failures and timeouts, 408, 425, 429, 5xx, 529, an overload event inside a stream, a reply schema the vendor refused (`Refused`) | 400, 401, 403, 404, other client errors, missing credentials, a malformed protocol message; 402 is out of credit (below) |
 
 The harness retries a temporary failure with exponential backoff and jitter (500 ms doubling,
 at most 30 s per wait, never shorter than the server's `retry-after`), up to
@@ -139,6 +139,14 @@ continued by the person's next message (ADR 0048). Two rules keep retries safe:
   it above the retry's warning (ADR 0049).
 - A retry repeats the model request, never a tool. Tools run only after a model call
   succeeds, so a state-changing action cannot run twice because of a retry.
+
+A reply the model wrote that cannot be used (`ProviderError::Malformed`: tool-call arguments
+that are not valid JSON, a reply that is not structured or was cut off) is not sent again
+unchanged. Its text is withdrawn and the model is told what was wrong, in a new round, and
+sends it again (`Retry { repair: true }`; the window shows "Redoing its last step"). At most 2
+in a row and 4 in a turn; then the turn fails with `AgentError::UnusableReply`, shown as "The
+model's reply could not be used." with Continue (ADR 0050). On a vendor session the failed
+reply ends the session, so a repair is a full, uncached request.
 
 A 402 means the account behind the key has no credit left: `ProviderError::OutOfCredit`. The
 turn stops at once with the provider's own message, and both front-ends add what to do ("Add

@@ -307,8 +307,10 @@ impl Goal {
         }
     }
 
-    /// For the model: the request (clipped to `request_chars`) and the follow-ups, saying to
-    /// follow the newest where they differ.
+    /// For the model: the request (clipped to `request_chars`) and the follow-ups, the newest
+    /// that fit (`request_chars / 500`, 2 to 8, each at most `request_chars / 8` characters),
+    /// saying to follow the newest where they differ and to do what the newest asks if it asks
+    /// for something else.
     pub fn render(&self, request_chars: usize) -> String {
         use std::fmt::Write as _;
         let mut s = format!(
@@ -316,13 +318,20 @@ impl Goal {
             clip_lines(&self.request, request_chars)
         );
         if !self.follow_ups.is_empty() || self.earlier > 0 {
+            let shown = (request_chars / 500).clamp(2, FOLLOW_UPS);
+            let each = (request_chars / 8).clamp(80, FOLLOW_UP_CHARS);
+            let older = self.follow_ups.len().saturating_sub(shown) + self.earlier as usize;
             s.push_str("\nThen they said, newest last (follow the newest where they differ):");
-            if self.earlier > 0 {
-                let _ = write!(s, "\n  (+{} earlier messages)", self.earlier);
+            if older > 0 {
+                let _ = write!(s, "\n  (+{older} earlier messages)");
             }
-            for f in &self.follow_ups {
-                let _ = write!(s, "\n  - {f}");
+            let from = self.follow_ups.len().saturating_sub(shown);
+            for f in &self.follow_ups[from..] {
+                let _ = write!(s, "\n  - {}", clip(f, each));
             }
+            s.push_str(
+                "\nIf their newest message asks for something else, do that instead; the task above stays unfinished.",
+            );
         }
         s
     }
@@ -415,7 +424,8 @@ impl Unfinished {
         let max = (budget as usize / 600).clamp(5, 20);
         let mut s = String::from(
             "Your last turn stopped before it finished. The calls it made are below: do not make \
-             a change marked done again; continue from where it stopped.",
+             a change marked done again; continue from where it stopped, unless the person's \
+             newest message asks for something else.",
         );
         if self.stopped {
             s.push_str("\nThe person stopped it.");
@@ -510,6 +520,9 @@ pub struct Session {
     unread: Vec<(u64, Post)>,
     /// The goal of the turn under way, stored with it however it ends.
     goal: Option<Goal>,
+    /// What the person said while the turn under way ran ([`Session::steered_now`]), kept
+    /// with it however it ends.
+    steered: Vec<String>,
 }
 
 impl Session {
@@ -543,6 +556,7 @@ impl Session {
             recent: Vec::new(),
             unread: Vec::new(),
             goal: None,
+            steered: Vec::new(),
         };
         s.save(engine)?;
         Ok(s)
@@ -598,6 +612,7 @@ impl Session {
             recent,
             unread: Vec::new(),
             goal: None,
+            steered: Vec::new(),
         };
         if let Some(mut t) = begun {
             match t.pid {
@@ -887,6 +902,7 @@ impl Session {
         let mut t = Turn::placeholder(self.record.turn_count, input);
         t.goal = goal.clone();
         self.goal = goal;
+        self.steered.clear();
         engine.store.put_session_turn(
             self.record.id.as_str(),
             t.index,
@@ -912,6 +928,7 @@ impl Session {
             return Ok(());
         }
         t.steered.push(message.to_string());
+        self.steered.push(message.to_string());
         engine.store.put_session_turn(
             self.record.id.as_str(),
             index,
@@ -949,6 +966,7 @@ impl Session {
             pid_start: None,
             goal: self.goal.take(),
             ran_out: outcome.ran_out && !outcome.cancelled,
+            // `outcome.steered` is what reached the model; it holds what `steered_now` kept.
         };
         self.push_turn(engine, turn, &outcome.metrics)
     }
@@ -965,6 +983,8 @@ impl Session {
         t.pid = None;
         t.pid_start = None;
         t.goal = self.goal.take();
+        // What the person said while it ran stays with it: the next turn's goal has it.
+        t.steered = std::mem::take(&mut self.steered);
         self.push_turn(engine, t, &Metrics::default())
     }
 
@@ -1543,5 +1563,77 @@ mod tests {
         // Its answer stays an answer for the person.
         let t = Session::read_turns(&engine, s.id(), None).unwrap();
         assert!(!t[0].incomplete && t[0].ran_out);
+    }
+
+    #[test]
+    fn what_the_person_said_survives_a_turn_that_fails() {
+        let (_d, engine, mut s) = chat();
+        s.begin_turn(&engine, "add syntax highlighting").unwrap();
+        s.steered_now(&engine, "use the theme's colours").unwrap();
+        s.fail_turn(
+            &engine,
+            "add syntax highlighting",
+            "the model's reply could not be used: x",
+        )
+        .unwrap();
+        let u = s.unfinished(&engine).unwrap().unwrap();
+        assert_eq!(u.goal.follow_ups, ["use the theme's colours"]);
+        let g = s.goal_for(Some(&u), "continue").unwrap();
+        assert_eq!(g.follow_ups, ["use the theme's colours", "continue"]);
+    }
+
+    #[test]
+    fn a_new_request_after_a_stop_or_the_step_limit_is_what_the_model_does() {
+        // Stopped by the person, then asked for something else.
+        let (_d, engine, mut s) = chat();
+        s.begin_turn(&engine, "add syntax highlighting").unwrap();
+        let mut stopped = outcome("");
+        stopped.cancelled = true;
+        s.record_turn(&engine, "add syntax highlighting", &stopped)
+            .unwrap();
+        let u = s.unfinished(&engine).unwrap().unwrap();
+        assert!(u.stopped);
+        let g = s.goal_for(Some(&u), "thanks, now write a README").unwrap();
+        let text = g.render(4_000);
+        assert!(text.ends_with("If their newest message asks for something else, do that instead; the task above stays unfinished."), "{text}");
+        assert!(text.contains("  - thanks, now write a README"), "{text}");
+        assert!(u
+            .carry(&[], 6_000)
+            .contains("unless the person's newest message asks for something else"));
+        // Out of steps, then asked for something else.
+        let (_d, engine, mut s) = chat();
+        s.begin_turn(&engine, "add syntax highlighting").unwrap();
+        let mut o = outcome("Partly done.");
+        o.ran_out = true;
+        s.record_turn(&engine, "add syntax highlighting", &o)
+            .unwrap();
+        let u = s.unfinished(&engine).unwrap().unwrap();
+        let text = s
+            .goal_for(Some(&u), "write a README")
+            .unwrap()
+            .render(4_000);
+        assert!(
+            text.contains("  - write a README") && text.contains("do that instead"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn follow_ups_shown_shrink_with_the_budget() {
+        let mut g = Goal::new("the request");
+        for i in 0..8 {
+            g.then(&format!("message {i} {}", "word ".repeat(100)));
+        }
+        let big = g.render(4_000);
+        let small = g.render(1_000);
+        assert_eq!(big.matches("\n  - message").count(), 8);
+        assert_eq!(small.matches("\n  - message").count(), 2);
+        assert!(small.contains("(+6 earlier messages)"));
+        assert!(
+            small.len() < big.len() / 3,
+            "{} vs {}",
+            small.len(),
+            big.len()
+        );
     }
 }

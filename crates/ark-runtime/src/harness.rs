@@ -669,6 +669,8 @@ impl Harness {
         let mut corrected_text_call = false;
         // Replies the model was asked to send again because they could not be used.
         let mut repairs: u32 = 0;
+        // The model gave its own answer (possibly empty), not the step limit or a stall.
+        let mut answered = false;
         let mut repairs_in_row: u32 = 0;
         // Files of the project folder this turn's calls wrote, and whether the model was told
         // once that its answer names a saved file none of them wrote.
@@ -711,11 +713,12 @@ impl Harness {
             let state_digest = state.digest(STATE_DIGEST_ITEMS);
             let tail = state_message_with(&state_digest, &steered);
             let (mut messages, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
+            let tail_tokens = WorkingSet::message_tokens(&tail);
             messages.push(tail);
             metrics.peak_prompt_tokens = metrics.peak_prompt_tokens.max(est);
 
             let tools = self.tool_set(engine, &loaded, meta_cfg);
-            let report = self.report(
+            let mut report = self.report(
                 profile,
                 &sys,
                 &state_digest,
@@ -728,6 +731,10 @@ impl Harness {
                 loaded.len(),
                 steps_taken,
             );
+            // What the person said while it ran rides in the working state, not in tool results.
+            let said = tail_tokens.saturating_sub(report.working_state);
+            report.working_state += said;
+            report.tool_rounds = report.tool_rounds.saturating_sub(said);
             on_event(HarnessEvent::Context { report });
 
             let mut unusable = String::new();
@@ -838,6 +845,7 @@ impl Harness {
                     continue;
                 }
                 answer = completion.content.trim().to_string();
+                answered = true;
                 streamed = !answer.is_empty();
                 break;
             }
@@ -1146,7 +1154,7 @@ impl Harness {
         }
 
         // The loop ended without the model's own answer: the work may not be done.
-        let ran_out = answer.is_empty();
+        let ran_out = !answered;
         if answer.is_empty() {
             match self
                 .force_answer(

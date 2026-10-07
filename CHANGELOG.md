@@ -10,6 +10,7 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Breaking
+- ADR 0049: `HarnessEvent::TextWithdrawn` is a new event; an exhaustive `match` adds it.
 - ADR 0050: `Settings::context_budget` is `Option<u32>` (`None`: sized from each agent's model).
   `ark_model::Endpoint` has `context_window` (struct literals add `context_window: None`, or
   use `Endpoint::new(..).context_window(n)`). `ProviderError::Refused` and
@@ -40,7 +41,7 @@ What changed for people building on ARK, per release. Not a commit log.
   `Harness::goal`): "continue" never becomes the goal, and a chain of any length keeps its first
   request and every later instruction. Rules, skills, preloaded tools and the trivial class read
   the goal. Messages sent while a turn runs stay in the working state and are stored at once
-  (`Session::steered_now`).
+  (`Session::steered_now`), and kept when the turn fails.
 - A turn that reached its step limit (`HarnessOutcome::ran_out`, `Turn::ran_out`) keeps its
   answer and is continued like an unfinished one: the next turn keeps its goal and does not make
   its changes again.
@@ -76,6 +77,11 @@ What changed for people building on ARK, per release. Not a commit log.
 - The model's note with its tool calls stays in its round, so it sees its own plan next step.
 - `code.run` says it is contained and points a project's commands to `process.start`;
   `process.start` says it runs tests and builds with the person's own programs.
+  `Adapter::summary` (default none) puts a few words beside an adapter's actions in the tool
+  index; `process` and `code` have one.
+- A turn's goal says to do what the person's newest message asks when it asks for something
+  else (after a Stop or the step limit, a new request is not folded into the old task). The
+  follow-ups it shows shrink with the budget.
 - The working state's `GOAL:` line is clipped to 300 characters (the full task is in the first
   message). Evidence lists an object's keys sorted.
 - A stop by the app (SIGTERM, quit) leaves the chat's turn interrupted, not cancelled, and

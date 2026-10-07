@@ -319,6 +319,10 @@ impl Adapter for Exec {
         "code"
     }
 
+    fn summary(&self) -> Option<&str> {
+        Some("run a program, contained: the project's files only, no network, none of the person's programs")
+    }
+
     fn actions(&self) -> Vec<ActionDescriptor> {
         let runtimes: Vec<String> = self
             .runtimes

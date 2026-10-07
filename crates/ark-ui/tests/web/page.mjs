@@ -937,7 +937,7 @@ async function processes(page) {
   const ask = page.locator(".approval");
   await ask.waitFor();
   const words = await ask.innerText();
-  assert.match(words, /Start this command in the project folder and keep it running, then open \/home in the browser\. Not contained: it runs as you, with your files and the network\. You can stop it in Processes\.\n\s*python3 -u -m http\.server 0 --bind 127\.0\.0\.1/);
+  assert.match(words, /Keep this running in the project folder, then open \/home in the browser\. Not contained: it runs as you\.\n\s*python3 -u -m http\.server 0 --bind 127\.0\.0\.1/);
   const buttons = (await ask.locator(".approval-actions button").allInnerTexts()).map((t) => t.split("\n")[0]);
   assert.deepEqual(buttons, ["Allow once", "Allow for this session", "Always in this project", "Deny"]);
   await ask.locator('button[data-decision="allow_once"]').click();

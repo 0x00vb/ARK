@@ -404,7 +404,7 @@ fn process_approval(action: &str, input: &Value) -> Option<String> {
         o => format!(", then open {} in the browser", clip(o, 80)),
     };
     let out = format!(
-        "Start this command in {place} and keep it running{then}. Not contained: it runs as you, with your files and the network. You can stop it in Processes.\n  {}",
+        "Keep this running in {place}{then}. Not contained: it runs as you.\n  {}",
         clip(&one_line(s("command")), 200)
     );
     Some(out)
@@ -748,7 +748,7 @@ mod tests {
         };
         assert_eq!(
             l.approval_line(&req),
-            "Start this command in web in the project and keep it running, then open /home in the browser. Not contained: it runs as you, with your files and the network. You can stop it in Processes.\n  npm run dev"
+            "Keep this running in web in the project, then open /home in the browser. Not contained: it runs as you.\n  npm run dev"
         );
         assert_eq!(
             l.call_label("process.start", &input),

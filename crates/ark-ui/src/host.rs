@@ -473,6 +473,8 @@ impl Host {
             Arc::downgrade(&host),
             host.orchs.subscribe(),
         ));
+        // What waited before this process started (kept questions, results) is looked at too.
+        host.notify_soon();
         if let Some(c) = &host.computer {
             tokio::spawn(forward_computer(Arc::downgrade(&host), c.watch()));
         }
@@ -945,14 +947,19 @@ impl Host {
             // the token or session that asked, and the address the page has.
             "push_key" => Ok(json!({ "key": self.notifier.public_key() })),
             "push_add" => {
-                self.notifier.add(
+                let added = self.notifier.add(
                     &params["subscription"],
                     &s("name"),
                     params["_by"].as_str().unwrap_or("local"),
                     &s("_origin"),
+                    params["renew"].as_bool().unwrap_or(false),
                 )?;
-                Ok(json!({ "ok": true }))
+                // Removed from another device: it stays removed until turned on here.
+                Ok(json!({ "ok": true, "removed": !added }))
             }
+            // Devices signed in with a code, and signing one out (ADR 0047).
+            "devices_signed_in" => Ok(self.notifier.signed_in()),
+            "device_sign_out" => Ok(json!(self.notifier.sign_out(&s("name"))?)),
             "push_remove" => Ok(json!(match params["id"].as_str() {
                 Some(id) => self.notifier.remove_id(id),
                 None => self.notifier.remove(&s("endpoint")),

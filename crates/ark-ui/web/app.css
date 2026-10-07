@@ -1373,7 +1373,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 }
 
 /* Devices (devices.js, ADR 0047): a code to sign in another device; the sign-in by code. */
-.pair-code { display: flex; align-items: baseline; gap: 8px; padding: 4px 12px 10px; }
+.pair-code { display: flex; align-items: baseline; gap: 8px; padding: 0 16px 12px; }
 .pair-code:empty { display: none; }
 .pair-value {
   font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: 0.08em;
@@ -1395,6 +1395,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .welcome.pair { align-items: center; text-align: center; }
 .app[data-signed-out] { grid-template-columns: 0 1fr 0 !important; }
 .devices-others:empty { display: none; }
+.devices-others { margin-top: 12px; }
 
 /* Settings on a phone: the sections as a row to scroll above the one shown; a row's controls
    under its words. */
@@ -1408,4 +1409,3 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   .setting-row { flex-wrap: wrap; }
   .setting-row .plugin-detail { white-space: normal; }
 }
-.pair-code { padding: 0 16px 12px; }

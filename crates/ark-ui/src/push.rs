@@ -33,7 +33,7 @@ pub struct Device {
     /// Its public key (P-256, uncompressed) and auth secret, base64url.
     pub p256dh: String,
     pub auth: String,
-    /// What the person calls it ("iPhone Safari").
+    /// What the person calls it ("Phone Safari").
     pub name: String,
     pub added_ms: u64,
     /// The token or session name it was added with: revoking that name stops its notifications.
@@ -86,8 +86,17 @@ impl Keys {
                     &rng,
                 )
                 .map_err(|_| anyhow::anyhow!("could not make a key"))?;
-                write_private(path, &B64.encode(doc.as_ref()))?;
-                doc.as_ref().to_vec()
+                match write_private(path, &B64.encode(doc.as_ref())) {
+                    Ok(()) => doc.as_ref().to_vec(),
+                    // Another process made one first: that one is the runtime's.
+                    Err(e)
+                        if e.downcast_ref::<std::io::Error>().map(std::io::Error::kind)
+                            == Some(std::io::ErrorKind::AlreadyExists) =>
+                    {
+                        B64.decode(std::fs::read_to_string(path)?.trim())?
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             Err(e) => return Err(e.into()),
         };

@@ -67,7 +67,15 @@ struct Link {
     /// A short code a person types ([`Tokens::pair_code`]), not a link.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     short: bool,
+    /// The session it becomes ends by then at the latest: when the session that made the code
+    /// ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    until_ms: Option<u64>,
 }
+
+/// Between a name and the name of a device it signed in: `laptop › Phone Safari`. Revoking a
+/// name revokes what it signed in.
+pub const UNDER: &str = " › ";
 
 #[derive(Default, Serialize, Deserialize)]
 struct File {
@@ -163,32 +171,30 @@ impl Tokens {
                 expires_ms: now_ms() + valid_for.as_millis() as u64,
                 session_ms: session.as_millis() as u64,
                 short: false,
+                until_ms: None,
             });
             Ok(code)
         })
     }
 
     /// A code a person types on a device that cannot open a link (a web app on a phone's Home
-    /// Screen has cookies of its own): `K7Q4-ZP2M`, good for `valid_for`, traded once for a
-    /// session lasting `session` and named `name`. A few wrong codes end every open one.
+    /// Screen has cookies of its own): `K7Q4-ZP2M`, good for `valid_for`, traded once
+    /// ([`Tokens::redeem_as`]) for a session lasting `session` and named under `name` (`name ›
+    /// <the device>`), so revoking `name` signs the device out too. `until_ms`: the session
+    /// ends by then at the latest (the session that made the code ends then). A few wrong codes
+    /// end every open one.
     pub fn pair_code(
         &self,
         name: &str,
         valid_for: Duration,
         session: Duration,
+        until_ms: Option<u64>,
     ) -> anyhow::Result<String> {
         let name = name.trim();
         if name.is_empty() {
             anyhow::bail!("a device needs a name");
         }
         self.update(|file| {
-            if file
-                .tokens
-                .iter()
-                .any(|t| t.info.name == name && t.info.expires_ms.is_none())
-            {
-                anyhow::bail!("a saved token is named `{name}`; a device needs another name");
-            }
             let raw: String = uuid::Uuid::new_v4()
                 .as_bytes()
                 .iter()
@@ -201,6 +207,7 @@ impl Tokens {
                 expires_ms: now_ms() + valid_for.as_millis() as u64,
                 session_ms: session.as_millis() as u64,
                 short: true,
+                until_ms,
             });
             Ok(format!("{}-{}", &raw[..4], &raw[4..]))
         })
@@ -208,6 +215,12 @@ impl Tokens {
 
     /// Trade a link code for a session, once. None when the code is unknown, used or late.
     pub fn redeem(&self, code: &str) -> anyhow::Result<Option<Session>> {
+        self.redeem_as(code, "")
+    }
+
+    /// [`redeem`](Self::redeem), from a device that says what it is (`Phone Safari`): a typed
+    /// code's session is named `<who made the code> › <device>`.
+    pub fn redeem_as(&self, code: &str, device: &str) -> anyhow::Result<Option<Session>> {
         let code = code.trim();
         if code.is_empty() {
             return Ok(None);
@@ -228,6 +241,8 @@ impl Tokens {
             let Some(i) = found else {
                 if short {
                     file.pair_misses.push(now_ms());
+                    let extra = file.pair_misses.len().saturating_sub(PAIR_TRIES);
+                    file.pair_misses.drain(..extra);
                     if file.pair_misses.len() >= PAIR_TRIES {
                         file.links.retain(|l| !l.short);
                     }
@@ -237,17 +252,41 @@ impl Tokens {
             let link = file.links.remove(i);
             let now = now_ms();
             let token = secret("arks_");
-            let expires_ms = now + link.session_ms;
+            let expires_ms = (now + link.session_ms).min(link.until_ms.unwrap_or(u64::MAX));
+            // A typed code's device is named under who made the code, and apart from the
+            // devices signed in before it.
+            let name = if link.short {
+                let device: String = device.trim().chars().take(40).collect();
+                let base = format!(
+                    "{}{UNDER}{}",
+                    link.name,
+                    if device.is_empty() {
+                        "device"
+                    } else {
+                        device.as_str()
+                    }
+                );
+                let taken = |n: &str| file.tokens.iter().any(|t| t.info.name == n);
+                let mut name = base.clone();
+                let mut k = 2;
+                while taken(&name) {
+                    name = format!("{base} {k}");
+                    k += 1;
+                }
+                name
+            } else {
+                link.name.clone()
+            };
             file.tokens.push(Entry {
                 info: TokenInfo {
-                    name: link.name.clone(),
+                    name: name.clone(),
                     created_ms: now,
                     expires_ms: Some(expires_ms),
                 },
                 sha256: hash(&token),
             });
             Ok(Some(Session {
-                name: link.name,
+                name,
                 token,
                 expires_ms,
             }))
@@ -282,12 +321,29 @@ impl Tokens {
     /// Remove the token named `name`, with every session and unused link of that name. False
     /// when there is none.
     pub fn revoke(&self, name: &str) -> anyhow::Result<bool> {
+        // What it signed in goes with it (`name › device`).
+        let under = format!("{name}{UNDER}");
+        let gone = |n: &str| n == name || n.starts_with(&under);
         self.update(|file| {
             let before = file.tokens.len() + file.links.len();
-            file.tokens.retain(|t| t.info.name != name);
-            file.links.retain(|l| l.name != name);
+            file.tokens.retain(|t| !gone(&t.info.name));
+            file.links.retain(|l| !gone(&l.name));
             Ok(file.tokens.len() + file.links.len() != before)
         })
+    }
+
+    /// The saved token or live session `token` is, without its secret.
+    pub fn info(&self, token: &str) -> Option<TokenInfo> {
+        if token.is_empty() {
+            return None;
+        }
+        let (h, now) = (hash(token), now_ms());
+        self.read()
+            .ok()?
+            .tokens
+            .into_iter()
+            .find(|t| same(&t.sha256, &h) && t.info.live(now))
+            .map(|t| t.info)
     }
 
     /// The name of the saved token or live session `token` is, if any.
@@ -383,21 +439,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let t = Tokens::in_store(dir.path());
         let day = Duration::from_secs(24 * 3600);
+        let laptop = t.create("laptop").unwrap();
         let code = t
-            .pair_code("iPhone", Duration::from_secs(600), day)
+            .pair_code("laptop", Duration::from_secs(600), day, None)
             .unwrap();
         assert_eq!(code.len(), 9);
         assert_eq!(&code[4..5], "-");
-        // Typed in lower case without the dash: the same code, once.
+        // Typed in lower case without the dash: the same code, once, named under its maker.
         let s = t
-            .redeem(&code.replace('-', "").to_lowercase())
+            .redeem_as(&code.replace('-', "").to_lowercase(), "Phone Safari")
             .unwrap()
             .unwrap();
-        assert_eq!(s.name, "iPhone");
-        assert_eq!(t.check(&s.token).as_deref(), Some("iPhone"));
+        assert_eq!(s.name, "laptop › Phone Safari");
+        assert_eq!(t.check(&s.token).as_deref(), Some("laptop › Phone Safari"));
         assert!(t.redeem(&code).unwrap().is_none(), "used");
         // Wrong codes: past five in ten minutes, every open code ends.
-        let code = t.pair_code("iPad", Duration::from_secs(600), day).unwrap();
+        let code = t
+            .pair_code("laptop", Duration::from_secs(600), day, None)
+            .unwrap();
         for _ in 0..5 {
             assert!(t.redeem("2222-2222").unwrap().is_none());
         }
@@ -406,8 +465,19 @@ mod tests {
             "ended by the wrong tries"
         );
         // A link is not a typed code and is not ended by them.
-        let link = t.link("laptop", Duration::from_secs(60), day).unwrap();
+        let link = t.link("web", Duration::from_secs(60), day).unwrap();
         assert!(t.redeem(&link).unwrap().is_some());
+        // Revoking who made a code signs out the devices it signed in; a cap holds.
+        assert!(t.revoke("laptop").unwrap());
+        assert!(t.check(&s.token).is_none(), "signed out with its maker");
+        assert!(t.check(&laptop).is_none());
+        let soon = now_ms() + 60_000;
+        let code = t
+            .pair_code("web", Duration::from_secs(600), day, Some(soon))
+            .unwrap();
+        let s = t.redeem_as(&code, "").unwrap().unwrap();
+        assert_eq!(s.expires_ms, soon, "not past the session that made it");
+        assert_eq!(s.name, "web › device");
     }
 
     #[test]

@@ -190,7 +190,11 @@ plan review); the runtime decides not to send to a device in view instead of the
 notification (iOS stops delivering to a worker that shows nothing); a phone signs in with a code
 it types, for 90 days (a Home Screen app has its own cookies and no address bar); My machine
 replaces `--connect`'s saved address instead of sitting beside it; the push key stays in the
-store (ADR 0047). Dropped: the install script (`docker compose` on the server is the one
+store (ADR 0047); a device's session lasts 90 days, not renewed (the gate's revision said 30
+days, renewed while used: a renewal would rewrite the token file on every request, and a phone
+that is not opened for three months pairs again in a minute); a paired device is named under the
+one that paired it and never outlives it (implementation review: a paired session must not
+escape revocation). Dropped: the install script (`docker compose` on the server is the one
 command; a prebuilt image per tag would make it fast on a small server, and publishing one waits
 for the owner).
 

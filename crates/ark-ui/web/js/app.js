@@ -20,7 +20,7 @@ import { registerPlugins } from "./plugins.js";
 import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
 import { Waiting } from "./waiting.js";
-import { registerDevices, keepInStep, openItems } from "./devices.js";
+import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js";
 
 const transport = connect();
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
@@ -68,6 +68,8 @@ const api = {
     showConversation();
     return change("new_session");
   },
+  // A code to sign in another device (Settings › Devices, ADR 0047).
+  pairCode: () => transport.pairCode(),
   openSession: (id) => {
     showConversation();
     if (id !== state.sessionId) return change("open_session", { id });
@@ -381,6 +383,8 @@ function elsewhere(msg) {
 }
 
 function onEvent(msg) {
+  // The session ended (signed out from another device, or its time is up): the code field.
+  if (msg.kind === "signed_out") return signInScreen();
   if (msg.kind === "reconnecting" || msg.kind === "disconnected" || msg.kind === "connected") {
     dispatchExt(`ark:${msg.kind}`, msg);
     return connection(msg);
@@ -737,7 +741,7 @@ function signInScreen() {
     e.preventDefault();
     go.disabled = true;
     why.textContent = "";
-    if (await transport.signIn(input.value)) return location.reload();
+    if (await transport.signIn(input.value, deviceName())) return location.reload();
     why.textContent = "That code did not work. Make a new one on the other device.";
     go.disabled = false;
     input.select();

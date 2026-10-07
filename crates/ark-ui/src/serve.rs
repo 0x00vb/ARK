@@ -355,7 +355,8 @@ async fn handle(
             };
             let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
             let code = v["code"].as_str().unwrap_or("");
-            match tokens.redeem(code)? {
+            // A device that types a code says what it is (`Phone Safari`).
+            match tokens.redeem_as(code, v["name"].as_str().unwrap_or(""))? {
                 Some(s) => {
                     let left = s.expires_ms.saturating_sub(now_ms()) / 1000;
                     let body = json!({ "ok": true, "expires_ms": s.expires_ms });
@@ -386,15 +387,16 @@ async fn handle(
             let (Check::Tokens(tokens), true) = (check, authed) else {
                 return respond(&mut sock, "401 Unauthorized", "text/plain", b"token").await;
             };
-            let v: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
-            let name = v["name"].as_str().map(str::trim).filter(|n| !n.is_empty());
-            let name = name.map(str::to_string).unwrap_or_else(|| {
-                format!("device {}", &uuid::Uuid::new_v4().simple().to_string()[..4])
-            });
+            // The new device is named under the one asking and never outlives it: revoking
+            // this device signs that one out too (ADR 0040, 0047).
+            let credential = session.clone().unwrap_or_else(|| req.token().to_string());
+            let Some(me) = tokens.info(&credential) else {
+                return respond(&mut sock, "401 Unauthorized", "text/plain", b"token").await;
+            };
             let valid = std::time::Duration::from_secs(PAIR_VALID_SECS);
             let lasts = std::time::Duration::from_secs(PAIRED_SESSION_DAYS * 24 * 3600);
-            let code = tokens.pair_code(&name, valid, lasts)?;
-            let body = json!({ "code": code, "name": name, "expires_ms": now_ms() + PAIR_VALID_SECS * 1000 });
+            let code = tokens.pair_code(&me.name, valid, lasts, me.expires_ms)?;
+            let body = json!({ "code": code, "expires_ms": now_ms() + PAIR_VALID_SECS * 1000 });
             respond(
                 &mut sock,
                 "200 OK",

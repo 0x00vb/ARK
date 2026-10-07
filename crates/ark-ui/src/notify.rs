@@ -1,7 +1,9 @@
 //! When the runtime notifies a person's devices (ADR 0047), and what it sends. Something that
-//! waits (the attention list, a chat's own question) is sent once, a minute after it appeared
-//! and only if it still waits, to every device added before it whose page is not open and in
-//! view. A device a revoked token or session added is forgotten.
+//! waits (the attention list, a chat's own question) is sent to each device once, a minute after
+//! it appeared and only while it waits: to devices added before it, and not while that device's
+//! page is open and in view (then later, if it still waits). A push service that is busy is
+//! tried again. A device a revoked token or session added is forgotten; one removed stays
+//! removed until it is turned on again.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,14 +27,21 @@ fn wait() -> Duration {
         .unwrap_or(Duration::from_secs(60))
 }
 
-/// How long a page's "I am in view" lasts without another.
-const IN_VIEW_MS: u64 = 90_000;
+/// How long a page's "I am in view" lasts without another (the page says it every 20 s, and
+/// "not any more" when it is hidden).
+const IN_VIEW_MS: u64 = 45_000;
+/// Nothing older than this is sent: a day-old question reads as news on a phone.
+const MAX_AGE_MS: u64 = 24 * 3600 * 1000;
+/// A device someone removed: its page does not add it again by itself.
+const REMOVED: &str = "push_removed";
 
 pub(crate) struct Notifier {
     engine: Arc<Engine>,
     keys: OnceLock<Option<Keys>>,
     client: OnceLock<reqwest::Client>,
     scheduled: AtomicBool,
+    /// Something happened since the last look began: look again.
+    again: AtomicBool,
     /// Device id -> until when its page said it was in view.
     in_view: Mutex<HashMap<String, u64>>,
     /// The runtime's tokens, when it serves with saved tokens.
@@ -54,6 +63,7 @@ impl Notifier {
             keys: OnceLock::new(),
             client: OnceLock::new(),
             scheduled: AtomicBool::new(false),
+            again: AtomicBool::new(false),
             in_view: Mutex::new(HashMap::new()),
             tokens: OnceLock::new(),
             out: OnceLock::new(),
@@ -96,15 +106,17 @@ impl Notifier {
             .collect()
     }
 
-    /// Add (or renew) a device. `sub` is the browser's subscription (`{endpoint, keys: {p256dh,
-    /// auth}}`).
+    /// Add a device, or renew one (`renew`: its page keeping in step, not the person turning it
+    /// on). False when the device was removed and this is only a renewal: it stays removed.
+    /// `sub` is the browser's subscription (`{endpoint, keys: {p256dh, auth}}`).
     pub(crate) fn add(
         &self,
         sub: &Value,
         name: &str,
         by: &str,
         origin: &str,
-    ) -> anyhow::Result<()> {
+        renew: bool,
+    ) -> anyhow::Result<bool> {
         let endpoint = sub["endpoint"].as_str().unwrap_or("");
         anyhow::ensure!(
             push::known_service(endpoint),
@@ -117,7 +129,19 @@ impl Notifier {
             "the subscription has no keys"
         );
         let id = Device::id(endpoint);
+        let store = &self.engine.store;
+        if store.get_record(REMOVED, &id).ok().flatten().is_some() {
+            if renew {
+                return Ok(false);
+            }
+            let _ = store.delete_record(REMOVED, &id);
+        }
         let known = self.devices();
+        // Renewed, it keeps when it was first added: items since then are still its.
+        let first = known
+            .iter()
+            .find(|d| Device::id(&d.endpoint) == id)
+            .map(|d| d.added_ms);
         anyhow::ensure!(
             known.iter().any(|d| Device::id(&d.endpoint) == id) || known.len() < push::MAX_DEVICES,
             "{} devices get notifications already; turn one off first",
@@ -128,28 +152,66 @@ impl Notifier {
             p256dh,
             auth,
             name: name.trim().chars().take(60).collect(),
-            added_ms: now_ms(),
+            added_ms: first.unwrap_or_else(now_ms),
             by: by.into(),
             origin: origin.into(),
         };
-        self.engine
-            .store
-            .put_record(push::DEVICE, &id, "", &serde_json::to_value(&d)?)?;
-        Ok(())
+        store.put_record(push::DEVICE, &id, "", &serde_json::to_value(&d)?)?;
+        Ok(true)
     }
 
     pub(crate) fn remove(&self, endpoint: &str) -> bool {
-        self.engine
-            .store
-            .delete_record(push::DEVICE, &Device::id(endpoint))
-            .unwrap_or(false)
+        self.remove_id(&Device::id(endpoint))
     }
 
+    /// Stop notifying a device. Its page does not add it again by itself.
     pub(crate) fn remove_id(&self, id: &str) -> bool {
-        self.engine
-            .store
-            .delete_record(push::DEVICE, id)
-            .unwrap_or(false)
+        let store = &self.engine.store;
+        let _ = store.put_record(REMOVED, id, "", &json!({ "at_ms": now_ms() }));
+        store.delete_record(push::DEVICE, id).unwrap_or(false)
+    }
+
+    /// Forget a device whose push service said it is gone: a new subscription may come back.
+    fn forget(&self, id: &str) {
+        let _ = self.engine.store.delete_record(push::DEVICE, id);
+    }
+
+    /// The devices signed in with a typed code (sessions under a name), with whether each gets
+    /// notifications. Empty without saved tokens.
+    pub(crate) fn signed_in(&self) -> Value {
+        let Some(tokens) = self.tokens.get() else {
+            return json!([]);
+        };
+        let devices = self.devices();
+        json!(tokens
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.name.contains(crate::access::UNDER))
+            .map(|t| {
+                let notified = devices.iter().any(|d| d.by == t.name);
+                let shown = t.name.rsplit(crate::access::UNDER).next().unwrap_or(&t.name).to_string();
+                json!({ "name": t.name, "device": shown, "created_ms": t.created_ms, "expires_ms": t.expires_ms, "notified": notified })
+            })
+            .collect::<Vec<_>>())
+    }
+
+    /// Sign a device out (and what it signed in): its session ends, its notifications stop.
+    pub(crate) fn sign_out(&self, name: &str) -> anyhow::Result<bool> {
+        let tokens = self.tokens.get().ok_or_else(|| {
+            anyhow::anyhow!("devices sign in only where the runtime keeps tokens")
+        })?;
+        anyhow::ensure!(
+            name.contains(crate::access::UNDER),
+            "only a device signed in with a code is signed out here"
+        );
+        let under = format!("{name}{}", crate::access::UNDER);
+        for d in self.devices() {
+            if d.by == name || d.by.starts_with(&under) {
+                self.forget(&Device::id(&d.endpoint));
+            }
+        }
+        tokens.revoke(name)
     }
 
     /// The page of the device `endpoint` is open and in view (or not any more).
@@ -165,6 +227,7 @@ impl Notifier {
     /// Something may wait now: look again once it has waited long enough. One look is pending
     /// at a time.
     pub(crate) fn soon(self: &Arc<Self>, notices: Arc<dyn Fn() -> Vec<Notice> + Send + Sync>) {
+        self.again.store(true, Ordering::SeqCst);
         if self.devices().is_empty() || self.scheduled.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -172,16 +235,22 @@ impl Notifier {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(wait()).await;
-                let pending = me.look(&notices()).await;
-                if !pending {
-                    break;
+                me.again.store(false, Ordering::SeqCst);
+                if me.look(&notices()).await || me.again.load(Ordering::SeqCst) {
+                    continue;
                 }
+                me.scheduled.store(false, Ordering::SeqCst);
+                // Something came between the last look and now: this loop takes it.
+                if me.again.load(Ordering::SeqCst) && !me.scheduled.swap(true, Ordering::SeqCst) {
+                    continue;
+                }
+                break;
             }
-            me.scheduled.store(false, Ordering::SeqCst);
         });
     }
 
-    /// Send what is due; true when something waits that is not due yet.
+    /// Send what is due; true when something still waits for some device (not due yet, its
+    /// page in view, its push service busy).
     async fn look(&self, notices: &[Notice]) -> bool {
         let live = self
             .tokens
@@ -192,14 +261,14 @@ impl Notifier {
         for d in self.devices() {
             // What added it was revoked or ran out.
             if live.as_ref().is_some_and(|names| !names.contains(&d.by)) {
-                self.remove(&d.endpoint);
+                self.forget(&Device::id(&d.endpoint));
                 continue;
             }
             devices.push(d);
         }
         let in_view = self.in_view.lock().unwrap().clone();
         let done = ark_interact::attention::notified(&self.engine);
-        let (sends, due, pending) = plan(
+        let (sends, mut pending) = plan(
             &devices,
             notices,
             &done,
@@ -216,16 +285,21 @@ impl Notifier {
                 tag: n.tag.clone(),
                 urgent: n.urgent,
             };
+            let key = mark(&n.id, &d.endpoint);
             match self.send(d.clone(), m).await {
-                Sent::Ok => {}
-                Sent::Gone => {
-                    self.remove(&d.endpoint);
+                Sent::Ok => {
+                    let _ = ark_interact::attention::mark_notified(&self.engine, &key);
                 }
-                other => tracing::info!(device = %d.name, "a notification was not sent: {other:?}"),
+                Sent::Gone => self.forget(&Device::id(&d.endpoint)),
+                Sent::Later(why) => {
+                    tracing::info!(device = %d.name, "a notification waits to be sent again: {why}");
+                    pending = true;
+                }
+                Sent::Refused(why) => {
+                    tracing::info!(device = %d.name, "a notification was not sent: {why}");
+                    let _ = ark_interact::attention::mark_notified(&self.engine, &key);
+                }
             }
-        }
-        for ni in due {
-            let _ = ark_interact::attention::mark_notified(&self.engine, &notices[ni].id);
         }
         pending
     }
@@ -255,8 +329,13 @@ impl Notifier {
     }
 }
 
-/// Which device hears of which notice now (indexes), which notices are done (sent, or no device
-/// should hear of them), and whether something waits that is not due yet.
+/// The mark of a notice sent to a device.
+fn mark(notice: &str, endpoint: &str) -> String {
+    format!("{notice}@{}", Device::id(endpoint))
+}
+
+/// Which device hears of which notice now (indexes), and whether something still waits for
+/// some device (not due yet, or its page in view).
 fn plan(
     devices: &[Device],
     notices: &[Notice],
@@ -264,28 +343,34 @@ fn plan(
     in_view: &HashMap<String, u64>,
     now: u64,
     wait: u64,
-) -> (Vec<(usize, usize)>, Vec<usize>, bool) {
-    let (mut sends, mut due, mut pending) = (Vec::new(), Vec::new(), false);
+) -> (Vec<(usize, usize)>, bool) {
+    let (mut sends, mut pending) = (Vec::new(), false);
     for (ni, n) in notices.iter().enumerate() {
-        if done.contains(&n.id) {
+        let age = now.saturating_sub(n.at_ms);
+        if age > MAX_AGE_MS {
             continue;
         }
-        if now.saturating_sub(n.at_ms) < wait {
+        if age < wait {
             pending = true;
             continue;
         }
-        due.push(ni);
         for (di, d) in devices.iter().enumerate() {
-            let looking = in_view
-                .get(&Device::id(&d.endpoint))
-                .is_some_and(|until| *until > now);
-            // Nothing from before the device asked; nothing to a page that shows it already.
-            if n.at_ms >= d.added_ms && !looking {
-                sends.push((di, ni));
+            // Nothing from before the device asked; nothing twice.
+            if n.at_ms < d.added_ms || done.contains(&mark(&n.id, &d.endpoint)) {
+                continue;
             }
+            // Its page shows it now: later, if it still waits then.
+            if in_view
+                .get(&Device::id(&d.endpoint))
+                .is_some_and(|until| *until > now)
+            {
+                pending = true;
+                continue;
+            }
+            sends.push((di, ni));
         }
     }
-    (sends, due, pending)
+    (sends, pending)
 }
 
 pub(crate) fn now_ms() -> u64 {
@@ -335,14 +420,16 @@ mod tests {
             notice("fresh", 9_500),
             notice("sent", 1_000),
         ];
-        let done: HashSet<String> = ["sent".to_string()].into();
+        let done: HashSet<String> = [mark("sent", "https://a"), mark("sent", "https://b")].into();
         let in_view: HashMap<String, u64> = [(Device::id("https://b"), 20_000)].into();
-        let (sends, due, pending) = plan(&devices, &notices, &done, &in_view, 10_000, 1_000);
-        // "old" is older than every device: done, sent to nobody. "due" goes to a only: b is
-        // looking, c asked later. "fresh" is not due. "sent" went out before.
+        let (sends, pending) = plan(&devices, &notices, &done, &in_view, 10_000, 1_000);
+        // "old" is older than every device. "due" goes to a now; b is looking (later); c asked
+        // after it. "fresh" is not due. "sent" went to a and b before.
         assert_eq!(sends, vec![(0, 1)]);
-        assert_eq!(due, vec![0, 1]);
         assert!(pending);
+        // b stops looking: it hears of "due" then, once.
+        let (sends, _) = plan(&devices, &notices, &done, &HashMap::new(), 10_000, 1_000);
+        assert_eq!(sends, vec![(0, 1), (1, 1)]);
     }
 }
 

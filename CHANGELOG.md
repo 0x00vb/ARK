@@ -60,10 +60,13 @@ What changed for people building on ARK, per release. Not a commit log.
   notifications. Something waiting (a question, a failure, a result nobody saw, a chat's own
   question) reaches each device once, a minute after it appeared, if it still waits and that
   device's page is not in view; a tap opens the page on it (`#item=`). A device signs in with an
-  8-character code from a signed-in one (`POST /pair`, `Tokens::pair_code`) for 90 days; its
-  notifications end with its session. The page has a manifest (the app's name, accent and logo)
+  8-character code from a signed-in one (`POST /pair`, `Tokens::pair_code`,
+  `Tokens::redeem_as`) for 90 days, named under the device that made the code
+  (`laptop › Phone Safari`): revoking that one signs it out too, and Settings › Devices signs it
+  out on its own. Its notifications end with its session. The page has a manifest (the app's name, accent and logo)
   and a service worker (`sw.js`); a browser with no session on such a runtime sees only the code
-  field. Host methods `push_key`, `push_add`, `push_remove`, `push_devices`, `push_here`;
+  field. Host methods `push_key`, `push_add`, `push_remove`, `push_devices`, `push_here`,
+  `devices_signed_in`, `device_sign_out`; `Tokens::info`;
   `ark_ui::push`, `ark_interact::attention::{Notice, notice}`.
 - Settings fit a phone: the sections are a row above the one shown, and a row's controls go
   under its words.

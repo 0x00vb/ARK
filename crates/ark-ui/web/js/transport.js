@@ -108,10 +108,17 @@ export function connect() {
     local: ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname),
     // A page in a browser cannot see the runtime's disk: no native picker.
     pickFolder: async () => undefined,
-    /// Trade a code typed from a signed-in device for a session (ADR 0047). True when it worked.
-    async signIn(code) {
-      const r = await fetch("/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) }).catch(() => null);
+    /// Trade a code typed from a signed-in device for a session (ADR 0047), naming this device.
+    /// True when it worked.
+    async signIn(code, name) {
+      const r = await fetch("/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name }) }).catch(() => null);
       return !!r?.ok;
+    },
+    /// A code for another device (ADR 0047): `{code, expires_ms}`.
+    async pairCode() {
+      const r = await fetch("/pair", { method: "POST", headers, body: "{}" });
+      if (!r.ok) throw new Error("A code could not be made.");
+      return r.json();
     },
     async call(method, params = {}) {
       await ready;
@@ -153,7 +160,7 @@ export function connect() {
           const s = await session();
           if (s && !s.signed_in && (await enter())) return;
           // Signed out where a code signs in: the page asks for it; nothing to retry.
-          if (s && !s.signed_in && s.pairing && !token) return;
+          if (s && !s.signed_in && s.pairing && !token) return fn({ kind: "signed_out" });
           if (failures >= tries()) {
             const retry = entry && !token ? () => location.assign(entry) : () => { failures = 0; open(); };
             fn({ kind: "disconnected", retry });

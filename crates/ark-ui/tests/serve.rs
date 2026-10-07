@@ -670,11 +670,7 @@ async fn a_typed_code_signs_a_phone_in_and_its_notifications_end_with_its_sessio
     let none = raw(port, post("/pair", host, Some(me), "", "{}")).await;
     assert!(none.starts_with("HTTP/1.1 401"), "{none}");
     let auth = format!("Authorization: Bearer {laptop}\r\n");
-    let made = raw(
-        port,
-        post("/pair", host, Some(me), &auth, r#"{"name":"iPhone"}"#),
-    )
-    .await;
+    let made = raw(port, post("/pair", host, Some(me), &auth, "{}")).await;
     assert!(made.starts_with("HTTP/1.1 200"), "{made}");
     let made: Value = serde_json::from_str(made.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     let code = made["code"]
@@ -684,7 +680,7 @@ async fn a_typed_code_signs_a_phone_in_and_its_notifications_end_with_its_sessio
         .replace('-', " ");
 
     // Typed on the phone: a session for 90 days, in a cookie.
-    let body = json!({ "code": code }).to_string();
+    let body = json!({ "code": code, "name": "Phone Safari" }).to_string();
     let signed = raw(port, post("/session", host, Some(me), "", &body)).await;
     assert!(signed.starts_with("HTTP/1.1 200"), "{signed}");
     let (session, attrs) = set_cookie(&signed, "__Host-ark-session").expect("a cookie");
@@ -695,18 +691,22 @@ async fn a_typed_code_signs_a_phone_in_and_its_notifications_end_with_its_sessio
         .and_then(|a| a.trim().parse().ok())
         .unwrap_or_else(|| panic!("{attrs}"));
     assert!(age > 89 * 24 * 3600, "{age}");
-    assert_eq!(tokens.check(session).as_deref(), Some("iPhone"));
+    assert_eq!(
+        tokens.check(session).as_deref(),
+        Some("laptop › Phone Safari"),
+        "named under who made the code"
+    );
 
     // The phone asks for notifications: tied to its session, whatever the page says.
     let cookie = format!("Cookie: __Host-ark-session={session}\r\n");
     let add = json!({ "method": "push_add", "params": {
         "subscription": { "endpoint": "https://web.push.apple.com/abc", "keys": { "p256dh": "BCVx", "auth": "BTBZ" } },
-        "name": "iPhone Safari", "_by": "laptop" } })
+        "name": "Phone Safari", "_by": "laptop" } })
     .to_string();
     let added = raw(port, post("/rpc", host, Some(me), &cookie, &add)).await;
     assert!(added.contains(r#""ok":true"#), "{added}");
     let listed = host_.call("push_devices", json!({})).await.unwrap();
-    assert_eq!(listed[0]["name"], "iPhone Safari");
+    assert_eq!(listed[0]["name"], "Phone Safari");
     let record = ark_ui::push::Device::id("https://web.push.apple.com/abc");
     let ark = Ark::builder().store_root(dir.path()).build().unwrap();
     let d = ark
@@ -715,6 +715,39 @@ async fn a_typed_code_signs_a_phone_in_and_its_notifications_end_with_its_sessio
         .get_record(ark_ui::push::DEVICE, &record)
         .unwrap()
         .unwrap();
-    assert_eq!(d["by"], "iPhone", "the server names who asked");
+    assert_eq!(
+        d["by"], "laptop › Phone Safari",
+        "the server names who asked"
+    );
     assert_eq!(d["origin"], me);
+
+    // Settings › Devices lists it; Sign out ends its session and its notifications.
+    let signed_in = host_.call("devices_signed_in", json!({})).await.unwrap();
+    assert_eq!(signed_in[0]["device"], "Phone Safari");
+    assert_eq!(signed_in[0]["notified"], true);
+    host_
+        .call(
+            "device_sign_out",
+            json!({ "name": "laptop › Phone Safari" }),
+        )
+        .await
+        .unwrap();
+    assert!(tokens.check(session).is_none());
+    assert_eq!(
+        host_.call("push_devices", json!({})).await.unwrap(),
+        json!([])
+    );
+
+    // A device paired by another one goes when that one is revoked.
+    let made = raw(port, post("/pair", host, Some(me), &auth, "{}")).await;
+    let made: Value = serde_json::from_str(made.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let s = tokens
+        .redeem_as(made["code"].as_str().unwrap(), "Tablet Chrome")
+        .unwrap()
+        .unwrap();
+    assert!(tokens.revoke("laptop").unwrap());
+    assert!(
+        tokens.check(&s.token).is_none(),
+        "signed out with what paired it"
+    );
 }

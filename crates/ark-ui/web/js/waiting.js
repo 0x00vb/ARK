@@ -100,7 +100,8 @@ export class Waiting {
     if (!it) return this.api.toast("That was answered or cleared already.");
     if (it.kind !== "question") return this.go(it);
     if (it.project !== this.api.project()?.id) await this.api.openProject(it.project);
-    document.querySelector("#asks .approval")?.scrollIntoView({ block: "nearest" });
+    const card = document.querySelector(`#asks .approval[data-id="${CSS.escape(id)}"]`) || document.querySelector("#asks .approval");
+    card?.scrollIntoView({ block: "nearest" });
   }
 
   /// Go where the work lives: its chat, where the post shows it. Work without a chat shows its

@@ -579,6 +579,7 @@ async function browserview(page) {
         return url?.startsWith("file:") ? Promise.reject(new Error("the Browser does not open that address")) : Promise.resolve({ shown: true });
       },
       act: (a) => (window.calls.push([a]), Promise.resolve()),
+      reach: () => Promise.resolve({ reached: true }),
       listen: (fn) => ((window.emitBrowser = fn), Promise.resolve()),
     };
   });
@@ -643,6 +644,114 @@ async function browserview(page) {
   await until("close");
 }
 scenarios.browserview = browserview;
+
+// The window's view shows nothing when an address does not answer, so the panel asks first and
+// says so; the bar shows a load until the page finishes.
+async function browserdown(page) {
+  await page.evaluate(() => {
+    window.calls = [];
+    window.reached = [];
+    window.up = new Set(["http://localhost:3000", "http://localhost:3000/x"]);
+    window.ark.browserView = {
+      show: (r, url) => (window.calls.push(["show", r, url || null]), Promise.resolve({ shown: true })),
+      act: (a) => (window.calls.push([a]), Promise.resolve()),
+      reach: (url) => {
+        window.reached.push(url);
+        const answer = { reached: window.up.has(url) };
+        // A slow check, overtaken by the next address.
+        return url.includes(":4001") ? new Promise((ok) => setTimeout(() => ok(answer), 400)) : Promise.resolve(answer);
+      },
+      listen: (fn) => ((window.emitBrowser = fn), Promise.resolve()),
+    };
+  });
+  const bar = page.locator(".wb-bar");
+  const input = page.locator(".wb-input");
+  const down = page.locator(".wb-refused");
+  const shows = (u) => page.waitForFunction((u) => window.calls.some((c) => c[0] === "show" && c[2] === u), u);
+  const enter = async (u) => {
+    await input.fill(u);
+    await input.press("Enter");
+  };
+
+  await page.evaluate(() => window.ark.openPanel("browser", { locator: "localhost:3000" }));
+  await shows("http://localhost:3000");
+  assert.equal(await bar.getAttribute("data-loading"), "", "the bar shows the load");
+  assert.equal(await page.locator(".wb-frame-host").getAttribute("data-page"), null, "the pane shows through until a page arrives");
+  // The page arrives at another address (a redirect): white behind it, then done.
+  await page.evaluate(() => window.emitBrowser({ url: "http://localhost:3000/home", loading: true }));
+  assert.equal(await page.locator(".wb-frame-host").getAttribute("data-page"), "");
+  await page.evaluate(() => window.emitBrowser({ url: "http://localhost:3000/home", loading: false }));
+  await page.waitForFunction(() => !document.querySelector(".wb-bar").hasAttribute("data-loading"));
+
+  // Nothing runs on the port: the pane says so, the view steps aside, the bar keeps the address.
+  await enter("localhost:3999");
+  await down.waitFor();
+  assert.equal(await down.locator("p").innerText(), "localhost:3999 can't be reached");
+  assert.equal(await down.locator("button").innerText(), "Try again");
+  assert.equal(await input.inputValue(), "http://localhost:3999");
+  assert.ok(await input.evaluate((el) => el === document.activeElement), "focus stays in the bar");
+  await page.waitForFunction(() => window.calls.at(-1)?.[0] === "hide");
+  assert.ok(!(await page.evaluate(() => window.calls.some((c) => c[2] === "http://localhost:3999"))));
+  await page.waitForFunction(() => !document.querySelector(".wb-bar").hasAttribute("data-loading"));
+  // The view's late news does not replace what was typed.
+  await page.evaluate(() => window.emitBrowser({ url: "http://localhost:3000/other", loading: false }));
+  assert.equal(await input.inputValue(), "http://localhost:3999");
+  const box = await down.boundingBox();
+  const pane = await page.locator("#pane").boundingBox();
+  assert.ok(box.x >= pane.x && box.x + box.width <= pane.x + pane.width + 1, "the message fits the pane");
+
+  // Try again asks again; still down, then up.
+  const asked = await page.evaluate(() => window.reached.length);
+  await down.locator("button").click();
+  await page.waitForFunction((n) => window.reached.length > n, asked);
+  assert.ok(await down.isVisible());
+  await page.evaluate(() => window.up.add("http://localhost:3999"));
+  await down.locator("button").click();
+  await shows("http://localhost:3999");
+  assert.ok(await down.isHidden());
+
+  // Reload while down tries again; Back returns to the page before.
+  await page.evaluate(() => window.up.delete("http://localhost:3999"));
+  await enter("localhost:3999");
+  await down.waitFor();
+  const before = await page.evaluate(() => window.reached.length);
+  await page.locator('.wb-bar button[aria-label="Reload"]').click();
+  await page.waitForFunction((n) => window.reached.length > n, before);
+  await page.locator('.wb-bar button[aria-label="Back"]').click();
+  assert.ok(await down.isHidden());
+  assert.equal(await input.inputValue(), "http://localhost:3000/home", "the bar names the page come back to");
+  await page.waitForFunction(() => window.calls.at(-1)?.[0] === "show");
+  assert.ok(!(await page.evaluate(() => window.calls.some((c) => c[0] === "back"))), "Back from the message does not move the page");
+
+  // A slow check overtaken by the next address counts for nothing.
+  await enter("localhost:4001");
+  await enter("localhost:3000/x");
+  await shows("http://localhost:3000/x");
+  await page.waitForTimeout(600);
+  assert.ok(await down.isHidden(), "the overtaken check does not say can't be reached");
+
+  // The page before finishes while the next address is checked: the bar, the line and Try again
+  // stay with the address typed.
+  await enter("localhost:4001");
+  await page.evaluate(() => window.emitBrowser({ url: "http://localhost:3000/x", loading: false }));
+  assert.equal(await bar.getAttribute("data-loading"), "", "the line goes on while the address is checked");
+  await down.waitFor();
+  assert.equal(await down.locator("p").innerText(), "localhost:4001 can't be reached");
+  assert.equal(await input.inputValue(), "http://localhost:4001");
+  await down.locator("button").focus();
+  await page.evaluate(() => window.up.add("http://localhost:4001"));
+  await down.locator("button").press("Enter");
+  await shows("http://localhost:4001");
+  assert.equal(await page.evaluate(() => window.reached.at(-1)), "http://localhost:4001", "Try again asks for the address typed");
+  assert.ok(await input.evaluate((el) => el === document.activeElement), "focus goes back to the bar");
+
+  // An address the view refuses is not asked about.
+  const n = await page.evaluate(() => window.reached.length);
+  await enter("file:///tmp/a.html");
+  await shows("file:///tmp/a.html");
+  assert.equal(await page.evaluate(() => window.reached.length), n);
+}
+scenarios.browserdown = browserdown;
 
 // In a browser the panel is a frame: a page that refuses frames says so, with a way out.
 async function framerefused(page) {

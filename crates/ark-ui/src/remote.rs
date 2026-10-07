@@ -259,7 +259,9 @@ pub fn run_window(
     mut context: tauri::Context<tauri::Wry>,
 ) -> std::process::ExitCode {
     let client = Client::new(url, token);
-    let target = match tauri::async_runtime::block_on(client.hello()) {
+    let target = match plain_http_refused(url)
+        .map_or_else(|| tauri::async_runtime::block_on(client.hello()), Err)
+    {
         Ok(_) => client.page_url(),
         Err(e) => unreachable_page(url, &format!("{e:#}")),
     };
@@ -298,6 +300,9 @@ pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
     let app = crate::desktop::APP
         .get()
         .ok_or_else(|| anyhow::anyhow!("there is no window to open {url} in"))?;
+    if let Some(e) = plain_http_refused(url) {
+        return Err(e);
+    }
     let client = Client::new(url, token);
     client.hello().await?;
     let target: tauri::Url = client.page_url().parse()?;
@@ -311,6 +316,26 @@ pub async fn visit(url: &str, token: &str) -> anyhow::Result<()> {
         return Err(e.into());
     }
     Ok(())
+}
+
+/// On macOS a window loads plain http only from this computer, its network and names without
+/// a dot: macOS's own exceptions (ATS), which still hold where an app lets its
+/// pages use http (the Browser view, ADR 0044). A runtime elsewhere by name opens over https,
+/// so its token never travels in clear. Elsewhere nothing is refused.
+#[cfg(feature = "desktop")]
+fn plain_http_refused(url: &str) -> Option<anyhow::Error> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let parsed = reqwest::Url::parse(url).ok()?;
+    let host = parsed.host_str()?.to_ascii_lowercase();
+    let allowed = parsed.scheme() != "http"
+        || host.starts_with('[')
+        || host.parse::<std::net::IpAddr>().is_ok()
+        || !host.contains('.')
+        || host.ends_with(".local")
+        || host.ends_with(".localhost");
+    (!allowed).then(|| anyhow::anyhow!("{url} is plain http: open ARK there over https"))
 }
 
 /// A small page that says the runtime could not be opened, as a `data:` address.
@@ -339,4 +364,25 @@ fn unreachable_page(url: &str, error: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(all(test, feature = "desktop", target_os = "macos"))]
+mod tests {
+    #[test]
+    fn a_runtime_elsewhere_by_name_opens_over_https_on_macos() {
+        let refused = |u: &str| super::plain_http_refused(u).is_some();
+        assert!(refused("http://ark.example.com"));
+        assert!(refused("http://box.tailnet.ts.net:7700/"));
+        for allowed in [
+            "https://ark.example.com",
+            "http://127.0.0.1:7700",
+            "http://192.168.1.5:7700",
+            "http://[::1]:7700",
+            "http://box:7700",
+            "http://box.local:7700",
+            "http://app.localhost:7700",
+        ] {
+            assert!(!refused(allowed), "{allowed}");
+        }
+    }
 }

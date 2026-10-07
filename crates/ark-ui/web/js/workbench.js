@@ -129,6 +129,10 @@ function terminal(el, params, ark) {
 const hostOf = (u) => {
   try { return new URL(u).hostname; } catch { return u; }
 };
+// With the port: for a dev server the port is the point (`localhost:3000`).
+const hostPortOf = (u) => {
+  try { return new URL(u).host || u; } catch { return u; }
+};
 
 // What ARK draws over the pane: menus, the palette, dialogs, toasts, the narrow window's sidebar,
 // and anything an app marks `data-ark-overlay`. The window's Browser view sits above the page,
@@ -171,7 +175,8 @@ function browser(el, params, ark) {
   const back = h("button.icon-btn", { type: "button", title: "Back", "aria-label": "Back", onclick: () => nav.back() }, icon("arrow-left"));
   const reload = h("button.icon-btn", { type: "button", title: "Reload", "aria-label": "Reload", onclick: () => s.url && nav.reload() }, icon("reload"));
   const outBtn = h("button.icon-btn", { type: "button", title: "Open in your browser", "aria-label": "Open in your browser", onclick: out }, icon("external"));
-  el.append(h("div.wb-bar", back, reload, address, outBtn), host);
+  const bar = h("div.wb-bar", back, reload, address, outBtn);
+  el.append(bar, host);
 
   const shown = (u) => {
     s.url = u;
@@ -179,17 +184,38 @@ function browser(el, params, ark) {
     ark.setPanelTitle("browser", hostOf(u));
     ark.reportFocus();
   };
-  // An address the view refuses (the app's own pages, files): the bar goes back to the page.
-  const failed = (u, e) => {
-    ark.toast(e?.message || String(e));
-    if (s.url !== u) return;
+  // The bar goes back to the page shown.
+  const restore = () => {
     address.value = s.url = s.shown;
     blank.hidden = !!s.shown;
     ark.setPanelTitle("browser", s.shown ? hostOf(s.shown) : "Browser");
     ark.reportFocus();
   };
-  const nav = view ? nativeBrowser(host, view, (u) => shown((s.shown = u)), failed) : framedBrowser(host, ark, out);
+  // An address the view refuses (the app's own pages, files): says why.
+  const failed = (u, e) => {
+    ark.toast(e?.message || String(e));
+    if (s.url === u) restore();
+  };
+  // Nothing answers at the address (nothing runs on that port, a name nobody knows). The bar
+  // keeps what was typed.
+  const downText = h("p");
+  const down = h("div.wb-empty.wb-refused", { hidden: true }, downText, h("button.btn", { type: "button", onclick: () => nav.reload() }, icon("reload"), "Try again"));
+  const ui = {
+    shown: (u) => shown((s.shown = u)),
+    failed,
+    restore,
+    down: (u) => {
+      if (u) downText.textContent = `${hostPortOf(u)} can't be reached`;
+      else if (down.contains(document.activeElement)) address.focus();
+      down.hidden = !u;
+    },
+    loading: (on) => bar.toggleAttribute("data-loading", on),
+    // A page arrived: what shows through it is white, as a page without a background expects.
+    page: () => host.setAttribute("data-page", ""),
+  };
+  const nav = view ? nativeBrowser(host, view, ui) : framedBrowser(host, ark, out);
   host.append(blank);
+  if (view) host.append(down);
 
   const go = (u) => {
     u = String(u || "").trim();
@@ -213,11 +239,61 @@ function browser(el, params, ark) {
 /// In the window: the page in a webview of its own, kept over `host`. Its place is sent once it
 /// holds still for a frame (not every frame of the pane opening), one call at a time; while the
 /// tab is out of sight the place is looked at a few times a second only.
-function nativeBrowser(host, view, shown, failed) {
-  const s = { alive: true, busy: false, created: false, visible: false, wait: false, last: "", prev: "", frame: 0, pending: "" };
+function nativeBrowser(host, view, ui) {
+  const s = { alive: true, busy: false, created: false, visible: false, wait: false, last: "", prev: "", frame: 0, pending: "", seq: 0, parked: false, checking: false, asked: "", since: 0, cap: 0, off: 0 };
+  // The bar shows a load from Enter until the page finishes, at least long enough to be seen (a
+  // refusal on this computer comes back at once), at most 30 s: a load that fails after the
+  // address answered is not reported by the view.
+  const loading = (on) => {
+    clearTimeout(s.cap);
+    clearTimeout(s.off);
+    if (on) {
+      s.since ||= performance.now();
+      ui.loading(true);
+      s.cap = setTimeout(() => loading(false), 30000);
+      return;
+    }
+    s.off = setTimeout(() => {
+      s.since = 0;
+      ui.loading(false);
+    }, Math.max(0, 300 - (performance.now() - s.since)));
+  };
   view.listen((ev) => {
-    if (ev.url && !ev.loading && /^https?:/i.test(ev.url)) shown(ev.url);
+    // While an address is checked, or the pane says it does not answer, the view's late news
+    // (the page before finishing) is not shown.
+    if (!s.alive || s.parked || s.checking) return;
+    if (ev.loading) {
+      ui.page();
+      loading(true);
+      return;
+    }
+    loading(false);
+    if (ev.url && /^https?:/i.test(ev.url)) ui.shown(ev.url);
   }).catch(() => {});
+  const open = (u) => {
+    s.parked = false;
+    ui.down(null);
+    s.pending = u;
+  };
+  // A failed load shows nothing in the view, so the window is asked first whether anything
+  // answers there. Only the latest address counts.
+  const load = (u) => {
+    const n = ++s.seq;
+    s.asked = u;
+    loading(true);
+    s.checking = false;
+    if (!/^https?:/i.test(u)) return open(u);
+    s.checking = true;
+    view.reach(u).then((r) => r?.reached !== false, () => true).then((ok) => {
+      if (n !== s.seq || !s.alive) return;
+      s.checking = false;
+      if (ok) return open(u);
+      s.parked = true;
+      s.pending = "";
+      ui.down(u);
+      loading(false);
+    });
+  };
   // The view is made only while the person is in the window (making it brings the app to the
   // front); the window coming to the front asks again.
   const onFocus = () => (s.wait = false);
@@ -226,7 +302,7 @@ function nativeBrowser(host, view, shown, failed) {
     if (!s.alive) return;
     requestAnimationFrame(tick);
     if (s.busy || (!s.visible && !s.pending && s.frame++ % 8)) return;
-    const place = placeOf(host);
+    const place = s.parked ? null : placeOf(host);
     const key = place ? `${place.x},${place.y},${place.width},${place.height}` : "";
     const still = key === s.prev;
     s.prev = key;
@@ -257,16 +333,28 @@ function nativeBrowser(host, view, shown, failed) {
     }, (e) => {
       s.busy = false;
       if (s.pending === url) s.pending = "";
-      if (url) failed(url, e);
+      if (url) {
+        loading(false);
+        ui.failed(url, e);
+      }
     });
   };
   requestAnimationFrame(tick);
   return {
-    load: (u) => (s.pending = u),
-    back: () => view.act("back").catch(() => {}),
-    reload: () => view.act("reload").catch(() => {}),
+    load,
+    // From "can't be reached", Back returns to the page before it; Reload tries again.
+    back: () => {
+      if (!s.parked) return view.act("back").catch(() => {});
+      s.seq++;
+      s.parked = s.checking = false;
+      ui.down(null);
+      ui.restore();
+    },
+    reload: () => (s.parked ? load(s.asked) : view.act("reload").catch(() => {})),
     dispose: () => {
       s.alive = false;
+      clearTimeout(s.cap);
+      clearTimeout(s.off);
       removeEventListener("focus", onFocus);
       view.act("close").catch(() => {});
     },

@@ -252,6 +252,11 @@ async fn the_browser_view_follows_the_panel_and_steps_aside_for_menus() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_address_that_does_not_answer_says_so_and_can_be_tried_again() {
+    drive("browserdown", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_page_that_refuses_frames_says_so_in_a_browser() {
     drive("framerefused", vec![], Duration::ZERO).await;
 }

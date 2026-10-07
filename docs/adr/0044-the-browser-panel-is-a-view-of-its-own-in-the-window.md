@@ -67,6 +67,26 @@ body, and answers `framable: true` when it cannot tell.
 - While the tab is out of sight the page looks at the view's place a few times a second, not
   every frame.
 - Windows and Linux have multiwebview too; untested (macOS ships).
+- A load that fails shows nothing in the view, and wry reports no failure (only commit and
+  finish). So before loading a typed address the panel asks `ark_browser_reach`: on this
+  computer (`localhost`, `*.localhost` without DNS, loopback) whether the port takes a
+  connection, nothing sent; elsewhere only whether the name is known, nothing connected, so a
+  proxy never matters (a network where only a proxy resolves names would say "can't be
+  reached"). Not reached: the pane says "`host:port` can't be reached" with Try again, the view
+  steps aside, and the bar keeps the address; Back returns to the page before. A load that fails
+  after that (TLS, a reset, a link inside the page to an address that does not answer) still
+  shows nothing; the bar's loading line stops after 30 s.
+- The view is clear (`background_color` with alpha 0, wry's `drawsBackground` off) for its
+  whole life: the pane's colour shows through until a page arrives, then the panel paints white
+  behind it, as a page without a background expects. The macOS call that sets the colour later
+  never turns the background back on, so it is not used. Rubber-banding past a dark page shows
+  white at the edges, and a page that sets only `color-scheme: dark` shows on white.
+- An app on macOS that wants plain http pages in the Browser sets
+  `NSAppTransportSecurity > NSAllowsArbitraryLoadsInWebContent` (ARK Desktop does); without it
+  only this computer, its network and names without a dot load over http. The key also applies
+  to the window's own webview, so on macOS `remote::visit` and `run_window` refuse a runtime
+  elsewhere by name over plain http, before its token is sent (ATS's own exceptions, IP
+  addresses, names without a dot and `.local`, still open over http).
 
 ## Check
 - `desktop.rs` tests: `the_browser_never_loads_the_apps_own_page` (refused and allowed
@@ -77,7 +97,21 @@ body, and answers `framable: true` when it cannot tell.
   `the_browser_view_follows_the_panel_and_steps_aside_for_menus` (its place inside the pane and
   clear of the grip, no calls while nothing moves, the address bar following a load, a refused
   address, the palette, another tab, the pane closed, Back, Reload, the tab closed) and
-  `a_page_that_refuses_frames_says_so_in_a_browser`.
+  `a_page_that_refuses_frames_says_so_in_a_browser`, and
+  `an_address_that_does_not_answer_says_so_and_can_be_tried_again` (the loading line, the pane
+  until a page arrives at a redirected address, "can't be reached" with the view aside and the
+  typed address kept, late view news ignored, Try again down then up, Reload and Back from the
+  message, a slow check overtaken by the next address, refused addresses not asked). It fails
+  when the panel loads without asking.
+- `desktop.rs` tests: `this_computer_is_localhost_and_loopback_only`,
+  `the_browser_asks_this_computer_whether_its_port_answers` (by number, `localhost` and
+  `app.localhost` with a listener, then closed). `remote.rs`:
+  `a_runtime_elsewhere_by_name_opens_over_https_on_macos`.
+- A bundled probe app with WKWebView, as ARK Desktop is (2026-10-07): `localhost` with a
+  server loads; a closed port fails with -1004 and draws nothing; plain http to a public name
+  fails with -1022 (ATS) and loads with `NSAllowsArbitraryLoadsInWebContent`; a view with
+  `drawsBackground` off draws a page without a background on clear pixels (alpha 0), a default
+  view on white.
 - Natively in ARK Desktop (2026-10-07): duckduckgo.com, which refuses frames, showed in the
   panel. Still to check by a person at the screen: a Next.js dev server with those headers and
   github.com with a sign-in, a Desktop dialog over the pane, a window resize, a project switch, a

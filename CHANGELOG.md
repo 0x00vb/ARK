@@ -17,6 +17,10 @@ What changed for people building on ARK, per release. Not a commit log.
   own overlays carry `data-ark-overlay`. In a plain browser the panel stays a frame and says
   when a page refuses (`frame_check`). `ark-ui` now needs Tauri's `unstable` feature (`~2.12`).
 - `ark_tools::web::public_client()`: a client that only connects to public addresses.
+- The Browser view says when an address does not answer ("localhost:3000 can't be reached",
+  Try again) instead of staying white, shows a loading line in the bar until the page
+  finishes, and shows the pane's colour, not a white block, until the page arrives
+  (`ark_browser_reach`, ADR 0044).
 
 - Project processes (ADR 0041, `ark-proc`, `ArkBuilder::processes`): agents start, watch and
   stop long-running commands in the project (`process.start`, `list`, `stop`): a dev server, a
@@ -59,6 +63,9 @@ What changed for people building on ARK, per release. Not a commit log.
   `picture`; `ComputerService::picture`, `Engine::picture`.
 
 ### Changed
+- On macOS, `remote::visit` and `run_window` refuse a runtime elsewhere by name over plain
+  http (use https); IP addresses, names without a dot and `.local` still open over http. The
+  token is no longer sent in clear there.
 - `present` says what `locator` is for each view: the address for the browser (this machine's
   too) and the command for the terminal. An agent asked to show a page on `localhost` now opens
   it in the person's Browser view instead of giving up.

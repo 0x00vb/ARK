@@ -35,6 +35,7 @@ export function connect() {
       browserView: {
         show: (r, url) => tauri.core.invoke("ark_browser_show", { url: url || null, x: r.x, y: r.y, width: r.width, height: r.height }),
         act: (action) => tauri.core.invoke("ark_browser", { action }),
+        reach: (url) => tauri.core.invoke("ark_browser_reach", { url }),
         listen(fn) {
           const ch = new tauri.core.Channel();
           ch.onmessage = fn;

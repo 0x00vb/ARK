@@ -37,7 +37,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Top bar | The title (the chat's, or the project's over one of its views). With app views marked `nav`: tabs, "Chat" first. On the right, a + menu: Terminal, Browser, Files, then app panels marked `nav`. |
 | Side pane | What the person or the agent opened, beside the conversation: Terminal, Browser, Files, an artifact, an evidence record, an app panel. Tabs, resizable. Closed, the conversation gets the width. |
 | Terminal | The project's shell, in its folder (one per project; closing the tab keeps it, reopening re-attaches with its scrollback). The agent's `present` may type a command at the prompt; the person presses Enter. |
-| Browser | A page with an address bar; words become a search, and `localhost:3000` (or `127.0.0.1`, `[::1]`, `*.localhost`) opens over http. In the window the page is a view of its own over the pane (ADR 0044), so any site shows; it steps aside while ARK's menus, palette or dialogs cover it. In a browser it is a frame: a page that refuses frames says so, with Open in your browser (`frame_check`; pages on this machine or a private network are not asked and may show blank). |
+| Browser | A page with an address bar; words become a search, and `localhost:3000` (or `127.0.0.1`, `[::1]`, `*.localhost`) opens over http. In the window the page is a view of its own over the pane (ADR 0044), so any site shows; it steps aside while ARK's menus, palette or dialogs cover it. An address that does not answer says "can't be reached" with Try again; a line under the bar shows a load. In a browser it is a frame: a page that refuses frames says so, with Open in your browser (`frame_check`; pages on this machine or a private network are not asked and may show blank). |
 | Processes | When the app offers processes (ADR 0041): what agents started (command, folder, state, address), the selected one's live output, Stop, and Open in the Browser. Opens when a process starts in the project the window shows; a process started with `open` opens that page in the Browser once ready. |
 | Files | The project's folder. A file opens in a tab of its own (see [Files](#files)). A path outside the folder is refused. |
 | A file | A spreadsheet as a grid, a document as a page, text in an editor: the file the agent works on, edited in place. A turn that wrote files ends with a card per file that opens it. |
@@ -192,7 +192,7 @@ this Mac") only when it is true.
 In the window the Browser panel's page is drawn above the page (ADR 0044). An app's element that
 can cover the pane (a dialog, a menu, a sheet) carries `data-ark-overlay`, and the Browser steps
 aside while it is shown. `ark.browserView` is the window's carrier for the Browser panel
-(`undefined` in a browser); apps do not need it.
+(`undefined` in a browser: `show`, `act`, `reach`, `listen`); apps do not need it.
 
 A small real viewer, ARK Desktop's diagrams (`ui/diagram.js`, trimmed):
 

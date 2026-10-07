@@ -150,6 +150,64 @@ fn browser_may_open(url: &tauri::Url) -> bool {
     !url.host_str().is_some_and(|h| APP_HOSTS.contains(&h))
 }
 
+/// The addresses of `url` when it names this computer: `localhost` and its subdomains (RFC
+/// 6761, never asked of DNS), loopback and the unspecified address. `None` for anything else.
+fn this_computer(url: &tauri::Url) -> Option<Vec<std::net::SocketAddr>> {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    let port = url.port_or_known_default()?;
+    let host = url
+        .host_str()?
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
+    let ips: Vec<IpAddr> = if host == "localhost" || host.ends_with(".localhost") {
+        vec![Ipv4Addr::LOCALHOST.into(), Ipv6Addr::LOCALHOST.into()]
+    } else {
+        match host.parse::<IpAddr>() {
+            Ok(ip) if ip.is_loopback() || ip.is_unspecified() => vec![ip],
+            _ => return None,
+        }
+    };
+    Some(
+        ips.into_iter()
+            .map(|ip| SocketAddr::new(ip, port))
+            .collect(),
+    )
+}
+
+/// Whether anything answers at `url`, as far as can be told without loading it. A failed load
+/// shows nothing in the view and is not reported, so the panel asks first. On this computer:
+/// whether the port takes a connection (nothing is sent). Elsewhere: whether the name is known;
+/// nothing is connected, so a proxy never matters. A check that takes too long counts as
+/// reached, and the view tries.
+async fn reach(url: &tauri::Url) -> bool {
+    use tokio::time::{timeout, Duration};
+    let wait = Duration::from_secs(2);
+    if !matches!(url.scheme(), "http" | "https") {
+        return true;
+    }
+    if let Some(addrs) = this_computer(url) {
+        for a in addrs {
+            match timeout(wait, tokio::net::TcpStream::connect(a)).await {
+                Ok(Ok(_)) | Err(_) => return true,
+                Ok(Err(_)) => {}
+            }
+        }
+        return false;
+    }
+    let (Some(host), Some(port)) = (url.host_str(), url.port_or_known_default()) else {
+        return true;
+    };
+    if host.starts_with('[') || host.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    match timeout(wait, tokio::net::lookup_host((host, port))).await {
+        Ok(Ok(mut found)) => found.next().is_some(),
+        Ok(Err(_)) => false,
+        Err(_) => true,
+    }
+}
+
 /// The window back on its own page.
 pub(crate) fn go_home(webview: &tauri::Webview) {
     if let Some(home) = HOME.get() {
@@ -265,6 +323,9 @@ fn browser_builder(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::W
     let (loads, opens) = (app.clone(), app.clone());
     tauri::webview::WebviewBuilder::new(BROWSER, WebviewUrl::External(url))
         .data_store_identifier(BROWSER_STORE)
+        // Clear for its whole life: the panel paints what shows through, its own colour until a
+        // page arrives, then white (a page without a background of its own expects white).
+        .background_color(tauri::webview::Color(0, 0, 0, 0))
         .on_page_load(move |_, p| {
             let loading = matches!(p.event(), PageLoadEvent::Started);
             browser_event(
@@ -353,6 +414,17 @@ async fn ark_browser_show(
     Ok(serde_json::json!({ "shown": true }))
 }
 
+/// Whether anything answers at `url` (`{ reached }`), asked before the panel loads an address.
+#[tauri::command]
+async fn ark_browser_reach(webview: tauri::Webview, url: String) -> Result<Value, String> {
+    from_own_page(&webview)?;
+    let reached = match url.parse::<tauri::Url>() {
+        Ok(u) => reach(&u).await,
+        Err(_) => true,
+    };
+    Ok(serde_json::json!({ "reached": reached }))
+}
+
 /// Where the Browser's loads (`{url, loading}`) go: the page that asks.
 #[tauri::command]
 fn ark_browser_events(
@@ -417,6 +489,7 @@ pub(crate) fn run(
             ark_pick_folder,
             ark_browser_show,
             ark_browser_events,
+            ark_browser_reach,
             ark_browser
         ])
         // The window's page loads again (a reload, a visit to a runtime elsewhere, the way
@@ -609,5 +682,36 @@ mod tests {
         ] {
             assert!(may(allowed), "{allowed}");
         }
+    }
+
+    #[test]
+    fn this_computer_is_localhost_and_loopback_only() {
+        let here = |u: &str| this_computer(&u.parse().unwrap()).map(|a| a.len());
+        assert_eq!(here("http://localhost:3000/"), Some(2));
+        assert_eq!(here("http://app.localhost:3000/"), Some(2));
+        assert_eq!(here("http://127.0.0.1:8080/"), Some(1));
+        assert_eq!(here("http://[::1]:8080/"), Some(1));
+        assert_eq!(here("http://0.0.0.0:8080/"), Some(1));
+        assert_eq!(here("http://10.0.0.1/"), None);
+        assert_eq!(here("https://example.com/"), None);
+        assert_eq!(here("https://localhost.example.com/"), None);
+    }
+
+    /// A port nothing listens on is not reached; a listening one is, by name (`localhost` and
+    /// its subdomains go to this computer without DNS) or by number.
+    #[tokio::test]
+    async fn the_browser_asks_this_computer_whether_its_port_answers() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let reached = |u: String| async move { reach(&u.parse().unwrap()).await };
+        assert!(reached(format!("http://127.0.0.1:{port}/")).await);
+        assert!(reached(format!("http://localhost:{port}/")).await);
+        assert!(reached(format!("http://app.localhost:{port}/")).await);
+        drop(listener);
+        assert!(!reached(format!("http://localhost:{port}/")).await);
+        assert!(!reached(format!("http://127.0.0.1:{port}/")).await);
+        // Not the Browser's to judge: the view says what it refuses.
+        assert!(reached("file:///etc/hosts".into()).await);
+        assert!(reached("about:blank".into()).await);
     }
 }

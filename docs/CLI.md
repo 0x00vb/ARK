@@ -93,7 +93,17 @@ Every app has these. Apps add their own (`/device`, `/chapter`, ...), listed fir
 | `/debug [on\|off]` | Show arguments, durations and model calls inline |
 | `/exit` | Leave |
 
-With an orchestrator, `/agents`, `/agent` and `/task` are added ([`ORCHESTRATION.md`](ORCHESTRATION.md)).
+With an orchestrator, `/agents`, `/waiting`, `/agent` and `/task` are added ([`ORCHESTRATION.md`](ORCHESTRATION.md)).
+
+`/waiting` lists what waits for you in every project: questions agents' tasks keep, work you
+started that failed, and results posted into a chat while you were elsewhere (ADR 0043). The
+numbers are those of the list you saw last: `/waiting 2` opens item 2 (a question shows its
+answers; a result or a failure shows its text and is cleared), `/waiting 2 once` answers a
+question (`session`, `always`, `deny`), `/waiting clear` clears every result and failure (the
+work stays in its chat and in `/agents`). When the count changes, the prompt is preceded by one
+dim line: `2 waiting for you · /waiting`. Opening a chat with `/resume` clears what was posted
+there. An agent's question that a turn showed and nobody answered stays open when the turn
+ends; the next turn asks it again.
 
 ## Approvals
 

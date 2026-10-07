@@ -72,6 +72,42 @@ async fn forward_orchestration(
     }
 }
 
+/// Tell every window when what waits for the person may have changed, in any project
+/// (`{kind: "attention"}`; a window reads `attention` again). A result posted into the chat
+/// windows show is seen there, so it never waits.
+async fn forward_attention(
+    host: std::sync::Weak<Host>,
+    mut rx: broadcast::Receiver<ark_interact::ark_orchestrate::OrchEvent>,
+) {
+    use ark_interact::ark_orchestrate::EventKind;
+    loop {
+        let ev = match rx.recv().await {
+            Ok(ev) => ev,
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                let Some(host) = host.upgrade() else { return };
+                host.emit(json!({ "kind": "attention" }));
+                continue;
+            }
+            Err(broadcast::error::RecvError::Closed) => return,
+        };
+        let Some(host) = host.upgrade() else { return };
+        match &ev.kind {
+            EventKind::Asked { .. } | EventKind::TaskFinished { .. } => {}
+            // Answered from any client (the terminal's `/waiting` too): its card goes.
+            EventKind::Answered { question, .. } => {
+                host.emit(json!({ "kind": "approval_closed", "id": question }));
+            }
+            EventKind::Posted { session, .. } => {
+                if *session == host.session_id() {
+                    ark_interact::attention::seen_chat(&host.engine, session);
+                }
+            }
+            _ => continue,
+        }
+        host.emit(json!({ "kind": "attention" }));
+    }
+}
+
 /// `{kind: "orch", event, line, tone, activity}` for one orchestration event (see
 /// [`forward_orchestration`]).
 fn orch_event(
@@ -429,6 +465,10 @@ impl Host {
         host.refresh().await;
         let first = Arc::downgrade(&host.cur());
         tokio::spawn(forward_approvals(host.clone(), approvals, first));
+        tokio::spawn(forward_attention(
+            Arc::downgrade(&host),
+            host.orchs.subscribe(),
+        ));
         if let Some(c) = &host.computer {
             tokio::spawn(forward_computer(Arc::downgrade(&host), c.watch()));
         }
@@ -581,14 +621,30 @@ impl Host {
 
     /// Questions tasks keep whose run is not waiting live in this process (it restarted), in
     /// the shape `hello` lists questions. Their id is the question's.
+    /// The project an agent's task works in (`{id, name}`), so its question can say where it
+    /// comes from when the window shows another project.
+    fn task_project(&self, task: Option<&str>) -> Value {
+        let Some(task) = task else { return Value::Null };
+        self.orchs
+            .list()
+            .into_iter()
+            .find(|o| o.task(task).is_some())
+            .map(|o| json!({ "id": o.project().id, "name": o.project().name }))
+            .unwrap_or(Value::Null)
+    }
+
     fn kept_questions(&self, live: &[Value]) -> Vec<Value> {
         let asked_live = |task: &str| live.iter().any(|q| q["request"]["task"] == json!(task));
         self.orchs
             .list()
             .iter()
-            .flat_map(|o| o.questions())
-            .filter(|t| !asked_live(&t.id))
-            .filter_map(|t| {
+            .flat_map(|o| {
+                let p = o.project();
+                let project = json!({ "id": p.id, "name": p.name });
+                o.questions().into_iter().map(move |t| (t, project.clone()))
+            })
+            .filter(|(t, _)| !asked_live(&t.id))
+            .filter_map(|(t, project)| {
                 let q = t.question?;
                 Some(json!({
                     "id": q.id,
@@ -598,6 +654,7 @@ impl Host {
                     "choices": ark_interact::approval_choices(&q.request),
                     "session": Value::Null,
                     "chat": Value::Null,
+                    "project": project,
                 }))
             })
             .collect()
@@ -706,7 +763,7 @@ impl Host {
                     .lock()
                     .unwrap()
                     .iter()
-                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"], "session": req["session"], "chat": req["chat"] }))
+                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"], "session": req["session"], "chat": req["chat"], "project": req["project"] }))
                     .collect();
                 pending.extend(self.kept_questions(&pending));
                 let cur = self.cur();
@@ -808,6 +865,30 @@ impl Host {
                     r.ctl.cancel.cancel();
                 }
                 Ok(json!({}))
+            }
+            // What waits for the person in any project (ADR 0043): the same list as `/waiting`.
+            "attention" => Ok(serde_json::to_value(ark_interact::attention::list(
+                &self.engine,
+                &self.labels,
+            ))?),
+            // Open or clear one item. Opening a result or a failure clears it; the window then
+            // shows where it lives (its chat, or its agent's task).
+            "attention_open" | "attention_clear" => {
+                let id = s("id");
+                let item = ark_interact::attention::list(&self.engine, &self.labels)
+                    .into_iter()
+                    .find(|i| i.id == id)
+                    .ok_or_else(|| anyhow::anyhow!("that is no longer waiting"))?;
+                if !item.is_question() {
+                    ark_interact::attention::clear(&self.engine, &item)?;
+                    self.emit(json!({ "kind": "attention" }));
+                } else if method == "attention_clear" {
+                    anyhow::bail!("a question leaves when it is answered");
+                }
+                let text = ark_interact::attention::text(&self.engine, &item);
+                let mut v = serde_json::to_value(item)?;
+                v["text"] = json!(text);
+                Ok(v)
             }
             "approve" => {
                 let decision: ApprovalDecision =
@@ -930,14 +1011,17 @@ impl Host {
                     .flatten()
                     .and_then(|r| r["id"].as_str().map(str::to_string))
                     .unwrap_or_else(|| id.clone());
-                self.switch(Target::Session(target), move |ix| {
-                    if ix.resume(&id)? {
-                        Ok(())
-                    } else {
-                        anyhow::bail!("no session matches `{id}`")
-                    }
-                })
-                .await
+                let opened = self
+                    .switch(Target::Session(target.clone()), move |ix| {
+                        if ix.resume(&id)? {
+                            Ok(())
+                        } else {
+                            anyhow::bail!("no session matches `{id}`")
+                        }
+                    })
+                    .await?;
+                self.seen();
+                Ok(opened)
             }
             "rename_session" => {
                 let (id, title) = (s("id"), s("title"));
@@ -961,11 +1045,13 @@ impl Host {
                     ix.switch_project(&name).map(|_| ())
                 })
                 .await
+                .inspect(|_| self.seen())
             }
             "open_project" => {
                 let id = s("id");
                 self.switch(Target::Change, move |ix| ix.open_project(&id).map(|_| ()))
                     .await
+                    .inspect(|_| self.seen())
             }
             // A folder becomes a project (or opens the one it already is); a bare name is
             // a project with a scratch folder.
@@ -1271,6 +1357,7 @@ impl Host {
                                 "error": t.error,
                                 "outputs": t.outputs,
                                 "finished_ms": t.finished_ms,
+                                "question": t.question,
                             }),
                         );
                     }
@@ -1537,6 +1624,14 @@ impl Host {
     /// Move the windows to another chat. A chat running a turn stays live in the background and
     /// a new conversation takes its place; a chat already live (`target`, or wherever `f` lands)
     /// is brought forward as it is, so no session is ever open twice.
+    /// The chat now shown has been seen: what was posted into it no longer waits. A chat that
+    /// was live in the background is brought forward without `Interaction::resume`, and a
+    /// project opens on its latest chat, so this runs after every move to another chat.
+    fn seen(&self) {
+        ark_interact::attention::seen_chat(&self.engine, &self.session_id());
+        self.emit(json!({ "kind": "attention" }));
+    }
+
     async fn switch(
         self: &Arc<Self>,
         target: Target,
@@ -1905,13 +2000,14 @@ async fn forward_approvals(
             Some(a) => (json!(a.session), json!(a.title)),
             None => (Value::Null, Value::Null),
         };
-        let shown = json!({ "request": pending.request, "line": line, "title": title, "choices": choices, "session": session, "chat": chat });
+        let project = host.task_project(pending.request.task.as_deref());
+        let shown = json!({ "request": pending.request, "line": line, "title": title, "choices": choices, "session": session, "chat": chat, "project": project });
         host.approvals
             .lock()
             .unwrap()
             .insert(id, (shown.clone(), reply));
         host.emit(
-            json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line, "title": shown["title"], "choices": shown["choices"], "session": session, "chat": chat }),
+            json!({ "kind": "approval", "id": id, "request": shown["request"], "line": line, "title": shown["title"], "choices": shown["choices"], "session": session, "chat": chat, "project": shown["project"] }),
         );
         let h = host.clone();
         tokio::spawn(async move {

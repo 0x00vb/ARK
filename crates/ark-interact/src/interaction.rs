@@ -261,6 +261,7 @@ impl App {
                 build,
                 approver: approver.clone(),
                 built: std::sync::Mutex::new(HashMap::new()),
+                events: tokio::sync::broadcast::channel(1024).0,
             })
         });
         let mut ix = Interaction {
@@ -288,6 +289,7 @@ impl App {
             orchestrator: self.orchestrator,
             orchs,
             sign_in: self.sign_in,
+            waiting: Vec::new(),
         };
         ix.refresh_names();
         ix.follow_project()?;
@@ -439,6 +441,8 @@ pub(crate) struct Orchestrators {
     build: OrchestrateFn,
     approver: Arc<dyn Approver>,
     built: std::sync::Mutex<HashMap<String, ark_orchestrate::Orchestrator>>,
+    /// Every orchestrator's events, also of ones built later.
+    events: tokio::sync::broadcast::Sender<ark_orchestrate::OrchEvent>,
 }
 
 impl Orchestrators {
@@ -451,6 +455,9 @@ impl Orchestrators {
         gate.keep_in(ark.engine().store.clone(), project.id.as_str());
         let o = (self.build)(ark, project, gate)?;
         built.insert(project.id.as_str().to_string(), o.clone());
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(forward(o.subscribe(), self.events.clone()));
+        }
         Ok(o)
     }
 
@@ -485,6 +492,49 @@ impl OrchestratorSet {
         match &self.all {
             Some(all) => all.built.lock().unwrap().values().cloned().collect(),
             None => self.one.iter().cloned().collect(),
+        }
+    }
+
+    /// The events of every orchestrator in the set, also of ones opened after this call.
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<ark_orchestrate::OrchEvent> {
+        match (&self.all, &self.one) {
+            (Some(all), _) => all.events.subscribe(),
+            (None, Some(o)) => o.subscribe(),
+            (None, None) => tokio::sync::broadcast::channel(1).1,
+        }
+    }
+
+    /// Answer the question a task keeps, in whichever project it waits. Errs when no task
+    /// waits on that question any more.
+    pub fn answer(&self, question: &str, decision: ApprovalDecision) -> anyhow::Result<()> {
+        let (o, task) = self
+            .list()
+            .into_iter()
+            .find_map(|o| {
+                let t = o
+                    .questions()
+                    .into_iter()
+                    .find(|t| t.question.as_ref().is_some_and(|q| q.id == question))?;
+                Some((o, t.id))
+            })
+            .ok_or_else(|| anyhow::anyhow!("that question is no longer waiting"))?;
+        o.answer(&task, decision)?;
+        Ok(())
+    }
+}
+
+async fn forward(
+    mut rx: tokio::sync::broadcast::Receiver<ark_orchestrate::OrchEvent>,
+    tx: tokio::sync::broadcast::Sender<ark_orchestrate::OrchEvent>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match rx.recv().await {
+            Ok(e) => {
+                let _ = tx.send(e);
+            }
+            Err(RecvError::Lagged(_)) => continue,
+            Err(RecvError::Closed) => return,
         }
     }
 }
@@ -574,6 +624,7 @@ impl Siblings {
             orchestrator: self.orchestrator.clone(),
             orchs: self.orchs.clone(),
             sign_in: self.sign_in.clone(),
+            waiting: Vec::new(),
         };
         ix.refresh_names();
         ix.follow_project()?;
@@ -743,6 +794,8 @@ pub struct Interaction {
     /// With [`App::orchestrate`]: every project's orchestrator, shared with sibling conversations.
     orchs: Option<Arc<Orchestrators>>,
     sign_in: Option<crate::capabilities::Opener>,
+    /// The ids `/waiting` listed last, in its numbers: a number answers what the person saw.
+    pub(crate) waiting: Vec<String>,
 }
 
 impl Interaction {
@@ -945,6 +998,7 @@ impl Interaction {
         self.session = s;
         self.reset_turn_state();
         self.refresh_names();
+        crate::attention::seen_chat(self.engine(), self.session.id().as_str());
         Ok(true)
     }
 
@@ -1108,6 +1162,7 @@ impl Interaction {
             Some(s) => {
                 self.session = s;
                 self.reset_turn_state();
+                crate::attention::seen_chat(self.engine(), self.session.id().as_str());
             }
             None => self.new_session()?,
         }

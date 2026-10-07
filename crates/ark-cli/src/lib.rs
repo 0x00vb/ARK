@@ -263,7 +263,11 @@ impl ArkCli {
                 let history_file = self
                     .history_file
                     .or_else(|| Some(ix.ark().settings().store_root.join(".history")));
-                let local = Local { ix, approvals };
+                let local = Local {
+                    ix,
+                    approvals,
+                    held: Vec::new(),
+                };
                 (Chat::Local(Box::new(local)), opened.resumed, history_file)
             }
         };

@@ -339,16 +339,24 @@ pub fn scheduled_projects(store: &ark_store::Store) -> Vec<String> {
     out
 }
 
+/// Every task in the store, in every project, oldest update first. Read without opening an
+/// orchestrator, for views across projects.
+pub fn all_tasks(store: &ark_store::Store) -> Vec<crate::TaskRecord> {
+    store
+        .list_records(crate::orchestrator::TASK, None)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect()
+}
+
 /// Projects whose orchestrators should open when an app starts, so their work goes on with no
 /// window: schedules that still run, and tasks a stopped process left open (ADR 0036).
 pub fn projects_with_work(store: &ark_store::Store) -> Vec<String> {
     let mut out = scheduled_projects(store);
     out.extend(
-        store
-            .list_records(crate::orchestrator::TASK, None)
-            .unwrap_or_default()
+        all_tasks(store)
             .into_iter()
-            .filter_map(|v| serde_json::from_value::<crate::TaskRecord>(v).ok())
             .filter(|t| !t.state.is_final())
             .map(|t| t.project),
     );

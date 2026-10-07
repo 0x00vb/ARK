@@ -1187,6 +1187,50 @@ async function processes(page) {
 }
 scenarios.processes = processes;
 
+// Work that waits for the person (ADR 0043): rows in the tray, newest first, above any
+// question. Opening a result goes to its chat; opening a failure with no chat shows why under
+// the row; the x and Delete clear. Cleared stays cleared after a reload.
+async function waiting(page) {
+  const rows = page.locator(".asks .waiting .wait-row");
+  await rows.first().waitFor();
+  assert.equal(await rows.count(), 3, "three shown, the fourth behind More");
+  assert.equal(await rows.nth(0).getAttribute("data-kind"), "finished");
+  assert.match(await rows.nth(0).innerText(), /File the notes/);
+  await page.locator(".wait-more").click();
+  assert.equal(await rows.count(), 4);
+
+  // A failure with no chat: why it failed, under the row.
+  const summarize = rows.filter({ hasText: "Summarize the notes" });
+  await summarize.focus();
+  await page.keyboard.press("Enter");
+  await summarize.locator(".wait-detail").waitFor();
+  assert.equal(await summarize.locator(".wait-detail").innerText(), "The notes folder is gone.");
+  await summarize.click();
+  await summarize.waitFor({ state: "detached" });
+
+  // The x clears one; Delete clears another.
+  const tidy = rows.filter({ hasText: "Tidy the drafts" });
+  await tidy.hover();
+  await tidy.locator(".wait-clear").click();
+  await tidy.waitFor({ state: "detached" });
+  const rename = rows.filter({ hasText: "Rename the chapters" });
+  await rename.focus();
+  await page.keyboard.press("Delete");
+  await rename.waitFor({ state: "detached" });
+
+  // A result posted into a chat: opening it opens the chat, where the post is.
+  await rows.first().click();
+  await page.locator("#session-title", { hasText: "hi" }).waitFor();
+  await page.locator("#thread", { hasText: "Filed." }).waitFor();
+  await page.locator(".asks .waiting").waitFor({ state: "detached" });
+
+  await page.reload();
+  await page.locator("#input").waitFor();
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator(".asks .waiting").count(), 0, "cleared stays cleared");
+}
+scenarios.waiting = waiting;
+
 const run = scenarios[scenario];
 if (!run) {
   console.error(`unknown scenario ${scenario}`);

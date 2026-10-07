@@ -108,6 +108,91 @@ impl Command for Board {
     }
 }
 
+pub struct Waiting;
+#[async_trait::async_trait]
+impl Command for Waiting {
+    meta!(
+        "waiting",
+        "What waits for you in any project: questions, work that failed, results"
+    );
+    fn usage(&self) -> &str {
+        "[<n> [once|session|always|deny] | clear]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        use crate::attention;
+        let items = attention::list(ix.engine(), ix.labels());
+        let mut words = args.split_whitespace();
+        let (first, second) = (words.next(), words.next());
+        match first {
+            None => {
+                ix.waiting = items.iter().map(|i| i.id.clone()).collect();
+                Ok(attention::report(&items).into())
+            }
+            Some("clear") => {
+                let n = items
+                    .iter()
+                    .filter(|i| !i.is_question())
+                    .filter(|i| attention::clear(ix.engine(), i).is_ok())
+                    .count();
+                ix.waiting.clear();
+                Ok(Report::new()
+                    .success(crate::fmt::count(n as u64, "item"))
+                    .note("Cleared. The work stays in its chat and in /agents.")
+                    .into())
+            }
+            Some(n) => {
+                // The number of the list the person saw, never of a newer one.
+                let Some(id) = n
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|n| ix.waiting.get(n.wrapping_sub(1)))
+                    .cloned()
+                else {
+                    // Numbers follow the list shown last, so they never shift onto other work.
+                    let say = if ix.waiting.is_empty() {
+                        "Numbers follow the list. /waiting shows it.".to_string()
+                    } else {
+                        format!("No item {n}. /waiting lists what waits now.")
+                    };
+                    return Ok(Report::new().warning(say).into());
+                };
+                let Some(item) = items.into_iter().find(|i| i.id == id) else {
+                    return Ok(Report::new()
+                        .note(format!(
+                            "Item {n} is no longer waiting. /waiting lists what waits now."
+                        ))
+                        .into());
+                };
+                let n: usize = n.parse().unwrap_or(0);
+                match second {
+                    None => {
+                        let r = attention::opened(ix.engine(), &item, n);
+                        if !item.is_question() {
+                            attention::clear(ix.engine(), &item)?;
+                        }
+                        Ok(r.into())
+                    }
+                    Some(word) if item.is_question() => {
+                        let decision = match crate::orchestration::decision(word) {
+                            Ok(d) => d,
+                            Err(e) => return Ok(Report::new().warning(e).into()),
+                        };
+                        ix.orchestrators().answer(&item.id, decision)?;
+                        Ok(Report::new()
+                            .success(format!("Answered: {}", item.title))
+                            .into())
+                    }
+                    Some(_) => Ok(Report::new()
+                        .warning(format!(
+                            "Item {n} is not a question. /waiting {n} opens it."
+                        ))
+                        .into()),
+                }
+            }
+        }
+    }
+}
+
 pub struct TaskCmd;
 #[async_trait::async_trait]
 impl Command for TaskCmd {

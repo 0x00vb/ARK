@@ -49,6 +49,7 @@ serves in a browser without the desktop feature: `writer --serve`.
 | Settings › Tool servers | ARK's own section, when the app has plugins: the MCP servers (running or why not, their tools, the command), Add (a name and a command, or a pasted `mcpServers` snippet), Restart, Remove (a second click confirms). The same as `/plugin`. An app section with the id `plugins` replaces it |
 | Board | In an app that runs agents, a tab beside Chat: the project's work as To do, In progress and Done ([`ORCHESTRATION.md`](ORCHESTRATION.md#the-board)). A card is a status circle, a title and its owner; "Needs you" and a dot while its agent works are the only marks. Drag moves a card (a line shows where it lands), the circle completes it, + adds one (Enter keeps the box open for the next). A click opens it in the side pane: title and note in place, owner, "Give to…" an agent (starts a task linked to it), what blocks it, each run's answer and files, its history, Delete (with Undo). Keys on a card: Enter opens, Space completes, Backspace deletes, arrows move the focus, Shift with arrows moves the card. Changes by agents and other windows glide into place |
 | Agents' questions | An orchestrated agent's approval waits in a tray at the bottom right, whatever the main column shows. In the native window, a question that arrives while the window is not in front (hidden, minimized, another app in use) also shows a system notification. |
+| What waits for you | In the same tray, above the questions: work you started that failed and results posted into a chat while you were elsewhere, in any project (ADR 0043). A row opens its chat, or shows why the work failed when it has no chat; x or Delete clears it. The terminal's `/waiting` lists the same items |
 
 Narrow windows (up to 760 px, or up to 1000 px with the pane open) fold the sidebar into a
 drawer opened from the top-left button. Below 760 px an open pane covers the window.
@@ -233,6 +234,7 @@ front-end uses the same.
 | Agents | `graph` (each agent has `doing`: what it does now in words, as `/agents` shows it), `agents`, `tools`, `profiles` (what `AgentSpec.profile_name` may name), `spawn_agent {spec}`, `suspend_agent`, `resume_agent`, `terminate_agent`, `message_agent {agent, text}` |
 | Tasks | `submit_task {agent, task}`, `task {task}` (record and timeline lines), `task_trace`, `cancel_task`, `retry_task`, `unschedule {schedule}`, `orch_events {after, limit}` |
 | Board | `board` (`items`, the `tasks` run for them, the live `agents`; null without an orchestrator), `board_add {title, note?, owner?, state?, blocked?, before?}`, `board_change {item, change}` (a `WorkChange`), `board_remove {item}`, `board_give {item, agent}` (answers the `task`). Follow it with `orch` events of type `work` and `work_removed` |
+| Waiting for you | `attention` (what waits in any project: questions tasks keep, failures, results posted into a chat; `ark_interact::attention::Item`), `attention_open {id}` (clears a failure or a result and returns it with `text`), `attention_clear {id}` (not a question: it leaves when answered) |
 | Page | `focus`, `ext` (an app handler) |
 
 | Events (`kind`) | |
@@ -242,6 +244,7 @@ front-end uses the same.
 | `computer` | Who uses the screen changed (`user`: `{owner, who, session}` or null) |
 | `term` | A terminal's output (`session`, `data`), or `exit: true`. Not replayed to a window that rejoins a turn; `term_open` returns the scrollback |
 | `approval`, `approval_closed` | A pending approval (`request`, `line`, `title`, and for a chat's question `session` and `chat`, its title), and its end (answered, or the turn ended) |
+| `attention` | What waits for the person may have changed in some project (a question asked or answered, a task finished, a post, a clear): read `attention` again |
 | `post` | Work a chat set up posted its result there (`session`, `post`: `{from, title, text, ok, at, after}`, ADR 0025). Stored turns from `transcript` carry theirs in `posts` |
 | `summary` | Session, model, project or context changed |
 | `files_changed` | Files of a project changed without a tool call: a restore or files added (`project`, `paths`) |

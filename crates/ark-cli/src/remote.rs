@@ -62,6 +62,16 @@ impl Remote {
         self.started.as_deref()
     }
 
+    /// How many items wait for the person there.
+    pub(crate) async fn waiting(&self) -> usize {
+        self.client
+            .call("attention", json!({}))
+            .await
+            .ok()
+            .and_then(|v| v.as_array().map(Vec::len))
+            .unwrap_or(0)
+    }
+
     pub(crate) async fn summary(&self) -> anyhow::Result<Summary> {
         Ok(serde_json::from_value(
             self.client.call("summary", json!({})).await?,

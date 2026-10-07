@@ -33,7 +33,15 @@ What changed for people building on ARK, per release. Not a commit log.
   Try again) instead of staying white, shows a loading line in the bar until the page
   finishes, and shows the pane's colour, not a white block, until the page arrives
   (`ark_browser_reach`, ADR 0044).
-
+- What waits for you, in every project (ADR 0043 step 1, `ark_interact::attention`): a question
+  an agent's task keeps, work you started that failed, and a result posted into a chat while
+  nobody was in it. One list in both front-ends: `/waiting` in the terminal (numbers answer the
+  list you saw: `/waiting 2 once`), and rows in the window's tray above the questions (open goes
+  to the chat; a failure with no chat shows why under its row; x or Delete clears). Opening a
+  chat clears what was posted there. Clearing is the only new record (`attention_cleared`) and
+  survives a restart. Host methods `attention`, `attention_open`, `attention_clear`; event
+  `attention`. `OrchestratorSet::subscribe` (every project's events) and `answer` (a kept
+  question in any project); `ark_orchestrate::all_tasks`.
 - Project processes (ADR 0041, `ark-proc`, `ArkBuilder::processes`): agents start, watch and
   stop long-running commands in the project (`process.start`, `list`, `stop`): a dev server, a
   watcher, a worker, with the person's own shell and tools. Not contained, so every start asks,
@@ -83,6 +91,10 @@ What changed for people building on ARK, per release. Not a commit log.
 - On macOS, `remote::visit` and `run_window` refuse a runtime elsewhere by name over plain
   http (use https); IP addresses, names without a dot and `.local` still open over http. The
   token is no longer sent in clear there.
+- The terminal keeps an agent's question open when the turn that showed it ends, instead of
+  refusing it: the task keeps waiting, `/waiting` answers it, and the next turn asks again. A
+  question answered meanwhile is not asked again (`PendingApproval::is_closed`). A chat's own
+  question is still refused when its turn ends.
 - `present` says what `locator` is for each view: the address for the browser (this machine's
   too) and the command for the terminal. An agent asked to show a page on `localhost` now opens
   it in the person's Browser view instead of giving up.
@@ -99,6 +111,8 @@ What changed for people building on ARK, per release. Not a commit log.
   sign-ins resolve only capabilities that need an account.
 - The Browser's address bar opens `localhost:3000` (and `127.0.0.1`, `[::1]`, `*.localhost`
   addresses) over http instead of searching for it.
+- The board's "Needs you" lights for a task waiting on your answer: the host's `board` response
+  carries each task's `question`.
 
 ### Breaking
 - `ark_connect::State` has a new variant, `Off` (the Computer while the person has not turned

@@ -19,6 +19,7 @@
 
 pub mod activity;
 pub mod approval;
+pub mod attention;
 mod builtins;
 pub mod capabilities;
 pub mod command;

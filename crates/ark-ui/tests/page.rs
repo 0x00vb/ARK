@@ -173,10 +173,13 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             )
         });
     }
-    let (_host, served) = ArkUi::new(app)
+    let (host, served) = ArkUi::new(app)
         .serve_background("127.0.0.1:0")
         .await
         .unwrap();
+    if scenario == "waiting" {
+        seed_waiting(&host, dir.path()).await;
+    }
     let out = tokio::process::Command::new("node")
         .arg("page.mjs")
         .arg(scenario)
@@ -660,6 +663,61 @@ async fn an_app_view_takes_the_main_column_and_agents_ask_from_the_tray() {
 
 /// The board: add, drag, complete, open an item, hand it to an agent and see it move by itself,
 /// what needs the person, delete with undo.
+/// What waits for the person (ADR 0043): a chat named "hi" with a result posted into it while
+/// the person was in another chat, and three failures with no chat.
+async fn seed_waiting(host: &Arc<ark_ui::Host>, dir: &std::path::Path) {
+    let mut rx = host.subscribe();
+    host.call("send", json!({ "text": "hi" })).await.unwrap();
+    loop {
+        let v = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("the turn ends")
+            .unwrap();
+        if v["kind"] == "turn_finished" {
+            break;
+        }
+    }
+    let s = host.call("summary", json!({})).await.unwrap();
+    let (project, chat) = (
+        s["project"]["id"].as_str().unwrap().to_string(),
+        s["session"]["id"].as_str().unwrap().to_string(),
+    );
+    host.call("new_session", json!({})).await.unwrap();
+    let ark = Ark::builder().store_root(dir).build().unwrap();
+    let store = &ark.engine().store;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let task = |id: &str, objective: &str, state: &str, at: u64, chat: Option<&str>| {
+        let mut t = json!({
+            "id": id, "project": project, "owner": "scribe", "objective": objective,
+            "origin": { "by": "external" }, "state": state, "created_ms": at - 1000,
+            "finished_ms": at, "error": "The notes folder is gone.", "result": "Filed.",
+        });
+        if let Some(c) = chat {
+            t["report_to"] = json!(c);
+        }
+        store.put_record("orch_task", id, &project, &t).unwrap();
+    };
+    task("t1", "Summarize the notes", "failed", now - 40_000, None);
+    task("t2", "Tidy the drafts", "failed", now - 30_000, None);
+    task("t3", "Rename the chapters", "failed", now - 20_000, None);
+    task("t4", "File the notes", "done", now - 10_000, Some(&chat));
+    ark_sdk::prelude::ark_runtime::session::post(
+        ark.engine(),
+        &chat,
+        ark_sdk::prelude::ark_runtime::Post::new("scribe", "File the notes", "Filed.", true)
+            .work("t4"),
+    )
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn work_that_waits_for_the_person_sits_in_the_tray() {
+    drive_app("waiting", vec![say("Hello.", false)], Duration::ZERO, true).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_board_is_worked_by_the_person_and_the_agents() {
     drive_app(

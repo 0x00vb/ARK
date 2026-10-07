@@ -133,16 +133,19 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
             end = &mut turn.end => break end,
         }
     };
+    let mut held = Vec::new();
     while let Ok(u) = turn.updates.try_recv() {
         match u {
             Update::Event(ev, a) => view.event(ev, a, out),
-            Update::Ask(q) => q.answer(ApprovalDecision::Deny),
+            Update::Ask(q) => held.extend(q.end_of_turn()),
             Update::Closed(_) => {}
         }
     }
-    if let Some(mut m) = menu.take() {
-        m.answer(ApprovalDecision::Deny);
+    if let Some(q) = menu.take().and_then(|mut m| m.question.take()) {
+        held.extend(q.end_of_turn());
     }
+    drop(turn);
+    chat.hold(held);
     let draft = std::mem::take(&mut view.typeahead);
     view.finish(out, &end);
     drop(keys);

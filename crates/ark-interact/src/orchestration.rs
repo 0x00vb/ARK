@@ -768,13 +768,7 @@ pub fn parse_task(args: &str) -> Result<Control, String> {
             let (Some(task), Some(word), None) = (w.next(), w.next(), w.next()) else {
                 return Err("usage: /task answer <task> once|session|always|deny".into());
             };
-            let decision = match word {
-                "once" | "yes" | "allow" => ApprovalDecision::AllowOnce,
-                "session" => ApprovalDecision::AllowSession,
-                "always" => ApprovalDecision::AllowAlways,
-                "deny" | "no" => ApprovalDecision::Deny,
-                _ => return Err(format!("`{word}`: answer once, session, always or deny")),
-            };
+            let decision = decision(word)?;
             Control::Answer {
                 task: task.into(),
                 decision,
@@ -786,5 +780,16 @@ pub fn parse_task(args: &str) -> Result<Control, String> {
             agent: agent.into(),
             task: ark_orchestrate::TaskSpec::new(rest),
         },
+    })
+}
+
+/// An answer typed in a terminal: once, session, always or deny.
+pub(crate) fn decision(word: &str) -> Result<ApprovalDecision, String> {
+    Ok(match word {
+        "once" | "yes" | "allow" => ApprovalDecision::AllowOnce,
+        "session" => ApprovalDecision::AllowSession,
+        "always" => ApprovalDecision::AllowAlways,
+        "deny" | "no" => ApprovalDecision::Deny,
+        _ => return Err(format!("`{word}`: answer once, session, always or deny")),
     })
 }

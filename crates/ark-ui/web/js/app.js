@@ -19,6 +19,7 @@ import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
 import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
+import { Waiting } from "./waiting.js";
 
 const transport = connect();
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
@@ -127,7 +128,7 @@ const api = {
 // Terminal, Browser and Files first, so an app's panel with the same id replaces one.
 registerBuiltins(installApi(api));
 
-let thread, composer, sidebar, topbar, pane;
+let thread, composer, sidebar, topbar, pane, waiting;
 
 function retitle(key, title) {
   const t = pane.tabs.get(key);
@@ -281,6 +282,7 @@ function applySummary(s) {
 
 async function loadSession() {
   pane.reset(state.summary?.project?.id);
+  placeAsks();
   thread.clear();
   const turns = await transport.call("transcript", { limit: 30 }).catch(() => []);
   if (turns.length) thread.renderStored(turns, { hasMore: turns.length === 30 });
@@ -442,6 +444,9 @@ function onEvent(msg) {
       if (applySummary(msg.summary)) boot(true);
       else sidebar.refresh(state.sessionId);
       break;
+    case "attention":
+      waiting.refresh();
+      break;
     case "ext":
       dispatchExt(msg.name, msg.payload);
       break;
@@ -459,8 +464,23 @@ function ask(msg) {
     card.dataset.chat = msg.session;
     card.prepend(h("button.approval-chat", { type: "button", onclick: () => api.openSession(msg.session) },
       `In ${msg.chat || "another chat"}`));
+  } else if (msg.project?.id) {
+    // An agent's question from another project says which, and opens it: "Always in this
+    // project" means that project.
+    card.dataset.project = msg.project.id;
+    card.prepend(h("button.approval-chat", { type: "button", onclick: () => api.openProject(msg.project.id) },
+      `In ${msg.project.name}`));
   }
   $("#asks").append(card);
+  placeAsks();
+}
+
+/// A question's project shows only while the window is in another one.
+function placeAsks() {
+  const here = state.summary?.project?.id;
+  for (const card of document.querySelectorAll("#asks .approval[data-project]")) {
+    card.querySelector(".approval-chat").hidden = card.dataset.project === here;
+  }
 }
 
 async function decide(id, decision) {
@@ -743,6 +763,7 @@ async function bootOnce(again) {
     }
   } else setRunning(false);
   for (const a of hello.approvals || []) onEvent({ kind: "approval", ...a });
+  waiting.refresh();
 }
 
 async function start() {
@@ -758,6 +779,7 @@ async function start() {
   composer = new Composer(api);
   acceptDrops(api, composer, $(".main"));
   sidebar = new Sidebar(api);
+  waiting = new Waiting(api, transport);
   topbar = new Topbar(api);
   pane = new Pane(appEl, api);
   fit();

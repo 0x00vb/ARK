@@ -47,8 +47,19 @@ pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::proce
         pending.extend(r.running().map(str::to_string));
     }
     let mut ctrl_c_hint = false;
+    let mut waiting = 0;
 
     loop {
+        // Work in any project that waits for the person: one line when the count changes.
+        if pending.is_empty() {
+            let n = st.chat.waiting().await;
+            if n != waiting {
+                if let Some(line) = ark_interact::attention::nudge(n) {
+                    st.out.line(&st.cfg.theme.dim(&line));
+                }
+                waiting = n;
+            }
+        }
         // Messages set up during the last turn go first, echoed after the prompt.
         let line = match pending.pop_front() {
             Some(next) => {

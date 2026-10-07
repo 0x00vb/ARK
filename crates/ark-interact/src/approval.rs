@@ -121,6 +121,11 @@ impl PendingApproval {
     pub fn answer(self, d: ApprovalDecision) {
         let _ = self.reply.send(d);
     }
+    /// Nobody waits for this answer any more: it was answered another way (from another
+    /// client, through the task that keeps it) or its turn ended.
+    pub fn is_closed(&self) -> bool {
+        self.reply.is_closed()
+    }
     /// Resolves when the turn stops waiting for this answer.
     pub async fn closed(&mut self) {
         self.reply.closed().await
@@ -192,6 +197,19 @@ mod tests {
         let task = tokio::spawn(async move { approver.decide(&req()).await });
         drop(rx.recv().await.unwrap());
         assert_eq!(task.await.unwrap(), ApprovalDecision::Deny);
+    }
+
+    /// A question answered another way while it sat in the channel (the terminal between turns,
+    /// answered with `/waiting`) says so, and a front-end skips it instead of asking again.
+    #[tokio::test]
+    async fn a_question_nobody_waits_for_is_closed() {
+        let (approver, mut rx) = ChannelApprover::channel();
+        let ask = tokio::spawn(async move { approver.decide(&req()).await });
+        let p = rx.recv().await.unwrap();
+        assert!(!p.is_closed());
+        ask.abort();
+        let _ = ask.await;
+        assert!(p.is_closed());
     }
 
     /// A grant narrower than the action names it on the button; the question says which.

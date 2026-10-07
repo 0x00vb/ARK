@@ -574,6 +574,41 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .approval-chat:hover { color: var(--accent); }
 .app[data-view] .asks { bottom: 20px; }
 
+/* Work that waits for the person (waiting.js): a failure, a result posted while nobody was
+   in its chat. One row each, above the questions. */
+.waiting {
+  display: flex; flex-direction: column; gap: 1px; padding: 4px;
+  border-radius: 14px; background: var(--card); box-shadow: var(--shadow-float);
+  animation: rise 280ms var(--ease) both;
+}
+.wait-row {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; column-gap: 8px;
+  padding: 7px 6px 7px 10px; border-radius: 10px; cursor: pointer; outline: none;
+  animation: fade 160ms var(--ease) both;
+}
+.wait-row:hover, .wait-row:focus-visible { background: var(--hover); }
+.wait-row:focus-visible { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.wait-mark { display: grid; place-items: center; width: 18px; height: 18px; }
+.wait-mark svg { width: 15px; height: 15px; }
+.wait-row[data-kind="failed"] .wait-mark { color: var(--err); }
+.wait-row[data-kind="finished"] .wait-mark { color: var(--ok); }
+.wait-text { display: flex; flex-direction: column; min-width: 0; }
+.wait-title { font-size: 13.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wait-place { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wait-clear { opacity: 0; transition: opacity 120ms var(--ease); }
+.wait-row:hover .wait-clear, .wait-row:focus-within .wait-clear { opacity: 1; }
+@media (hover: none) { .wait-clear { opacity: 1; } }
+.wait-detail {
+  grid-column: 2 / -1; margin: 6px 0 2px; max-height: 180px; overflow: auto;
+  font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2);
+}
+.wait-row[data-kind="failed"] .wait-detail { color: var(--err); }
+.wait-more {
+  border: 0; background: transparent; padding: 6px 10px; text-align: left; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: var(--text-3); border-radius: 8px;
+}
+.wait-more:hover { color: var(--text); background: var(--hover); }
+
 /* ---- views in the main column (ark.view) -------------------------------------------------- */
 
 .stage { flex: 1; min-height: 0; overflow: auto; position: relative; }

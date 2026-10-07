@@ -63,6 +63,19 @@ impl Question {
         }
     }
 
+    /// The turn that showed it ended. A question an agent asked for its own task keeps waiting
+    /// (its task keeps it; `/waiting` answers it): it is returned, to ask again in the next turn.
+    /// Any other is refused.
+    pub(crate) fn end_of_turn(self) -> Option<PendingApproval> {
+        match self.to {
+            Asker::Local(p) if self.request.agent.is_some() => Some(p),
+            _ => {
+                self.answer(ApprovalDecision::Deny);
+                None
+            }
+        }
+    }
+
     pub(crate) fn answer(self, d: ApprovalDecision) {
         match self.to {
             Asker::Local(p) => p.answer(d),
@@ -181,6 +194,8 @@ pub(crate) struct Turn<'a> {
 pub(crate) struct Local {
     pub ix: Interaction,
     pub approvals: mpsc::UnboundedReceiver<PendingApproval>,
+    /// Agents' questions still open when the last turn ended ([`Question::end_of_turn`]).
+    pub held: Vec<PendingApproval>,
 }
 
 pub(crate) enum Chat {
@@ -201,6 +216,25 @@ impl Chat {
         match self {
             Chat::Local(l) => (l.ix.session().turn_count() > 0).then(|| l.ix.recap()),
             Chat::Remote(r) => r.recap().await,
+        }
+    }
+
+    /// How many items wait for the person in any project (`/waiting`); 0 when the app has no
+    /// agents.
+    pub(crate) async fn waiting(&self) -> usize {
+        if !self.commands().iter().any(|c| c.name == "waiting") {
+            return 0;
+        }
+        match self {
+            Chat::Local(l) => ark_interact::attention::list(l.ix.engine(), l.ix.labels()).len(),
+            Chat::Remote(r) => r.waiting().await,
+        }
+    }
+
+    /// Keep agents' questions a turn left open, for the next turn.
+    pub(crate) fn hold(&mut self, questions: Vec<PendingApproval>) {
+        if let Chat::Local(l) = self {
+            l.held.extend(questions);
         }
     }
 
@@ -277,7 +311,12 @@ impl Local {
         let (tx, updates) = mpsc::unbounded_channel();
         let control = Control::Local(ctl.clone());
         let input = input.to_string();
-        let Local { ix, approvals } = self;
+        let Local {
+            ix,
+            approvals,
+            held,
+        } = self;
+        let held = std::mem::take(held);
         let end = Box::pin(async move {
             let labels = ix.labels().clone();
             let events = tx.clone();
@@ -287,7 +326,15 @@ impl Local {
                 });
                 // Questions come on their own channel while the turn runs.
                 let asks = async {
+                    for p in held.into_iter().filter(|p| !p.is_closed()) {
+                        let line = labels.approval_line(&p.request);
+                        let _ = tx.send(Update::Ask(Question::local(p, line)));
+                    }
                     while let Some(p) = approvals.recv().await {
+                        // Asked between turns and answered meanwhile (`/waiting`, a window).
+                        if p.is_closed() {
+                            continue;
+                        }
                         let line = labels.approval_line(&p.request);
                         let _ = tx.send(Update::Ask(Question::local(p, line)));
                     }

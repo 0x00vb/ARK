@@ -56,7 +56,7 @@ pub use record::{
     AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord, TaskState,
     ToolCallRecord, Usage,
 };
-pub use schedule::{projects_with_work, scheduled_projects, ScheduleRecord, When};
+pub use schedule::{all_tasks, projects_with_work, scheduled_projects, ScheduleRecord, When};
 pub use spec::{AgentSpec, Budget, TaskSpec};
 pub use tools::{
     BOARD_ADD, BOARD_LIST, BOARD_UPDATE, CHAT, CREATE, DELEGATE, MESSAGE, SCHEDULE, UNSCHEDULE,

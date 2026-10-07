@@ -104,6 +104,15 @@ impl Cli {
         }
     }
 
+    /// The input tokens a request may have ([`Provider::context_window`]): Claude models take
+    /// 200k; Codex's models take 272k of input.
+    pub fn context_window(self) -> u32 {
+        match self {
+            Cli::Claude => 200_000,
+            Cli::Codex => 272_000,
+        }
+    }
+
     /// The command that signs in, for the person to run.
     pub fn login_command(self) -> &'static str {
         match self {
@@ -562,8 +571,8 @@ impl CliModel {
     }
 
     /// `e`, unless it says Codex refused a typed reply schema (OpenAI's strict check). Then this
-    /// model uses the string form from now on, in every lane, and the call fails as a
-    /// malformed reply, which is retried. A vendor session reopens after a failure, so nothing
+    /// model uses the string form from now on, in every lane, and the call fails as
+    /// [`ProviderError::Refused`], which is retried. A vendor session reopens after a failure, so nothing
     /// is sent twice to a thread.
     fn refused(&self, e: ProviderError, shape: &ReplyShape) -> ProviderError {
         let detail = e.to_string();
@@ -578,7 +587,7 @@ impl CliModel {
         if !r.contains(&model) {
             r.push(model);
         }
-        ProviderError::Malformed {
+        ProviderError::Refused {
             provider: self.cli.name().into(),
             detail: format!("the reply schema was refused ({})", clip(&detail)),
         }
@@ -848,6 +857,9 @@ impl Provider for CliModel {
     fn reads_pictures(&self) -> bool {
         true
     }
+    fn context_window(&self) -> Option<u32> {
+        Some(self.cli.context_window())
+    }
     async fn complete(
         &self,
         system: &str,
@@ -1008,6 +1020,9 @@ enum Mode<'a> {
 impl SessionBackend for CliModel {
     fn reads_pictures(&self) -> bool {
         true
+    }
+    fn context_window(&self) -> Option<u32> {
+        Some(self.cli.context_window())
     }
     fn label(&self) -> String {
         Provider::describe(self)
@@ -2548,7 +2563,7 @@ cat "$d/reply"
             .complete("", &[Message::user("read a")], &tools())
             .await
             .unwrap_err();
-        assert!(matches!(e, ProviderError::Malformed { .. }), "{e}");
+        assert!(matches!(e, ProviderError::Refused { .. }), "{e}");
         assert!(e.is_transient());
         // The retry, and every later call of this model, sends the string form.
         let c = m

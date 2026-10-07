@@ -173,11 +173,16 @@ pub enum HarnessEvent {
     /// the failed attempt had streamed was withdrawn just before
     /// ([`TextWithdrawn`](HarnessEvent::TextWithdrawn)). No tool runs twice: tools run only
     /// after a model call succeeds.
+    ///
+    /// `repair`: the model's reply could not be used, and the model was told why and asked
+    /// for it again (ADR 0050). Nothing waits and nothing failed on the way to it.
     Retry {
         role: String,
         attempt: u32,
         delay_ms: u64,
         error: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        repair: bool,
     },
     /// Several steps in a row produced nothing new. `stopped` is false when the model was
     /// nudged to change course, true when the loop ended and a final answer was forced.
@@ -222,6 +227,10 @@ pub struct HarnessOutcome {
     pub interrupted: bool,
     /// Messages the user sent while the turn ran that reached the model, in order.
     pub steered: Vec<String>,
+    /// The step limit or the stall guard ended the work before the model answered, and the
+    /// answer was asked for (`force_answer`): the work may not be done. The next turn
+    /// continues its goal (ADR 0050).
+    pub ran_out: bool,
 }
 
 impl HarnessOutcome {
@@ -236,7 +245,12 @@ pub struct Harness {
     router: ModelRouter,
     allow_mutate: bool,
     max_steps: usize,
-    budget: u32,
+    /// What this turn works on when it continues an unfinished one (ADR 0050). `None`: the
+    /// question is the goal.
+    goal: Option<crate::session::Goal>,
+    /// The request budget the app or `ARK_CTX_BUDGET` set. `None`: sized from the reasoning
+    /// model's window ([`crate::budget::budget_for`], ADR 0050).
+    budget: Option<u32>,
     /// Actions to load before the first step because they match the task's words (see
     /// [`catalog::matching_actions`]); 0 leaves discovery to the model. Default 2.
     preload: usize,
@@ -316,10 +330,8 @@ impl Harness {
             router,
             allow_mutate: false,
             max_steps: 16,
-            budget: std::env::var("ARK_CTX_BUDGET")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(6000),
+            goal: None,
+            budget: crate::budget::budget_from_env(),
             // 2: measured live on qwen3:4b and Claude Haiku (bench/RESULTS.md, P1).
             preload: std::env::var("ARK_PRELOAD_ACTIONS")
                 .ok()
@@ -425,9 +437,39 @@ impl Harness {
         self.max_steps = n;
         self
     }
-    pub fn budget(mut self, tokens: u32) -> Self {
-        self.budget = tokens;
+    /// The goal this turn works on when it continues an unfinished one: the first request of
+    /// the chain and what the person said since, the question last ([`Session::goal_for`]).
+    /// It is the task the model gets and stays in every request; the research state's goal,
+    /// rule and tool selection and the trivial class read it. `ask`'s question stays the
+    /// person's newest message.
+    ///
+    /// [`Session::goal_for`]: crate::session::Session::goal_for
+    pub fn goal(mut self, goal: Option<crate::session::Goal>) -> Self {
+        self.goal = goal;
         self
+    }
+
+    /// Set the request budget. Without it the budget is sized from the reasoning model's
+    /// window ([`crate::budget::budget_for`]).
+    pub fn budget(mut self, tokens: u32) -> Self {
+        self.budget = Some(tokens);
+        self
+    }
+
+    /// Like [`budget`](Harness::budget), keeping the default when `None`.
+    pub fn budget_or_auto(mut self, tokens: Option<u32>) -> Self {
+        if tokens.is_some() {
+            self.budget = tokens;
+        }
+        self
+    }
+
+    /// The request budget this harness uses: the one set, else sized from the window of the
+    /// model in its reasoning slot.
+    pub fn request_budget(&self) -> u32 {
+        self.budget.unwrap_or_else(|| {
+            crate::budget::budget_for(self.router.provider(Role::Reason).context_window())
+        })
     }
     /// Load up to `n` actions that match the task's words before the first step.
     pub fn preload(mut self, n: usize) -> Self {
@@ -500,11 +542,23 @@ impl Harness {
             .store
             .get_research_state(project)?
             .unwrap_or_default();
-        state.goal = question.to_string();
+        // A turn that continues an unfinished one works on that one's goal, not on its own
+        // words ("continue"), for everything chosen from the task (ADR 0050).
+        let goal_text = match &self.goal {
+            Some(g) => format!("{}\n{question}", g.text()),
+            None => question.to_string(),
+        };
+        state.goal = self
+            .goal
+            .as_ref()
+            .map(|g| g.request.clone())
+            .filter(|r| !r.trim().is_empty())
+            .unwrap_or_else(|| question.to_string());
         state.touch();
         engine.store.put_research_state(project, &state)?;
+        let budget = self.request_budget();
 
-        let trivial = classify_trivial(question, &profile.investigation_markers);
+        let trivial = classify_trivial(&goal_text, &profile.investigation_markers);
         on_event(HarnessEvent::Classified { trivial });
         if let Some(r) = &self.rules {
             on_event(HarnessEvent::Rules {
@@ -548,7 +602,7 @@ impl Harness {
         // action keeps every earlier tool definition in the cacheable prefix.
         let mut loaded: Vec<String> = core_loaded(engine, profile);
         for name in
-            catalog::matching_actions(&engine.registry, &self.with_focus(question), self.preload)
+            catalog::matching_actions(&engine.registry, &self.with_focus(&goal_text), self.preload)
         {
             if !loaded.contains(&name) {
                 loaded.push(name);
@@ -562,15 +616,17 @@ impl Harness {
             skills: self.skills.clone(),
             can_add: can_add(profile),
             ready: self.ready_block(engine, &loaded),
-            task: question.to_string(),
+            task: self.task_text(question, budget),
         };
         let first_text = first.render();
         let first_tokens = estimate_tokens(&first_text) + 4;
-        let mut ws = WorkingSet::new(self.budget);
-        ws.push_round(vec![Message::user(first_text)]);
+        // The first message is the task frame: pinned, so no number of steps drops the task
+        // (ADR 0050).
+        let mut ws = WorkingSet::new(budget);
+        ws.pin(Message::user(first_text));
         // Tokens of retrieval results (evidence lookups, knowledge search) per round, aligned
         // with the working set's rounds, so the context report can show them apart.
-        let mut retrieved: Vec<u32> = vec![0];
+        let mut retrieved: Vec<u32> = Vec::new();
 
         let mut cited: Vec<InvocationId> = Vec::new();
         let mut answer = String::new();
@@ -611,6 +667,9 @@ impl Harness {
         let mut changed_at = turn_started;
         let mut fresh_meta: u32 = 0;
         let mut corrected_text_call = false;
+        // Replies the model was asked to send again because they could not be used.
+        let mut repairs: u32 = 0;
+        let mut repairs_in_row: u32 = 0;
         // Files of the project folder this turn's calls wrote, and whether the model was told
         // once that its answer names a saved file none of them wrote.
         let mut written: Vec<String> = Vec::new();
@@ -650,7 +709,7 @@ impl Harness {
                 metrics.cards_created - repeated_failures + fresh_meta + loaded.len() as u32;
 
             let state_digest = state.digest(STATE_DIGEST_ITEMS);
-            let tail = state_message(&state_digest);
+            let tail = state_message_with(&state_digest, &steered);
             let (mut messages, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
             messages.push(tail);
             metrics.peak_prompt_tokens = metrics.peak_prompt_tokens.max(est);
@@ -671,7 +730,8 @@ impl Harness {
             );
             on_event(HarnessEvent::Context { report });
 
-            let Some(completion) = self
+            let mut unusable = String::new();
+            let called = self
                 .call_model(
                     Role::Reason,
                     &system,
@@ -680,12 +740,41 @@ impl Harness {
                     true,
                     &mut metrics,
                     &mut on_event,
+                    Some(&mut unusable),
                 )
-                .await?
-            else {
+                .await;
+            let Some(completion) = (match called {
+                Ok(c) => c,
+                // The model's reply could not be used: tell it why and let it send it again,
+                // a bounded number of times (ADR 0050). Nothing ran.
+                Err(AgentError::UnusableReply { detail, .. })
+                    if repairs_in_row < MAX_REPAIRS_IN_ROW && repairs < MAX_REPAIRS =>
+                {
+                    repairs_in_row += 1;
+                    repairs += 1;
+                    metrics.record_retry();
+                    on_event(HarnessEvent::Retry {
+                        role: role_name(Role::Reason).to_string(),
+                        attempt: repairs,
+                        delay_ms: 0,
+                        error: detail.clone(),
+                        repair: true,
+                    });
+                    let mut round = Vec::new();
+                    if !unusable.trim().is_empty() {
+                        round.push(Message::assistant(unusable));
+                    }
+                    round.push(Message::user(format!("{REPAIR_NOTE} ({detail})")));
+                    ws.push_round(round);
+                    retrieved.push(0);
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }) else {
                 cancelled = true;
                 break;
             };
+            repairs_in_row = 0;
 
             if completion.tool_calls.is_empty() {
                 // The user said more while this answer was being written: treat the text as
@@ -753,8 +842,13 @@ impl Harness {
                 break;
             }
 
-            let mut round = vec![Message::assistant_tool_calls(completion.tool_calls.clone())];
+            // The model's note with its calls stays in the round (its plan, seen again next
+            // step) and goes on each call's record, so work that stops continues with it.
+            let mut said = Message::assistant_tool_calls(completion.tool_calls.clone());
+            said.content = completion.content.clone();
+            let mut round = vec![said];
             let mut round_retrieved = 0u32;
+            let narrated = engine.narrating(&completion.content);
 
             // Reads and observations of this step that need no approval and were not reused
             // run together (see `flush`). Anything else first finishes the pending batch, so
@@ -772,7 +866,7 @@ impl Harness {
                     if !batch.is_empty()
                         && !self
                             .flush(
-                                engine,
+                                &narrated,
                                 profile,
                                 project,
                                 &mut batch,
@@ -978,7 +1072,7 @@ impl Harness {
                 && !batch.is_empty()
                 && !self
                     .flush(
-                        engine,
+                        &narrated,
                         profile,
                         project,
                         &mut batch,
@@ -1047,9 +1141,12 @@ impl Harness {
                 cancelled: true,
                 interrupted,
                 steered,
+                ran_out: false,
             });
         }
 
+        // The loop ended without the model's own answer: the work may not be done.
+        let ran_out = answer.is_empty();
         if answer.is_empty() {
             match self
                 .force_answer(
@@ -1082,6 +1179,7 @@ impl Harness {
                         cancelled: true,
                         interrupted,
                         steered,
+                        ran_out: false,
                     });
                 }
             }
@@ -1151,6 +1249,7 @@ impl Harness {
             cancelled: false,
             interrupted: false,
             steered,
+            ran_out,
         })
     }
 
@@ -1185,12 +1284,12 @@ impl Harness {
             skills: self.skills.clone(),
             can_add: can_add(profile),
             ready: self.ready_block(engine, &loaded),
-            task: task.to_string(),
+            task: self.task_text(task, self.request_budget()),
         };
         let first_text = first.render();
         let first_tokens = estimate_tokens(&first_text) + 4;
-        let mut ws = WorkingSet::new(self.budget);
-        ws.push_round(vec![Message::user(first_text)]);
+        let mut ws = WorkingSet::new(self.request_budget());
+        ws.pin(Message::user(first_text));
         let state_digest = state.digest(STATE_DIGEST_ITEMS);
         let tail = state_message(&state_digest);
         let (_, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
@@ -1236,36 +1335,29 @@ impl Harness {
             .saturating_sub(instructions);
         let ready = first.ready.as_deref().map(estimate_tokens).unwrap_or(0)
             + first.can_add.as_deref().map(estimate_tokens).unwrap_or(0);
-        let capability_index =
-            estimate_tokens(&sys.index) + if ws.last_compressed == 0 { ready } else { 0 };
+        // The first message is the pinned head: always in the request.
+        let capability_index = estimate_tokens(&sys.index) + ready;
         let working_state = WorkingSet::message_tokens(&state_message(state_digest));
         let system_total = estimate_tokens(&sys.render());
-        // The first round holds workspace + conversation + rules + skills + task; attribute its
+        // The head holds workspace + conversation + rules + skills + task; attribute its
         // framing to the task.
-        let (workspace, conversation, rules, skills, task) = if ws.last_compressed == 0 {
-            let w = first.workspace.as_deref().map(estimate_tokens).unwrap_or(0);
-            let c = first
-                .conversation
-                .as_deref()
-                .map(estimate_tokens)
-                .unwrap_or(0);
-            let r = first.rules.as_deref().map(estimate_tokens).unwrap_or(0);
-            let k = first.skills.as_deref().map(estimate_tokens).unwrap_or(0);
-            (
-                w,
-                c,
-                r,
-                k,
-                first_tokens.saturating_sub(w + c + r + k + ready),
-            )
-        } else {
-            (0, 0, 0, 0, 0)
-        };
-        let first_kept = if ws.last_compressed == 0 {
-            first_tokens
-        } else {
-            0
-        };
+        let w = first.workspace.as_deref().map(estimate_tokens).unwrap_or(0);
+        let c = first
+            .conversation
+            .as_deref()
+            .map(estimate_tokens)
+            .unwrap_or(0);
+        let r = first.rules.as_deref().map(estimate_tokens).unwrap_or(0);
+        let k = first.skills.as_deref().map(estimate_tokens).unwrap_or(0);
+        let (workspace, conversation, rules, skills, task) = (
+            w,
+            c,
+            r,
+            k,
+            first_tokens.saturating_sub(w + c + r + k + ready),
+        );
+        let first_kept = first_tokens;
+        let ledger = ws.ledger_tokens();
         // Rounds before `last_compressed` were dropped from this request.
         let retrieved: u32 = retrieved.iter().skip(ws.last_compressed).sum();
         let model_output = ws.kept_model_output();
@@ -1273,6 +1365,7 @@ impl Harness {
             .saturating_sub(system_total)
             .saturating_sub(working_state)
             .saturating_sub(first_kept)
+            .saturating_sub(ledger)
             .saturating_sub(retrieved)
             .saturating_sub(model_output);
         let schema = |t: &ToolDef| {
@@ -1302,11 +1395,12 @@ impl Harness {
             task,
             tool_rounds,
             retrieved,
+            ledger,
             compressed_rounds: ws.last_compressed,
             tool_schemas,
             loaded_actions: loaded,
             total,
-            budget: self.budget,
+            budget: self.request_budget(),
         }
     }
 
@@ -1450,6 +1544,16 @@ impl Harness {
         }
     }
 
+    /// The task the model gets: the question, or for a turn that continues an unfinished one,
+    /// its goal with what the person said since (the question last). The goal's request is
+    /// clipped to fit the budget: `budget / 2` characters, 1,000 to 4,000.
+    fn task_text(&self, question: &str, budget: u32) -> String {
+        match &self.goal {
+            Some(g) => g.render((budget as usize / 2).clamp(1_000, 4_000)),
+            None => question.to_string(),
+        }
+    }
+
     /// The event a run that stopped ends with: the person's cancel, or the process stopping.
     fn stopped_event(&self) -> HarnessEvent {
         let asked = self.cancel.as_ref().is_some_and(|c| c.is_cancelled());
@@ -1490,8 +1594,10 @@ impl Harness {
         stream: bool,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
+        repair: Option<&mut String>,
     ) -> Result<Option<Completion>, AgentError> {
         let provider = self.router.provider(role).clone();
+        let mut repair = repair;
         let started = std::time::Instant::now();
         let mut retries = 0u32;
         // When this call first failed: an unreachable model is waited for that long.
@@ -1530,6 +1636,21 @@ impl Harness {
             }
             let completion = match result {
                 Ok(c) => c,
+                // The model's own reply cannot be used. Sending the same request again asks
+                // for the same mistake: with `repair`, the caller tells the model what was
+                // wrong instead (ADR 0050). What it showed is withdrawn and handed back.
+                Err(e @ ark_model::ProviderError::Malformed { .. }) if repair.is_some() => {
+                    if !shown.is_empty() {
+                        on_event(HarnessEvent::TextWithdrawn {
+                            text: shown.clone(),
+                        });
+                    }
+                    if let Some(out) = repair.as_deref_mut() {
+                        *out = shown;
+                    }
+                    tracing::warn!(role = role_name(role), error = %e, "the model's reply could not be used");
+                    return Err(AgentError::model(&e));
+                }
                 // What was shown does not decide whether to retry: the shown text is withdrawn
                 // and the retry streams its own (ADR 0049). Tools run only after a call
                 // succeeds, so none runs twice.
@@ -1560,6 +1681,7 @@ impl Harness {
                         attempt: retries,
                         delay_ms: delay.as_millis() as u64,
                         error: e.to_string(),
+                        repair: false,
                     });
                     if self.cancellable(tokio::time::sleep(delay)).await.is_none() {
                         return Ok(None);
@@ -1895,7 +2017,7 @@ impl Harness {
                 instructions,
                 task,
                 total: instructions + task,
-                budget: self.budget,
+                budget: self.request_budget(),
                 ..Default::default()
             },
         });
@@ -1908,6 +2030,7 @@ impl Harness {
                 false,
                 metrics,
                 on_event,
+                None,
             )
             .await
             .ok()??;
@@ -2013,6 +2136,7 @@ impl Harness {
                 true,
                 metrics,
                 on_event,
+                None,
             )
             .await?
             .map(|c| c.content.trim().to_string()))
@@ -2089,12 +2213,21 @@ impl Harness {
                 model_output: draft,
                 task: review,
                 total: estimate_tokens(&sys) + WorkingSet::message_tokens(&msgs[0]),
-                budget: self.budget,
+                budget: self.request_budget(),
                 ..Default::default()
             },
         });
         let c = self
-            .call_model(Role::Critic, &sys, &msgs, &[], false, metrics, on_event)
+            .call_model(
+                Role::Critic,
+                &sys,
+                &msgs,
+                &[],
+                false,
+                metrics,
+                on_event,
+                None,
+            )
             .await
             .ok()??;
         let out = c.content.trim().to_string();
@@ -2244,7 +2377,37 @@ impl SystemPrompt {
 /// records findings; keeping it at the end leaves everything before it byte-identical between
 /// steps, which is what a prefix cache needs.
 fn state_message(digest: &str) -> Message {
-    Message::user(format!("== WORKING STATE ==\n{digest}"))
+    state_message_with(digest, &[])
+}
+
+/// Messages the person sent while the turn ran that the working state repeats, newest kept, and
+/// the characters of each.
+const STEERED_CARRIED: usize = 5;
+const STEERED_CHARS: usize = 300;
+
+/// The working state with what the person said while the turn ran: a steering message also
+/// sits in a round, which can be dropped; here it stays (ADR 0050).
+fn state_message_with(digest: &str, steered: &[String]) -> Message {
+    use std::fmt::Write as _;
+    let mut s = format!("== WORKING STATE ==\n{digest}");
+    if !steered.is_empty() {
+        s.push_str("\nThe person also said while you worked (newest last):");
+        let older = steered.len().saturating_sub(STEERED_CARRIED);
+        if older > 0 {
+            let _ = write!(s, "\n  (+{older} earlier)");
+        }
+        for m in &steered[older..] {
+            let flat = m.split_whitespace().collect::<Vec<_>>().join(" ");
+            let clipped: String = flat.chars().take(STEERED_CHARS).collect();
+            let more = if flat.chars().count() > STEERED_CHARS {
+                "…"
+            } else {
+                ""
+            };
+            let _ = write!(s, "\n  - {clipped}{more}");
+        }
+    }
+    Message::user(s)
 }
 
 impl Harness {
@@ -2447,6 +2610,11 @@ fn unwritten_note(missing: &[String], written: &[String]) -> String {
 
 /// Runs of one identical state-changing call in a task: the first and one retry.
 pub const MAX_IDENTICAL_CHANGES: u32 = 2;
+
+/// Replies that could not be used the model is asked to send again: in a row, and in a turn.
+const MAX_REPAIRS_IN_ROW: u32 = 2;
+const MAX_REPAIRS: u32 = 4;
+const REPAIR_NOTE: &str = "Your last reply could not be used, so nothing ran. Send it again with valid arguments for the tool you meant to call. Put long text in several smaller edits instead of one large one.";
 
 const DONE_BEFORE_NOTE: &str = "not run again: this exact change already ran before the work was interrupted, so running it again would make it twice. Its result";
 const CUT_SHORT_NOTE: &str = "not run: this exact change was under way when the work was interrupted, so it may already have happened, and only the person can tell. Do not try it again; say in your answer that it was cut short and may need to be checked.";

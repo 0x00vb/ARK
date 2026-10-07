@@ -250,9 +250,110 @@ pub struct Turn {
     /// When that process started, to tell it from a later one with the same pid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pid_start: Option<u64>,
+    /// What this turn works on when it continues an unfinished one (ADR 0050): the first
+    /// request of the chain and what the person said about it since. `None`: its own input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<Goal>,
+    /// It answered because it reached its step limit, not because the work was done
+    /// ([`HarnessOutcome::ran_out`]): the next turn continues its goal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ran_out: bool,
+}
+
+/// Follow-ups a goal keeps in full, newest kept, and the characters of each.
+const FOLLOW_UPS: usize = 8;
+const FOLLOW_UP_CHARS: usize = 500;
+
+/// What a chain of turns works on (ADR 0050): the request that started it and every later
+/// message about it, from follow-up turns and from steering, newest last. A turn that
+/// continues an unfinished one takes its goal and adds its own message, so "continue" never
+/// becomes the goal and no instruction is lost.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Goal {
+    /// The person's first message of the chain, as the app passed it (it may be empty when
+    /// only files were sent).
+    pub request: String,
+    /// Later messages about it, newest last; the newest [`FOLLOW_UPS`] are kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub follow_ups: Vec<String>,
+    /// Older follow-ups no longer kept.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub earlier: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+impl Goal {
+    pub fn new(request: impl Into<String>) -> Goal {
+        Goal {
+            request: request.into(),
+            follow_ups: Vec::new(),
+            earlier: 0,
+        }
+    }
+
+    /// Add a later message, keeping the newest [`FOLLOW_UPS`].
+    pub fn then(&mut self, message: &str) {
+        let m = message.trim();
+        if m.is_empty() {
+            return;
+        }
+        self.follow_ups.push(clip(m, FOLLOW_UP_CHARS));
+        while self.follow_ups.len() > FOLLOW_UPS {
+            self.follow_ups.remove(0);
+            self.earlier += 1;
+        }
+    }
+
+    /// For the model: the request (clipped to `request_chars`) and the follow-ups, saying to
+    /// follow the newest where they differ.
+    pub fn render(&self, request_chars: usize) -> String {
+        use std::fmt::Write as _;
+        let mut s = format!(
+            "The person asked for this (it is not finished yet):\n{}",
+            clip_lines(&self.request, request_chars)
+        );
+        if !self.follow_ups.is_empty() || self.earlier > 0 {
+            s.push_str("\nThen they said, newest last (follow the newest where they differ):");
+            if self.earlier > 0 {
+                let _ = write!(s, "\n  (+{} earlier messages)", self.earlier);
+            }
+            for f in &self.follow_ups {
+                let _ = write!(s, "\n  - {f}");
+            }
+        }
+        s
+    }
+
+    /// The request and the follow-ups as one text, for choosing rules, skills and tools.
+    pub fn text(&self) -> String {
+        let mut s = self.request.clone();
+        for f in &self.follow_ups {
+            s.push('\n');
+            s.push_str(f);
+        }
+        s
+    }
 }
 
 impl Turn {
+    /// What this turn worked on, with what the person said while it ran.
+    pub fn effective_goal(&self) -> Goal {
+        let mut g = self.goal.clone().unwrap_or_else(|| Goal::new(&self.input));
+        for m in &self.steered {
+            g.then(m);
+        }
+        g
+    }
+
+    /// Whether this turn did not finish (it failed, the process stopped, or the person
+    /// stopped it): the next turn continues it.
+    pub fn unfinished(&self) -> bool {
+        self.incomplete || self.cancelled || self.ran_out
+    }
+
     fn placeholder(index: u32, input: &str) -> Turn {
         Turn {
             index,
@@ -267,6 +368,8 @@ impl Turn {
             error: None,
             pid: Some(std::process::id()),
             pid_start: crate::process::own_start(),
+            goal: None,
+            ran_out: false,
         }
     }
 }
@@ -274,10 +377,12 @@ impl Turn {
 /// Why a turn that never finished is marked so.
 pub const INTERRUPTED: &str = "interrupted: the app stopped before this turn finished";
 
-/// Unfinished turns in a row a continuation looks back over.
-const UNFINISHED_TURNS: usize = 3;
-/// Calls of unfinished turns the next turn is told about, newest kept.
-const CALLS_CARRIED: usize = 10;
+/// Unfinished turns in a row a continuation looks back over for their calls (ADR 0050). The
+/// goal itself goes back through the whole chain: each turn stores it.
+const UNFINISHED_TURNS: usize = 20;
+/// Characters of the model's last note and of the reason a turn stopped, carried.
+const NOTE_CARRIED: usize = 600;
+const ERROR_CARRIED: usize = 300;
 
 /// The unfinished turns at the end of a conversation and the calls they made
 /// ([`Session::unfinished`]).
@@ -289,56 +394,79 @@ pub struct Unfinished {
     pub works: Vec<String>,
     /// Oldest first.
     pub calls: Vec<ark_core::Invocation>,
+    /// One line per call, as [`Unfinished::calls`]: its action, key input and the first line
+    /// of its result card.
+    pub lines: Vec<String>,
+    /// The goal of the last unfinished turn, with what the person said while it ran.
+    pub goal: Goal,
+    /// Why the last turn stopped (its error), if it said.
+    pub error: Option<String>,
+    /// Whether the person stopped it.
+    pub stopped: bool,
 }
 
 impl Unfinished {
-    /// What the turns did, for the model: one clipped line per call, the newest
-    /// [`CALLS_CARRIED`], what the tools keep from them (`held`, [`Engine::continued`]), and
-    /// what to do with them.
-    pub fn carry(&self, held: &[String]) -> String {
+    /// What the turns did, for the model: why the last one stopped, one line per call (the
+    /// newest that fit `budget`: `budget / 600`, 5 to 20), what the tools keep from them
+    /// (`held`, [`Engine::continued`]), the model's last note, and what to do with them.
+    pub fn carry(&self, held: &[String], budget: u32) -> String {
         use ark_core::InvocationStatus as S;
         use std::fmt::Write as _;
+        let max = (budget as usize / 600).clamp(5, 20);
         let mut s = String::from(
             "Your last turn stopped before it finished. The calls it made are below: do not make \
-             a change marked done again; continue from where it stopped when asked to continue \
-             or retry.",
+             a change marked done again; continue from where it stopped.",
         );
-        let ran: Vec<&ark_core::Invocation> = self
-            .calls
-            .iter()
-            .filter(|c| c.status != S::PendingApproval)
-            .collect();
-        for h in held.iter().take(CALLS_CARRIED) {
+        if self.stopped {
+            s.push_str("\nThe person stopped it.");
+        } else if let Some(e) = &self.error {
+            let _ = write!(s, "\nIt stopped because: {}", clip(e, ERROR_CARRIED));
+        }
+        for h in held.iter().take(max) {
             let _ = write!(s, "\n  - {}", clip(h, 240));
         }
+        let ran: Vec<(&ark_core::Invocation, &String)> = self
+            .calls
+            .iter()
+            .zip(self.lines.iter())
+            .filter(|(c, _)| c.status != S::PendingApproval)
+            .collect();
         if ran.is_empty() {
             if held.is_empty() {
                 s.push_str("\n  (it made no calls)");
             }
-            return s;
-        }
-        let older = ran.len().saturating_sub(CALLS_CARRIED);
-        if older > 0 {
-            let _ = write!(s, "\n  (+{older} earlier calls)");
-        }
-        for c in &ran[older..] {
-            let call = clip(&format!("{} {}", c.action, c.input), 120);
-            let line = match c.status {
-                S::Ok => format!("done {call} → {}", clip(&c.output.to_string(), 120)),
-                S::Failed if c.error.as_deref() == Some(crate::engine::INTERRUPTED_CALL) => {
-                    if c.risk == ark_core::RiskTier::Mutate {
-                        format!("cut short {call}: it may or may not have happened")
-                    } else {
-                        format!("cut short {call}")
+        } else {
+            let older = ran.len().saturating_sub(max);
+            if older > 0 {
+                let _ = write!(s, "\n  (+{older} earlier calls)");
+            }
+            for (c, line) in &ran[older..] {
+                let state = match c.status {
+                    S::Ok => "done",
+                    S::Failed if c.error.as_deref() == Some(crate::engine::INTERRUPTED_CALL) => {
+                        if c.risk == ark_core::RiskTier::Mutate {
+                            "cut short (it may or may not have happened)"
+                        } else {
+                            "cut short"
+                        }
                     }
-                }
-                S::Failed => format!(
-                    "failed {call}: {}",
-                    clip(c.error.as_deref().unwrap_or("unknown error"), 120)
-                ),
-                _ => format!("cut short {call}"),
-            };
-            let _ = write!(s, "\n  - {line}");
+                    S::Failed => "failed",
+                    _ => "cut short",
+                };
+                let _ = write!(s, "\n  - {state}: {line}");
+            }
+        }
+        if let Some(n) = self
+            .calls
+            .iter()
+            .rev()
+            .find_map(|c| c.narration.as_deref().filter(|n| !n.trim().is_empty()))
+        {
+            let _ = write!(
+                s,
+                "\nYour last note before it stopped: \"{}\"",
+                clip(n, NOTE_CARRIED)
+            );
         }
         s
     }
@@ -380,6 +508,8 @@ pub struct Session {
     recent: Vec<Turn>,
     /// Posts after `record.posts_read`, as of the last [`Session::read_posts`].
     unread: Vec<(u64, Post)>,
+    /// The goal of the turn under way, stored with it however it ends.
+    goal: Option<Goal>,
 }
 
 impl Session {
@@ -412,6 +542,7 @@ impl Session {
             record,
             recent: Vec::new(),
             unread: Vec::new(),
+            goal: None,
         };
         s.save(engine)?;
         Ok(s)
@@ -466,6 +597,7 @@ impl Session {
             record,
             recent,
             unread: Vec::new(),
+            goal: None,
         };
         if let Some(mut t) = begun {
             match t.pid {
@@ -685,38 +817,104 @@ impl Session {
     /// continues from them: it does not make their changes again and is told what they did.
     /// `None` when the last turn finished.
     pub fn unfinished(&self, engine: &Engine) -> Result<Option<Unfinished>, AgentError> {
-        let mut turns: Vec<u32> = self
-            .recent
-            .iter()
+        let count = self.record.turn_count;
+        // Read from the store, not the verbatim window: a chain may be longer than it.
+        let stored = Self::read_turns(engine, &self.record.id, Some(UNFINISHED_TURNS + 1))?;
+        let chain: Vec<Turn> = stored
+            .into_iter()
+            .filter(|t| t.index < count)
             .rev()
-            .take_while(|t| t.incomplete || t.cancelled)
+            .take_while(Turn::unfinished)
             .take(UNFINISHED_TURNS)
-            .map(|t| t.index)
             .collect();
-        if turns.is_empty() {
+        let Some(last) = chain.first() else {
             return Ok(None);
-        }
+        };
+        let goal = last.effective_goal();
+        let error = last.error.clone().or_else(|| {
+            last.ran_out
+                .then(|| "it reached its step limit before the work was done".to_string())
+        });
+        let stopped = last.cancelled && !last.incomplete;
+        let mut turns: Vec<u32> = chain.iter().map(|t| t.index).collect();
         turns.reverse();
         let works: Vec<String> = turns.iter().map(|i| self.work_of(*i)).collect();
         let mut calls = Vec::new();
         for w in &works {
             calls.extend(engine.work_calls(&self.record.project, w)?);
         }
+        let lines = calls
+            .iter()
+            .map(|c| call_line(engine, &self.record.project, c))
+            .collect();
         Ok(Some(Unfinished {
             turns,
             works,
             calls,
+            lines,
+            goal,
+            error,
+            stopped,
         }))
+    }
+
+    /// The goal of a turn that starts now with `input`: the unfinished turn before it's goal
+    /// with `input` added, or `None` when the turn before finished (the input is the goal).
+    pub fn goal_for(&self, unfinished: Option<&Unfinished>, input: &str) -> Option<Goal> {
+        unfinished.map(|u| {
+            let mut g = u.goal.clone();
+            g.then(input);
+            g
+        })
     }
 
     /// Record that a turn started, before it runs. If the process stops before
     /// [`record_turn`](Session::record_turn) or [`fail_turn`](Session::fail_turn), the next
     /// open marks the turn interrupted instead of losing it.
     pub fn begin_turn(&mut self, engine: &Engine, input: &str) -> Result<(), AgentError> {
-        let t = Turn::placeholder(self.record.turn_count, input);
+        self.begin_turn_with_goal(engine, input, None)
+    }
+
+    /// [`begin_turn`](Session::begin_turn) for a turn that continues an unfinished one: its
+    /// goal is stored with it at once, so a crash keeps it, and the turn's record keeps it
+    /// whichever way it ends.
+    pub fn begin_turn_with_goal(
+        &mut self,
+        engine: &Engine,
+        input: &str,
+        goal: Option<Goal>,
+    ) -> Result<(), AgentError> {
+        let mut t = Turn::placeholder(self.record.turn_count, input);
+        t.goal = goal.clone();
+        self.goal = goal;
         engine.store.put_session_turn(
             self.record.id.as_str(),
             t.index,
+            &serde_json::to_value(&t)?,
+        )?;
+        Ok(())
+    }
+
+    /// A message the person sent while the turn runs reached the model: add it to the turn's
+    /// stored record now, so a crash keeps it in the goal the next turn continues.
+    pub fn steered_now(&mut self, engine: &Engine, message: &str) -> Result<(), AgentError> {
+        let index = self.record.turn_count;
+        let Some(v) = engine
+            .store
+            .list_session_turns(self.record.id.as_str(), Some(1))?
+            .into_iter()
+            .next()
+        else {
+            return Ok(());
+        };
+        let mut t = readable_turn(v);
+        if t.index != index || t.pid.is_none() {
+            return Ok(());
+        }
+        t.steered.push(message.to_string());
+        engine.store.put_session_turn(
+            self.record.id.as_str(),
+            index,
             &serde_json::to_value(&t)?,
         )?;
         Ok(())
@@ -749,6 +947,8 @@ impl Session {
             error: interrupted.then(|| INTERRUPTED.to_string()),
             pid: None,
             pid_start: None,
+            goal: self.goal.take(),
+            ran_out: outcome.ran_out && !outcome.cancelled,
         };
         self.push_turn(engine, turn, &outcome.metrics)
     }
@@ -764,6 +964,7 @@ impl Session {
         t.error = Some(error.to_string());
         t.pid = None;
         t.pid_start = None;
+        t.goal = self.goal.take();
         self.push_turn(engine, t, &Metrics::default())
     }
 
@@ -914,6 +1115,44 @@ fn first_sentence(s: &str) -> String {
     }
 }
 
+/// One line for a call of a stopped turn: its action, key input and the first line of its
+/// result card (or its error), with `inv:` to read it again.
+fn call_line(engine: &Engine, project: &ProjectId, c: &ark_core::Invocation) -> String {
+    let mut line = c.action.clone();
+    let input = crate::budget::key_input(&c.input);
+    if !input.is_empty() {
+        line.push(' ');
+        line.push_str(&input);
+    }
+    let result = engine
+        .store
+        .get_evidence_card(project, c.id.as_str())
+        .ok()
+        .flatten()
+        .map(|card| card.summary.lines().next().unwrap_or("").to_string())
+        .or_else(|| c.error.clone())
+        .unwrap_or_default();
+    if !result.trim().is_empty() {
+        line.push_str(" → ");
+        line.push_str(&clip(&result, 100));
+    }
+    line.push_str(&format!(" [inv:{}]", c.id.short()));
+    line
+}
+
+/// `s` clipped to `max` characters, keeping its line breaks.
+fn clip_lines(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() <= max {
+        t.to_string()
+    } else {
+        format!(
+            "{}… (the rest is in the conversation)",
+            t.chars().take(max).collect::<String>()
+        )
+    }
+}
+
 fn flat(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -947,6 +1186,7 @@ mod tests {
             cancelled: false,
             interrupted: false,
             steered: vec![],
+            ran_out: false,
         }
     }
 
@@ -1132,5 +1372,176 @@ mod tests {
         // Resumed after compaction, the window stays compacted.
         let again = Session::open(&engine, s.id().as_str()).unwrap().unwrap();
         assert_eq!(again.conversation_digest(), s.conversation_digest());
+    }
+
+    fn chat() -> (tempfile::TempDir, Engine, Session) {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let p = engine.create_project("p", "").unwrap();
+        let s = Session::start(&engine, &p.id).unwrap();
+        (dir, engine, s)
+    }
+
+    /// A turn that fails, continuing whatever came before it.
+    fn failed_turn(engine: &Engine, s: &mut Session, input: &str) {
+        let u = s.unfinished(engine).unwrap();
+        let goal = s.goal_for(u.as_ref(), input);
+        s.begin_turn_with_goal(engine, input, goal).unwrap();
+        s.fail_turn(engine, input, "the model's reply could not be used: x")
+            .unwrap();
+    }
+
+    #[test]
+    fn a_chain_keeps_the_request_and_every_instruction() {
+        let (_d, engine, mut s) = chat();
+        failed_turn(&engine, &mut s, "add syntax highlighting");
+        failed_turn(&engine, &mut s, "use tree-sitter");
+        let u = s.unfinished(&engine).unwrap().unwrap();
+        let g = s.goal_for(Some(&u), "continue").unwrap();
+        assert_eq!(g.request, "add syntax highlighting");
+        assert_eq!(g.follow_ups, ["use tree-sitter", "continue"]);
+        let text = g.render(4_000);
+        assert!(
+            text.contains("follow the newest where they differ"),
+            "{text}"
+        );
+        assert_eq!(
+            u.error.as_deref(),
+            Some("the model's reply could not be used: x")
+        );
+    }
+
+    #[test]
+    fn a_long_chain_keeps_the_request_and_counts_older_messages() {
+        let (_d, engine, mut s) = chat();
+        failed_turn(&engine, &mut s, "the request");
+        for i in 0..30 {
+            failed_turn(&engine, &mut s, &format!("continue {i}"));
+        }
+        let u = s.unfinished(&engine).unwrap().unwrap();
+        assert_eq!(
+            u.goal.request, "the request",
+            "the first request of any chain"
+        );
+        assert_eq!(u.goal.follow_ups.len(), 8);
+        assert_eq!(u.goal.follow_ups.last().unwrap(), "continue 29");
+        assert_eq!(u.goal.earlier, 22);
+        assert!(u.goal.render(4_000).contains("(+22 earlier messages)"));
+    }
+
+    #[test]
+    fn a_finished_turn_ends_the_chain() {
+        let (_d, engine, mut s) = chat();
+        failed_turn(&engine, &mut s, "first");
+        s.begin_turn_with_goal(&engine, "continue", Some(Goal::new("first")))
+            .unwrap();
+        s.record_turn(&engine, "continue", &outcome("done"))
+            .unwrap();
+        assert!(s.unfinished(&engine).unwrap().is_none());
+        assert!(s.goal_for(None, "something new").is_none());
+    }
+
+    #[test]
+    fn the_goal_survives_every_way_a_turn_is_recorded() {
+        let mut g = Goal::new("the request");
+        g.then("continue");
+        // Finished.
+        let (_d, engine, mut s) = chat();
+        s.begin_turn_with_goal(&engine, "continue", Some(g.clone()))
+            .unwrap();
+        s.record_turn(&engine, "continue", &outcome("ok")).unwrap();
+        let t = Session::read_turns(&engine, s.id(), None).unwrap();
+        assert_eq!(t[0].goal.as_ref(), Some(&g), "record_turn");
+        // Failed.
+        let (_d, engine, mut s) = chat();
+        s.begin_turn_with_goal(&engine, "continue", Some(g.clone()))
+            .unwrap();
+        s.fail_turn(&engine, "continue", "boom").unwrap();
+        let t = Session::read_turns(&engine, s.id(), None).unwrap();
+        assert_eq!(t[0].goal.as_ref(), Some(&g), "fail_turn");
+        // The process died: the store's next opening recovers the begun turn.
+        let (_d, engine, mut s) = chat();
+        s.begin_turn_with_goal(&engine, "continue", Some(g.clone()))
+            .unwrap();
+        s.steered_now(&engine, "and keep the theme").unwrap();
+        let mut stored = Session::read_turns(&engine, s.id(), None).unwrap();
+        let mut t = stored.remove(0);
+        t.pid = Some(u32::MAX - 7);
+        t.pid_start = Some(1);
+        engine
+            .store
+            .put_session_turn(s.id().as_str(), t.index, &serde_json::to_value(&t).unwrap())
+            .unwrap();
+        let reopened = Session::open(&engine, s.id().as_str()).unwrap().unwrap();
+        let t = Session::read_turns(&engine, reopened.id(), None).unwrap();
+        assert_eq!(t[0].goal.as_ref(), Some(&g), "recovered on open");
+        assert_eq!(
+            t[0].steered,
+            ["and keep the theme"],
+            "steering kept at once"
+        );
+        let u = reopened.unfinished(&engine).unwrap().unwrap();
+        assert_eq!(
+            u.goal.follow_ups,
+            ["continue", "and keep the theme"],
+            "the next turn continues with what was said while it ran"
+        );
+    }
+
+    #[test]
+    fn a_fourth_continue_still_finds_the_first_turns_change() {
+        let (_d, engine, mut s) = chat();
+        let project = s.project().clone();
+        failed_turn(&engine, &mut s, "save the chapter");
+        let mut inv = ark_core::Invocation::new(
+            "notes.save",
+            ark_core::RiskTier::Mutate,
+            serde_json::json!({"path": "ch1.md"}),
+        );
+        inv.status = ark_core::InvocationStatus::Ok;
+        inv.work = Some(s.work_of(0));
+        inv.narration = Some("Saving chapter one now.".into());
+        engine.store.put_invocation(&project, &inv).unwrap();
+        for _ in 0..4 {
+            failed_turn(&engine, &mut s, "continue");
+        }
+        let u = s.unfinished(&engine).unwrap().unwrap();
+        assert_eq!(u.turns.len(), 5);
+        assert!(
+            u.calls.iter().any(|c| c.id == inv.id),
+            "turn 0's change is found, so it is not made again"
+        );
+        let carry = u.carry(&[], 6_000);
+        assert!(carry.contains("done: notes.save path=ch1.md"), "{carry}");
+        assert!(
+            carry.contains("Your last note before it stopped: \"Saving chapter one now.\""),
+            "{carry}"
+        );
+        assert!(
+            carry.contains("It stopped because: the model's reply could not be used"),
+            "{carry}"
+        );
+    }
+
+    #[test]
+    fn a_turn_that_ran_out_of_steps_is_continued() {
+        let (_d, engine, mut s) = chat();
+        s.begin_turn(&engine, "add syntax highlighting").unwrap();
+        let mut o = outcome("Here is where I got to.");
+        o.ran_out = true;
+        s.record_turn(&engine, "add syntax highlighting", &o)
+            .unwrap();
+        let u = s
+            .unfinished(&engine)
+            .unwrap()
+            .expect("its work is not done");
+        let g = s.goal_for(Some(&u), "continue").unwrap();
+        assert_eq!(g.request, "add syntax highlighting");
+        assert!(u
+            .carry(&[], 6_000)
+            .contains("It stopped because: it reached its step limit"));
+        // Its answer stays an answer for the person.
+        let t = Session::read_turns(&engine, s.id(), None).unwrap();
+        assert!(!t[0].incomplete && t[0].ran_out);
     }
 }

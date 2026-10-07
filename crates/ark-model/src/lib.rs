@@ -74,6 +74,11 @@ pub enum ProviderError {
     /// (usually cut off). Running the tool with guessed arguments would be wrong.
     #[error("{provider} sent a malformed reply: {detail}")]
     Malformed { provider: String, detail: String },
+    /// The vendor refused the form of the request (Codex refusing a typed reply schema), and
+    /// the next request takes another form. Not the model's output: retried as sent again,
+    /// never shown to the model as its mistake (ADR 0050).
+    #[error("{provider} refused the request: {detail}")]
+    Refused { provider: String, detail: String },
     #[error("missing credential: {0}")]
     MissingCredential(String),
     #[error("serde: {0}")]
@@ -93,7 +98,9 @@ impl ProviderError {
             ProviderError::Status { status, .. } => {
                 matches!(status, 408 | 425 | 429) || (500..=599).contains(status)
             }
-            ProviderError::Overloaded { .. } | ProviderError::Malformed { .. } => true,
+            ProviderError::Overloaded { .. }
+            | ProviderError::Malformed { .. }
+            | ProviderError::Refused { .. } => true,
             ProviderError::Api { .. }
             | ProviderError::OutOfCredit { .. }
             | ProviderError::MissingCredential(_)
@@ -416,6 +423,12 @@ pub trait Provider: Send + Sync {
     fn reads_pictures(&self) -> bool {
         false
     }
+    /// The input tokens one request to this model may have, when known. The harness sizes its
+    /// request budget from it (ADR 0050). The default is unknown; wrappers forward to what
+    /// they wrap.
+    fn context_window(&self) -> Option<u32> {
+        None
+    }
     /// Human description, e.g. "ollama qwen3:4b-instruct".
     fn describe(&self) -> String;
     /// The model identifier this provider targets (e.g. "qwen3:4b-instruct"). Used by
@@ -473,7 +486,11 @@ fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
                 let key = e
                     .api_key()
                     .ok_or_else(|| ProviderError::MissingCredential(e.key_var()))?;
-                Ok(Box::new(OpenAi::new(e.base_url, model, key).named(other)))
+                Ok(Box::new(
+                    OpenAi::new(e.base_url, model, key)
+                        .named(other)
+                        .with_context_window(e.context_window),
+                ))
             }
             None => Err(ProviderError::Api {
                 provider: other.into(),

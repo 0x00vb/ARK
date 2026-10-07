@@ -199,6 +199,9 @@ impl Provider for Faulty {
     fn model_id(&self) -> String {
         self.inner.model_id()
     }
+    fn context_window(&self) -> Option<u32> {
+        self.inner.context_window()
+    }
 }
 
 fn splitmix(mut z: u64) -> u64 {
@@ -249,5 +252,18 @@ mod tests {
         assert_ne!(a, c);
         let failed = a.iter().filter(|x| **x).count();
         assert!((10..=30).contains(&failed), "{failed} of 40");
+    }
+
+    #[test]
+    fn the_bench_wrappers_pass_the_window_on() {
+        let inner: Arc<dyn Provider> = Arc::new(
+            ark_sdk::prelude::ark_model::MockProvider::new("m", vec![])
+                .with_context_window(200_000),
+        );
+        let rec = crate::record::Recorder::new();
+        let faulty = Faulty::wrap(inner.clone(), &FaultPlan::default(), 0, rec.clone());
+        assert_eq!(faulty.context_window(), Some(200_000));
+        let metered = crate::record::Metered::wrap(inner, rec);
+        assert_eq!(metered.context_window(), Some(200_000));
     }
 }

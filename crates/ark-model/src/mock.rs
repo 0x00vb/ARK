@@ -27,6 +27,8 @@ pub struct MockProvider {
     chunk_delay: std::time::Duration,
     /// Fallback when the script runs out: a closure that builds a reply from the request.
     fallback: Option<Fallback>,
+    /// The window it reports ([`Provider::context_window`]); unknown by default.
+    window: Option<u32>,
 }
 
 impl MockProvider {
@@ -37,6 +39,7 @@ impl MockProvider {
             calls: Mutex::new(Vec::new()),
             chunk_delay: std::time::Duration::ZERO,
             fallback: None,
+            window: None,
         }
     }
 
@@ -94,6 +97,12 @@ impl MockProvider {
             }))
     }
 
+    /// Report this input window, as a real model with a known one would.
+    pub fn with_context_window(mut self, tokens: u32) -> Self {
+        self.window = Some(tokens);
+        self
+    }
+
     /// Stream each word with this pause between chunks.
     pub fn with_chunk_delay(mut self, delay: std::time::Duration) -> Self {
         self.chunk_delay = delay;
@@ -138,6 +147,9 @@ impl MockProvider {
 
 #[async_trait]
 impl Provider for MockProvider {
+    fn context_window(&self) -> Option<u32> {
+        self.window
+    }
     fn describe(&self) -> String {
         format!("mock {}", self.id)
     }

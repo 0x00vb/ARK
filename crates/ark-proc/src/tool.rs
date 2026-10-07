@@ -126,7 +126,7 @@ impl Adapter for ProcessTool {
         vec![
             ActionDescriptor::new(
                 START,
-                "Start a long-running command in the project (a dev server, a watcher, a worker) with the person's own shell and tools. It keeps running after this call; the person sees its output and can stop it. Answers once it is ready (a local address in its output answers), has ended, or `wait` passed, with the end of its output. To show the person its page, pass `open`.",
+                "Run a command in the project with the person's own shell, programs and settings (their PATH: cargo, npm, python and the rest): the project's tests, a build, a dev server, a watcher. It keeps running after this call; the person sees its output and can stop it. Answers once it is ready (a local address in its output answers), has ended (with its exit code), or `wait` passed, with the end of its output; `process.list` with its id reads more. For tests or a build, pass a `wait` long enough for it to end. To show the person its page, pass `open`.",
                 RiskTier::Mutate,
             )
             // "Always in this project" covers this command in this folder, never another.

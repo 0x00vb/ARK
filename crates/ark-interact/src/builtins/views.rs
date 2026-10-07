@@ -748,7 +748,12 @@ impl Command for Config {
             .field("store", s.store_root.display().to_string())
             .field(
                 "context budget",
-                format!("{} tokens per request (ARK_CTX_BUDGET)", s.context_budget),
+                match s.context_budget {
+                    Some(b) => format!("{b} tokens per request (ARK_CTX_BUDGET)"),
+                    None => {
+                        "by model: a quarter of its window, 6000 to 48000 tokens per request".into()
+                    }
+                },
             )
             .field("max steps", s.max_steps.to_string())
             .field(

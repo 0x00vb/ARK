@@ -20,10 +20,14 @@ pub struct OpenAi {
     http: HttpConfig,
     /// The model reads images: OpenAI's own API, not a named endpoint unless told.
     pictures: bool,
+    /// Input tokens a request may have, when known ([`Provider::context_window`]).
+    window: Option<u32>,
 }
 
 impl OpenAi {
     pub fn from_env(model: impl Into<String>) -> Result<Self> {
+        let model: String = model.into();
+        let model_name = model.clone();
         let key = crate::keys::api_key("OPENAI_API_KEY")
             .ok_or_else(|| ProviderError::MissingCredential("OPENAI_API_KEY".into()))?;
         Ok(OpenAi::new(
@@ -31,7 +35,8 @@ impl OpenAi {
             model,
             key,
         )
-        .reads_pictures(true))
+        .reads_pictures(true)
+        .with_context_window(openai_window(&model_name)))
     }
 
     /// Construct explicitly against any OpenAI-compatible endpoint.
@@ -45,7 +50,14 @@ impl OpenAi {
             client: http.client(),
             http,
             pictures: false,
+            window: None,
         }
+    }
+
+    /// The input tokens a request to this model may have, when known.
+    pub fn with_context_window(mut self, tokens: Option<u32>) -> Self {
+        self.window = tokens;
+        self
     }
 
     /// Whether the model reads images ([`Provider::reads_pictures`]).
@@ -120,10 +132,31 @@ fn to_wire_message(m: &Message) -> Value {
     }
 }
 
+/// The input window of an OpenAI model by its family, for OpenAI's own API. Unknown names
+/// give `None`, and the harness keeps its smallest budget for them.
+fn openai_window(model: &str) -> Option<u32> {
+    let m = model.to_ascii_lowercase();
+    let w = if m.starts_with("gpt-5") {
+        272_000
+    } else if m.starts_with("gpt-4.1") {
+        1_000_000
+    } else if m.starts_with("gpt-4o") || m.starts_with("gpt-4-turbo") {
+        128_000
+    } else if m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
+        200_000
+    } else {
+        return None;
+    };
+    Some(w)
+}
+
 #[async_trait]
 impl Provider for OpenAi {
     fn reads_pictures(&self) -> bool {
         self.pictures
+    }
+    fn context_window(&self) -> Option<u32> {
+        self.window
     }
     fn describe(&self) -> String {
         format!("{} {}", self.name, self.model)
@@ -265,5 +298,15 @@ mod tests {
         );
         // Without a picture, one message as before.
         assert_eq!(to_wire(&Message::tool_result(&call, "x")).len(), 1);
+    }
+
+    #[test]
+    fn openai_models_have_their_family_window() {
+        assert_eq!(openai_window("gpt-5"), Some(272_000));
+        assert_eq!(openai_window("gpt-5-mini"), Some(272_000));
+        assert_eq!(openai_window("gpt-4.1-mini"), Some(1_000_000));
+        assert_eq!(openai_window("gpt-4o"), Some(128_000));
+        assert_eq!(openai_window("o3"), Some(200_000));
+        assert_eq!(openai_window("some-local-model"), None);
     }
 }

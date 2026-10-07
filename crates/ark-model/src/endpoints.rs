@@ -26,6 +26,10 @@ pub struct Endpoint {
     /// The key, when the app gives it. Otherwise it is read like any API key, from
     /// [`key_var`](Endpoint::key_var): the environment first, then the app's key store.
     pub key: Option<String>,
+    /// The input tokens a request to its models may have, when the app knows it
+    /// ([`Provider::context_window`](crate::Provider::context_window)). Unknown: the harness
+    /// keeps its smallest budget.
+    pub context_window: Option<u32>,
 }
 
 impl Endpoint {
@@ -36,6 +40,7 @@ impl Endpoint {
             name,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             key: None,
+            context_window: None,
         }
     }
 
@@ -46,6 +51,12 @@ impl Endpoint {
 
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
+        self
+    }
+
+    /// The input tokens a request to its models may have.
+    pub fn context_window(mut self, tokens: u32) -> Self {
+        self.context_window = Some(tokens);
         self
     }
 

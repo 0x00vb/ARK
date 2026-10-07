@@ -9,7 +9,7 @@ any application on ARK.
 | Variable | Default | Meaning |
 |---|---:|---|
 | `ARK_PROVIDER`, `ARK_MODEL` | `ollama`, per provider | the model; two tiers with `ARK_PROVIDER_FAST` / `ARK_MODEL_FAST` and `ARK_PROVIDER_STRONG` / `ARK_MODEL_STRONG` |
-| `ARK_CTX_BUDGET` | 6000 | prompt-token budget per request (tool schemas not counted) |
+| `ARK_CTX_BUDGET` | by model | prompt-token budget per request (tool schemas not counted). Unset: a quarter of the reasoning model's input window, 6,000 to 48,000 and at most half the window; 6,000 when the window is unknown (ADR 0050) |
 | `ARK_MODEL_RETRIES` | 4 | retries of a model call after a temporary failure |
 | `ARK_MODEL_OFFLINE_S` | 60 | how long a model that cannot be reached (no connection, a timeout) is waited for, past the retries |
 | `ARK_HTTP_CONNECT_TIMEOUT_S` | 10 | connecting to a provider |

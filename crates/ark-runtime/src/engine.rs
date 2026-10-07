@@ -51,6 +51,8 @@ pub struct Engine {
     work: Option<String>,
     /// Earlier runs of that work this one continues ([`continuing`](Engine::continuing)).
     continues: Vec<String>,
+    /// What the agent said when it made the calls this engine runs ([`narrating`](Engine::narrating)).
+    narration: Option<String>,
 }
 
 /// How many pictures stay for windows to show after the model got them.
@@ -71,6 +73,7 @@ impl Engine {
             shown: Arc::default(),
             work: None,
             continues: Vec::new(),
+            narration: None,
         }
     }
 
@@ -90,6 +93,7 @@ impl Engine {
             shown: self.shown.clone(),
             work: self.work.clone(),
             continues: self.continues.clone(),
+            narration: self.narration.clone(),
         }
     }
 
@@ -108,7 +112,25 @@ impl Engine {
             shown: self.shown.clone(),
             work: Some(work.into()),
             continues: self.continues.clone(),
+            narration: self.narration.clone(),
         }
+    }
+
+    /// This engine, with every call it runs keeping what the agent said when it made it
+    /// ([`Invocation::narration`], clipped to 600 characters). Kept in the call's record before
+    /// it runs, so work that stops is continued with the agent's own plan (ADR 0050).
+    pub fn narrating(&self, text: &str) -> Engine {
+        let t = text.trim();
+        let mut e = self.for_work(self.work.clone().unwrap_or_default());
+        e.work = self.work.clone();
+        e.narration = (!t.is_empty()).then(|| {
+            if t.chars().count() <= 600 {
+                t.to_string()
+            } else {
+                format!("{}…", t.chars().take(600).collect::<String>())
+            }
+        });
+        e
     }
 
     /// This engine, telling the tools its work continues `works`, runs of it that stopped
@@ -528,6 +550,7 @@ impl Engine {
         let input = self.resolve_artifact_arg(project, input);
         let mut inv = Invocation::new(action, desc.risk, input.clone());
         inv.work = self.work.clone();
+        inv.narration = self.narration.clone();
 
         // record which artifact this call reads, if any, for the provenance graph
         if let Some(a) = input.get("artifact").and_then(|v| v.as_str()) {

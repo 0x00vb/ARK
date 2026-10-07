@@ -474,9 +474,14 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             attempt,
             delay_ms,
             error,
+            repair,
         } => (
             E::Retry,
-            format!("retry {role} #{attempt} after {}", millis(*delay_ms)),
+            if *repair {
+                format!("repair {role} #{attempt}: the reply could not be used")
+            } else {
+                format!("retry {role} #{attempt} after {}", millis(*delay_ms))
+            },
             Some(clip(error, 160)),
             Tone::Warning,
         ),

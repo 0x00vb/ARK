@@ -329,7 +329,10 @@ impl Adapter for Exec {
         let mut summary = format!(
             "Run a program in the project folder and get its output and the files it wrote. \
              Runtimes: {}. The program reads and writes files only in the project folder \
-             (paths relative to it) and has no network.",
+             (paths relative to it) and has no network. It is contained: the person's own \
+             programs (cargo, npm, git and the rest) are not there, so do not start them from \
+             it. A project's own commands (its tests, a build) run with `process.start` when \
+             it is offered; when it is not, say they cannot be run here.",
             runtimes.join("; ")
         );
         if !self.shows.is_empty() {

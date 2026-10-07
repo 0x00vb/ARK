@@ -742,6 +742,14 @@ impl TurnEnd {
     pub fn out_of_credit(&self) -> Option<OutOfCredit> {
         self.result.as_ref().err().and_then(OutOfCredit::of)
     }
+
+    /// Why it failed, as the person reads it ([`crate::labels::person_error`]).
+    pub fn error_line(&self) -> Option<String> {
+        self.result
+            .as_ref()
+            .err()
+            .map(|e| crate::labels::person_error(&e.to_string()))
+    }
 }
 
 /// A turn stopped because the model's account has no credit left (the provider answered 402).

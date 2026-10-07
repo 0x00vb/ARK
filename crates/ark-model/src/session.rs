@@ -88,6 +88,10 @@ pub trait SessionBackend: Send + Sync {
     fn reads_pictures(&self) -> bool {
         false
     }
+    /// The vendor model's input window ([`Provider::context_window`]), when known.
+    fn context_window(&self) -> Option<u32> {
+        None
+    }
     /// The account whose capacity this backend draws on (`claude`, `codex`).
     fn account(&self) -> String;
     /// Start a vendor session from a full request. Returns the vendor's session id.
@@ -771,6 +775,16 @@ impl Provider for ManagedSession {
         self.backend.reads_pictures()
     }
 
+    /// The vendor thread is billed whole on every call, and it rotates at
+    /// [`SessionPolicy::max_context_tokens`]: that is the window a request should be sized for.
+    fn context_window(&self) -> Option<u32> {
+        let w = self.backend.context_window();
+        if !self.policy.reuse {
+            return w;
+        }
+        w.map(|w| w.min(self.policy.max_context_tokens))
+    }
+
     fn describe(&self) -> String {
         self.backend.label()
     }
@@ -1132,6 +1146,9 @@ struct OneShot {
 impl Provider for OneShot {
     fn reads_pictures(&self) -> bool {
         self.backend.reads_pictures()
+    }
+    fn context_window(&self) -> Option<u32> {
+        self.backend.context_window()
     }
     async fn complete(
         &self,

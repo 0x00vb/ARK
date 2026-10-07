@@ -1,5 +1,7 @@
 //! Model-call retries: bounded, observable, never re-running a tool, cancellable while waiting,
-//! and possible after text was shown, which is then withdrawn (ADR 0049).
+//! and possible after text was shown, which is then withdrawn (ADR 0049). A reply the model
+//! wrote that cannot be used is not resent: the model is told why and sends it again, a
+//! bounded number of times (ADR 0050).
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,6 +26,8 @@ enum Step {
 struct Flaky {
     steps: Mutex<VecDeque<Step>>,
     calls: AtomicUsize,
+    /// The messages of each request, in order.
+    requests: Mutex<Vec<Vec<Message>>>,
 }
 
 impl Flaky {
@@ -31,6 +35,7 @@ impl Flaky {
         Arc::new(Flaky {
             steps: Mutex::new(steps.into()),
             calls: AtomicUsize::new(0),
+            requests: Mutex::new(Vec::new()),
         })
     }
 }
@@ -48,11 +53,12 @@ impl Provider for Flaky {
     async fn complete_streaming(
         &self,
         _s: &str,
-        _m: &[Message],
+        m: &[Message],
         _t: &[ToolDef],
         on_text: TextSink<'_>,
     ) -> ark_model::Result<Completion> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        self.requests.lock().unwrap().push(m.to_vec());
         let step = self.steps.lock().unwrap().pop_front();
         match step {
             Some(Step::Ok(c)) => {
@@ -330,7 +336,8 @@ async fn every_failed_attempt_withdraws_its_own_text() {
     let (out, seen, _) = run(m.clone(), fast_policy(3), None).await;
     assert_eq!(out.unwrap().answer, "Résumé ✓ done");
     assert_eq!(seen.withdrawn, ["Résumé ✓ — first try, long", "Ré"]);
-    assert_eq!(seen.retries, vec![1, 2]);
+    // A transport retry, then the first repair of an unusable reply.
+    assert_eq!(seen.retries, vec![1, 1]);
     assert_eq!(seen.text, "Résumé ✓ done");
 }
 
@@ -401,4 +408,109 @@ async fn cancelling_during_the_backoff_returns_at_once() {
     let (out, _, _) = run(m, slow, Some(token)).await;
     assert!(out.unwrap().cancelled);
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+fn refused() -> ProviderError {
+    ProviderError::Refused {
+        provider: "x".into(),
+        detail: "the reply schema was refused (invalid_json_schema)".into(),
+    }
+}
+
+/// The text of every message of request `i`.
+fn request_text(m: &Flaky, i: usize) -> String {
+    m.requests.lock().unwrap()[i]
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[tokio::test]
+async fn an_unusable_reply_becomes_feedback_and_the_model_sends_it_again() {
+    // The owner's case: the note streamed, then the edit's arguments did not parse.
+    let m = Flaky::new(vec![
+        Step::TextThenFail("Plan: (1) keep the textarea", malformed),
+        Step::Ok(call("notes.save")),
+        Step::Ok(answer("saved")),
+    ]);
+    let (out, seen, saves) = run(m.clone(), fast_policy(0), None).await;
+    assert_eq!(
+        out.unwrap().answer,
+        "saved",
+        "no transport retry was needed"
+    );
+    assert_eq!(seen.withdrawn, ["Plan: (1) keep the textarea"]);
+    let again = request_text(&m, 1);
+    assert!(
+        again.contains("Your last reply could not be used"),
+        "{again}"
+    );
+    assert!(
+        again.contains("column 1573"),
+        "the model is told what was wrong: {again}"
+    );
+    assert!(
+        again.contains("Plan: (1) keep the textarea"),
+        "its own plan stays with it: {again}"
+    );
+    assert_eq!(saves.load(Ordering::SeqCst), 1);
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn three_unusable_replies_in_a_row_end_the_turn() {
+    let m = Flaky::new(vec![
+        Step::Fail(malformed),
+        Step::Fail(malformed),
+        Step::Fail(malformed),
+        Step::Ok(answer("never")),
+    ]);
+    let (out, seen, _) = run(m.clone(), fast_policy(2), None).await;
+    match out {
+        Err(ark_runtime::AgentError::UnusableReply { detail, .. }) => {
+            assert!(detail.contains("column 1573"))
+        }
+        Err(e) => panic!("expected an unusable reply, got {e:?}"),
+        Ok(o) => panic!("expected an unusable reply, got the answer {:?}", o.answer),
+    }
+    assert_eq!(seen.retries, vec![1, 2], "two repairs, then the turn ends");
+    assert_eq!(m.calls.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn repairs_are_counted_in_a_row_and_bounded_per_turn() {
+    // Two in a row, a good step, two more: four in the turn. A fifth ends it.
+    let m = Flaky::new(vec![
+        Step::Fail(malformed),
+        Step::Fail(malformed),
+        Step::Ok(call("notes.save")),
+        Step::Fail(malformed),
+        Step::Fail(malformed),
+        Step::Ok(call("notes.save")),
+        Step::Fail(malformed),
+        Step::Ok(answer("never")),
+    ]);
+    let (out, seen, _) = run(m.clone(), fast_policy(2), None).await;
+    assert!(
+        matches!(out, Err(ark_runtime::AgentError::UnusableReply { .. })),
+        "{:?}",
+        out.as_ref().err()
+    );
+    assert_eq!(seen.retries, vec![1, 2, 3, 4]);
+    assert_eq!(m.calls.load(Ordering::SeqCst), 7);
+}
+
+#[tokio::test]
+async fn a_refused_schema_is_retried_without_telling_the_model() {
+    let m = Flaky::new(vec![Step::Fail(refused), Step::Ok(answer("done"))]);
+    let (out, seen, _) = run(m.clone(), fast_policy(2), None).await;
+    assert_eq!(out.unwrap().answer, "done");
+    assert_eq!(seen.retries, vec![1]);
+    assert!(!request_text(&m, 1).contains("could not be used"));
+    assert_eq!(
+        request_text(&m, 0),
+        request_text(&m, 1),
+        "sent again as it was"
+    );
 }

@@ -198,8 +198,13 @@ pub fn cap_arrays(v: &Value, limit: usize) -> Value {
 }
 
 fn top_keys(v: &Value) -> String {
+    // Sorted: an object keeps its keys in the order they were written.
     v.as_object()
-        .map(|m| m.keys().cloned().collect::<Vec<_>>().join(", "))
+        .map(|m| {
+            let mut k: Vec<&String> = m.keys().collect();
+            k.sort();
+            k.into_iter().cloned().collect::<Vec<_>>().join(", ")
+        })
         .unwrap_or_default()
 }
 

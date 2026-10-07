@@ -132,12 +132,16 @@ flowchart LR
     card --> req["next request"]
     state["working state<br/>(findings, hypotheses)"] --> req
     carry["carry-over<br/>(recent exchanges, gists)"] --> req
+    head["task frame (pinned)<br/>goal, what the person said,<br/>what a stopped turn did"] --> req
+    ledger["ledger of dropped steps<br/>(one line per call)"] --> req
     store -. "get_evidence(match, offset)" .-> req
 ```
 
 | Mechanism | Module |
 |---|---|
-| Request assembled under a token budget from whole rounds; old rounds drop in chunks | `ark-runtime::budget` |
+| Request assembled under a token budget from whole rounds; old rounds drop in chunks and leave a ledger of their calls; the task frame is pinned and never dropped (ADR 0050) | `ark-runtime::budget` |
+| The budget is a quarter of the reasoning model's window (6,000 to 48,000; a vendor session's window is its 64k rotation limit) unless the app sets one | `budget::budget_for`, `Provider::context_window` |
+| A turn after an unfinished one keeps that one's goal and adds the new message; the goal is stored with the turn | `session::Goal`, `Turn::goal` |
 | Tool output distilled to an evidence card; full rows read on demand | `distill`, `evidence` |
 | A compact action index; a schema is loaded only when needed | `catalog`, `capmap` |
 | Fixed system prompt, tools in load order, working state last, so a prefix cache can serve it | `harness`, `ark-model` |

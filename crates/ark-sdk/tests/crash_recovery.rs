@@ -394,8 +394,8 @@ async fn killed_after_a_change_continues_without_making_it_again() {
         asked.contains("Your last turn stopped before it finished"),
         "{asked}"
     );
-    assert!(asked.contains("done slow.write"), "{asked}");
-    assert!(asked.contains("cut short slow.run"), "{asked}");
+    assert!(asked.contains("done: slow.write"), "{asked}");
+    assert!(asked.contains("cut short: slow.run"), "{asked}");
     // The continuation finished: the turn after it starts fresh.
     assert!(session.unfinished(ark.engine()).unwrap().is_none());
 }

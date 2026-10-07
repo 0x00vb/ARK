@@ -42,6 +42,9 @@ pub struct ContextReport {
     /// Evidence and knowledge the agent looked up this turn, still inside the window.
     #[serde(default)]
     pub retrieved: u32,
+    /// The ledger standing in for dropped rounds: what their calls did (ADR 0050).
+    #[serde(default)]
+    pub ledger: u32,
     /// Rounds dropped from the window on this request (their evidence stays retrievable).
     pub compressed_rounds: usize,
     /// Tool schemas sent alongside the prompt (meta-tools plus loaded actions). Reported
@@ -74,6 +77,7 @@ impl ContextReport {
             ("Tool results", self.tool_rounds),
             ("Model output", self.model_output),
             ("Retrieved context", self.retrieved),
+            ("Earlier steps", self.ledger),
         ]
     }
 }

@@ -328,7 +328,8 @@ impl ChatModel {
                 json!({ "file": "chapter-one.md", "text": "It rained all night." }),
             )
         };
-        if text.contains("== TASK ==\nContinue") {
+        // A turn that continues a stopped one gets its goal, then what the person said since.
+        if text.contains("Then they said") && text.contains("  - Continue") {
             return Some(if results == 0 {
                 save()
             } else {
@@ -493,10 +494,11 @@ fn a_chat_turn_killed_after_a_save_continues_without_saving_again() {
         "saved once"
     );
     let log = model.log.lock().unwrap().clone();
-    let continued = log
-        .iter()
-        .find(|l| l.contains("== TASK ==\nContinue"))
-        .unwrap();
-    assert!(continued.contains("done manuscript.save"), "{continued}");
+    let continued = log.iter().find(|l| l.contains("  - Continue")).unwrap();
+    assert!(continued.contains("done: manuscript.save"), "{continued}");
+    assert!(
+        continued.contains("The person asked for this (it is not finished yet):\nsave chapter one"),
+        "the goal is the request, not \"Continue\": {continued}"
+    );
     assert!(log.iter().any(|l| l.contains("not run again")), "{log:#?}");
 }

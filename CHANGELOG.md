@@ -10,6 +10,14 @@ What changed for people building on ARK, per release. Not a commit log.
 ## [Unreleased]
 
 ### Breaking
+- ADR 0050: `Settings::context_budget` is `Option<u32>` (`None`: sized from each agent's model).
+  `ark_model::Endpoint` has `context_window` (struct literals add `context_window: None`, or
+  use `Endpoint::new(..).context_window(n)`). `ProviderError::Refused` and
+  `AgentError::UnusableReply` are new variants, and `HarnessEvent::Retry` has `repair`: an
+  exhaustive `match` adds them or `..`. `Unfinished::carry` takes the request budget.
+  `Turn::{goal, ran_out}`, `HarnessOutcome::ran_out`, `Invocation::narration`,
+  `ContextReport::ledger` and `Unfinished::{lines, goal, error, stopped}` are new fields for
+  struct literals.
 - New fields for ADR 0048: `Invocation::{work, pid_start}`, `session::Turn::pid_start`,
   `TaskSpec::work`, `TaskRecord::{work, pid_start}`, `ApprovalRequest::cut_short`,
   `RetryPolicy::offline`, `RunCtx::{work, continues}`, `TranscriptTurn::{interrupted, resume}`.
@@ -23,6 +31,25 @@ What changed for people building on ARK, per release. Not a commit log.
   `tools: Vec::new()` or `..Default::default()`.
 
 ### Added
+- An agent never loses its task (ADR 0050). The first message of a turn (the task, the goal it
+  continues, the carry-over) is pinned in the working set and never dropped; dropped steps leave
+  a ledger, one line per call (action, file or query, result, `inv:`) and the model's last note.
+  `WorkingSet::pin`, `ledger_tokens`; `ContextReport::ledger` ("Earlier steps").
+- A turn after an unfinished one works on that one's goal with the new message added
+  (`session::Goal`, `Turn::goal`, `Session::goal_for`, `begin_turn_with_goal`,
+  `Harness::goal`): "continue" never becomes the goal, and a chain of any length keeps its first
+  request and every later instruction. Rules, skills, preloaded tools and the trivial class read
+  the goal. Messages sent while a turn runs stay in the working state and are stored at once
+  (`Session::steered_now`).
+- A turn that reached its step limit (`HarnessOutcome::ran_out`, `Turn::ran_out`) keeps its
+  answer and is continued like an unfinished one: the next turn keeps its goal and does not make
+  its changes again.
+- The next turn after a stopped one is told why it stopped and the model's last note, kept on
+  each call (`Invocation::narration`, `Engine::narrating`); it looks back over up to 20 stopped
+  turns, read from the store.
+- `Provider::context_window` (and `SessionBackend::context_window`): Claude models 200k, Codex
+  272k, OpenAI by family, an endpoint when it declares one (`Endpoint::context_window`). Every
+  wrapper passes it on. `budget::budget_for`, `Harness::request_budget`, `budget_or_auto`.
 - A chat turn keeps its progress and continues where it stopped (ADR 0048). Its calls name the
   turn (`Engine::for_work`, `Invocation::work`); its trace is saved as it runs; a stopped turn
   shows each call done, failed, cut short or not run, "Interrupted before it finished." and,
@@ -36,6 +63,21 @@ What changed for people building on ARK, per release. Not a commit log.
   (`RetryPolicy::should_retry_for`, `ProviderError::is_unreachable`).
 
 ### Changed
+- The request budget is sized from the reasoning model's window: a quarter of it, 6,000 to
+  48,000, at most half. A vendor session's window is its rotation limit (64k), so a Claude or
+  Codex subscription lane gets 16,000. Unknown windows keep 6,000. `ARK_CTX_BUDGET` and
+  `.context_budget(n)` still set it.
+- A reply the model wrote that cannot be used (arguments that do not parse, a reply that is not
+  structured) is not sent again unchanged: the model is told what was wrong and sends it again,
+  at most 2 times in a row and 4 in a turn (`Retry { repair: true }`, "Redoing its last step").
+  After that the turn fails with `AgentError::UnusableReply`, which both front-ends word as "The
+  model's reply could not be used." A refused reply schema is `ProviderError::Refused`, retried
+  as before.
+- The model's note with its tool calls stays in its round, so it sees its own plan next step.
+- `code.run` says it is contained and points a project's commands to `process.start`;
+  `process.start` says it runs tests and builds with the person's own programs.
+- The working state's `GOAL:` line is clipped to 300 characters (the full task is in the first
+  message). Evidence lists an object's keys sorted.
 - A stop by the app (SIGTERM, quit) leaves the chat's turn interrupted, not cancelled, and
   ends it with `HarnessEvent::Interrupted` (amends ADR 0038).
 - `ARK_MODEL_RETRIES` defaults to 4 (was 2).
@@ -53,6 +95,9 @@ What changed for people building on ARK, per release. Not a commit log.
   row.
 
 ### Fixed
+- An agent on Codex no longer forgets its task part of the way through: the task left the
+  working set after two file reads, and a vendor session that rotated started without it. A
+  follow-up "continue" no longer becomes the goal (ADR 0050).
 - After a crash and a reboot, a reused pid no longer keeps a dead turn, call or task "running";
   the next turn no longer overwrites the stopped one.
 - A chat whose first turn was cut short is listed (with its title) as soon as the store opens.

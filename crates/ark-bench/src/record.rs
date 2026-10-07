@@ -277,6 +277,9 @@ impl Provider for Metered {
     fn model_id(&self) -> String {
         self.inner.model_id()
     }
+    fn context_window(&self) -> Option<u32> {
+        self.inner.context_window()
+    }
 }
 
 #[cfg(test)]

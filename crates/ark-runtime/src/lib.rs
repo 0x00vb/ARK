@@ -56,7 +56,7 @@ pub use cancel::CancelToken;
 pub use context_report::ContextReport;
 pub use distill::{call_digest, distill, Distiller, DistillerSet};
 pub use engine::{Engine, Restored};
-pub use error::AgentError;
+pub use error::{AgentError, UNUSABLE_REPLY};
 pub use harness::{FileBefore, Harness, HarnessEvent, HarnessOutcome, STATE_DIGEST_ITEMS};
 pub use knowledge::{KnowledgeHit, KnowledgeProvider};
 pub use ledger::StoreLedger;

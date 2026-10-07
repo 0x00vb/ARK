@@ -181,6 +181,10 @@ impl Provider for Anthropic {
     fn reads_pictures(&self) -> bool {
         true
     }
+    /// Every current Claude model takes 200k tokens of input.
+    fn context_window(&self) -> Option<u32> {
+        Some(200_000)
+    }
     fn describe(&self) -> String {
         format!("anthropic {}", self.model)
     }

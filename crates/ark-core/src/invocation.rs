@@ -59,6 +59,10 @@ pub struct Invocation {
     /// stopped can be found and not made again when the work continues.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work: Option<String>,
+    /// What the agent said when it made the call (its plan, clipped), so work that stopped
+    /// can be continued with it (ADR 0050).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narration: Option<String>,
 }
 
 impl Invocation {
@@ -84,6 +88,7 @@ impl Invocation {
             pid: None,
             pid_start: None,
             work: None,
+            narration: None,
         }
     }
 

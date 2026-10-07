@@ -510,7 +510,8 @@ impl ResearchState {
         use std::fmt::Write as _;
         let mut s = String::new();
         if !self.goal.is_empty() {
-            let _ = writeln!(s, "GOAL: {}", self.goal);
+            // The whole task is in the first message; here it is a reminder.
+            let _ = writeln!(s, "GOAL: {}", one_line(&self.goal, 300));
         }
         let list = |s: &mut String, title: &str, items: &[String]| {
             if items.is_empty() {

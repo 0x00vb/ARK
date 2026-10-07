@@ -291,14 +291,29 @@ async fn a_program_asks_ark_keeps_the_question_and_another_client_answers() {
     assert_eq!(done.usage.cost_micro_usd, 50_000);
 
     let log = calls(&s);
-    assert!(log.contains(r#"env {"home":true,"secret":null}"#), "{log}");
-    assert!(log.contains(r#""settingSources":[]"#), "{log}");
-    assert!(
-        log.contains(r#"session/set_mode {"modeId":"default""#),
+    // Key order is not the test: an object keeps the order its keys were written in.
+    let env = log
+        .lines()
+        .find_map(|l| l.strip_prefix("env "))
+        .expect("the program's environment is logged");
+    let env: serde_json::Value = serde_json::from_str(env).unwrap();
+    assert_eq!(
+        env,
+        serde_json::json!({"home": true, "secret": null}),
         "{log}"
     );
-    assert!(
-        log.contains(r#"answer {"outcome":{"optionId":"allow""#),
+    assert!(log.contains(r#""settingSources":[]"#), "{log}");
+    let call = |name: &str| -> serde_json::Value {
+        let line = log
+            .lines()
+            .find_map(|l| l.strip_prefix(name))
+            .unwrap_or_else(|| panic!("no {name}: {log}"));
+        serde_json::from_str(line.trim()).unwrap()
+    };
+    assert_eq!(call("session/set_mode ")["modeId"], "default", "{log}");
+    assert_eq!(
+        call("answer ")["outcome"]["optionId"],
+        "allow",
         "never 'always'"
     );
 }

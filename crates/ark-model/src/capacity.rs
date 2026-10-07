@@ -220,6 +220,9 @@ impl Provider for Limited {
     fn reads_pictures(&self) -> bool {
         self.inner.reads_pictures()
     }
+    fn context_window(&self) -> Option<u32> {
+        self.inner.context_window()
+    }
     async fn complete(
         &self,
         system: &str,

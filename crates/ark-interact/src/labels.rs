@@ -607,6 +607,16 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
     })
 }
 
+/// A turn's error as both front-ends show it. A reply the model could not fix (ADR 0050)
+/// reads in the person's words; its detail stays in the turn's record for the model.
+pub fn person_error(error: &str) -> String {
+    if error.starts_with(ark_sdk::prelude::ark_runtime::UNUSABLE_REPLY) {
+        "The model's reply could not be used.".to_string()
+    } else {
+        error.to_string()
+    }
+}
+
 pub fn default_label(action: &str, input: &Value) -> String {
     let (ns, verb) = action.split_once('.').unwrap_or((action, action));
     let verb_l = verb.to_ascii_lowercase();

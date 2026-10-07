@@ -209,6 +209,9 @@ pub fn describe(
         HarnessEvent::Steered { text } => {
             Activity::new(K::Steered, "Your message reached the agent").detail(text.clone())
         }
+        HarnessEvent::Retry { repair: true, .. } => {
+            Activity::new(K::Warning, "Redoing its last step").tone(Tone::Muted)
+        }
         HarnessEvent::Retry {
             attempt, delay_ms, ..
         } => Activity::new(

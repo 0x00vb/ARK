@@ -2053,7 +2053,7 @@ impl Host {
             .await;
         let (ok, cancelled, error, answer, steps) = match &end.result {
             Ok(o) => (true, o.cancelled, None, o.answer.clone(), o.steps),
-            Err(e) => (false, false, Some(e.to_string()), String::new(), 0),
+            Err(_) => (false, false, end.error_line(), String::new(), 0),
         };
         conv.note(&ix);
         // Not while the windows move to another chat: this decides whether it stays live.

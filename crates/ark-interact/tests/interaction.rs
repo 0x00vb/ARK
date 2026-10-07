@@ -996,11 +996,10 @@ impl Adapter for Drafts {
 async fn an_always_grant_lasts_until_removed_with_grants() {
     let dir = tempfile::tempdir().unwrap();
     let saver = Arc::new(MockProvider::new("m", vec![]).with_fallback(|req| {
-        if req
-            .messages
-            .last()
-            .is_some_and(|m| m.tool_call_id.is_some())
-        {
+        // Saved once in this turn: answer (the working state is the last message, so look
+        // for the save's result anywhere; a model that saved forever would run out of steps
+        // and its next turn would continue it, ADR 0050).
+        if req.messages.iter().any(|m| m.tool_call_id.is_some()) {
             Completion {
                 content: "Saved.".into(),
                 tool_calls: vec![],

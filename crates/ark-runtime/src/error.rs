@@ -32,10 +32,19 @@ pub enum AgentError {
     #[error("serde: {0}")]
     Serde(#[from] serde_json::Error),
 
+    /// The model's own reply could not be used (arguments that do not parse, a reply that is
+    /// not structured or was cut off), and asking it to fix its reply did not help (ADR 0050).
+    /// The turn keeps its goal and calls; the next one continues it.
+    #[error("{UNUSABLE_REPLY}: {detail}")]
+    UnusableReply { provider: String, detail: String },
+
     /// A plugin could not be added, removed or started.
     #[error("{0}")]
     Plugin(String),
 }
+
+/// How an [`AgentError::UnusableReply`] reads, so a front-end can word it for the person.
+pub const UNUSABLE_REPLY: &str = "the model's reply could not be used";
 
 impl AgentError {
     /// A model call's failure: [`AgentError::OutOfCredit`] when the account is out of credit,
@@ -45,6 +54,10 @@ impl AgentError {
             ark_model::ProviderError::OutOfCredit { provider, detail } => AgentError::OutOfCredit {
                 provider: provider.clone(),
                 message: detail.clone(),
+            },
+            ark_model::ProviderError::Malformed { provider, detail } => AgentError::UnusableReply {
+                provider: provider.clone(),
+                detail: detail.clone(),
             },
             other => AgentError::Provider(other.to_string()),
         }

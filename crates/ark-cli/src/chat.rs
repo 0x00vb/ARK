@@ -172,7 +172,7 @@ impl Ended {
                 "metrics": o.metrics,
                 "findings": o.state.findings.iter().map(|f| &f.text).collect::<Vec<_>>(),
             }),
-            Err(e) => json!({ "ok": false, "error": e.to_string() }),
+            Err(_) => json!({ "ok": false, "error": end.error_line() }),
         };
         let out_of_credit = end.out_of_credit();
         if let Some(o) = &out_of_credit {
@@ -182,7 +182,7 @@ impl Ended {
         result["project"] = json!(ix.project().name);
         result["context"] = serde_json::to_value(ix.last_context()).unwrap_or_default();
         Ended {
-            error: end.result.as_ref().err().map(|e| e.to_string()),
+            error: end.error_line(),
             hint: out_of_credit.map_or_else(|| RETRY.into(), |o| o.hint),
             cancelled: end.result.as_ref().is_ok_and(|o| o.cancelled),
             footer: end.footer,

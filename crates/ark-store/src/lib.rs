@@ -494,6 +494,20 @@ impl Store {
         collect(rows)
     }
 
+    /// The card of one invocation, if it was distilled.
+    pub fn get_evidence_card(
+        &self,
+        project: &ProjectId,
+        invocation: &str,
+    ) -> Result<Option<EvidenceCard>> {
+        let db = self.db.lock().unwrap();
+        one(db.query_row(
+            "SELECT json FROM evidence_cards WHERE project_id=?1 AND invocation_id=?2",
+            [project.as_str(), invocation],
+            |r| r.get::<_, String>(0),
+        ))
+    }
+
     /// Find an existing card for the same (action, input) digest — the primitive the
     /// runtime uses to avoid re-running a tool call it already made.
     pub fn find_card_by_digest(

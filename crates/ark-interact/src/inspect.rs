@@ -657,7 +657,7 @@ impl TranscriptTurn {
             cancelled: t.cancelled,
             unfinished: t.incomplete.then(|| match t.error.as_deref() {
                 Some(INTERRUPTED) => crate::activity::INTERRUPTED.to_string(),
-                Some(e) => format!("Did not finish: {e}"),
+                Some(e) => format!("Did not finish: {}", crate::labels::person_error(e)),
                 None => "Did not finish.".to_string(),
             }),
             interrupted: t.incomplete && t.error.as_deref() == Some(INTERRUPTED),

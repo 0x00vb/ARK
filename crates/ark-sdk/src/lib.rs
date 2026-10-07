@@ -107,7 +107,9 @@ pub struct TurnTools {
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Settings {
     pub store_root: PathBuf,
-    pub context_budget: u32,
+    /// The request budget set by the app or `ARK_CTX_BUDGET`. `None`: each agent's is sized
+    /// from its model's window (ADR 0050).
+    pub context_budget: Option<u32>,
     pub max_steps: usize,
     pub planner: bool,
     pub critic: bool,
@@ -124,7 +126,7 @@ pub struct Ark {
     subscriptions: SubscriptionRuntime,
     profile: AgentProfile,
     max_steps: usize,
-    budget: u32,
+    budget: Option<u32>,
     planner: bool,
     critic: bool,
     allow_mutate: bool,
@@ -287,7 +289,7 @@ impl Ark {
     fn harness_with(&self, router: ModelRouter) -> Harness {
         Harness::new(router)
             .max_steps(self.max_steps)
-            .budget(self.budget)
+            .budget_or_auto(self.budget)
             .planner(self.planner)
             .critic(self.critic)
             .allow_mutate(self.allow_mutate)
@@ -320,7 +322,17 @@ impl Ark {
     ) -> Result<HarnessOutcome, ArkError> {
         let project = session.project().clone();
         let router = self.session_router(session).await;
-        let (engine, rules) = self.with_rules(&project, input)?;
+        // The turn before did not finish (the app stopped, it failed, the person stopped it):
+        // this one continues it (ADR 0048). Its goal is that turn's goal with this message
+        // added, so "continue" never becomes the task (ADR 0050), and what is chosen from the
+        // task (rules, skills, tools) is chosen from the goal.
+        let unfinished = session.unfinished(&self.engine)?;
+        let goal = session.goal_for(unfinished.as_ref(), input);
+        let goal_text = goal
+            .as_ref()
+            .map(|g| g.text())
+            .unwrap_or_else(|| input.to_string());
+        let (engine, rules) = self.with_rules(&project, &goal_text)?;
         let (engine, catalog) = self.with_skills(engine, &project);
         let owner = format!("session:{}", session.id());
         let tools = self.turn_tools(&opts.tools, &router, &owner);
@@ -334,13 +346,12 @@ impl Ark {
         }
         // What work this chat set up has posted since its last answer.
         session.read_posts(&self.engine)?;
-        // The turn before did not finish (the app stopped, it failed, the person stopped it):
-        // this one continues it. Its changes are not made again, one cut short is asked about
-        // again, and the model is told what it did.
-        let unfinished = session.unfinished(&self.engine)?;
+        let harness = self.harness_with(router);
+        // Its changes are not made again, one cut short is asked about again, and the model is
+        // told what it did, sized to the request budget.
         let carry = unfinished
             .as_ref()
-            .map(|u| u.carry(&engine.continued(&u.works)));
+            .map(|u| u.carry(&engine.continued(&u.works), harness.request_budget()));
         let digest = match (carry, session.conversation_digest()) {
             (Some(c), Some(d)) => Some(format!("{d}\n{c}")),
             (c, d) => c.or(d),
@@ -355,8 +366,8 @@ impl Ark {
                 .for_work(session.work_of(session.turn_count()))
                 .continuing(works),
         );
-        let harness = self
-            .harness_with(router)
+        let harness = harness
+            .goal(goal.clone())
             .conversation(digest)
             .done_before(done_before)
             .cut_short(cut_short)
@@ -367,11 +378,25 @@ impl Ark {
             .focus(opts.focus)
             .rules(rules)
             .skills(catalog);
-        session.begin_turn(&self.engine, input)?;
-        match harness
-            .ask(&engine, &profile, &project, input, on_event)
-            .await
-        {
+        session.begin_turn_with_goal(&self.engine, input, goal)?;
+        let mut on_event = on_event;
+        let result = {
+            let stored = &mut *session;
+            let store = &self.engine;
+            harness
+                .ask(&engine, &profile, &project, input, move |ev| {
+                    // What the person said while it ran is part of the goal: kept now, so a
+                    // crash keeps it.
+                    if let HarnessEvent::Steered { text } = &ev {
+                        if let Err(e) = stored.steered_now(store, text) {
+                            tracing::warn!("could not keep a message sent while the turn ran: {e}");
+                        }
+                    }
+                    on_event(ev)
+                })
+                .await
+        };
+        match result {
             Ok(outcome) => {
                 session.record_turn(&self.engine, input, &outcome)?;
                 Ok(outcome)
@@ -668,7 +693,7 @@ pub struct ArkBuilder {
     router: Option<ModelRouter>,
     provider: Option<Arc<dyn Provider>>,
     max_steps: usize,
-    budget: u32,
+    budget: Option<u32>,
     planner: bool,
     critic: bool,
     allow_mutate: bool,
@@ -724,10 +749,7 @@ impl Default for ArkBuilder {
             router: None,
             provider: None,
             max_steps: 16,
-            budget: std::env::var("ARK_CTX_BUDGET")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(6000),
+            budget: ark_runtime::budget::budget_from_env(),
             planner: false,
             critic: true,
             allow_mutate: false,
@@ -787,8 +809,10 @@ impl ArkBuilder {
         self.max_steps = n;
         self
     }
+    /// Fix the request budget of every agent. Without it each agent's is sized from its
+    /// model's window (ADR 0050).
     pub fn context_budget(mut self, tokens: u32) -> Self {
-        self.budget = tokens;
+        self.budget = Some(tokens);
         self
     }
     pub fn planner(mut self, yes: bool) -> Self {

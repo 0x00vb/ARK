@@ -297,6 +297,11 @@ impl Provider for Tape {
     fn model_id(&self) -> String {
         self.model.clone()
     }
+    /// Unknown in both modes, so a run records and replays with the same request budget
+    /// (ADR 0050 sizes it from the window; a replay has no model to ask).
+    fn context_window(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// The request with run-specific ids replaced, hashed (FNV-1a, 64 bits, stable across builds).

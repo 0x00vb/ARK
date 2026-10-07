@@ -691,7 +691,7 @@ pub(crate) struct Inner {
     pub engine: Arc<Engine>,
     base: AgentProfile,
     profiles: Vec<NamedProfile>,
-    context_budget: u32,
+    context_budget: Option<u32>,
     max_steps: usize,
     planner: bool,
     critic: bool,
@@ -2534,7 +2534,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         let budget = &task.budget;
         let harness = Harness::new(models.router.clone_view())
             .max_steps(budget.max_steps.unwrap_or(self.max_steps))
-            .budget(self.context_budget)
+            .budget_or_auto(self.context_budget)
             .planner(spec.planner.unwrap_or(self.planner))
             .critic(spec.critic.unwrap_or(self.critic))
             .allow_mutate(spec.allow_mutate)

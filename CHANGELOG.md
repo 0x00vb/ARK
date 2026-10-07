@@ -9,6 +9,13 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Changed
+- `present` says what `locator` is for each view: the address for the browser (this machine's
+  too) and the command for the terminal. An agent asked to show a page on `localhost` now opens
+  it in the person's Browser view instead of giving up.
+- `browser.open` refusing an address on this machine says to show the page in the person's
+  browser view instead.
+
 ## [0.12.1] - 2026-10-07
 
 ARK in any browser and on a phone: files in without drag and drop; Run code on Linux.

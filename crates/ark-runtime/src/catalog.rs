@@ -293,13 +293,13 @@ pub fn meta_tool_defs(cfg: MetaToolConfig) -> Vec<ToolDef> {
     if cfg.present {
         tools.push(ToolDef {
             name: PRESENT.into(),
-            description: "Show the user something beside the conversation: a file of the project (any kind ARK reads opens in its own view), a stored artifact, evidence, the terminal, the browser, or a view the app adds.".into(),
+            description: "Show the user something beside the conversation: a file of the project (any kind ARK reads opens in its own view), a stored artifact, evidence, the terminal, the browser, or a view the app adds. The user's browser opens any address, this machine's too (http://localhost:3000).".into(),
             parameters: serde_json::json!({
                 "type": "object", "required": ["view"],
                 "properties": {
-                    "view": { "type": "string", "description": "file (with path), artifact (with its id), evidence (locator inv:…), terminal, browser, or an app's view" },
+                    "view": { "type": "string", "description": "file (with path), artifact (with its id), evidence (locator inv:…), terminal (locator: a command typed at its prompt for the user to run), browser (locator: the address), or an app's view" },
                     "artifact": { "type": "string" }, "path": { "type": "string" },
-                    "locator": { "type": "string" }, "pane": { "type": "string" }, "note": { "type": "string" }
+                    "locator": { "type": "string", "description": "evidence: inv:…; browser: the address; terminal: the command" }, "pane": { "type": "string" }, "note": { "type": "string" }
                 }
             }),
         });

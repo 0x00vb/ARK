@@ -412,7 +412,12 @@ impl Browser {
             ));
         }
         if !self.svc.private {
-            ark_tools::web::check_public(&url).await.map_err(tool)?;
+            ark_tools::web::check_public(&url).await.map_err(|e| {
+                tool(format!(
+                    "{e}. This browser opens public pages only. To show the person a page on \
+                     this machine, show it in their browser view instead (it opens any address)."
+                ))
+            })?;
         }
         let signed = input["signed_in"].as_bool().unwrap_or(false);
         let page = self.svc.page(&self.owner, signed).await.map_err(tool)?;

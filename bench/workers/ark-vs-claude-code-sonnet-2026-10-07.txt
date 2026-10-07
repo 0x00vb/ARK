@@ -1,0 +1,18 @@
+Run { workload: "analysis", agent: "ark", ok: true, secs: 6.349114583, tokens: 12522, priced: 0.010107399999999999, reported: 0.0, asked: 1 } error=None
+Run { workload: "analysis", agent: "claude-code", ok: true, secs: 27.532518583, tokens: 60126, priced: 0.039344199999999996, reported: 0.114099, asked: 1 } error=None
+Run { workload: "analysis", agent: "ark", ok: true, secs: 6.692937708, tokens: 12500, priced: 0.0100174, reported: 0.0, asked: 1 } error=None
+Run { workload: "analysis", agent: "claude-code", ok: true, secs: 21.067559792, tokens: 60137, priced: 0.039312599999999996, reported: 0.114024, asked: 1 } error=None
+Run { workload: "analysis", agent: "ark", ok: true, secs: 6.301544625, tokens: 12492, priced: 0.0100362, reported: 0.0, asked: 1 } error=None
+Run { workload: "analysis", agent: "claude-code", ok: true, secs: 19.66741775, tokens: 60102, priced: 0.0392858, reported: 0.113943, asked: 1 } error=None
+Run { workload: "edit", agent: "ark", ok: true, secs: 6.194284, tokens: 8307, priced: 0.0099632, reported: 0.0, asked: 1 } error=None
+Run { workload: "edit", agent: "claude-code", ok: true, secs: 19.139670459, tokens: 48549, priced: 0.0363722, reported: 0.106734, asked: 1 } error=None
+Run { workload: "edit", agent: "ark", ok: true, secs: 12.33925225, tokens: 18560, priced: 0.0167494, reported: 0.0, asked: 1 } error=None
+Run { workload: "edit", agent: "claude-code", ok: true, secs: 26.848667917, tokens: 48475, priced: 0.0362126, reported: 0.106303, asked: 1 } error=None
+Run { workload: "edit", agent: "ark", ok: true, secs: 13.892640167, tokens: 18652, priced: 0.017307, reported: 0.0, asked: 1 } error=None
+Run { workload: "edit", agent: "claude-code", ok: true, secs: 19.337004584, tokens: 48631, priced: 0.0368344, reported: 0.107914, asked: 1 } error=None
+| Workload | Agent | Success | Median time (s) | Median tokens | Priced cost/success ($) | Reported cost ($) | Asked per run |
+|---|---|---:|---:|---:|---:|---:|---:|
+| analysis | ark | 3/3 | 6.3 | 12500 | 0.0101 | - | 1.0 |
+| analysis | claude-code | 3/3 | 21.1 | 60126 | 0.0393 | 0.1140 | 1.0 |
+| edit | ark | 3/3 | 12.3 | 18560 | 0.0147 | - | 1.0 |
+| edit | claude-code | 3/3 | 19.3 | 48549 | 0.0365 | 0.1070 | 1.0 |

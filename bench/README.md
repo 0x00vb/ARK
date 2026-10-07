@@ -15,6 +15,7 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 | `board/live-qwen3-4b.json`, `board/sim.json` | the `board` workload (ADR 0023), 3 repetitions live on qwen3:4b-instruct and simulated |
 | `analysis/live-qwen3-4b.json`, `analysis/live-qwen3.5-27b.json`, `analysis/sim.json` | the `analysis` workload: 3 repetitions live on qwen3:4b-instruct, 2 on qwen3.5:27b, and simulated |
 | `analysis/repeat-before-qwen3-4b.json`, `analysis/repeat-after-qwen3-4b.json` | the `analysis` workload, 5 repetitions live on qwen3:4b-instruct, before and after an identical change runs at most twice |
+| `workers/ark-vs-claude-code-sonnet-2026-10-07.txt` | live, ARK's agent on `claude:sonnet` against Claude Code on Sonnet as an ARK worker (ADR 0043 step 2), 2 workloads x 3 runs, from `crates/ark-orchestrate/tests/worker_bench.rs` (not an `ark-bench` report: one line per run and the table) |
 | `baseline-naive.json` | the same suite through the naive loop (`--harness naive`), for "ARK against a naive loop" in `RESULTS.md` |
 | `m4/sim.json` | simulated, the M4 runtime (v0.3.0 plus measurement-only event fields, `035a06b`) |
 | `m4/live-qwen3-4b.json` | live, M4 runtime, qwen3:4b-instruct through Ollama, 3 repetitions |

@@ -9,6 +9,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Breaking
+- `ark_orchestrate::TaskRecord` has `decisions` and `ark_orchestrate::Usage` has
+  `cost_micro_usd` and `asked` (ADR 0043 step 2): code that builds either with a struct
+  literal adds the fields (`decisions: Vec::new()`, `..Default::default()` for `Usage`). The
+  next tag is 0.13.0.
+
 ### Added
 - The Computer is a capability the person turns on (ADR 0045). Off, a turn carries one line
   saying the agent can ask for it, and no computer schema. An agent that needs an app calls
@@ -33,6 +39,21 @@ What changed for people building on ARK, per release. Not a commit log.
   Try again) instead of staying white, shows a loading line in the bar until the page
   finishes, and shows the pane's colour, not a white block, until the page arrives
   (`ark_browser_reach`, ADR 0044).
+- An agent can do its tasks on another agent program installed here, Claude Code or Codex,
+  with that program's own tools (ADR 0043 step 2): its model is `agent:claude-code` or
+  `agent:codex` (`agent:claude-code:sonnet` names the model), when the app turns it on
+  (`ArkBuilder::workers`). The task stays ARK's. The program starts with a clean environment,
+  without the person's or the project's own settings, in the mode that asks; what it wants to
+  change or run is an ARK question that names the file or the command ("Always in this
+  project" covers only that), kept on the task and answered from any client. What it changed
+  is found in the project folder and kept as the task's outputs, with versions before. After a
+  restart it loads its own session, and an answer given in an earlier run is not asked again.
+  New crate `ark-acp` (the Agent Client Protocol client and the catalog of programs);
+  `ark_runtime::worker` (`Worker`, `Workers`), `ark_runtime::folder` (what work changed in a
+  folder, shared with Run code), `Engine::keep_produced`, `TaskRecord::decisions`,
+  `Usage::cost_micro_usd` and `Usage::asked`. Measured against ARK's own agent:
+  `bench/RESULTS.md`. ARK's agent stays the default. `ark_exec::written_since` is now
+  `ark_runtime::folder::written_since`, re-exported.
 - What waits for you, in every project (ADR 0043 step 1, `ark_interact::attention`): a question
   an agent's task keeps, work you started that failed, and a result posted into a chat while
   nobody was in it. One list in both front-ends: `/waiting` in the terminal (numbers answer the
@@ -89,6 +110,10 @@ What changed for people building on ARK, per release. Not a commit log.
   says: on unless it has a switch.
 - No grant covers `acquire_capability`: each request asks (ADR 0045), and one for a capability
   that `asks_a_person` asks also when the agent may change things without asking.
+- An answer given in a task carries into the run that continues it after the process stopped
+  (`TaskRecord::decisions`): a refusal, or leave to change a file, is not asked again; leave to
+  run a command is, since it may have run already. A pause, a retry or a new task asks again.
+  `Usage::asked` counts the questions of every task.
 - On macOS, `remote::visit` and `run_window` refuse a runtime elsewhere by name over plain
   http (use https); IP addresses, names without a dot and `.local` still open over http. The
   token is no longer sent in clear there.

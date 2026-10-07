@@ -154,6 +154,7 @@ impl<'a> OrchestratorBuilder<'a> {
             approvals: self.approvals,
             per_agent: self.ark.per_agent().to_vec(),
             workers: self.ark.workers().cloned(),
+            folders: Mutex::new(HashMap::new()),
             max_parallel: self.max_parallel,
             global: Arc::new(Semaphore::new(self.max_parallel)),
             accounts: Mutex::new(HashMap::new()),
@@ -680,6 +681,8 @@ pub(crate) struct Inner {
     per_agent: Vec<Arc<dyn ark_runtime::per_agent::PerAgent>>,
     /// The agent programs an agent may run on (`agent:<name>`), when the app offers them.
     workers: Option<Arc<dyn ark_runtime::worker::Workers>>,
+    /// One agent program at a time in a project folder: what changed there is that task's.
+    folders: Mutex<HashMap<std::path::PathBuf, Arc<tokio::sync::Mutex<()>>>>,
     pub max_parallel: usize,
     global: Arc<Semaphore>,
     accounts: Mutex<HashMap<String, Arc<Semaphore>>>,
@@ -1188,6 +1191,7 @@ impl Inner {
                     if !alive {
                         r.pid = None;
                         close_open_calls(&mut r);
+                        carry_decisions(&mut r);
                         let asking = r.question.as_ref().is_some_and(Question::open);
                         let scope = st.agents.get(&r.owner).map(|a| a.record.scope.clone());
                         let unsure = match (scope, r.started_ms) {
@@ -1682,6 +1686,11 @@ impl Inner {
         let id = id.to_string();
         tokio::spawn(async move {
             let f = me.drive(&id).await;
+            // What an agent program changed is recorded once, when the task ends, however it
+            // ends (a cancel or a terminated agent never reach the run).
+            if f.state.is_final() {
+                me.end_work(&id).await;
+            }
             me.finish(&id, f);
         });
     }
@@ -1922,6 +1931,10 @@ impl Inner {
                 return Final::left();
             }
             let attempt = self.attempt(id, &owner, &models, resumed).await;
+            // Answers carry only into the run that continues one the process stopped in.
+            if !matches!(attempt, Attempt::Stopped(Stop::Restart)) {
+                self.update_task(id, |t| t.decisions.iter_mut().for_each(|d| d.carry = false));
+            }
             self.release(id).await;
             drop(guard);
             match attempt {
@@ -2586,6 +2599,15 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             }
             if let Some(a) = self.state.lock().unwrap().agents.get_mut(owner) {
                 a.steering = None;
+                // A program takes no messages while it works: they wait for the next task.
+                for text in steer.take_undelivered() {
+                    a.record.inbox.push(Mail {
+                        from: "?".into(),
+                        text,
+                        task: None,
+                        at_ms: now_ms(),
+                    });
+                }
             }
             return ran;
         }
@@ -3007,6 +3029,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         let rec = self.update_task(id, |t| {
             t.pid = None;
             close_open_calls(t);
+            carry_decisions(t);
             if t.question.as_ref().is_some_and(Question::open) {
                 t.state = TaskState::Waiting;
                 t.waiting_on = Some(WAITING_PERSON.into());
@@ -3442,6 +3465,14 @@ impl Approver for OnBehalf {
         self.orch.answered(&self.task, &question, decision).await;
         self.orch.decided(&self.task, &r, decision);
         decision
+    }
+}
+
+/// The process stops in this run: its answers carry into the run that continues it.
+fn carry_decisions(t: &mut TaskRecord) {
+    let run = t.attempts;
+    for d in &mut t.decisions {
+        d.carry |= d.attempt == run;
     }
 }
 

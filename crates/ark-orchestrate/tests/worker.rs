@@ -59,7 +59,7 @@ fn serve(log: &Path) {
         match method.as_str() {
             "initialize" => send(json!({ "jsonrpc": "2.0", "id": id, "result": {
                 "protocolVersion": 1, "agentCapabilities": { "loadSession": true },
-                "agentInfo": { "name": "fake", "version": "1" } } })),
+                "agentInfo": { "name": "fake", "version": "1.2.0" } } })),
             "session/new" | "session/load" => {
                 cwd = PathBuf::from(msg["params"]["cwd"].as_str().unwrap());
                 loaded = method == "session/load";
@@ -141,8 +141,8 @@ fn serve(log: &Path) {
     }
 }
 
-/// The scripted program as a catalog entry.
-fn catalog() -> Arc<dyn ark_runtime::worker::Workers> {
+/// The scripted program as a catalog entry, checked with connector versions `checked`.
+fn catalog_checked(checked: &'static [&'static str]) -> Arc<dyn ark_runtime::worker::Workers> {
     std::env::set_var(
         "ARK_TEST_FAKE_PROGRAM_PATH",
         std::env::current_exe().unwrap(),
@@ -157,6 +157,7 @@ fn catalog() -> Arc<dyn ark_runtime::worker::Workers> {
         default_model: None,
         session_meta: || json!({ "claudeCode": { "options": { "settingSources": [] } } }),
         mode: Some("default"),
+        checked,
         settings_dir: None,
         env: &["ARK_FAKE_PROGRAM", "FAKE_MODE", "FAKE_KIND", "FAKE_HANG"],
         setup: "",
@@ -202,13 +203,25 @@ fn setup() -> Setup {
     }
 }
 
+fn catalog() -> Arc<dyn ark_runtime::worker::Workers> {
+    catalog_checked(&["1."])
+}
+
 fn open(s: &Setup, asked: Arc<AtomicUsize>) -> (Ark, Orchestrator) {
+    open_with(s, asked, catalog())
+}
+
+fn open_with(
+    s: &Setup,
+    asked: Arc<AtomicUsize>,
+    workers: Arc<dyn ark_runtime::worker::Workers>,
+) -> (Ark, Orchestrator) {
     let ark = Ark::builder()
         .store_root(&s.store)
         .provider(Arc::new(ark_model::MockProvider::new("unused", vec![])))
         .planner(false)
         .critic(false)
-        .workers_with(catalog())
+        .workers_with(workers)
         .build()
         .unwrap();
     let project = ark.find_or_create_project("p", "").unwrap();
@@ -375,4 +388,126 @@ fn a_restart_after_the_answer_does_not_ask_twice() {
     });
     let log = calls(&s);
     assert!(log.contains("session/load"), "{log}");
+}
+
+/// Leave to run a command does not carry over a restart: it may have run already, so the
+/// person decides again.
+#[test]
+fn a_command_is_asked_again_after_a_restart() {
+    let s = setup();
+    std::env::set_var("FAKE_KIND", "execute");
+    std::env::set_var("FAKE_HANG", "1");
+    let asked = Arc::new(AtomicUsize::new(0));
+    let id = {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let id = rt.block_on(async {
+            let (ark, o) = open(&s, asked.clone());
+            o.spawn(AgentSpec::new("w").model("agent:fake"))
+                .await
+                .unwrap();
+            let id = o.submit("w", TaskSpec::new("take notes")).unwrap();
+            until_asked(&o, &id).await;
+            o.answer(&id, ApprovalDecision::AllowOnce).unwrap();
+            for _ in 0..200 {
+                if folder(&ark).join("notes.txt").exists() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            id
+        });
+        rt.shutdown_timeout(Duration::from_secs(2));
+        id
+    };
+    std::env::remove_var("FAKE_HANG");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let asked2 = Arc::new(AtomicUsize::new(0));
+        let (_ark, o) = open(&s, asked2.clone());
+        let q = until_asked(&o, &id).await.question.unwrap();
+        assert_eq!(q.request.action, "program.run");
+        assert_eq!(asked2.load(Ordering::SeqCst), 1, "asked again");
+        o.answer(&id, ApprovalDecision::Deny).unwrap();
+        let done = o.wait(&id).await.unwrap();
+        assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    });
+}
+
+/// A pause is not a restart: after the resume the program asks again and so does ARK.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pause_asks_again() {
+    let s = setup();
+    std::env::set_var("FAKE_HANG", "1");
+    let asked = Arc::new(AtomicUsize::new(0));
+    let (_ark, o) = open(&s, asked.clone());
+    o.spawn(AgentSpec::new("w").model("agent:fake"))
+        .await
+        .unwrap();
+    let id = o.submit("w", TaskSpec::new("write the report")).unwrap();
+    until_asked(&o, &id).await;
+    o.answer(&id, ApprovalDecision::AllowOnce).unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    o.suspend("w").unwrap();
+    std::env::remove_var("FAKE_HANG");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    o.resume("w").unwrap();
+    until_asked(&o, &id).await;
+    assert_eq!(
+        asked.load(Ordering::SeqCst),
+        2,
+        "asked again after the pause"
+    );
+    o.answer(&id, ApprovalDecision::AllowOnce).unwrap();
+    let done = o.wait(&id).await.unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+}
+
+/// A connector version ARK was not checked with is not used: nothing runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unchecked_connector_is_not_used() {
+    let s = setup();
+    let (ark, o) = open_with(
+        &s,
+        Arc::new(AtomicUsize::new(0)),
+        catalog_checked(&["0.23."]),
+    );
+    o.spawn(AgentSpec::new("w").model("agent:fake"))
+        .await
+        .unwrap();
+    let id = o.submit("w", TaskSpec::new("write the report")).unwrap();
+    let done = o.wait(&id).await.unwrap();
+    assert_eq!(done.state, TaskState::Failed);
+    let e = done.error.unwrap();
+    assert!(
+        e.contains("not checked with this version") && e.contains("1.2.0"),
+        "{e}"
+    );
+    assert!(!folder(&ark).join("report.md").exists());
+}
+
+/// A task cancelled while its question waits ends without a run: its folder state and kept
+/// record are removed all the same.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_task_leaves_nothing_behind() {
+    let s = setup();
+    let (_ark, o) = open(&s, Arc::new(AtomicUsize::new(0)));
+    o.spawn(AgentSpec::new("w").model("agent:fake"))
+        .await
+        .unwrap();
+    let id = o.submit("w", TaskSpec::new("write the report")).unwrap();
+    until_asked(&o, &id).await;
+    assert!(s.store.join("work").join(&id).join("before.json").is_file());
+    o.cancel(&id).unwrap();
+    let done = o.wait(&id).await.unwrap();
+    assert_eq!(done.state, TaskState::Cancelled);
+    for _ in 0..100 {
+        if !s.store.join("work").join(&id).exists() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        !s.store.join("work").join(&id).exists(),
+        "folder copies removed"
+    );
 }

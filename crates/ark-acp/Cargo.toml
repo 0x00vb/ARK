@@ -14,10 +14,10 @@ serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["process", "time", "sync", "io-util", "macros", "rt"] }
+tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tempfile.workspace = true

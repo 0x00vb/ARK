@@ -388,21 +388,22 @@ fn run_result(summary: &str) -> String {
     }
 }
 
-/// A process start, for its approval: the command, where, what it can reach, and the page it
-/// will open.
 /// A command an agent program wants to run (ADR 0043), as a process start reads: one sentence,
-/// then the command alone.
+/// then the command, whole and as written (a person approves exactly what runs).
 fn program_approval(action: &str, input: &Value) -> Option<String> {
-    if action != "program.run" {
+    if action != ark_sdk::prelude::ark_runtime::worker::RUN {
         return None;
     }
     let command = input.get("command").and_then(Value::as_str).unwrap_or("");
+    let lines: Vec<String> = command.lines().map(|l| format!("  {l}")).collect();
     Some(format!(
-        "Run this in the project folder. Not contained: it runs as you.\n  {}",
-        clip(&one_line(command), 200)
+        "Run this in the project folder. Not contained: it runs as you.\n{}",
+        lines.join("\n")
     ))
 }
 
+/// A process start, for its approval: the command, where, what it can reach, and the page it
+/// will open.
 fn process_approval(action: &str, input: &Value) -> Option<String> {
     if action != PROCESS_START {
         return None;

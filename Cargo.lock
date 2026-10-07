@@ -378,6 +378,7 @@ dependencies = [
  "ark-store",
  "ark-tools",
  "async-trait",
+ "blake3",
  "futures",
  "libc",
  "serde",

@@ -20,6 +20,13 @@ use crate::harness::HarnessEvent;
 /// `agent:<name>:<model>`.
 pub const SPEC: &str = "agent:";
 
+/// The actions of a worker's requests: to change files (`{paths}`), to run a command
+/// (`{command, folder}`), anything else (asked every time). A grant names the files or the
+/// command; leave to change a file carries over a restart, leave to run a command does not.
+pub const CHANGE: &str = "program.change";
+pub const RUN: &str = "program.run";
+pub const OTHER: &str = "program.other";
+
 /// One task, as a worker gets it.
 pub struct WorkerJob<'a> {
     pub brief: &'a str,

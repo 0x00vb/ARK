@@ -52,6 +52,7 @@ the terminal and the window stay in step: a command, a label or a trace view is 
 flowchart LR
     core[ark-core] --> store[ark-store] & tools[ark-tools]
     model[ark-model] & store & tools --> runtime[ark-runtime] --> sdk[ark-sdk]
+    runtime --> acp[ark-acp] --> sdk
     sdk --> orch[ark-orchestrate] --> interact[ark-interact] --> cli[ark-cli] & ui[ark-ui]
     orch --> bench[ark-bench]
 ```
@@ -70,7 +71,8 @@ Arrows point from a dependency to its user. There are no cycles.
 | `ark-proc` | project processes: `Processes` (start in the person's shell, output kept and sent to windows, ready by address, stop by process group, the sweep after a crash), the `process` tool, `Installs` (programs installed through `acquire_capability`). Details: [ADR 0041](adr/0041-project-processes-asked-seen-and-stopped.md) |
 | `ark-connect` | capabilities that need an account: `Catalog` (providers and capabilities, as data), `Connections` (accounts, a `ToolSource`), OAuth with PKCE, `Secrets` (OS keychain), the Mail and Calendar services. The only crate that names a third-party service. Details: [`GOOGLE.md`](GOOGLE.md) |
 | `ark-account` | optional: the person's ARK Account on this computer (sign-in through the browser, staying signed in, `can` for ARK Cloud features), on `ark-connect`'s OAuth and `Secrets`. No runtime crate depends on it (ADR 0026) |
-| `ark-runtime` | `Harness` (the loop), `Engine` (ingest, run actions, approval gate), `Session`, `AgentProfile`, `ModelRouter`, `DistillerSet`, `ApprovalGate`, `CancelToken`, `Steering`, `ContextReport`, `Metrics`; `Agent`, a plain ReAct loop |
+| `ark-runtime` | `Harness` (the loop), `Engine` (ingest, run actions, approval gate), `Session`, `AgentProfile`, `ModelRouter`, `DistillerSet`, `ApprovalGate`, `CancelToken`, `Steering`, `ContextReport`, `Metrics`; `Agent`, a plain ReAct loop; `worker::Worker` (a task done by another agent program, reported as the harness reports), `folder::Before` (what work changed in a folder) |
+| `ark-acp` | agents on other agent programs over the Agent Client Protocol: `Catalog` (Claude Code, Codex, as data), `Acp` (a `Worker`: a clean environment, the asking mode, questions through ARK's gate, the program's own session after a restart). Details: [ADR 0043](adr/0043-attention-workers-and-where-work-runs.md) › Step 2 results |
 | `ark-sdk` | `Ark`, `Ark::builder()`, `TurnOptions`, `prelude` |
 | `ark-orchestrate` | `Orchestrator`, `AgentSpec`, `TaskSpec`, `TaskRecord`, `Budget`, `Models`, `ModelResolver`, `Graph`, `OrchEvent`. Details: [`ORCHESTRATION.md`](ORCHESTRATION.md) |
 | `ark-interact` | `App`, `Interaction`, `Command`, `Reply`, `Report`, `ActivityLabels`, `ToolLabeler`, `trace`, `inspect`, `logging`; `remote::Client`, the protocol client of a runtime served elsewhere |

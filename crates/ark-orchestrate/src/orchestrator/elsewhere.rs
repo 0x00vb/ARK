@@ -8,7 +8,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use ark_core::{Invocation, ProjectId, RiskTier};
-use ark_model::capacity::Capacity;
 use ark_model::{Completion, Message, Provider, ToolDef};
 use ark_runtime::folder::Before;
 use ark_runtime::harness::{FileBefore, HarnessEvent};
@@ -38,11 +37,9 @@ pub(super) fn models(
     resolver: &dyn ModelResolver,
 ) -> AgentModels {
     let spec = spec.unwrap_or_default().to_string();
-    let capacity = match resolver.capacity_of(w.name()) {
-        // Unknown to the resolver: one task at a time per program, as a person runs it.
-        c if c == Capacity::for_provider(w.name()) => Capacity::concurrent(2),
-        c => c,
-    };
+    // Its slots are the program's account's; one task per project folder at a time is the
+    // orchestrator's (`Inner::folders`).
+    let capacity = resolver.capacity_of(w.name());
     AgentModels {
         router: ModelRouter::single(Arc::new(Elsewhere(spec.clone()))),
         account: w.name().to_string(),
@@ -86,7 +83,7 @@ impl Inner {
             Some(Ok(w)) => Ok(Some(w)),
             Some(Err(e)) => Err(OrchError::NotAllowed(e)),
             None => Err(OrchError::NotAllowed(format!(
-                "no agent program `{name}` here"
+                "`agent:{name}` names nothing this app can run"
             ))),
         }
     }
@@ -108,11 +105,19 @@ impl Inner {
             Ok(d) => d,
             Err(e) => return Attempt::Failed(e.to_string()),
         };
-        let dir = self.engine.store.root().join("work").join(id);
-        let before = match self.folder_before(&folder, &dir).await {
-            Ok(b) => b,
-            Err(e) => return Attempt::Failed(e),
+        // One program at a time in a folder: what changes there is this task's.
+        let lock = {
+            let mut f = self.folders.lock().unwrap();
+            f.entry(folder.clone()).or_default().clone()
         };
+        let _one = tokio::select! {
+            g = lock.lock_owned() => g,
+            _ = cancel.cancelled() => return Attempt::Stopped(self.stopped(id)),
+        };
+        let dir = self.work_dir(id);
+        if let Err(e) = self.folder_before(&folder, &dir).await {
+            return Attempt::Failed(e);
+        }
         // An earlier run of this task in a process that is gone: stop what it left running.
         let kept = self.engine.store.get_record(KEPT, id).ok().flatten();
         if let Some(k) = &kept {
@@ -157,22 +162,52 @@ impl Inner {
                 t.usage.cost_micro_usd += r.cost_micro_usd.unwrap_or(0);
             }
         });
-        let attempt = match result {
+        // The folder state and the program's are kept until the task ends ([`Inner::end_work`]):
+        // a restart, a pause or a retry continues against the same start.
+        match result {
             Ok(r) if !r.cancelled => Attempt::Done(r.answer),
             Ok(_) => Attempt::Stopped(self.stopped(id)),
             Err(_) if cancel.is_cancelled() => Attempt::Stopped(self.stopped(id)),
             Err(e) => Attempt::Failed(e),
-        };
-        // The task goes on after a restart or a pause: its folder state and the program's are
-        // kept for that run, and what changed is recorded once, when the task ends.
-        if matches!(attempt, Attempt::Stopped(Stop::Restart | Stop::Suspend)) {
-            return attempt;
         }
-        self.record_work(id, owner, scope, &folder, before, &on_event)
-            .await;
+    }
+
+    fn work_dir(&self, id: &str) -> std::path::PathBuf {
+        self.engine.store.root().join("work").join(id)
+    }
+
+    /// The task ended, however it ended: stop what its program left running, record what it
+    /// changed in the folder (the task's outputs, versions before for Restore), and remove the
+    /// folder state. Nothing for a task that never ran on a program.
+    pub(super) async fn end_work(self: &Arc<Self>, id: &str) {
+        let dir = self.work_dir(id);
+        let Some(before) = Before::load(&dir.join("before.json")) else {
+            return;
+        };
+        let (owner, scope, worker) = {
+            let st = self.state.lock().unwrap();
+            let Some(t) = st.tasks.get(id) else { return };
+            let a = st.agents.get(&t.record.owner);
+            (
+                t.record.owner.clone(),
+                a.map(|a| ProjectId(a.record.scope.clone())),
+                a.and_then(|a| a.worker.clone()),
+            )
+        };
+        if let (Some(w), Ok(Some(k))) = (&worker, self.engine.store.get_record(KEPT, id)) {
+            w.stop_left(&k);
+        }
+        if let Some(scope) = scope {
+            if let Ok(folder) = self.engine.workspace_dir(&scope) {
+                let me = self.clone();
+                let (tid, aname) = (id.to_string(), owner.clone());
+                let on_event = move |ev: HarnessEvent| me.on_agent_event(&tid, &aname, ev);
+                self.record_work(id, &owner, &scope, &folder, before, &on_event)
+                    .await;
+            }
+        }
         let _ = self.engine.store.delete_record(KEPT, id);
         let _ = std::fs::remove_dir_all(&dir);
-        attempt
     }
 
     fn stopped(&self, id: &str) -> Stop {
@@ -185,18 +220,16 @@ impl Inner {
     }
 
     /// The folder as it was when the task first started: taken then, read back in later runs.
-    async fn folder_before(&self, folder: &Path, dir: &Path) -> Result<Before, String> {
-        let list = dir.join("before.json");
-        if let Some(b) = Before::load(&list) {
-            return Ok(b);
+    async fn folder_before(&self, folder: &Path, dir: &Path) -> Result<(), String> {
+        if dir.join("before.json").is_file() {
+            return Ok(());
         }
         let (folder, dir) = (folder.to_path_buf(), dir.to_path_buf());
         tokio::task::spawn_blocking(move || {
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let b = Before::take(&folder, &dir.join("before"));
-            b.save(&dir.join("before.json"))
-                .map_err(|e| e.to_string())?;
-            Ok(b)
+            Before::take(&folder, &dir.join("before"))
+                .save(&dir.join("before.json"))
+                .map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| e.to_string())?
@@ -306,33 +339,44 @@ impl Inner {
         self.collect_outputs(id, owner, scope);
     }
 
-    /// Keep an answer the person gave in this task, for its later runs.
+    /// Keep an answer the person gave in this task, for the run that continues it after the
+    /// process stops.
     pub(super) fn decided(&self, task: &str, r: &ApprovalRequest, d: ApprovalDecision) {
+        if r.ask_each_time {
+            return;
+        }
+        let key = Decision::key_of(&r.action, &r.input);
         self.update_task(task, |t| {
             let attempt = t.attempts;
-            t.decisions
-                .retain(|x| !(x.action == r.action && x.input == r.input));
+            t.decisions.retain(|x| x.key != key);
             t.decisions.push(Decision {
-                action: r.action.clone(),
-                input: r.input.clone(),
+                key,
                 decision: d,
                 attempt,
+                carry: false,
             });
         });
     }
 
-    /// The answer the person gave for the same call in an earlier run of this task. Within one
-    /// run, "once" stays once.
+    /// The answer the person gave for the same call in the run the process stopped in. Only a
+    /// refusal, or leave to change a file (writing the same file again changes nothing), carries
+    /// over: a command may have run already, so the person decides again. Within one run, "once"
+    /// stays once.
     pub(super) fn decided_before(
         &self,
         task: &str,
         r: &ApprovalRequest,
     ) -> Option<ApprovalDecision> {
+        if r.ask_each_time {
+            return None;
+        }
+        let key = Decision::key_of(&r.action, &r.input);
         let st = self.state.lock().unwrap();
         let t = &st.tasks.get(task)?.record;
         t.decisions
             .iter()
-            .find(|x| x.attempt < t.attempts && x.action == r.action && x.input == r.input)
+            .find(|x| x.carry && x.key == key)
             .map(|x| x.decision)
+            .filter(|d| !d.allows() || r.action == ark_runtime::worker::CHANGE)
     }
 }

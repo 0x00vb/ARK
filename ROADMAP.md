@@ -203,19 +203,19 @@ None is a new work type:
 
 | # | Gap | Generic fix |
 |---|---|---|
-| H1 | `Orchestrator::attempt` always builds ARK's `Harness` | a worker resolved like a model (`ModelResolver`), so orchestration names no vendor |
+| H1 (done, step 2) | `Orchestrator::attempt` always builds ARK's `Harness` | an agent's model spec names a worker (`agent:<name>`), resolved through the app's `Workers` catalog; orchestration names no vendor or protocol |
 | H2 | ARK is only an MCP client; nothing outside its loop can call its capabilities | serve the agent's filtered `Registry` to the worker: ACP `fs/*` and `terminal/*`, and MCP per task, through the same gate and invocation log |
-| H3 | A worker's permission request has no path to the `ApprovalGate` | ACP `session/request_permission` as an `OnBehalf` request, so it becomes a stored question (W1) |
-| H4 | Outputs, versions before and "never repeat a change" come from ARK's invocation log; a worker's own writes are invisible | writes through ARK where the agent allows; else a folder checkpoint per task (the deferred copy per task) |
-| H5 | ADR 0004 says vendor sessions are disposable; a worker's transcript is its own | canonical at the task boundary; the worker's session is a cache (`session/load` when it exists) |
+| H3 (done, step 2) | A worker's permission request has no path to the `ApprovalGate` | ACP `session/request_permission` as an `OnBehalf` request, so it becomes a stored question (W1); a grant names the file or the command |
+| H4 (outputs done, step 2) | Outputs, versions before and "never repeat a change" come from ARK's invocation log; a worker's own writes are invisible | the folder as the record (ADR 0043 › A worker's results): listed and copied at the task's first start, compared when it ends. Left: a copy of the folder per task, so two tasks or the person never share one folder while a task waits |
+| H5 (done, step 2) | ADR 0004 says vendor sessions are disposable; a worker's transcript is its own | canonical at the task boundary; the worker's session is a cache, loaded after a restart (`session/load`) |
 
-First slice (ADR 0043 step 2, after the spike): one ACP worker (OMP natively; Claude Code and Codex through their
-adapters), H1 to H3, file writes through ARK, measured against ARK's own agent on two
-workloads. Direct bridges (Claude Code `stream-json` with tools on, Codex `app-server` with
-approvals) only where ACP measurably falls short. H4 is not solved until a test records how
-OMP, Claude Code and Codex behave over ACP: where writes go, which actions ask permission, what
-tool calls report as outputs, and whether a session comes back after a restart (ADR 0039 ›
-Consequences). Design from those results, not from the spec.
+First slice, done (ADR 0043 step 2, 2026-10-07): Claude Code and Codex through their ACP
+adapters (`ark-acp`), H1, H3, H5 and H4's outputs, measured against ARK's own agent on two
+workloads (`bench/RESULTS.md`: both succeed; ARK's agent is cheaper and faster on them and
+stays the default). Writes are not routed through ARK: neither program uses ACP's `fs/*` (the
+spike), so the folder is the record. Left: H2 (ARK's capabilities served to a worker: a
+workload that needs one), OMP (`omp acp`), a copy of the folder per task. Direct bridges
+(Claude Code `stream-json`, Codex `app-server`) only where ACP measurably falls short.
 
 What ARK takes from Tern, without becoming a terminal: (1) the daemon-owns-state, clients-mirror
 model, which ARK already has for work; (2) a typed, versioned protocol with a schema, text
@@ -261,7 +261,7 @@ The order (ADR 0043). Each step starts when the one before holds:
 |---|---|---|
 | 0 (done 2026-10-07) | ACP spike: an ARK task on Claude Code and on Codex through their ACP adapters. Both passed, also across a restart; findings for step 2 in ADR 0043 › Step 0 results | permission asked, kept as a question, answered by ARK, worker continues, result and written file back; a restart with a question open recorded per agent |
 | 1 (done 2026-10-07) | Attention in one runtime: questions, failures and handed-off results, any workload, one list in `ark-interact` (`/waiting`, rows in the window's tray), a cleared mark per item. ADR 0043 › Step 1 results. Limit: each read of the list reads every task record (it parses in full only those that can be items); an index when a profile shows it | the same list in both front-ends; one key answers or opens; cleared survives a restart |
-| 2 | One ACP worker, H1 to H3, shaped by step 0 and reassessed after step 1: grants per command or path (ARK stays the authority), outputs from the task's folder, ARK sets model and mode | its permission request is an item like any other; measured against ARK's agent on two workloads (success, cost, time, times asked) |
+| 2 (done 2026-10-07) | One ACP worker, H1 to H3, shaped by step 0 and reassessed after step 1: grants per command or path (ARK stays the authority), outputs from the task's folder, ARK sets model and mode. Claude Code first, Codex as the second catalog entry. ADR 0043 › Step 2 results | its permission request is an item like any other; measured against ARK's agent on two workloads (success, cost, time, times asked) |
 | 3 | Reach: Web Push from the runtime's page; My machine as a location (install with a service and limits, pairing with `token link`). Defer ARK-funded compute, not the distributed architecture: My machine proves the remote path on the person's compute | a VPS paired in one command; its question reaches the phone, is answered there, the task continues |
 | 4 | Attention across runtimes | when a person has more than one runtime: one list, each item answered on its own runtime |
 

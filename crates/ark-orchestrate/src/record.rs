@@ -167,15 +167,30 @@ pub struct Question {
     pub answer: Option<ApprovalDecision>,
 }
 
-/// An answer the person gave in a task: a later run of the task (after a restart) takes it for
-/// the same call instead of asking again.
+/// An answer the person gave in a task. When the process stops under the task, the run that
+/// continues it takes the answer for the same call instead of asking again (`carry`); a pause, a
+/// retry or a new run asks again.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Decision {
-    pub action: String,
-    pub input: serde_json::Value,
+    /// A digest of the call: its action and input (the input can hold a file's content).
+    pub key: String,
     pub decision: ApprovalDecision,
     /// The run (`TaskRecord::attempts`) it was given in.
     pub attempt: u32,
+    /// The process stopped in that run: the next run continues it.
+    #[serde(default)]
+    pub carry: bool,
+}
+
+impl Decision {
+    /// The digest of a call, as `key` holds it.
+    pub fn key_of(action: &str, input: &serde_json::Value) -> String {
+        let mut h = blake3::Hasher::new();
+        h.update(action.as_bytes());
+        h.update(b"\n");
+        h.update(input.to_string().as_bytes());
+        h.finalize().to_hex()[..32].to_string()
+    }
 }
 
 impl Question {

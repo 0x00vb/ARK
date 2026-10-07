@@ -115,6 +115,64 @@ missing model), and an agent's save question answered from the other project aft
 Not in step 1: notifications (step 3), items per person, unread marks for a chat's own turn
 finishing in the background.
 
+## Step 2 results (2026-10-07)
+
+An agent whose model is `agent:claude-code` or `agent:codex` does its tasks in that program,
+when the app turns it on (`ArkBuilder::workers`). Claude Code came first: its requests name the
+file and it reports cost. Codex is the second entry of the same catalog, data in `ark-acp`.
+
+| Part | Where | What |
+|---|---|---|
+| The trait | `ark_runtime::worker` | `Worker::run(WorkerJob) -> WorkerRun`: brief, folder, gate, cancel, kept state; reports `HarnessEvent`s as the harness does. `Workers` is the app's catalog |
+| The program | `ark-acp` | a clean environment (`env_clear` and a list: home, path, user, locale); its own process group, stopped on every end; Claude Code without the person's or the project's settings (`settingSources: []`, the adapter in a private empty home for the run, the program with the person's real home for its login) and in `default` mode (`session/set_mode`); Codex with `approval_policy="untrusted"` and a read-only sandbox; ARK sets the model per job; only connector versions ARK was checked with run (claude-agent-acp 0.23, codex-acp 0.16), since keeping the program inside ARK's answers depends on the connector |
+| Questions | `ark-acp` -> the task's `OnBehalf` gate | a change is `program.change {paths}` with the grant `program.change:<paths>`, shown with the lines it removes and adds; a command is `program.run {command, folder}` with `program.run:<command>@.`, the exact command (a leading `cd` into the project folder is dropped), shown whole; anything else, or a path outside the folder or through a link, asks every time. ARK answers with the program's "once" options only, and refuses when the program offers no "allow once" |
+| Results | `ark_runtime::folder`, `orchestrator/elsewhere.rs` | the folder listed and copied at the task's first start (kept under the store until it ends); when the task ends, however it ends, new and changed files are outputs and changed and removed ones keep versions before, as one `program.files` call, and the copies are removed. One program at a time in a project folder |
+| Restarts | `orch_worker` record, `TaskRecord::decisions` | what a gone run left running is stopped (its process group, when its leader is gone or is still the program); the program loads its own session; the run that continues one the process stopped in takes its refusals and its leave to change a file again, never leave to run a command (it may have run already); a pause or a retry asks again |
+| Measures | `Usage::cost_micro_usd`, `Usage::asked`, a `ModelCall` with the program's tokens | `bench/RESULTS.md` › ARK's agent against Claude Code |
+
+What changed from the plan, and why:
+
+| Plan | Shipped | Why |
+|---|---|---|
+| The trait in `ark-model` | in `ark-runtime`, beside `Harness` | it needs the gate, the cancel token and `HarnessEvent`; `ark-model` depends on no ARK crate (plan review) |
+| Claude Code without its settings via `settingSources: []` | also the adapter in an empty home | the adapter reads the person's `~/.claude/settings.json` itself; this machine's `defaultMode: auto` made every session fail, and a project's `bypassPermissions` would skip questions. Setting `CLAUDE_CONFIG_DIR` instead loses the person's login |
+| A model from the person's settings | ARK sets one; Codex defaults to `gpt-5.5` | codex-acp refused the model in this machine's Codex settings |
+| `take_answer` for exactly-once | plus `TaskRecord::decisions`, carried only over a stopped process | `take_answer` only covers a question still open at the restart; an answer given before the process died (the write done, the task not ended) was asked again (plan review). Carrying every answer to every later run let a command run twice (implementation review) |
+| A Settings list of programs | none | a program that is not installed is not offered; nothing to choose there yet |
+
+Evidence: `crates/ark-orchestrate/tests/worker.rs` against a scripted program (the test binary
+run again): asked, kept, answered from another client, the file an output, tokens and cost
+recorded, no ARK secret in the program's environment, settings left out, mode set; a shell write
+with no path in its request found in the folder; a restart after the answer and the write loads
+the session, asks nobody, keeps the file once. Removing the decisions check or `env_clear`
+fails them. Live, `tests/worker_live.rs` with a project whose own settings allow everything and
+skip questions: Claude Code (claude-agent-acp 0.23.1) asked ARK before writing, and after a
+restart following the write it saw the work done and asked nobody; Codex (codex-acp 0.16.0,
+gpt-5.5) the same. Dogfood in `writer --serve`: a question in the tray from another project, the
+chapter changed, "Always in this project" for `wc -w *.md` covered it in later tasks, two Denies
+left the folder unchanged and the program said it would not retry.
+
+Measured (3 runs each, both on Sonnet, two small tasks): both succeed every time; ARK's agent is
+2.5 to 4 times cheaper and 1.6 to 3.4 times faster on them. ARK's agent stays the default.
+
+Limits:
+- The program is not contained. It reads anything it can without asking, and Claude Code runs
+  commands it classifies as read-only (`ls -la` was seen) without a question, as reads do not
+  ask for ARK's agents. Codex runs in its read-only sandbox. ARK's authority holds while the
+  program keeps the mode ARK set; that is why only checked connector versions run.
+- A process a program starts detached (`setsid`) leaves its group and is not stopped with it.
+- The person's own edits, or ARK's agents' changes, in the folder while a program's task waits
+  count as that task's (a copy of the folder per task is H4's rest). Hidden folders (`.github`)
+  and package folders are not looked at; copies stop at 512 MB.
+- A run killed mid-way loses its usage (a program reports tokens when a prompt ends); Codex
+  reports no tokens. If the process stops between recording the work and saving the task's end,
+  the work is recorded twice.
+- A project whose own settings name a mode the adapter does not know (`auto`) fails that
+  adapter's session, with the reason.
+- A person picks a program only by typing `agent:claude-code` (`/agent new`, an agent's spec):
+  nothing in the window offers the installed ones yet. Which way to offer them is the owner's
+  call (a board card).
+
 ## Consequences
 - Developers can bring the agents they already use, and their questions and results land where
   ARK's own agents' do. This brings developers in; it is not the product's message, which stays

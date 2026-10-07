@@ -225,6 +225,7 @@ run(agent, task)
 | a name given to `ModelsBuilder::provider` | that provider | the same provider |
 | anything else (`ollama:*`, `anthropic:*`, `openai:*`) | `ark_model::build` | the same provider |
 | none | the `Ark` router (a subscription router still gets a managed session per agent) | the `Ark` router |
+| `agent:<name>[:<model>]` (`agent:claude-code`, `agent:codex:gpt-5.5`) | none: another agent program does the task with its own tools (below) | none |
 
 An agent with no spec follows the session's model: the resolver reads `Ark::current_model`
 each time, so after `/model` (or the window's model choice) new agents run on the new model,
@@ -240,6 +241,29 @@ each conversation (`Session`) reasons through its own managed session (lane
 `session/<id>`, `Ark::session_router`). Measured in the writing agent's terminal: two turns of
 one conversation, each in a new process, used one vendor session for 3 calls; the second
 process resumed it from the store.
+
+### An agent on another program
+
+With `ArkBuilder::workers(true)`, an agent whose model is `agent:claude-code` or `agent:codex`
+does its tasks in that program, installed and signed in on this computer (ADR 0043 step 2).
+The task stays the orchestrator's; only the loop is the program's.
+
+```text
+task -> brief, the project folder -> the program (its own tools, its own model calls)
+          wants to change a file / run a command -> an ARK question on the task (kept, any client answers)
+        <- its answer, its usage, its cost
+     -> what changed in the folder since the task started -> outputs, versions before
+```
+
+| What | How |
+|---|---|
+| Authority | The program starts with a clean environment (no ARK keys or secrets), without the person's or the project's own settings, in the mode that asks. ARK answers each of its requests with the program's "once" options; a grant is ARK's and names the file (`program.change:report.md`) or the command (`program.run:npm test@.`). A request with nothing concrete to name asks every time. Read-only steps the program classifies as reads (`ls`, reading a file) do not ask, as reads do not for ARK's agents |
+| Results | The folder is listed and copied (clones) when the task first starts; when it ends, new and changed files are the task's outputs and changed or removed files keep their versions before (`program.files`). Paths the program names are not trusted for this |
+| Restarts | The program's session id and process group are kept with the task (`orch_worker`). After a restart, what the gone process left running is stopped, the program loads its own session, and an answer given in an earlier run answers the same request again (`TaskRecord::decisions`): the person is not asked twice |
+| Measurement | Tokens arrive as a model call, the program's own cost in `Usage::cost_micro_usd`, questions in `Usage::asked` |
+
+`ark-orchestrate` names no program or protocol: the catalog lives in `ark-acp` and reaches the
+orchestrator as `ark_runtime::worker::Workers`.
 
 ### The managed session
 

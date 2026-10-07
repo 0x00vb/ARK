@@ -44,6 +44,10 @@ pub struct Entry {
     pub session_meta: fn() -> serde_json::Value,
     /// The mode it must be in, when it has modes: the one that asks before a change.
     pub mode: Option<&'static str>,
+    /// The versions of the program's connector ARK was checked with (prefixes: `0.23.`). How
+    /// it is kept inside ARK's answers depends on the connector, so another version is not
+    /// used. Empty: any.
+    pub checked: &'static [&'static str],
     /// The adapter reads the person's settings from their home, or from the folder this
     /// variable names. It gets an empty home and not the variable, so the person's own mode
     /// and rules never apply; the program it starts gets both, as set, through the session
@@ -93,9 +97,10 @@ pub fn entries() -> Vec<Entry> {
             default_model: None,
             session_meta: claude_meta,
             mode: Some("default"),
+            checked: &["0.23."],
             settings_dir: Some("CLAUDE_CONFIG_DIR"),
             env: &[],
-            setup: "install Claude Code and its protocol adapter (`npm install -g @zed-industries/claude-agent-acp`), then sign in with `claude`",
+            setup: "install Claude Code and its connector (`npm install -g @zed-industries/claude-agent-acp@0.23`), then sign in with `claude`",
         },
         Entry {
             name: "codex",
@@ -113,9 +118,10 @@ pub fn entries() -> Vec<Entry> {
             default_model: Some("gpt-5.5"),
             session_meta: no_meta,
             mode: None,
+            checked: &["0.16."],
             settings_dir: None,
             env: &["CODEX_HOME"],
-            setup: "install Codex and its protocol adapter (`npm install -g @zed-industries/codex-acp`), then sign in with `codex`",
+            setup: "install Codex and its connector (`npm install -g @zed-industries/codex-acp@0.16`), then sign in with `codex`",
         },
     ]
 }

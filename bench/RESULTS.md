@@ -3,6 +3,32 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## ARK's agent against Claude Code as a worker (2026-10-07)
+
+ADR 0043 › Which agent does the work: a worker earns routing by measurement. Two tasks, each
+in a fresh project with every question answered "once": `analysis` (`sales.csv`, write the
+best month to `report.md`) and `edit` (change one date in `notes.md`, nothing else; checked
+byte for byte). ARK's agent runs on `claude:sonnet` with the Files tools; Claude Code runs on
+Sonnet as `agent:claude-code:sonnet` (claude-agent-acp 0.23.1, Claude Code 2.1.292, the
+owner's subscription). 3 runs each, `crates/ark-orchestrate/tests/worker_bench.rs`, raw lines
+in `workers/ark-vs-claude-code-sonnet-2026-10-07.txt`. "Priced" is tokens at Sonnet's list
+price ($2 in, $0.20 cached, $10 out; cache writes priced as input) for both; "reported" is
+Claude Code's own figure.
+
+| Workload | Agent | Success | Median time | Median tokens | Priced cost/success | Reported cost/run | Asked per run |
+|---|---|---:|---:|---:|---:|---:|---:|
+| analysis | ARK | 3/3 | 6.3 s | 12,500 | $0.0101 | | 1.0 |
+| analysis | Claude Code | 3/3 | 21.1 s | 60,126 | $0.0393 | $0.1140 | 1.0 |
+| edit | ARK | 3/3 | 12.3 s | 18,560 | $0.0147 | | 1.0 |
+| edit | Claude Code | 3/3 | 19.3 s | 48,549 | $0.0365 | $0.1070 | 1.0 |
+
+- Both succeed every time and ask the person once per run, for the one change.
+- ARK's agent costs a quarter to two fifths as much and takes a third to two thirds of the time.
+  Most of Claude Code's tokens are its own cached prompt (47,135 of 59,933 input tokens in the
+  window dogfood's edit task): what that buys shows on larger coding work, not here.
+- ARK's agent stays the default. Six runs on two small tasks say nothing about large coding
+  tasks; route by measurement again when a workload where a worker should win exists.
+
 ## Analysis with Run code (2026-10-05)
 
 The `analysis` workload: `sales.csv` (sales by region and month) in the project folder; the task

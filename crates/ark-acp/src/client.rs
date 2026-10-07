@@ -12,15 +12,15 @@ use ark_runtime::approval::ApprovalRequest;
 use ark_runtime::harness::HarnessEvent;
 use ark_runtime::worker::{Worker, WorkerJob, WorkerRun};
 use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout};
 
 use crate::{Entry, ModelSetting, BASE_ENV};
 
-/// The action of a request to change files, to run a command, and anything else.
-pub const CHANGE: &str = "program.change";
-pub const RUN: &str = "program.run";
-pub const OTHER: &str = "program.other";
+pub use ark_runtime::worker::{CHANGE, OTHER, RUN};
+
+/// The longest message ARK reads from a program.
+const MAX_LINE: u64 = 16 * 1024 * 1024;
 
 /// Said before the brief when a task runs again in the program's own session after a restart.
 const RESUMED: &str = "This task ran before and stopped when the program running it restarted. \
@@ -66,11 +66,14 @@ impl Worker for Acp {
         // The adapter reads the person's settings from its home: it gets an empty one. The
         // program it starts gets the person's real home (its login, its sessions) through the
         // session's options, exactly as when the person runs it.
+        // A private folder of this run (0700), gone when the run ends.
+        let empty = tempfile::Builder::new()
+            .prefix("ark-program-home")
+            .tempdir()
+            .map_err(|e| format!("{title} did not start: {e}"))?;
         let settings_home: Vec<(String, std::ffi::OsString)> = match self.entry.settings_dir {
             Some(var) => {
-                let empty = std::env::temp_dir().join("ark-acp-home");
-                let _ = std::fs::create_dir_all(&empty);
-                cmd.env("HOME", &empty).env_remove(var);
+                cmd.env("HOME", empty.path()).env_remove(var);
                 ["HOME", var]
                     .into_iter()
                     .filter_map(|k| std::env::var_os(k).map(|v| (k.to_string(), v)))
@@ -98,8 +101,8 @@ impl Worker for Acp {
         (job.keep)(json!({ "group": group.0, "session": kept_session }));
         let stderr = Tail::new(child.stderr.take());
         let mut conn = Conn {
-            stdin: child.stdin.take().ok_or("no stdin")?,
-            lines: BufReader::new(child.stdout.take().ok_or("no stdout")?).lines(),
+            stdin: child.stdin.take().ok_or("started without input")?,
+            reader: BufReader::new(child.stdout.take().ok_or("started without output")?),
             next: 0,
         };
         let mut turn = Turn::new(&folder, title);
@@ -127,8 +130,8 @@ impl Worker for Acp {
                 })
             }
             Err(e) => Err(match stderr.text().await {
-                t if t.trim().is_empty() => format!("{title}: {e}"),
-                t => format!("{title}: {e} ({})", t.trim()),
+                t if t.trim().is_empty() => format!("{title} {e}"),
+                t => format!("{title} {e} ({})", t.trim()),
             }),
         };
         drop(conn);
@@ -139,7 +142,7 @@ impl Worker for Acp {
 
     fn stop_left(&self, kept: &Value) {
         if let Some(g) = kept["group"].as_u64() {
-            stop_group_of(g as u32, self.entry.program);
+            stop_group_of(g as u32, &self.program);
         }
     }
 }
@@ -156,7 +159,6 @@ impl Acp {
         group: Option<u32>,
         settings_home: Vec<(String, std::ffi::OsString)>,
     ) -> Result<WorkerRun, String> {
-        let title = self.entry.title;
         let init = conn
             .call(
                 "initialize",
@@ -169,8 +171,20 @@ impl Acp {
                 Updates::Ignore,
             )
             .await?;
-        if let Some(v) = init["agentInfo"]["version"].as_str() {
-            tracing::info!(worker = self.entry.name, version = v, "started");
+        let version = init["agentInfo"]["version"].as_str().unwrap_or("");
+        tracing::info!(worker = self.entry.name, version, "started");
+        let checked = self.entry.checked;
+        if !checked.is_empty() && !checked.iter().any(|c| version.starts_with(c)) {
+            return Err(format!(
+                "is not used: ARK was not checked with this version of its connector ({} {}; checked: {}), and its changes could skip ARK's questions",
+                self.entry.program,
+                if version.is_empty() { "of unknown version" } else { version },
+                checked
+                    .iter()
+                    .map(|c| c.trim_end_matches('.'))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
         }
         let mut meta = (self.entry.session_meta)();
         if let (ModelSetting::ClaudeMeta, Some(m)) =
@@ -217,7 +231,7 @@ impl Acp {
         }
         let sid = opened["sessionId"]
             .as_str()
-            .ok_or("no session id")?
+            .ok_or("opened no session")?
             .to_string();
         turn.session = sid.clone();
         (job.keep)(json!({ "group": group, "session": sid }));
@@ -232,7 +246,7 @@ impl Acp {
                     Updates::Ignore,
                 )
                 .await
-                .map_err(|e| format!("it would not ask before changes ({e})"))?;
+                .map_err(|e| format!("would not ask before changes ({e})"))?;
             }
         }
         let text = if resumed {
@@ -287,7 +301,10 @@ impl Acp {
                 cost_micro_usd: turn.cost,
                 cancelled: true,
             }),
-            other => Err(format!("{title} stopped: {other}")),
+            "max_tokens" => Err("stopped: it reached its output limit".into()),
+            "max_turn_requests" => Err("stopped: it reached its step limit".into()),
+            "refusal" => Err("refused the task".into()),
+            other => Err(format!("stopped ({other})")),
         }
     }
 }
@@ -302,7 +319,7 @@ enum Updates {
 
 struct Conn {
     stdin: ChildStdin,
-    lines: Lines<BufReader<ChildStdout>>,
+    reader: BufReader<ChildStdout>,
     next: u64,
 }
 
@@ -313,7 +330,24 @@ impl Conn {
         self.stdin
             .write_all(line.as_bytes())
             .await
-            .map_err(|e| format!("it closed its input: {e}"))
+            .map_err(|e| format!("stopped taking input ({e})"))
+    }
+
+    /// The program's next message, `None` when it closed its output.
+    async fn next_line(&mut self) -> Result<Option<String>, String> {
+        let mut buf = Vec::new();
+        let n = (&mut self.reader)
+            .take(MAX_LINE)
+            .read_until(b'\n', &mut buf)
+            .await
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Ok(None);
+        }
+        if n as u64 == MAX_LINE && buf.last() != Some(&b'\n') {
+            return Err("sent a message too large to read".into());
+        }
+        Ok(Some(String::from_utf8_lossy(&buf).into_owned()))
     }
 
     async fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
@@ -336,7 +370,7 @@ impl Conn {
             .await?;
         loop {
             let line = tokio::select! {
-                l = self.lines.next_line() => l.map_err(|e| e.to_string())?.ok_or("it exited")?,
+                l = self.next_line() => l?.ok_or("stopped")?,
                 _ = job.cancel.cancelled() => return Err("cancelled".into()),
             };
             let Ok(msg) = serde_json::from_str::<Value>(&line) else {
@@ -350,7 +384,8 @@ impl Conn {
                 None if msg["id"].as_u64() == Some(id) => {
                     return match msg.get("error") {
                         Some(e) => Err(format!(
-                            "{method}: {}{}",
+                            "failed while {}: {}{}",
+                            step(method),
                             e["message"].as_str().unwrap_or(&e.to_string()),
                             e["data"]["details"]
                                 .as_str()
@@ -486,18 +521,20 @@ impl Turn {
         } else {
             false
         };
-        let want = if allowed { "allow_once" } else { "reject_once" };
+        // Only the program's "once" answers: never one that changes its own rules or mode.
         let options = params["options"].as_array().cloned().unwrap_or_default();
-        let pick = options
-            .iter()
-            .find(|o| o["kind"] == want)
+        let once = |kind: &str| options.iter().find(|o| o["kind"] == kind);
+        let pick = if allowed { once("allow_once") } else { None }
+            .or_else(|| once("reject_once"))
             .or_else(|| {
                 options
                     .iter()
-                    .find(|o| o["kind"].as_str().unwrap_or("").starts_with(&want[..5]))
-            })
-            .ok_or("it offered no answer ARK can give")?;
-        Ok(json!({ "outcome": "selected", "optionId": pick["optionId"] }))
+                    .find(|o| o["kind"].as_str().is_some_and(|k| k.starts_with("reject")))
+            });
+        Ok(match pick {
+            Some(o) => json!({ "outcome": "selected", "optionId": o["optionId"] }),
+            None => json!({ "outcome": "cancelled" }),
+        })
     }
 }
 
@@ -525,16 +562,27 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
     paths.dedup();
     let command = match &call["rawInput"]["command"] {
         Value::String(s) => Some(s.clone()),
-        Value::Array(a) => Some(
-            a.iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(" "),
-        ),
+        Value::Array(a) => {
+            let parts: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
+            Some(match parts.as_slice() {
+                // A shell running a script: the script is the command.
+                [_, flag, script] if matches!(*flag, "-c" | "-lc") => script.to_string(),
+                _ => parts
+                    .iter()
+                    .map(|p| {
+                        if p.contains(char::is_whitespace) || p.is_empty() {
+                            format!("'{}'", p.replace('\'', "'\\''"))
+                        } else {
+                            p.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            })
+        }
         _ => None,
     }
-    .map(|c| c.split_whitespace().collect::<Vec<_>>().join(" "))
-    .map(|c| without_cd_here(&c, folder))
+    .map(|c| without_cd_here(c.trim(), folder))
     .filter(|c| !c.is_empty());
     let base =
         |action: &str, input: Value, class: Option<String>, preview: String, summary: String| {
@@ -562,7 +610,7 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
                 CHANGE,
                 json!({ "paths": paths }),
                 class,
-                format!("{verb} {}", paths.join(", ")),
+                format!("{verb} {}{}", paths.join(", "), change_lines(call)),
                 format!("{by} {does} it"),
             )
         }
@@ -616,6 +664,53 @@ fn without_cd_here(command: &str, folder: &Path) -> String {
     }
 }
 
+/// What the program is doing when a call fails, in words.
+fn step(method: &str) -> &'static str {
+    match method {
+        "initialize" => "starting",
+        "session/new" => "opening its session",
+        "session/load" => "loading its earlier session",
+        "session/set_mode" => "setting the mode that asks before a change",
+        "session/prompt" => "working",
+        _ => "talking to it",
+    }
+}
+
+/// The lines a change removes and adds, from the diff a program sends with its request, under
+/// the request's first line (a card shows them as code). At most 12.
+fn change_lines(call: &Value) -> String {
+    let mut out = Vec::new();
+    for c in call["content"].as_array().into_iter().flatten() {
+        if c["type"] != "diff" {
+            continue;
+        }
+        let old: Vec<&str> = c["oldText"].as_str().unwrap_or("").lines().collect();
+        let new: Vec<&str> = c["newText"].as_str().unwrap_or("").lines().collect();
+        let head = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+        let tail = old[head..]
+            .iter()
+            .rev()
+            .zip(new[head..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        for l in &old[head..old.len() - tail] {
+            out.push(format!("  - {l}"));
+        }
+        for l in &new[head..new.len() - tail] {
+            out.push(format!("  + {l}"));
+        }
+    }
+    if out.is_empty() {
+        return String::new();
+    }
+    let more = out.len().saturating_sub(12);
+    out.truncate(12);
+    if more > 0 {
+        out.push(format!("  ({more} more lines)"));
+    }
+    format!("\n{}", out.join("\n"))
+}
+
 /// `path` relative to `folder`, `None` when it is outside it or reached through a link.
 fn relative(path: &Path, folder: &Path) -> Option<String> {
     let path = if path.is_absolute() {
@@ -629,10 +724,20 @@ fn relative(path: &Path, folder: &Path) -> Option<String> {
     {
         return None;
     }
-    // A new file: its folder must be inside.
+    // A new file, maybe in new folders: the nearest folder that exists must be inside.
     let real = match path.canonicalize() {
         Ok(p) => p,
-        Err(_) => path.parent()?.canonicalize().ok()?.join(path.file_name()?),
+        Err(_) => {
+            let mut missing = Vec::new();
+            let mut at = path.as_path();
+            loop {
+                if let Ok(p) = at.canonicalize() {
+                    break missing.iter().rev().fold(p, |p: PathBuf, m| p.join(m));
+                }
+                missing.push(at.file_name()?.to_os_string());
+                at = at.parent()?;
+            }
+        }
     };
     let rel = real.strip_prefix(folder).ok()?;
     let parts: Vec<String> = rel
@@ -659,18 +764,26 @@ impl Drop for Group {
 
 /// Stop a group a gone process left, if its leader is still the program it started (a process
 /// id can be reused).
-fn stop_group_of(group: u32, program: &str) {
+fn stop_group_of(group: u32, program: &Path) {
     #[cfg(unix)]
     {
         if group <= 1 {
             return;
         }
+        // SAFETY: signal 0 sends nothing; it says whether the process exists.
+        let leader_gone = unsafe { libc::kill(group as libc::pid_t, 0) } != 0;
+        let name = program
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let leader = std::process::Command::new("ps")
             .args(["-o", "command=", "-p", &group.to_string()])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default();
-        if leader.contains(program) {
+        // A group id is not given out again while the group has members: with its leader gone,
+        // what is left in it is what the program started.
+        if leader_gone || (!name.is_empty() && leader.contains(&name)) {
             // SAFETY: as in `Group::drop`; the leader is the program this task started.
             unsafe {
                 libc::killpg(group as libc::pid_t, libc::SIGKILL);
@@ -747,16 +860,41 @@ mod tests {
             &root,
             "Fake",
         );
-        assert_eq!(run.class, "program.run:npm test@.");
-        assert_eq!(run.preview, "Run npm test");
-        // A `cd` into the folder it runs in anyway is the same command; any other is not.
-        let here = request(
-            &json!({ "kind": "execute", "title": "x",
-                "rawInput": { "command": format!("cd \"{}\" && npm test", root.display()) } }),
+        assert_eq!(run.class, "program.run:npm  test@.", "the exact command");
+        assert_eq!(run.preview, "Run npm  test");
+        // Commands that differ only in spaces or lines are different commands.
+        let two = request(
+            &json!({ "kind": "execute", "title": "x", "rawInput": { "command": "echo hi\nrm -rf build" } }),
             &root,
             "Fake",
         );
-        assert_eq!(here.class, "program.run:npm test@.");
+        let one = request(
+            &json!({ "kind": "execute", "title": "x", "rawInput": { "command": "echo hi rm -rf build" } }),
+            &root,
+            "Fake",
+        );
+        assert_ne!(two.class, one.class);
+        // A shell running a script shows the script; other arguments keep their quotes.
+        let script = request(
+            &json!({ "kind": "execute", "title": "x", "rawInput": { "command": ["/bin/zsh", "-lc", "test -f a.md && cat a.md"] } }),
+            &root,
+            "Fake",
+        );
+        assert_eq!(script.preview, "Run test -f a.md && cat a.md");
+        let args = request(
+            &json!({ "kind": "execute", "title": "x", "rawInput": { "command": ["grep", "two words", "a.md"] } }),
+            &root,
+            "Fake",
+        );
+        assert_eq!(args.preview, "Run grep 'two words' a.md");
+        // A `cd` into the folder it runs in anyway is the same command; any other is not.
+        let here = request(
+            &json!({ "kind": "execute", "title": "x",
+                "rawInput": { "command": format!("cd \"{}\" && npm  test", root.display()) } }),
+            &root,
+            "Fake",
+        );
+        assert_eq!(here.class, "program.run:npm  test@.");
         let elsewhere = request(
             &json!({ "kind": "execute", "title": "x", "rawInput": { "command": "cd web && npm test" } }),
             &root,

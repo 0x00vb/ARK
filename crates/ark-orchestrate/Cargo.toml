@@ -13,6 +13,7 @@ ark-model.workspace = true
 ark-store.workspace = true
 ark-tools.workspace = true
 ark-runtime.workspace = true
+jiff.workspace = true
 ark-sdk.workspace = true
 serde.workspace = true
 serde_json.workspace = true

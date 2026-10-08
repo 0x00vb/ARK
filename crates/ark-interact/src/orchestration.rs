@@ -82,9 +82,11 @@ pub fn schedules_table(g: &Graph) -> Table {
             s.id.clone(),
             s.agent.clone(),
             s.says.clone(),
-            s.next_ms
-                .map(ark_orchestrate::schedule::local_label)
-                .unwrap_or_else(|| "-".into()),
+            match s.next_label() {
+                Some(n) => n,
+                None if s.paused => "paused".into(),
+                None => "-".into(),
+            },
             s.runs.to_string(),
             clip(&s.task.objective, 60),
         ]);
@@ -92,14 +94,163 @@ pub fn schedules_table(g: &Graph) -> Table {
     t
 }
 
-/// What runs on its own in this project (`/schedules`).
-pub fn schedules_report(g: &Graph) -> Report {
-    let r = Report::titled("Scheduled");
-    if g.schedules.is_empty() {
-        return r.note("Nothing is scheduled. Ask in words: \"every weekday at 9, have the researcher summarize the news\".");
+/// One schedule as both front-ends show it: what, when, the next run, how the last one went.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ScheduleView {
+    pub id: String,
+    pub agent: String,
+    pub objective: String,
+    pub context: String,
+    /// When, in words: `every day at 02:00`.
+    pub says: String,
+    /// The IANA zone its times are read in.
+    pub tz: Option<String>,
+    pub next_ms: Option<u64>,
+    /// The next run in words, in the schedule's zone: `Thu 02:00`.
+    pub next: Option<String>,
+    pub paused: bool,
+    /// `scheduled`, `running`, `asking`, `retrying`, `succeeded`, `failed`, `paused`.
+    pub state: ark_orchestrate::ScheduleState,
+    /// The state in words, what matters first: "waits for you", "trying again at 02:10",
+    /// "did not finish Thu 02:00", "running now", "paused", else the next run ("next Thu 02:00").
+    pub status: String,
+    /// How the last run ended, in words: "ran Thu 02:00", "did not finish Thu 02:00".
+    pub last: Option<String>,
+    /// The chat its results are posted in.
+    pub chat: Option<String>,
+    pub runs: u32,
+    pub missed: u32,
+    pub skipped: u32,
+    pub last_task: Option<String>,
+}
+
+/// One run of a schedule, newest first in [`schedule_runs`].
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RunView {
+    pub task: String,
+    pub state: TaskState,
+    /// When it started (or was made), in the schedule's zone: `Thu 02:00`.
+    pub at: String,
+    pub at_ms: u64,
+    pub result: Option<String>,
+    pub error: Option<String>,
+    /// Its files and other outputs, by artifact id.
+    pub outputs: Vec<ark_orchestrate::ArtifactRef>,
+    pub attempts: u32,
+    /// Why it is not running, while it waits: "trying again at 02:10", "your answer".
+    pub waiting_on: Option<String>,
+}
+
+/// The schedules of `o`, soonest first, paused last; only those reporting to `chat` when given.
+pub fn schedules(o: &ark_orchestrate::Orchestrator, chat: Option<&str>) -> Vec<ScheduleView> {
+    o.schedules()
+        .into_iter()
+        .filter(|s| chat.is_none() || s.task.report_to.as_deref() == chat)
+        .map(|s| schedule_view(o, &s))
+        .collect()
+}
+
+pub fn schedule_view(
+    o: &ark_orchestrate::Orchestrator,
+    s: &ark_orchestrate::ScheduleRecord,
+) -> ScheduleView {
+    use ark_orchestrate::ScheduleState as S;
+    let state = o.schedule_state(s);
+    let last = s.last_task.as_deref().and_then(|t| o.task(t));
+    let when = |ms: u64| s.when.label(ms);
+    let ended = last.as_ref().filter(|t| t.state.is_final()).and_then(|t| {
+        let at = when(t.finished_ms.unwrap_or(t.created_ms));
+        match t.state {
+            TaskState::Done => Some(format!("ran {at}")),
+            TaskState::Failed => Some(format!("did not finish {at}")),
+            _ => None,
+        }
+    });
+    let status = match (state, &last) {
+        (S::Asking, _) => "waits for you".to_string(),
+        (S::Retrying, Some(t)) => match t.retry_at_ms {
+            Some(at) => format!("trying again at {}", when(at)),
+            None => "trying again".into(),
+        },
+        (S::Running, _) => "running now".into(),
+        (S::Failed, _) => ended.clone().unwrap_or_default(),
+        (S::Paused, _) => "paused".into(),
+        _ => match s.next_label() {
+            Some(n) => format!("next {n}"),
+            None => ended.clone().unwrap_or_default(),
+        },
+    };
+    ScheduleView {
+        id: s.id.clone(),
+        agent: s.agent.clone(),
+        objective: s.task.objective.clone(),
+        context: s.task.context.clone(),
+        says: s.says.clone(),
+        tz: s.when.tz.clone(),
+        next_ms: s.next_ms,
+        next: s.next_label(),
+        paused: s.paused,
+        state,
+        status,
+        last: ended,
+        chat: s.task.report_to.clone(),
+        runs: s.runs,
+        missed: s.missed,
+        skipped: s.skipped,
+        last_task: s.last_task.clone(),
     }
-    r.table(schedules_table(g))
-        .note("Stop one with /schedules stop <schedule>, or ask in words.")
+}
+
+/// A schedule's runs, newest first, at most `limit`.
+pub fn schedule_runs(o: &ark_orchestrate::Orchestrator, id: &str, limit: usize) -> Vec<RunView> {
+    let Some(s) = o.schedule_record(id) else {
+        return Vec::new();
+    };
+    o.schedule_runs(id, limit)
+        .into_iter()
+        .map(|t| {
+            let at_ms = t.started_ms.unwrap_or(t.created_ms);
+            RunView {
+                at: s.when.label(at_ms),
+                at_ms,
+                task: t.id,
+                state: t.state,
+                result: t.result,
+                error: t.error.map(|e| crate::labels::person_error(&e)),
+                outputs: t.outputs,
+                attempts: t.attempts,
+                // In the person's words: a busy agent is a run waiting its turn.
+                waiting_on: t.waiting_on.filter(|_| !t.state.is_final()).map(|w| {
+                    if w.starts_with("agent ") || w.starts_with("capacity") {
+                        "its turn".to_string()
+                    } else {
+                        w
+                    }
+                }),
+            }
+        })
+        .collect()
+}
+
+/// What runs on its own in this project (`/schedules`).
+pub fn schedules_report(o: &ark_orchestrate::Orchestrator) -> Report {
+    let r = Report::titled("Scheduled");
+    let all = schedules(o, None);
+    if all.is_empty() {
+        return r.note("Nothing is scheduled. Ask in words: \"every day at 2 AM, recount the stock and send me a summary\".");
+    }
+    let mut t = Table::with_header(&["schedule", "when", "now", "runs", "task"]).right(3);
+    for v in &all {
+        t = t.row([
+            v.id.clone(),
+            v.says.clone(),
+            v.status.clone(),
+            v.runs.to_string(),
+            clip(&v.objective, 60),
+        ]);
+    }
+    r.table(t)
+        .note("/schedules run|pause|resume|stop <schedule>, or ask in words.")
 }
 
 /// The whole graph: tasks as a tree (who delegated what to whom), agents with their model,
@@ -426,6 +577,19 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
         EventKind::Unscheduled { agent, says, .. } => {
             (format!("{agent} no longer runs {says}"), Tone::Muted)
         }
+        EventKind::ScheduleChanged {
+            agent,
+            says,
+            paused,
+            ..
+        } => (
+            if *paused {
+                format!("{agent}'s schedule ({says}) paused")
+            } else {
+                format!("{agent} runs {says}")
+            },
+            Tone::Muted,
+        ),
         EventKind::Work { item, by } => (
             format!(
                 "{} {}: {}",
@@ -538,6 +702,17 @@ pub enum Control {
     Unschedule {
         schedule: String,
     },
+    /// Keep a schedule, run nothing until resumed.
+    PauseSchedule {
+        schedule: String,
+    },
+    ResumeSchedule {
+        schedule: String,
+    },
+    /// Start a schedule's run now, besides its times.
+    RunSchedule {
+        schedule: String,
+    },
     /// Add an item to the board.
     AddWork {
         title: String,
@@ -641,13 +816,29 @@ pub async fn control(
             ControlOutcome::Messaged { agent, delivered }
         }
         Control::Unschedule { schedule } => {
-            let s = o.unschedule(&schedule)?;
+            let s = o.stop_schedule(&schedule).await?;
             ControlOutcome::Done(format!(
                 "{} no longer runs \"{}\"",
                 s.agent,
                 clip(&s.task.objective, 60)
             ))
         }
+        Control::PauseSchedule { schedule } => {
+            let s = o.pause_schedule(&schedule)?;
+            ControlOutcome::Done(format!("paused \"{}\"", clip(&s.task.objective, 60)))
+        }
+        Control::ResumeSchedule { schedule } => {
+            let s = o.resume_schedule(&schedule)?;
+            ControlOutcome::Done(format!(
+                "\"{}\" runs {}, next {}",
+                clip(&s.task.objective, 60),
+                s.says,
+                s.next_label().unwrap_or_default()
+            ))
+        }
+        Control::RunSchedule { schedule } => ControlOutcome::Submitted {
+            task: o.run_schedule_now(&schedule)?,
+        },
         Control::AddWork { title, change } => {
             ControlOutcome::Work(Box::new(o.add_work(PERSON, &title, change)?))
         }

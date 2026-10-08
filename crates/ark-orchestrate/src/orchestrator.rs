@@ -41,7 +41,7 @@ use crate::record::{
     now_ms, AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord,
     TaskState, ToolCallRecord, Usage, TOOL_CALLS_KEPT,
 };
-use crate::schedule::{ScheduleRecord, When, SCHEDULE};
+use crate::schedule::{IfMissed, ScheduleChange, ScheduleRecord, When, SCHEDULE};
 use crate::spec::{AgentSpec, TaskSpec};
 use crate::tools::{self, AgentTools};
 use crate::OrchError;
@@ -180,6 +180,15 @@ impl<'a> OrchestratorBuilder<'a> {
 /// How often the timer looks for schedules that are due.
 const SCHEDULE_TICK: Duration = Duration::from_secs(20);
 
+/// Runs of one schedule open at once when it allows overlap: the one running and one waiting.
+const MAX_OPEN_RUNS: usize = 2;
+
+/// Finished runs kept per schedule.
+const RUNS_KEPT: usize = 50;
+
+/// Runs in a row that did not finish before a schedule pauses itself.
+const MAX_FAILURES: u32 = 3;
+
 impl Orchestrator {
     /// An orchestrator over `ark`'s store, tools and settings, working in `project`. Agents
     /// without a model use `ark`'s router; agents without their own profile start from
@@ -223,20 +232,27 @@ impl Orchestrator {
     /// for tasks (see [`ChatTools`](crate::tools)). Add them to each turn with
     /// [`TurnOptions::tools`](ark_sdk::TurnOptions::tools); they name the agents of that moment.
     pub fn chat_tools(&self) -> ark_sdk::TurnTools {
-        self.chat_tools_in(None)
+        self.chat_tools_in(None, None)
     }
 
     /// [`chat_tools`](Self::chat_tools) for one conversation (`session`): what it schedules
     /// posts each run's result into it ([`TaskSpec::report_to`]).
     pub fn chat_tools_for(&self, session: &str) -> ark_sdk::TurnTools {
-        self.chat_tools_in(Some(session.to_string()))
+        self.chat_tools_in(Some(session.to_string()), None)
     }
 
-    fn chat_tools_in(&self, chat: Option<String>) -> ark_sdk::TurnTools {
+    /// [`chat_tools_for`](Self::chat_tools_for) for a person in time zone `zone` (IANA, as
+    /// their client says it): "at 9" is their 9, also on a runtime in another zone.
+    pub fn chat_tools_in_zone(&self, session: &str, zone: Option<&str>) -> ark_sdk::TurnTools {
+        self.chat_tools_in(Some(session.to_string()), zone.map(str::to_string))
+    }
+
+    fn chat_tools_in(&self, chat: Option<String>, zone: Option<String>) -> ark_sdk::TurnTools {
         ark_sdk::TurnTools {
             adapter: Arc::new(tools::ChatTools {
                 orch: self.clone(),
                 chat,
+                zone,
             }),
             distiller: Some(tools::distiller()),
         }
@@ -524,6 +540,18 @@ impl Orchestrator {
         task: TaskSpec,
         when: When,
     ) -> Result<ScheduleRecord, OrchError> {
+        self.schedule_with(agent, task, when, ScheduleChange::default())
+    }
+
+    /// [`schedule`](Self::schedule) with its policies set (`if_missed`, `overlap`, `retries`;
+    /// the other fields of `opts` are ignored).
+    pub fn schedule_with(
+        &self,
+        agent: &str,
+        task: TaskSpec,
+        when: When,
+        opts: ScheduleChange,
+    ) -> Result<ScheduleRecord, OrchError> {
         let when = when.normalized().map_err(OrchError::NotAllowed)?;
         match self.agent(agent) {
             None => return Err(OrchError::UnknownAgent(agent.into())),
@@ -535,7 +563,15 @@ impl Orchestrator {
         if task.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
         }
-        let rec = ScheduleRecord::new(self.inner.project.id.as_str(), agent, task, when);
+        let mut rec = ScheduleRecord::new(self.inner.project.id.as_str(), agent, task, when);
+        if rec.next_ms.is_none() {
+            return Err(OrchError::NotAllowed(format!(
+                "{} has passed; give a time still to come",
+                rec.says
+            )));
+        }
+        opts.policies(&mut rec);
+        let _one = self.inner.ticks.lock().unwrap();
         self.inner.save_schedule(&rec);
         self.inner
             .state
@@ -552,19 +588,167 @@ impl Orchestrator {
         Ok(rec)
     }
 
-    /// The schedules that still run, soonest first.
+    /// The schedules kept (running or paused), soonest first, paused last.
     pub fn schedules(&self) -> Vec<ScheduleRecord> {
         let st = self.inner.state.lock().unwrap();
         let mut v: Vec<ScheduleRecord> = st.schedules.values().cloned().collect();
-        v.sort_by_key(|s| (s.next_ms, s.created_ms));
+        v.sort_by_key(|s| (s.next_ms.is_none(), s.next_ms, s.created_ms));
         v
     }
 
-    /// Stop a schedule. A run already started goes on (cancel its task to stop it).
+    pub fn schedule_record(&self, id: &str) -> Option<ScheduleRecord> {
+        self.inner.state.lock().unwrap().schedules.get(id).cloned()
+    }
+
+    /// Where a schedule is: scheduled, running, asking, retrying, succeeded, failed, paused.
+    pub fn schedule_state(&self, s: &ScheduleRecord) -> crate::ScheduleState {
+        let st = self.inner.state.lock().unwrap();
+        let last = s
+            .last_task
+            .as_ref()
+            .and_then(|t| st.tasks.get(t))
+            .map(|t| &t.record);
+        crate::ScheduleState::of(s, last)
+    }
+
+    /// Stop a schedule. A run already working goes on (cancel its task to stop it); one only
+    /// waiting to try again is cancelled. The runs it made stay, with their results.
     pub fn unschedule(&self, id: &str) -> Result<ScheduleRecord, OrchError> {
-        self.inner
-            .drop_schedule(id)
-            .ok_or_else(|| OrchError::NotAllowed(format!("no schedule `{id}`")))
+        let rec = {
+            let _one = self.inner.ticks.lock().unwrap();
+            let gone = self.inner.drop_schedule(id);
+            gone.ok_or_else(|| self.inner.no_schedule(id))?
+        };
+        self.inner.cancel_waiting_retry(&rec);
+        Ok(rec)
+    }
+
+    /// [`unschedule`](Self::unschedule), and end the agent made for the schedule when no other
+    /// schedule uses it and it has no open task.
+    pub async fn stop_schedule(&self, id: &str) -> Result<ScheduleRecord, OrchError> {
+        let rec = self.unschedule(id)?;
+        let used = self.schedules().iter().any(|s| s.agent == rec.agent);
+        let busy = self
+            .agent(&rec.agent)
+            .is_some_and(|a| a.current_task.is_some() || a.state == AgentState::Running);
+        if rec.own_agent && !used && !busy {
+            self.terminate(&rec.agent).await?;
+        }
+        Ok(rec)
+    }
+
+    /// Mark a schedule's agent as made for it ([`ScheduleRecord::own_agent`]).
+    pub(crate) fn own_agent(&self, id: &str) {
+        let _one = self.inner.ticks.lock().unwrap();
+        let found = self.inner.state.lock().unwrap().schedules.get(id).cloned();
+        if let Some(mut s) = found {
+            s.own_agent = true;
+            self.inner.keep_schedule(s);
+        }
+    }
+
+    /// Keep a schedule but run nothing until [`resume_schedule`](Self::resume_schedule). A run
+    /// already working goes on; one only waiting to try again is cancelled.
+    pub fn pause_schedule(&self, id: &str) -> Result<ScheduleRecord, OrchError> {
+        let rec = self.inner.change(id, |s| {
+            s.paused = true;
+            s.next_ms = None;
+            Ok(())
+        })?;
+        self.inner.cancel_waiting_retry(&rec);
+        Ok(rec)
+    }
+
+    /// Run a paused schedule again from its next time; the times missed while it was paused do
+    /// not run.
+    pub fn resume_schedule(&self, id: &str) -> Result<ScheduleRecord, OrchError> {
+        self.inner.change(id, |s| {
+            s.paused = false;
+            s.failures = 0;
+            s.next_ms = s.when.next_after(now_ms());
+            if s.next_ms.is_none() {
+                return Err(OrchError::NotAllowed(format!(
+                    "{} has passed; change its time to run it again",
+                    s.says
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    /// Change what a schedule runs or when. Runs already started keep what they were given.
+    pub fn change_schedule(
+        &self,
+        id: &str,
+        change: ScheduleChange,
+    ) -> Result<ScheduleRecord, OrchError> {
+        let when = match &change.when {
+            Some(w) => Some(w.normalized().map_err(OrchError::NotAllowed)?),
+            None => None,
+        };
+        self.inner.change(id, |s| {
+            if let Some(o) = change.objective.as_deref().map(str::trim) {
+                if o.is_empty() {
+                    return Err(OrchError::NotAllowed("a task needs an objective".into()));
+                }
+                s.task.objective = o.to_string();
+            }
+            if let Some(c) = &change.context {
+                s.task.context = c.trim().to_string();
+            }
+            if let Some(mut w) = when.clone() {
+                // A new time of day is read in the zone the schedule had, unless it names one.
+                if w.tz.is_none() && w.every_minutes.is_none() {
+                    w.tz = s.when.tz.clone().or_else(crate::schedule::system_zone);
+                }
+                if w.next_after(now_ms()).is_none() {
+                    return Err(OrchError::NotAllowed(format!(
+                        "{} has passed; give a time still to come",
+                        w.describe()
+                    )));
+                }
+                s.says = w.describe();
+                s.when = w;
+                if !s.paused {
+                    s.next_ms = s.when.next_after(now_ms());
+                }
+            }
+            change.policies(s);
+            Ok(())
+        })
+    }
+
+    /// Start a run now, outside the schedule's times; its next time stays. Refused while a run
+    /// is open, unless the schedule allows overlap. A paused schedule stays paused.
+    pub fn run_schedule_now(&self, id: &str) -> Result<String, OrchError> {
+        let _one = self.inner.ticks.lock().unwrap();
+        let found = self.inner.state.lock().unwrap().schedules.get(id).cloned();
+        let mut s = found.ok_or_else(|| self.inner.no_schedule(id))?;
+        let open = self.inner.open_runs(id);
+        if (open > 0 && !s.overlap) || open >= MAX_OPEN_RUNS {
+            return Err(OrchError::NotAllowed(
+                "a run is still under way; wait for it to end".into(),
+            ));
+        }
+        let now = now_ms();
+        let task = self.inner.start_run(&mut s, now, now)?;
+        self.inner.keep_schedule(s);
+        Ok(task)
+    }
+
+    /// A schedule's runs, newest first: each is a task with its state, result, error, outputs
+    /// and times; its trace is [`task_trace`](Self::task_trace).
+    pub fn schedule_runs(&self, id: &str, limit: usize) -> Vec<TaskRecord> {
+        let st = self.inner.state.lock().unwrap();
+        let mut v: Vec<TaskRecord> = st
+            .tasks
+            .values()
+            .filter(|t| t.record.schedule.as_deref() == Some(id))
+            .map(|t| t.record.clone())
+            .collect();
+        v.sort_by_key(|t| std::cmp::Reverse((t.created_ms, t.id.clone())));
+        v.truncate(limit);
+        v
     }
 
     /// Start every schedule due at `now_ms`; returns the tasks started. The orchestrator's
@@ -775,6 +959,17 @@ fn close_open_calls(t: &mut TaskRecord) {
     }
 }
 
+/// A run's failure that trying again cannot fix: no credit left, a project or action that is not
+/// there. Anything else (the model unreachable or overloaded, a reply it could not get right, a
+/// store or tool error) may pass, so a task with attempts left tries again.
+fn final_error(e: &ark_runtime::AgentError) -> bool {
+    use ark_runtime::AgentError as E;
+    matches!(
+        e,
+        E::OutOfCredit { .. } | E::ProjectNotFound(_) | E::UnknownAction(_) | E::Plugin(_)
+    )
+}
+
 /// What a finished task reports to its chat: (ok, text). Nothing for one that was cancelled
 /// (whoever cancelled it knows) or has not finished.
 fn reports(t: &TaskRecord) -> Option<(bool, String)> {
@@ -788,7 +983,10 @@ fn reports(t: &TaskRecord) -> Option<(bool, String)> {
 enum Attempt {
     Done(String),
     Stopped(Stop),
+    /// A failure another try may not hit (the model unreachable, a reply it could not get right).
     Failed(String),
+    /// A failure trying again cannot fix (the account is out of credit).
+    Fatal(String),
 }
 
 struct Final {
@@ -1062,9 +1260,210 @@ impl Inner {
         Some(rec)
     }
 
-    /// Start the schedules due at `now`. A schedule whose last run is still open skips this
-    /// one; a run missed while the process was down runs once. One tick at a time; a schedule
-    /// stopped meanwhile stays stopped.
+    fn no_schedule(&self, id: &str) -> OrchError {
+        let known: Vec<String> = self
+            .state
+            .lock()
+            .unwrap()
+            .schedules
+            .keys()
+            .cloned()
+            .collect();
+        OrchError::NotAllowed(if known.is_empty() {
+            format!("no schedule `{id}`; nothing is scheduled")
+        } else {
+            format!("no schedule `{id}`; the schedules are {}", known.join(", "))
+        })
+    }
+
+    /// Change a schedule under the timer's lock, so a tick never writes back a copy from
+    /// before the change. Nothing changes when `f` refuses.
+    fn change(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut ScheduleRecord) -> Result<(), OrchError>,
+    ) -> Result<ScheduleRecord, OrchError> {
+        let _one = self.ticks.lock().unwrap();
+        // The state lock is let go before `no_schedule` takes it again.
+        let found = self.state.lock().unwrap().schedules.get(id).cloned();
+        let mut s = found.ok_or_else(|| self.no_schedule(id))?;
+        f(&mut s)?;
+        self.keep_schedule(s.clone());
+        self.emit(EventKind::ScheduleChanged {
+            schedule: s.id.clone(),
+            agent: s.agent.clone(),
+            says: s.says.clone(),
+            paused: s.paused,
+        });
+        Ok(s)
+    }
+
+    /// Store a schedule and keep it in memory; one that will never run again is removed. Not
+    /// for a schedule stopped meanwhile.
+    fn keep_schedule(&self, s: ScheduleRecord) {
+        let mut st = self.state.lock().unwrap();
+        if !st.schedules.contains_key(&s.id) {
+            return;
+        }
+        // A one-time schedule stays while its run is open, so it shows how that run goes.
+        let running = s
+            .last_task
+            .as_ref()
+            .and_then(|t| st.tasks.get(t))
+            .is_some_and(|t| !t.record.state.is_final());
+        if s.kept() || running {
+            self.save_schedule(&s);
+            st.schedules.insert(s.id.clone(), s);
+        } else {
+            let _ = self.engine.store.delete_record(SCHEDULE, &s.id);
+            st.schedules.remove(&s.id);
+        }
+    }
+
+    /// Runs of a schedule not finished yet.
+    fn open_runs(&self, id: &str) -> usize {
+        let st = self.state.lock().unwrap();
+        st.tasks
+            .values()
+            .filter(|t| t.record.schedule.as_deref() == Some(id) && !t.record.state.is_final())
+            .count()
+    }
+
+    /// Start one run of `s` for the time `slot`, at `now`. Its brief says which time it is for
+    /// (and that it is late, when it is); it tries again after a failure that may pass.
+    fn start_run(&self, s: &mut ScheduleRecord, slot: u64, now: u64) -> Result<String, OrchError> {
+        let mut spec = s.task.clone();
+        let mut line = format!("This is the run scheduled for {}", s.when.label(slot));
+        if let Some(tz) = s
+            .when
+            .tz
+            .as_ref()
+            .filter(|_| !line.ends_with(char::is_alphabetic))
+        {
+            line.push_str(&format!(" ({tz})"));
+        }
+        line.push('.');
+        if now.saturating_sub(slot) > crate::schedule::LATE_MS {
+            line.push_str(&format!(
+                " It starts late, at {}: nothing ran at that time.",
+                s.when.label(now)
+            ));
+        }
+        spec.context = match spec.context.trim() {
+            "" => line,
+            c => format!("{line}\n{c}"),
+        };
+        spec.max_attempts = Some(1 + s.retries);
+        spec.retry_delay_ms = Some(crate::schedule::RETRY_DELAY_MS);
+        let id = self.create_run(&s.agent, spec, Origin::External, None, Some((&s.id, slot)))?;
+        self.start(&id);
+        s.runs += 1;
+        s.last_ms = Some(now);
+        s.last_task = Some(id.clone());
+        self.prune_runs(&s.id);
+        Ok(id)
+    }
+
+    /// Keep a schedule's newest [`RUNS_KEPT`] finished runs; older ones leave the store, so a
+    /// schedule that runs every few minutes does not grow it without end.
+    fn prune_runs(&self, id: &str) {
+        let old: Vec<String> = {
+            let st = self.state.lock().unwrap();
+            let mut runs: Vec<&TaskRecord> = st
+                .tasks
+                .values()
+                .map(|t| &t.record)
+                .filter(|t| t.schedule.as_deref() == Some(id) && t.state.is_final())
+                .filter(|t| t.item.is_none() && t.children.is_empty())
+                .collect();
+            runs.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
+            runs.iter().skip(RUNS_KEPT).map(|t| t.id.clone()).collect()
+        };
+        for t in old {
+            self.state.lock().unwrap().tasks.remove(&t);
+            let _ = self.engine.store.delete_record(TASK, &t);
+        }
+    }
+
+    /// Tell the chat a schedule reports to something about it (no result: a run let go, a pause).
+    fn note(&self, s: &ScheduleRecord, text: String) {
+        let Some(chat) = &s.task.report_to else {
+            return;
+        };
+        let post = Post::new(&s.agent, clip(&s.task.objective, 80), text, false);
+        match ark_runtime::session::post(&self.engine, chat, post.clone()) {
+            Ok(_) => self.emit(EventKind::Posted {
+                session: chat.clone(),
+                task: s.last_task.clone().unwrap_or_default(),
+                post,
+            }),
+            Err(e) => tracing::warn!(schedule = %s.id, "could not post into the chat: {e}"),
+        }
+    }
+
+    /// A schedule's latest run ended: count a failure in a row (3 pause the schedule and say so
+    /// in its chat), or clear the count; an ended one-time schedule goes.
+    fn run_ended(&self, run: &TaskRecord) {
+        let Some(id) = &run.schedule else { return };
+        let _one = self.ticks.lock().unwrap();
+        let found = self.state.lock().unwrap().schedules.get(id).cloned();
+        let Some(mut s) = found else { return };
+        if s.last_task.as_deref() != Some(run.id.as_str()) {
+            return;
+        }
+        if s.counted.as_deref() != Some(run.id.as_str()) {
+            s.counted = Some(run.id.clone());
+            match run.state {
+                TaskState::Failed => s.failures += 1,
+                TaskState::Done => s.failures = 0,
+                _ => {}
+            }
+        }
+        let pause = s.failures >= MAX_FAILURES && !s.paused && s.active();
+        if pause {
+            self.pause_failing(&mut s);
+        }
+        self.keep_schedule(s);
+    }
+
+    /// Pause a schedule whose runs keep failing, and say so in its chat.
+    fn pause_failing(&self, s: &mut ScheduleRecord) {
+        s.paused = true;
+        s.next_ms = None;
+        self.note(
+            s,
+            format!(
+                "Paused after {} runs in a row did not finish. Ask to resume it when the cause is fixed.",
+                s.failures
+            ),
+        );
+        self.emit(EventKind::ScheduleChanged {
+            schedule: s.id.clone(),
+            agent: s.agent.clone(),
+            says: s.says.clone(),
+            paused: true,
+        });
+    }
+
+    /// A schedule stopped or paused: its run that only waits to try again is cancelled; one
+    /// that works goes on.
+    fn cancel_waiting_retry(&self, s: &ScheduleRecord) {
+        let waiting = {
+            let st = self.state.lock().unwrap();
+            s.last_task
+                .as_ref()
+                .and_then(|t| st.tasks.get(t))
+                .filter(|t| !t.record.state.is_final() && t.record.retry_at_ms.is_some())
+                .map(|t| t.record.id.clone())
+        };
+        if let Some(t) = waiting {
+            self.cancel_tree(&t, Stop::Cancel);
+        }
+    }
+
+    /// Start the schedules due at `now`. One tick at a time, and every change to a schedule
+    /// waits for it, so a pause or a change made meanwhile is never undone. See
+    /// [`crate::schedule`] for the rules.
     fn tick_schedules(&self, now: u64) -> Vec<String> {
         let _one = self.ticks.lock().unwrap();
         let due: Vec<ScheduleRecord> = {
@@ -1077,43 +1476,74 @@ impl Inner {
         };
         let mut started = Vec::new();
         for mut s in due {
-            if !self.state.lock().unwrap().schedules.contains_key(&s.id) {
-                continue;
-            }
-            let busy = s.last_task.as_ref().is_some_and(|t| {
+            let Some(slot) = s.next_ms else { continue };
+            let (last, open, made) = {
                 let st = self.state.lock().unwrap();
-                st.tasks.get(t).is_some_and(|t| !t.record.state.is_final())
-            });
-            if busy {
+                if !st.schedules.contains_key(&s.id) {
+                    continue;
+                }
+                let last = s
+                    .last_task
+                    .as_ref()
+                    .and_then(|t| st.tasks.get(t))
+                    .map(|t| t.record.clone());
+                let mine = st
+                    .tasks
+                    .values()
+                    .filter(|t| t.record.schedule.as_deref() == Some(s.id.as_str()));
+                let open = mine.clone().filter(|t| !t.record.state.is_final()).count();
+                // A run for this time made before a crash, whose schedule was not saved.
+                let made = mine
+                    .clone()
+                    .find(|t| t.record.slot == Some(slot))
+                    .map(|t| t.record.id.clone());
+                (last, open, made)
+            };
+            // Failures in a row: each finished run counts once, when the next one is due.
+            if let Some(l) =
+                last.filter(|l| l.state.is_final() && Some(&l.id) != s.counted.as_ref())
+            {
+                s.counted = Some(l.id.clone());
+                if l.state == TaskState::Failed {
+                    s.failures += 1;
+                } else {
+                    s.failures = 0;
+                }
+            }
+            if let Some(id) = made {
+                s.runs += 1;
+                s.last_ms = Some(slot);
+                s.last_task = Some(id);
+            } else if s.failures >= MAX_FAILURES {
+                self.pause_failing(&mut s);
+                self.keep_schedule(s);
+                continue;
+            } else if now.saturating_sub(slot) > crate::schedule::LATE_MS
+                && s.if_missed == IfMissed::Skip
+            {
+                s.missed += 1;
+                if s.when.once {
+                    self.note(
+                        &s,
+                        format!(
+                            "Did not run: nothing was running at {}, and this schedule lets a missed run go.",
+                            s.when.label(slot)
+                        ),
+                    );
+                }
+            } else if (open > 0 && !s.overlap) || open >= MAX_OPEN_RUNS {
                 s.skipped += 1;
             } else {
-                match self.create_task(&s.agent, s.task.clone(), Origin::External, None) {
-                    Ok(id) => {
-                        self.update_task(&id, |t| t.schedule = Some(s.id.clone()));
-                        self.start(&id);
-                        s.runs += 1;
-                        s.last_ms = Some(now);
-                        s.last_task = Some(id.clone());
-                        started.push(id);
-                    }
+                match self.start_run(&mut s, slot, now) {
+                    Ok(id) => started.push(id),
                     Err(e) => {
                         tracing::warn!(schedule = %s.id, "a scheduled run could not start: {e}");
                         s.skipped += 1;
                     }
                 }
             }
-            s.advance(now);
-            let mut st = self.state.lock().unwrap();
-            if !st.schedules.contains_key(&s.id) {
-                continue;
-            }
-            if s.active() {
-                self.save_schedule(&s);
-                st.schedules.insert(s.id.clone(), s);
-            } else {
-                let _ = self.engine.store.delete_record(SCHEDULE, &s.id);
-                st.schedules.remove(&s.id);
-            }
+            s.advance(slot, now);
+            self.keep_schedule(s);
         }
         started
     }
@@ -1274,9 +1704,18 @@ impl Inner {
                 }
             }
             for v in store.list_records(SCHEDULE, Some(self.project.id.as_str()))? {
+                // Also an ended one-time schedule whose run is open: it goes when the run ends.
+                // One whose run ended in a process that stopped before it said so goes now.
                 if let Ok(s) = serde_json::from_value::<ScheduleRecord>(v) {
-                    if s.active() {
+                    let open = s
+                        .last_task
+                        .as_ref()
+                        .and_then(|t| st.tasks.get(t))
+                        .is_some_and(|t| !t.record.state.is_final());
+                    if s.kept() || open {
                         st.schedules.insert(s.id.clone(), s);
+                    } else {
+                        let _ = store.delete_record(SCHEDULE, &s.id);
                     }
                 }
             }
@@ -1564,6 +2003,19 @@ impl Inner {
         origin: Origin,
         parent: Option<&str>,
     ) -> Result<String, OrchError> {
+        self.create_run(owner, spec, origin, parent, None)
+    }
+
+    /// [`create_task`](Self::create_task), and for a schedule's run its schedule and the time
+    /// it is for, in the same save: a crash can never leave a run its schedule does not know.
+    fn create_run(
+        &self,
+        owner: &str,
+        spec: TaskSpec,
+        origin: Origin,
+        parent: Option<&str>,
+        run: Option<(&str, u64)>,
+    ) -> Result<String, OrchError> {
         let (agent_budget, state) = {
             let st = self.state.lock().unwrap();
             let a = st
@@ -1639,7 +2091,10 @@ impl Inner {
             run_ms: 0,
             pid: None,
             pid_start: None,
-            schedule: None,
+            schedule: run.map(|(s, _)| s.to_string()),
+            slot: run.map(|(_, at)| at),
+            retry_delay_ms: spec.retry_delay_ms,
+            retry_at_ms: None,
             item: spec.item.clone(),
             report_to: spec.report_to.clone(),
             work: spec.work.clone(),
@@ -1891,6 +2346,10 @@ impl Inner {
         if !self.wait_for_answer(id).await {
             return self.stopped_before_start(id);
         }
+        // A wait to try again that a restart cut short goes on to its time.
+        if !self.wait_to_retry(id).await {
+            return self.stopped_before_start(id);
+        }
         loop {
             if let Some(Stop::Cancel) = self.stop_reason(id) {
                 return Final::cancelled("cancelled");
@@ -1981,30 +2440,66 @@ impl Inner {
                 Attempt::Stopped(Stop::Limit(l)) => {
                     return Final::failed(format!("budget exceeded: {l}"))
                 }
+                Attempt::Fatal(e) => return Final::failed(e),
                 Attempt::Failed(e) => {
-                    let (attempts, max) = {
+                    let (attempts, max, base) = {
                         let st = self.state.lock().unwrap();
                         let t = &st.tasks[id].record;
-                        (t.attempts, t.max_attempts)
+                        (t.attempts, t.max_attempts, t.retry_delay_ms)
                     };
                     if attempts >= max {
                         return Final::failed(e);
                     }
-                    let delay = Duration::from_millis(500 * (1 << attempts.min(6)));
+                    let delay = Duration::from_millis(match base {
+                        Some(b) => b.saturating_mul(1 << attempts.saturating_sub(1).min(6)),
+                        None => 500 * (1 << attempts.min(6)),
+                    });
                     self.emit(EventKind::TaskRetry {
                         task: id.to_string(),
                         attempt: attempts + 1,
                         error: clip(&e, 300),
                         delay_ms: delay.as_millis() as u64,
                     });
-                    let cancel = self.cancel_token(id);
-                    tokio::select! {
-                        _ = tokio::time::sleep(delay) => {}
-                        _ = cancel.cancelled() => return self.stopped_before_start(id),
+                    if delay >= Duration::from_secs(10) {
+                        let at = now_ms() + delay.as_millis() as u64;
+                        self.update_task(id, |t| t.retry_at_ms = Some(at));
+                        if !self.wait_to_retry(id).await {
+                            return self.stopped_before_start(id);
+                        }
+                    } else {
+                        let cancel = self.cancel_token(id);
+                        tokio::select! {
+                            _ = tokio::time::sleep(delay) => {}
+                            _ = cancel.cancelled() => return self.stopped_before_start(id),
+                        }
                     }
+                    // The next try continues this one: the changes it made are not made again.
+                    resumed = true;
                 }
             }
         }
+    }
+
+    /// Wait until the task's saved time to try again, queued with that time as the reason.
+    /// False when it was cancelled meanwhile.
+    async fn wait_to_retry(&self, id: &str) -> bool {
+        let at = {
+            let st = self.state.lock().unwrap();
+            st.tasks.get(id).and_then(|t| t.record.retry_at_ms)
+        };
+        let Some(at) = at else { return true };
+        let wait = at.saturating_sub(now_ms());
+        if wait > 0 {
+            let label = crate::schedule::local_label(at);
+            self.queued(id, TaskState::Queued, format!("trying again at {label}"));
+            let cancel = self.cancel_token(id);
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(wait)) => {}
+                _ = cancel.cancelled() => return false,
+            }
+        }
+        self.update_task(id, |t| t.retry_at_ms = None);
+        true
     }
 
     fn agent_state(&self, agent: &str) -> Option<AgentState> {
@@ -2156,9 +2651,21 @@ impl Inner {
     /// (`Harness::done_before`). The agent runs one task at a time, so its calls since the
     /// task first started are this task's.
     fn done_before(&self, id: &str, scope: &ProjectId) -> Vec<ark_core::Invocation> {
-        let started = {
+        // Between two tries (a retry's wait) the agent may run another task: its calls are not
+        // this task's.
+        let (started, others) = {
             let st = self.state.lock().unwrap();
-            st.tasks.get(id).and_then(|t| t.record.started_ms)
+            let Some(me) = st.tasks.get(id) else {
+                return Vec::new();
+            };
+            let others: std::collections::HashSet<String> = st
+                .tasks
+                .values()
+                .filter(|t| t.record.id != id && t.record.owner == me.record.owner)
+                .flat_map(|t| t.record.tool_calls.iter().map(|c| c.invocation.clone()))
+                .filter(|i| !i.is_empty())
+                .collect();
+            (me.record.started_ms, others)
         };
         let Some(started) = started else {
             return Vec::new();
@@ -2169,6 +2676,7 @@ impl Inner {
             .unwrap_or_default()
             .into_iter()
             .filter(|i| i.created_at.unix_timestamp_nanos() / 1_000_000 >= started as i128)
+            .filter(|i| !others.contains(i.id.as_str()))
             .collect()
     }
 
@@ -2696,6 +3204,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 match self.stop_reason(id) {
                     Some(s) => Attempt::Stopped(s),
                     None if self.engine.is_stopping() => Attempt::Stopped(Stop::Restart),
+                    None if final_error(&e) => Attempt::Fatal(e.to_string()),
                     None => Attempt::Failed(e.to_string()),
                 }
             }
@@ -2980,6 +3489,9 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         });
         self.work_follows(&rec);
         self.report_back(&rec);
+        if rec.schedule.is_some() {
+            self.run_ended(&rec);
+        }
         let st = self.state.lock().unwrap();
         if let Some(t) = st.tasks.get(id) {
             t.done.send_replace(true);

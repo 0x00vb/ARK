@@ -153,6 +153,13 @@ pub enum EventKind {
         task: String,
         post: ark_runtime::Post,
     },
+    /// A schedule was paused, resumed or changed (`says`: when, in words, after the change).
+    ScheduleChanged {
+        schedule: String,
+        agent: String,
+        says: String,
+        paused: bool,
+    },
     /// A schedule stopped (asked to, or its agent ended).
     Unscheduled {
         schedule: String,
@@ -202,6 +209,7 @@ impl EventKind {
             | EventKind::Session { agent, .. }
             | EventKind::ArtifactProduced { agent, .. }
             | EventKind::Scheduled { agent, .. }
+            | EventKind::ScheduleChanged { agent, .. }
             | EventKind::Asked { agent, .. }
             | EventKind::TaskStarted { agent, .. } => Some(agent),
             EventKind::TaskCreated { owner, .. } => Some(owner),

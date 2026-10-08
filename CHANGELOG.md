@@ -9,6 +9,46 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- Scheduled work (ADR 0053, [`ORCHESTRATION.md`](docs/ORCHESTRATION.md#schedules)):
+  `When::{date, cron, tz}` (one run on a date, five-field calendars, the person's IANA zone
+  with daylight saving), `Orchestrator::{schedule_with, pause_schedule, resume_schedule,
+  change_schedule, run_schedule_now, schedule_runs, schedule_record, schedule_state,
+  chat_tools_in_zone}`, `ScheduleChange`, `ScheduleState`, `IfMissed`; schedule policies
+  `if_missed`, `overlap`, `retries`; a schedule pauses itself after 3 failed runs in a row and
+  keeps its newest 50 runs. `TaskSpec::retry_after` and `TaskRecord::{slot, retry_delay_ms,
+  retry_at_ms}`. `agents.schedule` takes `schedule` (change, `resume`, `run_now`), `date`, `cron`,
+  `tz`, `if_missed`, `overlap`, and no `to` (the schedule gets its own agent, ended by
+  `Orchestrator::stop_schedule` when nothing else uses it); its description says today's date. `agents.unschedule` takes `pause`.
+- `ark_interact::orchestration::{schedules, schedule_view, schedule_runs}`,
+  `Control::{PauseSchedule, ResumeSchedule, RunSchedule}`, `/schedules run|pause|resume|stop`,
+  `Interaction::set_zone`, `Siblings::set_zone`.
+- The window: a line per schedule of the open chat above the composer, and the schedule in the
+  side pane (runs, results, files, Run now, Pause or Resume, Stop). Page methods `schedules`,
+  `schedule`, `schedule_run`, `schedule_pause`, `schedule_resume`; `hello` takes `tz`.
+
+### Changed
+- `agents.schedule` asks each time (`ask_each_time`): no "always" answer covers making or
+  changing standing work. Its approval shows when and, in full, what each run is handed. Its
+  larger schema costs a chat that orchestrates about 200 input tokens a turn: the simulated
+  `board` workload goes from 14,899 to 16,075 tokens (+7.9%, success unchanged);
+  `bench/baseline.json` regenerated.
+- A task tries again only after a failure that may pass: out of credit, a missing project or
+  action fail at once. A wait of 10 s or more to try again is kept on the task (`retry_at_ms`)
+  and shown as `waiting_on: "trying again at …"`.
+
+### Fixed
+- A task's second attempt repeated the state-changing calls its failed first attempt made; it
+  now continues it (`done_before`, its own calls only).
+- A crash between starting a scheduled run and saving its schedule ran that time twice; a timer
+  tick could undo a stop or change made while it ran; intervals drifted by up to a tick per run.
+
+### Breaking
+- `When` has `date`, `cron` and `tz`: struct literals add them or `..Default::default()`.
+  `EventKind::ScheduleChanged` is new: an exhaustive `match` adds it. `ScheduleRecord`,
+  `TaskRecord` and `TaskSpec` have new fields (see Added) for struct literals; stored records
+  read with defaults.
+
 ## [0.14.0] - 2026-10-07
 
 ### Breaking

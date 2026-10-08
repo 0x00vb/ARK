@@ -326,6 +326,17 @@ pub struct TaskRecord {
     /// The schedule that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<String>,
+    /// For a schedule's run: the time it is for (Unix ms). A run is never started twice for one
+    /// time, also across a crash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u64>,
+    /// The wait before another try after a failure that may pass, doubling at each one
+    /// ([`crate::TaskSpec::retry_after`]). `None`: half a second, doubling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_delay_ms: Option<u64>,
+    /// When it tries again after a failure (Unix ms), while it waits; a restart waits too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_at_ms: Option<u64>,
     /// The board item it works on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item: Option<String>,

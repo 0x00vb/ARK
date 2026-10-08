@@ -251,8 +251,12 @@ pub struct TaskSpec {
     #[serde(default)]
     pub budget: Option<Budget>,
     /// Attempts when the model or the runtime fails (not when the agent answers). Default 1.
+    /// A failure no try can fix (out of credit) is not tried again.
     #[serde(default)]
     pub max_attempts: Option<u32>,
+    /// The wait before the next attempt, doubling at each one. Default half a second.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_delay_ms: Option<u64>,
     /// Rule sets bound to this task only.
     #[serde(default)]
     pub rules: Vec<RuleBinding>,
@@ -294,6 +298,11 @@ impl TaskSpec {
     }
     pub fn attempts(mut self, n: u32) -> Self {
         self.max_attempts = Some(n.max(1));
+        self
+    }
+    /// Wait `ms` before the second attempt, twice that before the third, and so on.
+    pub fn retry_after(mut self, ms: u64) -> Self {
+        self.retry_delay_ms = Some(ms);
         self
     }
     pub fn rules(mut self, r: RuleBinding) -> Self {

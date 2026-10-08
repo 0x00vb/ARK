@@ -379,6 +379,61 @@ async function board(page) {
 }
 scenarios.board = board;
 
+// Schedules (ADR 0053): asked in words, approved each time; a quiet line above the composer
+// says when and where it is; the line opens it beside the chat: run now, pause, resume, stop.
+async function schedules(page) {
+  await page.locator("#input").fill("every day at 2 AM recount the stock and give me a summary");
+  await page.keyboard.press("Enter");
+  // Making standing work is asked, and no "always" answer is offered for it.
+  const card = page.locator(".approval").first();
+  await card.waitFor();
+  assert.match(await card.innerText(), /Run on its own every day at 02:00/);
+  assert.match(await card.innerText(), /Each run: Recount the stock in stock.xlsx/);
+  assert.equal(await card.locator("button", { hasText: /Always/ }).count(), 0, "no always for standing work");
+  await page.waitForTimeout(400);
+  await shot(page, "schedule-approval");
+  const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
+  await card.locator("button", { hasText: "Allow once" }).click();
+  await done;
+
+  const line = page.locator("#plans .plan");
+  await line.waitFor();
+  assert.equal(await line.locator(".plan-when").innerText(), "every day at 02:00");
+  assert.match(await line.locator(".plan-state").innerText(), /^next /);
+  await shot(page, "schedule-line");
+
+  await line.click();
+  const panel = page.locator(".sc-panel");
+  await panel.locator(".sc-what", { hasText: "Recount the stock" }).waitFor();
+  const ran = page.evaluate(() => new Promise((ok) => window.ark.on("ark:orch", (m) => m.event.type === "task_finished" && ok(m.event.state))));
+  await panel.locator("button", { hasText: "Run now" }).click();
+  assert.equal(await ran, "done");
+  await panel.locator(".sc-run .sc-said", { hasText: "120 boxes" }).waitFor();
+  // The line goes back to the next time; the panel says how the last run went.
+  await panel.locator(".sc-last", { hasText: /^ran / }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#plans .plan-state")?.textContent.startsWith("next "));
+  // The result is posted in the chat too.
+  await page.locator(".post", { hasText: "120 boxes" }).first().waitFor();
+  await shot(page, "schedule-panel");
+
+  await panel.locator("button", { hasText: "Pause" }).click();
+  await page.waitForFunction(() => document.querySelector("#plans .plan")?.dataset.tone === "muted");
+  assert.equal(await line.locator(".plan-state").innerText(), "paused");
+  await panel.locator("button", { hasText: "Resume" }).click();
+  await page.waitForFunction(() => document.querySelector("#plans .plan-state")?.textContent.startsWith("next "));
+
+  // Stop asks once more, then the line goes; the run and its post stay.
+  const stop = panel.locator(".sc-stop");
+  await stop.click();
+  assert.equal(await stop.innerText(), "Stop for good?");
+  assert.equal(await line.count(), 1);
+  await page.locator(".sc-stop").click();
+  await line.waitFor({ state: "detached" });
+  assert.equal(await page.evaluate(async () => (await window.ark.call("schedules")).length), 0);
+  assert.ok(await page.locator(".post", { hasText: "120 boxes" }).count() > 0);
+}
+scenarios.schedules = schedules;
+
 // Files the agent writes are cards that open beside the conversation; the person edits them in
 // place and the file changes: a cell (the total follows), a document's lines.
 async function files(page) {

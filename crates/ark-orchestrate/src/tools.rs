@@ -227,7 +227,12 @@ pub(crate) struct ChatTools {
     pub orch: Orchestrator,
     /// The conversation (session id): what it schedules posts each run's result there.
     pub chat: Option<String>,
+    /// The person's IANA time zone, when the client said it; else the machine's.
+    pub zone: Option<String>,
 }
+
+/// Schedules the chat tools' descriptions list; the rest are counted.
+const SCHEDULES_LISTED: usize = 10;
 
 impl ChatTools {
     fn roster(&self) -> String {
@@ -248,25 +253,82 @@ impl ChatTools {
         }
     }
 
-    /// The schedules running now, for the schedule tools' descriptions.
+    /// The schedules kept now, for the schedule tools' descriptions: when, the next run, how
+    /// the last one went.
     fn scheduled(&self) -> String {
         let all = self.orch.schedules();
         if all.is_empty() {
             return "Nothing is scheduled.".into();
         }
-        let list: Vec<String> = all
+        let mut list: Vec<String> = all
             .iter()
+            .take(SCHEDULES_LISTED)
             .map(|s| {
+                let state = self.orch.schedule_state(s);
+                let next = match s.next_label() {
+                    Some(n) => format!(", next {n}"),
+                    None => String::new(),
+                };
                 format!(
-                    "{} ({}, {}: {})",
+                    "{} ({}, {}{next}, {}): {}",
                     s.id,
                     s.agent,
                     s.says,
+                    state.as_str(),
                     crate::brief::clip(&s.task.objective, 60)
                 )
             })
             .collect();
+        if all.len() > SCHEDULES_LISTED {
+            list.push(format!("and {} more", all.len() - SCHEDULES_LISTED));
+        }
         format!("Scheduled: {}.", list.join("; "))
+    }
+
+    /// The zone times are read in: the person's, else the machine's.
+    fn zone(&self) -> Option<String> {
+        self.zone.clone().or_else(crate::schedule::system_zone)
+    }
+
+    /// Today's date, so "tomorrow at 9" and "next Thursday" can be resolved. The date only: a
+    /// description that changed every minute would spoil the prompt cache.
+    fn now_line(&self) -> String {
+        let zone = self
+            .zone()
+            .and_then(|z| jiff::tz::TimeZone::get(&z).ok())
+            .unwrap_or_else(jiff::tz::TimeZone::system);
+        let now = jiff::Timestamp::now().to_zoned(zone.clone());
+        format!(
+            "Today: {} ({}).",
+            now.strftime("%a %Y-%m-%d"),
+            zone.iana_name().unwrap_or("local time")
+        )
+    }
+
+    /// A free agent name for a schedule's own agent, from its objective: `recount-stock`.
+    fn name_for(&self, objective: &str) -> String {
+        let words: Vec<String> = objective
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| w.len() > 2)
+            .take(3)
+            .map(str::to_lowercase)
+            .collect();
+        let base = match words.join("-") {
+            w if w.is_empty() => "scheduled".to_string(),
+            w => w
+                .chars()
+                .take(24)
+                .collect::<String>()
+                .trim_end_matches('-')
+                .to_string(),
+        };
+        let mut name = base.clone();
+        let mut n = 2;
+        while self.orch.agent(&name).is_some() {
+            name = format!("{base}-{n}");
+            n += 1;
+        }
+        name
     }
 
     fn live(&self, name: &str) -> bool {
@@ -335,40 +397,53 @@ impl Adapter for ChatTools {
                     }
                 }
             })),
-            // Standing work spends model time with nobody watching: the person agrees to it.
+            // Standing work spends model time with nobody watching: the person agrees to it,
+            // each time. No earlier "always" covers making or changing one: text the chat read
+            // (a page, a mail) must never set up work that runs unattended.
             ActionDescriptor::new(
                 SCHEDULE,
                 format!(
-                    "have an agent run a task on its own at set times (every weekday at 09:00, every 30 minutes) or once later (in 2 hours, at 18:00). Each run is a new task; it runs whether or not this chat is open{}. {}",
-                    if self.chat.is_some() { ", and its result is posted in this chat" } else { "" },
-                    self.roster()
+                    "do work on its own at set times (every weekday at 09:00, the 1st of each month, every 30 minutes) or once later (tomorrow at 9, in 2 hours). Each run is a new task{}. With `schedule`, change, resume or run now one of those listed under {UNSCHEDULE}. {}",
+                    if self.chat.is_some() { "; its result is posted in this chat" } else { "" },
+                    self.now_line(),
                 ),
                 RiskTier::Mutate,
             )
             .volatile()
+            .ask_each_time()
             .with_input_schema(json!({
                 "type": "object",
-                "required": ["to", "objective"],
                 "properties": {
-                    "to": { "type": "string", "description": "the agent's name" },
-                    "objective": { "type": "string", "description": "what each run must achieve" },
-                    "context": { "type": "string", "description": "only what it needs to know; it does not see this conversation" },
-                    "at": { "type": "string", "description": "local time of day, HH:MM (24-hour)" },
-                    "days": { "type": "array", "items": { "type": "string" }, "description": "with at: mon .. sun, weekdays or weekends; default every day" },
-                    "every_minutes": { "type": "integer", "description": "instead of at: run every this many minutes" },
-                    "once": { "type": "boolean", "description": "run one time (at the next `at`, or after `every_minutes`) and stop" }
+                    "schedule": { "type": "string", "description": "id (s-…) of one to change; leave out for a new one" },
+                    "to": { "type": "string", "description": "an agent; default: one of its own" },
+                    "objective": { "type": "string", "description": "what each run does, complete: it does not see this chat (files, places, what to leave)" },
+                    "context": { "type": "string" },
+                    "at": { "type": "string", "description": "HH:MM" },
+                    "days": { "type": "array", "items": { "type": "string" }, "description": "with at: mon..sun, weekdays, weekends" },
+                    "date": { "type": "string", "description": "with at: YYYY-MM-DD, one run" },
+                    "every_minutes": { "type": "integer", "description": "instead of at; 5 or more" },
+                    "cron": { "type": "string", "description": "instead of at: minute hour day month weekday" },
+                    "tz": { "type": "string", "description": "IANA zone, only if the person names another" },
+                    "once": { "type": "boolean" },
+                    "if_missed": { "type": "string", "enum": ["once", "skip"], "description": "a run missed while off: run once when back (default) or skip" },
+                    "overlap": { "type": "boolean", "description": "run even while the last one is going" },
+                    "resume": { "type": "boolean" },
+                    "run_now": { "type": "boolean" }
                 }
             })),
             ActionDescriptor::new(
                 UNSCHEDULE,
-                format!("stop a scheduled task. {}", self.scheduled()),
+                format!("stop a scheduled task, or pause it to resume later. Runs already done keep their results. {}", self.scheduled()),
                 RiskTier::Observe,
             )
             .volatile()
             .with_input_schema(json!({
                 "type": "object",
                 "required": ["schedule"],
-                "properties": { "schedule": { "type": "string", "description": "its id, s-…" } }
+                "properties": {
+                    "schedule": { "type": "string", "description": "its id, s-…" },
+                    "pause": { "type": "boolean", "description": "keep it, run nothing until resumed (default false: stop it)" }
+                }
             })),
         ]
     }
@@ -549,47 +624,108 @@ impl Adapter for ChatTools {
                 ))
             }
             SCHEDULE => {
-                let to = s("to");
-                if !self.live(to) {
+                let bad = |e: crate::OrchError| AdapterError::bad_input(action, e.to_string());
+                let id = s("schedule");
+                // A new schedule's times are the person's; a change keeps the schedule's zone
+                // unless it names one.
+                let when = when_of(&input, if id.is_empty() { self.zone() } else { None });
+                let flag = |k: &str| input.get(k).and_then(Value::as_bool);
+                let mut opts = crate::ScheduleChange {
+                    if_missed: match s("if_missed") {
+                        "skip" => Some(crate::IfMissed::Skip),
+                        "once" => Some(crate::IfMissed::Once),
+                        _ => None,
+                    },
+                    overlap: flag("overlap"),
+                    ..Default::default()
+                };
+                if !id.is_empty() {
+                    opts.objective = Some(s("objective").to_string()).filter(|o| !o.is_empty());
+                    opts.context = input
+                        .get("context")
+                        .and_then(Value::as_str)
+                        .map(str::to_string);
+                    opts.when = when;
+                    let mut rec = self.orch.change_schedule(id, opts).map_err(|e| {
+                        AdapterError::bad_input(action, format!("{e}. {}", self.scheduled()))
+                    })?;
+                    if flag("resume") == Some(true) && rec.paused {
+                        rec = self.orch.resume_schedule(id).map_err(bad)?;
+                    }
+                    let mut v = schedule_json(&rec);
+                    if flag("run_now") == Some(true) {
+                        v["run"] = json!(self.orch.run_schedule_now(id).map_err(bad)?);
+                    }
+                    v["state"] = json!(self.orch.schedule_state(&rec).as_str());
+                    return Ok(ActionOutput::json(v));
+                }
+                let Some(when) = when else {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        "say when: at (HH:MM, with days or a date), every_minutes, or cron",
+                    ));
+                };
+                let objective = s("objective");
+                if objective.is_empty() {
+                    return Err(AdapterError::bad_input(action, "an objective is required"));
+                }
+                let mut to = s("to").to_string();
+                if !to.is_empty() && !self.live(&to) {
                     return Err(AdapterError::bad_input(
                         action,
                         format!("no agent named `{to}`. {}", self.roster()),
                     ));
                 }
-                let when = crate::schedule::When {
-                    every_minutes: input
-                        .get("every_minutes")
-                        .and_then(Value::as_u64)
-                        .map(|m| m.min(u32::MAX as u64) as u32),
-                    at: Some(s("at")).filter(|a| !a.is_empty()).map(str::to_string),
-                    days: input
-                        .get("days")
-                        .and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(Value::as_str)
-                                .map(str::to_string)
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    once: input.get("once").and_then(Value::as_bool).unwrap_or(false),
-                };
-                let mut task = TaskSpec::new(s("objective")).context(s("context"));
+                // Checked before an agent is made for it.
+                let checked = when
+                    .normalized()
+                    .map_err(|e| AdapterError::bad_input(action, e))?;
+                if checked.next_after(crate::record::now_ms()).is_none() {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        format!(
+                            "{} has passed; give a time still to come",
+                            checked.describe()
+                        ),
+                    ));
+                }
+                if to.is_empty() {
+                    // Its own agent: what it carries from run to run is this schedule's alone.
+                    to = self.name_for(objective);
+                    let spec = AgentSpec::new(&to).role(format!(
+                        "does a scheduled task: {}",
+                        crate::brief::clip(objective, 80)
+                    ));
+                    self.orch.spawn(spec).await.map_err(fail)?;
+                }
+                let mut task = TaskSpec::new(objective).context(s("context"));
                 if let Some(chat) = &self.chat {
                     task = task.report_to(chat);
                 }
-                let rec = self
+                let own = s("to").is_empty();
+                let mut rec = self
                     .orch
-                    .schedule(to, task, when)
-                    .map_err(|e| AdapterError::bad_input(action, e.to_string()))?;
+                    .schedule_with(&to, task, when, opts)
+                    .map_err(bad)?;
+                if own {
+                    self.orch.own_agent(&rec.id);
+                    rec.own_agent = true;
+                }
                 Ok(ActionOutput::json(schedule_json(&rec)))
             }
             UNSCHEDULE => {
-                let rec = self.orch.unschedule(s("schedule")).map_err(|e| {
+                let id = s("schedule");
+                let pause = input.get("pause").and_then(Value::as_bool) == Some(true);
+                let done = if pause {
+                    self.orch.pause_schedule(id)
+                } else {
+                    self.orch.stop_schedule(id).await
+                };
+                let rec = done.map_err(|e| {
                     AdapterError::bad_input(action, format!("{e}. {}", self.scheduled()))
                 })?;
                 let mut v = schedule_json(&rec);
-                v["stopped"] = json!(true);
+                v[if pause { "paused" } else { "stopped" }] = json!(true);
                 Ok(ActionOutput::json(v))
             }
             other => Err(AdapterError::UnknownAction(other.to_string())),
@@ -838,8 +974,45 @@ fn schedule_json(s: &crate::ScheduleRecord) -> Value {
         "agent": s.agent,
         "objective": s.task.objective,
         "when": s.says,
-        "next": s.next_ms.map(crate::schedule::local_label),
+        "tz": s.when.tz,
+        "next": s.next_label(),
+        "paused": s.paused,
     })
+}
+
+/// The `When` an `agents.schedule` input gives, if it gives one; times of day in `zone` unless
+/// it names its own.
+fn when_of(input: &Value, zone: Option<String>) -> Option<crate::When> {
+    let s = |k: &str| {
+        input
+            .get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    let w = crate::When {
+        every_minutes: input
+            .get("every_minutes")
+            .and_then(Value::as_u64)
+            .map(|m| m.min(u32::MAX as u64) as u32),
+        at: s("at"),
+        days: input
+            .get("days")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        date: s("date"),
+        cron: s("cron"),
+        tz: s("tz").or(zone),
+        once: input.get("once").and_then(Value::as_bool).unwrap_or(false),
+    };
+    (w.every_minutes.is_some() || w.at.is_some() || w.cron.is_some()).then_some(w)
 }
 
 fn result_json(t: &TaskRecord) -> Value {
@@ -925,21 +1098,28 @@ pub(crate) fn distiller() -> Distiller {
             )),
             SCHEDULE | UNSCHEDULE => {
                 let g = |k: &str| out.get(k).and_then(Value::as_str).unwrap_or("");
-                let verb = if action == UNSCHEDULE {
+                let yes = |k: &str| out.get(k).and_then(Value::as_bool) == Some(true);
+                let verb = if yes("stopped") {
                     "stopped"
+                } else if yes("paused") {
+                    "paused"
                 } else {
                     "scheduled"
                 };
-                Some((
-                    format!(
-                        "{verb} {}: {} runs \"{}\" {}",
-                        g("schedule"),
-                        g("agent"),
-                        crate::brief::clip(g("objective"), 120),
-                        g("when")
-                    ),
-                    vec![g("schedule").to_string()],
-                ))
+                let mut card = format!(
+                    "{verb} {}: {} runs \"{}\" {}",
+                    g("schedule"),
+                    g("agent"),
+                    crate::brief::clip(g("objective"), 120),
+                    g("when")
+                );
+                if !g("next").is_empty() && verb == "scheduled" {
+                    card.push_str(&format!(", next {}", g("next")));
+                }
+                if !g("run").is_empty() {
+                    card.push_str(&format!("; started run {}", g("run")));
+                }
+                Some((card, vec![g("schedule").to_string()]))
             }
             MESSAGE => Some((
                 format!(

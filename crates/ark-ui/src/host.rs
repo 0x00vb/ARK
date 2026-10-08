@@ -861,6 +861,11 @@ impl Host {
         let n = |k: &str| params.get(k).and_then(|v| v.as_u64());
         match method {
             "hello" => {
+                // The person's zone, as their browser says it: "at 9" is their 9 also when
+                // this runtime runs elsewhere.
+                if let Some(tz) = params.get("tz").and_then(Value::as_str) {
+                    self.siblings.set_zone(Some(tz));
+                }
                 let mut pending: Vec<Value> = self
                     .approvals
                     .lock()
@@ -1508,6 +1513,30 @@ impl Host {
             }
             "cancel_task" => self.control_done(Control::Cancel { task: s("task") }).await,
             "retry_task" => self.control_done(Control::Retry { task: s("task") }).await,
+            // What runs on its own: every schedule of the project, or those reporting to the
+            // chat `session`, as ark-interact words them.
+            "schedules" => match self.orchestrator() {
+                Ok(o) => {
+                    let chat = Some(s("session")).filter(|c| !c.is_empty());
+                    Ok(serde_json::to_value(
+                        ark_interact::orchestration::schedules(&o, chat.as_deref()),
+                    )?)
+                }
+                Err(_) => Ok(json!([])),
+            },
+            // One schedule and its runs, newest first.
+            "schedule" => {
+                let o = self.orchestrator()?;
+                let id = s("schedule");
+                let rec = o
+                    .schedule_record(&id)
+                    .ok_or_else(|| anyhow::anyhow!("no schedule `{id}`"))?;
+                let limit = n("limit").unwrap_or(20).min(50) as usize;
+                Ok(json!({
+                    "schedule": ark_interact::orchestration::schedule_view(&o, &rec),
+                    "runs": ark_interact::orchestration::schedule_runs(&o, &id, limit),
+                }))
+            }
             // Stop a task an agent runs at set times (the graph's `schedules`).
             "unschedule" => {
                 self.control_done(Control::Unschedule {
@@ -1515,6 +1544,27 @@ impl Host {
                 })
                 .await
             }
+            "schedule_pause" => {
+                self.control_done(Control::PauseSchedule {
+                    schedule: s("schedule"),
+                })
+                .await
+            }
+            "schedule_resume" => {
+                self.control_done(Control::ResumeSchedule {
+                    schedule: s("schedule"),
+                })
+                .await
+            }
+            "schedule_run" => match self
+                .control(Control::RunSchedule {
+                    schedule: s("schedule"),
+                })
+                .await?
+            {
+                ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                _ => Ok(json!({})),
+            },
             // The project's board, with what the page shows of the tasks run for its items
             // and the agents an item can be given to. Follow it with `orch` events (`work`).
             "board" => {

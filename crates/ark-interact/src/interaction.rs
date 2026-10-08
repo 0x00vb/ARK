@@ -264,6 +264,9 @@ impl App {
                 events: tokio::sync::broadcast::channel(1024).0,
             })
         });
+        let mut labelers = self.labelers;
+        // A schedule's change names the schedule it is about.
+        labelers.push(Arc::new(crate::labels::ScheduleNames(ark.clone())));
         let mut ix = Interaction {
             info: AppInfo {
                 name: self.name,
@@ -275,7 +278,7 @@ impl App {
             session,
             gate: Arc::new(ApprovalGate::new(approver)),
             commands,
-            labels: Labels::new(self.labelers),
+            labels: Labels::new(labelers),
             status: self.status,
             on_project: self.on_project,
             pricing: self.pricing.or_else(Pricing::from_env),
@@ -290,6 +293,7 @@ impl App {
             orchs,
             sign_in: self.sign_in,
             links: Arc::new(crate::links::Links::default()),
+            zone: Arc::new(std::sync::Mutex::new(None)),
             waiting: Vec::new(),
         };
         ix.refresh_names();
@@ -578,9 +582,24 @@ pub struct Siblings {
     orchs: Option<Arc<Orchestrators>>,
     sign_in: Option<crate::capabilities::Opener>,
     links: Arc<crate::links::Links>,
+    zone: Zone,
 }
 
+/// The person's IANA time zone as their client said it, shared by an app's conversations.
+type Zone = Arc<std::sync::Mutex<Option<String>>>;
+
 impl Siblings {
+    /// The person's time zone, for every conversation of the app ([`Interaction::set_zone`]).
+    pub fn set_zone(&self, tz: Option<&str>) {
+        let known = tz.filter(|t| {
+            ark_orchestrate::When::daily_at("09:00")
+                .in_zone(*t)
+                .normalized()
+                .is_ok()
+        });
+        *self.zone.lock().unwrap() = known.map(str::to_string);
+    }
+
     /// Tell the app the conversation windows show is now in `project` (what
     /// [`App::on_project_change`] gets), when a front-end brings forward a conversation that is
     /// already open there.
@@ -646,6 +665,7 @@ impl Siblings {
             orchs: self.orchs.clone(),
             sign_in: self.sign_in.clone(),
             links: self.links.clone(),
+            zone: self.zone.clone(),
             waiting: Vec::new(),
         };
         ix.refresh_names();
@@ -826,6 +846,8 @@ pub struct Interaction {
     sign_in: Option<crate::capabilities::Opener>,
     /// Other runtimes whose items this one shows too (ADR 0043 step 4), shared with siblings.
     links: Arc<crate::links::Links>,
+    /// The person's time zone, when their client said it (shared with siblings).
+    zone: Zone,
     /// The items `/waiting` listed last, in its numbers (runtime, id): a number answers what
     /// the person saw.
     pub(crate) waiting: Vec<(Option<String>, String)>,
@@ -902,12 +924,30 @@ impl Interaction {
             orchs: self.orchs.clone(),
             sign_in: self.sign_in.clone(),
             links: self.links.clone(),
+            zone: self.zone.clone(),
         }
     }
 
     /// The other runtimes whose items this one shows too (ADR 0043 step 4).
     pub fn links(&self) -> &Arc<crate::links::Links> {
         &self.links
+    }
+
+    /// The person's time zone (IANA, from their client): what they schedule "at 9" runs at
+    /// their 9, also when this runtime is on a machine in another zone. Ignored when it is not
+    /// a zone this machine knows.
+    pub fn set_zone(&self, tz: Option<&str>) {
+        let known = tz.filter(|t| {
+            ark_orchestrate::When::daily_at("09:00")
+                .in_zone(*t)
+                .normalized()
+                .is_ok()
+        });
+        *self.zone.lock().unwrap() = known.map(str::to_string);
+    }
+
+    pub fn zone(&self) -> Option<String> {
+        self.zone.lock().unwrap().clone()
     }
 
     /// Run on the model chosen last in any of this app's conversations.
@@ -1439,7 +1479,12 @@ impl Interaction {
         let chat = self.session.id().as_str();
         self.orchestrator
             .iter()
-            .flat_map(|o| [o.chat_tools_for(chat), o.board_tools()])
+            .flat_map(|o| {
+                [
+                    o.chat_tools_in_zone(chat, self.zone().as_deref()),
+                    o.board_tools(),
+                ]
+            })
             .collect()
     }
 

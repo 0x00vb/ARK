@@ -67,7 +67,7 @@ pub struct Schedules;
 impl Command for Schedules {
     meta!("schedules", "Tasks agents run on their own at set times");
     fn usage(&self) -> &str {
-        "[stop <schedule>]"
+        "[run|pause|resume|stop <schedule>]"
     }
     async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
         let Some(o) = ix.orchestrator() else {
@@ -75,16 +75,23 @@ impl Command for Schedules {
         };
         let args = args.trim();
         if args.is_empty() {
-            return Ok(crate::orchestration::schedules_report(&o.graph()).into());
+            return Ok(crate::orchestration::schedules_report(o).into());
         }
+        use crate::orchestration::Control as C;
         let parsed = match args.split_once(char::is_whitespace) {
-            Some(("stop", id)) if !id.trim().is_empty() => {
-                Ok(crate::orchestration::Control::Unschedule {
-                    schedule: id.trim().to_string(),
-                })
+            Some((verb, id)) if !id.trim().is_empty() => {
+                let schedule = id.trim().to_string();
+                match verb {
+                    "stop" => Ok(C::Unschedule { schedule }),
+                    "pause" => Ok(C::PauseSchedule { schedule }),
+                    "resume" => Ok(C::ResumeSchedule { schedule }),
+                    "run" => Ok(C::RunSchedule { schedule }),
+                    _ => Err(String::new()),
+                }
             }
-            _ => Err("usage: /schedules [stop <schedule>]".to_string()),
-        };
+            _ => Err(String::new()),
+        }
+        .map_err(|_| "usage: /schedules [run|pause|resume|stop <schedule>]".to_string());
         control_cmd(ix, parsed).await
     }
 }

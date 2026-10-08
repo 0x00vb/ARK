@@ -19,6 +19,7 @@ import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
 import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
+import { registerSchedules, schedulesFollow } from "./schedules.js";
 import { Waiting } from "./waiting.js";
 import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js";
 import { os, label, relabel } from "./keys.js";
@@ -294,6 +295,7 @@ async function loadSession() {
   thread.scroll(true);
   sidebar.refresh(state.sessionId);
   refreshRing();
+  schedulesFollow();
 }
 
 function showWelcome() {
@@ -770,7 +772,10 @@ function signInScreen() {
 async function bootOnce(again) {
   let hello;
   try {
-    hello = await transport.call("hello");
+    // The person's time zone: what they schedule "at 9" runs at their 9, wherever ARK runs.
+    let tz;
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch {}
+    hello = await transport.call("hello", tz ? { tz } : undefined);
   } catch (e) {
     if (e.signIn) return signInScreen();
     clear($("#thread")).append(h("div.welcome", h("h1", "Not connected"), h("p", e.message)));
@@ -803,6 +808,8 @@ async function bootOnce(again) {
     });
     // The project's board, when the app runs agents.
     registerBoard(window.ark);
+    // What this chat runs on its own, above the composer.
+    registerSchedules(window.ark);
   }
   await loadSession();
   state.working = hello.working || [];

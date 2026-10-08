@@ -76,6 +76,7 @@ const PATHS = {
   folder: '<path d="M2.5 4.5a1 1 0 0 1 1-1H6l1.5 1.5h5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/>',
   bolt: '<path d="M9 2L4 9h4l-1 5 5-7H8z"/>',
   play: '<path d="M5 3.5v9l7-4.5z"/>',
+  clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.1 1.3"/>',
   command: '<path d="M6 6V4.5A1.5 1.5 0 1 0 4.5 6H11.5A1.5 1.5 0 1 0 10 4.5V11.5A1.5 1.5 0 1 0 11.5 10H4.5A1.5 1.5 0 1 0 6 11.5z"/>',
   plus: '<path d="M8 3.5v9M3.5 8h9"/>',
   "arrow-left": '<path d="M13 8H3.5M7.5 4l-4 4 4 4"/>',

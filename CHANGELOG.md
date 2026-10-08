@@ -9,6 +9,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-08
+
 ### Breaking
 - `ark_interact::Effect` has `Open(session)`: a `match` on it needs an arm for it (or `_`).
 - `ark_model::Backend` has `step`: a literal needs `step: None`.

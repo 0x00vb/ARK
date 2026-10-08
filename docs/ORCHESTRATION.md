@@ -87,35 +87,59 @@ without a lookup. An app with no orchestrator offers none of these.
 ## Schedules
 
 An agent can run a task on its own at set times: "every weekday at 09:00", "every 30
-minutes", "once at 18:00", "once, in 2 hours". A schedule is a record in the orchestrator's
-store (ADR 0017). Each run is an ordinary task, submitted the way `submit` does it, so it is
-queued, approved, traced and shown like any other. It carries `TaskRecord::schedule`.
+minutes", "the 1st of each month", "on 15 Oct at 14:00", "once, in 2 hours". A schedule is a
+record in the orchestrator's store (ADR 0017, 0053). Each run is an ordinary task, submitted the
+way `submit` does it, so it is queued, approved, traced and shown like any other. It carries
+`TaskRecord::schedule` and `slot`, the time it is for.
 
 ```rust
-orch.schedule("digest", TaskSpec::new("summarize what changed today"), When::daily_at("18:00").on(["weekdays"]))?;
-orch.schedules();          // soonest first; also Graph::schedules
-orch.unschedule("s-1a2b3c4d")?;
+let s = orch.schedule("digest", TaskSpec::new("summarize what changed today"),
+    When::daily_at("18:00").on(["weekdays"]).in_zone("Europe/Madrid"))?;
+orch.schedule("billing", TaskSpec::new("send the invoices"), When::cron("0 9 1 * *"))?;
+orch.schedule("notes", TaskSpec::new("send the report"), When::on_date("2026-10-15", "14:00"))?;
+orch.pause_schedule(&s.id)?;  orch.resume_schedule(&s.id)?;
+orch.change_schedule(&s.id, ScheduleChange { when: Some(When::daily_at("19:00")), ..Default::default() })?;
+orch.run_schedule_now(&s.id)?;            // a run now; the next time stays
+orch.schedule_runs(&s.id, 20);            // its runs, newest first
+orch.schedules();                         // soonest first, paused last; also Graph::schedules
+orch.unschedule(&s.id)?;
 ```
 
 | `When` | Runs |
 |---|---|
-| `every_minutes: 30` | every 30 minutes from when it was made (5 at least) |
-| `at: "09:00"` | every day at 09:00, local time |
+| `every_minutes: 30` | every 30 minutes from its last time (5 at least) |
+| `at: "09:00"` | every day at 09:00 in `tz` |
 | `at: "09:00", days: ["mon", "wed"]` (or `weekdays`, `weekends`) | on those days |
-| `once: true` | one time (at the next `at`, or after `every_minutes`), then it ends |
+| `at: "14:00", date: "2026-10-15"` | once, on that day |
+| `cron: "0 9 1 * *"` | minute hour day-of-month month day-of-week; lists, ranges, steps, names; both day fields given: either matches |
+| `once: true` | one time (at the next `at`, after `every_minutes`, or the next cron time), then it ends |
+| `tz: "Europe/Madrid"` | the IANA zone times are read in; filled when the schedule is made (the person's client's zone, else the machine's) |
 
 | Rule | Why |
 |---|---|
 | The orchestrator's timer looks every 20 s; it starts when `build` runs inside a tokio runtime | no window or chat needs to be open |
-| A run missed while the process was down runs once when it is back | the morning report still comes, once |
-| A run is skipped while the schedule's previous task is open (`skipped` counts them) | runs never pile up on one agent |
+| A time the clocks skip runs as far after it as the jump; a time that happens twice runs the first time; intervals are durations | one run a day across daylight saving |
+| A run missed while the process was down runs once when it is back (`if_missed: once`), saying it is late, or is let go when more than 15 minutes late (`skip`, counted in `missed`) | the morning report still comes, once |
+| A run is skipped while the schedule's previous one is open (`skipped`); with `overlap` one more waits behind it, never more | runs never pile up |
+| A run is made once per time: a task for (schedule, slot) found after a crash is not made again; a stop, pause or change waits for the tick | nothing runs twice, nothing stopped runs |
+| A run that fails for a reason that may pass tries again after 5, then 10 minutes (`retries`, default 2), continuing what it did; out of credit does not. Stop and Pause cancel a run that only waits to try again | a network gone at 02:00 does not lose the night's work |
+| 3 runs in a row that did not finish pause the schedule when the third ends, and say why in its chat | money is not spent on a run that keeps failing |
+| A schedule keeps its newest 50 finished task records (their events stay, as for any task) | a schedule every few minutes does not fill the store with tasks |
 | Ending an agent (`terminate`) ends its schedules | an ended agent runs nothing |
 | An app with `App::orchestrate` opens the orchestrator of every project with active schedules when it starts (`scheduled_projects`) | scheduled work runs in projects nobody has open |
 
-The chat schedules with `agents.schedule`, the terminal lists them with `/schedules` and
-stops one with `/schedules stop <id>`, and `/agents` shows them under "Scheduled". A run that
-needs an approval waits for an answer like any agent's question. "Always in this project"
-lets it run unattended.
+The chat makes, changes, resumes and runs a schedule with `agents.schedule` (asked each time,
+with when and all each run is handed; no "always" covers it) and stops or pauses one with
+`agents.unschedule`. Without `to`, the schedule gets an agent of its own. The tool's description
+says today's date in the person's zone and lists the schedules with their state. Stopping a
+schedule ends the agent made for it when nothing else uses it. Agents
+never get these tools. The terminal has `/schedules` and `/schedules run|pause|resume|stop <id>`;
+`/agents` lists them. The window shows a line per schedule above the composer of the chat that
+asked, and the schedule with its runs in the side pane.
+
+A run that needs an approval waits for an answer like any agent's question (tray, phone), and
+holds the next runs until it is answered. "Always in this project", or "Allow for this session"
+until the runtime restarts, lets it run unattended.
 
 Each run's result is posted in the chat that asked for the schedule (ADR 0025): the window
 shows it under that chat's last turn, live if the chat is open, and the chat's next turn
@@ -124,7 +148,7 @@ carries it, so the person can answer it. Any task can do the same with `TaskSpec
 ```rust
 let chat = session.id().as_str();
 orch.schedule("orders", TaskSpec::new("check the new orders").report_to(chat), When::daily_at("09:00"))?;
-let tools = orch.chat_tools_for(chat);   // what agents.schedule does from that chat
+let tools = orch.chat_tools_in_zone(chat, Some("Europe/Madrid"));   // what the chat gets
 ark_runtime::session::posts(engine, chat, 0, 50)?;   // the chat's posts, oldest first
 ```
 

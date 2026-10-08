@@ -35,6 +35,7 @@
 
 pub mod board;
 mod brief;
+mod cron;
 mod event;
 mod graph;
 pub mod models;
@@ -57,7 +58,8 @@ pub use record::{
     ToolCallRecord, Usage,
 };
 pub use schedule::{
-    all_tasks, projects_with_work, scheduled_projects, tasks_where, ScheduleRecord, When,
+    all_tasks, projects_with_work, scheduled_projects, tasks_where, IfMissed, ScheduleChange,
+    ScheduleRecord, ScheduleState, When,
 };
 pub use spec::{AgentSpec, Budget, TaskSpec};
 pub use tools::{

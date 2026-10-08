@@ -138,6 +138,7 @@ impl Labels {
             .or_else(|| run_approval(&request.action, &request.input))
             .or_else(|| process_approval(&request.action, &request.input))
             .or_else(|| program_approval(&request.action, &request.input))
+            .or_else(|| schedule_approval(&request.action, &request.input))
             .or_else(|| runtime_label(&request.action, &request.input))
             .unwrap_or_else(|| request.preview.clone())
     }
@@ -235,8 +236,100 @@ fn element(input: &Value) -> String {
 fn when_words(input: &Value) -> String {
     let when: ark_orchestrate::When = serde_json::from_value(input.clone()).unwrap_or_default();
     match when.normalized() {
-        Ok(w) => w.describe(),
+        Ok(w) => match &w.tz {
+            Some(tz) => format!("{} ({tz})", w.describe()),
+            None => w.describe(),
+        },
         Err(_) => String::new(),
+    }
+}
+
+/// Making or changing standing work, for its approval: when, and in full what every run is
+/// handed (its objective and context), since nobody watches the runs. A change names the
+/// schedule by what it does and when it runs now (`known`), when that is known.
+fn schedule_approval(action: &str, input: &Value) -> Option<String> {
+    if action != ark_orchestrate::SCHEDULE {
+        return None;
+    }
+    Some(schedule_line(input, None))
+}
+
+/// [`schedule_approval`] for a change of `known`.
+pub(crate) fn schedule_line(
+    input: &Value,
+    known: Option<&ark_orchestrate::ScheduleRecord>,
+) -> String {
+    let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").trim();
+    let yes = |k: &str| input.get(k).and_then(Value::as_bool) == Some(true);
+    let when = when_words(input);
+    let mut out = if s("schedule").is_empty() {
+        format!("Run on its own {when}")
+    } else {
+        let mut what = Vec::new();
+        if !when.is_empty() {
+            what.push(format!("run it {when}"));
+        }
+        if !s("objective").is_empty() || input.get("context").is_some() {
+            what.push("change what it does".to_string());
+        }
+        if yes("resume") {
+            what.push("resume it".to_string());
+        }
+        if yes("run_now") {
+            what.push("run it now".to_string());
+        }
+        let name = match known {
+            Some(k) => format!("\"{}\" ({})", clip(&k.task.objective, 80), k.says),
+            None => "a scheduled task".to_string(),
+        };
+        match what.is_empty() {
+            true => format!("Change {name}"),
+            false => format!("Change {name}: {}", what.join(", ")),
+        }
+    };
+    if !s("to").is_empty() {
+        out.push_str(&format!(", by {}", s("to")));
+    }
+    // In full: what runs unattended is what the person agrees to.
+    for (k, head) in [("objective", "Each run"), ("context", "It is told")] {
+        if !s(k).is_empty() {
+            out.push_str(&format!("\n  {head}: {}", s(k).replace('\n', "\n    ")));
+        }
+    }
+    match s("if_missed") {
+        "skip" => out.push_str("\n  A run missed while the computer is off is let go."),
+        "once" if !s("schedule").is_empty() => {
+            out.push_str("\n  A run missed while the computer is off runs when it is back.")
+        }
+        _ => {}
+    }
+    match input.get("overlap").and_then(Value::as_bool) {
+        Some(true) => out.push_str("\n  A run starts even while the last one is still going."),
+        Some(false) if !s("schedule").is_empty() => {
+            out.push_str("\n  A run waits for the last one to end.")
+        }
+        _ => {}
+    }
+    out
+}
+
+/// Names the schedule a change is about, from the store, so its approval says which it is.
+pub(crate) struct ScheduleNames(pub ark_sdk::Ark);
+
+impl ToolLabeler for ScheduleNames {
+    fn approval(&self, request: &ApprovalRequest) -> Option<String> {
+        if request.action != ark_orchestrate::SCHEDULE {
+            return None;
+        }
+        let id = request.input.get("schedule").and_then(Value::as_str)?;
+        let v = self
+            .0
+            .engine()
+            .store
+            .get_record("orch_schedule", id)
+            .ok()??;
+        let known: ark_orchestrate::ScheduleRecord = serde_json::from_value(v).ok()?;
+        Some(schedule_line(&request.input, Some(&known)))
     }
 }
 
@@ -478,15 +571,28 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
         ark_orchestrate::WAIT => "Waiting for delegated work".into(),
         ark_orchestrate::CREATE => format!("Creating agent {}", s("name")),
         ark_orchestrate::MESSAGE => format!("Messaging {}", s("to")),
-        ark_orchestrate::SCHEDULE => format!(
-            "Scheduling {} to {} {}",
-            s("to"),
-            clip(s("objective"), 60),
-            when_words(input)
-        )
+        ark_orchestrate::SCHEDULE => match (s("schedule"), s("to")) {
+            ("", "") => format!(
+                "Scheduling {} {}",
+                clip(s("objective"), 60),
+                when_words(input)
+            ),
+            ("", to) => format!(
+                "Scheduling {to} to {} {}",
+                clip(s("objective"), 60),
+                when_words(input)
+            ),
+            (id, _) => format!("Changing schedule {id}"),
+        }
         .trim_end()
         .to_string(),
-        ark_orchestrate::UNSCHEDULE => "Stopping a scheduled task".into(),
+        ark_orchestrate::UNSCHEDULE => {
+            if input.get("pause").and_then(Value::as_bool) == Some(true) {
+                "Pausing a scheduled task".into()
+            } else {
+                "Stopping a scheduled task".into()
+            }
+        }
         ark_orchestrate::BOARD_LIST => "Reading the board".into(),
         ark_orchestrate::BOARD_ADD => {
             let items = input.get("items").and_then(Value::as_array);
@@ -801,6 +907,63 @@ mod tests {
         assert_eq!(
             l.call_label("process.stop", &json!({ "id": "p1" })),
             "Stopping p1"
+        );
+    }
+
+    #[test]
+    fn a_schedule_approval_shows_when_and_all_each_run_is_handed() {
+        let l = Labels::new(Vec::new());
+        let req = |input: Value| ApprovalRequest {
+            action: ark_orchestrate::SCHEDULE.into(),
+            summary: String::new(),
+            risk: ark_sdk::prelude::RiskTier::Mutate,
+            input,
+            class: ark_orchestrate::SCHEDULE.into(),
+            preview: String::new(),
+            agent: None,
+            task: None,
+            ask_each_time: true,
+            cut_short: false,
+        };
+        assert_eq!(
+            l.approval_line(&req(json!({
+                "objective": "Recount the stock in stock.xlsx, update the counts and summarize the changes",
+                "context": "The counts are on the sheet Inventory.",
+                "at": "02:00", "tz": "Europe/Madrid"
+            }))),
+            "Run on its own every day at 02:00 (Europe/Madrid)\n  Each run: Recount the stock in stock.xlsx, update the counts and summarize the changes\n  It is told: The counts are on the sheet Inventory."
+        );
+        assert_eq!(
+            l.approval_line(&req(
+                json!({ "schedule": "s-1a2b3c4d", "at": "03:00", "resume": true })
+            )),
+            "Change a scheduled task: run it every day at 03:00, resume it"
+        );
+        // Long instructions are shown whole, never cut: they run with nobody watching.
+        let long = format!(
+            "Count the stock. {}",
+            "Then check the shelves again. ".repeat(60)
+        );
+        let line = l.approval_line(&req(
+            json!({ "objective": "Count", "context": long.trim(), "at": "02:00" }),
+        ));
+        assert!(line.ends_with("Then check the shelves again."), "{line}");
+        assert!(line.len() > 1800);
+        let known: ark_orchestrate::ScheduleRecord = serde_json::from_value(json!({
+            "id": "s-1", "project": "p", "agent": "a", "task": { "objective": "Recount the stock" },
+            "when": { "at": "02:00" }, "says": "every day at 02:00", "created_ms": 0
+        }))
+        .unwrap();
+        assert_eq!(
+            schedule_line(&json!({ "schedule": "s-1", "run_now": true }), Some(&known)),
+            "Change \"Recount the stock\" (every day at 02:00): run it now"
+        );
+        assert_eq!(
+            l.call_label(
+                ark_orchestrate::UNSCHEDULE,
+                &json!({ "schedule": "s-1", "pause": true })
+            ),
+            "Pausing a scheduled task"
         );
     }
 

@@ -43,6 +43,7 @@ anyhow = "1"
 blake3 = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+jiff = "0.2"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 tracing = "0.1"

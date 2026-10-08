@@ -502,3 +502,155 @@ fn a_chat_turn_killed_after_a_save_continues_without_saving_again() {
     );
     assert!(log.iter().any(|l| l.contains("not run again")), "{log:#?}");
 }
+
+/// The fake model for a schedule (ADR 0053): the chat schedules a stock count at `at` (UTC);
+/// each run saves `stock.md`, then answers.
+struct ScheduleModel {
+    at: String,
+    log: Mutex<Vec<String>>,
+}
+
+impl ScheduleModel {
+    fn reply(&self, body: &Value) -> Option<Value> {
+        let tools: Vec<&str> = body["tools"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        let messages = body["messages"].as_array().cloned().unwrap_or_default();
+        let text: String = messages
+            .iter()
+            .map(|m| m["content"].as_str().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let results = messages.iter().filter(|m| m["role"] == "tool").count();
+        if tools.contains(&"agents__schedule") {
+            self.log.lock().unwrap().push(format!("chat | {text}"));
+            return Some(if results == 0 {
+                call(
+                    "agents__schedule",
+                    json!({
+                        "objective": "Count the stock and save the count to stock.md with manuscript.save",
+                        "at": self.at, "tz": "UTC"
+                    }),
+                )
+            } else {
+                say("Every day at that time. [inv:1]")
+            });
+        }
+        if text.contains("== OBJECTIVE ==") && text.contains("This is the run scheduled for") {
+            self.log.lock().unwrap().push(format!("run | {text}"));
+            return Some(if results == 0 {
+                call(
+                    "manuscript__save",
+                    json!({ "file": "stock.md", "text": "12 boxes" }),
+                )
+            } else {
+                say("Counted 12 boxes and saved stock.md.")
+            });
+        }
+        Some(say("OK"))
+    }
+}
+
+/// ADR 0053, end to end in real processes: the chat is asked for a daily stock count, the person
+/// approves the schedule, the process is killed, and the next process runs it at its time: the
+/// run asks before it saves (scheduling bypasses no approval), saves once, and its result is
+/// posted in the chat that asked.
+#[test]
+fn a_schedule_made_in_the_chat_survives_a_kill_and_runs_at_its_time() {
+    // One or two minutes ahead, in UTC: the time the run is for.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let ahead = if now % 60 > 40 { 120 } else { 60 };
+    let slot = (now / 60) * 60 + ahead;
+    let at = format!("{:02}:{:02}", slot % 86_400 / 3600, slot % 3600 / 60);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let model = Arc::new(ScheduleModel {
+        at,
+        log: Mutex::new(Vec::new()),
+    });
+    let m = model.clone();
+    let base = rt.block_on(serve_with(Arc::new(move |b: &Value| m.reply(b))));
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("store");
+    let token = Command::new(WRITER)
+        .args(["--new-token", "test"])
+        .env("WRITER_ROOT", &root)
+        .output()
+        .unwrap();
+    let token = String::from_utf8_lossy(&token.stdout).trim().to_string();
+
+    let first = Served::start(&root, &base, &token);
+    first.rpc("hello", json!({ "tz": "Europe/Madrid" }));
+    let chat = first.rpc("summary", json!({}))["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    first.rpc(
+        "send",
+        json!({ "text": "every day at that time, count the stock and save it" }),
+    );
+    // Making standing work is asked.
+    allow_once(&first, 30);
+    let list = until("the schedule", 30, || {
+        let l = first.rpc("schedules", json!({ "session": chat }));
+        (l.as_array().map_or(0, Vec::len) == 1).then_some(l)
+    });
+    let s = &list[0];
+    assert_eq!(s["tz"], "UTC", "{s}");
+    assert_eq!(s["state"], "scheduled", "{s}");
+    assert_eq!(s["next_ms"].as_u64(), Some(slot * 1000), "{s}");
+    let id = s["id"].as_str().unwrap().to_string();
+    // The model was told the date and the person's zone.
+    let log = model.log.lock().unwrap().clone();
+    assert!(log[0].contains("(Europe/Madrid)"), "{}", log[0]);
+    let (_, _) = first.stop("-KILL");
+    assert!(find(&root, "stock.md").is_none());
+
+    // The next process runs it at its time; the save is asked like any agent's.
+    let second = Served::start(&root, &base, &token);
+    allow_once(&second, ahead + 60);
+    let saved = until("stock.md", 60, || find(&root, "stock.md"));
+    assert_eq!(std::fs::read_to_string(&saved).unwrap(), "12 boxes");
+    let one = until("the run to end", 60, || {
+        let v = second.rpc("schedule", json!({ "schedule": id }));
+        (v["schedule"]["state"] == "succeeded").then_some(v)
+    });
+    let runs = one["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 1, "{one}");
+    assert_eq!(runs[0]["result"], "Counted 12 boxes and saved stock.md.");
+    let started = runs[0]["at_ms"].as_u64().unwrap();
+    assert!(
+        started >= slot * 1000 && started < slot * 1000 + 30_000,
+        "ran at its time: {started} for {}",
+        slot * 1000
+    );
+    // The line shows the next time; the last run is said apart.
+    assert!(one["schedule"]["status"]
+        .as_str()
+        .unwrap()
+        .starts_with("next "));
+    assert!(one["schedule"]["last"]
+        .as_str()
+        .unwrap()
+        .starts_with("ran "));
+    assert_eq!(one["schedule"]["runs"], 1);
+    // The run's brief said which time it was for, and nothing of the chat.
+    let log = model.log.lock().unwrap().clone();
+    let run = log.iter().find(|l| l.starts_with("run | ")).unwrap();
+    assert!(!run.contains("every day at that time"), "{run}");
+    // Its result is posted in the chat that asked.
+    let turns = second.rpc("transcript", json!({ "session": chat }));
+    let posts: Vec<&Value> = turns
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["posts"].as_array().into_iter().flatten())
+        .collect();
+    assert_eq!(posts.len(), 1, "{turns}");
+    assert_eq!(posts[0]["text"], "Counted 12 boxes and saved stock.md.");
+}

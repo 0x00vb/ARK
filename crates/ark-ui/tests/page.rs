@@ -906,6 +906,31 @@ async fn the_board_is_worked_by_the_person_and_the_agents() {
     .await;
 }
 
+/// Schedules (ADR 0053): made in words and approved each time, shown as a line above the
+/// composer, run now, paused, resumed and stopped from beside the chat.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_schedule_asked_in_words_is_seen_run_paused_and_stopped_beside_its_chat() {
+    let schedule = Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "agents.schedule".into(),
+            arguments: json!({
+                "objective": "Recount the stock in stock.xlsx and summarize what changed",
+                "at": "02:00"
+            }),
+        }],
+        usage: Usage::default(),
+    };
+    let script = vec![
+        schedule,
+        say("Every day at 02:00 I will recount the stock.", false),
+        // The run the person starts with Run now.
+        say("Counted 120 boxes; 3 are missing since yesterday.", false),
+    ];
+    drive_app("schedules", script, Duration::ZERO, true).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_chat_keeps_working_in_the_background_while_another_runs() {
     let save = Completion {

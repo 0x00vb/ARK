@@ -38,6 +38,7 @@ pub mod host;
 mod notify;
 pub mod push;
 pub mod remote;
+pub mod resource;
 mod serve;
 mod terminal;
 mod upload;
@@ -53,7 +54,9 @@ use serde_json::Value;
 /// What an app's [`computers::ComputerSetup`] is made of.
 pub use ark_reach;
 pub use assets::Assets;
-pub use host::{Emitter, Handler, HandlerCtx, Host, Theme, UiInfo, Welcome};
+pub use host::{
+    Emitter, Handler, Host, ProjectHandlerCtx, Theme, UiInfo, Welcome, WindowHandlerCtx,
+};
 pub use serve::{Access, Served};
 
 /// Builds the workspace for an app. See the crate docs.
@@ -159,15 +162,33 @@ impl ArkUi {
         self.info.styles.push(asset.into());
         self
     }
-    /// A backend method for the app's scripts: `ark.ext(name, params)`.
-    pub fn handler<F, Fut>(mut self, name: impl Into<String>, f: F) -> Self
+    /// A project backend method for the app's scripts. It follows the resource's runtime and
+    /// receives the validated project explicitly.
+    pub fn project_handler<F, Fut>(mut self, name: impl Into<String>, f: F) -> Self
     where
-        F: Fn(HandlerCtx, Value) -> Fut + Send + Sync + 'static,
+        F: Fn(ProjectHandlerCtx, Value) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<Value>> + Send + 'static,
     {
         let f = Arc::new(f);
-        self.handlers
-            .insert(name.into(), Arc::new(move |ctx, v| Box::pin(f(ctx, v))));
+        self.handlers.insert(
+            name.into(),
+            Handler::Project(Arc::new(move |ctx, v| Box::pin(f(ctx, v)))),
+        );
+        self
+    }
+
+    /// A backend method owned by the origin window. It receives no project and never follows a
+    /// remote chat.
+    pub fn window_handler<F, Fut>(mut self, name: impl Into<String>, f: F) -> Self
+    where
+        F: Fn(WindowHandlerCtx, Value) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<Value>> + Send + 'static,
+    {
+        let f = Arc::new(f);
+        self.handlers.insert(
+            name.into(),
+            Handler::Window(Arc::new(move |ctx, v| Box::pin(f(ctx, v)))),
+        );
         self
     }
     /// Model, project and session choices, as the shell's flags give them.

@@ -96,6 +96,7 @@ async function change(id, ch) {
 export function registerBoard(ark) {
   store.ark = ark;
   ark.on("ark:orch", (m) => {
+    if (m.ref) return;
     const ev = m.event || {};
     if (ev.type === "work") {
       upsert(ev.item);
@@ -132,7 +133,7 @@ export function registerBoard(ark) {
     store.items = first.items || [];
     store.tasks = first.tasks || {};
     store.agents = first.agents || [];
-    ark.panel({ id: "board-item", title: "Item", icon: "layers", render: (el, params) => itemPanel(el, params) });
+    ark.panel({ id: "board-item", title: "Item", icon: "layers", render: (el, params, scoped) => itemPanel(el, params, scoped || ark) });
     ark.view({ id: "board", title: "Board", icon: "layers", nav: true, render: (el) => boardView(el) });
   })();
 }
@@ -576,8 +577,46 @@ function boardView(el) {
 
 // ---- one item, in the side pane --------------------------------------------------------------
 
-function itemPanel(el, params) {
-  const ark = store.ark;
+function itemPanel(el, params, ark = store.ark) {
+  const panel = { items: [], tasks: {}, agents: [] };
+  if (ark.location && JSON.stringify(ark.location) === JSON.stringify(ark.summary?.()?.location)) {
+    panel.items = store.items;
+    panel.tasks = store.tasks;
+    panel.agents = store.agents;
+  }
+  const item = (key) => panel.items.find((work) => work.id === key);
+  const task = (key) => panel.tasks[key];
+  const openTask = (work) => [...(work.tasks || [])].reverse().map((key) => [key, task(key)])
+    .find(([, run]) => run && !["done", "failed", "cancelled"].includes(run.state));
+  const running = (work) => (work.tasks || []).some((key) => task(key)?.state === "running");
+  const asking = (work) => (work.tasks || []).some((key) => {
+    const run = task(key);
+    return run && run.question && !run.question.answer && !["done", "failed", "cancelled"].includes(run.state);
+  });
+  const byName = (by) => (by === PERSON ? "You" : by === "chat" ? "Chat" : by);
+  async function loadPanel() {
+    try {
+      const board = await ark.call("board");
+      panel.items = board?.items || [];
+      panel.tasks = board?.tasks || {};
+      panel.agents = board?.agents || [];
+      draw();
+    } catch (error) {
+      ark.toast(error.message);
+    }
+  }
+  async function change(key, update) {
+    try {
+      const changed = await ark.call("board_change", { item: key, change: update });
+      const at = panel.items.findIndex((work) => work.id === changed.id);
+      if (at === -1) panel.items.push(changed);
+      else panel.items[at] = changed;
+      draw();
+    } catch (error) {
+      ark.toast(error.message);
+      loadPanel();
+    }
+  }
   el.classList.add("bd-panel");
   let id = params?.id;
   let editing = null; // a field being typed in keeps its text while the item changes
@@ -615,7 +654,7 @@ function itemPanel(el, params) {
 
   del.onclick = () => {
     const w = item(id);
-    if (w && store.remove) store.remove(w);
+    if (w) ark.call("board_remove", { item: w.id }).then(() => ark.closePanel("board-item")).catch((error) => ark.toast(error.message));
   };
 
   function menu(anchor, entries) {
@@ -647,16 +686,16 @@ function itemPanel(el, params) {
     ownerBtn.onclick = () => menu(ownerBtn, [
       { label: "No owner", current: !w.owner, run: () => change(id, { owner: "" }) },
       { label: "You", current: w.owner === PERSON, run: () => change(id, { owner: PERSON }) },
-      ...store.agents.map((a) => ({ label: a.name, sub: clip(a.role, 40), current: w.owner === a.name, run: () => change(id, { owner: a.name }) })),
+      ...panel.agents.map((a) => ({ label: a.name, sub: clip(a.role, 40), current: w.owner === a.name, run: () => change(id, { owner: a.name }) })),
     ]);
     meta.append(ownerBtn);
     if (busy) {
       const [tid, t] = busy;
       meta.append(h("span.bd-p-busy", running(w) ? h("span.bd-live") : null, t.state === "running" ? "Working" : t.state === "waiting" ? "Waiting on its helpers" : "Queued"),
         h("button.btn.ghost.small", { type: "button", onclick: () => ark.call("cancel_task", { task: tid }).catch((e) => ark.toast(e.message)) }, "Stop"));
-    } else if (w.state !== "done" && store.agents.length) {
+    } else if (w.state !== "done" && panel.agents.length) {
       const give = h("button.btn.small.bd-p-give", { type: "button" }, "Give to…");
-      give.onclick = () => menu(give, store.agents.map((a) => ({
+      give.onclick = () => menu(give, panel.agents.map((a) => ({
         label: a.name,
         sub: clip(a.role, 40),
         run: () => ark.call("board_give", { item: id, agent: a.name }).catch((e) => ark.toast(e.message)),
@@ -697,9 +736,9 @@ function itemPanel(el, params) {
       steps.map((s) => h("div.bd-p-step", h("span.bd-p-by", byName(s.by)), h("span", s.text), h("span.bd-p-ago", ago(s.at_ms)))));
   }
 
-  const off = () => draw();
-  store.listeners.add(off);
+  const off = ark.on("ark:orch", () => loadPanel());
   draw();
+  loadPanel();
   return {
     update(p) {
       if (p?.id && p.id !== id) {
@@ -709,16 +748,14 @@ function itemPanel(el, params) {
         draw();
       }
     },
-    refresh: () => draw(),
+    refresh: () => loadPanel(),
     focus: () => {
       const w = item(id);
       return w ? { surface: { kind_tag: "board", title: w.title, locator: w.id } } : null;
     },
     dispose() {
       resized.disconnect();
-      store.listeners.delete(off);
-      if (store.openItem === id) store.openItem = null;
-      store.changed({ quiet: true });
+      off?.();
     },
   };
 }

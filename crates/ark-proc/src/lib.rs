@@ -292,6 +292,20 @@ impl Processes {
         v
     }
 
+    /// Processes belonging to exactly one project root. Front-ends use this instead of
+    /// filtering after exposing runtime-wide ids.
+    pub fn list_for(&self, root: &Path) -> Vec<Info> {
+        let procs = self.inner.procs.lock().unwrap();
+        let mut v: Vec<Info> = procs
+            .iter()
+            .rev()
+            .filter(|p| p.root == root)
+            .map(|p| p.info())
+            .collect();
+        v.sort_by_key(|i| !matches!(i.state, State::Running | State::Ready));
+        v
+    }
+
     /// The ports on this computer that running processes of project `root` serve themselves:
     /// the port of their address, when the socket listening there belongs to the process (not
     /// another app that answers on it). What an agent's browser may open (ADR 0046). `root` is
@@ -337,6 +351,17 @@ impl Processes {
     /// Everything kept of a process's output, as it was written (for a terminal view).
     pub fn raw_output(&self, id: &str) -> Option<String> {
         let p = self.find(id)?;
+        let st = p.st.lock().unwrap();
+        let bytes: Vec<u8> = st.log.iter().copied().collect();
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// Kept output only when `id` belongs to `root`.
+    pub fn raw_output_for(&self, root: &Path, id: &str) -> Option<String> {
+        let p = self.find(id)?;
+        if p.root != root {
+            return None;
+        }
         let st = p.st.lock().unwrap();
         let bytes: Vec<u8> = st.log.iter().copied().collect();
         Some(String::from_utf8_lossy(&bytes).into_owned())
@@ -595,6 +620,14 @@ impl Processes {
             open: None,
         });
         Some(p.info())
+    }
+
+    /// Stop `id` only when it belongs to `root`.
+    pub async fn stop_for(&self, root: &Path, id: &str) -> Option<Info> {
+        if self.find(id).is_none_or(|p| p.root != root) {
+            return None;
+        }
+        self.stop(id).await
     }
 
     /// Stop every running process (the runtime is stopping).

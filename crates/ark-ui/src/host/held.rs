@@ -153,6 +153,11 @@ impl Host {
         v["running"] = json!(l.is_some_and(|l| l.running.is_some()));
         v["changes"] = json!(l.map(|l| l.changes).unwrap_or(0));
         v["place"] = self.place(chat);
+        v["location"] = json!(crate::resource::ResourceLocation {
+            runtime: chat.runtime.clone(),
+            project: chat.remote_project.clone(),
+            session: chat.session.clone(),
+        });
         v
     }
 
@@ -421,6 +426,39 @@ impl Host {
     ) -> Option<anyhow::Result<Value>> {
         let s = |k: &str| params[k].as_str().unwrap_or("").to_string();
         match method {
+            "resource" => {
+                let reference: crate::resource::ResourceRef =
+                    match serde_json::from_value(params["ref"].clone()) {
+                        Ok(r) => r,
+                        Err(e) => return Some(Err(e.into())),
+                    };
+                let here = ark_interact::held::runtime_id(&self.engine);
+                if reference.location.runtime == here {
+                    return None;
+                }
+                let Some(chat) = self.held_chat(&reference.location.session) else {
+                    return Some(Err(anyhow::anyhow!("no linked chat owns that resource")));
+                };
+                if chat.runtime != reference.location.runtime
+                    || chat.remote_project != reference.location.project
+                {
+                    return Some(Err(anyhow::anyhow!(
+                        "the resource location does not match its chat"
+                    )));
+                }
+                Some(
+                    self.on_place(
+                        &chat,
+                        "chat_resource",
+                        json!({
+                            "session": chat.session,
+                            "ref": reference,
+                            "operation": params["operation"],
+                        }),
+                    )
+                    .await,
+                )
+            }
             "summary" => {
                 let chat = self.shown_held()?;
                 Some(Ok(self.held_summary(&chat)))
@@ -647,28 +685,10 @@ impl Host {
                     async {
                         let mut p = params.clone();
                         p["session"] = json!(chat.session);
-                        let opened = self.on_place(&chat, "chat_setup", p).await?;
-                        if let Some(id) = opened["session"].as_str() {
-                            self.held_terms
-                                .lock()
-                                .unwrap()
-                                .insert(id.to_string(), chat.place.clone());
-                        }
-                        Ok(opened)
+                        self.on_place(&chat, "chat_setup", p).await
                     }
                     .await,
                 )
-            }
-            "term_write" | "term_resize" | "term_close" => {
-                let id = s("session");
-                let place = self.held_terms.lock().unwrap().get(&id).cloned()?;
-                let mut p = params.clone();
-                p["id"] = json!(id);
-                if method == "term_close" {
-                    self.held_terms.lock().unwrap().remove(&id);
-                }
-                let call = format!("chat_{method}");
-                Some(self.links.chat(&place, &call, p).await.map(|_| Value::Null))
             }
             // A key for the chat's computer: the one typed, or the one saved here, which goes
             // only when the person asks for it.
@@ -707,13 +727,76 @@ impl Host {
                 self.leave_held().await;
                 None
             }
-            _ => None,
+            // Explicitly window-local or relationship-wide. This is the complete fallthrough
+            // set while a held chat is shown; adding a host method requires classifying it.
+            "hello"
+            | "places"
+            | "computers"
+            | "computer_hosts"
+            | "computer_add"
+            | "computer_remove"
+            | "computer_terminal"
+            | "working"
+            | "projects"
+            | "sessions"
+            | "rename_project"
+            | "project_folder"
+            | "attention"
+            | "attention_all"
+            | "attention_answer"
+            | "attention_go"
+            | "attention_seen"
+            | "push_key"
+            | "push_add"
+            | "push_remove"
+            | "push_devices"
+            | "push_here"
+            | "devices_signed_in"
+            | "device_sign_out"
+            | "api_keys"
+            | "api_key_save"
+            | "api_key_forget"
+            | "subscription_usage"
+            | "capabilities"
+            | "capability_connect"
+            | "capability_turn"
+            | "capability_disconnect"
+            | "plugins"
+            | "plugin_add"
+            | "plugin_remove"
+            | "plugin_restart"
+            | "upload_project_parts"
+            | "upload_project_finish"
+            | "upload_project_cancel"
+            | "ext" => None,
+            other => self.shown_held().map(|chat| {
+                Err(anyhow::anyhow!(
+                    "`{other}` is not routed for resources on {}; nothing ran on this computer",
+                    chat.place
+                ))
+            }),
         }
     }
 
     /// The computer `place` was removed: its chats leave the screen, their questions the
     /// tray, its terminals and its follower stop.
     pub(super) async fn forget_place(&self, place: &str, sessions: &[String]) {
+        // Remove aliases where the resources live before deleting our knowledge of the chats.
+        // Failure is harmless: aliases are ephemeral and a disconnected runtime cannot emit to
+        // this removed link, but an available runtime must not retain them.
+        for session in sessions {
+            let _ = self
+                .links
+                .chat(
+                    place,
+                    "chat_forget_resources",
+                    json!({ "session": session }),
+                )
+                .await;
+        }
+        for session in sessions {
+            self.resource_subscribers.remove_session(session);
+        }
         let closed: Vec<String> = {
             let mut live = self.held_live.lock().unwrap();
             sessions
@@ -726,7 +809,6 @@ impl Host {
         for id in closed {
             self.emit(json!({ "kind": "approval_closed", "id": id }));
         }
-        self.held_terms.lock().unwrap().retain(|_, p| p != place);
         if let Some((task, _)) = self.relays.lock().unwrap().remove(place) {
             task.abort();
         }
@@ -813,7 +895,20 @@ impl Host {
                 "kind", "session", "id", "request", "line", "title", "choices", "chat",
             ],
             "approval_closed" => &["kind", "id"],
-            "term" => &["kind", "session", "data", "exit"],
+            "term" => &[
+                "kind",
+                "session",
+                "ref",
+                "generation",
+                "cursor",
+                "data",
+                "exit",
+            ],
+            "proc" => &["kind", "session", "ref", "event", "here"],
+            "files_changed" => &["kind", "session", "ref", "project", "paths"],
+            "orch" => &[
+                "kind", "session", "ref", "event", "line", "tone", "activity",
+            ],
             _ => return,
         };
         let mut ev = only(&ev, fields);
@@ -832,15 +927,23 @@ impl Host {
         let Some(session) = ev["session"].as_str().map(str::to_string) else {
             return;
         };
-        // A program's terminal this runtime opened there.
-        if kind == "term" {
-            if self
-                .held_terms
-                .lock()
-                .unwrap()
-                .get(&session)
-                .map(String::as_str)
-                == Some(place)
+        // A project resource event already carries its validated, session-bound alias.
+        if matches!(kind.as_str(), "term" | "proc" | "orch" | "files_changed")
+            && ev.get("ref").is_some()
+        {
+            let Ok(reference) =
+                serde_json::from_value::<crate::resource::ResourceRef>(ev["ref"].clone())
+            else {
+                return;
+            };
+            let Some(chat) = self
+                .held_chat(&reference.location.session)
+                .filter(|c| c.place == place)
+            else {
+                return;
+            };
+            if reference.location.runtime == chat.runtime
+                && reference.location.project == chat.remote_project
             {
                 self.emit(ev);
             }

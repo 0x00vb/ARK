@@ -113,6 +113,18 @@ async fn open(dir: &std::path::Path, action: &'static str, saves: Arc<AtomicUsiz
         .0
 }
 
+async fn project_call(host: &Arc<Host>, operation: &str, input: Value) -> anyhow::Result<Value> {
+    let location = host.call("summary", json!({})).await?["location"].clone();
+    host.call(
+        "resource",
+        json!({
+            "ref": { "location": location, "kind": "project", "id": "" },
+            "operation": { "kind": operation, "input": input },
+        }),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn approvals_travel_through_the_protocol() {
     let dir = tempfile::tempdir().unwrap();
@@ -130,7 +142,7 @@ async fn approvals_travel_through_the_protocol() {
         .call("command", json!({ "line": "/new" }))
         .await
         .is_err());
-    assert!(host.call("state", json!({})).await.is_ok());
+    assert!(project_call(&host, "state", json!({})).await.is_ok());
     // Subscription usage is a read: a list, empty until a CLI reports.
     assert!(host
         .call("subscription_usage", json!({}))
@@ -367,9 +379,11 @@ async fn gui_and_cli_send_the_same_context_for_500_turns() {
             host.call("trace", json!({})).await.unwrap();
             host.call("call", json!({ "n": 1 })).await.unwrap();
             host.call("context", json!({})).await.unwrap();
-            host.call("state", json!({})).await.unwrap();
+            project_call(&host, "state", json!({})).await.unwrap();
             host.call("sessions", json!({})).await.unwrap();
-            host.call("focus", json!({ "focus": null })).await.unwrap();
+            project_call(&host, "focus", json!({ "focus": null }))
+                .await
+                .unwrap();
             host.call("command", json!({ "line": "/usage" }))
                 .await
                 .unwrap();

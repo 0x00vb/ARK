@@ -262,10 +262,14 @@ export async function terminalSheet(api, title, sub, open, done) {
     box);
   const overlay = h("div.program-overlay", sheet);
   document.body.append(overlay);
-  const s = { id: null, term: null, offs: [] };
+  const s = { id: null, ref: null, term: null, offs: [] };
+  const resource = (kind, input = {}) => {
+    if (!s.ref) return Promise.reject(new Error("The terminal has no resource location"));
+    return api.resource(s.ref, kind, input);
+  };
   const end = () => {
     for (const off of s.offs) off();
-    if (s.id) api.call("term_close", { session: s.id }).catch(() => {});
+    if (s.ref) resource("terminal_close", { session: s.id }).catch(() => {});
     s.term?.dispose();
     overlay.remove();
     done?.();
@@ -291,12 +295,17 @@ export async function terminalSheet(api, title, sub, open, done) {
   try { fit.fit(); } catch {}
   const early = [];
   const output = (p) => (p.exit ? term.write("\r\n\x1b[2m[finished]\x1b[0m\r\n") : term.write(p.data));
-  s.offs.push(window.ark.on("ark:term", (p) => (!s.id ? early.push(p) : p.session === s.id && output(p))));
-  term.onData((data) => s.id && api.call("term_write", { session: s.id, data }).catch(() => {}));
+  s.offs.push(window.ark.on("ark:term", (p) => {
+    if (!s.ref) early.push(p);
+    else if (p.ref && JSON.stringify(p.ref) === JSON.stringify(s.ref)) output(p);
+  }));
+  term.onData((data) => s.ref && resource("terminal_write", { session: s.id, data }).catch(() => {}));
   try {
     const opened = await open(term.cols, term.rows);
     s.id = opened.session;
-    for (const p of early.splice(0)) if (p.session === s.id) output(p);
+    s.ref = opened.ref;
+    if (!s.ref) throw new Error("The runtime did not return a terminal resource reference");
+    for (const p of early.splice(0)) if (p.ref && JSON.stringify(p.ref) === JSON.stringify(s.ref)) output(p);
     term.focus();
   } catch (e) {
     term.write(`\x1b[31m${e.message}\x1b[0m\r\n`);

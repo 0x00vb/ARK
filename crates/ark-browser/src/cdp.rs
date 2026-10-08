@@ -25,6 +25,8 @@ pub struct Chrome {
     tree: Mutex<ark_os::process::Tree>,
     out: mpsc::UnboundedSender<String>,
     pending: Pending,
+    /// Unsolicited Target events, kept briefly so a person-driven surface can adopt a popup.
+    events: Arc<Mutex<Vec<Value>>>,
     next: AtomicU64,
 }
 
@@ -38,6 +40,14 @@ impl Drop for Chrome {
 }
 
 impl Chrome {
+    #[cfg(test)]
+    pub(crate) fn crash_for_test(&self) {
+        self.tree.lock().unwrap().kill();
+        if let Some(mut child) = self.child.lock().unwrap().take() {
+            let _ = child.start_kill();
+        }
+    }
+
     /// Start `bin` on `profile` (a folder it keeps cookies and sign-ins in) and connect.
     /// `headless`: no window.
     pub async fn launch(bin: &Path, profile: &Path, headless: bool) -> Result<Chrome, String> {
@@ -83,13 +93,22 @@ impl Chrome {
             }
         });
         let answers = pending.clone();
+        let events: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let seen = events.clone();
         tokio::spawn(async move {
             while let Some(Ok(msg)) = source.next().await {
                 let Message::Text(text) = msg else { continue };
                 let Ok(v) = serde_json::from_str::<Value>(&text) else {
                     continue;
                 };
-                let Some(id) = v["id"].as_u64() else { continue };
+                let Some(id) = v["id"].as_u64() else {
+                    let mut events = seen.lock().unwrap();
+                    events.push(v);
+                    if events.len() > 128 {
+                        events.drain(..64);
+                    }
+                    continue;
+                };
                 if let Some(tx) = answers.lock().unwrap().remove(&id) {
                     let r = match v.get("error") {
                         Some(e) => Err(e["message"].as_str().unwrap_or("error").to_string()),
@@ -108,6 +127,7 @@ impl Chrome {
             child: Mutex::new(Some(child)),
             out,
             pending,
+            events,
             next: AtomicU64::new(1),
         })
     }
@@ -145,6 +165,20 @@ impl Chrome {
             Some(c) => matches!(c.try_wait(), Ok(None)),
             None => false,
         }
+    }
+
+    /// The newest popup created by `opener` in `context`, if one.
+    pub fn take_popup(&self, context: &str, opener: &str) -> Option<String> {
+        let mut events = self.events.lock().unwrap();
+        let at = events.iter().rposition(|v| {
+            v["method"] == "Target.targetCreated"
+                && v["params"]["targetInfo"]["browserContextId"].as_str() == Some(context)
+                && v["params"]["targetInfo"]["openerId"].as_str() == Some(opener)
+        })?;
+        let v = events.remove(at);
+        v["params"]["targetInfo"]["targetId"]
+            .as_str()
+            .map(str::to_string)
     }
 }
 

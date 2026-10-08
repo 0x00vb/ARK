@@ -18,8 +18,12 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::resource::{
+    ResourceKind, ResourceLocation, ResourceOperation, ResourceOperationKind, ResourceRef,
+    ResourceSubscribers,
+};
 use ark_interact::activity::describe;
-use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec, WorkChange};
+use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec};
 use ark_interact::inspect::{
     ArtifactSummary, ContextSource, ContextView, KeptOut, StateView, UsageView,
 };
@@ -95,6 +99,15 @@ async fn forward_attention(
             Err(broadcast::error::RecvError::Closed) => return,
         };
         let Some(host) = host.upgrade() else { return };
+        for reference in
+            host.resource_subscribers
+                .aliases(ResourceKind::Project, &ev.project, "orch")
+        {
+            let mut out = orch_event(&host.labels, &HashMap::new(), ev.clone());
+            out["session"] = json!(reference.location.session);
+            out["ref"] = json!(reference);
+            host.emit(out);
+        }
         match &ev.kind {
             // A retry takes a failed task out of the list (`TaskQueued`).
             EventKind::Asked { .. }
@@ -121,6 +134,18 @@ async fn forward_links(host: std::sync::Weak<Host>, mut rx: broadcast::Receiver<
                 let Some(host) = host.upgrade() else { return };
                 // `linked`: a runtime that follows this one does not read it again for this.
                 host.emit(json!({ "kind": "attention", "linked": true }));
+                for chat in ark_interact::held::list(&host.engine, None) {
+                    host.emit(json!({
+                        "kind": "resource_connection",
+                        "location": {
+                            "runtime": chat.runtime,
+                            "project": chat.remote_project,
+                            "session": chat.session,
+                        },
+                        "online": host.links.state(&chat.place) == Some(ark_interact::links::State::Ok),
+                        "place": chat.place,
+                    }));
+                }
             }
             Err(broadcast::error::RecvError::Closed) => return,
         }
@@ -143,28 +168,64 @@ fn orch_event(
     json!({ "kind": "orch", "event": ev, "line": line, "tone": tone, "activity": activity })
 }
 
-/// A consumer's backend method, called from its panels as `ark.call("ext", {name, params})`.
-pub type Handler = Arc<
-    dyn Fn(HandlerCtx, Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + Send>>
+/// A consumer's project backend method. It is reachable only through a validated resource
+/// reference and receives that reference's explicit project.
+pub type ProjectHandler = Arc<
+    dyn Fn(ProjectHandlerCtx, Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + Send>>
         + Send
         + Sync,
 >;
 
+/// A consumer's window-local backend method. It can never receive or infer a project from a
+/// remote chat.
+pub type WindowHandler = Arc<
+    dyn Fn(WindowHandlerCtx, Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// A handler has one explicit routing class. There is no default.
+#[derive(Clone)]
+pub enum Handler {
+    Project(ProjectHandler),
+    Window(WindowHandler),
+}
+
 /// What a consumer handler can reach.
 #[derive(Clone)]
-pub struct HandlerCtx {
+pub struct ProjectHandlerCtx {
     pub engine: Arc<Engine>,
     pub project: Project,
     emitter: Emitter,
     links: Arc<ark_interact::links::Links>,
 }
 
-impl HandlerCtx {
+impl ProjectHandlerCtx {
     /// The app's links to other runtimes, to change when the person links or forgets one.
     pub fn links(&self) -> Arc<ark_interact::links::Links> {
         self.links.clone()
     }
     /// Send an event to the consumer's scripts (`ark.on(name, fn)`).
+    pub fn emit(&self, name: &str, payload: Value) {
+        self.emitter.emit(name, payload)
+    }
+    pub fn emitter(&self) -> Emitter {
+        self.emitter.clone()
+    }
+}
+
+/// What a window-local consumer handler can reach. It deliberately has no project.
+#[derive(Clone)]
+pub struct WindowHandlerCtx {
+    pub engine: Arc<Engine>,
+    emitter: Emitter,
+    links: Arc<ark_interact::links::Links>,
+}
+
+impl WindowHandlerCtx {
+    pub fn links(&self) -> Arc<ark_interact::links::Links> {
+        self.links.clone()
+    }
     pub fn emit(&self, name: &str, payload: Value) {
         self.emitter.emit(name, payload)
     }
@@ -298,6 +359,8 @@ struct Running {
 struct Conv {
     ix: Arc<tokio::sync::Mutex<Interaction>>,
     running: Mutex<Option<Running>>,
+    /// What this chat's next turn sees in the side pane. It never leaks to another chat.
+    focus: Mutex<Option<Option<Focus>>>,
     /// What lists show for it, kept for while its interaction is busy.
     about: Mutex<About>,
 }
@@ -319,6 +382,7 @@ impl Conv {
         Arc::new(Conv {
             ix: Arc::new(tokio::sync::Mutex::new(ix)),
             running: Mutex::new(None),
+            focus: Mutex::new(None),
             about: Mutex::new(about),
         })
     }
@@ -379,7 +443,7 @@ pub struct Host {
     background: Mutex<Vec<Arc<Conv>>>,
     /// Terminals another runtime opened here for a program's install or sign-in (`chat_setup`):
     /// the only terminals it may type into.
-    setup_terms: Mutex<std::collections::HashSet<String>>,
+    setup_terms: Mutex<HashMap<String, String>>,
     /// Chats another runtime holds here and reaches by name (`chat_*`, ADR 0052), by session.
     /// None of them moves the windows; a window that opens one takes it from here.
     addressed: Mutex<HashMap<String, Arc<Conv>>>,
@@ -397,7 +461,6 @@ pub struct Host {
     feed: Arc<Feed>,
     approvals: Mutex<HashMap<u64, (Value, oneshot::Sender<ApprovalDecision>)>>,
     next_id: AtomicU64,
-    focus: Mutex<Option<Option<Focus>>>,
     snapshot: Mutex<Snapshot>,
     handlers: HashMap<String, Handler>,
     info: UiInfo,
@@ -408,10 +471,17 @@ pub struct Host {
     orchs: ark_interact::OrchestratorSet,
     /// One shell per project, for the Terminal panel.
     terminals: crate::terminal::Terminals,
+    /// Session-bound pane aliases for shared terminal and process resources.
+    resource_subscribers: Arc<ResourceSubscribers>,
+    /// One reconciliation at a time per project replica. Chats share replicas, so epoch checks,
+    /// filesystem apply and manifest advancement are one critical section.
+    copy_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// The Computer, when the app offers it.
     computer: Option<Arc<ark_sdk::prelude::ark_computer::ComputerService>>,
     /// Project processes, when the app offers them (ADR 0041).
     processes: Option<ark_sdk::prelude::ark_proc::Processes>,
+    /// Chromium on this runtime, for a person's chat-owned rendered Browser.
+    browser: Option<Arc<ark_sdk::prelude::ark_browser::BrowserService>>,
     /// Notifications to the person's devices (ADR 0047).
     pub(crate) notifier: Arc<crate::notify::Notifier>,
     /// The app's links to other runtimes, shared with its conversations.
@@ -421,8 +491,6 @@ pub struct Host {
     held: Mutex<Option<String>>,
     /// The person's computers over SSH, when the app offers them (ADR 0052).
     computers: std::sync::OnceLock<Arc<crate::computers::Computers>>,
-    /// Terminals opened on another computer for a program there, by id: its place.
-    held_terms: Mutex<HashMap<String, String>>,
     /// What this runtime knows of held chats while they run.
     held_live: Mutex<HashMap<String, held::HeldLive>>,
     /// One follower of events per place that holds chats here, and whether it is following.
@@ -493,10 +561,12 @@ impl Host {
         );
         // Uploads a client left more than a day ago (ADR 0030).
         crate::upload::sweep(ix.ark().shared_engine().store.root());
+        let resource_subscribers = Arc::new(ResourceSubscribers::default());
         let host = Arc::new(Host {
             orch: Mutex::new(None),
             orchs: ix.orchestrators(),
-            terminals: Default::default(),
+            terminals: crate::terminal::Terminals::new(resource_subscribers.clone()),
+            resource_subscribers,
             engine: ix.ark().shared_engine(),
             chat_skills: ix.ark().skill_names().to_vec(),
             caps: ark_interact::capabilities::Parts::of(ix.ark()),
@@ -505,6 +575,7 @@ impl Host {
             siblings: ix.siblings(),
             computer: ix.ark().computer().cloned(),
             processes: ix.ark().processes().cloned(),
+            browser: ix.ark().browser_service().cloned(),
             notifier: Arc::new(crate::notify::Notifier::new(ix.ark().shared_engine())),
             links: ix.links().clone(),
             held: Mutex::new(None),
@@ -515,12 +586,11 @@ impl Host {
             background: Mutex::new(Vec::new()),
             addressed: Mutex::new(HashMap::new()),
             setup_terms: Mutex::new(Default::default()),
+            copy_locks: Mutex::new(Default::default()),
             computers: Default::default(),
-            held_terms: Mutex::new(HashMap::new()),
             feed: Feed::new(),
             approvals: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
-            focus: Mutex::new(None),
             snapshot: Mutex::new(Snapshot::default()),
             handlers,
             info,
@@ -619,7 +689,19 @@ impl Host {
     /// Files of a project changed without a tool call (a restore, files added): open views and
     /// lists read them again.
     fn files_changed(&self, project: &ProjectId, paths: &[String]) {
-        self.emit(json!({ "kind": "files_changed", "project": project.as_str(), "paths": paths }));
+        let references: HashMap<ResourceLocation, ResourceRef> = self
+            .resource_subscribers
+            .aliases(ResourceKind::File, project.as_str(), "*")
+            .into_iter()
+            .chain(paths.iter().flat_map(|path| {
+                self.resource_subscribers
+                    .aliases(ResourceKind::File, project.as_str(), path)
+            }))
+            .map(|reference| (reference.location.clone(), reference))
+            .collect();
+        for reference in references.into_values() {
+            self.emit(json!({ "kind": "files_changed", "project": project.as_str(), "paths": paths, "session": reference.location.session, "ref": reference }));
+        }
     }
 
     fn emit_working(&self) {
@@ -859,37 +941,28 @@ impl Host {
         }
     }
 
-    async fn control(&self, c: Control) -> anyhow::Result<ControlOutcome> {
-        ark_interact::orchestration::control(&self.orchestrator()?, c).await
+    async fn resource_orchestrator(
+        self: &Arc<Self>,
+        reference: &ResourceRef,
+    ) -> anyhow::Result<Orchestrator> {
+        let conv = self
+            .chat_conv(&reference.location.session, "", true)
+            .await?;
+        let orchestrator = conv.about.lock().unwrap().orch.clone();
+        orchestrator.ok_or_else(|| anyhow::anyhow!("this app runs a single agent"))
     }
 
-    async fn control_done(&self, c: Control) -> anyhow::Result<Value> {
-        self.control(c).await?;
-        Ok(json!({}))
+    async fn control_on(
+        &self,
+        orchestrator: &Orchestrator,
+        control: Control,
+    ) -> anyhow::Result<ControlOutcome> {
+        ark_interact::orchestration::control(orchestrator, control).await
     }
 
     /// The app's saved API keys, when it keeps connections.
     fn api_keys(&self) -> Option<ark_interact::ark_sdk::prelude::ark_connect::ApiKeys> {
         self.caps.connections.as_ref().map(|c| c.api_keys().clone())
-    }
-
-    /// A board change; answers with the item as it is now.
-    async fn board_control(&self, c: Control) -> anyhow::Result<Value> {
-        match self.control(c).await? {
-            ControlOutcome::Work(w) => Ok(serde_json::to_value(*w)?),
-            _ => Ok(json!({})),
-        }
-    }
-
-    /// The orchestrator, for the orchestration methods. They do not wait for the
-    /// conversation: agents work on their own.
-    fn orchestrator(&self) -> anyhow::Result<Orchestrator> {
-        self.orch
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|(o, _)| o.clone())
-            .ok_or_else(|| anyhow::anyhow!("this app runs a single agent"))
     }
 
     fn project(&self) -> anyhow::Result<Project> {
@@ -909,7 +982,780 @@ impl Host {
         let cur = self.cur();
         let mut v = cur.about.lock().unwrap().summary.clone();
         v["running"] = json!(cur.is_running());
+        v["location"] = json!(self.location_of(&cur));
         v
+    }
+
+    fn location_of(&self, conv: &Arc<Conv>) -> ResourceLocation {
+        let about = conv.about.lock().unwrap();
+        ResourceLocation {
+            runtime: ark_interact::held::runtime_id(&self.engine),
+            project: about.project.clone(),
+            session: about.session.clone(),
+        }
+    }
+
+    /// Resolve a resource without changing the chat any window shows.
+    fn resource_project(&self, r: &ResourceRef) -> anyhow::Result<Project> {
+        let here = ark_interact::held::runtime_id(&self.engine);
+        anyhow::ensure!(
+            r.location.runtime == here,
+            "that resource belongs to another runtime"
+        );
+        anyhow::ensure!(
+            !r.location.session.is_empty(),
+            "the resource has no opening chat"
+        );
+        let project = if let Some(conv) = self.conv_of(&r.location.session) {
+            conv.about.lock().unwrap().project.clone()
+        } else {
+            self.engine
+                .store
+                .get_session(&r.location.session)?
+                .and_then(|v| v["project"].as_str().map(str::to_string))
+                .ok_or_else(|| anyhow::anyhow!("there is no chat `{}` here", r.location.session))?
+        };
+        anyhow::ensure!(
+            project == r.location.project,
+            "the resource's project does not match its chat"
+        );
+        self.engine
+            .store
+            .get_project(&ProjectId(project.clone()))?
+            .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))
+    }
+
+    fn resource_path<'a>(&self, r: &'a ResourceRef, input: &'a Value) -> &'a str {
+        if r.id.is_empty() {
+            input["path"].as_str().unwrap_or("")
+        } else {
+            &r.id
+        }
+    }
+
+    fn scoped_upload(&self, r: &ResourceRef, input: &Value) -> String {
+        use sha2::Digest as _;
+
+        let identity = format!(
+            "{}-{}-{}",
+            r.location.runtime,
+            r.location.session,
+            input["upload"].as_str().unwrap_or("")
+        );
+        format!("{:x}", sha2::Sha256::digest(identity.as_bytes()))
+    }
+
+    async fn resource_call(
+        self: &Arc<Self>,
+        r: ResourceRef,
+        operation: ResourceOperation,
+        from_link: bool,
+    ) -> anyhow::Result<Value> {
+        anyhow::ensure!(
+            operation.kind.accepts(r.kind),
+            "operation {:?} is not valid for {:?}",
+            operation.kind,
+            r.kind
+        );
+        let project = self.resource_project(&r)?;
+        let workspace = self.engine.workspace_dir(&project.id)?;
+        let input = operation.input;
+        let s = |k: &str| input[k].as_str().unwrap_or("").to_string();
+        let n = |k: &str| input[k].as_u64();
+        use ResourceOperationKind as O;
+        match operation.kind {
+            O::Subscribe => {
+                let id = if r.id.is_empty() {
+                    "*".to_string()
+                } else {
+                    r.id.clone()
+                };
+                self.resource_subscribers
+                    .subscribe(r.kind, project.id.as_str(), &id, r);
+                Ok(json!({}))
+            }
+            O::Unsubscribe => {
+                self.resource_subscribers.unsubscribe(&r);
+                Ok(json!({}))
+            }
+            O::TerminalOpen => {
+                let size = |k: &str, d: u64| n(k).unwrap_or(d).clamp(2, 1000) as u16;
+                let opened = self.terminals.open(
+                    &self.feed,
+                    project.id.as_str(),
+                    workspace,
+                    size("cols", 80),
+                    size("rows", 24),
+                )?;
+                let mut value = serde_json::to_value(&opened)?;
+                let mut opened_ref = r.clone();
+                opened_ref.id = opened.session;
+                self.terminals
+                    .subscribe(project.id.as_str(), &opened_ref.id, opened_ref.clone());
+                value["ref"] = serde_json::to_value(opened_ref)?;
+                Ok(value)
+            }
+            O::TerminalRead => {
+                let setup = self.setup_terms.lock().unwrap().get(&r.id).cloned();
+                if setup.as_deref() == Some(&r.location.session) {
+                    return Ok(serde_json::to_value(self.terminals.read_owned(
+                        &r.id,
+                        &s("generation"),
+                        n("after").unwrap_or(0),
+                    )?)?);
+                }
+                self.terminals
+                    .subscribe(project.id.as_str(), &r.id, r.clone());
+                Ok(serde_json::to_value(self.terminals.read_for(
+                    project.id.as_str(),
+                    &r.id,
+                    &s("generation"),
+                    n("after").unwrap_or(0),
+                )?)?)
+            }
+            O::TerminalWrite => {
+                if self
+                    .setup_terms
+                    .lock()
+                    .unwrap()
+                    .get(&r.id)
+                    .map(String::as_str)
+                    == Some(r.location.session.as_str())
+                {
+                    self.terminals.write(&r.id, &s("data"))?;
+                } else {
+                    self.terminals
+                        .write_for(project.id.as_str(), &r.id, &s("data"))?;
+                }
+                Ok(Value::Null)
+            }
+            O::TerminalResize => {
+                let size = |k: &str| n(k).unwrap_or(24).clamp(2, 1000) as u16;
+                if self
+                    .setup_terms
+                    .lock()
+                    .unwrap()
+                    .get(&r.id)
+                    .map(String::as_str)
+                    == Some(r.location.session.as_str())
+                {
+                    self.terminals.resize(&r.id, size("cols"), size("rows"))?;
+                } else {
+                    self.terminals.resize_for(
+                        project.id.as_str(),
+                        &r.id,
+                        size("cols"),
+                        size("rows"),
+                    )?;
+                }
+                Ok(Value::Null)
+            }
+            O::TerminalClose => {
+                let setup = self.setup_terms.lock().unwrap().get(&r.id).cloned();
+                if setup.as_deref() == Some(&r.location.session) {
+                    self.terminals.close(&r.id);
+                    self.setup_terms.lock().unwrap().remove(&r.id);
+                } else {
+                    self.terminals.close_for(project.id.as_str(), &r.id)?;
+                }
+                Ok(Value::Null)
+            }
+            O::Processes => match &self.processes {
+                Some(p) => {
+                    self.resource_subscribers.subscribe(
+                        ResourceKind::Process,
+                        project.id.as_str(),
+                        "*",
+                        r,
+                    );
+                    Ok(json!(p.list_for(&workspace)))
+                }
+                None => anyhow::bail!("this app does not start processes"),
+            },
+            O::ProcessOutput => match self
+                .processes
+                .as_ref()
+                .and_then(|p| p.raw_output_for(&workspace, &r.id))
+            {
+                Some(out) => Ok(json!({ "data": out })),
+                None => anyhow::bail!("there is no process `{}` in this project", r.id),
+            },
+            O::ProcessStop => match &self.processes {
+                Some(p) => match p.stop_for(&workspace, &r.id).await {
+                    Some(info) => Ok(json!(info)),
+                    None => anyhow::bail!("there is no process `{}` in this project", r.id),
+                },
+                None => anyhow::bail!("this app does not start processes"),
+            },
+            O::Files => {
+                self.resource_subscribers.subscribe(
+                    ResourceKind::File,
+                    project.id.as_str(),
+                    "*",
+                    r.clone(),
+                );
+                let (entries, more) =
+                    crate::files::list(&workspace, self.resource_path(&r, &input))?;
+                Ok(json!({ "root": workspace, "entries": entries, "more": more }))
+            }
+            O::FileRead => {
+                self.resource_subscribers.subscribe(
+                    ResourceKind::File,
+                    project.id.as_str(),
+                    &r.id,
+                    r.clone(),
+                );
+                crate::files::read(&workspace, self.resource_path(&r, &input))
+            }
+            O::FileWrite => {
+                let base = Some(s("base")).filter(|b| !b.is_empty());
+                let value = crate::files::write(
+                    &workspace,
+                    self.resource_path(&r, &input),
+                    &s("text"),
+                    base.as_deref(),
+                )?;
+                self.files_changed(&project.id, std::slice::from_ref(&r.id));
+                Ok(value)
+            }
+            O::FileEdit => {
+                let base = Some(s("base")).filter(|b| !b.is_empty());
+                let value = crate::files::edit(
+                    &workspace,
+                    self.resource_path(&r, &input),
+                    input.get("edits").unwrap_or(&Value::Null),
+                    base.as_deref(),
+                )?;
+                self.files_changed(&project.id, std::slice::from_ref(&r.id));
+                Ok(value)
+            }
+            O::FileMedia => crate::files::media(&workspace, self.resource_path(&r, &input)),
+            O::FileVersion => crate::files::version(&workspace, self.resource_path(&r, &input)),
+            O::FileRestore => {
+                let restored = self
+                    .engine
+                    .restore_file(&project.id, &ArtifactId(s("artifact")))?;
+                self.files_changed(&project.id, std::slice::from_ref(&restored.path));
+                Ok(serde_json::to_value(restored)?)
+            }
+            O::UploadParts => {
+                let store = self.engine.store.root().to_path_buf();
+                let id = self.scoped_upload(&r, &input);
+                let parts = input.get("parts").cloned().unwrap_or(Value::Null);
+                tokio::task::spawn_blocking(move || crate::upload::put(&store, &id, &parts)).await?
+            }
+            O::UploadAdd => {
+                let store = self.engine.store.root().to_path_buf();
+                let id = self.scoped_upload(&r, &input);
+                let dir = workspace.clone();
+                let answer =
+                    tokio::task::spawn_blocking(move || crate::upload::add(&store, &id, &dir))
+                        .await??;
+                let added: Vec<String> = serde_json::from_value(answer["added"].clone())?;
+                self.files_changed(&project.id, &added);
+                Ok(answer)
+            }
+            O::UploadCancel => {
+                let store = self.engine.store.root().to_path_buf();
+                let id = self.scoped_upload(&r, &input);
+                tokio::task::spawn_blocking(move || crate::upload::cancel(&store, &id)).await??;
+                Ok(json!({}))
+            }
+            O::FileOpen => {
+                anyhow::ensure!(
+                    !from_link,
+                    "files on that computer cannot open in a local app"
+                );
+                crate::files::open_in_app(&workspace, self.resource_path(&r, &input))?;
+                Ok(Value::Null)
+            }
+            O::Workspace => {
+                let path = s("path");
+                if !path.trim().is_empty() {
+                    let conv = self.chat_conv(&r.location.session, "", true).await?;
+                    anyhow::ensure!(!conv.is_running(), "that chat is working");
+                    let mut ix = conv.ix.lock().await;
+                    ix.set_workspace(std::path::Path::new(path.trim()))?;
+                    conv.note(&ix);
+                }
+                let refreshed = self
+                    .engine
+                    .store
+                    .get_project(&project.id)?
+                    .unwrap_or(project);
+                let dir = self.engine.workspace_dir(&refreshed.id)?;
+                Ok(json!({ "path": dir, "chosen": refreshed.workspace.is_some() }))
+            }
+            O::State => {
+                let state = self
+                    .engine
+                    .store
+                    .get_research_state(&project.id)?
+                    .unwrap_or_default();
+                let artifacts = self.engine.store.list_artifacts(&project.id)?;
+                Ok(serde_json::to_value(StateView::build(
+                    state,
+                    STATE_DIGEST_ITEMS,
+                    &artifacts,
+                ))?)
+            }
+            O::Graph => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.resource_subscribers.subscribe(
+                    ResourceKind::Project,
+                    project.id.as_str(),
+                    "orch",
+                    r,
+                );
+                self.graph_with_doing(&o.graph())
+            }
+            O::TaskTrace => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.task_trace(&s("task"))?)?)
+            }
+            O::Task => {
+                let o = self.resource_orchestrator(&r).await?;
+                let id = s("task");
+                let task = o
+                    .task(&id)
+                    .ok_or_else(|| anyhow::anyhow!("no task `{id}`"))?;
+                let timeline: Vec<Value> = o
+                    .task_trace(&id)?
+                    .into_iter()
+                    .filter_map(|event| {
+                        let (line, tone) = event_line(&event.kind)?;
+                        Some(json!({
+                            "seq": event.seq, "at_ms": event.at_ms,
+                            "agent": event.kind.agent(), "line": line,
+                            "tone": tone, "event": event,
+                        }))
+                    })
+                    .collect();
+                Ok(json!({ "task": task, "timeline": timeline }))
+            }
+            O::OrchEvents => {
+                let o = self.resource_orchestrator(&r).await?;
+                let names = HashMap::new();
+                let limit = n("limit").unwrap_or(200).min(2000) as usize;
+                Ok(Value::Array(
+                    o.events(n("after").unwrap_or(0), limit)?
+                        .into_iter()
+                        .map(|event| orch_event(&self.labels, &names, event))
+                        .collect(),
+                ))
+            }
+            O::Agents => Ok(serde_json::to_value(
+                self.resource_orchestrator(&r).await?.agents(),
+            )?),
+            O::SpawnAgent => {
+                let o = self.resource_orchestrator(&r).await?;
+                let spec: AgentSpec = serde_json::from_value(input["spec"].clone())?;
+                match self.control_on(&o, Control::Spawn(Box::new(spec))).await? {
+                    ControlOutcome::Agent(agent) => Ok(serde_json::to_value(*agent)?),
+                    _ => Ok(json!({})),
+                }
+            }
+            O::SubmitTask => {
+                let o = self.resource_orchestrator(&r).await?;
+                let task: TaskSpec = serde_json::from_value(input["task"].clone())?;
+                match self
+                    .control_on(
+                        &o,
+                        Control::Submit {
+                            agent: s("agent"),
+                            task,
+                        },
+                    )
+                    .await?
+                {
+                    ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                    _ => Ok(json!({})),
+                }
+            }
+            O::CancelTask | O::RetryTask => {
+                let o = self.resource_orchestrator(&r).await?;
+                let control = if operation.kind == O::CancelTask {
+                    Control::Cancel { task: s("task") }
+                } else {
+                    Control::Retry { task: s("task") }
+                };
+                self.control_on(&o, control).await?;
+                Ok(json!({}))
+            }
+            O::Schedules => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.resource_subscribers.subscribe(
+                    ResourceKind::Project,
+                    project.id.as_str(),
+                    "orch",
+                    r,
+                );
+                let chat = Some(s("session")).filter(|c| !c.is_empty());
+                Ok(serde_json::to_value(
+                    ark_interact::orchestration::schedules(&o, chat.as_deref()),
+                )?)
+            }
+            O::Schedule => {
+                let o = self.resource_orchestrator(&r).await?;
+                let id = s("schedule");
+                let rec = o
+                    .schedule_record(&id)
+                    .ok_or_else(|| anyhow::anyhow!("no schedule `{id}`"))?;
+                let limit = n("limit").unwrap_or(20).min(50) as usize;
+                Ok(json!({
+                    "schedule": ark_interact::orchestration::schedule_view(&o, &rec),
+                    "runs": ark_interact::orchestration::schedule_runs(&o, &id, limit),
+                }))
+            }
+            O::Unschedule | O::SchedulePause | O::ScheduleResume | O::ScheduleRun => {
+                let o = self.resource_orchestrator(&r).await?;
+                let schedule = s("schedule");
+                let control = match operation.kind {
+                    O::Unschedule => Control::Unschedule { schedule },
+                    O::SchedulePause => Control::PauseSchedule { schedule },
+                    O::ScheduleResume => Control::ResumeSchedule { schedule },
+                    O::ScheduleRun => Control::RunSchedule { schedule },
+                    _ => unreachable!(),
+                };
+                match self.control_on(&o, control).await? {
+                    ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                    _ => Ok(json!({})),
+                }
+            }
+            O::Board => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.resource_subscribers.subscribe(
+                    ResourceKind::Project,
+                    project.id.as_str(),
+                    "orch",
+                    r,
+                );
+                let items = o.board();
+                let mut tasks = serde_json::Map::new();
+                for id in items.iter().flat_map(|work| work.tasks.iter()) {
+                    if let Some(task) = o.task(id) {
+                        tasks.insert(
+                            id.clone(),
+                            json!({
+                                "owner": task.owner, "state": task.state,
+                                "objective": task.objective, "result": task.result,
+                                "error": task.error, "outputs": task.outputs,
+                                "finished_ms": task.finished_ms, "question": task.question,
+                            }),
+                        );
+                    }
+                }
+                let agents: Vec<Value> = o
+                    .agents()
+                    .into_iter()
+                    .filter(|a| a.state != ark_interact::ark_orchestrate::AgentState::Terminated)
+                    .map(|a| json!({ "name": a.name, "role": a.spec.role, "state": a.state }))
+                    .collect();
+                Ok(json!({ "items": items, "tasks": tasks, "agents": agents }))
+            }
+            O::BoardAdd | O::BoardChange => {
+                let o = self.resource_orchestrator(&r).await?;
+                let control = if operation.kind == O::BoardAdd {
+                    Control::AddWork {
+                        title: s("title"),
+                        change: serde_json::from_value(input.clone())?,
+                    }
+                } else {
+                    Control::ChangeWork {
+                        item: s("item"),
+                        change: serde_json::from_value(input["change"].clone())?,
+                    }
+                };
+                match self.control_on(&o, control).await? {
+                    ControlOutcome::Work(work) => Ok(serde_json::to_value(*work)?),
+                    _ => Ok(json!({})),
+                }
+            }
+            O::BoardRemove | O::BoardGive => {
+                let o = self.resource_orchestrator(&r).await?;
+                let control = if operation.kind == O::BoardRemove {
+                    Control::RemoveWork { item: s("item") }
+                } else {
+                    Control::GiveWork {
+                        item: s("item"),
+                        agent: s("agent"),
+                    }
+                };
+                match self.control_on(&o, control).await? {
+                    ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                    _ => Ok(json!({})),
+                }
+            }
+            O::SuspendAgent | O::ResumeAgent | O::TerminateAgent | O::MessageAgent => {
+                let o = self.resource_orchestrator(&r).await?;
+                let control = match operation.kind {
+                    O::SuspendAgent => Control::Suspend { agent: s("agent") },
+                    O::ResumeAgent => Control::Resume { agent: s("agent") },
+                    O::TerminateAgent => Control::Terminate { agent: s("agent") },
+                    O::MessageAgent => Control::Message {
+                        agent: s("agent"),
+                        text: s("text"),
+                    },
+                    _ => unreachable!(),
+                };
+                match self.control_on(&o, control).await? {
+                    ControlOutcome::Messaged { delivered, .. } => {
+                        Ok(json!({ "delivered": delivered }))
+                    }
+                    _ => Ok(json!({})),
+                }
+            }
+            O::Profiles => Ok(Value::Array(
+                self.resource_orchestrator(&r)
+                    .await?
+                    .profiles()
+                    .iter()
+                    .map(|p| json!({ "name": p.name, "summary": p.summary }))
+                    .collect(),
+            )),
+            O::Grants => Ok(serde_json::to_value(
+                ark_sdk::prelude::ark_runtime::lasting_grants(
+                    &self.engine.store,
+                    project.id.as_str(),
+                ),
+            )?),
+            O::GrantRemove => Ok(json!({
+                "removed": ark_sdk::prelude::ark_runtime::remove_lasting_grant(
+                    &self.engine.store, project.id.as_str(), &s("class"),
+                )
+            })),
+            O::Skills => Ok(serde_json::to_value(ark_interact::skills::list_for(
+                &self.engine,
+                &project.id,
+                &self.chat_skills,
+            ))?),
+            O::Tools => {
+                let mut actions =
+                    ark_sdk::offered_tools(&self.engine, &self.caps.per_agent).actions();
+                actions.sort_by(|a, b| a.name.cmp(&b.name));
+                Ok(Value::Array(
+                    actions
+                        .iter()
+                        .map(|d| {
+                            json!({
+                                "name": d.name, "summary": d.summary, "risk": d.risk,
+                            })
+                        })
+                        .collect(),
+                ))
+            }
+            O::Usage => {
+                let conv = self.chat_conv(&r.location.session, "", true).await?;
+                anyhow::ensure!(!conv.is_running(), "usage updates when this turn finishes");
+                let usage = conv.ix.lock().await.usage_view();
+                Ok(json!({ "usage": usage, "running": false }))
+            }
+            O::Artifacts => {
+                let arts = self.engine.store.list_artifacts(&project.id)?;
+                Ok(Value::Array(
+                    arts.iter()
+                        .map(|artifact| {
+                            let summary = ArtifactSummary::from(artifact);
+                            let mut value = serde_json::to_value(&summary)?;
+                            let mut reference = r.clone();
+                            reference.id = summary.id.clone();
+                            value["ref"] = serde_json::to_value(reference)?;
+                            anyhow::Ok(value)
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?,
+                ))
+            }
+            O::Artifact => {
+                let mut value = self.artifact_in(&project.id, &r.id, &input)?;
+                value["ref"] = serde_json::to_value(&r)?;
+                if value["artifact"].is_object() {
+                    value["artifact"]["ref"] = serde_json::to_value(&r)?;
+                }
+                Ok(value)
+            }
+            O::Invocation => {
+                let id = r.id.trim_start_matches("inv:");
+                Ok(serde_json::to_value(
+                    self.engine.store.resolve_invocation(&project.id, id)?,
+                )?)
+            }
+            O::Picture => {
+                use base64::Engine as _;
+                let id = r.id.trim_start_matches("inv:");
+                anyhow::ensure!(
+                    self.engine
+                        .store
+                        .resolve_invocation(&project.id, id)?
+                        .is_some(),
+                    "there is no invocation `{id}` in this project"
+                );
+                let picture = self
+                    .engine
+                    .picture(&r.id)
+                    .ok_or_else(|| anyhow::anyhow!("that picture is no longer available"))?;
+                Ok(json!({
+                    "media_type": picture.media_type,
+                    "data": base64::engine::general_purpose::STANDARD.encode(picture.bytes.as_slice()),
+                }))
+            }
+            O::ComputerPicture => {
+                use base64::Engine as _;
+                let shot = self
+                    .computer
+                    .as_ref()
+                    .and_then(|c| c.picture(&s("app")))
+                    .ok_or_else(|| anyhow::anyhow!("no picture of {} yet", s("app")))?;
+                Ok(json!({
+                    "media_type": "image/png",
+                    "data": base64::engine::general_purpose::STANDARD.encode(&shot.png),
+                    "width": shot.width,
+                    "height": shot.height,
+                }))
+            }
+            O::RunAction => Ok(serde_json::to_value(
+                self.engine
+                    .run_action(
+                        &project.id,
+                        &s("action"),
+                        input.get("input").cloned().unwrap_or(Value::Null),
+                        input["approved"].as_bool().unwrap_or(false),
+                    )
+                    .await?,
+            )?),
+            O::Focus => {
+                let conv = self.chat_conv(&r.location.session, "", true).await?;
+                let focus: Option<Focus> = serde_json::from_value(input["focus"].clone()).ok();
+                *conv.focus.lock().unwrap() = Some(focus);
+                Ok(json!({}))
+            }
+            O::Extension => {
+                let name = s("name");
+                anyhow::ensure!(
+                    r.id == name,
+                    "the extension reference does not match `{name}`"
+                );
+                let handler = self
+                    .handlers
+                    .get(&name)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("no handler named `{name}`"))?;
+                let Handler::Project(handler) = handler else {
+                    anyhow::bail!("`{name}` is window-local")
+                };
+                handler(
+                    ProjectHandlerCtx {
+                        engine: self.engine.clone(),
+                        project,
+                        emitter: self.emitter(),
+                        links: self.links(),
+                    },
+                    input.get("params").cloned().unwrap_or(Value::Null),
+                )
+                .await
+            }
+            browser_op @ (O::BrowserOpen
+            | O::BrowserSnapshot
+            | O::BrowserNavigate
+            | O::BrowserResize
+            | O::BrowserPointer
+            | O::BrowserKey
+            | O::BrowserText
+            | O::BrowserWheel
+            | O::BrowserBack
+            | O::BrowserReload
+            | O::BrowserStop
+            | O::BrowserClose) => {
+                let surface = self
+                    .browser
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Chromium is not available on that computer"))?
+                    .surface(&r.location.session);
+                match browser_op {
+                    O::BrowserOpen | O::BrowserNavigate => {
+                        surface.open(&s("url")).await.map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserSnapshot => Ok(serde_json::to_value(
+                        surface
+                            .snapshot(
+                                n("width").unwrap_or(1280) as u32,
+                                n("height").unwrap_or(900) as u32,
+                            )
+                            .await
+                            .map_err(anyhow::Error::msg)?,
+                    )?),
+                    O::BrowserResize => {
+                        surface
+                            .resize(
+                                n("width").unwrap_or(1280) as u32,
+                                n("height").unwrap_or(900) as u32,
+                                input["scale"].as_f64().unwrap_or(1.0),
+                            )
+                            .await
+                            .map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserPointer => {
+                        surface
+                            .pointer(
+                                &s("event"),
+                                input["x"].as_f64().unwrap_or(0.0),
+                                input["y"].as_f64().unwrap_or(0.0),
+                                input["button"].as_str().unwrap_or("none"),
+                                n("clicks").unwrap_or(1) as u8,
+                            )
+                            .await
+                            .map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserKey => {
+                        surface
+                            .key(
+                                &s("event"),
+                                &s("key"),
+                                &s("code"),
+                                n("modifiers").unwrap_or(0) as u8,
+                            )
+                            .await
+                            .map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserText => {
+                        surface.text(&s("text")).await.map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserWheel => {
+                        surface
+                            .wheel(
+                                input["x"].as_f64().unwrap_or(0.0),
+                                input["y"].as_f64().unwrap_or(0.0),
+                                input["dx"].as_f64().unwrap_or(0.0),
+                                input["dy"].as_f64().unwrap_or(0.0),
+                            )
+                            .await
+                            .map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserBack => {
+                        surface.back().await.map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserReload => {
+                        surface.reload().await.map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserStop => {
+                        surface.stop().await.map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    O::BrowserClose => {
+                        surface.close().await.map_err(anyhow::Error::msg)?;
+                        Ok(json!({}))
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 
     /// Lock the current interaction for a request that changes it; refuse while a turn runs.
@@ -996,35 +1842,6 @@ impl Host {
                 Some(c) => Ok(json!({ "stopped": c.take_back() })),
                 None => anyhow::bail!("this app does not use the computer"),
             },
-            // The newest picture an agent took of an app's window, shown beside a question to
-            // click a spot in it (`{media_type, data, width, height}`).
-            "computer_picture" => {
-                use base64::Engine as _;
-                let shot = self
-                    .computer
-                    .as_ref()
-                    .and_then(|c| c.picture(&s("app")))
-                    .ok_or_else(|| anyhow::anyhow!("no picture of {} yet", s("app")))?;
-                Ok(json!({
-                    "media_type": "image/png",
-                    "data": base64::engine::general_purpose::STANDARD.encode(&shot.png),
-                    "width": shot.width,
-                    "height": shot.height,
-                }))
-            }
-            // The picture a step showed the model (`computer.see`), while the runtime still
-            // holds it (`{media_type, data}`).
-            "picture" => {
-                use base64::Engine as _;
-                let p = self
-                    .engine
-                    .picture(&s("invocation"))
-                    .ok_or_else(|| anyhow::anyhow!("that picture is no longer kept"))?;
-                Ok(json!({
-                    "media_type": p.media_type,
-                    "data": base64::engine::general_purpose::STANDARD.encode(p.bytes.as_slice()),
-                }))
-            }
             // Where a new chat can run (ADR 0052): this computer, by its name, and the person's
             // other computers with how each is.
             "places" => {
@@ -1115,13 +1932,28 @@ impl Host {
                     .ok_or_else(|| anyhow::anyhow!("nothing to answer for {}", s("target")))?;
                 let home = ark_os::dirs::home().unwrap_or_else(std::env::temp_dir);
                 let size = |k: &str, d: u64| n(k).unwrap_or(d).clamp(2, 1000) as u16;
-                Ok(json!(self.terminals.open_program(
+                let reference = ResourceRef {
+                    location: self.location_of(&self.cur()),
+                    kind: ResourceKind::Terminal,
+                    id: String::new(),
+                };
+                let opened = self.terminals.open_program(
                     &self.feed,
                     &argv,
                     home,
                     size("cols", 80),
-                    size("rows", 24)
-                )?))
+                    size("rows", 24),
+                    reference.clone(),
+                )?;
+                self.setup_terms
+                    .lock()
+                    .unwrap()
+                    .insert(opened.session.clone(), reference.location.session.clone());
+                let mut value = serde_json::to_value(&opened)?;
+                let mut reference = reference;
+                reference.id = opened.session;
+                value["ref"] = serde_json::to_value(reference)?;
+                Ok(value)
             }
             // Every chat running a turn now (`{session, title, project, input}`).
             "working" => Ok(Value::Array(self.working())),
@@ -1477,135 +2309,28 @@ impl Host {
             }
             // The Browser panel in a plain browser: whether a page lets a frame show it.
             "frame_check" => Ok(crate::frame::check(&s("url")).await),
-            // The Terminal panel: the project's shell in its folder (see `terminal`).
-            "term_open" => {
-                let project = self.project()?;
-                let dir = self.engine.workspace_dir(&project.id)?;
-                let size = |k: &str, d: u64| n(k).unwrap_or(d).clamp(2, 1000) as u16;
-                Ok(json!(self.terminals.open(
-                    &self.feed,
-                    project.id.as_str(),
-                    dir,
-                    size("cols", 80),
-                    size("rows", 24)
-                )?))
-            }
-            "term_write" => {
-                self.terminals.write(&s("session"), &s("data"))?;
-                Ok(Value::Null)
-            }
-            "term_resize" => {
-                let size = |k: &str| n(k).unwrap_or(24).clamp(2, 1000) as u16;
-                self.terminals
-                    .resize(&s("session"), size("cols"), size("rows"))?;
-                Ok(Value::Null)
-            }
-            "term_close" => {
-                self.terminals.close(&s("session"));
-                Ok(Value::Null)
-            }
-            // The Processes panel (ADR 0041): what agents started, its output, and Stop.
-            "procs" => match &self.processes {
-                Some(p) => Ok(json!(p.list())),
-                None => anyhow::bail!("this app does not start processes"),
-            },
-            "proc_output" => match self.processes.as_ref().and_then(|p| p.raw_output(&s("id"))) {
-                Some(out) => Ok(json!({ "data": out })),
-                None => anyhow::bail!("there is no process `{}`", s("id")),
-            },
-            "proc_stop" => match &self.processes {
-                Some(p) => match p.stop(&s("id")).await {
-                    Some(info) => Ok(json!(info)),
-                    None => anyhow::bail!("there is no process `{}`", s("id")),
-                },
-                None => anyhow::bail!("this app does not start processes"),
-            },
-            // The Files panel: the project's folder (see `files`).
-            "files" => {
-                let dir = self.engine.workspace_dir(&self.project()?.id)?;
-                let (entries, more) = crate::files::list(&dir, &s("path"))?;
-                Ok(json!({ "root": dir, "entries": entries, "more": more }))
-            }
-            "file_read" => {
-                let dir = self.engine.workspace_dir(&self.project()?.id)?;
-                crate::files::read(&dir, &s("path"))
-            }
-            "file_write" => {
-                let dir = self.engine.workspace_dir(&self.project()?.id)?;
-                let base = Some(s("base")).filter(|b| !b.is_empty());
-                crate::files::write(&dir, &s("path"), &s("text"), base.as_deref())
-            }
-            // The person's change to a spreadsheet or document: the edits the agent sends.
-            "file_edit" => {
-                let dir = self.engine.workspace_dir(&self.project()?.id)?;
-                let base = Some(s("base")).filter(|b| !b.is_empty());
-                let edits = params.get("edits").cloned().unwrap_or(Value::Null);
-                crate::files::edit(&dir, &s("path"), &edits, base.as_deref())
-            }
-            "file_media" => {
-                let dir = self.engine.workspace_dir(&self.project()?.id)?;
-                crate::files::media(&dir, &s("path"))
-            }
-            "file_version" => {
-                let dir = self.engine.workspace_dir(&self.project()?.id)?;
-                crate::files::version(&dir, &s("path"))
-            }
-            // A file put back as a call found it (ADR 0034); `undo` puts back what it replaced.
-            "file_restore" => {
-                let project = self.project()?.id;
-                let id = ark_sdk::prelude::ArtifactId(s("artifact"));
-                let restored = self.engine.restore_file(&project, &id)?;
-                self.files_changed(&project, std::slice::from_ref(&restored.path));
-                Ok(serde_json::to_value(restored)?)
+            "resource" => {
+                let reference: ResourceRef = serde_json::from_value(params["ref"].clone())?;
+                let operation: ResourceOperation =
+                    serde_json::from_value(params["operation"].clone())?;
+                self.resource_call(reference, operation, false).await
             }
             // A folder from another computer becomes a project here (see `upload`, ADR 0030):
             // its files in parts, then the project. Neither waits for a running turn.
-            "upload_parts" => {
+            "upload_project_parts" => {
                 let (store, id) = (self.engine.store.root().to_path_buf(), s("upload"));
                 let parts = params.get("parts").cloned().unwrap_or(Value::Null);
                 tokio::task::spawn_blocking(move || crate::upload::put(&store, &id, &parts)).await?
             }
-            "upload_project" => {
+            "upload_project_finish" => {
                 let (engine, id, name) = (self.engine.clone(), s("upload"), s("name"));
                 tokio::task::spawn_blocking(move || crate::upload::finish(&engine, &id, &name))
                     .await?
             }
-            // Files dropped on a chat: into the open project's folder (ADR 0035).
-            "upload_add" => {
-                let project = self.project()?.id;
-                let dir = self.engine.workspace_dir(&project)?;
-                let (store, id) = (self.engine.store.root().to_path_buf(), s("upload"));
-                let answer =
-                    tokio::task::spawn_blocking(move || crate::upload::add(&store, &id, &dir))
-                        .await??;
-                let added: Vec<String> = serde_json::from_value(answer["added"].clone())?;
-                self.files_changed(&project, &added);
-                Ok(answer)
-            }
-            "upload_cancel" => {
+            "upload_project_cancel" => {
                 let (store, id) = (self.engine.store.root().to_path_buf(), s("upload"));
                 tokio::task::spawn_blocking(move || crate::upload::cancel(&store, &id)).await??;
                 Ok(json!({}))
-            }
-            // On the computer the runtime runs on: the window offers it only when that is the
-            // person's own (`ark.isLocal()`).
-            "file_open" => {
-                let dir = self.engine.workspace_dir(&self.project()?.id)?;
-                crate::files::open_in_app(&dir, &s("path"))?;
-                Ok(Value::Null)
-            }
-            // The folder the project's tools work in; `path` changes it.
-            "workspace" => {
-                let path = s("path");
-                if !path.trim().is_empty() {
-                    let dir = std::path::PathBuf::from(path.trim());
-                    self.change(move |ix| ix.set_workspace(&dir).map(|_| ()))
-                        .await?;
-                }
-                // Read without waiting for a running turn.
-                let project = self.project()?;
-                let dir = self.engine.workspace_dir(&project.id)?;
-                Ok(json!({ "path": dir, "chosen": project.workspace.is_some() }))
             }
             "model" => {
                 let spec = s("spec");
@@ -1655,246 +2380,6 @@ impl Host {
                 Ok(json!({ "call": call, "invocation": inv, "entries": entries }))
             }
             "context" => Ok(serde_json::to_value(self.context().await?)?),
-            // The agent and task graph; follow it with `orch` events after its `seq`.
-            "graph" => match self.orchestrator() {
-                Ok(o) => Ok(self.graph_with_doing(&o.graph())?),
-                Err(_) => Ok(Value::Null),
-            },
-            "task_trace" => Ok(serde_json::to_value(
-                self.orchestrator()?.task_trace(&s("task"))?,
-            )?),
-            "task" => {
-                let o = self.orchestrator()?;
-                let id = s("task");
-                let task = o
-                    .task(&id)
-                    .ok_or_else(|| anyhow::anyhow!("no task `{id}`"))?;
-                // Each event with the line a timeline shows for it (from ark-interact).
-                let timeline: Vec<Value> = o
-                    .task_trace(&id)?
-                    .into_iter()
-                    .filter_map(|e| {
-                        let (line, tone) = event_line(&e.kind)?;
-                        Some(json!({
-                            "seq": e.seq,
-                            "at_ms": e.at_ms,
-                            "agent": e.kind.agent(),
-                            "line": line,
-                            "tone": tone,
-                            "event": e,
-                        }))
-                    })
-                    .collect();
-                Ok(json!({ "task": task, "timeline": timeline }))
-            }
-            // Stored events after `after`, worded as the live `orch` events are; a window
-            // that opens late reads the recent past with it.
-            "orch_events" => {
-                let names = HashMap::new();
-                let limit = n("limit").unwrap_or(200).min(2000) as usize;
-                let events = self
-                    .orchestrator()?
-                    .events(n("after").unwrap_or(0), limit)?;
-                Ok(Value::Array(
-                    events
-                        .into_iter()
-                        .map(|e| orch_event(&self.labels, &names, e))
-                        .collect(),
-                ))
-            }
-            "agents" => Ok(serde_json::to_value(self.orchestrator()?.agents())?),
-            // Changes to the agents go through ark-interact's `control`, as the terminal's
-            // `/agent` and `/task` do; only the answer's shape is the protocol's.
-            "spawn_agent" => {
-                let spec: AgentSpec = serde_json::from_value(params["spec"].clone())?;
-                match self.control(Control::Spawn(Box::new(spec))).await? {
-                    ControlOutcome::Agent(a) => Ok(serde_json::to_value(*a)?),
-                    _ => Ok(json!({})),
-                }
-            }
-            "submit_task" => {
-                let task: TaskSpec = serde_json::from_value(params["task"].clone())?;
-                match self
-                    .control(Control::Submit {
-                        agent: s("agent"),
-                        task,
-                    })
-                    .await?
-                {
-                    ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
-                    _ => Ok(json!({})),
-                }
-            }
-            "cancel_task" => self.control_done(Control::Cancel { task: s("task") }).await,
-            "retry_task" => self.control_done(Control::Retry { task: s("task") }).await,
-            // What runs on its own: every schedule of the project, or those reporting to the
-            // chat `session`, as ark-interact words them.
-            "schedules" => match self.orchestrator() {
-                Ok(o) => {
-                    let chat = Some(s("session")).filter(|c| !c.is_empty());
-                    Ok(serde_json::to_value(
-                        ark_interact::orchestration::schedules(&o, chat.as_deref()),
-                    )?)
-                }
-                Err(_) => Ok(json!([])),
-            },
-            // One schedule and its runs, newest first.
-            "schedule" => {
-                let o = self.orchestrator()?;
-                let id = s("schedule");
-                let rec = o
-                    .schedule_record(&id)
-                    .ok_or_else(|| anyhow::anyhow!("no schedule `{id}`"))?;
-                let limit = n("limit").unwrap_or(20).min(50) as usize;
-                Ok(json!({
-                    "schedule": ark_interact::orchestration::schedule_view(&o, &rec),
-                    "runs": ark_interact::orchestration::schedule_runs(&o, &id, limit),
-                }))
-            }
-            // Stop a task an agent runs at set times (the graph's `schedules`).
-            "unschedule" => {
-                self.control_done(Control::Unschedule {
-                    schedule: s("schedule"),
-                })
-                .await
-            }
-            "schedule_pause" => {
-                self.control_done(Control::PauseSchedule {
-                    schedule: s("schedule"),
-                })
-                .await
-            }
-            "schedule_resume" => {
-                self.control_done(Control::ResumeSchedule {
-                    schedule: s("schedule"),
-                })
-                .await
-            }
-            "schedule_run" => match self
-                .control(Control::RunSchedule {
-                    schedule: s("schedule"),
-                })
-                .await?
-            {
-                ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
-                _ => Ok(json!({})),
-            },
-            // The project's board, with what the page shows of the tasks run for its items
-            // and the agents an item can be given to. Follow it with `orch` events (`work`).
-            "board" => {
-                let o = match self.orchestrator() {
-                    Ok(o) => o,
-                    Err(_) => return Ok(Value::Null),
-                };
-                let items = o.board();
-                let mut tasks = serde_json::Map::new();
-                for id in items.iter().flat_map(|w| w.tasks.iter()) {
-                    if let Some(t) = o.task(id) {
-                        tasks.insert(
-                            id.clone(),
-                            json!({
-                                "owner": t.owner,
-                                "state": t.state,
-                                "objective": t.objective,
-                                "result": t.result,
-                                "error": t.error,
-                                "outputs": t.outputs,
-                                "finished_ms": t.finished_ms,
-                                "question": t.question,
-                            }),
-                        );
-                    }
-                }
-                let agents: Vec<Value> = o
-                    .agents()
-                    .into_iter()
-                    .filter(|a| a.state != ark_interact::ark_orchestrate::AgentState::Terminated)
-                    .map(|a| json!({ "name": a.name, "role": a.spec.role, "state": a.state }))
-                    .collect();
-                Ok(json!({ "items": items, "tasks": tasks, "agents": agents }))
-            }
-            // Changes to the board go through ark-interact's `control`, as `/board` does.
-            "board_add" => {
-                let change: WorkChange = serde_json::from_value(params.clone())?;
-                self.board_control(Control::AddWork {
-                    title: s("title"),
-                    change,
-                })
-                .await
-            }
-            "board_change" => {
-                let change: WorkChange = serde_json::from_value(params["change"].clone())?;
-                self.board_control(Control::ChangeWork {
-                    item: s("item"),
-                    change,
-                })
-                .await
-            }
-            "board_remove" => {
-                self.control_done(Control::RemoveWork { item: s("item") })
-                    .await
-            }
-            "board_give" => match self
-                .control(Control::GiveWork {
-                    item: s("item"),
-                    agent: s("agent"),
-                })
-                .await?
-            {
-                ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
-                _ => Ok(json!({})),
-            },
-            "suspend_agent" => {
-                self.control_done(Control::Suspend { agent: s("agent") })
-                    .await
-            }
-            "resume_agent" => {
-                self.control_done(Control::Resume { agent: s("agent") })
-                    .await
-            }
-            "terminate_agent" => {
-                self.control_done(Control::Terminate { agent: s("agent") })
-                    .await
-            }
-            "message_agent" => match self
-                .control(Control::Message {
-                    agent: s("agent"),
-                    text: s("text"),
-                })
-                .await?
-            {
-                ControlOutcome::Messaged { delivered, .. } => Ok(json!({ "delivered": delivered })),
-                _ => Ok(json!({})),
-            },
-            // The profiles the app offers, which an agent's `profile_name` chooses from.
-            "profiles" => Ok(Value::Array(
-                self.orchestrator()?
-                    .profiles()
-                    .iter()
-                    .map(|p| json!({ "name": p.name, "summary": p.summary }))
-                    .collect(),
-            )),
-            // What agents may do without asking in the open project, lasting ("Always in this
-            // project"); the same as `/grants` in a terminal.
-            "grants" => {
-                let project = self.project()?;
-                Ok(serde_json::to_value(
-                    ark_sdk::prelude::ark_runtime::lasting_grants(
-                        &self.engine.store,
-                        project.id.as_str(),
-                    ),
-                )?)
-            }
-            "grant_remove" => {
-                let project = self.project()?;
-                Ok(
-                    json!({ "removed": ark_sdk::prelude::ark_runtime::remove_lasting_grant(
-                    &self.engine.store,
-                    project.id.as_str(),
-                    &s("class"),
-                ) }),
-                )
-            }
             // What ARK can use: one list with the terminal's `/connect`. Connecting answers the
             // sign-in page for the page to open; it finishes in the background.
             "capabilities" => Ok(serde_json::to_value(
@@ -1923,16 +2408,6 @@ impl Host {
                 ark_interact::capabilities::disconnect(self.caps.connections.as_ref(), &s("id"))
                     .await?,
             )?),
-            // Skills of the project folder and the store; `chat` says whether the conversation
-            // may read each (agents choose their own in their spec).
-            "skills" => {
-                let project = self.project()?;
-                Ok(serde_json::to_value(ark_interact::skills::list_for(
-                    &self.engine,
-                    &project.id,
-                    &self.chat_skills,
-                ))?)
-            }
             // MCP plugins: the engine's, worded and run off the async runtime by ark-interact,
             // as `/plugin` is. None waits for a running turn; a change applies from the next.
             // `plugins` is null when the app has none (it was not opened on a store root).
@@ -1966,81 +2441,17 @@ impl Host {
             "plugin_restart" => Ok(serde_json::to_value(
                 ark_interact::plugins::restart(self.engine.clone(), s("name")).await?,
             )?),
-            // The actions a turn is offered, which an agent's `tools` patterns choose from.
-            "tools" => {
-                let mut actions =
-                    ark_sdk::offered_tools(&self.engine, &self.caps.per_agent).actions();
-                actions.sort_by(|a, b| a.name.cmp(&b.name));
-                Ok(Value::Array(
-                    actions
-                        .iter()
-                        .map(|d| json!({ "name": d.name, "summary": d.summary, "risk": d.risk }))
-                        .collect(),
-                ))
-            }
-            "usage" => {
-                if !self.is_running() {
-                    self.refresh().await;
-                }
-                Ok(
-                    json!({ "usage": self.snapshot.lock().unwrap().usage, "running": self.is_running() }),
-                )
-            }
-            "state" => {
-                let pid = self.project()?.id;
-                let state = self
-                    .engine
-                    .store
-                    .get_research_state(&pid)?
-                    .unwrap_or_default();
-                let artifacts = self.engine.store.list_artifacts(&pid)?;
-                Ok(serde_json::to_value(StateView::build(
-                    state,
-                    STATE_DIGEST_ITEMS,
-                    &artifacts,
-                ))?)
-            }
-            "artifacts" => {
-                let arts = self.engine.store.list_artifacts(&self.project()?.id)?;
-                let list: Vec<ArtifactSummary> = arts.iter().map(ArtifactSummary::from).collect();
-                Ok(serde_json::to_value(list)?)
-            }
-            "artifact" => self.artifact(&s("id"), &params),
-            "invocation" => {
-                let pid = self.project()?.id;
-                let id = s("id");
-                let id = id.trim_start_matches("inv:");
-                Ok(serde_json::to_value(
-                    self.engine.store.resolve_invocation(&pid, id)?,
-                )?)
-            }
-            "run_action" => {
-                let pid = self.project()?.id;
-                let approved = params
-                    .get("approved")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let inv = self
-                    .engine
-                    .run_action(&pid, &s("action"), params["input"].clone(), approved)
-                    .await?;
-                Ok(serde_json::to_value(inv)?)
-            }
-            "focus" => {
-                let focus: Option<Focus> = serde_json::from_value(params["focus"].clone()).ok();
-                *self.focus.lock().unwrap() = Some(focus);
-                Ok(json!({}))
-            }
             "ext" => {
                 let name = s("name");
                 let h = self
                     .handlers
                     .get(&name)
-                    .cloned()
                     .ok_or_else(|| anyhow::anyhow!("no handler named `{name}`"))?;
-                let ctx = HandlerCtx {
+                let Handler::Window(h) = h else {
+                    anyhow::bail!("`{name}` is a project resource and needs a resource reference")
+                };
+                let ctx = WindowHandlerCtx {
                     engine: self.engine.clone(),
-                    project: self.project()?,
                     emitter: self.emitter(),
                     links: self.links(),
                 };
@@ -2278,6 +2689,7 @@ impl Host {
     fn summary_of(&self, conv: &Arc<Conv>) -> Value {
         let mut v = conv.about.lock().unwrap().summary.clone();
         v["running"] = json!(conv.is_running());
+        v["location"] = json!(self.location_of(conv));
         v
     }
 
@@ -2298,6 +2710,35 @@ impl Host {
         let s = |k: &str| params[k].as_str().unwrap_or("").to_string();
         let session = s("session");
         match method {
+            "chat_resource" => {
+                let reference: ResourceRef = serde_json::from_value(params["ref"].clone())?;
+                anyhow::ensure!(
+                    reference.location.session == session,
+                    "the resource belongs to another chat"
+                );
+                let operation: ResourceOperation =
+                    serde_json::from_value(params["operation"].clone())?;
+                self.resource_call(reference, operation, true).await
+            }
+            "chat_forget_resources" => {
+                self.resource_subscribers.remove_session(&session);
+                let setup: Vec<String> = self
+                    .setup_terms
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|(_, owner)| *owner == &session)
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                for id in setup {
+                    self.terminals.close(&id);
+                    self.setup_terms.lock().unwrap().remove(&id);
+                }
+                if let Some(browser) = &self.browser {
+                    let _ = browser.surface(&session).close().await;
+                }
+                Ok(json!({ "forgotten": true }))
+            }
             "chat_new" => {
                 let p = ark_interact::held::origin_project(
                     &self.engine,
@@ -2457,37 +2898,38 @@ impl Host {
                 };
                 let home = ark_os::dirs::home().unwrap_or_else(std::env::temp_dir);
                 let size = |k: &str, d: u64| params[k].as_u64().unwrap_or(d).clamp(2, 1000) as u16;
+                let record = self
+                    .engine
+                    .store
+                    .get_session(&session)?
+                    .ok_or_else(|| anyhow::anyhow!("there is no chat `{session}` here"))?;
+                let reference = ResourceRef {
+                    location: ResourceLocation {
+                        runtime: ark_interact::held::runtime_id(&self.engine),
+                        project: record["project"].as_str().unwrap_or_default().to_string(),
+                        session: session.clone(),
+                    },
+                    kind: ResourceKind::Terminal,
+                    id: String::new(),
+                };
                 let opened = self.terminals.open_program(
                     &self.feed,
                     &argv,
                     home,
                     size("cols", 80),
                     size("rows", 24),
-                )?;
+                    reference.clone(),
+                );
+                let opened = opened?;
                 self.setup_terms
                     .lock()
                     .unwrap()
-                    .insert(opened.session.clone());
-                Ok(json!(opened))
-            }
-            "chat_term_write" | "chat_term_resize" | "chat_term_close" => {
-                let id = s("id");
-                anyhow::ensure!(
-                    self.setup_terms.lock().unwrap().contains(&id),
-                    "no terminal `{id}` was opened from there"
-                );
-                match method {
-                    "chat_term_write" => self.terminals.write(&id, &s("data"))?,
-                    "chat_term_resize" => {
-                        let size = |k: &str| params[k].as_u64().unwrap_or(24).clamp(2, 1000) as u16;
-                        self.terminals.resize(&id, size("cols"), size("rows"))?
-                    }
-                    _ => {
-                        self.terminals.close(&id);
-                        self.setup_terms.lock().unwrap().remove(&id);
-                    }
-                }
-                Ok(Value::Null)
+                    .insert(opened.session.clone(), session.clone());
+                let mut reference = reference;
+                reference.id = opened.session.clone();
+                let mut value = serde_json::to_value(opened)?;
+                value["ref"] = serde_json::to_value(reference)?;
+                Ok(value)
             }
             // A key the person agreed to send from their other computer: saved here as
             // `api_key_save` saves one (checked with the provider first).
@@ -2551,16 +2993,17 @@ impl Host {
             .ok_or_else(|| anyhow::anyhow!("no context yet"))
     }
 
-    /// An artifact of the project, or of one of its orchestrated agents (each works in a
-    /// child project, and what a task produced stays there).
-    fn find_artifact(&self, id: &str) -> anyhow::Result<ark_sdk::prelude::Artifact> {
-        let pid = self.project()?.id;
+    fn find_artifact_in(
+        &self,
+        pid: &ProjectId,
+        id: &str,
+    ) -> anyhow::Result<ark_sdk::prelude::Artifact> {
         let store = &self.engine.store;
-        if let Some(a) = store.resolve_artifact(&pid, id)? {
+        if let Some(a) = store.resolve_artifact(pid, id)? {
             return Ok(a);
         }
         for p in store.list_projects()? {
-            if p.parent.as_ref() == Some(&pid) {
+            if p.parent.as_ref() == Some(pid) {
                 if let Some(a) = store.resolve_artifact(&p.id, id)? {
                     return Ok(a);
                 }
@@ -2569,8 +3012,8 @@ impl Host {
         anyhow::bail!("artifact not found")
     }
 
-    fn artifact(&self, id: &str, params: &Value) -> anyhow::Result<Value> {
-        let art = self.find_artifact(id)?;
+    fn artifact_in(&self, pid: &ProjectId, id: &str, params: &Value) -> anyhow::Result<Value> {
+        let art = self.find_artifact_in(pid, id)?;
         let bytes = self.engine.store.read_blob(&art.id)?;
         let offset = params.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
         let length = params
@@ -2631,7 +3074,7 @@ impl Host {
         self.emit(json!({ "kind": "turn_started", "input": input, "session": session }));
         self.emit_working();
         let mut ix = conv.ix.lock().await;
-        if let Some(focus) = self.focus.lock().unwrap().take() {
+        if let Some(focus) = conv.focus.lock().unwrap().take() {
             ix.set_focus(focus);
         }
         let feed = self.feed.clone();
@@ -2724,16 +3167,35 @@ async fn forward_processes(
         match rx.recv().await {
             Ok(ev) => {
                 let Some(h) = host.upgrade() else { break };
-                // `here`: the process runs in the project the window shows, so a page it opens
-                // belongs there.
-                let here = h
-                    .project()
-                    .ok()
-                    .and_then(|p| h.engine.workspace_dir(&p.id).ok())
-                    .is_some_and(|dir| {
-                        proc_project(&ev).is_some_and(|p| std::path::Path::new(p) == dir)
-                    });
-                h.emit(json!({ "kind": "proc", "event": ev, "here": here }));
+                let Some(id) = proc_id(&ev) else { continue };
+                let root = proc_project(&ev).map(str::to_string).or_else(|| {
+                    h.processes
+                        .as_ref()
+                        .and_then(|processes| processes.get(id))
+                        .map(|process| process.project)
+                });
+                let Some(root) = root else { continue };
+                let project = h.engine.store.list_projects().ok().and_then(|projects| {
+                    projects.into_iter().find(|p| {
+                        h.engine
+                            .workspace_dir(&p.id)
+                            .is_ok_and(|dir| dir == std::path::Path::new(&root))
+                    })
+                });
+                let Some(project) = project else { continue };
+                for mut reference in
+                    h.resource_subscribers
+                        .aliases(ResourceKind::Process, project.id.as_str(), id)
+                {
+                    reference.id = id.to_string();
+                    h.emit(json!({
+                        "kind": "proc",
+                        "session": reference.location.session,
+                        "ref": reference,
+                        "event": ev,
+                        "here": true,
+                    }));
+                }
             }
             // A window that missed output reads it again (`proc_output`).
             Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -2747,6 +3209,14 @@ fn proc_project(ev: &ark_sdk::prelude::ark_proc::Event) -> Option<&str> {
     match ev {
         Event::Started { process } | Event::Changed { process, .. } => Some(&process.project),
         Event::Output { .. } => None,
+    }
+}
+
+fn proc_id(ev: &ark_sdk::prelude::ark_proc::Event) -> Option<&str> {
+    use ark_sdk::prelude::ark_proc::Event;
+    match ev {
+        Event::Started { process } | Event::Changed { process, .. } => Some(&process.id),
+        Event::Output { id, .. } => Some(id),
     }
 }
 

@@ -69,7 +69,7 @@ export class Pane {
   add(key, title, ic, make, opts = {}) {
     const view = h("div.pane-view", { "data-key": key });
     if (opts.fill) view.classList.add("fill");
-    const tab = { key, title, icon: ic, make, view, ctl: null, built: false, params: null, wide: !!opts.wide };
+    const tab = { key, title, icon: ic, make, view, ctl: null, built: false, params: null, wide: !!opts.wide, api: opts.api || this.api };
     this.tabs.set(key, tab);
     this.body.append(view);
     this.renderTabs();
@@ -119,6 +119,24 @@ export class Pane {
       t.built = true;
       t.params = params;
       t.ctl = t.make(t.view, params) || {};
+      if (t.api.remoteResource) {
+        const unavailable = h("div.resource-unavailable", "That computer is not answering");
+        t.view.append(unavailable);
+        const connection = () => {
+          const offline = !t.api.online();
+          t.view.toggleAttribute("data-resource-offline", offline);
+          unavailable.hidden = !offline;
+          for (const child of t.view.children) if (child !== unavailable) child.inert = offline;
+          if (!offline) {
+            if (typeof t.ctl?.reconnect === "function") t.ctl.reconnect();
+            else t.ctl?.refresh?.();
+          }
+        };
+        const off = t.api.on("ark:resource_connection", connection);
+        const dispose = t.ctl.dispose?.bind(t.ctl);
+        t.ctl.dispose = () => { off(); dispose?.(); };
+        connection();
+      }
     } else if (params !== undefined && params !== t.params) {
       t.params = params;
       if (t.ctl.update) t.ctl.update(params);
@@ -135,7 +153,7 @@ export class Pane {
     const t = this.isOpen && this.active ? this.tabs.get(this.active) : null;
     let focus = null;
     try { focus = t?.ctl?.focus?.() || null; } catch {}
-    this.api.setFocus(focus);
+    (t?.api || this.api).setFocus(focus);
   }
 
   remove(key) {
@@ -151,8 +169,9 @@ export class Pane {
   }
 
   close() {
+    const t = this.active ? this.tabs.get(this.active) : null;
     this.app.dataset.pane = "closed";
-    this.reportFocus();
+    (t?.api || this.api).setFocus(null);
   }
 
   toggle() {
@@ -160,14 +179,10 @@ export class Pane {
     else this.open();
   }
 
-  /// A new session: evidence tabs belong to the old one; app panels stay. Files belong to
-  /// their project's folder: another project closes them.
+  /// A new session does not rebind or discard open resources. Each tab retains the location it
+  /// captured when it opened and can keep operating after the window changes chats.
   reset(project) {
-    const moved = project !== this.project;
     this.project = project;
-    for (const key of [...this.tabs.keys()]) {
-      if (key.startsWith("inv:") || (moved && key.startsWith("file:"))) this.remove(key);
-    }
   }
 }
 
@@ -219,7 +234,7 @@ export function artifactView(el, api, artifactId, viewerId, params) {
     s.current = v;
     for (const b of s.head.querySelectorAll(".seg")) b.setAttribute("aria-pressed", String(b.dataset.id === (v?.id || "raw")));
     if (v) {
-      try { s.ctl = v.render(s.body, s.artifact, window.ark, prm) || null; } catch (e) { s.body.append(h("div.call-err", String(e))); }
+      try { s.ctl = v.render(s.body, s.artifact, api, prm) || null; } catch (e) { s.body.append(h("div.call-err", String(e))); }
     } else {
       genericArtifact(s.body, s.raw);
     }
@@ -249,7 +264,7 @@ export function artifactView(el, api, artifactId, viewerId, params) {
     });
     if (actions.length) {
       s.head.append(h("div.art-actions", actions.map((x) =>
-        h("button.btn.small", { onclick: () => x.run({ artifact: a }, window.ark) }, x.icon ? icon(x.icon) : null, x.label))));
+        h("button.btn.small", { onclick: () => x.run({ artifact: a }, api) }, x.icon ? icon(x.icon) : null, x.label))));
     }
     clear(el).append(s.head, s.body);
     const primary = (v) => {

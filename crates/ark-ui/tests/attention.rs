@@ -82,6 +82,18 @@ async fn open(dir: &std::path::Path, saves: Arc<AtomicUsize>) -> Arc<Host> {
     ArkUi::new(app).open().await.unwrap().0
 }
 
+async fn project_call(host: &Arc<Host>, operation: &str, input: Value) -> anyhow::Result<Value> {
+    let location = host.call("summary", json!({})).await?["location"].clone();
+    host.call(
+        "resource",
+        json!({
+            "ref": { "location": location, "kind": "project", "id": "" },
+            "operation": { "kind": operation, "input": input },
+        }),
+    )
+    .await
+}
+
 async fn wait_for(
     rx: &mut tokio::sync::broadcast::Receiver<Value>,
     what: &str,
@@ -236,13 +248,15 @@ async fn one_list_across_projects_in_both_front_ends() {
     // A question in the first project.
     let (a, _) = chat_in(&host, "test").await;
     let mut rx = host.subscribe();
-    host.call(
+    project_call(
+        &host,
         "spawn_agent",
         json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
     )
     .await
     .unwrap();
-    host.call(
+    project_call(
+        &host,
         "submit_task",
         json!({ "agent": "scribe", "task": { "objective": "file the notes" } }),
     )
@@ -281,13 +295,15 @@ async fn the_terminal_answers_a_question_in_another_project() {
     let host = open(dir.path(), saves.clone()).await;
     chat_in(&host, "books").await;
     let mut rx = host.subscribe();
-    host.call(
+    project_call(
+        &host,
         "spawn_agent",
         json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
     )
     .await
     .unwrap();
-    host.call(
+    project_call(
+        &host,
         "submit_task",
         json!({ "agent": "scribe", "task": { "objective": "file the notes" } }),
     )
@@ -424,14 +440,16 @@ async fn a_post_waits_until_a_window_shows_its_chat() {
     let dir = tempfile::tempdir().unwrap();
     let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
     let (_, chat) = chat_in(&host, "books").await;
-    host.call(
+    project_call(
+        &host,
         "spawn_agent",
         json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
     )
     .await
     .unwrap();
     let mut rx = host.subscribe();
-    host.call(
+    project_call(
+        &host,
         "submit_task",
         json!({ "agent": "scribe", "task": { "objective": "say hello", "report_to": chat } }),
     )

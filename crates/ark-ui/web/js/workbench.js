@@ -44,8 +44,42 @@ export async function xterm() {
 
 function terminal(el, params, ark) {
   el.classList.add("wb-terminal");
-  const s = { session: null, term: null, fit: null, pending: params?.locator || "", offs: [] };
-  const write = (data) => s.session && ark.call("term_write", { session: s.session, data }).catch(() => {});
+  const s = { session: null, ref: null, generation: null, cursor: 0, term: null, fit: null, pending: params?.locator || "", offs: [], ended: false };
+  const gap = h("div.term-gap", { role: "status", hidden: true }, "Earlier output unavailable");
+  const reopen = h("button.btn.small.term-reopen", { type: "button", hidden: true }, "Reopen");
+  el.append(gap, reopen);
+  const write = (data) => s.session && !s.ended && ark.call("term_write", { session: s.session, data }).catch(() => {});
+  const ended = () => {
+    if (s.ended) return;
+    s.ended = true;
+    if (s.term) s.term.options.disableStdin = true;
+    s.term?.write("\r\n\x1b[2m[shell exited]\x1b[0m\r\n");
+    reopen.hidden = false;
+  };
+  const adopt = (info) => {
+    s.session = info.session;
+    s.ref = info.ref;
+    s.generation = info.generation;
+    s.cursor = info.cursor || 0;
+    s.ended = false;
+    reopen.hidden = true;
+    if (s.term) s.term.options.disableStdin = false;
+    if (info.ended) ended();
+  };
+  reopen.onclick = async () => {
+    reopen.disabled = true;
+    try {
+      if (s.ref) await ark.resource(s.ref, "terminal_close", { session: s.session });
+      const info = await ark.call("term_open", { cols: s.term?.cols || 80, rows: s.term?.rows || 24 });
+      adopt(info);
+      if (info.history) s.term?.write(info.history);
+      s.term?.focus();
+    } catch (e) {
+      s.term?.write(`\r\n\x1b[31m${e.message}\x1b[0m\r\n`);
+    } finally {
+      reopen.disabled = false;
+    }
+  };
   const fit = () => { try { s.fit?.fit(); } catch {} };
   const theme = () => ({
     background: css("--pane") || "#181818",
@@ -77,8 +111,10 @@ function terminal(el, params, ark) {
     // Output can arrive before `term_open` answers with the session id; hold it until then.
     const early = [];
     const output = (p) => {
-      if (p.exit) return term.write("\r\n\x1b[2m[shell exited]\x1b[0m\r\n");
+      if (p.generation && s.generation && p.generation !== s.generation) return;
+      if (p.exit) return ended();
       term.write(p.data);
+      if (p.cursor) s.cursor = p.cursor;
       // Type a presented command once the shell has drawn its prompt.
       if (s.pending) {
         const cmd = s.pending;
@@ -88,14 +124,14 @@ function terminal(el, params, ark) {
     };
     s.offs.push(ark.on("ark:term", (p) => {
       if (!s.session) early.push(p);
-      else if (p.session === s.session) output(p);
+      else if (p.ref ? JSON.stringify(p.ref) === JSON.stringify(s.ref) : p.session === s.session) output(p);
     }));
     try {
       const info = await ark.call("term_open", { cols: term.cols, rows: term.rows });
-      s.session = info.session;
+      adopt(info);
       if (info.reattached && info.history) term.write(info.history);
       // A re-attached shell's history already holds what arrived early.
-      for (const p of early.splice(0)) if (!info.reattached && p.session === s.session) output(p);
+      for (const p of early.splice(0)) if (!info.reattached && (p.ref ? JSON.stringify(p.ref) === JSON.stringify(s.ref) : p.session === s.session)) output(p);
       if (info.reattached && s.pending) {
         write(typedCommand(s.pending));
         s.pending = "";
@@ -111,15 +147,30 @@ function terminal(el, params, ark) {
   ro.observe(el);
   const retheme = () => s.term && (s.term.options.theme = theme());
   addEventListener("ark:theme", retheme);
+  const replay = async () => {
+    if (!s.session || !s.generation) return;
+    try {
+      const r = await ark.call("term_read", { session: s.session, generation: s.generation, after: s.cursor });
+      if (r.gap) gap.hidden = false;
+      if (r.data) s.term?.write(r.data);
+      s.cursor = r.cursor;
+      if (r.ended) ended();
+    } catch (e) {
+      s.term?.write(`\r\n\x1b[2m[${e.message}]\x1b[0m\r\n`);
+    }
+  };
+  s.offs.push(ark.on("ark:connected", replay));
   return {
     focus: () => ({ surface: { kind_tag: "terminal", title: "Terminal" } }),
     update: (p) => p?.locator && write(typedCommand(p.locator)),
     refresh: () => setTimeout(() => { fit(); s.term?.focus(); }, 0),
+    reconnect: replay,
     // Closing the tab keeps the shell; reopening re-attaches with its scrollback.
     dispose: () => {
       ro.disconnect();
       removeEventListener("ark:theme", retheme);
       for (const off of s.offs) off();
+      if (s.ref) ark.resource(s.ref, "unsubscribe").catch(() => {});
       s.term?.dispose();
     },
   };
@@ -214,9 +265,11 @@ function browser(el, params, ark) {
     // A page arrived: what shows through it is white, as a page without a background expects.
     page: () => host.setAttribute("data-page", ""),
   };
-  const nav = view ? nativeBrowser(host, view, ui) : framedBrowser(host, ark, out);
+  const nav = ark.remoteResource
+    ? remoteBrowser(host, ark, ui)
+    : view ? nativeBrowser(host, view, ui) : framedBrowser(host, ark, out);
   host.append(blank);
-  if (view) host.append(down);
+  if (view || ark.remoteResource) host.append(down);
 
   const go = (u) => {
     u = String(u || "").trim();
@@ -234,6 +287,116 @@ function browser(el, params, ark) {
     focus: () => ({ surface: { kind_tag: "browser", title: s.url ? hostOf(s.url) : "Browser", locator: s.url || undefined } }),
     update: (p) => p?.locator && go(p.locator),
     dispose: () => nav.dispose(),
+  };
+}
+
+/// A chat-owned Chromium page rendered by the runtime that owns the resource. Only one frame
+/// request is in flight; the next poll replaces the image, so a slow link cannot queue frames.
+function remoteBrowser(host, ark, ui) {
+  const ref = ark.resourceRef("browser", "main", ark.location);
+  const status = h("span.sr-only", { role: "status", "aria-live": "polite" });
+  const image = h("img.remote-browser", {
+    alt: "",
+    role: "application",
+    tabindex: "0",
+    "aria-label": "Browser page on the chat's computer",
+    "aria-description": "Press Control Option Escape to return keyboard control to ARK",
+  });
+  host.append(image, status);
+  const s = { alive: true, loading: false, timer: 0, width: 1280, height: 900, captured: false, url: "" };
+  const call = (kind, input = {}) => ark.resource(ref, kind, input);
+  const size = () => {
+    const r = host.getBoundingClientRect();
+    return { width: Math.max(320, Math.min(1920, Math.round(r.width || 1280))), height: Math.max(240, Math.min(1200, Math.round(r.height || 900))) };
+  };
+  const point = (e) => {
+    const r = image.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * s.width / Math.max(1, r.width), y: (e.clientY - r.top) * s.height / Math.max(1, r.height) };
+  };
+  const poll = async () => {
+    if (!s.alive || s.loading) return;
+    if (!ark.online()) {
+      if (s.alive) s.timer = setTimeout(poll, 1000);
+      return;
+    }
+    s.loading = true;
+    const dims = size();
+    try {
+      if (dims.width !== s.width || dims.height !== s.height) {
+        s.width = dims.width; s.height = dims.height;
+        await call("browser_resize", { ...dims, scale: Math.min(devicePixelRatio || 1, 2) });
+      }
+      const frame = await call("browser_snapshot", dims);
+      if (!s.alive) return;
+      if (frame.image) image.src = `data:${frame.media_type};base64,${frame.image}`;
+      s.width = frame.width; s.height = frame.height;
+      ui.loading(frame.loading);
+      if (frame.url) ui.shown(frame.url);
+      s.url = frame.url || s.url;
+      ui.down("");
+      status.textContent = frame.loading ? `Loading ${frame.url || "page"}` : frame.title || frame.url || "Browser page";
+      ui.page();
+    } catch (e) {
+      status.textContent = e.message;
+      ui.down(s.url || "remote://browser");
+    } finally {
+      s.loading = false;
+      if (s.alive) s.timer = setTimeout(poll, 250);
+    }
+  };
+  const load = async (url) => {
+    s.url = url;
+    ui.loading(true);
+    status.textContent = `Loading ${url}`;
+    try {
+      await call("browser_navigate", { url });
+      ui.down("");
+      await poll();
+      image.focus();
+    } catch (e) {
+      ui.loading(false);
+      status.textContent = e.message;
+      ui.down(url);
+    }
+  };
+  const pointer = (event) => (e) => {
+    const p = point(e);
+    call("browser_pointer", { event, ...p, button: e.button === 2 ? "right" : e.button === 1 ? "middle" : "left", clicks: e.detail || 1 }).catch(() => {});
+  };
+  image.addEventListener("pointermove", pointer("mouseMoved"));
+  image.addEventListener("pointerdown", (e) => { image.setPointerCapture(e.pointerId); image.focus(); pointer("mousePressed")(e); });
+  image.addEventListener("pointerup", pointer("mouseReleased"));
+  image.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const p = point(e);
+    call("browser_wheel", { ...p, dx: e.deltaX, dy: e.deltaY }).catch(() => {});
+  }, { passive: false });
+  image.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && e.ctrlKey && e.altKey) {
+      e.preventDefault();
+      s.captured = false;
+      image.blur();
+      host.closest(".pane")?.querySelector(".pane-tab[aria-selected=true]")?.focus();
+      return;
+    }
+    s.captured = true;
+    e.preventDefault();
+    const modifiers = (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) call("browser_text", { text: e.key }).catch(() => {});
+    else call("browser_key", { event: "keyDown", key: e.key, code: e.code, modifiers })
+      .then(() => call("browser_key", { event: "keyUp", key: e.key, code: e.code, modifiers })).catch(() => {});
+  });
+  poll();
+  return {
+    load,
+    back: () => call("browser_back").then(poll).catch(() => {}),
+    reload: () => call("browser_reload").then(poll).catch(() => {}),
+    reconnect: poll,
+    dispose: () => {
+      s.alive = false;
+      clearTimeout(s.timer);
+      call("browser_close").catch(() => {});
+    },
   };
 }
 
@@ -447,6 +610,10 @@ function files(el, params, ark) {
     focus: () => ({ surface: { kind_tag: "folder", title: s.dir || "Project folder" } }),
     update: (p) => show(p),
     refresh: () => list(s.dir),
+    dispose: () => {
+      for (const off of offs) off();
+      ark.resource(ark.resourceRef("file", "", ark.location), "unsubscribe").catch(() => {});
+    },
   };
 }
 
@@ -466,14 +633,18 @@ export const BUILTINS = [
 ];
 
 export function registerBuiltins(ark) {
-  for (const p of BUILTINS) ark.panel({ ...p, nav: true, builtin: true, render: (el, params) => p.render(el, params, ark) });
+  for (const p of BUILTINS) ark.panel({ ...p, nav: true, builtin: true, render: (el, params, scoped) => p.render(el, params, scoped || ark) });
   // Processes, only where the app lets agents start them (`procs` fails otherwise).
   let added = false;
   const add = async () => {
     if (added) return;
+    if (!ark.summary?.()?.location) {
+      setTimeout(add, 0);
+      return;
+    }
     try { await ark.call("procs"); } catch { return; }
     added = true;
-    ark.panel({ id: "processes", title: "Processes", icon: "play", presents: ["processes"], nav: true, builtin: true, wide: true, fill: true, render: (el, params) => processes(el, params, ark) });
+    ark.panel({ id: "processes", title: "Processes", icon: "play", presents: ["processes"], nav: true, builtin: true, wide: true, fill: true, render: (el, params, scoped) => processes(el, params, scoped || ark) });
     watchProcesses(ark);
   };
   add();

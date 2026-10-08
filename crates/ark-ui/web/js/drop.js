@@ -51,27 +51,37 @@ export function acceptDrops(api, composer, zone) {
     // Entries see into folders. Files that have no place on a disk (made by a page) cannot be
     // read through them: then the files as dropped.
     const plain = () => files.map((file) => ({ path: file.name, file }));
-    once(api, async () => addToProject(api, composer, entries.length ? await walkAll(entries).catch(plain) : plain()));
+    const target = api.at(api.summary().location);
+    once(target, async () => addToProject(target, composer, entries.length ? await walkAll(entries).catch(plain) : plain()));
   });
 }
 
 /// The system's file chooser (a phone has no drag and drop): the files go into the project.
 export function chooseFiles(api, composer) {
-  choose({ multiple: true }, (files) =>
-    once(api, () => addToProject(api, composer, files.map((file) => ({ path: file.name, file })))));
+  choose({ multiple: true }, (files) => {
+    const target = api.at(api.summary().location);
+    once(target, () => addToProject(target, composer, files.map((file) => ({ path: file.name, file }))));
+  });
 }
 
 /// A folder from this device becomes a new project on the runtime, wherever it runs (ADR 0030
 /// calls), and opens. A browser cannot hand the runtime a path, so it sends the files.
 export function uploadFolder(api) {
-  choose({ multiple: true, webkitdirectory: true }, (files) => once(api, async () => {
+  const windowApi = Object.assign(Object.create(api), {
+    call: (method, params) => api.windowCall({
+      upload_parts: "upload_project_parts",
+      upload_project: "upload_project_finish",
+      upload_cancel: "upload_project_cancel",
+    }[method] || method, params),
+  });
+  choose({ multiple: true, webkitdirectory: true }, (files) => once(windowApi, async () => {
     // `top/inner/file.txt`: the folder's name, then the path inside it.
     const name = (files[0]?.webkitRelativePath || "").split("/")[0] || "Project";
     const list = files.map((file) => ({ path: file.webkitRelativePath.split("/").slice(1).join("/") || file.name, file }));
     if (!list.length) return api.toast("There is nothing to add: only files are added, and the folders had none.");
     const progress = new Progress(list, "Uploading", name);
     try {
-      const project = await send(api, list, progress, { method: "upload_project", params: { name } });
+      const project = await send(windowApi, list, progress, { method: "upload_project", params: { name } });
       await api.openProject(project.id);
     } catch (e) {
       api.toast(progress.stopped ? "Stopped. Nothing was added." : `The folder was not uploaded: ${e.message}`);

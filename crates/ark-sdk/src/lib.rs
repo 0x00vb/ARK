@@ -144,6 +144,9 @@ pub struct Ark {
     computer: Option<Arc<ark_computer::ComputerService>>,
     /// Project processes, when the app turned them on ([`ArkBuilder::processes`]).
     processes: Option<ark_proc::Processes>,
+    /// The shared Chromium service, when the app turned it on. Front-ends use the same service
+    /// for a person's runtime-bound Browser without gaining access to an agent's page.
+    browser: Option<Arc<ark_browser::BrowserService>>,
     /// Other agent programs an agent can run on, when the app offers them
     /// ([`ArkBuilder::workers`]).
     workers: Option<Arc<dyn ark_runtime::worker::Workers>>,
@@ -171,6 +174,7 @@ impl Clone for Ark {
             connections: self.connections.clone(),
             computer: self.computer.clone(),
             processes: self.processes.clone(),
+            browser: self.browser.clone(),
             workers: self.workers.clone(),
         }
     }
@@ -257,6 +261,11 @@ impl Ark {
     /// Project processes, when the app offers them: what runs, its output, stopping it.
     pub fn processes(&self) -> Option<&ark_proc::Processes> {
         self.processes.as_ref()
+    }
+
+    /// Chromium on this runtime, when offered by the app.
+    pub fn browser_service(&self) -> Option<&Arc<ark_browser::BrowserService>> {
+        self.browser.as_ref()
     }
 
     /// The other agent programs an agent can run on (`agent:<name>` as its model), when the
@@ -1095,7 +1104,7 @@ impl ArkBuilder {
             Some(BrowserChoice::Given(svc)) => Some(svc),
             None => None,
         };
-        if let Some(svc) = browser {
+        if let Some(svc) = &browser {
             // Agents open the pages their project's own processes serve (ADR 0046). A weak
             // handle: what runs still stops with the runtime.
             if let Some(p) = &processes {
@@ -1104,7 +1113,7 @@ impl ArkBuilder {
                     p.upgrade().map(|p| p.serving(ws)).unwrap_or_default()
                 }));
             }
-            per_agent.push(Arc::new(ark_browser::Browsers(svc)));
+            per_agent.push(Arc::new(ark_browser::Browsers(svc.clone())));
         }
         let computer = match self.computer {
             // Off until the person turns it on; their answer kept in the store (ADR 0045).
@@ -1139,6 +1148,7 @@ impl ArkBuilder {
             connections,
             computer,
             processes,
+            browser,
             workers: self.workers,
         })
     }

@@ -113,6 +113,7 @@ export function processes(el, params, ark) {
   const ro = new ResizeObserver(() => { try { s.fit?.fit(); } catch {} });
   ro.observe(out);
   s.offs.push(ark.on("ark:proc", (m) => {
+    if (ark.location && (!m.ref || JSON.stringify(m.ref.location) !== JSON.stringify(ark.location))) return;
     const ev = m.event || {};
     if (ev.type === "output") {
       if (ev.id === s.id) s.term?.write(ev.data);
@@ -129,6 +130,7 @@ export function processes(el, params, ark) {
     dispose: () => {
       ro.disconnect();
       for (const off of s.offs) off();
+      if (ark.location) ark.resource(ark.resourceRef("process", "", ark.location), "unsubscribe").catch(() => {});
       s.term?.dispose();
     },
   };
@@ -140,6 +142,8 @@ export function watchProcesses(ark) {
   ark.on("ark:proc", (m) => {
     const ev = m.event || {};
     if (!m.here) return;
+    const here = ark.summary()?.location;
+    if (m.ref && (!here || JSON.stringify(m.ref.location) !== JSON.stringify(here))) return;
     if (ev.type === "started") ark.openPanel("processes", { id: ev.process.id });
     else if (ev.type === "changed" && ev.open) ark.openPanel("browser", { locator: ev.open });
   });

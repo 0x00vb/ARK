@@ -459,7 +459,7 @@ class TurnView {
   }
 
   approval(msg, onDecide) {
-    const card = approvalCard(msg, onDecide);
+    const card = approvalCard(msg, onDecide, this.api);
     this.block = null;
     this.textEl = null;
     this.agent.append(card);
@@ -532,17 +532,19 @@ function fileCard(api, path, here, before) {
 
 /// The agent's newest picture of the app, with a ring where it wants to click. Nothing when
 /// there is no picture to show.
-function spotPicture(input) {
+function spotPicture(input, api) {
   const box = h("div.approval-shot");
   const img = h("img", { alt: "" });
   const ring = h("span.approval-spot");
   box.append(img, ring);
   box.hidden = true;
-  window.ark?.call("computer_picture", { app: input.app }).then((p) => {
+  api?.call("computer_picture", { app: input.app }).then((p) => {
     const x = Number(input.x), y = Number(input.y);
     if (!p?.data || !(x >= 0 && y >= 0 && x <= p.width && y <= p.height)) return box.remove();
     ring.style.left = `${(x / p.width) * 100}%`;
     ring.style.top = `${(y / p.height) * 100}%`;
+    img.width = p.width;
+    img.height = p.height;
     img.src = `data:${p.media_type};base64,${p.data}`;
     box.hidden = false;
   }).catch(() => box.remove());
@@ -551,7 +553,7 @@ function spotPicture(input) {
 
 /// The question card for a pending approval. An orchestrated agent's question names the
 /// agent and its task; the conversation's own has the keyboard hints.
-export function approvalCard(msg, onDecide) {
+export function approvalCard(msg, onDecide, api = window.ark) {
   const req = msg.request;
   const own = !req.agent;
   const decide = (d) => {
@@ -570,7 +572,7 @@ export function approvalCard(msg, onDecide) {
     preview ? h("pre.approval-preview", preview) : null,
     // A click in a picture shows the picture with the spot: the person judges the spot, not
     // the agent's words for it.
-    req.action === "computer.point" ? spotPicture(req.input || {}) : null,
+    req.action === "computer.point" ? spotPicture(req.input || {}, api) : null,
     // What the action does in general, unless the preview already shows what this call does.
     req.summary && !preview && req.action !== "computer.point" ? h("div.approval-summary", req.summary) : null,
     // The answers come from ark-interact, as the terminal's do: the first is the default.

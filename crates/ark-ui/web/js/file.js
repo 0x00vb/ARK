@@ -151,6 +151,7 @@ export function fileView(el, path, ark, params) {
       s.ctl?.dispose?.();
       removeEventListener("focus", onFocus);
       for (const off of s.offs) off();
+      ark.resource(ark.resourceRef("file", s.path, ark.location), "unsubscribe").catch(() => {});
     },
   };
 }

@@ -7,7 +7,30 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
-## [Unreleased]
+## [0.16.0] - 2026-10-08
+
+### Breaking
+- ADR 0052 resource locality: `ArkUi::handler` is replaced by `project_handler` and
+  `window_handler`. A project handler receives the project from the resource reference. A
+  window handler has no project context and never follows a remote chat.
+
+### Added
+- ADR 0052 resource locality: `ResourceLocation` and `ResourceRef` bind Terminal, Files,
+  editors, spreadsheets, documents, processes, artifacts, invocations, project panels and the
+  Browser to the runtime, project replica and chat that opened them. The `resource` and
+  `chat_resource` protocol validates that identity and refuses unknown routes instead of
+  falling back to the window's computer.
+- A Browser opened for a chat on another runtime is a rendered, interactive Chromium page on
+  that runtime, with resize, pointer, wheel, keyboard, navigation, popup and reconnect state.
+- Project terminals have a generation and bounded cursor replay. Two chats on one project
+  replica can observe the same terminal and processes through their own resource references.
+
+### Changed
+- Project transfer parts resume by byte offset. Apply and settle receipts are bound to a
+  monotonic replica epoch, reconciliations serialize per replica, and completed archives
+  publish atomically with the exact packed-content manifest. A Bring interrupted after local
+  apply resumes only while that content is still present; later edits become an ordinary
+  conflict. `Bring to this Mac` remains the only reconciliation action.
 
 ## [0.15.0] - 2026-10-08
 

@@ -110,6 +110,24 @@ async fn until(what: &str, mut f: impl AsyncFnMut() -> bool) {
     panic!("never: {what}");
 }
 
+async fn resource_call(
+    host: &Arc<Host>,
+    kind: &str,
+    operation: &str,
+    id: &str,
+    input: Value,
+) -> anyhow::Result<Value> {
+    let location = host.call("summary", json!({})).await?["location"].clone();
+    host.call(
+        "resource",
+        json!({
+            "ref": { "location": location, "kind": kind, "id": id },
+            "operation": { "kind": operation, "input": input },
+        }),
+    )
+    .await
+}
+
 /// B: the person's server, with a token for A.
 async fn server(dir: &std::path::Path, saves: Arc<AtomicUsize>) -> (Arc<Host>, u16, String) {
     let tokens = Tokens::in_store(dir);
@@ -496,7 +514,9 @@ async fn copy_folder(b: &Arc<Host>, name: &str) -> std::path::PathBuf {
         .unwrap_or_else(|| panic!("B has {name}: {projects}"))["id"]
         .clone();
     b.call("open_project", json!({ "id": id })).await.unwrap();
-    let v = b.call("workspace", json!({})).await.unwrap();
+    let v = resource_call(b, "project", "workspace", "", json!({}))
+        .await
+        .unwrap();
     std::path::PathBuf::from(v["path"].as_str().unwrap())
 }
 
@@ -520,6 +540,7 @@ async fn the_project_goes_with_the_chat_and_its_changes_come_back() {
     a.call("add_project", json!({ "name": "site", "path": w }))
         .await
         .unwrap();
+    let local_location = a.call("summary", json!({})).await.unwrap()["location"].clone();
 
     // The first chat there takes the project: modes kept, build output left here.
     let placed = a
@@ -597,7 +618,17 @@ async fn the_project_goes_with_the_chat_and_its_changes_come_back() {
         std::fs::read_to_string(w.join("README.md")).unwrap(),
         "hello from vps\n"
     );
-    let kept = a.call("artifacts", json!({})).await.unwrap().to_string();
+    let kept = a
+        .call(
+            "resource",
+            json!({
+                "ref": { "location": local_location, "kind": "artifact", "id": "" },
+                "operation": { "kind": "artifacts", "input": {} },
+            }),
+        )
+        .await
+        .unwrap()
+        .to_string();
     assert!(
         kept.contains("README.md"),
         "the version before is kept: {kept}"
@@ -715,11 +746,17 @@ async fn a_program_signs_in_on_the_server_from_here() {
     let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
     let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
     let seen = record(&a);
-    a.call("new_session", json!({ "place": "vps" }))
+    let remote_chat = a
+        .call("new_session", json!({ "place": "vps" }))
         .await
-        .unwrap();
+        .unwrap()["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     // B's own shell is never another runtime's to type into; a stream id is never a path.
-    let own = b.call("term_open", json!({})).await.unwrap()["session"]
+    let own = resource_call(&b, "terminal", "terminal_open", "", json!({}))
+        .await
+        .unwrap()["session"]
         .as_str()
         .unwrap()
         .to_string();
@@ -727,9 +764,15 @@ async fn a_program_signs_in_on_the_server_from_here() {
         .call("chat_term_write", json!({ "id": own, "data": "ls\n" }))
         .await
         .is_err());
-    b.call("term_close", json!({ "session": own }))
-        .await
-        .unwrap();
+    resource_call(
+        &b,
+        "terminal",
+        "terminal_close",
+        &own,
+        json!({ "session": own }),
+    )
+    .await
+    .unwrap();
     assert!(b
         .call("copy_part", json!({ "stream": "../../etc/passwd" }))
         .await
@@ -753,26 +796,43 @@ async fn a_program_signs_in_on_the_server_from_here() {
         .await
         .unwrap();
     let id = opened["session"].as_str().unwrap().to_string();
+    let terminal_ref = opened["ref"].clone();
     let out = || {
         seen.lock()
             .unwrap()
             .iter()
-            .filter(|v| v["kind"] == "term" && v["session"] == id.as_str())
+            .filter(|v| v["kind"] == "term" && v["ref"] == terminal_ref)
             .map(|v| v["data"].as_str().unwrap_or("").to_string())
             .collect::<String>()
     };
     until("the link", async || out().contains("Paste code here")).await;
     assert!(out().contains("https://example.invalid/login"));
-    a.call("term_write", json!({ "session": id, "data": "abc-123\n" }))
+    // Changing the window's chat cannot rebind the setup terminal to that chat or runtime.
+    a.call("new_session", json!({ "place": "here" }))
         .await
         .unwrap();
+    a.call(
+        "resource",
+        json!({
+            "ref": terminal_ref,
+            "operation": { "kind": "terminal_write", "input": { "session": id, "data": "abc-123\n" } },
+        }),
+    )
+    .await
+    .unwrap();
     until("the answer", async || {
         out().contains("signed in with abc-123")
     })
     .await;
-    a.call("term_close", json!({ "session": id }))
-        .await
-        .unwrap();
+    a.call(
+        "resource",
+        json!({
+            "ref": opened["ref"],
+            "operation": { "kind": "terminal_close", "input": { "session": id } },
+        }),
+    )
+    .await
+    .unwrap();
     // What was typed and shown there is kept on neither computer.
     for dir in [dir_a.path(), dir_b.path()] {
         assert!(
@@ -781,6 +841,9 @@ async fn a_program_signs_in_on_the_server_from_here() {
             dir.display()
         );
     }
+    a.call("open_session", json!({ "id": remote_chat }))
+        .await
+        .unwrap();
 
     // Only the catalog's programs and steps; never another terminal there.
     for (program, step) in [("rm", "install"), ("claude", "shell")] {
@@ -803,6 +866,794 @@ async fn a_program_signs_in_on_the_server_from_here() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("no openai key is saved here"), "{e}");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn resources_keep_the_opening_chat_location_after_the_window_moves() {
+    let (dir_a, dir_b, work) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    std::fs::write(work.path().join("where.txt"), "local\n").unwrap();
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    a.call(
+        "add_project",
+        json!({ "name": "located", "path": work.path() }),
+    )
+    .await
+    .unwrap();
+    let local = a.call("summary", json!({})).await.unwrap()["location"].clone();
+
+    a.call("new_session", json!({ "place": "vps" }))
+        .await
+        .unwrap();
+    let remote_one = a.call("summary", json!({})).await.unwrap()["location"].clone();
+    let remote_file = json!({
+        "location": remote_one,
+        "kind": "file",
+        "id": "where.txt",
+    });
+    a.call(
+        "resource",
+        json!({
+            "ref": remote_file,
+            "operation": { "kind": "file_write", "input": { "text": "remote\n" } },
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(work.path().join("where.txt")).unwrap(),
+        "local\n",
+        "a remote file operation never fell back to the local replica"
+    );
+    let there = copy_folder(&b, "located").await;
+    assert_eq!(
+        std::fs::read_to_string(there.join("where.txt")).unwrap(),
+        "remote\n"
+    );
+
+    a.call("new_session", json!({ "place": "here" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        a.call("summary", json!({})).await.unwrap()["location"]["runtime"],
+        local["runtime"]
+    );
+    let read = a
+        .call(
+            "resource",
+            json!({
+                "ref": remote_file,
+                "operation": { "kind": "file_read", "input": {} },
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        read["text"], "remote\n",
+        "an open tab keeps its remote location"
+    );
+    let local_file = json!({ "location": local, "kind": "file", "id": "where.txt" });
+    a.call(
+        "resource",
+        json!({ "ref": local_file, "operation": { "kind": "file_read", "input": {} } }),
+    )
+    .await
+    .unwrap();
+    let mut file_events = a.subscribe();
+    a.call(
+        "resource",
+        json!({ "ref": local_file, "operation": { "kind": "file_write", "input": { "text": "local-two\n" } } }),
+    )
+    .await
+    .unwrap();
+    a.call(
+        "resource",
+        json!({ "ref": remote_file, "operation": { "kind": "file_write", "input": { "text": "remote-two\n" } } }),
+    )
+    .await
+    .unwrap();
+    let mut changed_at = std::collections::HashSet::new();
+    until("file changes to carry their exact location", async || {
+        while let Ok(event) = file_events.try_recv() {
+            if event["kind"] == "files_changed" && event["paths"] == json!(["where.txt"]) {
+                changed_at.insert(event["ref"]["location"].clone());
+            }
+        }
+        changed_at.len() == 2
+    })
+    .await;
+    assert!(changed_at.contains(&local));
+    assert!(changed_at.contains(&remote_one));
+
+    let mut forged = remote_file.clone();
+    forged["location"]["project"] = local["project"].clone();
+    let err = a
+        .call(
+            "resource",
+            json!({
+                "ref": forged,
+                "operation": { "kind": "file_write", "input": { "text": "wrong\n" } },
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(format!("{err}").contains("does not match"));
+    assert_eq!(
+        std::fs::read_to_string(work.path().join("where.txt")).unwrap(),
+        "local-two\n"
+    );
+
+    a.call("new_session", json!({ "place": "vps" }))
+        .await
+        .unwrap();
+    let remote_two = a.call("summary", json!({})).await.unwrap()["location"].clone();
+    let open = |location: Value| {
+        json!({
+            "ref": { "location": location, "kind": "terminal", "id": "" },
+            "operation": { "kind": "terminal_open", "input": { "cols": 80, "rows": 24 } },
+        })
+    };
+    let first = a.call("resource", open(remote_one.clone())).await.unwrap();
+    let second = a.call("resource", open(remote_two.clone())).await.unwrap();
+    assert_eq!(
+        first["session"], second["session"],
+        "one shell is shared by the replica"
+    );
+    assert_ne!(
+        first["ref"]["location"]["session"],
+        second["ref"]["location"]["session"]
+    );
+
+    let mut rx = a.subscribe();
+    let terminal = first["session"].as_str().unwrap();
+    a.call(
+        "resource",
+        json!({
+            "ref": first["ref"],
+            "operation": { "kind": "terminal_write", "input": { "data": "stty -echo\n" } },
+        }),
+    )
+    .await
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    a.call(
+        "resource",
+        json!({
+            "ref": first["ref"],
+            "operation": { "kind": "terminal_write", "input": { "data": "printf 'ARK_LOCATION_ONCE\\n'\n" } },
+        }),
+    )
+    .await
+    .unwrap();
+    let mut output: std::collections::HashMap<String, String> = Default::default();
+    until(
+        "both chat aliases to receive terminal output once",
+        async || {
+            while let Ok(event) = rx.try_recv() {
+                if event["kind"] == "term" && event["ref"]["id"] == terminal {
+                    let session = event["ref"]["location"]["session"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                    output
+                        .entry(session)
+                        .or_default()
+                        .push_str(event["data"].as_str().unwrap_or(""));
+                }
+            }
+            output.len() == 2
+                && output
+                    .values()
+                    .all(|text| text.contains("ARK_LOCATION_ONCE"))
+        },
+    )
+    .await;
+    assert!(
+        output
+            .values()
+            .all(|text| text.matches("ARK_LOCATION_ONCE").count() == 1),
+        "{output:?}"
+    );
+    b.call(
+        "chat_forget_resources",
+        json!({ "session": remote_one["session"] }),
+    )
+    .await
+    .unwrap();
+    while rx.try_recv().is_ok() {}
+    a.call(
+        "resource",
+        json!({
+            "ref": second["ref"],
+            "operation": { "kind": "terminal_write", "input": { "data": "printf 'ONLY_SECOND_ALIAS\n'\n" } },
+        }),
+    )
+    .await
+    .unwrap();
+    let mut aliases = Vec::new();
+    until("only the surviving alias to receive output", async || {
+        while let Ok(event) = rx.try_recv() {
+            if event["kind"] == "term"
+                && event["data"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("ONLY_SECOND_ALIAS")
+            {
+                aliases.push(
+                    event["ref"]["location"]["session"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string(),
+                );
+            }
+        }
+        !aliases.is_empty()
+    })
+    .await;
+    assert_eq!(
+        aliases,
+        vec![remote_two["session"].as_str().unwrap().to_string()]
+    );
+    a.call(
+        "resource",
+        json!({
+            "ref": first["ref"],
+            "operation": { "kind": "terminal_close", "input": {} },
+        }),
+    )
+    .await
+    .unwrap();
+    let reopened = a
+        .call(
+            "resource",
+            json!({
+                "ref": { "location": remote_two, "kind": "terminal", "id": "" },
+                "operation": { "kind": "terminal_open", "input": {} },
+            }),
+        )
+        .await
+        .unwrap();
+    assert_ne!(reopened["generation"], first["generation"]);
+    a.call(
+        "resource",
+        json!({
+            "ref": second["ref"],
+            "operation": { "kind": "terminal_close", "input": {} },
+        }),
+    )
+    .await
+    .unwrap();
+    let second_reopened = a
+        .call(
+            "resource",
+            json!({
+                "ref": {
+                    "location": second["ref"]["location"],
+                    "kind": "terminal", "id": "",
+                },
+                "operation": { "kind": "terminal_open", "input": {} },
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second_reopened["session"], reopened["session"]);
+    assert_eq!(second_reopened["generation"], reopened["generation"]);
+    a.call(
+        "resource",
+        json!({
+            "ref": second_reopened["ref"],
+            "operation": { "kind": "terminal_close", "input": {} },
+        }),
+    )
+    .await
+    .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_partial_project_transfer_resumes_and_its_final_receipt_is_idempotent() {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+
+    let (store, source) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(source.path().join("chapter.txt"), "once\n").unwrap();
+    let host = ArkUi::new(app(store.path(), "B", Arc::new(AtomicUsize::new(0))))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let mut archive = Vec::new();
+    ark_ui::copy::pack(
+        source.path(),
+        &["chapter.txt".into()],
+        &[],
+        false,
+        &mut archive,
+    )
+    .unwrap();
+    let stream = format!("{:x}", sha2::Sha256::digest(&archive));
+    let cut = archive.len() / 2;
+    let part = |offset: usize, end: usize, last: bool| {
+        json!({
+            "origin": "runtime-a",
+            "origin_project": "project-a",
+            "name": "resume",
+            "stream": stream,
+            "offset": offset,
+            "data": base64::engine::general_purpose::STANDARD.encode(&archive[offset..end]),
+            "last": last,
+            "first": true,
+            "epoch": 0,
+            "manifest": ark_ui::copy::scan(source.path(), &["chapter.txt".into()]).unwrap(),
+        })
+    };
+    let first = host.call("copy_put", part(0, cut, false)).await.unwrap();
+    assert_eq!(first["next"], cut);
+    let retry = host.call("copy_put", part(0, cut, false)).await.unwrap();
+    assert_eq!(
+        retry["next"], cut,
+        "the same part is acknowledged, not appended"
+    );
+    let done = host
+        .call("copy_put", part(cut, archive.len(), true))
+        .await
+        .unwrap();
+    assert_eq!(done["done"], true);
+    let receipt = host
+        .call("copy_put", part(cut, archive.len(), true))
+        .await
+        .unwrap();
+    assert_eq!(
+        receipt, done,
+        "a lost final response replays the stored receipt"
+    );
+    let folder = copy_folder(&host, "resume").await;
+    assert_eq!(
+        std::fs::read_to_string(folder.join("chapter.txt")).unwrap(),
+        "once\n"
+    );
+    // The same content after an intervening transfer is a new lifecycle, not the permanent
+    // receipt of the first send.
+    for (epoch, text) in [(1, "between\n"), (2, "once\n")] {
+        std::fs::write(source.path().join("chapter.txt"), text).unwrap();
+        let mut next = Vec::new();
+        ark_ui::copy::pack(
+            source.path(),
+            &["chapter.txt".into()],
+            &[],
+            false,
+            &mut next,
+        )
+        .unwrap();
+        let id = format!("{:x}", sha2::Sha256::digest(&next));
+        host.call(
+            "copy_put",
+            json!({
+                "origin": "runtime-a", "origin_project": "project-a", "name": "resume",
+                "stream": id, "offset": 0,
+                "data": base64::engine::general_purpose::STANDARD.encode(&next),
+                "last": true, "first": false, "epoch": epoch,
+                "manifest": ark_ui::copy::scan(source.path(), &["chapter.txt".into()]).unwrap(),
+            }),
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(
+        std::fs::read_to_string(folder.join("chapter.txt")).unwrap(),
+        "once\n"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_writers_to_one_replica_cannot_share_an_epoch() {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+
+    let (store, source) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let host = ArkUi::new(app(store.path(), "B", Arc::new(AtomicUsize::new(0))))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let archive = |text: &str| {
+        std::fs::write(source.path().join("same.txt"), text).unwrap();
+        let mut bytes = Vec::new();
+        ark_ui::copy::pack(source.path(), &["same.txt".into()], &[], false, &mut bytes).unwrap();
+        let manifest = ark_ui::copy::scan(source.path(), &["same.txt".into()]).unwrap();
+        (bytes, manifest)
+    };
+    let (left, left_manifest) = archive("left\n");
+    let (right, right_manifest) = archive("right\n");
+    let params = |bytes: &[u8], manifest: &ark_ui::copy::Manifest| {
+        json!({
+            "origin": "runtime-a", "origin_project": "project-a", "name": "race",
+            "stream": format!("{:x}", sha2::Sha256::digest(bytes)), "offset": 0,
+            "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+            "last": true, "first": false, "epoch": 0,
+            "manifest": manifest,
+        })
+    };
+    let (one, two) = tokio::join!(
+        host.call("copy_put", params(&left, &left_manifest)),
+        host.call("copy_put", params(&right, &right_manifest)),
+    );
+    assert_ne!(
+        one.is_ok(),
+        two.is_ok(),
+        "only one writer may consume epoch 0"
+    );
+    let state = host
+        .call(
+            "copy_state",
+            json!({
+                "origin": "runtime-a", "origin_project": "project-a", "name": "race",
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(state["epoch"], 1);
+    let text = std::fs::read_to_string(copy_folder(&host, "race").await.join("same.txt")).unwrap();
+    assert!(text == "left\n" || text == "right\n", "{text:?}");
+    let folder = copy_folder(&host, "race").await;
+    std::fs::write(folder.join("same.txt"), "written-after-apply\n").unwrap();
+    let state = host
+        .call(
+            "copy_state",
+            json!({
+                "origin": "runtime-a", "origin_project": "project-a", "name": "race",
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        state["changes"]["changed"],
+        json!(["same.txt"]),
+        "the destination records the transferred manifest, not a later live scan"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_bring_plan_is_stable_and_settlement_does_not_hide_a_later_change() {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+
+    let (store, source) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::fs::write(source.path().join("chapter.txt"), "base\n").unwrap();
+    let host = ArkUi::new(app(store.path(), "B", Arc::new(AtomicUsize::new(0))))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let mut archive = Vec::new();
+    ark_ui::copy::pack(
+        source.path(),
+        &["chapter.txt".into()],
+        &[],
+        false,
+        &mut archive,
+    )
+    .unwrap();
+    let stream = format!("{:x}", sha2::Sha256::digest(&archive));
+    host.call(
+        "copy_put",
+        json!({
+            "origin": "runtime-a", "origin_project": "project-a", "name": "stable",
+            "stream": stream, "offset": 0,
+            "data": base64::engine::general_purpose::STANDARD.encode(&archive),
+            "last": true, "first": true,
+            "epoch": 0,
+            "manifest": ark_ui::copy::scan(source.path(), &["chapter.txt".into()]).unwrap(),
+        }),
+    )
+    .await
+    .unwrap();
+    let folder = copy_folder(&host, "stable").await;
+    std::fs::write(folder.join("chapter.txt"), "packed\n").unwrap();
+    let plan = json!({
+        "origin": "runtime-a", "origin_project": "project-a", "name": "stable",
+        "files": ["chapter.txt"], "deleted": [],
+    });
+    let first = host.call("copy_pack", plan.clone()).await.unwrap();
+    let retry = host.call("copy_pack", plan.clone()).await.unwrap();
+    assert_eq!(
+        first["stream"], retry["stream"],
+        "retry reuses the same content plan"
+    );
+    let archive = store
+        .path()
+        .join("uploads")
+        .join(format!("copy-{}.tar", first["stream"].as_str().unwrap()));
+    std::fs::write(&archive, b"cut short").unwrap();
+    let repaired = host.call("copy_pack", plan.clone()).await.unwrap();
+    assert_eq!(repaired["stream"], first["stream"]);
+    assert_eq!(
+        std::fs::metadata(&archive).unwrap().len(),
+        repaired["size"].as_u64().unwrap(),
+        "a truncated final archive is packed atomically again"
+    );
+
+    // A change after packing must still be reported after settlement. Settlement records the
+    // packed version, not whatever happens to be in the folder when its acknowledgement arrives.
+    std::fs::write(folder.join("chapter.txt"), "later\n").unwrap();
+    let settle = json!({
+        "origin": "runtime-a", "origin_project": "project-a", "name": "stable",
+        "stream": first["stream"], "paths": ["chapter.txt"],
+    });
+    assert_eq!(
+        host.call("copy_settle", settle.clone()).await.unwrap()["ok"],
+        true
+    );
+    assert_eq!(host.call("copy_settle", settle).await.unwrap()["ok"], true);
+    let state = host.call("copy_state", plan).await.unwrap();
+    assert_eq!(state["changes"]["changed"], json!(["chapter.txt"]));
+
+    let plan = json!({
+        "origin": "runtime-a", "origin_project": "project-a", "name": "stable",
+        "files": ["chapter.txt"], "deleted": [],
+    });
+    let middle = host.call("copy_pack", plan.clone()).await.unwrap();
+    host.call(
+        "copy_settle",
+        json!({
+            "origin": "runtime-a", "origin_project": "project-a", "name": "stable",
+            "stream": middle["stream"], "paths": ["chapter.txt"],
+        }),
+    )
+    .await
+    .unwrap();
+    std::fs::write(folder.join("chapter.txt"), "packed\n").unwrap();
+    let again = host.call("copy_pack", plan.clone()).await.unwrap();
+    assert_ne!(
+        again["stream"], first["stream"],
+        "an identical plan after an intervening settlement has a new lifecycle"
+    );
+    host.call(
+        "copy_settle",
+        json!({
+            "origin": "runtime-a", "origin_project": "project-a", "name": "stable",
+            "stream": again["stream"], "paths": ["chapter.txt"],
+        }),
+    )
+    .await
+    .unwrap();
+    let final_state = host.call("copy_state", plan).await.unwrap();
+    assert_eq!(final_state["changes"]["changed"], json!([]));
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bring_resumes_after_apply_before_its_local_manifest_advanced() {
+    let (dir_a, dir_b, work) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    std::fs::write(work.path().join("chapter.txt"), "base\n").unwrap();
+    let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    a.call(
+        "add_project",
+        json!({ "name": "resume-bring", "path": work.path() }),
+    )
+    .await
+    .unwrap();
+    let local = a.call("summary", json!({})).await.unwrap()["location"].clone();
+    a.call("new_session", json!({ "place": "vps" }))
+        .await
+        .unwrap();
+    let remote = a.call("summary", json!({})).await.unwrap()["location"].clone();
+    let folder = copy_folder(&b, "resume-bring").await;
+    std::fs::write(folder.join("chapter.txt"), "remote\n").unwrap();
+    let packed = b
+        .call(
+            "copy_pack",
+            json!({
+                "origin": local["runtime"], "origin_project": local["project"],
+                "name": "resume-bring", "files": ["chapter.txt"], "deleted": [],
+            }),
+        )
+        .await
+        .unwrap();
+    let stream = packed["stream"].as_str().unwrap();
+
+    // This is the durable cut point: bytes are already applied and the receipt is stored, but
+    // the process stopped before advancing this side's manifest or settling the sender.
+    std::fs::write(work.path().join("chapter.txt"), "remote\n").unwrap();
+    let key = format!(
+        "{}:{}",
+        local["project"].as_str().unwrap(),
+        remote["runtime"].as_str().unwrap()
+    );
+    let store = ark_store::Store::open(dir_a.path()).unwrap();
+    store
+        .put_record(
+            "copy_bring_pending",
+            &key,
+            &key,
+            &json!({
+                "stream": stream,
+                "epoch": packed["epoch"],
+                "manifest": packed["manifest"],
+                "deleted": packed["deleted"],
+            }),
+        )
+        .unwrap();
+    store
+        .put_record(
+            "copy_receipt",
+            &format!("{key}:bring:{stream}"),
+            &key,
+            &json!({ "written": ["chapter.txt"], "deleted": [], "refused": [] }),
+        )
+        .unwrap();
+
+    let resumed = a
+        .call("place_bring", json!({ "choices": {} }))
+        .await
+        .unwrap();
+    assert_eq!(resumed["written"], json!(["chapter.txt"]));
+    let remote_state = b
+        .call(
+            "copy_state",
+            json!({
+                "origin": local["runtime"], "origin_project": local["project"],
+                "name": "resume-bring",
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(remote_state["changes"]["changed"], json!([]));
+
+    // If this side changed again after the bytes were applied, resuming must not bless that
+    // different content as the remote version. The interrupted plan is abandoned and the next
+    // Bring reports an ordinary two-sided conflict.
+    std::fs::write(folder.join("chapter.txt"), "remote-again\n").unwrap();
+    let packed = b
+        .call(
+            "copy_pack",
+            json!({
+                "origin": local["runtime"], "origin_project": local["project"],
+                "name": "resume-bring", "files": ["chapter.txt"], "deleted": [],
+            }),
+        )
+        .await
+        .unwrap();
+    let stream = packed["stream"].as_str().unwrap();
+    std::fs::write(work.path().join("chapter.txt"), "remote-again\n").unwrap();
+    store
+        .put_record(
+            "copy_bring_pending",
+            &key,
+            &key,
+            &json!({
+                "stream": stream, "epoch": packed["epoch"],
+                "manifest": packed["manifest"], "deleted": packed["deleted"],
+            }),
+        )
+        .unwrap();
+    store
+        .put_record(
+            "copy_receipt",
+            &format!("{key}:bring:{stream}"),
+            &key,
+            &json!({ "written": ["chapter.txt"], "deleted": [], "refused": [] }),
+        )
+        .unwrap();
+    std::fs::write(work.path().join("chapter.txt"), "local-later\n").unwrap();
+    let error = a
+        .call("place_bring", json!({ "choices": {} }))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("changed here after"), "{error}");
+    let conflict = a
+        .call("place_bring", json!({ "choices": {} }))
+        .await
+        .unwrap();
+    assert_eq!(conflict["waiting"], json!(["chapter.txt"]), "{conflict}");
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn an_offline_settlement_keeps_the_bring_plan_and_receipt() {
+    let (dir_a, dir_b, work) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    std::fs::write(work.path().join("chapter.txt"), "base\n").unwrap();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let remote_store = dir_b.path().to_path_buf();
+    let server_thread = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async move {
+            let (host, port, token) = server(&remote_store, Arc::new(AtomicUsize::new(0))).await;
+            ready_tx.send((host, port, token)).unwrap();
+            stopped.await.ok();
+        });
+        runtime.shutdown_background();
+    });
+    let (b, port, token) = ready_rx.recv().unwrap();
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    a.call(
+        "add_project",
+        json!({ "name": "offline-settle", "path": work.path() }),
+    )
+    .await
+    .unwrap();
+    let local = a.call("summary", json!({})).await.unwrap()["location"].clone();
+    a.call("new_session", json!({ "place": "vps" }))
+        .await
+        .unwrap();
+    let remote = a.call("summary", json!({})).await.unwrap()["location"].clone();
+    let folder = copy_folder(&b, "offline-settle").await;
+    std::fs::write(folder.join("chapter.txt"), "remote\n").unwrap();
+    let packed = b
+        .call(
+            "copy_pack",
+            json!({
+                "origin": local["runtime"], "origin_project": local["project"],
+                "name": "offline-settle", "files": ["chapter.txt"], "deleted": [],
+            }),
+        )
+        .await
+        .unwrap();
+    let stream = packed["stream"].as_str().unwrap();
+    std::fs::write(work.path().join("chapter.txt"), "remote\n").unwrap();
+    let key = format!(
+        "{}:{}",
+        local["project"].as_str().unwrap(),
+        remote["runtime"].as_str().unwrap()
+    );
+    let receipt = format!("{key}:bring:{stream}");
+    let store = ark_store::Store::open(dir_a.path()).unwrap();
+    store
+        .put_record(
+            "copy_bring_pending",
+            &key,
+            &key,
+            &json!({
+                "stream": stream, "epoch": packed["epoch"],
+                "manifest": packed["manifest"], "deleted": packed["deleted"],
+            }),
+        )
+        .unwrap();
+    store
+        .put_record(
+            "copy_receipt",
+            &receipt,
+            &key,
+            &json!({ "written": ["chapter.txt"], "deleted": [], "refused": [] }),
+        )
+        .unwrap();
+
+    stop.send(()).unwrap();
+    server_thread.join().unwrap();
+    until("the settlement runtime to be offline", async || {
+        a.links().state("vps") != Some(ark_interact::links::State::Ok)
+    })
+    .await;
+    assert!(a
+        .call("place_bring", json!({ "choices": {} }))
+        .await
+        .is_err());
+    assert!(store
+        .get_record("copy_bring_pending", &key)
+        .unwrap()
+        .is_some());
+    assert!(store
+        .get_record("copy_receipt", &receipt)
+        .unwrap()
+        .is_some());
 }
 
 /// A stand-in for Claude Code's own sign-in in `dir`, used by the server: a link, then the code

@@ -28,13 +28,11 @@ pub const CHAT_CALLS: &[&str] = &[
     "chat_context",
     "chat_trace",
     "chat_rename",
+    "chat_resource",
     // Who answers there (ADR 0052, Who answers): its models, a program's install or sign-in in
     // a terminal the person answers, a key the person agreed to send.
     "chat_models",
     "chat_setup",
-    "chat_term_write",
-    "chat_term_resize",
-    "chat_term_close",
     "chat_key",
     // The project's copy there (ADR 0052, Project copy).
     "copy_state",

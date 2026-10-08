@@ -13,6 +13,42 @@ use ark_sdk::prelude::*;
 use ark_ui::{ArkUi, Host};
 use serde_json::{json, Value};
 
+#[derive(Clone)]
+struct Client(Arc<Host>);
+
+impl std::ops::Deref for Client {
+    type Target = Host;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Client {
+    async fn call(&self, method: &str, input: Value) -> anyhow::Result<Value> {
+        let operation = match method {
+            "tools" | "spawn_agent" | "agents" | "submit_task" | "orch_events" | "task"
+            | "message_agent" | "graph" | "suspend_agent" | "resume_agent" | "cancel_task"
+            | "workspace" | "unschedule" => Some(("project", method, "")),
+            "artifact" => Some(("artifact", method, input["id"].as_str().unwrap_or(""))),
+            _ => None,
+        };
+        let Some((kind, operation, id)) = operation else {
+            return self.0.call(method, input).await;
+        };
+        let location = self.0.call("summary", json!({})).await?["location"].clone();
+        self.0
+            .call(
+                "resource",
+                json!({
+                    "ref": { "location": location, "kind": kind, "id": id },
+                    "operation": { "kind": operation, "input": input },
+                }),
+            )
+            .await
+    }
+}
+
 struct Notes {
     saves: Arc<AtomicUsize>,
 }
@@ -64,7 +100,7 @@ fn model(action: &'static str, args: Value) -> Arc<MockProvider> {
     }))
 }
 
-async fn open(dir: &std::path::Path, saves: Arc<AtomicUsize>) -> Arc<Host> {
+async fn open(dir: &std::path::Path, saves: Arc<AtomicUsize>) -> Client {
     open_with(dir, saves, model("notes.save", json!({}))).await
 }
 
@@ -72,7 +108,7 @@ async fn open_with(
     dir: &std::path::Path,
     saves: Arc<AtomicUsize>,
     model: Arc<MockProvider>,
-) -> Arc<Host> {
+) -> Client {
     let provider: Arc<dyn ark_model::Provider> = model;
     let ark = Ark::builder()
         .store_root(dir)
@@ -92,7 +128,7 @@ async fn open_with(
             .approvals(gate)
             .build()?)
     });
-    ArkUi::new(app).open().await.unwrap().0
+    Client(ArkUi::new(app).open().await.unwrap().0)
 }
 
 /// The next event matching `f`.
@@ -494,7 +530,7 @@ async fn a_scheduled_run_posts_its_result_in_the_chat_and_the_window_shows_it() 
             *keep.lock().unwrap() = Some(o.clone());
             Ok(o)
         });
-    let host = ArkUi::new(app).open().await.unwrap().0;
+    let host = Client(ArkUi::new(app).open().await.unwrap().0);
     host.call("spawn_agent", json!({ "spec": { "name": "helper" } }))
         .await
         .unwrap();

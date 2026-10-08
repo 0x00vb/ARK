@@ -78,6 +78,25 @@ fn app(dir: &std::path::Path) -> App {
     })
 }
 
+async fn resource_call(
+    client: &Client,
+    kind: &str,
+    operation: &str,
+    id: &str,
+    input: Value,
+) -> anyhow::Result<Value> {
+    let location = client.call("summary", json!({})).await?["location"].clone();
+    client
+        .call(
+            "resource",
+            json!({
+                "ref": { "location": location, "kind": kind, "id": id },
+                "operation": { "kind": operation, "input": input },
+            }),
+        )
+        .await
+}
+
 /// A raw HTTP request and the whole response.
 async fn raw(port: u16, req: String) -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -373,20 +392,24 @@ async fn a_client_runs_a_task_that_finishes_with_no_client_connected() {
     let client = Client::new(&url, &token);
     let hello = client.hello().await.unwrap();
     assert_eq!(hello["version"], env!("CARGO_PKG_VERSION"));
-    client
-        .call(
-            "spawn_agent",
-            json!({ "spec": { "name": "reader", "role": "reads the notes", "tools": ["notes.*"] } }),
-        )
-        .await
-        .unwrap();
-    let r = client
-        .call(
-            "submit_task",
-            json!({ "agent": "reader", "task": { "objective": "read the notes" } }),
-        )
-        .await
-        .unwrap();
+    resource_call(
+        &client,
+        "project",
+        "spawn_agent",
+        "",
+        json!({ "spec": { "name": "reader", "role": "reads the notes", "tools": ["notes.*"] } }),
+    )
+    .await
+    .unwrap();
+    let r = resource_call(
+        &client,
+        "project",
+        "submit_task",
+        "",
+        json!({ "agent": "reader", "task": { "objective": "read the notes" } }),
+    )
+    .await
+    .unwrap();
     let task = r["task"].as_str().unwrap().to_string();
     // Nobody listens to events: the task runs in the runtime on its own. A new client (a
     // window opened later) reads its result.
@@ -394,7 +417,9 @@ async fn a_client_runs_a_task_that_finishes_with_no_client_connected() {
     let later = Client::new(&url, &token);
     let mut state = Value::Null;
     for _ in 0..100 {
-        let t = later.call("task", json!({ "task": task })).await.unwrap();
+        let t = resource_call(&later, "project", "task", "", json!({ "task": task }))
+            .await
+            .unwrap();
         state = t["task"]["state"].clone();
         if state == "done" {
             assert_eq!(t["task"]["result"], "Read.");
@@ -464,12 +489,19 @@ async fn a_folder_sent_from_another_computer_becomes_a_project_there() {
         .call("open_project", json!({ "id": id }))
         .await
         .unwrap();
-    let read = client
-        .call("file_read", json!({ "path": "chapters/draft/one.md" }))
+    let read = resource_call(
+        &client,
+        "file",
+        "file_read",
+        "chapters/draft/one.md",
+        json!({ "path": "chapters/draft/one.md" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(read["text"], "It was a dark night.");
+    let root = resource_call(&client, "file", "files", "", json!({ "path": "" }))
         .await
         .unwrap();
-    assert_eq!(read["text"], "It was a dark night.");
-    let root = client.call("files", json!({ "path": "" })).await.unwrap();
     let names: Vec<&str> = root["entries"]
         .as_array()
         .unwrap()
@@ -492,7 +524,7 @@ async fn a_folder_sent_from_another_computer_becomes_a_project_there() {
     // A path out of the upload's folder is refused.
     let out = client
         .call(
-            "upload_parts",
+            "upload_project_parts",
             json!({ "upload": "abcdef123456", "parts": [{ "path": "../../access.json", "data": "", "offset": 0 }] }),
         )
         .await
@@ -523,21 +555,21 @@ async fn a_folder_sent_from_another_computer_becomes_a_project_there() {
     // Asking again for a finished upload's project (its answer was lost) answers the same.
     client
         .call(
-            "upload_parts",
+            "upload_project_parts",
             json!({ "upload": "again12345", "parts": [] }),
         )
         .await
         .unwrap();
     let first = client
         .call(
-            "upload_project",
+            "upload_project_finish",
             json!({ "upload": "again12345", "name": "twice" }),
         )
         .await
         .unwrap();
     let second = client
         .call(
-            "upload_project",
+            "upload_project_finish",
             json!({ "upload": "again12345", "name": "twice" }),
         )
         .await
@@ -591,17 +623,24 @@ async fn a_revoked_session_stops_receiving_events_on_a_stream_it_already_had() {
     tokens.revoke("Chrome on Mac").unwrap();
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let client = Client::new(&format!("http://127.0.0.1:{port}"), &script);
-    client
-        .call("spawn_agent", json!({ "spec": { "name": "reader", "role": "reads the notes", "tools": ["notes.*"] } }))
-        .await
-        .unwrap();
-    client
-        .call(
-            "submit_task",
-            json!({ "agent": "reader", "task": { "objective": "read the notes" } }),
-        )
-        .await
-        .unwrap();
+    resource_call(
+        &client,
+        "project",
+        "spawn_agent",
+        "",
+        json!({ "spec": { "name": "reader", "role": "reads the notes", "tools": ["notes.*"] } }),
+    )
+    .await
+    .unwrap();
+    resource_call(
+        &client,
+        "project",
+        "submit_task",
+        "",
+        json!({ "agent": "reader", "task": { "objective": "read the notes" } }),
+    )
+    .await
+    .unwrap();
     let mut got = String::new();
     let closed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {

@@ -11,7 +11,7 @@ import { Sidebar } from "./sidebar.js";
 import { Topbar } from "./topbar.js";
 import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
-import { registry, installApi, dispatchExt, presenterFor } from "./ext.js";
+import { registry, installApi, dispatchExt, presenterFor, onExt } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
 import { fileView, kindOf, KIND_ICON, setFileKinds } from "./file.js";
 import { registerCapabilities } from "./capabilities.js";
@@ -29,7 +29,9 @@ import { registerComputers } from "./computers.js";
 const transport = connect();
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
 const appEl = $("#app");
-const state = { summary: null, ui: {}, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, view: null };
+const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, view: null };
+const resourceOnline = new Map();
+const locationKey = (location) => `${location?.runtime || ""}:${location?.project || ""}:${location?.session || ""}`;
 // Main-column views (`ark.view`), built on first show and kept while hidden.
 const views = new Map();
 
@@ -37,10 +39,19 @@ const views = new Map();
 
 const api = {
   h, icon, markdown,
-  call: (method, params) => transport.call(method, params),
+  on: onExt,
+  call: (method, params = {}) => RESOURCE_METHODS[method]
+    ? scopedApi(currentLocation()).call(method, params)
+    : transport.call(method, params),
+  windowCall: (method, params = {}) => transport.call(method, params),
   ext: (name, params = {}) => transport.call("ext", { name, params }),
-  runAction: (action, input = {}, approved = false) => transport.call("run_action", { action, input, approved }),
-  setFocus: (focus) => transport.call("focus", { focus }).catch(() => {}),
+  runAction: (action, input = {}, approved = false) => scopedApi(currentLocation()).runAction(action, input, approved),
+  setFocus: (focus) => scopedApi(currentLocation()).setFocus(focus),
+  resourceRef: (kind, id = "", location = currentLocation()) => ({ location: { ...location }, kind, id: String(id || "") }),
+  resource: (ref, kind, input = {}) => resourceOnline.get(locationKey(ref?.location)) === false
+    ? Promise.reject(new Error("That computer is not answering"))
+    : transport.call("resource", { ref, operation: { kind, input } }),
+  at: (location) => scopedApi(location),
   // The system's folder picker in the window: a path, or null when dismissed. Undefined
   // where there is none (a browser), so the caller asks for a typed path instead.
   pickFolder: ({ title } = {}) => transport.pickFolder(title),
@@ -94,32 +105,40 @@ const api = {
   openSettings: (section) => showView(SETTINGS, section ? { section } : undefined),
   loadEarlier,
   openInvocation: (id) => {
-    const key = `inv:${id}`;
-    pane.openTab(key, `inv:${String(id).replace(/^inv:/, "").slice(0, 6)}`, "file", (el) => invocationView(el, api, id));
+    const location = currentLocation();
+    const ark = scopedApi(location);
+    const key = resourceKey("inv", location, id);
+    pane.openTab(key, `inv:${String(id).replace(/^inv:/, "").slice(0, 6)}`, "file", (el) => invocationView(el, ark, id), undefined, { api: ark });
   },
   // A stored copy of a project file opens as the file, as it is now (one view per kind), unless
   // an app's viewer is asked for or matches it.
   openArtifact: (id, viewerId, params) => {
-    if (viewerId) return openArtifactTab(id, viewerId, params);
-    api.call("artifact", { id, length: 1 }).then((r) => {
+    const location = currentLocation();
+    const ark = scopedApi(location);
+    if (viewerId) return openArtifactTab(id, viewerId, params, location);
+    ark.call("artifact", { id, length: 1 }).then((r) => {
       const a = r.artifact;
       const lens = registry.viewers.some((v) => { try { return v.match(a); } catch { return false; } });
-      if (a.path && !lens) api.openFile(a.path, params);
-      else openArtifactTab(id, undefined, params);
-    }).catch(() => openArtifactTab(id, undefined, params));
+      if (a.path && !lens) ark.openFile(a.path, params);
+      else openArtifactTab(id, undefined, params, location);
+    }).catch(() => openArtifactTab(id, undefined, params, location));
   },
   // A file of the project in a tab of its own: a spreadsheet, a document or text.
   openFile: (path, params) => {
     path = String(path).replace(/^\.\//, "");
-    pane.openTab(`file:${path}`, path.split("/").pop(), KIND_ICON[kindOf(path)], (el, p) => fileView(el, path, window.ark, p), params, { wide: true, fill: true });
+    const location = currentLocation();
+    const ark = scopedApi(location);
+    pane.openTab(resourceKey("file", location, path), path.split("/").pop(), KIND_ICON[kindOf(path)], (el, p) => fileView(el, path, ark, p), params, { wide: true, fill: true, api: ark });
   },
   openPanel(id, params) {
     const p = registry.panels.get(id);
     if (!p) return toast(`No panel named ${id}`);
-    pane.openTab(`panel:${id}`, p.title, p.icon || "box", (el, prm) => p.render(el, prm, window.ark) || {}, params, { wide: !!p.wide, fill: !!p.fill });
+    const location = currentLocation();
+    const ark = scopedApi(location);
+    pane.openTab(resourceKey("panel", location, id), p.title, p.icon || "box", (el, prm) => p.render(el, prm, ark) || {}, params, { wide: !!p.wide, fill: !!p.fill, api: ark });
   },
-  setPanelTitle: (id, title) => retitle(`panel:${id}`, title),
-  closePanel: (id) => pane.remove(`panel:${id}`),
+  setPanelTitle: (id, title) => retitle(resourceKey("panel", currentLocation(), id), title),
+  closePanel: (id) => pane.remove(resourceKey("panel", currentLocation(), id)),
   toast,
   popover,
   refreshSidebar: () => sidebar.refresh(state.sessionId),
@@ -137,6 +156,93 @@ const api = {
     });
   },
 };
+
+const RESOURCE_METHODS = {
+  term_open: ["terminal", "terminal_open"], term_read: ["terminal", "terminal_read"],
+  term_write: ["terminal", "terminal_write"], term_resize: ["terminal", "terminal_resize"], term_close: ["terminal", "terminal_close"],
+  procs: ["process", "processes"], proc_output: ["process", "process_output"], proc_stop: ["process", "process_stop"],
+  files: ["file", "files"], file_read: ["file", "file_read"], file_write: ["file", "file_write"], file_edit: ["file", "file_edit"],
+  file_media: ["file", "file_media"], file_version: ["file", "file_version"], file_restore: ["file", "file_restore"],
+  upload_parts: ["file", "upload_parts"], upload_add: ["file", "upload_add"], upload_cancel: ["file", "upload_cancel"], file_open: ["file", "file_open"],
+  workspace: ["project", "workspace"], state: ["project", "state"],
+  graph: ["project", "graph"], task_trace: ["project", "task_trace"], task: ["project", "task"], orch_events: ["project", "orch_events"],
+  agents: ["project", "agents"], spawn_agent: ["project", "spawn_agent"], submit_task: ["project", "submit_task"],
+  cancel_task: ["project", "cancel_task"], retry_task: ["project", "retry_task"],
+  schedules: ["project", "schedules"], schedule: ["project", "schedule"], unschedule: ["project", "unschedule"],
+  schedule_pause: ["project", "schedule_pause"], schedule_resume: ["project", "schedule_resume"], schedule_run: ["project", "schedule_run"],
+  board: ["project", "board"], board_add: ["project", "board_add"], board_change: ["project", "board_change"],
+  board_remove: ["project", "board_remove"], board_give: ["project", "board_give"],
+  suspend_agent: ["project", "suspend_agent"], resume_agent: ["project", "resume_agent"], terminate_agent: ["project", "terminate_agent"], message_agent: ["project", "message_agent"],
+  profiles: ["project", "profiles"], grants: ["project", "grants"], grant_remove: ["project", "grant_remove"],
+  skills: ["project", "skills"], tools: ["project", "tools"], usage: ["project", "usage"],
+  artifacts: ["artifact", "artifacts"], artifact: ["artifact", "artifact"], invocation: ["invocation", "invocation"],
+  picture: ["picture", "picture"], computer_picture: ["picture", "computer_picture"],
+};
+
+function currentLocation() {
+  const location = state.summary?.location;
+  if (!location?.runtime || !location?.project || !location?.session) throw new Error("This chat has no resource location");
+  return location;
+}
+
+function resourceKey(prefix, location, id) {
+  return `${prefix}:${location.runtime}:${location.project}:${location.session}:${id}`;
+}
+
+function scopedApi(location) {
+  // Consumer capabilities may be installed or replaced after boot (the Desktop Browser view is
+  // one). A resource tab snapshots its location, not the API object's early boot values.
+  const scoped = Object.create(window.ark || api);
+  scoped.location = { ...location };
+  scoped.remoteResource = location.runtime !== state.runtime;
+  scoped.online = () => resourceOnline.get(locationKey(location)) !== false;
+  if (scoped.remoteResource) scoped.browserView = undefined;
+  scoped.call = (method, params = {}) => {
+    const spec = RESOURCE_METHODS[method];
+    if (!spec) return (window.ark || api).call(method, params);
+    const [kind, operation] = spec;
+    const id = kind === "terminal" ? (params.session || "")
+      : kind === "process" ? (params.id || "")
+      : kind === "artifact" || kind === "invocation" ? (params.id || "")
+      : kind === "picture" ? (params.invocation || params.app || "")
+      : kind === "file" && method !== "files" && !method.startsWith("upload_") && method !== "file_restore" ? (params.path || "") : "";
+    return api.resource(api.resourceRef(kind, id, location), operation, params);
+  };
+  if (api.on) scoped.on = (name, fn) => api.on(name, (message) => {
+    if (["ark:term", "ark:proc", "ark:orch"].includes(name) && !message?.ref) return;
+    if (message?.ref && JSON.stringify(message.ref.location) !== JSON.stringify(location)) return;
+    if (message?.location && JSON.stringify(message.location) !== JSON.stringify(location)) return;
+    fn(message);
+  });
+  scoped.ext = (name, params = {}) => api.resource(api.resourceRef("extension", name, location), "extension", { name, params });
+  scoped.runAction = (action, input = {}, approved = false) => api.resource(api.resourceRef("project", "", location), "run_action", { action, input, approved });
+  scoped.setFocus = (focus) => api.resource(api.resourceRef("project", "", location), "focus", { focus }).catch(() => {});
+  scoped.openFile = (path, params) => {
+    path = String(path).replace(/^\.\//, "");
+    pane.openTab(resourceKey("file", location, path), path.split("/").pop(), KIND_ICON[kindOf(path)], (el, p) => fileView(el, path, scoped, p), params, { wide: true, fill: true, api: scoped });
+  };
+  scoped.openInvocation = (id) => {
+    const key = resourceKey("inv", location, id);
+    pane.openTab(key, `inv:${String(id).replace(/^inv:/, "").slice(0, 6)}`, "file", (el) => invocationView(el, scoped, id), undefined, { api: scoped });
+  };
+  scoped.openArtifact = (id, viewerId, params) => {
+    if (viewerId) return openArtifactTab(id, viewerId, params, location);
+    scoped.call("artifact", { id, length: 1 }).then((r) => {
+      const artifact = r.artifact;
+      const lens = registry.viewers.some((v) => { try { return v.match(artifact); } catch { return false; } });
+      if (artifact.path && !lens) scoped.openFile(artifact.path, params);
+      else openArtifactTab(id, undefined, params, location);
+    }).catch(() => openArtifactTab(id, undefined, params, location));
+  };
+  scoped.openPanel = (id, params) => {
+    const panel = registry.panels.get(id);
+    if (!panel) return toast(`No panel named ${id}`);
+    pane.openTab(resourceKey("panel", location, id), panel.title, panel.icon || "box", (el, prm) => panel.render(el, prm, scoped) || {}, params, { wide: !!panel.wide, fill: !!panel.fill, api: scoped });
+  };
+  scoped.setPanelTitle = (id, title) => retitle(resourceKey("panel", location, id), title);
+  scoped.closePanel = (id) => pane.remove(resourceKey("panel", location, id));
+  return scoped;
+}
 
 // Terminal, Browser and Files first, so an app's panel with the same id replaces one.
 registerBuiltins(installApi(api));
@@ -290,6 +396,7 @@ function applySummary(s) {
   state.summary = s;
   state.sessionId = s.session.id;
   state.title = s.session.title || (s.session.turns ? "Untitled chat" : "");
+  if (s.location) resourceOnline.set(locationKey(s.location), !s.place || s.place.state === "ok");
   showTitle();
   composer.setModel(s.model);
   places?.show(s, state.running);
@@ -412,6 +519,9 @@ function onEvent(msg) {
     dispatchExt(`ark:${msg.kind}`, msg);
     return connection(msg);
   }
+  if (msg.kind === "resource_connection" && msg.location) {
+    resourceOnline.set(locationKey(msg.location), !!msg.online);
+  }
   // App scripts can follow the same stream: `ark.on("ark:turn_finished", fn)`.
   if (msg.kind !== "ext" && msg.kind !== "text") dispatchExt(`ark:${msg.kind}`, msg);
   // A question an orchestrated agent asks belongs to no chat (`session` is empty).
@@ -525,14 +635,16 @@ async function decide(id, decision) {
   }
 }
 
-function openArtifactTab(id, viewerId, params) {
+function openArtifactTab(id, viewerId, params, location = currentLocation()) {
   const v = registry.viewers.find((x) => x.id === viewerId);
   const prm = params === undefined && viewerId ? { viewer: viewerId } : params && { ...params, viewer: viewerId };
-  pane.openTab(`art:${id}`, "Artifact", "file", (el, p) => {
-    const ctl = artifactView(el, api, id, viewerId, p);
-    api.call("artifact", { id, length: 1 }).then((r) => retitle(`art:${id}`, r.artifact.name)).catch(() => {});
+  const ark = scopedApi(location);
+  const key = resourceKey("art", location, id);
+  pane.openTab(key, "Artifact", "file", (el, p) => {
+    const ctl = artifactView(el, ark, id, viewerId, p);
+    ark.call("artifact", { id, length: 1 }).then((r) => retitle(key, r.artifact.name)).catch(() => {});
     return ctl;
-  }, prm, { wide: v ? !!v.wide : registry.viewers.some((x) => x.wide), fill: true });
+  }, prm, { wide: v ? !!v.wide : registry.viewers.some((x) => x.wide), fill: true, api: ark });
 }
 
 function present(d) {
@@ -812,6 +924,7 @@ async function bootOnce(again) {
   }
   feed.seq = hello.seq || 0;
   state.ui = hello.ui || {};
+  state.runtime = hello.runtime;
   setFileKinds(hello.file_kinds, hello.kind_nouns);
   state.commands = hello.commands || [];
   composer.commands = state.commands;

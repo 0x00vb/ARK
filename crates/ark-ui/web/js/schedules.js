@@ -60,20 +60,18 @@ function draw() {
   }
 }
 
-async function act(method, id, done) {
+async function act(method, id, done, ark = store.ark) {
   try {
-    await store.ark.call(method, { schedule: id });
-    if (done) store.ark.toast(done);
+    await ark.call(method, { schedule: id });
+    if (done) ark.toast(done);
   } catch (e) {
-    store.ark.toast(e.message);
+    ark.toast(e.message);
   }
-  load();
 }
 
 // ---- one schedule, in the side pane -------------------------------------------------------------
 
-function schedulePanel(el, params) {
-  const ark = store.ark;
+function schedulePanel(el, params, ark = store.ark) {
   el.classList.add("sc-panel");
   let id = params?.id;
   let data = null;
@@ -111,11 +109,11 @@ function schedulePanel(el, params) {
       type: "button",
       disabled: open ? true : null,
       title: open ? "A run is under way" : null,
-      onclick: () => act("schedule_run", id),
+      onclick: () => act("schedule_run", id, undefined, ark).then(fetch),
     }, icon("play"), "Run now");
     const pause = s.paused
-      ? h("button.btn.ghost.small", { type: "button", onclick: () => act("schedule_resume", id) }, "Resume")
-      : h("button.btn.ghost.small", { type: "button", onclick: () => act("schedule_pause", id) }, "Pause");
+      ? h("button.btn.ghost.small", { type: "button", onclick: () => act("schedule_resume", id, undefined, ark).then(fetch) }, "Resume")
+      : h("button.btn.ghost.small", { type: "button", onclick: () => act("schedule_pause", id, undefined, ark).then(fetch) }, "Pause");
     const stop = h("button.btn.ghost.small.sc-stop", { type: "button" }, stopping ? "Stop for good?" : "Stop");
     stop.onclick = () => {
       if (!stopping) {
@@ -124,7 +122,7 @@ function schedulePanel(el, params) {
       }
       clearTimeout(stopping);
       stopping = null;
-      act("unschedule", id, "Stopped").then(() => ark.closePanel?.("schedule"));
+      act("unschedule", id, "Stopped", ark).then(() => ark.closePanel?.("schedule"));
     };
     el.append(
       h("div.sc-head",
@@ -185,8 +183,9 @@ function word(state) {
 
 export function registerSchedules(ark) {
   store.ark = ark;
-  ark.panel({ id: "schedule", title: "Schedule", icon: "clock", builtin: true, render: (el, params) => schedulePanel(el, params) });
+  ark.panel({ id: "schedule", title: "Schedule", icon: "clock", builtin: true, render: (el, params, scoped) => schedulePanel(el, params, scoped || ark) });
   ark.on("ark:orch", (m) => {
+    if (m.ref) return;
     if (MOVES.has(m.event?.type)) loadSoon();
   });
   ark.on("ark:orch_lagged", load);

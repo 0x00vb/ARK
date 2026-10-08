@@ -96,6 +96,18 @@ async fn all(host: &Arc<Host>) -> Value {
     host.call("attention_all", json!({})).await.unwrap()
 }
 
+async fn project_call(host: &Arc<Host>, operation: &str, input: Value) -> anyhow::Result<Value> {
+    let location = host.call("summary", json!({})).await?["location"].clone();
+    host.call(
+        "resource",
+        json!({
+            "ref": { "location": location, "kind": "project", "id": "" },
+            "operation": { "kind": operation, "input": input },
+        }),
+    )
+    .await
+}
+
 /// B (the person's server) with an agent's question waiting.
 async fn server_with_a_question(
     dir: &std::path::Path,
@@ -111,13 +123,15 @@ async fn server_with_a_question(
     b.call("switch_project", json!({ "name": "novel" }))
         .await
         .unwrap();
-    b.call(
+    project_call(
+        &b,
         "spawn_agent",
         json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
     )
     .await
     .unwrap();
-    b.call(
+    project_call(
+        &b,
         "submit_task",
         json!({ "agent": "scribe", "task": { "objective": "file the notes" } }),
     )

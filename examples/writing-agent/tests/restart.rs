@@ -131,6 +131,23 @@ impl Served {
     }
 
     fn rpc(&self, method: &str, params: Value) -> Value {
+        if matches!(
+            method,
+            "spawn_agent" | "graph" | "orch_events" | "schedule" | "schedules" | "task"
+        ) {
+            let location = self.raw_rpc("summary", json!({}))["location"].clone();
+            return self.raw_rpc(
+                "resource",
+                json!({
+                    "ref": { "location": location, "kind": "project", "id": "" },
+                    "operation": { "kind": method, "input": params },
+                }),
+            );
+        }
+        self.raw_rpc(method, params)
+    }
+
+    fn raw_rpc(&self, method: &str, params: Value) -> Value {
         let out = Command::new("curl")
             .args(["-s", "-m", "20", "-X", "POST"])
             .arg(format!("{}/rpc", self.url))

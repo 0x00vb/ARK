@@ -38,7 +38,12 @@ fn site() -> String {
                 })
                 .unwrap_or("none")
                 .to_string();
-            let (extra, body) = if let Some(q) = path.strip_prefix("/hello?name=") {
+            let (extra, body) = if path.starts_with("/popup") {
+                (
+                    "",
+                    "<title>Opening</title><button style='width:180px;height:80px' onclick=\"window.open('/hello?name=Popup')\">Open popup</button>".to_string(),
+                )
+            } else if let Some(q) = path.strip_prefix("/hello?name=") {
                 (
                     "Set-Cookie: seen=yes\r\n",
                     format!(
@@ -51,7 +56,7 @@ fn site() -> String {
             } else {
                 (
                     "",
-                    "<title>Greeter</title><main><h1>Greeter</h1><form action=\"/hello\"><label for=n>Your name</label><input id=n name=name><button>Greet me</button></form><a href=\"/whoami\">Who am I</a></main>".to_string(),
+                    "<title>Greeter</title><main><h1>Greeter</h1><form action=\"/hello\"><label for=n>Your name</label><input autofocus oninput=\"document.title=this.value\" id=n name=name style=\"position:fixed;left:10px;top:10px;width:180px;height:32px\"><button>Greet me</button></form><a href=\"/whoami\">Who am I</a></main>".to_string(),
                 )
             };
             let _ = write!(
@@ -177,6 +182,84 @@ async fn agents_browse_apart_and_take_turns_on_the_signed_in_browser() {
     );
     assert_eq!(b["signed_in"], true);
     assert_eq!(svc.signed_in_user().await.as_deref(), Some("bob"));
+}
+
+#[tokio::test]
+async fn a_person_surface_has_its_own_context_frames_navigation_and_popups() {
+    let dir = tempfile::tempdir().unwrap();
+    let svc = BrowserService::new(dir.path()).allow_private(true);
+    if svc.browser().is_none() {
+        eprintln!("skipped: no Chrome, Edge or Brave on this machine");
+        return;
+    }
+    let base = site();
+    let first = svc.surface("chat-a");
+    let second = svc.surface("chat-b");
+    first.resize(640, 480, 1.0).await.unwrap();
+    first.open(&base).await.unwrap();
+    let frame = first.snapshot(640, 480).await.unwrap();
+    assert_eq!(frame.title, "Greeter");
+    assert_eq!(frame.media_type, "image/jpeg");
+    assert!(frame.image.len() > 100, "a rendered frame is returned");
+
+    second.open(&format!("{base}/whoami")).await.unwrap();
+    assert_eq!(second.snapshot(640, 480).await.unwrap().title, "Who");
+    assert_eq!(first.snapshot(640, 480).await.unwrap().title, "Greeter");
+
+    first
+        .open(&format!("{base}/hello?name=Surface"))
+        .await
+        .unwrap();
+    assert_eq!(first.snapshot(640, 480).await.unwrap().title, "Hello");
+    first.back().await.unwrap();
+    for _ in 0..20 {
+        if first.snapshot(640, 480).await.unwrap().title == "Greeter" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(first.snapshot(640, 480).await.unwrap().title, "Greeter");
+    first.open(&base).await.unwrap();
+    for _ in 0..20 {
+        if !first.snapshot(640, 480).await.unwrap().loading {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    first.text("Keys").await.unwrap();
+    assert_eq!(first.snapshot(640, 480).await.unwrap().title, "Keys");
+    first.key("keyDown", "Enter", "Enter", 0).await.unwrap();
+    first.key("keyUp", "Enter", "Enter", 0).await.unwrap();
+    for _ in 0..20 {
+        if first.snapshot(640, 480).await.unwrap().title == "Hello" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(first.snapshot(640, 480).await.unwrap().title, "Hello");
+
+    first.open(&format!("{base}/popup")).await.unwrap();
+    first
+        .pointer("mousePressed", 60.0, 40.0, "left", 1)
+        .await
+        .unwrap();
+    first
+        .pointer("mouseReleased", 60.0, 40.0, "left", 1)
+        .await
+        .unwrap();
+    let mut title = String::new();
+    for _ in 0..40 {
+        title = first.snapshot(640, 480).await.unwrap().title;
+        if title == "Hello" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(title, "Hello", "the newest popup replaces the tracked page");
+    first.stop().await.unwrap();
+    first.reload().await.unwrap();
+    first.close().await.unwrap();
+    second.close().await.unwrap();
 }
 
 #[tokio::test]

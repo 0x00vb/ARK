@@ -122,7 +122,7 @@ pub async fn send_folder(
         Ok(true) => {
             call(
                 client,
-                "upload_project",
+                "upload_project_finish",
                 json!({ "upload": upload, "name": name }),
             )
             .await
@@ -132,7 +132,7 @@ pub async fn send_folder(
     };
     if done.is_err() {
         // Best effort: the runtime also removes uploads left for a day when it starts.
-        let _ = call(client, "upload_cancel", json!({ "upload": upload })).await;
+        let _ = call(client, "upload_project_cancel", json!({ "upload": upload })).await;
     }
     done
 }
@@ -175,7 +175,7 @@ async fn send_files(
     // Starts the upload, so an empty folder is one too.
     call(
         client,
-        "upload_parts",
+        "upload_project_parts",
         json!({ "upload": upload, "parts": [] }),
     )
     .await?;
@@ -240,7 +240,7 @@ async fn flush(client: &Client, upload: &str, batch: &mut Vec<Value>) -> anyhow:
     let first = parts[0]["path"].as_str().unwrap_or("").to_string();
     call(
         client,
-        "upload_parts",
+        "upload_project_parts",
         json!({ "upload": upload, "parts": parts }),
     )
     .await

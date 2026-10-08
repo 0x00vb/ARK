@@ -15,8 +15,53 @@ What changed for people building on ARK, per release. Not a commit log.
   `ArkBuilder::project_instructions(names)` names other files, or none to turn it off;
   `rules::project_instructions` (sections chosen by the task) and `RuleSelection::with_project`
   are new.
+- ADR 0052: a chat runs on the computer the person picks. A runtime holds chats for another
+  through calls that name the chat (`chat_new`, `chat_send`, `chat_read`, `chat_approve`,
+  `chat_model`, …) and never move its own windows; the other keeps a record per chat
+  (`ark_interact::held`), passes the window's calls there, and numbers that computer's events
+  into its own stream, a question's id becoming `<runtime id>:<id>`. `new_session {place}`,
+  `sessions` rows with `place`, `places`, `/chats` and `/resume` of a held chat
+  (`Effect::Open`). `Links::chat`, `chat_events`, `add`, `remove`, `state`, `runtime_id`.
+- ADR 0052: the window's place chip beside the model in an empty chat, the line above the
+  composer ("3 files changed on vps · Bring to this Mac", a choice per file changed on both
+  sides, "vps is not answering · Try again"), marks in the sidebar and the header, and
+  Settings › Computers: a host from `~/.ssh/config`, `user@host`, or an address and a code.
+- ADR 0052: `ArkUi::computers(ComputerSetup { contract, build, secrets, ssh_config })` lets the
+  person add computers over SSH (setup, a tunnel kept up, a link); `ArkUi::keep_computer` moves
+  a server an app kept before. `ark_ui::ark_reach` re-exports the crate for the contract.
+- ADR 0052: who answers on a computer is that computer's: the model menu lists its models;
+  Install and Sign in run the program's own step there in a terminal sheet (`place_setup`,
+  `Cli::install_line`, `Cli::sign_in_args`, catalog `Backend::step`); a key goes there only
+  when asked (`place_key`, `ApiKeys::saved_key`) and is forgotten when the computer is removed.
+- `scripts/linux-build.sh PACKAGE BIN`: a program's Linux build for a server (Debian 11).
+- Examples: the writer serves on a computer with its own contract (`--version`,
+  `--revoke-token`, `WRITER_SERVER_BUILD`).
+- ADR 0052 step 2: `ark_ui::copy`, a project's copy on another computer. `select` (a git
+  folder's `ls-files`, else all but build folders), a `Manifest` per copy (a `copy_manifest`
+  record), `changes` against it, `plan_send` (never a file the other side changed), `pack` (a
+  `tar` stream), `apply` and `apply_first` (refuse paths and links out of the folder, never write
+  through a link, drop setuid and setgid, keep a version before each replaced file), and
+  `both_changed`. `Engine::keep_before` keeps a project file as a version before (ADR 0034);
+  `restore_file` uses it.
 - Window: code in the file editor is coloured from the theme (keywords, strings, numbers,
   literals, comments) for 12 language families. Other files keep the plain editor.
+- ADR 0052 step 0: `ArkUi::serve("unix:/path/to.sock")` serves on a Unix socket, with saved
+  tokens only. The socket is 0600; its folder is made 0700, or refused when others can write to
+  it. A socket left by a stopped process is replaced; a live one stops the second server
+  ("already serving"). The file is removed when serving stops.
+- `remote::Client::new("unix:/path/to.sock", token)` reaches a runtime on a Unix socket, for
+  calls and events; errors name the socket as they name an address.
+- `ark_os::fs::private_dir`: a folder only its owner can change (Unix 0700, owner checked).
+- ADR 0052 step 3: new crate `ark-reach` sets up a computer over the system `ssh`. It covers
+  `hosts` from `~/.ssh/config` (through `Include`, resolved by `ssh -G`), a checked `Target`,
+  one `Session` per setup (connect, look, install by SHA-256, start as a `systemd --user`
+  service or in the background, pair), `remove`, and a `Tunnel` between Unix sockets that
+  comes back after a drop. The app describes its program with a `ServeContract`. Container
+  tests run with `ARK_TEST_SSH=1`.
+
+### Breaking
+- `ark_interact::Effect` has `Open(session)`: a `match` on it needs an arm for it (or `_`).
+- `ark_model::Backend` has `step`: a literal needs `step: None`.
 
 ### Changed
 - ADR 0051: a project folder with an `AGENTS.md` changes every conversation turn's first
@@ -25,6 +70,9 @@ What changed for people building on ARK, per release. Not a commit log.
   set the rules come from.
 - ADR 0051: a turn whose model restates its full answer beside a second check of the files it
   changed ends on that answer; the check does not run.
+- HTTPS uses rustls instead of the system's OpenSSL (`reqwest` without default features),
+  with the system's certificates and Mozilla's built in. A Linux build needs only glibc, and a
+  server without CA certificates still reaches HTTPS sites (ADR 0052).
 
 ## [0.14.0] - 2026-10-07
 

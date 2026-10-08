@@ -7,6 +7,7 @@ import { h, icon, clear, clip, touch, $ } from "./dom.js";
 import { registry } from "./ext.js";
 import { chooseFiles } from "./drop.js";
 import { label } from "./keys.js";
+import { programSheet } from "./places.js";
 
 export class Composer {
   constructor(api) {
@@ -256,11 +257,15 @@ export class Composer {
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && input.value.trim()) pick(input.value.trim());
     });
+    // A chat on another computer: its models, keys and programs are that computer's.
+    const place = this.api.summary()?.place?.name || null;
+    if (this.backendsFor !== place) this.backends = null;
+    this.backendsFor = place;
     const paint = (backends) => {
       clear(body);
       const current = this.model.textContent;
       for (const b of backends) {
-        if (b.kind === "api" && !b.ready && !this.canSaveKeys) continue;
+        if (b.kind === "api" && !b.ready && !this.canSaveKeys && !place) continue;
         const group = h("div.model-group",
           h("div.model-head",
             h("span.model-dot", { "data-ok": String(b.ready) }),
@@ -281,7 +286,8 @@ export class Composer {
             key.disabled = true;
             why.textContent = "Checking the key…";
             try {
-              await this.api.call("api_key_save", { provider: b.provider, key: key.value.trim() });
+              if (place) await this.api.call("place_key", { provider: b.provider, key: key.value.trim() });
+              else await this.api.call("api_key_save", { provider: b.provider, key: key.value.trim() });
               this.backends = await this.api.call("models");
               paint(this.backends);
             } catch (err) {
@@ -291,6 +297,27 @@ export class Composer {
             }
           });
           group.append(h("div.model-fix", key), why);
+          // The key this computer keeps goes there only when the person asks.
+          if (place && this.savedKeys?.includes(b.provider)) {
+            group.append(h("div.model-fix", h("button.btn.small", { type: "button", onclick: async (e) => {
+              e.target.disabled = true;
+              why.textContent = "Checking the key…";
+              try {
+                await this.api.call("place_key", { provider: b.provider });
+                this.backends = await this.api.call("models");
+                paint(this.backends);
+              } catch (err) {
+                e.target.disabled = false;
+                why.textContent = err.message;
+              }
+            } }, `Use ${this.api.hereName?.() || "this computer"}'s key`)));
+          }
+        } else if (place && b.step) {
+          // The program's own step, run there in a terminal shown here.
+          group.append(h("div.model-fix", h("button.btn.small.primary", { type: "button", onclick: () => {
+            menu.close();
+            programSheet(this.api, b, place, () => { this.backends = null; });
+          } }, b.step === "install" ? "Install" : "Sign in")));
         } else if (b.fix) {
           group.append(h("div.model-fix",
             h("code", b.fix),
@@ -302,10 +329,13 @@ export class Composer {
     if (this.backends) paint(this.backends);
     else body.append(h("div.menu-sub.pad", "Checking models…"));
     try {
-      [this.backends, this.canSaveKeys] = await Promise.all([
+      let keys;
+      [this.backends, keys] = await Promise.all([
         this.api.call("models"),
-        this.api.call("api_keys").then((k) => !!k.can_save).catch(() => false),
+        this.api.call("api_keys").catch(() => ({})),
       ]);
+      this.canSaveKeys = !!keys.can_save;
+      this.savedKeys = keys.saved || [];
       paint(this.backends);
     } catch (err) {
       if (!this.backends) {

@@ -101,6 +101,7 @@ ARK serves plain HTTP. Put it behind something that adds TLS:
 |---|---|
 | A public host name | Caddy on the same machine: `ark.example.com { reverse_proxy 127.0.0.1:8420 }` gets and renews a certificate by itself. Keep its access log off (with `?token=`, the page's event stream has the token in its address; a browser with a session sends none) |
 | A private network | Tailscale or WireGuard; serve on the private address only |
+| SSH only | `serve("unix:/path/to.sock")`: a Unix socket, mode 0600 in a 0700 folder, with saved tokens. The laptop forwards it (`ssh -L local.sock:/path/to.sock`) and connects with `Client::new("unix:local.sock", token)` (ADR 0052) |
 
 Server-sent events pass through Caddy without settings (tested with ARK Desktop's
 `deploy/compose.yaml`: a turn's events arrived live through Caddy 2). Other proxies must not

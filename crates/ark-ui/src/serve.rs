@@ -14,12 +14,17 @@
 //! `Origin`) unless it only reads. `GET /session` says whether the browser is in and where one
 //! that is not should go ([`ArkUi::entry`](crate::ArkUi::entry)); `DELETE /session` ends it.
 //! Every answer carries a Content-Security-Policy that lets the page run only its own scripts.
+//!
+//! The address is `host:port` for TCP, or `unix:/path/to.sock` for a Unix socket (ADR 0052): a
+//! runtime on a person's server that their laptop reaches through an SSH tunnel. The socket is
+//! mode 0600 in a folder only its owner changes, so other users of that computer cannot reach
+//! it. It serves with saved tokens only.
 
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 use crate::access::Tokens;
 use crate::assets::Assets;
@@ -40,9 +45,11 @@ pub enum Access {
 /// A running server.
 pub struct Served {
     /// The page's address: with the one-time token in it, or bare with saved tokens.
+    /// `unix:/path/to.sock` on a Unix socket.
     pub url: String,
     /// The one-time token; empty with saved tokens.
     pub token: String,
+    /// The TCP port; 0 on a Unix socket.
     pub port: u16,
 }
 
@@ -77,9 +84,8 @@ pub(crate) async fn serve(
     access: Access,
     entry: Option<String>,
 ) -> anyhow::Result<(Served, tokio::task::JoinHandle<()>)> {
-    let listener = TcpListener::bind(addr).await?;
-    let local = listener.local_addr()?;
-    let port = local.port();
+    let listener = Listener::bind(addr, &access).await?;
+    let port = listener.port();
     let (served, check) = match access {
         Access::OneTime => {
             let token = uuid::Uuid::new_v4().simple().to_string();
@@ -92,7 +98,7 @@ pub(crate) async fn serve(
         }
         Access::Tokens(tokens) => {
             let served = Served {
-                url: format!("http://{local}/"),
+                url: listener.url(),
                 token: String::new(),
                 port,
             };
@@ -105,7 +111,7 @@ pub(crate) async fn serve(
     let entry = Arc::new(entry);
     let task = tokio::spawn(async move {
         loop {
-            let Ok((sock, _)) = listener.accept().await else {
+            let Ok(sock) = listener.accept().await else {
                 // Out of file descriptors or similar: pause instead of spinning.
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 continue;
@@ -118,6 +124,107 @@ pub(crate) async fn serve(
         }
     });
     Ok((served, task))
+}
+
+/// A connection, over TCP or a Unix socket.
+trait Conn: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Conn for T {}
+
+/// Where the server listens. The accept task owns it: a socket file goes when the task does.
+enum Listener {
+    Tcp(TcpListener),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixListener, SocketFile),
+}
+
+impl Listener {
+    async fn bind(addr: &str, access: &Access) -> anyhow::Result<Listener> {
+        let Some(path) = addr.strip_prefix("unix:") else {
+            return Ok(Listener::Tcp(TcpListener::bind(addr).await?));
+        };
+        if matches!(access, Access::OneTime) {
+            anyhow::bail!("a Unix socket serves with saved access tokens only");
+        }
+        #[cfg(unix)]
+        {
+            let (listener, file) = bind_socket(std::path::Path::new(path)).await?;
+            Ok(Listener::Unix(listener, file))
+        }
+        #[cfg(not(unix))]
+        {
+            anyhow::bail!("{path}: this system has no Unix sockets; serve on host:port")
+        }
+    }
+
+    fn port(&self) -> u16 {
+        match self {
+            Listener::Tcp(l) => l.local_addr().map(|a| a.port()).unwrap_or(0),
+            #[cfg(unix)]
+            Listener::Unix(..) => 0,
+        }
+    }
+
+    fn url(&self) -> String {
+        match self {
+            Listener::Tcp(l) => match l.local_addr() {
+                Ok(a) => format!("http://{a}/"),
+                Err(_) => String::new(),
+            },
+            #[cfg(unix)]
+            Listener::Unix(_, file) => format!("unix:{}", file.0.display()),
+        }
+    }
+
+    async fn accept(&self) -> std::io::Result<Box<dyn Conn>> {
+        match self {
+            Listener::Tcp(l) => Ok(Box::new(l.accept().await?.0)),
+            #[cfg(unix)]
+            Listener::Unix(l, _) => Ok(Box::new(l.accept().await?.0)),
+        }
+    }
+}
+
+/// The socket file of a server on a Unix socket, removed when the server stops.
+#[cfg(unix)]
+struct SocketFile(std::path::PathBuf);
+
+#[cfg(unix)]
+impl Drop for SocketFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Listen on the Unix socket at `path`: mode 0600, in a folder only this user changes (made
+/// 0700 when missing). A socket left by a process that is gone is replaced; one that answers
+/// means a server is already there, and this one does not start.
+#[cfg(unix)]
+async fn bind_socket(
+    path: &std::path::Path,
+) -> anyhow::Result<(tokio::net::UnixListener, SocketFile)> {
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    if !path.is_absolute() {
+        anyhow::bail!("{}: a Unix socket needs an absolute path", path.display());
+    }
+    let folder = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("{}: no folder", path.display()))?;
+    ark_os::fs::private_dir(folder)?;
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if !meta.file_type().is_socket() {
+            anyhow::bail!("{}: a file that is not a socket is there", path.display());
+        }
+        match tokio::net::UnixStream::connect(path).await {
+            Ok(_) => anyhow::bail!("{}: already serving", path.display()),
+            // Nobody listens: a process that stopped without removing it.
+            Err(_) => std::fs::remove_file(path)?,
+        }
+    }
+    let listener = tokio::net::UnixListener::bind(path)
+        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+    let file = SocketFile(path.to_path_buf());
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok((listener, file))
 }
 
 struct Request {
@@ -166,7 +273,7 @@ impl Request {
     }
 }
 
-async fn read_request(sock: &mut TcpStream) -> anyhow::Result<Request> {
+async fn read_request<S: AsyncRead + Unpin>(sock: &mut S) -> anyhow::Result<Request> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     let head_end = loop {
@@ -221,8 +328,8 @@ async fn read_request(sock: &mut TcpStream) -> anyhow::Result<Request> {
     })
 }
 
-async fn respond(
-    sock: &mut TcpStream,
+async fn respond<S: AsyncWrite + Unpin>(
+    sock: &mut S,
     status: &str,
     mime: &str,
     body: &[u8],
@@ -231,8 +338,8 @@ async fn respond(
 }
 
 /// [`respond`] with more header lines (each ending in `\r\n`).
-async fn respond_with(
-    sock: &mut TcpStream,
+async fn respond_with<S: AsyncWrite + Unpin>(
+    sock: &mut S,
     status: &str,
     mime: &str,
     extra: &str,
@@ -290,8 +397,8 @@ impl Cookie {
     }
 }
 
-async fn handle(
-    mut sock: TcpStream,
+async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
+    mut sock: S,
     host: Arc<Host>,
     assets: Arc<Assets>,
     check: &Check,

@@ -113,6 +113,8 @@ export class Sidebar {
       style: { "--i": Math.min(i, 12) },
     },
       h("span.session-title", clip(title, 60)),
+      // A chat that runs on another computer: its mark, muted while that computer is away.
+      s.place ? h("span.session-place", { title: `Runs on ${s.place.name}`, "data-state": s.place.state }, icon("server")) : null,
       // A chat working in the background: a dot where its time would be.
       s.working || this.working.has(s.id)
         ? h("span.working-dot", { title: "Working", "aria-label": "Working" })

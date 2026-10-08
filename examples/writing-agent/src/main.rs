@@ -731,6 +731,19 @@ async fn main() -> std::process::ExitCode {
         .unwrap_or_else(|| PathBuf::from(".writer"));
     let cli = <Cli as clap::Parser>::parse();
     let tokens = ark_ui::access::Tokens::in_store(&root);
+    if let Some(name) = &cli.revoke_token {
+        return match tokens.revoke(name) {
+            Ok(true) => std::process::ExitCode::SUCCESS,
+            Ok(false) => {
+                eprintln!("writer: no token named `{name}`");
+                std::process::ExitCode::FAILURE
+            }
+            Err(e) => {
+                eprintln!("writer: {e:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     if let Some(name) = &cli.new_token {
         return match tokens.create(name) {
             Ok(t) => {
@@ -804,6 +817,12 @@ async fn main() -> std::process::ExitCode {
             ark_ui::Access::OneTime
         };
         let mut ui = ark_ui::ArkUi::new(app);
+        // On the person's own computer, they can add their others: a chat runs there.
+        if !cli.tokens {
+            if let Some(setup) = computers() {
+                ui = ui.computers(setup);
+            }
+        }
         // Another writer whose waiting work shows here too (ADR 0043 step 4). The token comes
         // from the environment, never the command line, which other users of the machine see.
         if let Some(link) = cli.link.as_deref() {
@@ -852,7 +871,11 @@ async fn main() -> std::process::ExitCode {
 }
 
 #[derive(clap::Parser)]
-#[command(name = "writer", about = "Writer · a developmental editor on ARK")]
+#[command(
+    name = "writer",
+    version,
+    about = "Writer · a developmental editor on ARK"
+)]
 struct Cli {
     #[command(flatten)]
     ark: ark_cli::ArkArgs,
@@ -870,6 +893,58 @@ struct Cli {
     /// Create an access token with this name, print it once, and exit
     #[arg(long, value_name = "NAME")]
     new_token: Option<String>,
+    /// Revoke the access token with this name, and exit
+    #[arg(long, value_name = "NAME")]
+    revoke_token: Option<String>,
+}
+
+/// How the writer serves on one of the person's computers (ADR 0052): the same program, over a
+/// Unix socket with its saved tokens. Its Linux build comes from `WRITER_SERVER_BUILD`.
+struct WriterServer;
+
+impl ark_ui::computers::ark_reach::ServeContract for WriterServer {
+    fn name(&self) -> &str {
+        "writer"
+    }
+    fn serve_args(&self, socket: &str) -> Vec<String> {
+        vec![
+            "--serve".into(),
+            format!("unix:{socket}"),
+            "--tokens".into(),
+        ]
+    }
+    fn token_args(&self, token: &str) -> Vec<String> {
+        vec!["--new-token".into(), token.into()]
+    }
+    fn revoke_args(&self, token: &str) -> Vec<String> {
+        vec!["--revoke-token".into(), token.into()]
+    }
+    fn version_args(&self) -> Vec<String> {
+        vec!["--version".into()]
+    }
+}
+
+/// The person's computers, when a Linux build of the writer is at hand (`WRITER_SERVER_BUILD`,
+/// `{target}` for the architecture's).
+fn computers() -> Option<ark_ui::computers::ComputerSetup> {
+    use sha2::Digest;
+    let template = std::env::var("WRITER_SERVER_BUILD").ok()?;
+    Some(ark_ui::computers::ComputerSetup {
+        contract: Arc::new(WriterServer),
+        build: Arc::new(move |facts| {
+            let target = format!("{}-unknown-linux-gnu", facts.arch);
+            let path = PathBuf::from(template.replace("{target}", &target));
+            let bytes =
+                std::fs::read(&path).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+            Ok(ark_ui::computers::ark_reach::Build {
+                path,
+                sha256: format!("{:x}", sha2::Sha256::digest(&bytes)),
+                version: String::new(),
+            })
+        }),
+        secrets: Arc::new(ark_connect::Keychain),
+        ssh_config: None,
+    })
 }
 
 // ---- helpers ---------------------------------------------------------------

@@ -480,6 +480,37 @@ impl Engine {
         Ok(art)
     }
 
+    /// Keep file `rel` of the project folder, as it is now, as a version before (ADR 0034): an
+    /// artifact with meta `{path, before: true}` that [`Engine::restore_file`] puts back. For a
+    /// change about to be made outside a call, such as a project copy brought back (ADR 0052).
+    /// `None` when there is no file. A path out of the folder is refused.
+    pub fn keep_before(
+        &self,
+        project: &ProjectId,
+        rel: &str,
+    ) -> Result<Option<ArtifactId>, AgentError> {
+        let file = project_file(&self.workspace_dir(project)?, rel)?;
+        let now = match std::fs::read(&file) {
+            Ok(now) => now,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let name = rel.rsplit('/').next().unwrap_or(rel);
+        let kind = self.detect_kind(name, &now);
+        let mut a = self.keep_bytes(
+            project,
+            name,
+            kind,
+            &now,
+            Provenance::Ingested {
+                path: rel.to_string(),
+            },
+        )?;
+        a.meta = serde_json::json!({ "path": rel, "before": true });
+        self.store.put_artifact(project, &a)?;
+        Ok(Some(a.id))
+    }
+
     /// Put a file of the project folder back as artifact `id` holds it: a version kept before a
     /// call changed or removed the file (ADR 0034). The file as it is now is kept first, the same
     /// way, so `undo` puts it back in turn. `undo` is `None` when there was no file.
@@ -498,24 +529,7 @@ impl Engine {
             .to_string();
         let bytes = self.store.read_blob(&art.id)?;
         let file = project_file(&self.workspace_dir(project)?, &rel)?;
-        let undo = match std::fs::read(&file) {
-            Ok(now) => Some(
-                self.keep_bytes(
-                    project,
-                    &art.name,
-                    art.kind.clone(),
-                    &now,
-                    Provenance::Ingested { path: rel.clone() },
-                )
-                .and_then(|mut a| {
-                    a.meta = serde_json::json!({ "path": rel, "before": true });
-                    self.store.put_artifact(project, &a)?;
-                    Ok(a.id)
-                })?,
-            ),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(e.into()),
-        };
+        let undo = self.keep_before(project, &rel)?;
         if let Some(dir) = file.parent() {
             std::fs::create_dir_all(dir)?;
         }

@@ -1426,6 +1426,94 @@ async function linked(page) {
 }
 scenarios.linked = linked;
 
+// Where a chat runs (ADR 0052): the chip of an empty chat offers the server; the first message
+// starts the chat there; the header, the sidebar and the chip say where it runs; a file it wrote
+// comes back with one button.
+scenarios.places = async (page) => {
+  const chip = page.locator("#place-chip");
+  await chip.waitFor();
+  assert.match(await chip.innerText(), /This (Mac|computer)/);
+  await chip.click();
+  const vps = page.locator(".places-pop .place-item", { hasText: "vps" });
+  await vps.waitFor();
+  await shot(page, "places-menu");
+  await vps.click();
+  assert.equal((await chip.innerText()).trim(), "vps");
+  await finished(page, () => page.locator("#input").fill("jot it down").then(() => page.keyboard.press("Enter")));
+  await page.locator(".turn .answer", { hasText: "Done." }).waitFor();
+  assert.equal(await chip.getAttribute("aria-disabled"), "true", "fixed after the first message");
+  await page.locator("#session-title .place-mark", { hasText: "vps" }).waitFor();
+  await page.locator(".session[aria-current='true'] .session-place").waitFor();
+  const line = page.locator("#place-line");
+  await line.getByText("1 file changed on vps").waitFor();
+  await shot(page, "places-light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot(page, "places-dark");
+  await page.setViewportSize({ width: 390, height: 800 });
+  const box = await line.boundingBox();
+  assert.ok(box.x >= 0 && box.x + box.width <= 390, `the line fits: ${JSON.stringify(box)}`);
+  await shot(page, "places-narrow");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await line.getByRole("button", { name: "Bring to this Mac" }).click();
+  await page.locator("#toast", { hasText: "1 file brought to this Mac" }).waitFor();
+  await line.waitFor({ state: "hidden" });
+
+  // The model menu is the server's: its program signs in there, answered here.
+  await page.locator("#model-chip").click();
+  const sign = page.locator(".models-pop .model-group", { hasText: "Claude subscription" }).getByRole("button", { name: "Sign in" });
+  await sign.waitFor();
+  await sign.click();
+  const sheet = page.locator(".program-sheet");
+  await sheet.getByText("Paste code here").waitFor();
+  await shot(page, "places-sign-in");
+  await page.keyboard.type("abc-123");
+  await page.keyboard.press("Enter");
+  await sheet.getByText("signed in with abc-123").waitFor();
+  await sheet.getByRole("button", { name: "Close" }).click();
+  await sheet.waitFor({ state: "detached" });
+};
+
+// The server went away: its chat stays, reads only, and says so with a way to try again.
+scenarios.places_away = async (page) => {
+  const line = page.locator("#place-line");
+  await line.getByText("vps is not answering").waitFor();
+  await line.getByRole("button", { name: "Try again" }).waitFor();
+  assert.equal(await page.locator("#composer").getAttribute("data-away"), "true");
+  await page.locator(".session-place[data-state]:not([data-state='ok'])").waitFor();
+  assert.equal(await page.locator(".welcome").count(), 0, "not shown as an empty chat");
+  await page.waitForTimeout(400);
+  await shot(page, "places-away");
+};
+
+// Settings › Computers (ADR 0052): the hosts of the ssh config to pick; a setup that cannot
+// connect names its step and offers Try again; an address asks for a code.
+scenarios.computers = async (page) => {
+  // The chip of an empty chat offers Add a computer, which opens the section.
+  const chip = page.locator("#place-chip");
+  await chip.waitFor();
+  await chip.click();
+  await page.locator(".places-pop").getByText("Add a computer").click();
+  const host = page.getByRole("button", { name: "closed-box" });
+  await host.waitFor();
+  await shot(page, "computers-empty");
+  await host.click();
+  await page.locator(".computer-steps li[data-state='failed']").waitFor({ timeout: 20000 });
+  assert.match(await page.locator(".computer-failure").innerText(), /closed-box/);
+  await page.getByRole("button", { name: "Try again" }).waitFor();
+  await shot(page, "computers-failed");
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot(page, "computers-failed-narrow");
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.getByRole("button", { name: "Cancel" }).click();
+  const field = page.locator(".computer-target");
+  await field.fill("https://ark.example.invalid");
+  await page.locator(".computer-code").waitFor();
+  await shot(page, "computers-address");
+};
+
 const run = scenarios[scenario];
 if (!run) {
   console.error(`unknown scenario ${scenario}`);
@@ -1433,9 +1521,9 @@ if (!run) {
 }
 const engine = process.env.ARK_UI_BROWSER === "chromium" ? chromium : webkit;
 const browser = await engine.launch();
+const errors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
-  const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   if (inits[scenario]) await page.addInitScript(inits[scenario]);
   await page.goto(url);
@@ -1445,6 +1533,8 @@ try {
   console.log(`${scenario}: ok`);
 } catch (e) {
   console.error(`${scenario}: ${e.stack || e}`);
+  // What the page threw before it failed, if anything.
+  for (const err of errors) console.error(`page error: ${err}`);
   process.exitCode = 1;
 } finally {
   await browser.close();

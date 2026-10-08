@@ -1444,3 +1444,80 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .approval.away .approval-actions { opacity: 0.45; }
 .wait-row[aria-disabled] { cursor: default; opacity: 0.55; }
 .wait-row[aria-disabled]:hover { background: transparent; }
+
+/* ---- where a chat runs (ADR 0052) ----------------------------------------------------------- */
+.composer-bar .chip.place-chip { display: inline-flex; align-items: center; gap: 5px; margin-right: 0; max-width: 40%; }
+.composer-bar .chip.place-chip[hidden] { display: none; }
+.place-chip svg { width: 13px; height: 13px; flex: none; }
+.place-chip span { overflow: hidden; text-overflow: ellipsis; }
+.place-chip + .model-chip { margin-left: -2px; }
+/* A chat placed elsewhere: the chip says where and does not open. */
+.place-chip[aria-disabled="true"] { cursor: default; color: var(--text-2); }
+.place-chip[aria-disabled="true"]:hover { background: transparent; }
+.place-chip[data-state="down"] { color: var(--text-3); }
+.place-chip[data-busy="true"] { color: var(--accent); pointer-events: none; }
+.place-chip[data-busy="true"] svg { animation: breathe 1.2s var(--ease) infinite; }
+@keyframes breathe { 50% { opacity: 0.35; } }
+.places-pop .place-item { display: flex; align-items: center; gap: 8px; }
+.places-pop .place-item svg { width: 14px; height: 14px; flex: none; color: var(--text-3); }
+.places-pop .place-item .menu-sub { margin-left: auto; padding: 0; }
+.places-pop .place-item[aria-current="true"] { color: var(--accent); }
+.places-pop .place-item[aria-current="true"] svg { color: var(--accent); }
+
+/* The line above the composer: files to bring back, a choice per file, or a computer away. */
+.place-line {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin-bottom: 8px; padding: 6px 8px 6px 14px;
+  border-radius: 14px; background: var(--bubble);
+  font-size: 13px; color: var(--text-2);
+  animation: rise 220ms var(--ease) both;
+}
+.place-line[hidden] { display: none; }
+.place-line > svg { width: 14px; height: 14px; flex: none; color: var(--text-3); }
+.place-line-text { flex: 1 1 auto; min-width: 0; }
+.place-line[data-tone="down"] > svg { color: var(--warn); }
+.place-line[data-tone="ask"] { flex-direction: column; align-items: stretch; }
+.place-conflict { display: flex; align-items: center; gap: 8px; }
+.place-file { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12.5px/1.4 var(--mono, ui-monospace, monospace); color: var(--text); }
+@media (max-width: 520px) {
+  .place-conflict { flex-wrap: wrap; }
+  .place-file { flex-basis: 100%; }
+}
+/* A chat on a computer that does not answer reads only. */
+.composer[data-away="true"] textarea, .composer[data-away="true"] .send { pointer-events: none; opacity: 0.45; }
+
+.place-mark { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--text-3); vertical-align: 1px; }
+.place-mark svg { width: 12px; height: 12px; }
+.session-place { display: inline-grid; flex: none; color: var(--text-3); margin-left: 4px; }
+.session-place svg { width: 12px; height: 12px; }
+.session-place[data-state]:not([data-state="ok"]) { opacity: 0.5; }
+/* A program's install or sign-in on another computer. */
+.program-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 40%, transparent); animation: fade 160ms var(--ease) both; }
+.program-sheet { width: min(720px, calc(100vw - 32px)); height: min(440px, calc(100vh - 64px)); display: flex; flex-direction: column; border-radius: 16px; background: var(--card); box-shadow: var(--shadow-float); overflow: hidden; animation: rise 220ms var(--ease) both; }
+.program-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 16px; font-size: 13.5px; font-weight: 500; }
+.program-head .menu-sub { padding: 0; font-weight: 400; }
+.program-head .icon-btn { margin-left: auto; }
+.program-sheet .term-box { flex: 1; min-height: 0; padding: 4px 8px 8px 12px; }
+/* Settings › Computers: adding one, step by step. */
+.computer-add { margin-top: 12px; }
+.computer-hosts { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 14px; }
+.computer-host { display: inline-flex; align-items: center; gap: 6px; }
+.computer-host svg { width: 13px; height: 13px; color: var(--text-3); }
+.computer-target { min-width: 0; width: 220px; }
+.computer-setup { padding: 14px 16px 10px; }
+.computer-setup-head { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+.computer-setup-head svg { width: 14px; height: 14px; color: var(--text-3); }
+.computer-steps { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 10px 0 0; padding: 0; font-size: 12.5px; }
+.computer-steps li { color: var(--text-3); display: inline-flex; align-items: center; gap: 6px; }
+.computer-steps li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.35; }
+.computer-steps li[data-state="done"] { color: var(--text-2); }
+.computer-steps li[data-state="done"]::before { opacity: 1; background: var(--ok); }
+.computer-steps li[data-state="now"] { color: var(--text); }
+.computer-steps li[data-state="now"]::before { opacity: 1; background: var(--accent); animation: breathe 1.2s var(--ease) infinite; }
+.computer-steps li[data-state="failed"] { color: var(--err); }
+.computer-steps li[data-state="failed"]::before { opacity: 1; background: var(--err); }
+.computer-failure { padding: 0 16px 14px; font-size: 13px; color: var(--text-2); }
+.computer-failure p { margin: 8px 0 10px; overflow-wrap: anywhere; }
+.computer-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 520px) { .computer-target { width: 100%; } }
+.computer-code { width: 110px; }

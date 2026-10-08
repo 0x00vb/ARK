@@ -28,6 +28,8 @@
 
 pub mod access;
 mod assets;
+pub mod computers;
+pub mod copy;
 #[cfg(feature = "desktop")]
 mod desktop;
 mod files;
@@ -48,6 +50,8 @@ use std::sync::Arc;
 use ark_interact::{App, ChannelApprover, Start};
 use serde_json::Value;
 
+/// What an app's [`computers::ComputerSetup`] is made of.
+pub use ark_reach;
 pub use assets::Assets;
 pub use host::{Emitter, Handler, HandlerCtx, Host, Theme, UiInfo, Welcome};
 pub use serve::{Access, Served};
@@ -63,6 +67,8 @@ pub struct ArkUi {
     entry: Option<String>,
     keep_running: bool,
     links: Vec<ark_interact::links::Link>,
+    computers: Option<computers::ComputerSetup>,
+    keep_computers: Vec<(String, String, String)>,
 }
 
 impl ArkUi {
@@ -73,6 +79,23 @@ impl ArkUi {
     pub fn link(mut self, name: &str, url: &str, token: &str) -> Self {
         self.links
             .push(ark_interact::links::Link::new(name, url, token));
+        self
+    }
+
+    /// Let the person add their own computers over SSH (ADR 0052): a chat can then run on one.
+    /// `setup` says what to install there (the app's program, a build per system) and where
+    /// tokens are kept.
+    pub fn computers(mut self, setup: computers::ComputerSetup) -> Self {
+        self.computers = Some(setup);
+        self
+    }
+
+    /// A computer the app kept before, reached at `url` with `token` (ADR 0052: today's "my
+    /// own server" becomes a computer by address). Kept in the store and the app's secrets from
+    /// now on, so the app can forget its own copy.
+    pub fn keep_computer(mut self, name: &str, url: &str, token: &str) -> Self {
+        self.keep_computers
+            .push((name.to_string(), url.to_string(), token.to_string()));
         self
     }
 
@@ -87,6 +110,8 @@ impl ArkUi {
             entry: None,
             keep_running: false,
             links: Vec::new(),
+            computers: None,
+            keep_computers: Vec::new(),
         }
     }
     /// The accent colour, any CSS colour.
@@ -194,11 +219,19 @@ impl ArkUi {
         if !self.links.is_empty() {
             host.links().set(self.links);
         }
+        if let Some(setup) = self.computers {
+            host.use_computers(setup, self.keep_computers);
+        }
         Ok((host, assets))
     }
 
-    /// Serve the workspace at `addr` (e.g. `127.0.0.1:0`) until ctrl+c. Prints the URL, which
-    /// carries the one-time token unless [`access`](Self::access) gave saved tokens.
+    /// Serve the workspace at `addr` (e.g. `127.0.0.1:0`) until ctrl+c or SIGTERM. Prints the
+    /// URL, which carries the one-time token unless [`access`](Self::access) gave saved tokens.
+    ///
+    /// `unix:/path/to.sock` serves on a Unix socket instead (saved tokens only, ADR 0052): the
+    /// socket is mode 0600, its folder is made 0700 when missing and refused when others can
+    /// write to it, a socket left by a stopped process is replaced, and one that answers means
+    /// a server is already there. The socket file is removed when serving stops.
     pub async fn serve(self, addr: &str) -> anyhow::Result<()> {
         let (access, entry) = (self.access.clone(), self.entry.clone());
         let (host, assets) = self.open().await?;
@@ -211,11 +244,11 @@ impl ArkUi {
                 );
             }
         }
-        let (served, task) = serve::serve(host.clone(), assets, addr, access, entry).await?;
+        let (served, mut task) = serve::serve(host.clone(), assets, addr, access, entry).await?;
         println!("{}", served.url);
         tokio::select! {
             _ = stop_signal() => {}
-            _ = task => return Ok(()),
+            _ = &mut task => return Ok(()),
         }
         // A deploy or a machine move: work under way continues in the next process (ADR 0038).
         let grace = ark_sdk::prelude::ark_runtime::cancel::stop_grace();
@@ -229,10 +262,13 @@ impl ArkUi {
             },
             _ = stop_signal() => eprintln!("stopping now"),
         }
+        // A Unix socket's file goes with the listener.
+        task.abort();
+        let _ = task.await;
         Ok(())
     }
 
-    /// Start serving and return at once (tests, embedding).
+    /// Start serving and return at once (tests, embedding). `addr` as in [`serve`](Self::serve).
     pub async fn serve_background(self, addr: &str) -> anyhow::Result<(Arc<Host>, Served)> {
         let (access, entry) = (self.access.clone(), self.entry.clone());
         let (host, assets) = self.open().await?;

@@ -129,6 +129,66 @@ impl Terminals {
         })
     }
 
+    /// A program in a terminal of its own (no shell, no project): a program's install or
+    /// sign-in the person watches and answers (ADR 0052). Its output is never kept beyond the
+    /// scrollback a window re-attaches to.
+    pub fn open_program(
+        &self,
+        feed: &Arc<Feed>,
+        argv: &[String],
+        cwd: PathBuf,
+        cols: u16,
+        rows: u16,
+    ) -> anyhow::Result<Opened> {
+        anyhow::ensure!(!argv.is_empty(), "nothing to run");
+        let pair = native_pty_system().openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+        let mut cmd = CommandBuilder::new(&argv[0]);
+        cmd.args(&argv[1..]);
+        cmd.cwd(&cwd);
+        cmd.env("TERM", "xterm-256color");
+        let mut child = pair.slave.spawn_command(cmd)?;
+        let mut reader = pair.master.try_clone_reader()?;
+        let writer = pair.master.take_writer()?;
+        let id = format!("term-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        let (feed, sid) = (feed.clone(), id.clone());
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => feed.send(json!({ "kind": "term", "session": sid, "data": String::from_utf8_lossy(&buf[..n]) })),
+                }
+            }
+            feed.send(json!({ "kind": "term", "session": sid, "exit": true }));
+        });
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        let cwd = cwd.display().to_string();
+        self.shells.lock().unwrap().insert(
+            id.clone(),
+            Shell {
+                master: pair.master,
+                writer,
+                history: Arc::new(Mutex::new(Vec::new())),
+                // Not a project's shell: `close` leaves the projects' alone.
+                project: format!("\u{0}{id}"),
+                cwd: cwd.clone(),
+            },
+        );
+        Ok(Opened {
+            session: id,
+            cwd,
+            history: String::new(),
+            reattached: false,
+        })
+    }
+
     pub fn write(&self, session: &str, data: &str) -> anyhow::Result<()> {
         let mut shells = self.shells.lock().unwrap();
         let s = shells

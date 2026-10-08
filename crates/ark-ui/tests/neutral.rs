@@ -96,6 +96,7 @@ fn runtime_code_names_no_domain() {
         "ark-sdk/src",
         "ark-orchestrate/src",
         "ark-bench/src",
+        "ark-reach/src",
     ] {
         scan(&crates.join(dir), true, &mut hits);
     }
@@ -138,6 +139,44 @@ fn orchestration_names_no_vendor() {
     assert!(
         hits.is_empty(),
         "vendor names in orchestration code:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// Reach sets up any app's program on a computer (ADR 0052): the app names the program
+/// through its `ServeContract`, so `ark-reach` names no vendor or product, comments and tests
+/// included.
+#[test]
+fn reach_names_no_vendor_or_product() {
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let mut hits = Vec::new();
+    for path in files_under(&crates.join("ark-reach"))
+        .into_iter()
+        .filter(|p| !p.components().any(|c| c.as_os_str() == "target"))
+    {
+        let text = std::fs::read_to_string(&path).unwrap().to_lowercase();
+        for (n, line) in text.lines().enumerate() {
+            for w in [
+                "claude",
+                "codex",
+                "anthropic",
+                "openai",
+                "ollama",
+                "chatgpt",
+                "opencode",
+                "ark-desktop",
+                "ark desktop",
+                "ark cloud",
+            ] {
+                if line.contains(w) {
+                    hits.push(format!("{}:{}: `{w}`", path.display(), n + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "vendor or product names in ark-reach:\n{}",
         hits.join("\n")
     );
 }

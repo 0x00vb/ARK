@@ -109,6 +109,12 @@ pub(crate) async fn interactive(mut st: ShellState, resumed: bool) -> std::proce
                     st.out.text("\x1b[2J\x1b[3J\x1b[H");
                     continue;
                 }
+                // A chat held on another computer: the window, or this runtime served and the
+                // terminal connected to it, opens it there.
+                Some(Effect::Open(_)) => {
+                    st.out.end_line();
+                    continue;
+                }
                 None => {
                     st.out.end_line();
                     continue;

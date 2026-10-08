@@ -307,7 +307,7 @@ impl App {
 }
 
 /// The projects a person works in (not orchestrated agents' child projects), newest first.
-fn top_projects(engine: &Engine) -> anyhow::Result<Vec<Project>> {
+pub(crate) fn top_projects(engine: &Engine) -> anyhow::Result<Vec<Project>> {
     Ok(engine
         .store
         .list_projects()
@@ -1609,7 +1609,7 @@ pub fn load_trace(engine: &Engine, session: &str, index: u32) -> Option<TurnReco
 }
 
 /// `base`, or `base 2`, `base 3` .. when a project already has that name.
-fn unique_name(base: &str, taken: &[Project]) -> String {
+pub(crate) fn unique_name(base: &str, taken: &[Project]) -> String {
     let free = |n: &str| !taken.iter().any(|p| p.name == n);
     if free(base) {
         return base.to_string();

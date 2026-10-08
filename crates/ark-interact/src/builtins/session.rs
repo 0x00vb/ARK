@@ -99,6 +99,16 @@ impl Command for Resume {
                 .into());
         };
         if !ix.resume(&target)? {
+            // A chat held on another computer opens there.
+            let held = crate::held::list(ix.engine(), None)
+                .into_iter()
+                .find(|c| c.session.starts_with(target.as_str()));
+            if let Some(c) = held {
+                return Ok(Reply {
+                    report: Report::new().note(format!("This chat runs on {}.", c.place)),
+                    effect: Some(Effect::Open(c.session)),
+                });
+            }
             return Ok(Report::new()
                 .warning(format!(
                     "No session matches `{target}`. /sessions lists them."
@@ -113,8 +123,40 @@ pub struct Sessions;
 #[async_trait::async_trait]
 impl Command for Sessions {
     meta!("sessions", "List sessions in this project");
+    fn aliases(&self) -> &[&str] {
+        &["chats"]
+    }
     async fn run(&self, ix: &mut Interaction, _args: &str) -> anyhow::Result<Reply> {
-        Ok(sessions_report(&ix.sessions(false)?).into())
+        let mut r = sessions_report(&ix.sessions(false)?);
+        // Chats of this project held on other computers, with their place (ADR 0052).
+        let held = crate::held::list(ix.engine(), Some(ix.project().id.as_str()));
+        if !held.is_empty() {
+            let mut t = Table::plain(3);
+            for c in held.iter().take(20) {
+                let up = ix.links().state(&c.place) == Some(crate::links::State::Ok);
+                let title = match c.title.as_str() {
+                    "" => "(empty)".to_string(),
+                    t => crate::fmt::clip(t, 50),
+                };
+                t.push(Row {
+                    cells: vec![
+                        Cell::new(c.session.chars().take(8).collect::<String>(), Tone::Accent),
+                        Cell::new(title, Tone::Normal),
+                        Cell::new(
+                            match up {
+                                true => format!("on {}", c.place),
+                                false => format!("on {} · not answering", c.place),
+                            },
+                            Tone::Muted,
+                        ),
+                    ],
+                    tone: Tone::Normal,
+                    command: Some(format!("/resume {}", &c.session[..c.session.len().min(8)])),
+                });
+            }
+            r = r.heading("On other computers").table(t);
+        }
+        Ok(r.into())
     }
 }
 

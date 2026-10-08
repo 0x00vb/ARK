@@ -10,6 +10,9 @@ use tokio::sync::mpsc;
 /// Calls a served runtime's methods and follows its events.
 #[derive(Clone)]
 pub struct Client {
+    /// The address as given, for `url()` and errors.
+    addr: String,
+    /// Where requests go: `addr`, or `http://localhost` on a Unix socket.
     base: String,
     token: String,
     http: reqwest::Client,
@@ -17,20 +20,27 @@ pub struct Client {
 
 impl Client {
     /// A runtime at `url` (`https://ark.example.com`), reached with an access token.
+    /// `unix:/path/to.sock` reaches a runtime serving on a Unix socket (ADR 0052), such as the
+    /// near end of an SSH tunnel.
     pub fn new(url: &str, token: &str) -> Client {
+        let addr = url.trim_end_matches('/').to_string();
+        let builder =
+            reqwest::Client::builder().connect_timeout(std::time::Duration::from_secs(10));
+        let (base, builder) = match addr.strip_prefix("unix:") {
+            Some(path) => unix_socket(builder, path),
+            None => (addr.clone(), builder),
+        };
         Client {
-            base: url.trim_end_matches('/').to_string(),
+            addr,
+            base,
             token: token.to_string(),
-            http: reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .build()
-                .unwrap_or_default(),
+            http: builder.build().unwrap_or_default(),
         }
     }
 
-    /// The runtime's address, without a trailing slash.
+    /// The runtime's address as given, without a trailing slash.
     pub fn url(&self) -> &str {
-        &self.base
+        &self.addr
     }
 
     /// One protocol call: what `ark.call(method, params)` does in the page.
@@ -87,7 +97,7 @@ impl Client {
         let mut first = Vec::new();
         loop {
             let chunk = body.next().await.ok_or_else(|| {
-                anyhow::anyhow!("the ARK runtime at {} closed the event stream", self.base)
+                anyhow::anyhow!("the ARK runtime at {} closed the event stream", self.addr)
             })??;
             let (ready, events) = lines.push(&chunk);
             first.extend(events);
@@ -116,22 +126,37 @@ impl Client {
     }
 
     /// The page's address with the token, for a window or a browser to open. The page keeps
-    /// the token for the tab and removes it from the address bar.
+    /// the token for the tab and removes it from the address bar. A runtime on a Unix socket
+    /// has no address a browser opens.
     pub fn page_url(&self) -> String {
         format!("{}/?token={}", self.base, self.token)
     }
 
     fn unreachable(&self, e: reqwest::Error) -> anyhow::Error {
-        anyhow::anyhow!("cannot reach the ARK runtime at {}: {e}", self.base)
+        anyhow::anyhow!("cannot reach the ARK runtime at {}: {e}", self.addr)
     }
 
     fn status(&self, code: u16) -> anyhow::Result<()> {
         match code {
             200 => Ok(()),
-            401 => anyhow::bail!("the ARK runtime at {} refused the access token", self.base),
-            s => anyhow::bail!("the ARK runtime at {} answered HTTP {s}", self.base),
+            401 => anyhow::bail!("the ARK runtime at {} refused the access token", self.addr),
+            s => anyhow::bail!("the ARK runtime at {} answered HTTP {s}", self.addr),
         }
     }
+}
+
+/// Requests go to the Unix socket at `path`; the URL's host only fills the `Host` header.
+#[cfg(unix)]
+fn unix_socket(builder: reqwest::ClientBuilder, path: &str) -> (String, reqwest::ClientBuilder) {
+    let builder = builder.unix_socket(std::path::Path::new(path));
+    ("http://localhost".to_string(), builder)
+}
+
+/// No Unix sockets on this system: requests go to a name that never resolves (`.invalid`), so
+/// each fails like an address that does not answer, and the error names the socket.
+#[cfg(not(unix))]
+fn unix_socket(builder: reqwest::ClientBuilder, _path: &str) -> (String, reqwest::ClientBuilder) {
+    ("http://unix-socket.invalid".to_string(), builder)
 }
 
 /// Server-sent events cut into JSON values. Chunks may split a line anywhere.

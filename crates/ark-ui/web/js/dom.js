@@ -70,6 +70,8 @@ const PATHS = {
   terminal: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 6.5L7 8l-2 1.5M8.5 10H11"/>',
   box: '<path d="M8 2.5l5 2.5v6L8 13.5 3 11V5z"/><path d="M3 5l5 2.5L13 5M8 7.5v6"/>',
   globe: '<circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11M8 2.5c1.6 1.8 1.6 9.2 0 11M8 2.5c-1.6 1.8-1.6 9.2 0 11"/>',
+  server: '<rect x="2.5" y="2.5" width="11" height="4.5" rx="1.25"/><rect x="2.5" y="9" width="11" height="4.5" rx="1.25"/><path d="M5 4.75h.01M5 11.25h.01"/>',
+  laptop: '<rect x="3.5" y="3.5" width="9" height="6.5" rx="1"/><path d="M1.75 12.5h12.5"/>',
   cpu: '<rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"/>',
   code: '<path d="M6 4.5L2.5 8 6 11.5M10 4.5L13.5 8 10 11.5"/>',
   copy: '<rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M3 10.5V4a1 1 0 0 1 1-1h6.5"/>',

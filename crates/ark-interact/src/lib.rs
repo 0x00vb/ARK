@@ -24,6 +24,7 @@ mod builtins;
 pub mod capabilities;
 pub mod command;
 pub mod fmt;
+pub mod held;
 pub mod inspect;
 pub mod installs;
 pub mod interaction;

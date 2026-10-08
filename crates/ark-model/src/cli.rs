@@ -129,6 +129,32 @@ impl Cli {
         }
     }
 
+    /// Install it for this user only, with no administrator and no screen: a shell line run in
+    /// a terminal the person watches (ADR 0052, on another computer).
+    pub fn install_line(self) -> &'static str {
+        match self {
+            Cli::Claude => "curl -fsSL https://claude.ai/install.sh | bash",
+            Cli::Codex => "npm install -g --prefix \"$HOME/.local\" @openai/codex",
+        }
+    }
+
+    /// Its own sign-in where no browser opens: Claude Code prints a link and waits for the code
+    /// pasted back; Codex prints a link and a one-time code (device sign-in). Run in a terminal
+    /// the person watches; ARK never reads what it stores.
+    pub fn sign_in_args(self) -> &'static [&'static str] {
+        match self {
+            Cli::Claude => &["auth", "login"],
+            Cli::Codex => &["login", "--device-auth"],
+        }
+    }
+
+    /// The program for a provider name (`claude`, `codex`).
+    pub fn of(name: &str) -> Option<Cli> {
+        [Cli::Claude, Cli::Codex]
+            .into_iter()
+            .find(|c| c.name() == name)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Cli::Claude => "Claude subscription",
@@ -144,8 +170,15 @@ impl Cli {
             let p = PathBuf::from(p);
             return p.is_file().then_some(p);
         }
+        // `~/.local/bin`: where the steps below install on a server, which a service's short
+        // PATH does not name.
         let extra = ark_os::dirs::home()
-            .map(|h| vec![h.join(".claude").join("local")])
+            .map(|h| {
+                vec![
+                    h.join(".claude").join("local"),
+                    h.join(".local").join("bin"),
+                ]
+            })
             .unwrap_or_default();
         ark_os::find::program_in(self.program(), extra)
     }

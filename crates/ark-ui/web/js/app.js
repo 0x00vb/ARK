@@ -22,6 +22,8 @@ import { registerBoard } from "./board.js";
 import { Waiting } from "./waiting.js";
 import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js";
 import { os, label, relabel } from "./keys.js";
+import { Places } from "./places.js";
+import { registerComputers } from "./computers.js";
 
 const transport = connect();
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
@@ -54,6 +56,12 @@ const api = {
   // Undefined anywhere else (the window's own page, a browser).
   openLocal: transport.openLocal,
   summary: () => state.summary,
+  // This computer as a sentence names it ("this Mac"), once the places are read.
+  hereName: () => places?.here,
+  // Resolves once the page shows chat `id`, rebuilt (a chat the host just opened).
+  shown: async (id) => {
+    for (let i = 0; i < 200 && (state.sessionId !== id || feed.booting); i++) await new Promise((r) => setTimeout(r, 25));
+  },
   project: () => state.summary?.project,
   send: (text) => submit(text),
   // Put text in the composer, unsent, with the conversation in view.
@@ -132,7 +140,7 @@ const api = {
 // Terminal, Browser and Files first, so an app's panel with the same id replaces one.
 registerBuiltins(installApi(api));
 
-let thread, composer, sidebar, topbar, pane, waiting;
+let thread, composer, sidebar, topbar, pane, waiting, places;
 
 function retitle(key, title) {
   const t = pane.tabs.get(key);
@@ -199,6 +207,8 @@ async function submit(text) {
     composer.set(text);
     return composer.modelMenu();
   }
+  // The first message of a chat placed on another computer starts it there.
+  if (await places.beforeSend(text)) return;
   for (const hook of registry.submitHooks) {
     try {
       if (await hook(text)) return;
@@ -269,6 +279,7 @@ function setRunning(on) {
   state.running = on;
   composer.setRunning(on);
   appEl.dataset.running = String(on);
+  places?.show(state.summary, on);
 }
 
 // ---- session display -------------------------------------------------------------------------
@@ -280,6 +291,13 @@ function applySummary(s) {
   state.title = s.session.title || (s.session.turns ? "Untitled chat" : "");
   showTitle();
   composer.setModel(s.model);
+  places?.show(s, state.running);
+  // A chat on a computer that does not answer reads only.
+  const away = !!s.place && s.place.state !== "ok";
+  $("#composer").dataset.away = String(away);
+  // Not by keyboard either.
+  $("#input").readOnly = away;
+  $("#send").disabled = away;
   document.title = s.session.title ? `${s.session.title} · ${s.name}` : s.name;
   return changed;
 }
@@ -290,7 +308,9 @@ async function loadSession() {
   thread.clear();
   const turns = await transport.call("transcript", { limit: 30 }).catch(() => []);
   if (turns.length) thread.renderStored(turns, { hasMore: turns.length === 30 });
-  else showWelcome();
+  // A chat on a computer that does not answer is not empty: its turns are there. The line
+  // above the composer says so.
+  else if (!(state.summary?.place && state.summary.place.state !== "ok")) showWelcome();
   thread.scroll(true);
   sidebar.refresh(state.sessionId);
   refreshRing();
@@ -453,6 +473,11 @@ function onEvent(msg) {
       break;
     case "attention":
       waiting.refresh();
+      // A link came, went, or changed state: the places offered follow.
+      if (msg.linked) places.load();
+      break;
+    case "place_changes":
+      places.changed(msg);
       break;
     case "ext":
       dispatchExt(msg.name, msg.payload);
@@ -570,7 +595,11 @@ function showConversation() {
 /// the project's name; else the view's title (Settings).
 function showTitle() {
   const v = state.view && (state.view === SETTINGS ? settingsView : registry.views.get(state.view));
-  $("#session-title").textContent = !v ? state.title || "" : v.nav ? state.summary?.project?.name || "" : v.title;
+  const el = $("#session-title");
+  el.textContent = !v ? state.title || "" : v.nav ? state.summary?.project?.name || "" : v.title;
+  // A chat that runs on another computer says where.
+  const place = !v && state.summary?.place;
+  if (place) el.append(h("span.place-mark", { title: `Runs on ${place.name}` }, icon("server"), place.name));
 }
 
 /// What the person looks at: the view's focus, else the side pane's.
@@ -783,6 +812,7 @@ async function bootOnce(again) {
   composer.commands = state.commands;
   if (state.ui.accent) document.documentElement.style.setProperty("--accent", state.ui.accent);
   applySummary(hello.summary);
+  places.load();
   composer.placeholder = `Ask ${hello.summary.name} anything`;
   if (!again) {
     sidebar.renderExtensions();
@@ -794,6 +824,7 @@ async function bootOnce(again) {
     registerPlugins(window.ark);
     registerSkills(window.ark);
     registerDevices(window.ark);
+    registerComputers(window.ark);
     keepInStep(window.ark);
     // A notification tapped: the item it is about (ADR 0047).
     openItems((id) => {
@@ -838,6 +869,7 @@ async function start() {
   if (transport.shell === "desktop") appLike();
   thread = new Thread($("#thread"), $("#scroller"), api);
   composer = new Composer(api);
+  places = new Places(api);
   acceptDrops(api, composer, $(".main"));
   sidebar = new Sidebar(api);
   waiting = new Waiting(api, transport, () => state.sessionId);

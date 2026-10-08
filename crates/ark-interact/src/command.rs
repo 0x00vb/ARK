@@ -18,6 +18,9 @@ pub enum Effect {
     ClearView,
     /// Leave the app. The session is saved.
     Exit,
+    /// Open this chat, held on another computer (ADR 0052): a front-end that reaches its place
+    /// opens it there.
+    Open(String),
 }
 
 /// A command's result.

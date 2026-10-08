@@ -117,9 +117,67 @@ pub fn owner_only(path: &Path) -> io::Result<()> {
     }
 }
 
+/// A folder only its owner can change, for a socket or a key. Unix: a missing folder is made
+/// with mode 0700 (its missing parents too). An existing one is refused unless this user owns
+/// it and neither its group nor others can write to it, since whoever can write there can put
+/// their own file in place of ours. Windows: the folder is made if missing.
+pub fn private_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+        if !path.exists() {
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(path)?;
+        }
+        let meta = std::fs::symlink_metadata(path)?;
+        let refused = |why: &str| {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{}: {why}", path.display()),
+            ))
+        };
+        if !meta.is_dir() {
+            return refused("not a folder");
+        }
+        // SAFETY: geteuid has no arguments and cannot fail.
+        if meta.uid() != unsafe { libc::geteuid() } {
+            return refused("another user owns this folder");
+        }
+        if meta.mode() & 0o022 != 0 {
+            return refused("other users can write to this folder");
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_private_folder_is_made_0700_and_a_shared_one_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let made = dir.path().join("a/b");
+        private_dir(&made).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&made), 0o700);
+        assert_eq!(mode(&dir.path().join("a")), 0o700);
+        private_dir(&made).unwrap();
+        std::fs::set_permissions(&made, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = private_dir(&made).unwrap_err();
+        assert!(e.to_string().contains("other users can write"), "{e}");
+        let file = dir.path().join("f");
+        std::fs::write(&file, "").unwrap();
+        assert!(private_dir(&file).is_err());
+    }
 
     #[test]
     fn names_every_system_accepts() {

@@ -35,6 +35,10 @@ pub struct Backend {
     pub fix: Option<String>,
     /// Models to offer. Others can still be typed as a spec.
     pub models: Vec<String>,
+    /// A subscription's program not ready: the step it needs, `install` or `sign_in`, which a
+    /// window can run on the computer it lists (ADR 0052).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<&'static str>,
 }
 
 /// Check every backend. Runs the checks at once; a slow or missing one costs at most a few
@@ -63,6 +67,7 @@ pub async fn catalog() -> Vec<Backend> {
                 .is_empty()
                 .then(|| "ollama pull qwen3:4b-instruct".into()),
             models,
+            step: None,
         },
         Err(detail) => Backend {
             provider: "ollama".into(),
@@ -72,6 +77,7 @@ pub async fn catalog() -> Vec<Backend> {
             detail,
             fix: Some("ollama serve".into()),
             models: vec![],
+            step: None,
         },
     });
     for (provider, label, key, model) in [
@@ -96,6 +102,7 @@ pub async fn catalog() -> Vec<Backend> {
             },
             fix: None,
             models: vec![model.into()],
+            step: None,
         });
     }
     out.extend(named);
@@ -122,6 +129,13 @@ fn subscription(st: cli::CliStatus) -> Backend {
             .iter()
             .map(|m| m.to_string())
             .collect(),
+        step: if !st.installed {
+            Some("install")
+        } else if !st.signed_in {
+            Some("sign_in")
+        } else {
+            None
+        },
     }
 }
 

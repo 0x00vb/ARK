@@ -34,6 +34,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+mod copying;
+mod held;
+
 /// Pass the orchestrator's events to every window as `{kind: "orch", event, line, tone,
 /// activity}`: the line a task's timeline shows for it (none for events a timeline leaves
 /// out), and for an agent's runtime event the activity the conversation would show for it
@@ -374,6 +377,12 @@ pub struct Host {
     /// Conversations still running a turn that windows no longer show. One ends when its turn
     /// does (its session is stored) unless it became current again.
     background: Mutex<Vec<Arc<Conv>>>,
+    /// Terminals another runtime opened here for a program's install or sign-in (`chat_setup`):
+    /// the only terminals it may type into.
+    setup_terms: Mutex<std::collections::HashSet<String>>,
+    /// Chats another runtime holds here and reaches by name (`chat_*`, ADR 0052), by session.
+    /// None of them moves the windows; a window that opens one takes it from here.
+    addressed: Mutex<HashMap<String, Arc<Conv>>>,
     /// Opens another live conversation of the app.
     siblings: ark_interact::Siblings,
     /// Held while the windows move to another chat and while a turn ends, so the two never
@@ -407,6 +416,26 @@ pub struct Host {
     pub(crate) notifier: Arc<crate::notify::Notifier>,
     /// The app's links to other runtimes, shared with its conversations.
     links: Arc<ark_interact::links::Links>,
+    /// The chat windows show when it is held on another computer (its session); `None` when it
+    /// is `current` (ADR 0052).
+    held: Mutex<Option<String>>,
+    /// The person's computers over SSH, when the app offers them (ADR 0052).
+    computers: std::sync::OnceLock<Arc<crate::computers::Computers>>,
+    /// Terminals opened on another computer for a program there, by id: its place.
+    held_terms: Mutex<HashMap<String, String>>,
+    /// What this runtime knows of held chats while they run.
+    held_live: Mutex<HashMap<String, held::HeldLive>>,
+    /// One follower of events per place that holds chats here, and whether it is following.
+    #[allow(clippy::type_complexity)]
+    relays: Mutex<
+        HashMap<
+            String,
+            (
+                tokio::task::JoinHandle<()>,
+                tokio::sync::watch::Receiver<bool>,
+            ),
+        >,
+    >,
 }
 
 impl Host {
@@ -478,9 +507,16 @@ impl Host {
             processes: ix.ark().processes().cloned(),
             notifier: Arc::new(crate::notify::Notifier::new(ix.ark().shared_engine())),
             links: ix.links().clone(),
+            held: Mutex::new(None),
+            held_live: Mutex::new(HashMap::new()),
+            relays: Mutex::new(HashMap::new()),
             current: Mutex::new(Conv::new(ix)),
             switching: tokio::sync::Mutex::new(()),
             background: Mutex::new(Vec::new()),
+            addressed: Mutex::new(HashMap::new()),
+            setup_terms: Mutex::new(Default::default()),
+            computers: Default::default(),
+            held_terms: Mutex::new(HashMap::new()),
             feed: Feed::new(),
             approvals: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
@@ -500,6 +536,8 @@ impl Host {
         host.notify_soon();
         // A linked runtime's list changed: windows read it again.
         tokio::spawn(forward_links(Arc::downgrade(&host), host.links.subscribe()));
+        // Chats held on other computers: their events, once their links are set.
+        host.start_relays();
         if let Some(c) = &host.computer {
             tokio::spawn(forward_computer(Arc::downgrade(&host), c.watch()));
         }
@@ -529,8 +567,9 @@ impl Host {
         self.current.lock().unwrap().clone()
     }
 
+    /// Whether windows show `conv`: not while they show a chat held elsewhere.
     fn is_current(&self, conv: &Arc<Conv>) -> bool {
-        Arc::ptr_eq(&self.cur(), conv)
+        self.held.lock().unwrap().is_none() && Arc::ptr_eq(&self.cur(), conv)
     }
 
     /// The live conversation of `session`: the current one or one working in the background.
@@ -539,12 +578,14 @@ impl Host {
         if cur.session() == session {
             return Some(cur);
         }
-        self.background
+        let bg = self
+            .background
             .lock()
             .unwrap()
             .iter()
             .find(|c| c.session() == session)
-            .cloned()
+            .cloned();
+        bg.or_else(|| self.addressed.lock().unwrap().get(session).cloned())
     }
 
     /// The conversation a request names (`session`), else the current one.
@@ -558,14 +599,20 @@ impl Host {
 
     /// Every conversation running a turn now, the current one first.
     fn working(&self) -> Vec<Value> {
-        let mut v: Vec<Value> = self.cur().working().into_iter().collect();
+        let cur = self.cur();
+        let mut v: Vec<Value> = cur.working().into_iter().collect();
+        let bg: Vec<Arc<Conv>> = self.background.lock().unwrap().clone();
+        v.extend(bg.iter().filter_map(|c| c.working()));
+        // A chat held for another runtime that is also current or in the background is listed once.
+        let shown = |c: &Arc<Conv>| Arc::ptr_eq(c, &cur) || bg.iter().any(|b| Arc::ptr_eq(b, c));
+        let addressed: Vec<Arc<Conv>> = self.addressed.lock().unwrap().values().cloned().collect();
         v.extend(
-            self.background
-                .lock()
-                .unwrap()
+            addressed
                 .iter()
+                .filter(|c| !shown(c))
                 .filter_map(|c| c.working()),
         );
+        v.extend(self.held_working());
         v
     }
 
@@ -674,6 +721,24 @@ impl Host {
         &self.engine
     }
 
+    /// Offer the person's own computers over SSH (`ArkUi::computers`): the ones added before are
+    /// reached again.
+    pub(crate) fn use_computers(
+        self: &Arc<Self>,
+        setup: crate::computers::ComputerSetup,
+        keep: Vec<(String, String, String)>,
+    ) {
+        let c = crate::computers::Computers::new(setup, self.engine.clone(), self.links.clone());
+        // What the app kept before (a server by address): a computer from now on.
+        for (name, url, token) in keep {
+            if let Err(e) = c.keep_address(&name, &url, &token) {
+                tracing::warn!("computer {name}: {e:#}");
+            }
+        }
+        c.start();
+        let _ = self.computers.set(c);
+    }
+
     /// The other runtimes whose items this one shows too (ADR 0043 step 4). The app sets them
     /// (`Links::set`, `ArkUi::link`): the people who reach this runtime act on those as its owner.
     pub fn links(&self) -> Arc<ark_interact::links::Links> {
@@ -687,7 +752,14 @@ impl Host {
             .iter()
             .map(ark_interact::attention::notice)
             .collect();
-        for (shown, _) in self.approvals.lock().unwrap().values() {
+        let local: Vec<Value> = self
+            .approvals
+            .lock()
+            .unwrap()
+            .values()
+            .map(|(shown, _)| shown.clone())
+            .collect();
+        for shown in local.iter().chain(self.held_questions().iter()) {
             // An agent's question is the list's (its task keeps it).
             if !shown["request"]["agent"].is_null() {
                 continue;
@@ -859,6 +931,10 @@ impl Host {
                 .to_string()
         };
         let n = |k: &str| params.get(k).and_then(|v| v.as_u64());
+        // The person's chat may be held on another computer: its calls go there.
+        if let Some(r) = self.held_route(method, &params).await {
+            return r;
+        }
         match method {
             "hello" => {
                 let mut pending: Vec<Value> = self
@@ -869,8 +945,9 @@ impl Host {
                     .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"], "session": req["session"], "chat": req["chat"], "project": req["project"] }))
                     .collect();
                 pending.extend(self.kept_questions(&pending));
+                pending.extend(self.held_questions());
                 let cur = self.cur();
-                let running = cur
+                let mut running = cur
                     .running
                     .lock()
                     .unwrap()
@@ -878,9 +955,13 @@ impl Host {
                     .map(|r| r.input.clone());
                 // Everything up to `seq` is in this answer: stored turns through `summary`,
                 // the running turn through `live`. A window ignores events at or below it.
-                let (seq, live) = self.feed.position(&cur.session());
+                let (seq, mut live) = self.feed.position(&cur.session());
+                let mut summary = self.summary();
+                if let Some(chat) = self.shown_held() {
+                    (summary, running, live) = self.held_hello(&chat);
+                }
                 Ok(json!({
-                    "summary": self.summary(),
+                    "summary": summary,
                     "ui": self.info,
                     "commands": self.commands,
                     "running": running,
@@ -900,6 +981,8 @@ impl Host {
                         .map(|k| (k.as_str().to_string(), json!(k.noun())))
                         .collect::<serde_json::Map<_, _>>(),
                     "version": env!("CARGO_PKG_VERSION"),
+                    // This runtime's store id: another runtime knows it by this (ADR 0052).
+                    "runtime": ark_interact::held::runtime_id(&self.engine),
                 }))
             }
             // The person takes the screen back from the agent using it: its next action there
@@ -936,6 +1019,104 @@ impl Host {
                     "media_type": p.media_type,
                     "data": base64::engine::general_purpose::STANDARD.encode(p.bytes.as_slice()),
                 }))
+            }
+            // Where a new chat can run (ADR 0052): this computer, by its name, and the person's
+            // other computers with how each is.
+            "places" => {
+                let here = if cfg!(target_os = "macos") {
+                    "This Mac"
+                } else {
+                    "This computer"
+                };
+                let places: Vec<Value> = self
+                    .links()
+                    .shown()
+                    .into_iter()
+                    .map(|l| json!({ "name": l.name, "state": l.state }))
+                    .collect();
+                Ok(
+                    json!({ "here": here, "places": places, "can_add": self.computers.get().is_some() }),
+                )
+            }
+            // Settings › Computers (ADR 0052): the person's computers, adding one over SSH, and
+            // taking one away.
+            "computers" => {
+                let c = self.computers.get();
+                Ok(json!({
+                    "can_add": c.is_some(),
+                    "computers": c.map(|c| c.list()).unwrap_or_default(),
+                }))
+            }
+            "computer_hosts" => match self.computers.get() {
+                Some(c) => Ok(json!(c.hosts().await)),
+                None => Ok(json!([])),
+            },
+            // A computer at an address, with a code made there.
+            "computer_add" if s("target").starts_with("http") => {
+                let c = self
+                    .computers
+                    .get()
+                    .ok_or_else(|| anyhow::anyhow!("this app does not add computers"))?;
+                let name = c.add_address(&s("target"), &s("code")).await?;
+                self.emit(json!({ "kind": "computer_setup", "target": s("target"), "done": true, "name": name }));
+                Ok(json!({ "name": name }))
+            }
+            "computer_add" => {
+                let c = self
+                    .computers
+                    .get()
+                    .ok_or_else(|| anyhow::anyhow!("this app does not add computers"))?;
+                let token = format!("ark-{}", &ark_interact::held::runtime_id(&self.engine)[..8]);
+                let me = Arc::downgrade(self);
+                c.add(
+                    &s("target"),
+                    token,
+                    Arc::new(move |v: Value| {
+                        if let Some(h) = me.upgrade() {
+                            h.emit(v);
+                        }
+                    }),
+                )?;
+                Ok(json!({ "started": true }))
+            }
+            "computer_remove" => {
+                let c = self
+                    .computers
+                    .get()
+                    .ok_or_else(|| anyhow::anyhow!("this app does not add computers"))?;
+                let name = s("name");
+                let sessions: Vec<String> = ark_interact::held::list(&self.engine, None)
+                    .into_iter()
+                    .filter(|c| c.place == name)
+                    .map(|c| c.session)
+                    .collect();
+                c.remove(
+                    &name,
+                    params["delete_store"].as_bool().unwrap_or(false),
+                    params["here_only"].as_bool().unwrap_or(false),
+                )
+                .await?;
+                self.forget_place(&name, &sessions).await;
+                self.emit(json!({ "kind": "attention", "linked": true }));
+                Ok(json!({}))
+            }
+            // The command a setup step left for the person, in a terminal on this computer:
+            // `ssh` asking about a host key, `sudo` to keep the service running after logout.
+            "computer_terminal" => {
+                let argv = self
+                    .computers
+                    .get()
+                    .and_then(|c| c.terminal_for(&s("target")))
+                    .ok_or_else(|| anyhow::anyhow!("nothing to answer for {}", s("target")))?;
+                let home = ark_os::dirs::home().unwrap_or_else(std::env::temp_dir);
+                let size = |k: &str, d: u64| n(k).unwrap_or(d).clamp(2, 1000) as u16;
+                Ok(json!(self.terminals.open_program(
+                    &self.feed,
+                    &argv,
+                    home,
+                    size("cols", 80),
+                    size("rows", 24)
+                )?))
             }
             // Every chat running a turn now (`{session, title, project, input}`).
             "working" => Ok(Value::Array(self.working())),
@@ -1108,7 +1289,17 @@ impl Host {
                 if let Some(Effect::Submit(text)) = &reply.effect {
                     self.start_turn(text.clone(), true)?;
                 }
-                self.emit(json!({ "kind": "summary", "summary": self.summary() }));
+                // `/resume` of a chat held on another computer: it opens there.
+                if let Some(Effect::Open(id)) = &reply.effect {
+                    if let Some(chat) = ark_interact::held::get(&self.engine, id) {
+                        self.held_open(chat).await?;
+                        return Ok(serde_json::to_value(reply)?);
+                    }
+                }
+                // A list read while a held chat is shown leaves it shown.
+                if self.held.lock().unwrap().is_none() {
+                    self.emit(json!({ "kind": "summary", "summary": self.summary() }));
+                }
                 Ok(serde_json::to_value(reply)?)
             }
             // Read from the store, so lists stay current while turns run. A chat running a turn
@@ -1131,6 +1322,7 @@ impl Host {
                     .filter_map(|w| w["session"].as_str().map(str::to_string))
                     .collect();
                 let mut v = serde_json::to_value(list)?;
+                let held_shown = self.held.lock().unwrap().is_some();
                 for row in v.as_array_mut().into_iter().flatten() {
                     if row["id"]
                         .as_str()
@@ -1138,6 +1330,28 @@ impl Host {
                     {
                         row["working"] = json!(true);
                     }
+                    if held_shown {
+                        row["current"] = json!(false);
+                    }
+                }
+                // Chats held on other computers, in the same list, newest first.
+                let scope = if !project.is_empty() {
+                    Some(project)
+                } else if params.get("all").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    None
+                } else {
+                    Some(self.project()?.id.as_str().to_string())
+                };
+                let held = self.held_rows(scope.as_deref());
+                if !held.is_empty() {
+                    let rows = v.as_array_mut().expect("a list");
+                    rows.extend(held);
+                    rows.sort_by(|a, b| {
+                        b["updated_at"]
+                            .as_str()
+                            .unwrap_or("")
+                            .cmp(a["updated_at"].as_str().unwrap_or(""))
+                    });
                 }
                 Ok(v)
             }
@@ -1782,6 +1996,8 @@ impl Host {
                 };
                 h(ctx, params.get("params").cloned().unwrap_or(Value::Null)).await
             }
+            m if m.starts_with("chat_") => self.chat_call(m, &params).await,
+            m if m.starts_with("copy_") => self.copy_call(m, &params).await,
             other => anyhow::bail!("unknown method `{other}`"),
         }
     }
@@ -1889,9 +2105,13 @@ impl Host {
     }
 
     fn take_background(&self, session: &str) -> Option<Arc<Conv>> {
+        // A window that opens a chat another runtime holds here takes the same conversation.
+        let held = self.addressed.lock().unwrap().remove(session);
         let mut bg = self.background.lock().unwrap();
-        let i = bg.iter().position(|c| c.session() == session)?;
-        Some(bg.remove(i))
+        match bg.iter().position(|c| c.session() == session) {
+            Some(i) => Some(bg.remove(i)),
+            None => held,
+        }
     }
 
     /// Make `live` the current chat; the current one stays live only while it runs.
@@ -1925,16 +2145,335 @@ impl Host {
     }
 
     async fn trace(&self, index: Option<u32>) -> anyhow::Result<Option<ark_interact::Trace>> {
+        self.trace_of(&self.cur(), index).await
+    }
+
+    async fn trace_of(
+        &self,
+        conv: &Arc<Conv>,
+        index: Option<u32>,
+    ) -> anyhow::Result<Option<ark_interact::Trace>> {
         if let Some(i) = index {
-            return Ok(load_trace(&self.engine, &self.session_id(), i).map(|r| interpret(&r)));
+            return Ok(load_trace(&self.engine, &conv.session(), i).map(|r| interpret(&r)));
         }
-        let conv = self.cur();
         if let Some(r) = conv.running.lock().unwrap().as_ref() {
             let rec = r.ctl.recorder.lock().unwrap().snapshot();
             return Ok(Some(interpret(&rec)));
         }
         let t = conv.ix.lock().await.trace(None);
         Ok(t)
+    }
+
+    /// A chat's context, for one that windows do not show (`chat_context`).
+    async fn context_of(&self, conv: &Arc<Conv>) -> anyhow::Result<ContextView> {
+        if let Some(r) = conv.running.lock().unwrap().as_ref() {
+            let t = interpret(&r.ctl.recorder.lock().unwrap().snapshot());
+            if let Some(report) = t.requests.last() {
+                return Ok(ContextView::build(
+                    report,
+                    ContextSource::LastRequest,
+                    None,
+                    &KeptOut::default(),
+                ));
+            }
+            anyhow::bail!("no context yet");
+        }
+        let ix = conv.ix.lock().await;
+        ix.context_view().await
+    }
+
+    /// The live conversation of a chat another runtime reaches by name (`chat_*`): the one open
+    /// here already, else opened beside the windows' without moving them.
+    /// `model`: the chat's model as the other runtime keeps it, put back on a conversation
+    /// opened again (one opened here takes this runtime's current model). `keep`: hold it open
+    /// (a turn starts on it); else it is read and let go, and nothing here grows with the
+    /// chats another runtime looks at.
+    async fn chat_conv(
+        self: &Arc<Self>,
+        session: &str,
+        model: &str,
+        keep: bool,
+    ) -> anyhow::Result<Arc<Conv>> {
+        anyhow::ensure!(!session.is_empty(), "which chat?");
+        if let Some(c) = self.conv_of(session) {
+            return Ok(c);
+        }
+        let rec = self
+            .engine
+            .store
+            .get_session(session)?
+            .ok_or_else(|| anyhow::anyhow!("there is no chat `{session}` here"))?;
+        let project = ProjectId(rec["project"].as_str().unwrap_or_default().to_string());
+        let conv = self.open_sibling(Some(session), &project)?;
+        if !model.is_empty() {
+            let mut ix = conv.ix.lock().await;
+            // A chat only read still opens when its model is gone here (on this computer's
+            // own); a turn needs it.
+            match ix.switch_model(model) {
+                Ok(_) => conv.note(&ix),
+                Err(e) if keep => return Err(e),
+                Err(_) => {}
+            }
+        }
+        if keep {
+            self.addressed
+                .lock()
+                .unwrap()
+                .insert(session.to_string(), conv.clone());
+        }
+        Ok(conv)
+    }
+
+    /// What `summary` answers for a chat that windows may not show.
+    fn summary_of(&self, conv: &Arc<Conv>) -> Value {
+        let mut v = conv.about.lock().unwrap().summary.clone();
+        v["running"] = json!(conv.is_running());
+        v
+    }
+
+    /// The questions a chat asks now (`hello`'s shape).
+    fn questions_of(&self, session: &str) -> Vec<Value> {
+        self.approvals
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, (q, _))| q["session"] == json!(session))
+            .map(|(id, (q, _))| json!({ "id": id, "request": q["request"], "line": q["line"], "title": q["title"], "choices": q["choices"], "session": q["session"], "chat": q["chat"], "project": q["project"] }))
+            .collect()
+    }
+
+    /// The calls another runtime makes on a chat it holds here (ADR 0052). Each names its chat;
+    /// none moves this runtime's windows.
+    async fn chat_call(self: &Arc<Self>, method: &str, params: &Value) -> anyhow::Result<Value> {
+        let s = |k: &str| params[k].as_str().unwrap_or("").to_string();
+        let session = s("session");
+        match method {
+            "chat_new" => {
+                let p = ark_interact::held::origin_project(
+                    &self.engine,
+                    &s("origin"),
+                    &s("origin_project"),
+                    &s("name"),
+                )?;
+                let conv = self.open_sibling(None, &p.id)?;
+                {
+                    let mut ix = conv.ix.lock().await;
+                    let model = s("model");
+                    if !model.is_empty() {
+                        ix.switch_model(&model)?;
+                    }
+                    conv.note(&ix);
+                }
+                let session = conv.session();
+                self.addressed
+                    .lock()
+                    .unwrap()
+                    .insert(session.clone(), conv.clone());
+                Ok(json!({
+                    "session": session,
+                    "project": { "id": p.id, "name": p.name },
+                    "summary": self.summary_of(&conv),
+                }))
+            }
+            "chat_send" => {
+                let text = s("text");
+                anyhow::ensure!(!text.trim().is_empty(), "nothing to send");
+                let ask = params["ask"].as_bool().unwrap_or(true);
+                let _quiet = self.switching.lock().await;
+                let conv = self.chat_conv(&session, &s("model"), true).await?;
+                // The chat's model, also on a conversation that was open already (the person may have
+                // changed it in this computer's own window).
+                let model = s("model");
+                if !model.is_empty() && !conv.is_running() {
+                    let mut ix = conv.ix.lock().await;
+                    ix.switch_model(&model)?;
+                    conv.note(&ix);
+                }
+                self.start_turn_on(conv, text, ask)?;
+                Ok(json!({ "started": true }))
+            }
+            "chat_steer" | "chat_cancel" => {
+                let conv = self
+                    .conv_of(&session)
+                    .ok_or_else(|| anyhow::anyhow!("no turn is running"))?;
+                let running = conv.running.lock().unwrap();
+                let r = running
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("no turn is running"))?;
+                if method == "chat_steer" {
+                    r.ctl.steer.push(s("text"));
+                    Ok(json!({ "queued": true }))
+                } else {
+                    r.ctl.cancel.cancel();
+                    Ok(json!({}))
+                }
+            }
+            // Everything a window needs to show the chat, up to `seq`: later events follow.
+            "chat_read" => {
+                let conv = self.chat_conv(&session, &s("model"), false).await?;
+                let before = params["before"].as_u64().map(|b| b as u32);
+                let limit = params["limit"].as_u64().unwrap_or(30) as usize;
+                let transcript = ark_interact::interaction::transcript(
+                    &self.engine,
+                    &self.labels,
+                    &session,
+                    before,
+                    limit,
+                )?;
+                let running = conv
+                    .running
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|r| r.input.clone());
+                let (seq, live) = self.feed.position(&session);
+                Ok(json!({
+                    "summary": self.summary_of(&conv),
+                    "transcript": transcript,
+                    "running": running,
+                    "live": live,
+                    "seq": seq,
+                    "approvals": self.questions_of(&session),
+                }))
+            }
+            "chat_approve" => {
+                let decision: ApprovalDecision =
+                    serde_json::from_value(params["decision"].clone())?;
+                let id = params["id"].as_u64().unwrap_or(0);
+                let reply = {
+                    let mut approvals = self.approvals.lock().unwrap();
+                    match approvals.get(&id) {
+                        Some((q, _)) if q["session"] == json!(session) => {
+                            approvals.remove(&id).map(|(_, r)| r)
+                        }
+                        _ => None,
+                    }
+                };
+                let reply =
+                    reply.ok_or_else(|| anyhow::anyhow!("that approval is no longer pending"))?;
+                let _ = reply.send(decision);
+                self.emit(json!({ "kind": "approval_closed", "id": id }));
+                Ok(json!({}))
+            }
+            "chat_model" => {
+                let conv = self.chat_conv(&session, &s("model"), false).await?;
+                anyhow::ensure!(
+                    !conv.is_running(),
+                    "the agent is working; wait for the turn to finish or stop it"
+                );
+                let mut ix = conv.ix.lock().await;
+                ix.switch_model(&s("spec"))?;
+                conv.note(&ix);
+                drop(ix);
+                Ok(self.summary_of(&conv))
+            }
+            "chat_rename" => {
+                let conv = self.chat_conv(&session, &s("model"), false).await?;
+                anyhow::ensure!(
+                    !conv.is_running(),
+                    "this chat is working; rename it when it finishes"
+                );
+                let mut ix = conv.ix.lock().await;
+                ix.rename_session(None, &s("title"))?;
+                conv.note(&ix);
+                drop(ix);
+                Ok(self.summary_of(&conv))
+            }
+            "chat_context" => {
+                let conv = self.chat_conv(&session, &s("model"), false).await?;
+                Ok(serde_json::to_value(self.context_of(&conv).await?)?)
+            }
+            // Who can answer here: the models this computer has, as `models` lists them.
+            "chat_models" => Ok(serde_json::to_value(
+                ark_interact::ark_sdk::prelude::ark_model::catalog().await,
+            )?),
+            // A program's install or sign-in, in a terminal the other runtime shows and the person
+            // answers. Only the steps the catalog names run, never a command sent from there.
+            "chat_setup" => {
+                use ark_interact::ark_sdk::prelude::ark_model::cli::Cli;
+                let program = Cli::of(&s("program"))
+                    .ok_or_else(|| anyhow::anyhow!("no program `{}` here", s("program")))?;
+                let argv: Vec<String> = match s("step").as_str() {
+                    "install" => vec!["sh".into(), "-c".into(), program.install_line().into()],
+                    "sign_in" => {
+                        let bin = program.locate().ok_or_else(|| {
+                            anyhow::anyhow!("{} is not installed here", program.label())
+                        })?;
+                        std::iter::once(bin.display().to_string())
+                            .chain(program.sign_in_args().iter().map(|a| a.to_string()))
+                            .collect()
+                    }
+                    other => anyhow::bail!("no step `{other}`"),
+                };
+                let home = ark_os::dirs::home().unwrap_or_else(std::env::temp_dir);
+                let size = |k: &str, d: u64| params[k].as_u64().unwrap_or(d).clamp(2, 1000) as u16;
+                let opened = self.terminals.open_program(
+                    &self.feed,
+                    &argv,
+                    home,
+                    size("cols", 80),
+                    size("rows", 24),
+                )?;
+                self.setup_terms
+                    .lock()
+                    .unwrap()
+                    .insert(opened.session.clone());
+                Ok(json!(opened))
+            }
+            "chat_term_write" | "chat_term_resize" | "chat_term_close" => {
+                let id = s("id");
+                anyhow::ensure!(
+                    self.setup_terms.lock().unwrap().contains(&id),
+                    "no terminal `{id}` was opened from there"
+                );
+                match method {
+                    "chat_term_write" => self.terminals.write(&id, &s("data"))?,
+                    "chat_term_resize" => {
+                        let size = |k: &str| params[k].as_u64().unwrap_or(24).clamp(2, 1000) as u16;
+                        self.terminals.resize(&id, size("cols"), size("rows"))?
+                    }
+                    _ => {
+                        self.terminals.close(&id);
+                        self.setup_terms.lock().unwrap().remove(&id);
+                    }
+                }
+                Ok(Value::Null)
+            }
+            // A key the person agreed to send from their other computer: saved here as
+            // `api_key_save` saves one (checked with the provider first).
+            "chat_key" => {
+                // The person removed this computer from the other: the keys it sent go.
+                // Each only while it is still the key that was sent: one saved here since stays.
+                if let Some(sent) = params["forget"].as_object() {
+                    let keys = self
+                        .api_keys()
+                        .ok_or_else(|| anyhow::anyhow!("this computer keeps no keys"))?;
+                    for (provider, hash) in sent {
+                        let same = keys.saved_key(provider).is_some_and(|k| {
+                            use sha2::Digest;
+                            Some(
+                                format!("{:x}", sha2::Sha256::digest(k.trim().as_bytes())).as_str(),
+                            ) == hash.as_str()
+                        });
+                        if same {
+                            keys.forget(provider)?;
+                        }
+                    }
+                    return Ok(json!({ "saved": keys.saved() }));
+                }
+                let keys = self.api_keys().ok_or_else(|| {
+                    anyhow::anyhow!("this computer keeps no keys; set the provider's environment variable there")
+                })?;
+                keys.save(&s("provider"), &s("key")).await?;
+                Ok(json!({ "saved": keys.saved() }))
+            }
+            "chat_trace" => {
+                let conv = self.chat_conv(&session, &s("model"), false).await?;
+                let index = params["index"].as_u64().map(|i| i as u32);
+                Ok(serde_json::to_value(self.trace_of(&conv, index).await?)?)
+            }
+            other => anyhow::bail!("unknown method `{other}`"),
+        }
     }
 
     async fn context(&self) -> anyhow::Result<ContextView> {
@@ -2009,7 +2548,15 @@ impl Host {
     }
 
     fn start_turn(self: &Arc<Self>, input: String, ask: bool) -> anyhow::Result<()> {
-        let conv = self.cur();
+        self.start_turn_on(self.cur(), input, ask)
+    }
+
+    fn start_turn_on(
+        self: &Arc<Self>,
+        conv: Arc<Conv>,
+        input: String,
+        ask: bool,
+    ) -> anyhow::Result<()> {
         let ctl = TurnControl {
             ask,
             ..TurnControl::new()
@@ -2064,12 +2611,17 @@ impl Host {
         }
         drop(ix);
         *conv.running.lock().unwrap() = None;
-        // A chat in the background ends with its turn; its session is stored.
+        // A chat in the background, or held here for another runtime, ends with its turn; its
+        // session is stored and opens again when called.
         if !current {
             self.background
                 .lock()
                 .unwrap()
                 .retain(|c| !Arc::ptr_eq(c, &conv));
+            self.addressed
+                .lock()
+                .unwrap()
+                .retain(|_, c| !Arc::ptr_eq(c, &conv));
         }
         drop(one);
         // No question outlives its turn; close them before saying the turn ended. Questions

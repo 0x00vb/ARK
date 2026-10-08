@@ -1,0 +1,17 @@
+[package]
+name = "ark-reach"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Setting up a computer over SSH (ADR 0052): its hosts, one connection per setup, install, start, pair, and a tunnel to a Unix socket. The system ssh does the connection."
+
+[dependencies]
+ark-os = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

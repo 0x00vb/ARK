@@ -4,7 +4,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-07 (ADR 0051 on main, untagged; v0.13.0: ADR 0043 steps 1 to 4: what waits for you, in every project, on a phone and on your own server; an agent on Claude Code or Codex; v0.12.1: Upload a folder… and Add files, a touch pass, Run code on Linux fixed and tested)
+Last updated: 2026-10-07 (ADR 0052 on branch `places`, uncommitted: a chat runs on the computer the person picks; ADR 0051 on main, untagged; v0.13.0: ADR 0043 steps 1 to 4: what waits for you, in every project, on a phone and on your own server; an agent on Claude Code or Codex; v0.12.1: Upload a folder… and Add files, a touch pass, Run code on Linux fixed and tested)
 
 ## Release
 
@@ -17,6 +17,12 @@ Last updated: 2026-10-07 (ADR 0051 on main, untagged; v0.13.0: ADR 0043 steps 1 
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | `ci/windows` merged into v0.14.0 (`ark-os`, ADR 0022): every OS difference ARK had on 2026-10-05 goes through it; code written on `main` after that (processes, notifications, durable turns) mostly does not yet, and newer shell-script tests are not marked unix-only. Never run on Windows. Next: the machine run (`scripts/windows-check.ps1`), Office fixes in `ark-files`, one runtime per store. Analysis and plan: `ark-desktop/docs/WINDOWS.md` |
 | Accounts | In v0.10.0: `ark-account` (ADR 0026, 0031), an optional ARK Account for ARK Cloud. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local) |
+
+## In progress
+
+| What | State |
+|---|---|
+| A chat runs on the computer the person picks (ADR 0052, accepted 2026-10-07): the place chip, held chats and `chat_*` calls, the project copy and Bring back, `ark-reach` (setup and a tunnel over the person's `ssh`), Settings › Computers, programs installed and signed in there, ARK Desktop's contract and builds, the writer as second app | Steps 0 to 6 and 8 built on branch `places` (this worktree, `../ark-places`) with ARK Desktop's `../ark-desktop-places`, uncommitted; ADR 0052 › Results has the evidence. `scripts/ci.sh` and Desktop's `check.sh` pass; `ARK_TEST_SSH=1` end to end passes with Desktop's and the writer's Linux builds. Waits for the owner: commit, a tag, the Linux builds on download.aiark.dev, a real-VPS run with a subscription. Step 7 (OpenCode, Cursor) needs a signed-in provider and Cursor |
 
 ## Open follow-ups (not started)
 

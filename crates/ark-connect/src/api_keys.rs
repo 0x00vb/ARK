@@ -96,6 +96,16 @@ impl ApiKeys {
         Ok(())
     }
 
+    /// The saved key of `provider`, for one purpose only: sending it to another of the person's
+    /// computers after they agreed (ADR 0052). Never shown or logged.
+    pub fn saved_key(&self, provider: &str) -> Option<String> {
+        if let Some(k) = self.cache.lock().unwrap().get(provider) {
+            return Some(k.clone());
+        }
+        known(provider).ok()?;
+        self.secrets.get(&secret(provider)).ok().flatten()
+    }
+
     /// Remove a saved key.
     pub fn forget(&self, provider: &str) -> Result<(), ConnectError> {
         known(provider)?;

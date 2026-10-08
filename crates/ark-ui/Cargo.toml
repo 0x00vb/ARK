@@ -13,16 +13,20 @@ desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-notificatio
 
 [dependencies]
 ark-os.workspace = true
+ark-reach.workspace = true
 ark-interact.workspace = true
 ark-sdk.workspace = true
+ark-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+time.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 uuid.workspace = true
 portable-pty.workspace = true
 reqwest.workspace = true
 sha2 = "0.10"
+tar.workspace = true
 ring = "0.17"
 tracing.workspace = true
 base64 = "0.22"

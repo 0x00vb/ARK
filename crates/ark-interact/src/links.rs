@@ -82,6 +82,8 @@ struct Followed {
     link: Link,
     client: Client,
     state: Mutex<State>,
+    /// Its store id, from its `hello` (ADR 0052); `None` until read, or from an older version.
+    runtime: Mutex<Option<String>>,
     items: Mutex<Vec<Item>>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -116,6 +118,8 @@ impl Drop for Links {
 const IDLE: Duration = Duration::from_secs(40);
 /// How long one call to a link may take.
 const CALL: Duration = Duration::from_secs(8);
+/// How long one call on a project's copy may take (a folder read, a part over a slow link).
+const COPY: Duration = Duration::from_secs(180);
 
 impl Links {
     /// From now on, these links (replacing the ones before). Each is followed in the
@@ -144,6 +148,7 @@ impl Links {
                 client: Client::new(&l.url, &l.token),
                 link: l.clone(),
                 state: Mutex::new(State::Starting),
+                runtime: Mutex::new(None),
                 items: Mutex::new(Vec::new()),
                 task: Mutex::new(None),
             });
@@ -152,6 +157,33 @@ impl Links {
             followed.insert(l.name.clone(), f);
         }
         let _ = self.changed.send(());
+    }
+
+    /// Add or replace one link (a computer just set up), keeping the others.
+    pub fn add(self: &Arc<Self>, link: Link) {
+        let mut all: Vec<Link> = self
+            .followed
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|f| f.link.name != link.name)
+            .map(|f| f.link.clone())
+            .collect();
+        all.push(link);
+        self.set(all);
+    }
+
+    /// Stop following the link `name` (a computer removed).
+    pub fn remove(self: &Arc<Self>, name: &str) {
+        let all: Vec<Link> = self
+            .followed
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|f| f.link.name != name)
+            .map(|f| f.link.clone())
+            .collect();
+        self.set(all);
     }
 
     /// Something changed on a link (its list, its state).
@@ -220,6 +252,65 @@ impl Links {
         call(&f, "attention_open", json!({ "id": id })).await
     }
 
+    /// Whether `runtime` is linked here, and how it is.
+    pub fn state(&self, runtime: &str) -> Option<State> {
+        let f = self.get(runtime).ok()?;
+        let s = *f.state.lock().unwrap();
+        Some(s)
+    }
+
+    /// The store id of the linked runtime `name`, once it answered.
+    pub fn runtime_id(&self, name: &str) -> Option<String> {
+        self.get(name).ok()?.runtime.lock().unwrap().clone()
+    }
+
+    /// The name of the link whose runtime has store id `id`.
+    pub fn name_of(&self, id: &str) -> Option<String> {
+        self.followed
+            .lock()
+            .unwrap()
+            .values()
+            .find(|f| f.runtime.lock().unwrap().as_deref() == Some(id))
+            .map(|f| f.link.name.clone())
+    }
+
+    /// One call on a chat `runtime` holds for this one (ADR 0052): only the calls of
+    /// [`CHAT_CALLS`](crate::held::CHAT_CALLS), which name their chat and never move that
+    /// runtime's own window.
+    pub async fn chat(&self, runtime: &str, method: &str, params: Value) -> anyhow::Result<Value> {
+        anyhow::ensure!(
+            crate::held::CHAT_CALLS.contains(&method),
+            "`{method}` does not cross to another computer"
+        );
+        let f = self.get(runtime)?;
+        // A copy reads or writes a folder there: it may take longer than a call.
+        let limit = match method.starts_with("copy_") {
+            true => COPY,
+            false => CALL,
+        };
+        let v = call_within(&f, method, params, limit).await?;
+        // A call that answered: it is there, whatever the follower last saw.
+        let before = std::mem::replace(&mut *f.state.lock().unwrap(), State::Ok);
+        if before != State::Ok {
+            let _ = self.changed.send(());
+        }
+        Ok(v)
+    }
+
+    /// Every event `runtime` sends from now on (with `{"kind": "alive"}` for its pings), for
+    /// the chats it holds for this one. Errors are in words, without its address or token.
+    pub async fn chat_events(
+        &self,
+        runtime: &str,
+    ) -> anyhow::Result<tokio::sync::mpsc::UnboundedReceiver<Value>> {
+        let f = self.get(runtime)?;
+        match tokio::time::timeout(CALL, f.client.events_alive()).await {
+            Ok(Ok(rx)) => Ok(rx),
+            Ok(Err(e)) => Err(anyhow::anyhow!(plain(&e, &f.link))),
+            Err(_) => anyhow::bail!("{runtime} is not answering"),
+        }
+    }
+
     /// The words for an error that came from reaching `runtime`, without its address or token.
     pub fn words(&self, runtime: &str, e: &anyhow::Error) -> String {
         match self.get(runtime) {
@@ -236,8 +327,17 @@ impl Links {
 }
 
 async fn call(f: &Followed, method: &str, params: Value) -> anyhow::Result<Value> {
+    call_within(f, method, params, CALL).await
+}
+
+async fn call_within(
+    f: &Followed,
+    method: &str,
+    params: Value,
+    limit: Duration,
+) -> anyhow::Result<Value> {
     let name = &f.link.name;
-    match tokio::time::timeout(CALL, f.client.call(method, params)).await {
+    match tokio::time::timeout(limit, f.client.call(method, params)).await {
         Ok(Ok(v)) => Ok(v),
         // In words, without the address or the token.
         Ok(Err(e)) => match classify(&e) {
@@ -346,6 +446,13 @@ async fn follow(f: Arc<Followed>, changed: broadcast::Sender<()>) {
             set(trouble(&e));
             wait(&mut backoff).await;
             continue;
+        }
+        if f.runtime.lock().unwrap().is_none() {
+            if let Ok(Ok(v)) = tokio::time::timeout(CALL, f.client.hello()).await {
+                if let Some(id) = v["runtime"].as_str() {
+                    *f.runtime.lock().unwrap() = Some(id.to_string());
+                }
+            }
         }
         set(State::Ok);
         let mut rx = match f.client.events_alive().await {

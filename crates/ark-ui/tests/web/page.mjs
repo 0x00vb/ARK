@@ -1083,6 +1083,21 @@ async function picker(page) {
 }
 scenarios.picker = picker;
 
+// An app module runs while the first hello is deliberately still in flight. `ark.ready()`
+// wakes it once, after the applied summary has a complete resource location, and only then may
+// its project-scoped call reach the host.
+scenarios.ready = async (page) => {
+  await page.waitForFunction(() => window.readyProbe?.graph);
+  const probe = await page.evaluate(() => window.readyProbe);
+  assert.equal(probe.before, null, "the app module did run before hello completed");
+  assert.equal(probe.wakes, 1, "readiness wakes once");
+  assert.equal(probe.calls, 1, "one scoped call runs after readiness");
+  assert.ok(probe.after.location.runtime);
+  assert.ok(probe.after.location.project);
+  assert.ok(probe.after.location.session);
+  assert.equal(probe.graph.project, probe.after.location.project);
+};
+
 // Settings › Tool servers: an MCP server is added from a typed command, shows its tools,
 // joins the app's tools, and is removed with a second click. One that cannot start says why.
 async function plugins(page) {
@@ -1613,6 +1628,13 @@ try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.on("pageerror", (e) => errors.push(String(e)));
   if (inits[scenario]) await page.addInitScript(inits[scenario]);
+  if (scenario === "ready") {
+    await page.route("**/*", async (route) => {
+      const body = route.request().postData() || "";
+      if (body.includes('"method":"hello"')) await new Promise((resolve) => setTimeout(resolve, 250));
+      await route.continue();
+    });
+  }
   await page.goto(url);
   await page.locator("#input").waitFor();
   await run(page);

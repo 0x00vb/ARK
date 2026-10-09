@@ -32,6 +32,10 @@ const appEl = $("#app");
 const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, view: null };
 const resourceOnline = new Map();
 const locationKey = (location) => `${location?.runtime || ""}:${location?.project || ""}:${location?.session || ""}`;
+let readyResolve;
+let isReady = false;
+const firstReady = new Promise((resolve) => (readyResolve = resolve));
+const validLocation = (location) => !!(location?.runtime && location?.project && location?.session);
 // Main-column views (`ark.view`), built on first show and kept while hidden.
 const views = new Map();
 
@@ -71,6 +75,13 @@ const api = {
   // Undefined anywhere else (the window's own page, a browser).
   openLocal: transport.openLocal,
   summary: () => state.summary,
+  // App modules load beside this module, while the first `hello` is still in flight. Wait for
+  // its resource location before making a project-scoped call. A failed hello can recover; this
+  // promise therefore stays pending instead of caching the startup failure.
+  ready: async () => {
+    if (!isReady) await firstReady;
+    return state.summary;
+  },
   // This computer as a sentence names it ("this Mac"), once the places are read.
   hereName: () => places?.here,
   // Resolves once the page shows chat `id`, rebuilt (a chat the host just opened).
@@ -397,6 +408,10 @@ function setRunning(on) {
 function applySummary(s) {
   const changed = s.session.id !== state.sessionId;
   state.summary = s;
+  if (!isReady && validLocation(s.location)) {
+    isReady = true;
+    readyResolve();
+  }
   state.sessionId = s.session.id;
   state.title = s.session.title || (s.session.turns ? "Untitled chat" : "");
   if (s.location) resourceOnline.set(locationKey(s.location), !s.place || s.place.state === "ok");
@@ -532,7 +547,9 @@ function onEvent(msg) {
     resourceOnline.set(locationKey(msg.location), !!msg.online);
   }
   // App scripts can follow the same stream: `ark.on("ark:turn_finished", fn)`.
-  if (msg.kind !== "ext" && msg.kind !== "text") dispatchExt(`ark:${msg.kind}`, msg);
+  // A summary listener must see the new summary through `ark.summary()`, not the previous
+  // chat. Summary is dispatched in its case below, after `applySummary`.
+  if (msg.kind !== "ext" && msg.kind !== "text" && msg.kind !== "summary") dispatchExt(`ark:${msg.kind}`, msg);
   // A question an orchestrated agent asks belongs to no chat (`session` is empty).
   if (msg.session && msg.session !== state.sessionId) return elsewhere(msg);
   switch (msg.kind) {
@@ -593,8 +610,12 @@ function onEvent(msg) {
     }
     case "summary":
       // Another chat: rebuild from the host, which knows whether it is working.
-      if (applySummary(msg.summary)) boot(true);
-      else sidebar.refresh(state.sessionId);
+      {
+        const changed = applySummary(msg.summary);
+        dispatchExt("ark:summary", msg);
+        if (changed) boot(true);
+        else sidebar.refresh(state.sessionId);
+      }
       break;
     case "attention":
       waiting.refresh();

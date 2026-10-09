@@ -224,10 +224,24 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             )
         });
     }
-    let (host, served) = ArkUi::new(app)
-        .serve_background("127.0.0.1:0")
-        .await
-        .unwrap();
+    let mut ui = ArkUi::new(app);
+    if scenario == "ready" {
+        ui = ui
+            .asset(
+                "ready-app.js",
+                br#"
+window.readyProbe = { calls: 0, wakes: 0, before: window.ark.summary() };
+const summary = await window.ark.ready();
+window.readyProbe.wakes += 1;
+window.readyProbe.after = summary;
+window.readyProbe.calls += 1;
+window.readyProbe.graph = await window.ark.call("graph");
+"#
+                .as_slice(),
+            )
+            .script("ready-app.js");
+    }
+    let (host, served) = ui.serve_background("127.0.0.1:0").await.unwrap();
     if scenario == "waiting" {
         seed_waiting(&host, dir.path()).await;
     }
@@ -612,6 +626,11 @@ async fn an_app_model_picker_asks_for_a_model_and_on_submit_takes_messages() {
         Duration::ZERO,
     )
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_app_waits_for_a_resource_location_before_its_first_project_call() {
+    drive_app("ready", vec![], Duration::ZERO, true).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

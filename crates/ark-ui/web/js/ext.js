@@ -38,6 +38,9 @@
 //   ark.openLocal()    only in the window on a runtime elsewhere it opened (Rust:
 //                      `ark_ui::remote::visit`): the window goes back to its own runtime.
 //                      Undefined everywhere else
+//   ark.ready()        waits until the first host summary has a resource location, then returns
+//                      the current summary. App modules use it before their first project call.
+//                      It stays pending through a recoverable startup connection failure.
 //   ark.on(name, fn)   an app handler's events, and ARK's own as `ark:<kind>` (in a browser
 //                      also `ark:reconnecting`, `ark:disconnected` with `retry()`, `ark:connected`)
 //                      (`ark:turn_finished`, `ark:event`, `ark:summary`, ...)

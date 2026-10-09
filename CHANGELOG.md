@@ -7,6 +7,16 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.18.1] - 2026-10-09
+
+### Added
+- `ark.ready()` lets an app wait for the first applied chat resource location before its first
+  project call.
+
+### Fixed
+- App summary listeners now run after the new summary is applied. App views no longer cache a
+  missing resource location when they load beside the first host handshake.
+
 ## [0.18.0] - 2026-10-09
 
 ### Breaking

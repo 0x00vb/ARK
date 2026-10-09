@@ -4,15 +4,15 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-09 (v0.18.0 released: native message safety, trusted effect results and
-visible Computer activity)
+Last updated: 2026-10-09 (v0.18.1 release: app extensions wait for a valid chat resource
+location)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.18.0 (2026-10-09), on `origin` and `github`; verified from a fresh clone |
-| `main` | v0.18.0 plus ADR 0056's decision record. Native messages have separate draft, send and proof steps; trusted unresolved effects replace optimistic model answers; Computer activity is sequenced and visible across apps. ARK Desktop 0.6.0 pins this tag and passed a native Calculator run, a safe WhatsApp self-draft and a public 0.5.4 to 0.6.0 signed update |
+| Latest tag | v0.18.1 (2026-10-09), release checks in progress |
+| `main` | v0.18.1 makes app startup wait for an applied resource location and dispatches summary events after that state is current. ARK Desktop 0.6.1 pins this tag. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |

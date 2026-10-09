@@ -43,7 +43,7 @@ Captured from a real run with a local 4B model and the planner on (it is off by 
 | `app --resume` (`-r`) | Continue the most recent session in this project |
 | `app --session <id>` | Continue a specific session (id or unique prefix) |
 | `app --project <name>` | Work in another project (created if missing) |
-| `app --model <m>` | Use another model: `qwen3:4b`, `anthropic:claude-sonnet-5-5`, or a subscription: `claude:sonnet`, `codex:default` |
+| `app --model <m>` | Use another model: `qwen3:4b`, `anthropic:claude-sonnet-5-5`, or a subscription with optional effort: `claude:sonnet@high`, `codex:gpt-5.6-terra@medium` |
 | `app --connect <url>` | Use the same app running elsewhere (see [On another machine](#on-another-machine)) |
 | `app -v` | Start with the debug view on |
 | `app -p "prompt"` | Run one prompt and exit (see [Headless](#headless-runs)) |

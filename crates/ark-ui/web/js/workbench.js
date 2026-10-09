@@ -82,10 +82,10 @@ function terminal(el, params, ark) {
   };
   const fit = () => { try { s.fit?.fit(); } catch {} };
   const theme = () => ({
-    background: css("--pane") || "#181818",
-    foreground: css("--text") || "#ececeb",
-    cursor: css("--accent") || "#888",
-    selectionBackground: "rgba(127,127,127,0.3)",
+    background: css("--term-bg") || css("--pane") || "#181818",
+    foreground: css("--term-fg") || css("--text") || "#ececeb",
+    cursor: css("--term-cursor") || css("--accent") || "#888",
+    selectionBackground: css("--term-selection") || "rgba(127,127,127,0.3)",
   });
 
   (async () => {

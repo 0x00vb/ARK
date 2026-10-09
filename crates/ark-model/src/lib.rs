@@ -31,7 +31,7 @@ pub mod usage;
 
 pub use anthropic::Anthropic;
 pub use capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
-pub use catalog::{catalog, Backend, BackendKind, PROVIDERS};
+pub use catalog::{catalog, Backend, BackendKind, ModelOption, PROVIDERS};
 pub use cli::{Cli, CliModel, CliStatus};
 pub use endpoints::{is_provider, Endpoint};
 pub use mock::MockProvider;
@@ -460,14 +460,14 @@ fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
         "anthropic" => Ok(Box::new(Anthropic::from_env(
             model.unwrap_or_else(|| "claude-sonnet-5-5".into()),
         )?)),
-        "claude" => Ok(Box::new(CliModel::new(
+        "claude" => Ok(Box::new(CliModel::try_new(
             Cli::Claude,
             model.unwrap_or_default(),
-        ))),
-        "codex" => Ok(Box::new(CliModel::new(
+        )?)),
+        "codex" => Ok(Box::new(CliModel::try_new(
             Cli::Codex,
             model.unwrap_or_default(),
-        ))),
+        )?)),
         "mock" => {
             let path = std::env::var("ARK_MOCK_SCRIPT")
                 .map_err(|_| ProviderError::MissingCredential("ARK_MOCK_SCRIPT".into()))?;

@@ -1,0 +1,392 @@
+{
+  "schema_version": 1,
+  "label": "claude-sonnet-medium-2026-10-09",
+  "ark_version": "0.17.0",
+  "created_at": "2026-10-09T05:26:37.241816Z",
+  "mode": "live",
+  "model": "claude:sonnet@medium",
+  "fast_model": null,
+  "reps": 1,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "180"
+  },
+  "workloads": [
+    {
+      "name": "simple",
+      "class": "simple",
+      "description": "say hello in French; no tool needed",
+      "summary": {
+        "runs": 1,
+        "successes": 1,
+        "success_rate": 1.0,
+        "model_calls": 1.0,
+        "input_tokens": 3243.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 3243.0,
+        "output_tokens": 120.0,
+        "total_tokens": 3363.0,
+        "cost_usd": 0.007686,
+        "cost_per_success_usd": 0.007686,
+        "tool_calls": 0.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 1.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 2394.0,
+        "p95_turn_ms": 2394.0,
+        "median_first_token_ms": 1807.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "simple",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Bonjour ! 👋 (That's \"hello\" in French.)",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 3363
+          },
+          "calls_by_model": {
+            "claude:sonnet@medium": 1
+          },
+          "input_tokens": 3243,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 3243,
+          "cache_write_tokens": 0,
+          "output_tokens": 120,
+          "total_tokens": 3363,
+          "tokens_measured": true,
+          "cost_usd": 0.007686,
+          "wall_ms": 2394,
+          "turn_ms": [
+            2394
+          ],
+          "first_token_ms": [
+            1807
+          ],
+          "model_latency_ms": [
+            2393
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "tool-lookup",
+      "class": "tool-lookup",
+      "description": "convert currency with a tool found among 25 actions; only the tool knows the rate",
+      "summary": {
+        "runs": 1,
+        "successes": 1,
+        "success_rate": 1.0,
+        "model_calls": 2.0,
+        "input_tokens": 7209.0,
+        "cached_input_tokens": 4026.0,
+        "uncached_input_tokens": 3183.0,
+        "output_tokens": 368.0,
+        "total_tokens": 7577.0,
+        "cost_usd": 0.0108512,
+        "cost_per_success_usd": 0.0108512,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 2.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 4218.0,
+        "p95_turn_ms": 4218.0,
+        "median_first_token_ms": 1137.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "tool-lookup",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**250 USD = 230.0 EUR** at the converter's current rate (inv:91600874).\n\nThe implied rate is 0.92 EUR per USD (230 / 250). I worked that out from the result. The converter didn't report the rate itself.\n\nNext step: if you need a live market rate, for example to make a payment, check it against a market source. The converter may use a fixed or cached rate.",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 7577
+          },
+          "calls_by_model": {
+            "claude:sonnet@medium": 2
+          },
+          "input_tokens": 7209,
+          "cached_input_tokens": 4026,
+          "uncached_input_tokens": 3183,
+          "cache_write_tokens": 0,
+          "output_tokens": 368,
+          "total_tokens": 7577,
+          "tokens_measured": true,
+          "cost_usd": 0.0108512,
+          "wall_ms": 4218,
+          "turn_ms": [
+            4218
+          ],
+          "first_token_ms": [
+            1512,
+            1137
+          ],
+          "model_latency_ms": [
+            2132,
+            2082
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 524,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 572,
+            "Model output": 26,
+            "Project": 100,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 56,
+            "Tool results": 40,
+            "Tool schemas": 1262,
+            "Working state": 54,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 1,
+          "result_context_tokens": 40,
+          "result_raw_tokens": 14,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "multi-step",
+      "class": "multi-step",
+      "description": "find a customer, list her orders, add the amounts",
+      "summary": {
+        "runs": 1,
+        "successes": 1,
+        "success_rate": 1.0,
+        "model_calls": 4.0,
+        "input_tokens": 15941.0,
+        "cached_input_tokens": 12022.0,
+        "uncached_input_tokens": 3919.0,
+        "output_tokens": 802.0,
+        "total_tokens": 16743.0,
+        "cost_usd": 0.0182624,
+        "cost_per_success_usd": 0.0182624,
+        "tool_calls": 3.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 7844.0,
+        "p95_turn_ms": 7844.0,
+        "median_first_token_ms": 1285.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "multi-step",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Ada Lovelace's orders add up to **565.74**.\n\n**Facts**\n- Ada Lovelace is customer C-1042, gold tier [inv:e665dafc].\n- She has four orders [inv:b4f72878]:\n  - O-1: 120.50\n  - O-2: 89.99\n  - O-3: 310.00\n  - O-4: 45.25\n- The calculator gave 120.5 + 89.99 + 310.0 + 45.25 = 565.74 [inv:01a02a3c].\n\n**Caveat:** The order list shows amounts only, with no currency or status. The total counts every listed o",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 16743
+          },
+          "calls_by_model": {
+            "claude:sonnet@medium": 4
+          },
+          "input_tokens": 15941,
+          "cached_input_tokens": 12022,
+          "uncached_input_tokens": 3919,
+          "cache_write_tokens": 0,
+          "output_tokens": 802,
+          "total_tokens": 16743,
+          "tokens_measured": true,
+          "cost_usd": 0.0182624,
+          "wall_ms": 7844,
+          "turn_ms": [
+            7844
+          ],
+          "first_token_ms": [
+            1743,
+            1421,
+            1247,
+            1285
+          ],
+          "model_latency_ms": [
+            1994,
+            1571,
+            1482,
+            2792
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 1092,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 1144,
+            "Model output": 135,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 287,
+            "Tool schemas": 2520,
+            "Working state": 148,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 3,
+          "result_context_tokens": 143,
+          "result_raw_tokens": 63,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 3,
+    "success_rate": 1.0,
+    "model_calls": 2.3333333333333335,
+    "input_tokens": 8797.666666666666,
+    "cached_input_tokens": 5349.333333333333,
+    "uncached_input_tokens": 3448.3333333333335,
+    "output_tokens": 430.0,
+    "total_tokens": 9227.666666666666,
+    "cost_usd": 0.012266533333333334,
+    "cost_per_success_usd": 0.012266533333333334,
+    "tool_calls": 1.3333333333333333,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 2.3333333333333335,
+    "peak_context_tokens": 0.0,
+    "mean_context_tokens": 0.0,
+    "tool_schema_tokens": 0.0,
+    "prefix_reuse_tokens": 0.0,
+    "median_turn_ms": 4218.0,
+    "p95_turn_ms": 7844.0,
+    "median_first_token_ms": 1421.0,
+    "stall_stops": 0.0
+  }
+}

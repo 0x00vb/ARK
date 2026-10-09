@@ -459,6 +459,88 @@ fn ark_browser(
     done.map_err(|e| e.to_string())
 }
 
+/// The packaged app's signed-update state. `None` in development and in apps that did not opt
+/// in. Windows reports an explicit unavailable state because its installer must close the app.
+/// This is native-window state, not a runtime protocol method.
+#[tauri::command]
+fn ark_update_status(webview: tauri::Webview) -> Result<Option<serde_json::Value>, String> {
+    from_own_page(&webview)?;
+    #[cfg(all(
+        feature = "desktop-updater",
+        not(debug_assertions),
+        not(target_os = "windows")
+    ))]
+    return serde_json::to_value(crate::updates::status())
+        .map(Some)
+        .map_err(|e| e.to_string());
+    #[cfg(all(
+        feature = "desktop-updater",
+        not(debug_assertions),
+        target_os = "windows"
+    ))]
+    return Ok(Some(serde_json::json!({
+        "state": "unavailable",
+        "reason": "platform"
+    })));
+    #[cfg(any(not(feature = "desktop-updater"), debug_assertions))]
+    Ok(None)
+}
+
+/// Ask the embedded, HTTPS-only endpoint now. The page cannot supply a URL, headers, version or
+/// downgrade policy.
+#[tauri::command]
+async fn ark_update_check(webview: tauri::Webview) -> Result<Option<serde_json::Value>, String> {
+    from_own_page(&webview)?;
+    #[cfg(all(
+        feature = "desktop-updater",
+        not(debug_assertions),
+        not(target_os = "windows")
+    ))]
+    return crate::updates::check_now()
+        .await
+        .and_then(|v| serde_json::to_value(v).map_err(Into::into))
+        .map(Some)
+        .map_err(|e| format!("{e:#}"));
+    #[cfg(all(
+        feature = "desktop-updater",
+        not(debug_assertions),
+        target_os = "windows"
+    ))]
+    return Ok(Some(serde_json::json!({
+        "state": "unavailable",
+        "reason": "platform"
+    })));
+    #[cfg(any(not(feature = "desktop-updater"), debug_assertions))]
+    Ok(None)
+}
+
+/// Update state changes for the own page. A page elsewhere in the window cannot subscribe.
+#[tauri::command]
+fn ark_update_events(
+    webview: tauri::Webview,
+    channel: tauri::ipc::Channel<serde_json::Value>,
+) -> Result<(), String> {
+    from_own_page(&webview)?;
+    #[cfg(all(
+        feature = "desktop-updater",
+        not(debug_assertions),
+        not(target_os = "windows")
+    ))]
+    crate::updates::listen(channel);
+    #[cfg(all(
+        feature = "desktop-updater",
+        not(debug_assertions),
+        target_os = "windows"
+    ))]
+    let _ = channel.send(serde_json::json!({
+        "state": "unavailable",
+        "reason": "platform"
+    }));
+    #[cfg(any(not(feature = "desktop-updater"), debug_assertions))]
+    let _ = channel;
+    Ok(())
+}
+
 pub(crate) fn run(
     host: Arc<Host>,
     assets: Arc<Assets>,
@@ -477,12 +559,15 @@ pub(crate) fn run(
         fallback,
     }));
     let events = host.subscribe();
-    let built = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // A second launch brings this window forward instead of starting a second runtime on
         // the same store.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show(app)
-        }))
+        }));
+    #[cfg(feature = "desktop-updater")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    let built = builder
         .manage(State(host))
         .manage(BrowserEvents::default())
         .plugin(tauri_plugin_dialog::init())
@@ -495,7 +580,10 @@ pub(crate) fn run(
             ark_browser_show,
             ark_browser_events,
             ark_browser_reach,
-            ark_browser
+            ark_browser,
+            ark_update_status,
+            ark_update_check,
+            ark_update_events
         ])
         // The window's page loads again (a reload, a visit to a runtime elsewhere, the way
         // back): the Browser's view belonged to the page before.
@@ -529,6 +617,12 @@ pub(crate) fn run(
             if keep_running {
                 tray(app, &name)?;
             }
+            #[cfg(all(
+                feature = "desktop-updater",
+                not(debug_assertions),
+                not(target_os = "windows")
+            ))]
+            crate::updates::start(app.handle().clone());
             notify_questions(app.handle().clone(), events, name.clone());
             Ok(())
         })

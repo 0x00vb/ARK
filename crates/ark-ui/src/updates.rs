@@ -1,0 +1,268 @@
+//! Signed updates for a packaged native app.
+//!
+//! The consumer enables `ark-ui/desktop-updater` and supplies Tauri's updater endpoint and
+//! public key. On macOS and Linux, ARK checks, downloads and installs in the background. It
+//! never restarts the app: work keeps running, and the installed version opens after the person
+//! next quits ARK. Windows stays disabled because Tauri must exit to launch its installer.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{LazyLock, Mutex};
+use std::time::Duration;
+
+use serde::Serialize;
+use tauri::AppHandle;
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_updater::UpdaterExt;
+
+/// What a consumer can show. Errors leave the running version untouched.
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Status {
+    Idle {
+        current: String,
+    },
+    Checking {
+        current: String,
+    },
+    Current {
+        current: String,
+    },
+    Downloading {
+        current: String,
+        version: String,
+        downloaded: u64,
+        total: Option<u64>,
+    },
+    Installing {
+        current: String,
+        version: String,
+    },
+    Ready {
+        current: String,
+        version: String,
+    },
+    Failed {
+        current: String,
+        kind: Failure,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Failure {
+    Check,
+    Download,
+    Verification,
+    Install,
+}
+
+impl Default for Status {
+    fn default() -> Self {
+        Self::Idle {
+            current: String::new(),
+        }
+    }
+}
+
+static STATUS: LazyLock<Mutex<Status>> = LazyLock::new(|| Mutex::new(Status::default()));
+static LISTENER: LazyLock<Mutex<Option<tauri::ipc::Channel<serde_json::Value>>>> =
+    LazyLock::new(|| Mutex::new(None));
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// The last known update state. It is process-local and contains no credentials.
+pub(crate) fn status() -> Status {
+    STATUS.lock().unwrap().clone()
+}
+
+fn set(status: Status) {
+    *STATUS.lock().unwrap() = status.clone();
+    if let Ok(value) = serde_json::to_value(status) {
+        if let Some(channel) = LISTENER.lock().unwrap().as_ref() {
+            let _ = channel.send(value);
+        }
+    }
+}
+
+/// Replace the page-load listener and immediately send the current state.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+pub(crate) fn listen(channel: tauri::ipc::Channel<serde_json::Value>) {
+    let value = serde_json::to_value(status()).unwrap_or_default();
+    let _ = channel.send(value);
+    *LISTENER.lock().unwrap() = Some(channel);
+}
+
+fn current(app: &AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[cfg_attr(debug_assertions, allow(dead_code))]
+fn busy() -> bool {
+    ACTIVE.load(Ordering::Acquire)
+}
+
+struct Operation;
+
+impl Operation {
+    fn claim() -> Option<Self> {
+        ACTIVE
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for Operation {
+    fn drop(&mut self) {
+        ACTIVE.store(false, Ordering::Release);
+    }
+}
+
+/// Start the quiet launch check. A short delay keeps it off the first-paint path.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+pub(crate) fn start(app: AppHandle) {
+    set(Status::Idle {
+        current: current(&app),
+    });
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        if matches!(status(), Status::Idle { .. }) {
+            check_and_install(app).await;
+        }
+    });
+}
+
+/// Check now, for a consumer's Settings action. A launch check already in progress is reused.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+pub(crate) async fn check_now() -> anyhow::Result<Status> {
+    if busy() {
+        return Ok(status());
+    }
+    let app = crate::desktop::APP
+        .get()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("the native window is not running"))?;
+    check_and_install(app).await;
+    Ok(status())
+}
+
+async fn check_and_install(app: AppHandle) {
+    let Some(_operation) = Operation::claim() else {
+        return;
+    };
+    let installed = current(&app);
+    set(Status::Checking {
+        current: installed.clone(),
+    });
+    let updater = match app.updater() {
+        Ok(updater) => updater,
+        Err(error) => {
+            set(Status::Failed {
+                current: installed,
+                kind: Failure::Check,
+            });
+            eprintln!("update check failed: {error}");
+            return;
+        }
+    };
+    let update = match updater.check().await {
+        Ok(update) => update,
+        Err(error) => {
+            set(Status::Failed {
+                current: installed,
+                kind: Failure::Check,
+            });
+            eprintln!("update check failed: {error}");
+            return;
+        }
+    };
+    let Some(update) = update else {
+        set(Status::Current { current: installed });
+        return;
+    };
+    // Tauri's Windows installer restarts by default. ARK never interrupts work. On every
+    // platform the installed version is used only after the person next quits and opens it.
+    let update = update.restart_after_install(false);
+
+    let version = update.version.clone();
+    set(Status::Downloading {
+        current: installed.clone(),
+        version: version.clone(),
+        downloaded: 0,
+        total: None,
+    });
+    let progress_current = installed.clone();
+    let progress_version = version.clone();
+    let install_current = installed.clone();
+    let install_version = version.clone();
+    let mut downloaded = 0u64;
+    if let Err(error) = update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded = downloaded.saturating_add(chunk as u64);
+                set(Status::Downloading {
+                    current: progress_current.clone(),
+                    version: progress_version.clone(),
+                    downloaded,
+                    total,
+                });
+            },
+            move || {
+                set(Status::Installing {
+                    current: install_current,
+                    version: install_version,
+                });
+            },
+        )
+        .await
+    {
+        let words = error.to_string().to_lowercase();
+        let kind = if words.contains("signature") || words.contains("verif") {
+            Failure::Verification
+        } else if matches!(status(), Status::Installing { .. }) {
+            Failure::Install
+        } else {
+            Failure::Download
+        };
+        set(Status::Failed {
+            current: installed,
+            kind,
+        });
+        eprintln!("update was not installed: {error}");
+        return;
+    }
+
+    set(Status::Ready {
+        current: installed,
+        version: version.clone(),
+    });
+    eprintln!("ARK update {version} is ready for the next launch");
+    let _ = app
+        .notification()
+        .builder()
+        .title(format!("ARK {version} is ready"))
+        .body("It will be used after you quit and open ARK.")
+        .show();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_is_busy_but_a_ready_update_is_not() {
+        set(Status::Downloading {
+            current: "1.0.0".into(),
+            version: "1.1.0".into(),
+            downloaded: 1,
+            total: Some(2),
+        });
+        ACTIVE.store(true, Ordering::Release);
+        assert!(busy());
+        ACTIVE.store(false, Ordering::Release);
+        set(Status::Ready {
+            current: "1.0.0".into(),
+            version: "1.1.0".into(),
+        });
+        assert!(!busy());
+    }
+}

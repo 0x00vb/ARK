@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 
 use crate::live::{LiveProcess, ReadError};
 use crate::stream::JsonTextField;
-use crate::{TextSink, Usage};
+use crate::{ModelOption, TextSink, Usage};
 
 /// How long the handshake and a thread start may take. A thread start also starts the MCP
 /// servers of the person's Codex setup.
@@ -32,7 +32,18 @@ pub(crate) struct Turn {
     pub usage: Usage,
 }
 
+pub(crate) struct TurnRequest<'a> {
+    pub thread_id: &'a str,
+    pub input: &'a str,
+    pub pictures: &'a [crate::Picture],
+    pub schema: &'a Value,
+    pub effort: Option<&'a str>,
+    pub wait: Duration,
+    pub on_text: Option<TextSink<'a>>,
+}
+
 /// Why a request or turn did not complete.
+#[derive(Debug)]
 pub(crate) enum AppError {
     /// The process or protocol failed: the app is not usable any more.
     Broken(String),
@@ -79,6 +90,44 @@ impl CodexApp {
         self.proc.stop().await;
     }
 
+    /// Models and effort levels available to this signed-in Codex account.
+    pub(crate) async fn models(&mut self) -> Result<Vec<ModelOption>, AppError> {
+        let mut out = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..20 {
+            let r = self
+                .request(
+                    "model/list",
+                    json!({"cursor": cursor, "includeHidden": false}),
+                    SETUP_TIMEOUT,
+                )
+                .await?;
+            out.extend(r["data"].as_array().into_iter().flatten().filter_map(|m| {
+                if m["hidden"].as_bool() == Some(true) {
+                    return None;
+                }
+                let id = m["model"].as_str().or_else(|| m["id"].as_str())?;
+                Some(ModelOption {
+                    id: id.to_string(),
+                    label: m["displayName"].as_str().unwrap_or(id).to_string(),
+                    efforts: m["supportedReasoningEfforts"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|e| e["reasoningEffort"].as_str().map(str::to_string))
+                        .collect(),
+                    default_effort: m["defaultReasoningEffort"].as_str().map(str::to_string),
+                })
+            }));
+            let next = r["nextCursor"].as_str().map(str::to_string);
+            if next.is_none() || next == cursor {
+                break;
+            }
+            cursor = next;
+        }
+        Ok(out)
+    }
+
     /// Start a thread: no approvals, read-only, `instructions` as its base instructions.
     pub(crate) async fn start_thread(
         &mut self,
@@ -119,28 +168,28 @@ impl CodexApp {
 
     /// Run one turn on thread `id`, its reply shaped by `schema`. The reply's `text` field
     /// reaches `on_text` while it is written.
-    pub(crate) async fn turn(
-        &mut self,
-        id: &str,
-        input: &str,
-        pictures: &[crate::Picture],
-        schema: &Value,
-        wait: Duration,
-        on_text: Option<TextSink<'_>>,
-    ) -> Result<Turn, AppError> {
+    pub(crate) async fn turn(&mut self, request: TurnRequest<'_>) -> Result<Turn, AppError> {
+        let TurnRequest {
+            thread_id: id,
+            input,
+            pictures,
+            schema,
+            effort,
+            wait,
+            on_text,
+        } = request;
         let deadline = Instant::now() + wait;
-        let rid = self
-            .send_request(
-                "turn/start",
-                json!({
-                    "threadId": id,
-                    "input": std::iter::once(json!({"type": "text", "text": input}))
-                        .chain(pictures.iter().map(|p| json!({"type": "image", "url": p.data_url()})))
-                        .collect::<Vec<_>>(),
-                    "outputSchema": schema,
-                }),
-            )
-            .await?;
+        let mut params = json!({
+            "threadId": id,
+            "input": std::iter::once(json!({"type": "text", "text": input}))
+                .chain(pictures.iter().map(|p| json!({"type": "image", "url": p.data_url()})))
+                .collect::<Vec<_>>(),
+            "outputSchema": schema,
+        });
+        if let Some(effort) = effort {
+            params["effort"] = json!(effort);
+        }
+        let rid = self.send_request("turn/start", params).await?;
         let mut field = JsonTextField::new("text");
         let mut text: Option<String> = None;
         let mut usage = Usage::default();

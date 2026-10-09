@@ -246,12 +246,17 @@ export class Composer {
     const input = h("input.menu-input", { placeholder: "Other model, e.g. ollama:qwen3:4b", "aria-label": "Model" });
     const menu = this.api.popover(this.model, [body, h("div.menu-sep"), input], { above: true });
     menu.classList.add("models-pop");
+    let effortPage = null;
+    let inlineError = null;
     const pick = async (spec) => {
-      menu.close();
+      inlineError = null;
       try {
         await this.api.call("model", { spec });
+        menu.close();
+        this.focus();
       } catch (err) {
-        this.api.toast(err.message);
+        inlineError = `Could not use ${spec}. ${err.message}`;
+        paint(this.backends || []);
       }
     };
     input.addEventListener("keydown", (e) => {
@@ -263,6 +268,21 @@ export class Composer {
     this.backendsFor = place;
     const paint = (backends) => {
       clear(body);
+      if (effortPage) {
+        const { backend: b, model: m } = effortPage;
+        const head = h("div.model-head",
+          h("button.icon-btn.small", { type: "button", "aria-label": `${b.label} models`, onclick: () => { effortPage = null; inlineError = null; paint(backends); } }, icon("arrow-left")),
+          h("span.model-name", m.label || m.id));
+        body.append(head);
+        const choices = [{ id: null, label: "Default", hint: m.default_effort }, ...(m.efforts || []).map((e) => ({ id: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))];
+        for (const effort of choices) {
+          const spec = `${b.provider}:${m.id}${effort.id ? `@${effort.id}` : ""}`;
+          body.append(h("button.menu-item.model-item", { onclick: () => pick(spec) },
+            h("span", effort.label), effort.hint ? h("span.menu-sub", effort.hint) : null));
+        }
+        if (inlineError) body.append(h("div.menu-sub.pad.model-error", { role: "alert" }, inlineError));
+        return;
+      }
       const current = this.model.textContent;
       for (const b of backends) {
         if (b.kind === "api" && !b.ready && !this.canSaveKeys && !place) continue;
@@ -272,9 +292,17 @@ export class Composer {
             h("span.model-name", b.label),
             h("span.menu-sub", b.detail)));
         if (b.ready) {
-          for (const m of b.models) {
-            const here = current === `${b.provider} ${m}`;
-            group.append(h("button.menu-item.model-item", { "aria-current": here ? "true" : null, onclick: () => !here && pick(`${b.provider}:${m}`) }, h("span", m)));
+          const rich = (b.model_options || []).filter((m) => !/embed/i.test(m.id));
+          const options = rich.length ? rich : (b.models || []).filter((m) => !/embed/i.test(m)).map((id) => ({ id, label: id, efforts: [] }));
+          for (const m of options) {
+            const here = current === `${b.provider} ${m.id}` || current.startsWith(`${b.provider} ${m.id}@`);
+            group.append(h("button.menu-item.model-item", { "aria-current": here ? "true" : null, onclick: () => {
+              if (m.efforts?.length) {
+                effortPage = { backend: b, model: m };
+                inlineError = null;
+                paint(backends);
+              } else if (!here) pick(`${b.provider}:${m.id}`);
+            } }, h("span", m.label || m.id), m.efforts?.length ? icon("chevron-right") : null));
           }
         } else if (b.kind === "api") {
           // A key pasted here is checked with the provider and kept in the system's keychain.
@@ -325,6 +353,7 @@ export class Composer {
         }
         body.append(group);
       }
+      if (inlineError) body.append(h("div.menu-sub.pad.model-error", { role: "alert" }, inlineError));
     };
     if (this.backends) paint(this.backends);
     else body.append(h("div.menu-sub.pad", "Checking models…"));

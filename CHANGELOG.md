@@ -7,6 +7,19 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.17.0] - 2026-10-09
+
+### Breaking
+- `ark_model::Backend` has `model_options`: a literal needs `model_options: vec![]`.
+
+### Added
+- ADR 0054: native apps can opt in to Tauri's signed background updater, with state exposed
+  only to the app's own page and no forced restart.
+- ADR 0055: Claude Code and Codex model specs can name effort as `model@effort`. Codex models
+  and their supported efforts come from the signed-in CLI instead of a static Default entry.
+- Settings › Appearance has Monokai, Dracula, GitHub and Xcode palettes for the shared UI,
+  editor, charts and terminal.
+
 ## [0.16.0] - 2026-10-08
 
 ### Breaking

@@ -1,0 +1,392 @@
+{
+  "schema_version": 1,
+  "label": "codex-terra-medium-2026-10-09",
+  "ark_version": "0.17.0",
+  "created_at": "2026-10-09T05:26:19.975702Z",
+  "mode": "live",
+  "model": "codex:gpt-5.6-terra@medium",
+  "fast_model": null,
+  "reps": 1,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "180"
+  },
+  "workloads": [
+    {
+      "name": "simple",
+      "class": "simple",
+      "description": "say hello in French; no tool needed",
+      "summary": {
+        "runs": 1,
+        "successes": 1,
+        "success_rate": 1.0,
+        "model_calls": 1.0,
+        "input_tokens": 17126.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 17126.0,
+        "output_tokens": 24.0,
+        "total_tokens": 17150.0,
+        "cost_usd": 0.034492,
+        "cost_per_success_usd": 0.034492,
+        "tool_calls": 0.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 1.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 22135.0,
+        "p95_turn_ms": 22135.0,
+        "median_first_token_ms": 22033.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "simple",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Bonjour !",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 17150
+          },
+          "calls_by_model": {
+            "codex:gpt-5.6-terra@medium": 1
+          },
+          "input_tokens": 17126,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 17126,
+          "cache_write_tokens": 0,
+          "output_tokens": 24,
+          "total_tokens": 17150,
+          "tokens_measured": true,
+          "cost_usd": 0.034492,
+          "wall_ms": 22135,
+          "turn_ms": [
+            22135
+          ],
+          "first_token_ms": [
+            22033
+          ],
+          "model_latency_ms": [
+            22133
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 286,
+            "Model output": 0,
+            "Project": 50,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "tool-lookup",
+      "class": "tool-lookup",
+      "description": "convert currency with a tool found among 25 actions; only the tool knows the rate",
+      "summary": {
+        "runs": 1,
+        "successes": 1,
+        "success_rate": 1.0,
+        "model_calls": 3.0,
+        "input_tokens": 52431.0,
+        "cached_input_tokens": 34304.0,
+        "uncached_input_tokens": 18127.0,
+        "output_tokens": 175.0,
+        "total_tokens": 52606.0,
+        "cost_usd": 0.0448648,
+        "cost_per_success_usd": 0.0448648,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 14656.0,
+        "p95_turn_ms": 14656.0,
+        "median_first_token_ms": 1310.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "tool-lookup",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "250 USD = **230 EUR** at the converter’s current rate.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 52606
+          },
+          "calls_by_model": {
+            "codex:gpt-5.6-terra@medium": 3
+          },
+          "input_tokens": 52431,
+          "cached_input_tokens": 34304,
+          "uncached_input_tokens": 18127,
+          "cache_write_tokens": 0,
+          "output_tokens": 175,
+          "total_tokens": 52606,
+          "tokens_measured": true,
+          "cost_usd": 0.0448648,
+          "wall_ms": 14656,
+          "turn_ms": [
+            14656
+          ],
+          "first_token_ms": [
+            1310
+          ],
+          "model_latency_ms": [
+            11630,
+            1650,
+            1372
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 786,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 858,
+            "Model output": 97,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 84,
+            "Tool results": 89,
+            "Tool schemas": 1893,
+            "Working state": 102,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 1,
+          "result_context_tokens": 40,
+          "result_raw_tokens": 14,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "multi-step",
+      "class": "multi-step",
+      "description": "find a customer, list her orders, add the amounts",
+      "summary": {
+        "runs": 1,
+        "successes": 1,
+        "success_rate": 1.0,
+        "model_calls": 4.0,
+        "input_tokens": 86368.0,
+        "cached_input_tokens": 60672.0,
+        "uncached_input_tokens": 25696.0,
+        "output_tokens": 396.0,
+        "total_tokens": 86764.0,
+        "cost_usd": 0.06748639999999999,
+        "cost_per_success_usd": 0.06748639999999999,
+        "tool_calls": 3.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 4.0,
+        "peak_context_tokens": 0.0,
+        "mean_context_tokens": 0.0,
+        "tool_schema_tokens": 0.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 21629.0,
+        "p95_turn_ms": 21629.0,
+        "median_first_token_ms": 1725.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "multi-step",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Ada Lovelace’s orders total **$565.74**.",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 86764
+          },
+          "calls_by_model": {
+            "codex:gpt-5.6-terra@medium": 4
+          },
+          "input_tokens": 86368,
+          "cached_input_tokens": 60672,
+          "uncached_input_tokens": 25696,
+          "cache_write_tokens": 0,
+          "output_tokens": 396,
+          "total_tokens": 86764,
+          "tokens_measured": true,
+          "cost_usd": 0.06748639999999999,
+          "wall_ms": 21629,
+          "turn_ms": [
+            21629
+          ],
+          "first_token_ms": [
+            14732,
+            1725,
+            2679,
+            1641
+          ],
+          "model_latency_ms": [
+            14891,
+            2294,
+            2720,
+            1718
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 0,
+          "mean_context_tokens": 0,
+          "context_sources": {
+            "Capability index": 1092,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 1144,
+            "Model output": 218,
+            "Project": 200,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 152,
+            "Tool results": 307,
+            "Tool schemas": 2520,
+            "Working state": 188,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 0,
+          "tools_exposed_max": 0,
+          "tools_used": 3,
+          "result_context_tokens": 145,
+          "result_raw_tokens": 64,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 3,
+    "successes": 3,
+    "success_rate": 1.0,
+    "model_calls": 2.6666666666666665,
+    "input_tokens": 51975.0,
+    "cached_input_tokens": 31658.666666666668,
+    "uncached_input_tokens": 20316.333333333332,
+    "output_tokens": 198.33333333333334,
+    "total_tokens": 52173.333333333336,
+    "cost_usd": 0.04894773333333333,
+    "cost_per_success_usd": 0.04894773333333333,
+    "tool_calls": 1.3333333333333333,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 2.6666666666666665,
+    "peak_context_tokens": 0.0,
+    "mean_context_tokens": 0.0,
+    "tool_schema_tokens": 0.0,
+    "prefix_reuse_tokens": 0.0,
+    "median_turn_ms": 21629.0,
+    "p95_turn_ms": 22135.0,
+    "median_first_token_ms": 1725.0,
+    "stall_stops": 0.0
+  }
+}

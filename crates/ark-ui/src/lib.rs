@@ -41,6 +41,8 @@ pub mod remote;
 pub mod resource;
 mod serve;
 mod terminal;
+#[cfg(feature = "desktop-updater")]
+mod updates;
 mod upload;
 
 use std::borrow::Cow;

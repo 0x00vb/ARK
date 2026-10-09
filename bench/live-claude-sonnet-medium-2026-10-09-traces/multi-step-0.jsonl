@@ -1,0 +1,74 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":685,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Loo"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"king up Ada Lov"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"elace first."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"claude:sonnet@medium","usage":{"prompt_tokens":3479,"completion_tokens":147,"measured":true,"cached_tokens":579,"cache_write_tokens":2898},"elapsed_ms":1994,"first_token_ms":1743,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"claude_0_0","action":"crm.find_customer","input":{"name":"Ada Lovelace"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"claude_0_0","action":"crm.find_customer","ok":true,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","invocation":"e665dafc-ce6d-469b-b577-3bc8e98679ab","duration_ms":0,"error":null,"context_tokens":40,"raw_tokens":13}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":40,"model_output":23,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":748,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Found customer C-1042."}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Now"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" listing her orders."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"claude:sonnet@medium","usage":{"prompt_tokens":3799,"completion_tokens":148,"measured":true,"cached_tokens":3477,"cache_write_tokens":320},"elapsed_ms":1571,"first_token_ms":1421,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"claude_1_0","action":"crm.orders","input":{"customer_id":"C-1042"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"claude_1_0","action":"crm.orders","ok":true,"summary":"customer_id=C-1042, orders=[{\"id\":\"O-1\",\"amount\":120.5},{\"id\":\"O-2\",\"amount\":89.99},{\"id\":\"O-3\",\"amount\":310.0},{\"id\":\"O-4\",\"amount\":45.25}]","invocation":"b4f72878-c46b-4491-9418-9f58404dba38","duration_ms":0,"error":null,"context_tokens":64,"raw_tokens":37}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":104,"model_output":44,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":833,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Summing the four order"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" amounts."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"claude:sonnet@medium","usage":{"prompt_tokens":4171,"completion_tokens":150,"measured":true,"cached_tokens":3797,"cache_write_tokens":372},"elapsed_ms":1482,"first_token_ms":1247,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"claude_2_0","action":"calc.eval","input":{"expr":"120.5+89.99+310.0+45.25"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"claude_2_0","action":"calc.eval","ok":true,"summary":"expr=120.5+89.99+310.0+45.25, value=565.74","invocation":"01a02a3c-623f-46b5-a1e6-413411764477","duration_ms":0,"error":null,"context_tokens":39,"raw_tokens":13}}
+{"type":"event","turn":0,"event":{"type":"step","index":4}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":4,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":143,"model_output":68,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":896,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Ada Lovelace's"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" orders add"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" up to **565.74**."}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n\n**Facts**\n-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Ada Lovelace"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" is"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" customer C-1042, g"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"old tier [inv:e"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"665dafc].\n- She"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" has four orders ["}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"inv:b4f72878"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"]:\n  - O-1"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":": 120.50\n  -"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" O-2: 89.99"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n  - O-3: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"310.00\n  - O-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"4: 45.25\n-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" The calculator g"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ave 120.5"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" + 89.99 +"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" 310.0 + 45"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":".25 = "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"565.74 [inv:"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"01a02a3c]."}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n\n**Ca"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"veat:"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"** The order list shows am"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ounts only"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":", with no currency or status"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":". The"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" total coun"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ts every list"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ed order,"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" including"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" any that were cancelled or"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" refunded.\n\n**Next"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" step:** If"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" you want a"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" net"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" fig"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ure, check each order's status with"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" `crm.invoice`"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" and remove any cancelled"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" or refunded "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ones."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"claude:sonnet@medium","usage":{"prompt_tokens":4492,"completion_tokens":357,"measured":true,"cached_tokens":4169,"cache_write_tokens":321},"elapsed_ms":2792,"first_token_ms":1285,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 3 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Ada Lovelace's orders add up to **565.74**.\n\n**Facts**\n- Ada Lovelace is customer C-1042, gold tier [inv:e665dafc].\n- She has four orders [inv:b4f72878]:\n  - O-1: 120.50\n  - O-2: 89.99\n  - O-3: 310.00\n  - O-4: 45.25\n- The calculator gave 120.5 + 89.99 + 310.0 + 45.25 = 565.74 [inv:01a02a3c].\n\n**Caveat:** The order list shows amounts only, with no currency or status. The total counts every listed order, including any that were cancelled or refunded.\n\n**Next step:** If you want a net figure, check each order's status with `crm.invoice` and remove any cancelled or refunded ones.","streamed":true}}

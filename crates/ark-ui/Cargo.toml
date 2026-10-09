@@ -10,6 +10,9 @@ description = "ARK graphical agent workspace: a desktop window (Tauri) or a loca
 default = ["desktop"]
 # The native window. Without it, ark-ui still serves the workspace to a local browser.
 desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-notification", "dep:tauri-plugin-single-instance"]
+# Signed background updates for a packaged native app. A consumer opts in and supplies the
+# endpoint and public key in its Tauri config; browser and server builds stay unchanged.
+desktop-updater = ["desktop", "dep:tauri-plugin-updater"]
 
 [dependencies]
 ark-os.workspace = true
@@ -36,6 +39,7 @@ tauri = { version = "~2.12", optional = true, features = ["tray-icon", "unstable
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2.13", optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

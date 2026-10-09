@@ -30,6 +30,17 @@ export function connect() {
         tauri.core.invoke("ark_subscribe", { channel: ch });
       },
       pickFolder: (title) => tauri.core.invoke("ark_pick_folder", { title: title || null }),
+      // The packaged app, not the runtime: signed updates from its embedded endpoint. No URL,
+      // header, version or downgrade input crosses this bridge.
+      updates: {
+        status: () => tauri.core.invoke("ark_update_status"),
+        check: () => tauri.core.invoke("ark_update_check"),
+        listen(fn) {
+          const ch = new tauri.core.Channel();
+          ch.onmessage = fn;
+          return tauri.core.invoke("ark_update_events", { channel: ch });
+        },
+      },
       // The Browser panel's page in a webview of the window's own, placed over the panel
       // (ADR 0044): pages that refuse to be framed show too.
       browserView: {
@@ -110,6 +121,7 @@ export function connect() {
     local: ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname),
     // A page in a browser cannot see the runtime's disk: no native picker.
     pickFolder: async () => undefined,
+    updates: undefined,
     /// Trade a code typed from a signed-in device for a session (ADR 0047), naming this device.
     /// True when it worked.
     async signIn(code, name) {

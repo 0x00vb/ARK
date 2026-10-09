@@ -277,7 +277,19 @@ pub fn run_window(
         w.title_bar_style = tauri::TitleBarStyle::Visible;
         w.hidden_title = false;
     }
-    match tauri::Builder::default().run(context) {
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "desktop-updater")]
+    let builder = builder
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            #[cfg(all(not(debug_assertions), not(target_os = "windows")))]
+            crate::updates::start(app.handle().clone());
+            #[cfg(any(debug_assertions, target_os = "windows"))]
+            let _ = app;
+            Ok(())
+        });
+    match builder.run(context) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");

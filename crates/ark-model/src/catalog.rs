@@ -20,6 +20,20 @@ pub enum BackendKind {
     Endpoint,
 }
 
+/// A model the provider advertised, with the effort choices it accepts.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ModelOption {
+    /// The identifier used in a model spec.
+    pub id: String,
+    /// A short name for a picker.
+    pub label: String,
+    /// Supported effort values, in the provider's preferred order.
+    pub efforts: Vec<String>,
+    /// The effort used when a spec does not name one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
+}
+
 /// One way to reach models.
 #[derive(Clone, Debug, Serialize)]
 pub struct Backend {
@@ -35,6 +49,9 @@ pub struct Backend {
     pub fix: Option<String>,
     /// Models to offer. Others can still be typed as a spec.
     pub models: Vec<String>,
+    /// Rich picker data when the provider exposes it. `models` remains for old clients.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub model_options: Vec<ModelOption>,
     /// A subscription's program not ready: the step it needs, `install` or `sign_in`, which a
     /// window can run on the computer it lists (ADR 0052).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,13 +62,17 @@ pub struct Backend {
 /// seconds and never fails the listing.
 pub async fn catalog() -> Vec<Backend> {
     let named = crate::endpoints::endpoints();
-    let (claude, codex, ollama, named) = tokio::join!(
+    let (claude, codex, codex_models, ollama, named) = tokio::join!(
         cli::status(Cli::Claude),
         cli::status(Cli::Codex),
+        cli::codex_models(),
         ollama_models(),
         futures::future::join_all(named.iter().map(crate::endpoints::backend))
     );
-    let mut out: Vec<Backend> = [claude, codex].into_iter().map(subscription).collect();
+    let mut out = vec![
+        subscription(claude, None),
+        subscription(codex, codex_models),
+    ];
     out.push(match ollama {
         Ok(models) => Backend {
             provider: "ollama".into(),
@@ -67,6 +88,7 @@ pub async fn catalog() -> Vec<Backend> {
                 .is_empty()
                 .then(|| "ollama pull qwen3:4b-instruct".into()),
             models,
+            model_options: vec![],
             step: None,
         },
         Err(detail) => Backend {
@@ -77,6 +99,7 @@ pub async fn catalog() -> Vec<Backend> {
             detail,
             fix: Some("ollama serve".into()),
             models: vec![],
+            model_options: vec![],
             step: None,
         },
     });
@@ -102,6 +125,7 @@ pub async fn catalog() -> Vec<Backend> {
             },
             fix: None,
             models: vec![model.into()],
+            model_options: vec![],
             step: None,
         });
     }
@@ -109,8 +133,25 @@ pub async fn catalog() -> Vec<Backend> {
     out
 }
 
-fn subscription(st: cli::CliStatus) -> Backend {
+fn subscription(st: cli::CliStatus, advertised: Option<Vec<ModelOption>>) -> Backend {
     let cli = st.cli;
+    let model_options = advertised.unwrap_or_else(|| {
+        cli.suggested_models()
+            .iter()
+            .map(|model| ModelOption {
+                id: (*model).into(),
+                label: cli.model_label(model),
+                // Codex efforts are model-specific. If live discovery failed, Default still
+                // works but the picker must not advertise unverified effort choices.
+                efforts: if cli == Cli::Codex {
+                    vec![]
+                } else {
+                    cli.efforts().iter().map(|e| (*e).into()).collect()
+                },
+                default_effort: None,
+            })
+            .collect()
+    });
     Backend {
         provider: cli.name().into(),
         label: cli.label().into(),
@@ -124,11 +165,8 @@ fn subscription(st: cli::CliStatus) -> Backend {
         } else {
             None
         },
-        models: cli
-            .suggested_models()
-            .iter()
-            .map(|m| m.to_string())
-            .collect(),
+        models: model_options.iter().map(|m| m.id.clone()).collect(),
+        model_options,
         step: if !st.installed {
             Some("install")
         } else if !st.signed_in {

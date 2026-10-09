@@ -3,6 +3,28 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Subscription model and effort selection (2026-10-09)
+
+One live run of `simple`, `tool-lookup` and `multi-step` after ARK added explicit model and
+effort selection. Both models used medium effort through their installed subscription CLI.
+The checks grade the answer and required tool results, not its wording.
+
+| Model | Accuracy | Calls/task | Tokens/task | Uncached/task | Median first token | Median turn |
+|---|---:|---:|---:|---:|---:|---:|
+| `codex:gpt-5.6-terra@medium` | 3/3 | 2.7 | 52,173 | 20,316 | 1.73 s | 21.63 s |
+| `claude:sonnet@medium` | 3/3 | 2.3 | 9,228 | 3,448 | 1.42 s | 4.22 s |
+
+- Terra's simple reply took 22.14 seconds to its first token. Its two tool workloads reached
+  the first token in 1.31 and 1.73 seconds. The median hides that cold-start outlier.
+- Both completed every checked task with no provider errors, retries or failed tool calls.
+- Token counts come from the CLIs. The report's dollar values use one common reference price,
+  so they are comparison estimates, not subscription charges or vendor bills.
+- This is a release smoke test with one run per task. It verifies routing, effort, consumption,
+  timing and checked accuracy. It is not a broad model ranking.
+
+Reports: `live-codex-terra-medium-2026-10-09.json` and
+`live-claude-sonnet-medium-2026-10-09.json`.
+
 ## ARK's agent against Claude Code as a worker (2026-10-07)
 
 ADR 0043 › Which agent does the work: a worker earns routing by measurement. Two tasks, each
@@ -764,4 +786,3 @@ Live qwen3:4b, 7 workloads x 2, `main` (edbbd25) against this branch (`reliabili
 
 Simulated suite: ADR 0050 alone leaves 20 workloads unchanged and `workbooks` -1.5%; ADR 0049's
 typed Files schemas move `files-edit` +18% and `workbooks` +6.5% (baseline regenerated).
-

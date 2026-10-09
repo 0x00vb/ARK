@@ -247,6 +247,7 @@ pub(crate) async fn backend(e: &Endpoint) -> crate::Backend {
         detail,
         fix: None,
         models,
+        model_options: vec![],
         step: None,
     }
 }

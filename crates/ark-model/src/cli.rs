@@ -36,7 +36,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 
@@ -46,6 +46,12 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// Codex models (`codex:<model>`) that refused a typed reply schema in this process: their
 /// replies use [`REPLY_SCHEMA`] from then on.
 static REFUSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The latest model-specific Codex efforts advertised to a picker in this process. A typed
+/// choice is checked against it before the active model changes. No catalog means Codex itself
+/// remains the authority, so headless use does not depend on opening a picker first.
+type EffortCatalog = HashMap<String, Vec<String>>;
+static CODEX_CATALOG: LazyLock<Mutex<Option<EffortCatalog>>> = LazyLock::new(|| Mutex::new(None));
 
 /// The older reply shape for Codex, strict, with tool arguments as a JSON string (an open
 /// object is not allowed in OpenAI's strict schemas). Codex now gets a schema built from the
@@ -101,6 +107,34 @@ impl Cli {
         match self {
             Cli::Claude => &["sonnet", "opus", "fable"],
             Cli::Codex => &["default"],
+        }
+    }
+
+    /// Effort values accepted by this CLI. Codex's picker replaces these with its live list.
+    pub fn efforts(self) -> &'static [&'static str] {
+        match self {
+            Cli::Claude => &["low", "medium", "high", "xhigh", "max"],
+            Cli::Codex => &["low", "medium", "high", "xhigh", "max", "ultra"],
+        }
+    }
+
+    pub fn model_label(self, model: &str) -> String {
+        match (self, model) {
+            (Cli::Claude, "sonnet") => "Sonnet".into(),
+            (Cli::Claude, "opus") => "Opus".into(),
+            (Cli::Claude, "fable") => "Fable".into(),
+            (_, "default") => "Default".into(),
+            _ => model
+                .split('-')
+                .map(|part| {
+                    let mut chars = part.chars();
+                    chars
+                        .next()
+                        .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+                .join("-"),
         }
     }
 
@@ -261,6 +295,7 @@ fn parse_status(cli: Cli, ok: bool, text: &str) -> (bool, String) {
 pub struct CliModel {
     cli: Cli,
     model: String,
+    effort: Option<String>,
     program: Option<PathBuf>,
     calls: AtomicU64,
     /// Claude Code processes kept for vendor sessions, by session id. Only idle ones are
@@ -274,7 +309,8 @@ pub struct CliModel {
 
 impl CliModel {
     pub fn new(cli: Cli, model: impl Into<String>) -> Self {
-        let model = model.into();
+        let requested = model.into();
+        let (model, effort) = requested_parts(&requested);
         CliModel {
             cli,
             model: if model.trim().is_empty() {
@@ -282,12 +318,22 @@ impl CliModel {
             } else {
                 model
             },
+            effort,
             program: None,
             calls: AtomicU64::new(0),
             live: Mutex::new(HashMap::new()),
             app: Mutex::new(None),
             no_app: Default::default(),
         }
+    }
+
+    /// Make a CLI model and reject a misspelled effort before changing the active model.
+    pub fn try_new(cli: Cli, model: impl Into<String>) -> Result<Self> {
+        let requested = model.into();
+        let (model, effort) = split_effort(cli, &requested)?;
+        let mut this = Self::new(cli, model);
+        this.effort = effort;
+        Ok(this)
     }
 
     /// Run this executable instead of looking the CLI up (tests, unusual installs).
@@ -398,6 +444,7 @@ impl CliModel {
                 cmd.args(claude_stream_args(
                     mode,
                     &self.model,
+                    self.effort.as_deref(),
                     Some(sys),
                     CLAUDE_REPLY_SCHEMA,
                 ))
@@ -522,14 +569,15 @@ impl CliModel {
         };
         let turn = match thread {
             Ok(t) => app
-                .turn(
-                    &t,
-                    &input.text,
-                    &input.pictures,
-                    &shape.schema,
-                    CALL_TIMEOUT,
+                .turn(crate::codex_app::TurnRequest {
+                    thread_id: &t,
+                    input: &input.text,
+                    pictures: &input.pictures,
+                    schema: &shape.schema,
+                    effort: self.effort.as_deref(),
+                    wait: CALL_TIMEOUT,
                     on_text,
-                )
+                })
                 .await
                 .map(|turn| (t, turn)),
             Err(e) => Err(e),
@@ -668,6 +716,9 @@ impl CliModel {
                     }
                 }
                 c.args(["--model", &self.model]);
+                if let Some(effort) = &self.effort {
+                    c.args(["--effort", effort]);
+                }
                 if let Some(sys) = sys {
                     c.args(["--system-prompt", sys]);
                 }
@@ -704,6 +755,9 @@ impl CliModel {
                 c.arg("--output-schema").arg(&schema);
                 if self.model != "default" {
                     c.args(["-m", &self.model]);
+                }
+                if let Some(effort) = &self.effort {
+                    c.args(["-c", &format!("model_reasoning_effort=\"{effort}\"")]);
                 }
                 c.arg("-");
                 (c, Some(schema))
@@ -903,11 +957,21 @@ impl Provider for CliModel {
     }
 
     fn describe(&self) -> String {
-        format!("{} {}", self.cli.name(), self.model)
+        format!(
+            "{} {}{}",
+            self.cli.name(),
+            self.model,
+            effort_suffix(self.effort.as_deref())
+        )
     }
 
     fn model_id(&self) -> String {
-        format!("{}:{}", self.cli.name(), self.model)
+        format!(
+            "{}:{}{}",
+            self.cli.name(),
+            self.model,
+            effort_suffix(self.effort.as_deref())
+        )
     }
 }
 
@@ -944,7 +1008,13 @@ the call in tool_calls.";
 
 /// Claude Code's flags for streaming JSON in and out: its own tools off, no project settings,
 /// the reply shaped by `schema`.
-fn claude_stream_args(mode: Mode<'_>, model: &str, sys: Option<&str>, schema: &str) -> Vec<String> {
+fn claude_stream_args(
+    mode: Mode<'_>,
+    model: &str,
+    effort: Option<&str>,
+    sys: Option<&str>,
+    schema: &str,
+) -> Vec<String> {
     let mut a: Vec<String> = [
         "-p",
         "--input-format",
@@ -967,6 +1037,9 @@ fn claude_stream_args(mode: Mode<'_>, model: &str, sys: Option<&str>, schema: &s
         Mode::Resume(id) => a.extend(["--resume".into(), id.into()]),
     }
     a.extend(["--model".into(), model.into()]);
+    if let Some(effort) = effort {
+        a.extend(["--effort".into(), effort.into()]);
+    }
     if let Some(sys) = sys {
         a.extend(["--system-prompt".into(), sys.into()]);
     }
@@ -1282,7 +1355,116 @@ pub fn session_backend(provider: &str, model: &str) -> Option<Arc<dyn SessionBac
         "codex" => Cli::Codex,
         _ => return None,
     };
-    Some(Arc::new(CliModel::new(cli, model)))
+    CliModel::try_new(cli, model)
+        .ok()
+        .map(|model| Arc::new(model) as Arc<dyn SessionBackend>)
+}
+
+fn effort_suffix(effort: Option<&str>) -> String {
+    effort.map(|e| format!("@{e}")).unwrap_or_default()
+}
+
+fn split_effort(cli: Cli, requested: &str) -> Result<(String, Option<String>)> {
+    let requested = requested.trim();
+    let Some((model, effort)) = requested.rsplit_once('@') else {
+        return Ok((requested.to_string(), None));
+    };
+    if model.is_empty() || effort.is_empty() || !cli.efforts().contains(&effort) {
+        return Err(ProviderError::Api {
+            provider: cli.name().into(),
+            detail: format!(
+                "effort `{effort}` is unavailable; choose {}",
+                cli.efforts().join(", ")
+            ),
+        });
+    }
+    if cli == Cli::Codex {
+        if CODEX_CATALOG.lock().unwrap().is_none() && !load_codex_catalog() {
+            return Err(ProviderError::Api {
+                provider: cli.name().into(),
+                detail:
+                    "could not verify that effort for this Codex model; list models and try again"
+                        .into(),
+            });
+        }
+        let catalog = CODEX_CATALOG.lock().unwrap();
+        let supported = catalog
+            .as_ref()
+            .and_then(|models| models.get(model))
+            .ok_or_else(|| ProviderError::Api {
+                provider: cli.name().into(),
+                detail: format!("Codex did not advertise model `{model}`"),
+            })?;
+        if !supported.iter().any(|e| e == effort) {
+            return Err(ProviderError::Api {
+                provider: cli.name().into(),
+                detail: format!(
+                    "effort `{effort}` is unavailable for `{model}`; choose {}",
+                    supported.join(", ")
+                ),
+            });
+        }
+    }
+    Ok((model.to_string(), Some(effort.to_string())))
+}
+
+fn requested_parts(requested: &str) -> (String, Option<String>) {
+    let requested = requested.trim();
+    match requested.rsplit_once('@') {
+        Some((model, effort)) if !model.is_empty() && !effort.is_empty() => {
+            (model.to_string(), Some(effort.to_string()))
+        }
+        _ => (requested.to_string(), None),
+    }
+}
+
+fn remember_codex_models(models: &[crate::ModelOption]) {
+    *CODEX_CATALOG.lock().unwrap() = Some(
+        models
+            .iter()
+            .map(|model| (model.id.clone(), model.efforts.clone()))
+            .collect(),
+    );
+}
+
+/// A typed headless model spec has no picker to populate the live catalog first. Query on a
+/// short-lived thread so construction can keep its synchronous API even inside a Tokio worker.
+fn load_codex_catalog() -> bool {
+    std::thread::Builder::new()
+        .name("ark-codex-models".into())
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()
+                .and_then(|runtime| runtime.block_on(codex_models()))
+                .is_some()
+        })
+        .ok()
+        .and_then(|thread| thread.join().ok())
+        .unwrap_or(false)
+}
+
+/// Ask the installed Codex app server for this account's model catalog. Failure is a picker
+/// fallback, never a reason chat cannot start.
+pub(crate) async fn codex_models() -> Option<Vec<crate::ModelOption>> {
+    let bin = Cli::Codex.locate()?;
+    let listed = tokio::time::timeout(Duration::from_secs(6), async {
+        let mut app = CodexApp::start(&bin, env!("CARGO_PKG_VERSION"))
+            .await
+            .ok()?;
+        let models = app.models().await.ok();
+        app.stop().await;
+        models
+    })
+    .await
+    .ok()
+    .flatten()?;
+    if listed.is_empty() {
+        return None;
+    }
+    remember_codex_models(&listed);
+    Some(listed)
 }
 
 /// A version-4 UUID, as Claude Code requires for `--session-id`.
@@ -2066,6 +2248,11 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) echo "{\"id\":$id,\"result\":{}}" ;;
     *'"method":"account/rateLimits/read"'*) echo "{\"id\":$id,\"result\":{}}" ;;
+    *'"method":"model/list"'*)
+      case "$line" in
+        *'"cursor":"next"'*) echo "{\"id\":$id,\"result\":{\"data\":[{\"id\":\"gpt-5.6-luna\",\"model\":\"gpt-5.6-luna\",\"displayName\":\"GPT-5.6-Luna\",\"hidden\":false,\"defaultReasoningEffort\":\"low\",\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast\"}]}],\"nextCursor\":null}}" ;;
+        *) echo "{\"id\":$id,\"result\":{\"data\":[{\"id\":\"gpt-5.6-terra\",\"model\":\"gpt-5.6-terra\",\"displayName\":\"GPT-5.6-Terra\",\"hidden\":false,\"defaultReasoningEffort\":\"medium\",\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast\"},{\"reasoningEffort\":\"medium\",\"description\":\"Balanced\"}]}],\"nextCursor\":\"next\"}}" ;;
+      esac ;;
     *'"method":"thread/start"'*) echo "{\"id\":$id,\"result\":{\"thread\":{\"id\":\"T1\"}}}" ;;
     *'"method":"thread/resume"'*) echo "{\"id\":$id,\"result\":{}}" ;;
     *'"method":"turn/start"'*) echo "{\"id\":$id,\"result\":{\"turn\":{\"id\":\"u1\"}}}"; cat "$d/turn" ;;
@@ -2080,6 +2267,24 @@ done
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         (p, dir.join("log"))
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn codex_catalog_includes_live_effort_choices() {
+        let (bin, _) = codex_app(
+            "codex-models",
+            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
+        );
+        let mut app = CodexApp::start(&bin, "test").await.unwrap();
+        let models = app.models().await.unwrap();
+        app.stop().await;
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gpt-5.6-terra");
+        assert_eq!(models[0].label, "GPT-5.6-Terra");
+        assert_eq!(models[0].efforts, ["low", "medium"]);
+        assert_eq!(models[0].default_effort.as_deref(), Some("medium"));
+        assert_eq!(models[1].id, "gpt-5.6-luna");
     }
 
     #[cfg(unix)]
@@ -2349,6 +2554,34 @@ done
     }
 
     #[test]
+    fn subscription_specs_keep_model_and_effort_separate() {
+        remember_codex_models(&[crate::ModelOption {
+            id: "gpt-5.6-terra".into(),
+            label: "GPT-5.6-Terra".into(),
+            efforts: vec!["low".into(), "medium".into()],
+            default_effort: Some("medium".into()),
+        }]);
+        let m = CliModel::try_new(Cli::Codex, "gpt-5.6-terra@medium").unwrap();
+        assert_eq!(m.model, "gpt-5.6-terra");
+        assert_eq!(m.effort.as_deref(), Some("medium"));
+        assert_eq!(Provider::model_id(&m), "codex:gpt-5.6-terra@medium");
+        let args = claude_stream_args(
+            Mode::OneShot,
+            "sonnet",
+            Some("high"),
+            None,
+            CLAUDE_REPLY_SCHEMA,
+        );
+        assert!(args.windows(2).any(|a| a == ["--effort", "high"]));
+        assert!(CliModel::try_new(Cli::Claude, "sonnet@fast").is_err());
+        let direct = CliModel::new(Cli::Claude, "sonnet@fast");
+        assert_eq!(direct.model, "sonnet");
+        assert_eq!(direct.effort.as_deref(), Some("fast"));
+        assert!(CliModel::try_new(Cli::Codex, "gpt-5.6-terra@ultra").is_err());
+        assert!(CliModel::try_new(Cli::Codex, "not-advertised@medium").is_err());
+    }
+
+    #[test]
     fn an_error_without_words_names_its_kind() {
         let e = parse_claude(r#"{"is_error":true,"subtype":"error_max_turns","num_turns":9}"#);
         assert_eq!(
@@ -2411,7 +2644,7 @@ done
         ]})
         .to_string();
         let (bin, log) = codex_app("codex-long", &answer);
-        let m = CliModel::new(Cli::Codex, "").with_program(bin);
+        let m = CliModel::new(Cli::Codex, "gpt-5.6-terra@medium").with_program(bin);
         let shown = Mutex::new(String::new());
         let sink = |t: &str| shown.lock().unwrap().push_str(t);
         let tools = vec![edit_tool(), tools().remove(0)];
@@ -2440,6 +2673,7 @@ done
             .find(|l| l.contains(r#""method":"turn/start""#))
             .unwrap();
         let sent: Value = serde_json::from_str(turn).unwrap();
+        assert_eq!(sent["params"]["effort"], "medium");
         let schema = &sent["params"]["outputSchema"];
         assert_eq!(strict_problems(schema), Vec::<String>::new(), "{schema}");
         let names: Vec<&Value> = schema["properties"]["tool_calls"]["items"]["anyOf"]

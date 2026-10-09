@@ -193,8 +193,9 @@ const scenarios = {
     const codex = page.locator(".model-group", { hasText: "ChatGPT subscription" });
     assert.equal(await codex.locator(".model-dot").getAttribute("data-ok"), "false");
     assert.ok((await codex.locator(".model-fix code").textContent()).includes("npm install"));
-    await claude.locator(".model-item", { hasText: "opus" }).click();
-    await page.waitForFunction(() => document.getElementById("model-chip").textContent === "claude opus");
+    await claude.locator(".model-item", { hasText: "Opus" }).click();
+    await page.locator(".models-pop .model-item", { hasText: "Medium" }).click();
+    await page.waitForFunction(() => document.getElementById("model-chip").textContent === "claude opus@medium");
   },
 
   // A message sent mid-turn waits above the composer, joins the thread where the agent read
@@ -987,10 +988,30 @@ async function settings(page) {
   // The test page opens light (no app default, a light system); Dark is kept across a reload.
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
   await page.locator(".settings-list .nav-row", { hasText: "Appearance" }).click();
-  await page.locator(".settings-section .seg", { hasText: "Dark" }).click();
+  assert.equal(await page.locator(".settings-section .theme-choice").count(), 7);
+  await page.locator(".settings-section .theme-choice", { hasText: "Dark" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "dark");
   const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   assert.equal(await bg(), "rgb(27, 27, 27)");
+  await page.locator(".settings-section .theme-choice", { hasText: "Dracula" }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dracula");
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "dark");
+  assert.equal(await bg(), "rgb(40, 42, 54)");
+  await page.locator(".settings-section .theme-choice", { hasText: "GitHub" }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "light");
+  await page.setViewportSize({ width: 360, height: 720 });
+  const themeLayout = await page.locator(".theme-choices").evaluate((group) => ({
+    fits: group.scrollWidth <= group.clientWidth,
+    targets: [...group.querySelectorAll("label")].map((label) => label.getBoundingClientRect().height),
+  }));
+  assert.equal(themeLayout.fits, true, "theme choices do not overflow a 360px window");
+  assert.equal(themeLayout.targets.every((height) => height >= 40), true, "theme targets stay at least 40px tall");
+  await page.locator('.theme-choice input[value="dracula"]').focus();
+  await page.keyboard.press("End");
+  assert.equal(await page.evaluate(() => window.arkTheme.choice()), "xcode");
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.locator(".settings-section .theme-choice", { hasText: "Dark" }).click();
   await page.reload();
   await page.locator("#open-settings:not([hidden])").waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");

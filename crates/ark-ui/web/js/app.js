@@ -60,6 +60,9 @@ const api = {
   // The window's own view for the Browser panel (`show(rect, url)`, `act(action)`,
   // `listen(fn)`); undefined in a browser, where the panel is a frame.
   browserView: transport.browserView,
+  // Signed native-app updates. Undefined in a browser; `status()` is null in development and
+  // when the packaged consumer did not opt in.
+  updates: transport.updates,
   // True when the runtime runs on the computer showing this page (the window's own runtime,
   // or a browser on this machine). False for a runtime elsewhere: its files, programs and
   // sign-ins are on that machine, so actions that need this one should not be offered.

@@ -97,14 +97,25 @@ export function registerAppearance(ark) {
     icon: "sun",
     builtin: true,
     render(el) {
-      const segs = h("div.segs", { role: "radiogroup", "aria-label": "Theme" });
+      const choices = [["system", "System"], ["light", "Light"], ["dark", "Dark"], ["monokai", "Monokai"], ["dracula", "Dracula"], ["github", "GitHub"], ["xcode", "Xcode"]];
+      const group = h("div.theme-choices", { role: "radiogroup", "aria-label": "Theme" });
       const draw = () => {
         const now = window.arkTheme?.choice() || "system";
-        clear(segs).append(...[["light", "Light"], ["dark", "Dark"], ["system", "System"]].map(([id, label]) =>
-          h("button.seg", { type: "button", role: "radio", "aria-checked": String(now === id), "aria-pressed": String(now === id), onclick: () => { window.arkTheme?.set(id); draw(); } }, label)));
+        clear(group).append(...choices.map(([id, label]) => h("label.theme-choice", { "data-palette": id },
+          h("input", { type: "radio", name: "ark-theme", value: id, checked: now === id, onchange: () => { window.arkTheme?.set(id); draw(); } }),
+          h("span.theme-swatch", { "aria-hidden": "true" }),
+          h("span", label))));
       };
+      group.addEventListener("keydown", (e) => {
+        if (e.key !== "Home" && e.key !== "End") return;
+        e.preventDefault();
+        const inputs = [...group.querySelectorAll("input")];
+        const input = e.key === "Home" ? inputs[0] : inputs.at(-1);
+        input?.focus();
+        input?.click();
+      });
       draw();
-      el.append(h("div.plugin-list", settingRow("Theme", null, segs)));
+      el.append(h("div.plugin-list", settingRow("Theme", null, group)));
     },
   });
 }

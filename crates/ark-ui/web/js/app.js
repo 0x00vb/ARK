@@ -488,18 +488,24 @@ function connection(msg) {
 
 /// While an agent uses the person's computer: who, and a way to take it back. Nothing shows
 /// otherwise.
-function showComputer(user) {
+function showComputer(user = state.computerUser, activity = state.computerActivity) {
+  state.computerUser = user;
+  state.computerActivity = activity;
   const el = $("#computer-use");
   clear(el);
-  el.hidden = !user;
-  if (!user) return;
-  const who = h("button.computer-who", { type: "button", title: user.session ? "Open the chat" : "" },
+  const hazard = ["hazardous", "submitted_unconfirmed"].includes(activity?.phase);
+  el.hidden = !user && !hazard;
+  if (el.hidden) return;
+  const who = user ? h("button.computer-who", { type: "button", title: user.session ? "Open the chat" : "" },
     // On a runtime elsewhere it is not the person's own computer.
-    h("span.working-dot"), `${user.who} is using ${(window.ark?.isLocal?.() ?? true) ? "your computer" : "the computer ARK runs on"}`);
-  if (user.session) who.onclick = () => api.openSession(user.session);
+    h("span.working-dot"), activity?.line || `${user.who} is using ${(window.ark?.isLocal?.() ?? true) ? "your computer" : "the computer ARK runs on"}`)
+    : h("span.computer-who", { role: "status", "aria-live": "polite" }, activity?.line || "Computer needs attention");
+  if (user?.session) who.onclick = () => api.openSession(user.session);
   const stop = h("button.computer-stop", { type: "button", title: "Take the computer back" }, "Stop");
   stop.onclick = () => transport.call("computer_stop").catch((e) => toast(e.message));
-  el.append(who, stop);
+  const check = hazard ? h("button.computer-stop", { type: "button", "aria-label": "Check the message app again" }, "Check again") : null;
+  if (check) check.onclick = () => transport.call("computer_check").then(() => { state.computerActivity = null; showComputer(); }).catch((e) => toast(e.message));
+  el.append(...[who, check, user ? stop : null].filter(Boolean));
 }
 
 /// Another chat's turn: it works in the background. Its question waits in the tray; the
@@ -564,7 +570,11 @@ function onEvent(msg) {
       sidebar.setWorking(state.working);
       break;
     case "computer":
-      showComputer(msg.user);
+      showComputer(msg.user, state.computerActivity);
+      break;
+    case "computer_action":
+      if (msg.activity) msg.activity.line = msg.line;
+      showComputer(state.computerUser, msg.activity);
       break;
     case "post":
       thread.post(msg.post);

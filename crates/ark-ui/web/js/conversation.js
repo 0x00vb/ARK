@@ -408,8 +408,13 @@ class TurnView {
   /// into, which goes when nothing is left. The retry streams its own text.
   withdraw(text) {
     const el = this.textEl;
-    if (!el || !text || !this.textBuf.endsWith(text)) return;
-    this.textBuf = this.textBuf.slice(0, this.textBuf.length - text.length);
+    if (!el || !text) return;
+    const end = this.textBuf.trimEnd().length;
+    if (!this.textBuf.slice(0, end).endsWith(text)) return;
+    // Final answers are stored trimmed, while providers can stream trailing whitespace.
+    // Remove that whitespace with the withdrawn suffix so guarded replacement cannot leave
+    // an optimistic external-effect claim on screen.
+    this.textBuf = this.textBuf.slice(0, end - text.length);
     el._md = this.textBuf;
     if (this.textBuf.trim()) {
       el.innerHTML = markdown(this.textBuf);

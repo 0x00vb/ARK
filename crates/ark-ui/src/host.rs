@@ -610,6 +610,10 @@ impl Host {
         host.start_relays();
         if let Some(c) = &host.computer {
             tokio::spawn(forward_computer(Arc::downgrade(&host), c.watch()));
+            tokio::spawn(forward_computer_activity(
+                Arc::downgrade(&host),
+                c.watch_activity(),
+            ));
         }
         if let Some(p) = &host.processes {
             tokio::spawn(forward_processes(Arc::downgrade(&host), p.subscribe()));
@@ -726,6 +730,24 @@ impl Host {
     /// Whether agents may use this machine's screen (the Computer).
     pub fn uses_computer(&self) -> bool {
         self.computer.is_some()
+    }
+
+    /// Take the screen back from Computer without going through the current page.
+    /// Native overlays and the menu bar use this even while another app is in front.
+    pub fn computer_stop(&self) -> Option<String> {
+        self.computer
+            .as_ref()
+            .and_then(|computer| computer.take_back())
+    }
+
+    /// Re-read a message draft after the person has checked the app themselves.
+    pub async fn computer_check(&self) -> Result<Value, String> {
+        let computer = self
+            .computer
+            .as_ref()
+            .ok_or_else(|| "this app does not use the computer".to_string())?;
+        serde_json::to_value(computer.check_message_again().await?)
+            .map_err(|error| error.to_string())
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
@@ -1840,6 +1862,12 @@ impl Host {
             // fails and it carries on without it.
             "computer_stop" => match &self.computer {
                 Some(c) => Ok(json!({ "stopped": c.take_back() })),
+                None => anyhow::bail!("this app does not use the computer"),
+            },
+            "computer_check" => match &self.computer {
+                Some(c) => Ok(serde_json::to_value(
+                    c.check_message_again().await.map_err(anyhow::Error::msg)?,
+                )?),
                 None => anyhow::bail!("this app does not use the computer"),
             },
             // Where a new chat can run (ADR 0052): this computer, by its name, and the person's
@@ -3228,6 +3256,21 @@ async fn forward_computer(
     while rx.changed().await.is_ok() {
         let Some(h) = host.upgrade() else { break };
         h.emit(json!({ "kind": "computer", "user": h.computer_user() }));
+    }
+}
+
+async fn forward_computer_activity(
+    host: std::sync::Weak<Host>,
+    mut rx: tokio::sync::watch::Receiver<Option<ark_sdk::prelude::ark_computer::ComputerActivity>>,
+) {
+    while rx.changed().await.is_ok() {
+        let Some(h) = host.upgrade() else { break };
+        let activity = rx.borrow().clone();
+        let line = activity
+            .as_ref()
+            .map(ark_interact::labels::computer_activity_line)
+            .unwrap_or_default();
+        h.emit(json!({ "kind": "computer_action", "activity": activity, "line": line }));
     }
 }
 

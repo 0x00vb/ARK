@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <link rel="stylesheet" href="computer-overlay.css" />
+  </head>
+  <body>
+    <div id="target" aria-hidden="true"><span></span></div>
+    <main id="control" role="status" aria-live="polite">
+      <span id="mark" aria-hidden="true"></span>
+      <span id="line"></span>
+      <button id="check" type="button" aria-label="Check the app again">Check again</button>
+      <button id="stop" type="button" aria-label="Stop ARK using the computer">Stop</button>
+    </main>
+    <script type="module" src="computer-overlay.js"></script>
+  </body>
+</html>

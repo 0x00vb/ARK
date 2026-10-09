@@ -105,7 +105,11 @@ impl Agent {
             peak_prompt_tokens = peak_prompt_tokens.max(completion.usage.prompt_tokens);
 
             if completion.tool_calls.is_empty() {
-                let answer = completion.content.trim().to_string();
+                let answer = engine.finalize_answer(
+                    project,
+                    &cited,
+                    completion.content.trim().to_string(),
+                )?;
                 on_event(AgentEvent::Answer { text: &answer });
                 self.persist_finding(engine, project, &answer, &cited)?;
                 return Ok(AgentOutcome {
@@ -193,7 +197,7 @@ impl Agent {
         prompt_tokens += final_c.usage.prompt_tokens as u64;
         completion_tokens += final_c.usage.completion_tokens as u64;
         peak_prompt_tokens = peak_prompt_tokens.max(final_c.usage.prompt_tokens);
-        let answer = final_c.content.trim().to_string();
+        let answer = engine.finalize_answer(project, &cited, final_c.content.trim().to_string())?;
         on_event(AgentEvent::Answer { text: &answer });
         self.persist_finding(engine, project, &answer, &cited)?;
         Ok(AgentOutcome {

@@ -1,0 +1,17 @@
+:root { color-scheme: light dark; --accent: #335eb7; font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, sans-serif; }
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+#target, #control { display: none; }
+body.target #target { display: grid; width: 52px; height: 52px; place-items: center; border: 3px solid color-mix(in srgb, var(--accent), white 18%); border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: 0 2px 12px rgb(0 0 0 / .24), inset 0 0 0 2px rgb(255 255 255 / .72); animation: arrive 120ms cubic-bezier(.2,.8,.2,1); }
+#target span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px rgb(255 255 255 / .9); }
+body.control #control { display: flex; align-items: center; gap: 9px; width: 100%; height: 44px; padding: 6px 7px 6px 12px; color: #171717; background: rgb(250 249 247 / .94); border: 1px solid rgb(0 0 0 / .16); border-radius: 14px; box-shadow: 0 5px 20px rgb(0 0 0 / .22); backdrop-filter: blur(18px); }
+#mark { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
+#line { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button { appearance: none; border: 0; border-radius: 9px; padding: 7px 9px; color: inherit; background: rgb(0 0 0 / .075); font: inherit; }
+button:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent), white 25%); outline-offset: 1px; }
+#check { display: none; }
+body.hazard #check { display: block; }
+@media (prefers-color-scheme: dark) { body.control #control { color: #f5f5f4; background: rgb(30 30 29 / .94); border-color: rgb(255 255 255 / .2); } button { background: rgb(255 255 255 / .12); } }
+@media (prefers-contrast: more) { body.control #control, body.target #target { border-width: 3px; border-color: currentColor; box-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { #target { animation: none !important; } }
+@keyframes arrive { from { opacity: 0; transform: scale(.72); } to { opacity: 1; transform: scale(1); } }

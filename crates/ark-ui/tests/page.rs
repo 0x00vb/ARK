@@ -43,6 +43,36 @@ impl Adapter for Notes {
     }
 }
 
+struct UnconfirmedEffect;
+
+#[async_trait::async_trait]
+impl Adapter for UnconfirmedEffect {
+    fn name(&self) -> &str {
+        "message"
+    }
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            "message.send",
+            "submit a test message",
+            RiskTier::Read,
+        )]
+    }
+    async fn run(&self, _a: &str, _i: Value, _c: &RunCtx<'_>) -> ark_tools::Result<ActionOutput> {
+        Ok(
+            ActionOutput::json(json!({ "status": "submitted_unconfirmed" })).with_effect(
+                ark_sdk::prelude::ark_core::ExternalEffect {
+                    id: "page-test-message".into(),
+                    state: ark_sdk::prelude::ark_core::ExternalEffectState::Unconfirmed,
+                    retry_allowed: false,
+                    user_message: Some(
+                        "The message may have sent, but ARK could not confirm it.".into(),
+                    ),
+                },
+            ),
+        )
+    }
+}
+
 fn say(text: &str, tool: bool) -> Completion {
     let calls = if tool {
         vec![ToolCall {
@@ -99,10 +129,16 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             left: std::sync::atomic::AtomicUsize::new(if scenario == "repair" { 1 } else { 99 }),
         });
     }
+    let actions = if scenario == "guarded-effect" {
+        vec!["message.send"]
+    } else {
+        vec!["notes.read"]
+    };
     let mut builder = Ark::builder()
         .store_root(dir.path())
         .tool(Arc::new(Notes))
-        .profile(AgentProfile::builder().core_actions(["notes.read"]).build())
+        .tool(Arc::new(UnconfirmedEffect))
+        .profile(AgentProfile::builder().core_actions(actions).build())
         .provider(model)
         .planner(false)
         .critic(false);
@@ -239,6 +275,23 @@ async fn streamed_text_keeps_its_last_chunk_and_answers_once() {
         say("The notes mention a locket.", false),
     ];
     drive("stream", script, Duration::from_millis(40)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unconfirmed_effect_with_trailing_whitespace_withdraws_false_success() {
+    let script = vec![
+        Completion {
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "send-1".into(),
+                name: "message.send".into(),
+                arguments: json!({}),
+            }],
+            usage: Usage::default(),
+        },
+        say("The message was sent.\n", false),
+    ];
+    drive("guarded-effect", script, Duration::from_millis(40)).await;
 }
 
 /// A model whose first reply breaks off after some text (an overloaded service mid-stream);

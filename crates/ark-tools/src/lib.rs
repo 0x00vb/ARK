@@ -147,6 +147,8 @@ pub struct ActionOutput {
     /// Pictures shown to the model with this result (a window, a page), when it reads images.
     /// Kept in memory for the next request only, never stored.
     pub pictures: Vec<Picture>,
+    /// A trusted external-effect outcome. The runtime persists this separately from `output`.
+    pub effect: Option<ark_core::ExternalEffect>,
 }
 
 /// An image a model sees, as its bytes and media type (`image/png`).
@@ -163,6 +165,7 @@ impl ActionOutput {
             command: None,
             produced: Vec::new(),
             pictures: Vec::new(),
+            effect: None,
         }
     }
     /// Show the model a picture with this result ([`ActionOutput::pictures`]).
@@ -179,6 +182,10 @@ impl ActionOutput {
     }
     pub fn with_artifact(mut self, a: ProducedArtifact) -> Self {
         self.produced.push(a);
+        self
+    }
+    pub fn with_effect(mut self, effect: ark_core::ExternalEffect) -> Self {
+        self.effect = Some(effect);
         self
     }
 }

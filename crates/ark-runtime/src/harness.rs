@@ -1222,6 +1222,16 @@ impl Harness {
             }
         }
 
+        let guarded = engine.finalize_answer(project, &cited, answer.clone())?;
+        if guarded != answer {
+            if streamed && !answer.is_empty() {
+                on_event(HarnessEvent::TextWithdrawn {
+                    text: answer.clone(),
+                });
+            }
+            answer = guarded;
+            streamed = false;
+        }
         let (passed, detail) = self.self_check(&answer, &cited, trivial, steps_taken);
         on_event(HarnessEvent::SelfCheck {
             passed,
@@ -1243,6 +1253,11 @@ impl Harness {
                 answer = revised;
                 streamed = false;
             }
+        }
+        let guarded = engine.finalize_answer(project, &cited, answer.clone())?;
+        if guarded != answer {
+            answer = guarded;
+            streamed = false;
         }
 
         let mut note = Note::new(NoteKind::Finding, &answer, Author::Agent);

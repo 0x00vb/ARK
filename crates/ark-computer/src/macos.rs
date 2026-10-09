@@ -445,6 +445,17 @@ impl Walk {
                     value,
                     disabled: el.flag("AXEnabled") == Some(false),
                     selected,
+                    identifier: el
+                        .text("AXIdentifier")
+                        .map(|v| clean(&v))
+                        .filter(|v| !v.is_empty()),
+                    description: el
+                        .text("AXDescription")
+                        .map(|v| clean(&v))
+                        .filter(|v| !v.is_empty())
+                        .map(|v| v.chars().take(1000).collect()),
+                    focused: el.flag("AXFocused") == Some(true),
+                    frame: frame_of(&el),
                 });
                 let el = Arc::new(el);
                 self.controls.push(Arc::new(AxControl {
@@ -979,12 +990,14 @@ impl Screen for Mac {
         let (root, fresh) = app_element(found.pid);
         let mut walk = Walk::new();
         let mut window = front_window(&root, &found.name)?;
+        let mut window_identifier = window.text("AXIdentifier").map(|v| clean(&v));
         walk.window(window);
         if fresh && walk.elements.is_empty() && walk.text.is_empty() {
             // Electron builds its tree once asked; give it a moment and read again.
             std::thread::sleep(Duration::from_millis(700));
             walk = Walk::new();
             window = front_window(&root, &found.name)?;
+            window_identifier = window.text("AXIdentifier").map(|v| clean(&v));
             walk.window(window);
         }
         let title = front_window(&root, &found.name)?
@@ -994,6 +1007,7 @@ impl Screen for Mac {
         Ok(Look {
             app: found.name,
             window: title,
+            window_identifier: window_identifier.filter(|v| !v.is_empty()),
             text: walk.text,
             elements: walk.elements,
             controls: walk.controls,

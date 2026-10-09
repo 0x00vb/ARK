@@ -74,6 +74,17 @@ const scenarios = {
     assert.deepEqual(await shape(page), live);
   },
 
+  // A provider can stream whitespace after a false success claim. The trusted external-effect
+  // guard withdraws the whole streamed claim before showing the unconfirmed result.
+  async "guarded-effect"(page) {
+    await finished(page, () => page.locator("#input").fill("Send the test message.").then(() => page.keyboard.press("Enter")));
+    const live = await shape(page);
+    const all = live.join("\n");
+    assert.ok(!all.includes("The message was sent."), all);
+    assert.equal(live.filter((s) => s.startsWith("answer: ")).length, 1, all);
+    assert.ok(all.includes("could not confirm"), all);
+  },
+
   // A reply the model could not use is taken back and redone: one quiet row, no failure, the
   // answer once (ADR 0050).
   async repair(page) {

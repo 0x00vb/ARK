@@ -19,15 +19,19 @@
 //! and an app there offers no Computer.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ark_core::{ActionDescriptor, RiskTier};
+use ark_core::{ActionDescriptor, ExternalEffect, ExternalEffectState, RiskTier};
 use ark_tools::{ActionOutput, Adapter, AdapterError, Result, RunCtx};
 use async_trait::async_trait;
-use serde::Serialize;
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
+use ring::hmac;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::watch;
 
@@ -48,8 +52,11 @@ pub const MENU: &str = "computer.menu";
 pub const SCROLL: &str = "computer.scroll";
 pub const SEE: &str = "computer.see";
 pub const POINT: &str = "computer.point";
-pub const ACTIONS: [&str; 10] = [
-    APPS, LOOK, OPEN, CLICK, TYPE, KEYS, MENU, SCROLL, SEE, POINT,
+pub const DRAFT: &str = "computer.draft";
+pub const SEND: &str = "computer.send";
+pub const CANCEL: &str = "computer.cancel";
+pub const ACTIONS: [&str; 13] = [
+    APPS, LOOK, OPEN, CLICK, TYPE, KEYS, MENU, SCROLL, SEE, POINT, DRAFT, SEND, CANCEL,
 ];
 /// The longer side of a picture of a window, in pixels.
 pub const PICTURE: u32 = 1280;
@@ -70,6 +77,7 @@ const OFF: &str =
 const TAKEN: &str =
     "the person took the computer back; stop using it and tell them what is left to do";
 const CARD_ELEMENTS: usize = 40;
+static HAZARD_WRITES: AtomicU64 = AtomicU64::new(0);
 
 /// An open app.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -95,10 +103,22 @@ pub struct Element {
     /// The selected row, item or tab.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub selected: bool,
+    /// A stable identifier supplied by the app's accessibility tree.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<String>,
+    /// The accessibility description, kept separate from the short display name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Whether this control owns keyboard focus now.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub focused: bool,
+    /// Its current position in logical screen points.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame: Option<Frame>,
 }
 
 /// Where something is on the screen, in points from the top left of the main display.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Frame {
     pub x: f64,
     pub y: f64,
@@ -183,9 +203,114 @@ pub trait Control: Send + Sync {
 pub struct Look {
     pub app: String,
     pub window: String,
+    pub window_identifier: Option<String>,
     pub text: String,
     pub elements: Vec<Element>,
     pub controls: Vec<Arc<dyn Control>>,
+}
+
+/// A message app's semantic reading of one generic accessibility observation. The app owns
+/// the recognizer; the platform reader and Computer do not name WhatsApp or another product.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MessageContext {
+    pub window_identifier: String,
+    pub conversation_identifier: String,
+    pub conversation: String,
+    pub conversation_frame: Option<Frame>,
+    pub composer_identifier: String,
+    pub composer: String,
+    pub composer_value: String,
+    pub composer_focused: bool,
+    pub composer_frame: Option<Frame>,
+    /// Stable fingerprints of matching outgoing messages visible before or after dispatch.
+    pub outgoing: Vec<String>,
+}
+
+/// Turns a generic window observation into message semantics for apps a consumer supports.
+pub trait MessageEvidence: Send + Sync {
+    fn context(
+        &self,
+        look: &Look,
+        recipient: Option<&str>,
+        text: Option<&str>,
+        bound: Option<(&str, &str)>,
+    ) -> std::result::Result<Option<MessageContext>, String>;
+}
+
+/// Supplies the HMAC key kept outside `computer-hazard.json`. Consumers normally back this by
+/// the operating system's secret store. It is not called until the person turns Computer on.
+pub trait SafetyKey: Send + Sync {
+    fn load_or_create(&self) -> std::result::Result<[u8; 32], String>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HazardKind {
+    DraftPresent,
+    SubmittedUnconfirmed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct HazardStatus {
+    pub kind: HazardKind,
+    pub app: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityPhase {
+    WaitingPermission,
+    WaitingPerson,
+    Acting,
+    Verifying,
+    Hazardous,
+    Stopped,
+    Refused,
+    Failed,
+    SubmittedUnconfirmed,
+    Confirmed,
+    Idle,
+}
+
+/// Sanitized, sequenced Computer feedback for a native window. It never contains an owner,
+/// recipient or draft.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ComputerActivity {
+    pub sequence: u64,
+    pub app: String,
+    pub action: String,
+    pub phase: ActivityPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<Frame>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Hazard {
+    kind: HazardKind,
+    app: String,
+    window_identifier: String,
+    conversation_identifier: String,
+    composer_identifier: String,
+    recipient_mac: String,
+    created_at: u64,
+    effect_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct HazardFile {
+    version: u32,
+    hazard: Option<Hazard>,
+}
+
+#[derive(Clone)]
+struct ActiveDraft {
+    owner: String,
+    app: String,
+    recipient: String,
+    text: String,
+    context: MessageContext,
+    before: Vec<String>,
+    generation: u64,
 }
 
 /// Whether ARK may use this computer's apps.
@@ -248,6 +373,9 @@ struct State {
     latest: HashMap<String, (u64, Shot)>,
     /// The number of the last picture taken.
     pictures: u64,
+    hazard: Option<Hazard>,
+    active_draft: Option<ActiveDraft>,
+    safety_error: Option<String>,
 }
 
 /// The computer of one ARK process. Cheap to share.
@@ -260,6 +388,16 @@ pub struct ComputerService {
     on: AtomicBool,
     state: Mutex<State>,
     holder: watch::Sender<Option<String>>,
+    messages: Option<Arc<dyn MessageEvidence>>,
+    generation: AtomicU64,
+    /// Serializes the irreversible key post with Stop, off and owner release.
+    dispatch: Mutex<()>,
+    safety_path: Option<PathBuf>,
+    safety_key: Option<Arc<dyn SafetyKey>>,
+    hmac_key: Mutex<Option<[u8; 32]>>,
+    activity: watch::Sender<Option<ComputerActivity>>,
+    activity_sequence: AtomicU64,
+    effect_sequence: AtomicU64,
 }
 
 impl ComputerService {
@@ -285,7 +423,32 @@ impl ComputerService {
             on: AtomicBool::new(true),
             state: Mutex::new(State::default()),
             holder: watch::channel(None).0,
+            messages: None,
+            generation: AtomicU64::new(0),
+            dispatch: Mutex::new(()),
+            safety_path: None,
+            safety_key: None,
+            hmac_key: Mutex::new(None),
+            activity: watch::channel(None).0,
+            activity_sequence: AtomicU64::new(0),
+            effect_sequence: AtomicU64::new(0),
         })
+    }
+
+    /// Message semantics supplied by the consumer for the apps it supports.
+    pub fn messages(self: Arc<Self>, messages: Arc<dyn MessageEvidence>) -> Arc<Self> {
+        let mut s = Arc::try_unwrap(self).unwrap_or_else(|_| panic!("set before sharing"));
+        s.messages = Some(messages);
+        Arc::new(s)
+    }
+
+    /// Keep hazardous message-draft state at `path`, authenticated with a key outside that
+    /// file. The key is loaded lazily when Computer is first enabled.
+    pub fn message_safety(self: Arc<Self>, path: PathBuf, key: Arc<dyn SafetyKey>) -> Arc<Self> {
+        let mut s = Arc::try_unwrap(self).unwrap_or_else(|_| panic!("set before sharing"));
+        s.safety_path = Some(path);
+        s.safety_key = Some(key);
+        Arc::new(s)
     }
 
     /// Shorter waits (tests).
@@ -324,6 +487,9 @@ impl ComputerService {
     /// Turn it on or off, and keep the answer. Off also takes the screen back from whoever
     /// holds it, so a running turn or task stops at its next action.
     pub fn set_on(&self, on: bool) -> std::result::Result<(), String> {
+        if on && self.messages.is_some() {
+            self.initialize_safety()?;
+        }
         if let Some(file) = &self.switch {
             if let Some(dir) = file.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -365,6 +531,21 @@ impl ComputerService {
         self.holder.subscribe()
     }
 
+    pub fn watch_activity(&self) -> watch::Receiver<Option<ComputerActivity>> {
+        self.activity.subscribe()
+    }
+
+    fn activity(&self, app: &str, action: &str, phase: ActivityPhase, target: Option<Frame>) {
+        let sequence = self.activity_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        self.activity.send_replace(Some(ComputerActivity {
+            sequence,
+            app: app.to_string(),
+            action: action.to_string(),
+            phase,
+            target,
+        }));
+    }
+
     /// The platform underneath, for trying it by hand (`examples/probe.rs`). Calls on it skip
     /// the lease, the approvals and the quiet wait.
     pub fn screen(&self) -> Arc<dyn Screen> {
@@ -386,9 +567,76 @@ impl ComputerService {
         self.screen.access()
     }
 
+    /// A message draft or uncertain submission that still blocks Computer mutations.
+    pub fn message_hazard(&self) -> Option<HazardStatus> {
+        self.state
+            .lock()
+            .unwrap()
+            .hazard
+            .as_ref()
+            .map(|h| HazardStatus {
+                kind: h.kind.clone(),
+                app: h.app.clone(),
+            })
+    }
+
+    /// Re-read the app after the person has checked it. This clears only the safety block. It
+    /// never changes an unconfirmed external effect into a confirmed one.
+    pub async fn check_message_again(&self) -> std::result::Result<HazardStatus, String> {
+        self.initialize_safety()?;
+        let hazard = self
+            .hazard()?
+            .ok_or_else(|| "there is no message draft to check".to_string())?;
+        let app = hazard.app.clone();
+        let look = self.blocking(move |s| s.look(&app)).await?;
+        let provider = self
+            .messages
+            .as_ref()
+            .ok_or_else(|| "this app has no message evidence provider".to_string())?;
+        let context = provider
+            .context(
+                &look,
+                None,
+                None,
+                Some((&hazard.conversation_identifier, &hazard.composer_identifier)),
+            )?
+            .ok_or_else(|| {
+                "ARK cannot identify the current conversation and composer".to_string()
+            })?;
+        let same = context.window_identifier == hazard.window_identifier
+            && context.conversation_identifier == hazard.conversation_identifier
+            && context.composer_identifier == hazard.composer_identifier
+            && self.recipient_mac(&context.conversation)? == hazard.recipient_mac;
+        if !same {
+            return Err(format!(
+                "open the conversation that needs attention in {}, then choose Check again",
+                hazard.app
+            ));
+        }
+        if !context.composer_value.is_empty() {
+            return Err(format!(
+                "the draft is still present in {}; clear it there, then choose Check again",
+                hazard.app
+            ));
+        }
+        self.keep_hazard(None)?;
+        self.state.lock().unwrap().active_draft = None;
+        self.activity("", "", ActivityPhase::Idle, None);
+        Ok(HazardStatus {
+            kind: hazard.kind,
+            app: hazard.app,
+        })
+    }
+
     /// The person takes the screen back: whoever holds it loses it, and its actions fail until
     /// its turn or task ends. Returns who held it.
     pub fn take_back(&self) -> Option<String> {
+        let _dispatch = self.dispatch.lock().unwrap();
+        self.take_back_locked()
+    }
+
+    fn take_back_locked(&self) -> Option<String> {
+        self.generation.fetch_add(1, Ordering::SeqCst);
         let mut st = self.state.lock().unwrap();
         let had = st.lease.take().map(|(o, _)| o);
         if let Some(o) = &had {
@@ -398,10 +646,13 @@ impl ComputerService {
         }
         drop(st);
         self.holder.send_replace(None);
+        self.activity("", "", ActivityPhase::Stopped, None);
         had
     }
 
     fn release(&self, owner: &str) {
+        let _dispatch = self.dispatch.lock().unwrap();
+        self.generation.fetch_add(1, Ordering::SeqCst);
         let mut st = self.state.lock().unwrap();
         st.looks.remove(owner);
         st.shots.remove(owner);
@@ -410,6 +661,7 @@ impl ComputerService {
             st.lease = None;
             drop(st);
             self.holder.send_replace(None);
+            self.activity("", "", ActivityPhase::Idle, None);
         }
     }
 
@@ -515,6 +767,103 @@ impl ComputerService {
         self.state.lock().unwrap().own_input = Some(Instant::now());
     }
 
+    fn initialize_safety(&self) -> std::result::Result<(), String> {
+        if self.hmac_key.lock().unwrap().is_some() {
+            return self
+                .state
+                .lock()
+                .unwrap()
+                .safety_error
+                .clone()
+                .map_or(Ok(()), Err);
+        }
+        let Some(path) = &self.safety_path else {
+            return Err("this app did not configure message-draft safety".into());
+        };
+        let Some(provider) = &self.safety_key else {
+            return Err("this app did not configure the Computer safety key".into());
+        };
+        let key = provider.load_or_create()?;
+        let loaded = match std::fs::read(path) {
+            Ok(bytes) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt as _;
+                    let mode = std::fs::metadata(path)
+                        .map_err(|e| format!("read Computer safety state permissions: {e}"))?
+                        .permissions()
+                        .mode()
+                        & 0o777;
+                    if mode & 0o077 != 0 {
+                        return Err("Computer safety state has unsafe file permissions".into());
+                    }
+                }
+                let file: HazardFile = serde_json::from_slice(&bytes)
+                    .map_err(|_| "Computer safety state is unreadable".to_string())?;
+                if file.version != 1 {
+                    return Err(format!(
+                        "Computer safety state is version {}; this ARK reads version 1",
+                        file.version
+                    ));
+                }
+                file.hazard
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                durable_hazard_write(
+                    path,
+                    &HazardFile {
+                        version: 1,
+                        hazard: None,
+                    },
+                )?;
+                None
+            }
+            Err(e) => return Err(format!("read Computer safety state: {e}")),
+        };
+        *self.hmac_key.lock().unwrap() = Some(key);
+        let mut st = self.state.lock().unwrap();
+        st.hazard = loaded;
+        st.safety_error = None;
+        Ok(())
+    }
+
+    fn recipient_mac(&self, recipient: &str) -> std::result::Result<String, String> {
+        let key = self
+            .hmac_key
+            .lock()
+            .unwrap()
+            .ok_or_else(|| "Computer safety is not initialized".to_string())?;
+        let key = hmac::Key::new(hmac::HMAC_SHA256, &key);
+        Ok(B64.encode(hmac::sign(&key, recipient.trim().as_bytes()).as_ref()))
+    }
+
+    fn keep_hazard(&self, hazard: Option<Hazard>) -> std::result::Result<(), String> {
+        let path = self
+            .safety_path
+            .as_ref()
+            .ok_or_else(|| "Computer message safety is not configured".to_string())?;
+        if let Err(e) = durable_hazard_write(
+            path,
+            &HazardFile {
+                version: 1,
+                hazard: hazard.clone(),
+            },
+        ) {
+            self.state.lock().unwrap().safety_error = Some(e.clone());
+            return Err(e);
+        }
+        self.state.lock().unwrap().hazard = hazard;
+        Ok(())
+    }
+
+    fn hazard(&self) -> std::result::Result<Option<Hazard>, String> {
+        let st = self.state.lock().unwrap();
+        if let Some(e) = &st.safety_error {
+            return Err(e.clone());
+        }
+        Ok(st.hazard.clone())
+    }
+
     async fn blocking<T: Send + 'static>(
         &self,
         f: impl FnOnce(&dyn Screen) -> std::result::Result<T, String> + Send + 'static,
@@ -524,6 +873,45 @@ impl ComputerService {
             .await
             .map_err(|e| format!("the computer did not answer: {e}"))?
     }
+}
+
+fn durable_hazard_write(path: &Path, value: &HazardFile) -> std::result::Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Computer safety path has no parent".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("create Computer safety folder: {e}"))?;
+    let tmp = path.with_file_name(format!(
+        ".computer-hazard-{}-{}",
+        std::process::id(),
+        HAZARD_WRITES.fetch_add(1, Ordering::SeqCst)
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let result = (|| {
+        let mut file = options
+            .open(&tmp)
+            .map_err(|e| format!("create Computer safety state: {e}"))?;
+        let bytes =
+            serde_json::to_vec(value).map_err(|e| format!("encode Computer safety state: {e}"))?;
+        file.write_all(&bytes)
+            .map_err(|e| format!("write Computer safety state: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("sync Computer safety state: {e}"))?;
+        std::fs::rename(&tmp, path).map_err(|e| format!("replace Computer safety state: {e}"))?;
+        std::fs::File::open(parent)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| format!("sync Computer safety folder: {e}"))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// One agent's computer tools ([`ComputerService::for_owner`]).
@@ -557,17 +945,75 @@ fn app_of(action: &str, input: &Value) -> Result<String> {
     Ok(app.to_string())
 }
 
+fn required_text(action: &str, input: &Value, field: &str) -> Result<String> {
+    input[field]
+        .as_str()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| AdapterError::bad_input(action, format!("`{field}` cannot be empty")))
+}
+
+fn matches_identifier(element: &Element, identifier: &str) -> bool {
+    element.identifier.as_deref() == Some(identifier)
+        || format!("{}:{}", element.role.trim(), element.name.trim()) == identifier
+}
+
+fn has_new_fingerprint(before: &[String], after: &[String]) -> bool {
+    after.iter().any(|fingerprint| {
+        let before_count = before.iter().filter(|old| *old == fingerprint).count();
+        let after_count = after.iter().filter(|new| *new == fingerprint).count();
+        after_count > before_count
+    })
+}
+
+fn unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 impl Computer {
     /// Hold the screen and have the person's go-ahead to act now.
-    async fn ready(&self) -> Result<()> {
+    async fn ready(&self, app: &str, action: &str) -> Result<()> {
         if !self.svc.is_on() {
             return Err(tool(OFF.into()));
         }
-        self.svc.allowed().await.map_err(tool)?;
-        self.svc.lease(&self.owner).await.map_err(tool)?;
-        self.svc.person_quiet().await.map_err(tool)?;
+        if self.svc.messages.is_some() {
+            if let Err(error) = self.svc.initialize_safety() {
+                self.svc.activity(app, action, ActivityPhase::Failed, None);
+                return Err(tool(error));
+            }
+        }
+        if self.svc.access() != Access::Allowed {
+            self.svc
+                .activity(app, action, ActivityPhase::WaitingPermission, None);
+        }
+        if let Err(error) = self.svc.allowed().await {
+            self.svc.activity(app, action, ActivityPhase::Failed, None);
+            return Err(tool(error));
+        }
+        if let Err(error) = self.svc.lease(&self.owner).await {
+            self.svc.activity(app, action, ActivityPhase::Refused, None);
+            return Err(tool(error));
+        }
+        if self
+            .svc
+            .screen
+            .since_input()
+            .is_some_and(|since| since < self.svc.quiet)
+        {
+            self.svc
+                .activity(app, action, ActivityPhase::WaitingPerson, None);
+        }
+        if let Err(error) = self.svc.person_quiet().await {
+            self.svc.activity(app, action, ActivityPhase::Refused, None);
+            return Err(tool(error));
+        }
         // The person may have taken it back while this waited.
         if !self.svc.holds(&self.owner) {
+            self.svc.activity(app, action, ActivityPhase::Stopped, None);
             return Err(tool(TAKEN.into()));
         }
         Ok(())
@@ -608,6 +1054,442 @@ impl Computer {
             ));
         }
         Ok(c.clone())
+    }
+
+    async fn fresh_look(&self, app: &str) -> Result<Look> {
+        let name = app.to_string();
+        self.svc
+            .blocking(move |s| s.look(&name))
+            .await
+            .map_err(tool)
+    }
+
+    fn message_context(&self, look: &Look, recipient: &str, text: &str) -> Result<MessageContext> {
+        let provider = self.svc.messages.as_ref().ok_or_else(|| {
+            AdapterError::bad_input(DRAFT, "this app has no message evidence provider")
+        })?;
+        provider
+            .context(look, Some(recipient), Some(text), None)
+            .map_err(tool)?
+            .ok_or_else(|| {
+                AdapterError::bad_input(
+                    DRAFT,
+                    format!(
+                        "{} does not expose enough evidence to prove the conversation and message",
+                        look.app
+                    ),
+                )
+            })
+    }
+
+    fn input_element<'a>(
+        &self,
+        action: &str,
+        look: &'a Look,
+        field: &str,
+        name_field: &str,
+        input: &Value,
+    ) -> Result<(&'a Element, Arc<dyn Control>)> {
+        let n = input[field]
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .ok_or_else(|| {
+                AdapterError::bad_input(action, format!("`{field}` is an element number"))
+            })?;
+        let expected = input[name_field].as_str().unwrap_or("");
+        let el = n
+            .checked_sub(1)
+            .and_then(|i| look.elements.get(i))
+            .ok_or_else(|| {
+                AdapterError::bad_input(action, format!("no element [{n}] in {}", look.app))
+            })?;
+        if !same_name(&el.name, expected) {
+            return Err(AdapterError::bad_input(
+                action,
+                format!(
+                    "element [{n}] is “{}”, not “{expected}”; look again",
+                    el.name
+                ),
+            ));
+        }
+        Ok((el, look.controls[n - 1].clone()))
+    }
+
+    async fn draft_message(&self, app: &str, input: &Value) -> Result<ActionOutput> {
+        if self.svc.hazard().map_err(tool)?.is_some() {
+            return Err(tool(
+                "a previous message draft still needs attention; resolve it before drafting another"
+                    .into(),
+            ));
+        }
+        let recipient = required_text(DRAFT, input, "recipient")?;
+        let text = required_text(DRAFT, input, "text")?;
+        let name = app.to_string();
+        self.svc
+            .blocking(move |s| s.open(&name))
+            .await
+            .map_err(tool)?;
+        let look = self.fresh_look(app).await?;
+        let (conversation_el, _) =
+            self.input_element(DRAFT, &look, "conversation_ref", "conversation_name", input)?;
+        let (composer_el, composer) =
+            self.input_element(DRAFT, &look, "composer_ref", "composer_name", input)?;
+        let context = self.message_context(&look, &recipient, &text)?;
+        if !matches_identifier(conversation_el, &context.conversation_identifier)
+            || !matches_identifier(composer_el, &context.composer_identifier)
+            || !context.composer_focused
+        {
+            return Err(AdapterError::bad_input(
+                DRAFT,
+                "the observed conversation and focused composer no longer match; look again",
+            ));
+        }
+        if !context.composer_value.is_empty() {
+            return Err(AdapterError::bad_input(
+                DRAFT,
+                "the composer already contains text; clear it yourself before ARK drafts a message",
+            ));
+        }
+        let generation = self.svc.generation.load(Ordering::SeqCst);
+        let hazard = Hazard {
+            kind: HazardKind::DraftPresent,
+            app: look.app.clone(),
+            window_identifier: context.window_identifier.clone(),
+            conversation_identifier: context.conversation_identifier.clone(),
+            composer_identifier: context.composer_identifier.clone(),
+            recipient_mac: self.svc.recipient_mac(&recipient).map_err(tool)?,
+            created_at: unix_seconds(),
+            effect_id: None,
+        };
+        self.svc.keep_hazard(Some(hazard)).map_err(tool)?;
+        self.svc
+            .activity(app, DRAFT, ActivityPhase::Acting, context.composer_frame);
+        self.svc.state.lock().unwrap().active_draft = Some(ActiveDraft {
+            owner: self.owner.clone(),
+            app: look.app.clone(),
+            recipient: recipient.clone(),
+            text: text.clone(),
+            context: context.clone(),
+            before: context.outgoing.clone(),
+            generation,
+        });
+        let name = app.to_string();
+        let staged = text.clone();
+        self.svc
+            .blocking(move |s| {
+                composer.press()?;
+                in_front(s, &name)?;
+                s.keys("cmd+a")?;
+                s.type_text(&staged)
+            })
+            .await
+            .map_err(tool)?;
+        self.svc.sent_input();
+        let after = self.fresh_look(app).await?;
+        let proven = self.message_context(&after, &recipient, &text)?;
+        if proven.window_identifier != context.window_identifier
+            || proven.conversation_identifier != context.conversation_identifier
+            || proven.composer_identifier != context.composer_identifier
+            || proven.composer_value != text
+        {
+            return Err(tool(
+                "the draft was placed but ARK could not prove it in the same conversation; clear it in the app, then choose Check again"
+                    .into(),
+            ));
+        }
+        if let Some(active) = self.svc.state.lock().unwrap().active_draft.as_mut() {
+            active.context = proven.clone();
+        }
+        self.svc
+            .activity(app, DRAFT, ActivityPhase::Hazardous, proven.composer_frame);
+        Ok(ActionOutput::json(json!({
+            "status": "drafted", "app": after.app, "recipient": recipient,
+            "text": text, "target": proven.composer_frame
+        })))
+    }
+
+    async fn send_message(&self, app: &str, input: &Value) -> Result<ActionOutput> {
+        let recipient = required_text(SEND, input, "recipient")?;
+        let text = required_text(SEND, input, "text")?;
+        let active = self
+            .svc
+            .state
+            .lock()
+            .unwrap()
+            .active_draft
+            .clone()
+            .ok_or_else(|| AdapterError::bad_input(SEND, "draft the message first"))?;
+        if active.owner != self.owner
+            || !same_app(&active.app, app)
+            || active.recipient != recipient
+            || active.text != text
+        {
+            return Err(AdapterError::bad_input(
+                SEND,
+                "the app, recipient and text must exactly match the staged draft",
+            ));
+        }
+        let effect_id = format!(
+            "message-{}-{}",
+            std::process::id(),
+            self.svc.effect_sequence.fetch_add(1, Ordering::SeqCst) + 1
+        );
+        let svc = self.svc.clone();
+        let owner = self.owner.clone();
+        let recipient_for_dispatch = recipient.clone();
+        let text_for_dispatch = text.clone();
+        let app_for_dispatch = app.to_string();
+        let effect_for_dispatch = effect_id.clone();
+        let dispatched = tokio::task::spawn_blocking(move || {
+            let _gate = svc.dispatch.lock().unwrap();
+            if svc.generation.load(Ordering::SeqCst) != active.generation
+                || svc.screen.access() != Access::Allowed
+            {
+                return Err("the Computer stopped before the message was sent".to_string());
+            }
+            {
+                let st = svc.state.lock().unwrap();
+                if !st.lease.as_ref().is_some_and(|(o, _)| o == &owner) {
+                    return Err(TAKEN.into());
+                }
+            }
+            in_front(svc.screen.as_ref(), &app_for_dispatch)?;
+            let look = svc.screen.look(&app_for_dispatch)?;
+            let provider = svc
+                .messages
+                .as_ref()
+                .ok_or_else(|| "this app has no message evidence provider".to_string())?;
+            let now = provider
+                .context(
+                    &look,
+                    Some(&recipient_for_dispatch),
+                    Some(&text_for_dispatch),
+                    Some((
+                        &active.context.conversation_identifier,
+                        &active.context.composer_identifier,
+                    )),
+                )?
+                .ok_or_else(|| "the conversation can no longer be proved".to_string())?;
+            if now.window_identifier != active.context.window_identifier
+                || now.conversation_identifier != active.context.conversation_identifier
+                || now.composer_identifier != active.context.composer_identifier
+                || !now.composer_focused
+                || now.composer_value != text_for_dispatch
+            {
+                return Err("the conversation or draft changed, so nothing was sent".into());
+            }
+            let mut hazard = svc
+                .hazard()?
+                .ok_or_else(|| "the draft safety record is missing".to_string())?;
+            hazard.kind = HazardKind::SubmittedUnconfirmed;
+            hazard.effect_id = Some(effect_for_dispatch);
+            svc.keep_hazard(Some(hazard))?;
+            svc.screen.keys("return")?;
+            svc.sent_input();
+            Ok(())
+        })
+        .await;
+        match dispatched {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                if self.effect_is_uncertain(&effect_id) {
+                    return Ok(self.unconfirmed_output(
+                        app,
+                        &recipient,
+                        &effect_id,
+                        active.context.composer_frame,
+                        Some(&error),
+                    ));
+                }
+                return Err(tool(error));
+            }
+            Err(error) => {
+                if self.effect_is_uncertain(&effect_id) {
+                    return Ok(self.unconfirmed_output(
+                        app,
+                        &recipient,
+                        &effect_id,
+                        active.context.composer_frame,
+                        Some("the computer stopped answering during submission"),
+                    ));
+                }
+                return Err(tool(format!("the computer did not answer: {error}")));
+            }
+        }
+        self.svc.activity(
+            app,
+            SEND,
+            ActivityPhase::Verifying,
+            active.context.composer_frame,
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let after = match self.fresh_look(app).await {
+            Ok(look) => look,
+            Err(_) => {
+                return Ok(self.unconfirmed_output(
+                    app,
+                    &recipient,
+                    &effect_id,
+                    active.context.composer_frame,
+                    Some("ARK could not read the app after submission"),
+                ));
+            }
+        };
+        let proven = match self.message_context(&after, &recipient, &text) {
+            Ok(context) => context,
+            Err(_) => {
+                return Ok(self.unconfirmed_output(
+                    app,
+                    &recipient,
+                    &effect_id,
+                    active.context.composer_frame,
+                    Some("ARK could not prove the conversation after submission"),
+                ));
+            }
+        };
+        let new_outgoing = has_new_fingerprint(&active.before, &proven.outgoing);
+        if proven.composer_value.is_empty() && new_outgoing {
+            self.svc.keep_hazard(None).map_err(tool)?;
+            self.svc.state.lock().unwrap().active_draft = None;
+            self.svc
+                .activity(app, SEND, ActivityPhase::Confirmed, proven.composer_frame);
+            return Ok(ActionOutput::json(json!({
+                "status": "confirmed", "effect_id": effect_id, "app": app,
+                "recipient": recipient, "text": text,
+                "effect": { "id": effect_id, "state": "confirmed", "retry_allowed": false }
+            }))
+            .with_effect(ExternalEffect {
+                id: effect_id,
+                state: ExternalEffectState::Confirmed,
+                retry_allowed: false,
+                user_message: None,
+            }));
+        }
+        let mut hazard = self
+            .svc
+            .hazard()
+            .map_err(tool)?
+            .ok_or_else(|| tool("the message safety record is missing".into()))?;
+        hazard.kind = if proven.composer_value.is_empty() {
+            HazardKind::SubmittedUnconfirmed
+        } else {
+            HazardKind::DraftPresent
+        };
+        self.svc.keep_hazard(Some(hazard)).map_err(tool)?;
+        self.svc.state.lock().unwrap().active_draft = None;
+        self.svc.activity(
+            app,
+            SEND,
+            ActivityPhase::SubmittedUnconfirmed,
+            proven.composer_frame,
+        );
+        Ok(self.unconfirmed_output(app, &recipient, &effect_id, proven.composer_frame, None))
+    }
+
+    fn effect_is_uncertain(&self, effect_id: &str) -> bool {
+        self.svc.hazard().ok().flatten().is_some_and(|hazard| {
+            hazard.kind == HazardKind::SubmittedUnconfirmed
+                && hazard.effect_id.as_deref() == Some(effect_id)
+        })
+    }
+
+    fn unconfirmed_output(
+        &self,
+        app: &str,
+        recipient: &str,
+        effect_id: &str,
+        target: Option<Frame>,
+        detail: Option<&str>,
+    ) -> ActionOutput {
+        self.svc.state.lock().unwrap().active_draft = None;
+        self.svc
+            .activity(app, SEND, ActivityPhase::SubmittedUnconfirmed, target);
+        let user_message = format!(
+            "The message may have sent, but ARK could not confirm it. Check {app}. ARK will not retry."
+        );
+        ActionOutput::json(json!({
+            "status": "submitted_unconfirmed",
+            "effect_id": effect_id,
+            "effect": {
+                "id": effect_id,
+                "state": "unconfirmed", "retry_allowed": false,
+                "user_message": user_message
+            },
+            "app": app, "recipient": recipient,
+            "detail": detail
+        }))
+        .with_effect(ExternalEffect {
+            id: effect_id.to_string(),
+            state: ExternalEffectState::Unconfirmed,
+            retry_allowed: false,
+            user_message: Some(user_message),
+        })
+    }
+
+    async fn cancel_message(&self, app: &str, input: &Value) -> Result<ActionOutput> {
+        let recipient = required_text(CANCEL, input, "recipient")?;
+        let text = required_text(CANCEL, input, "text")?;
+        let active = self
+            .svc
+            .state
+            .lock()
+            .unwrap()
+            .active_draft
+            .clone()
+            .ok_or_else(|| {
+                AdapterError::bad_input(
+                    CANCEL,
+                    "clear the draft in the app, then choose Check again",
+                )
+            })?;
+        if active.owner != self.owner
+            || !same_app(&active.app, app)
+            || active.recipient != recipient
+            || active.text != text
+        {
+            return Err(AdapterError::bad_input(
+                CANCEL,
+                "the request does not exactly match the staged draft",
+            ));
+        }
+        let look = self.fresh_look(app).await?;
+        let now = self.message_context(&look, &recipient, &text)?;
+        if now.window_identifier != active.context.window_identifier
+            || now.conversation_identifier != active.context.conversation_identifier
+            || now.composer_identifier != active.context.composer_identifier
+            || !now.composer_focused
+            || now.composer_value != text
+        {
+            return Err(tool("the draft changed; ARK will not erase it. Clear it in the app, then choose Check again".into()));
+        }
+        let at = look
+            .elements
+            .iter()
+            .position(|element| matches_identifier(element, &now.composer_identifier))
+            .ok_or_else(|| tool("the composer control is no longer available".into()))?;
+        let composer = look.controls[at].clone();
+        let name = app.to_string();
+        self.svc
+            .blocking(move |screen| {
+                composer.press()?;
+                in_front(screen, &name)?;
+                screen.keys("cmd+a")?;
+                screen.keys("delete")
+            })
+            .await
+            .map_err(tool)?;
+        self.svc.sent_input();
+        let after = self.fresh_look(app).await?;
+        let cleared = self.message_context(&after, &recipient, &text)?;
+        if !cleared.composer_value.is_empty() {
+            return Err(tool("ARK could not prove the composer is empty. Clear it in the app, then choose Check again".into()));
+        }
+        self.svc.keep_hazard(None).map_err(tool)?;
+        self.svc.state.lock().unwrap().active_draft = None;
+        self.svc.activity(app, CANCEL, ActivityPhase::Idle, None);
+        Ok(ActionOutput::json(
+            json!({ "status": "cancelled", "app": app }),
+        ))
     }
 
     /// A picture of the app's window, kept so `computer.point` can map its pixels to the screen.
@@ -657,6 +1539,7 @@ impl Computer {
         let out = json!({
             "app": look.app,
             "window": look.window,
+            "window_identifier": look.window_identifier,
             "text": look.text,
             "lines": look.text.lines().count(),
             "elements": look.elements,
@@ -708,17 +1591,16 @@ impl Adapter for Computer {
                         "double": { "type": "boolean" }, "right": { "type": "boolean" }
                     }
                 })),
-            ActionDescriptor::new(TYPE, "type into a field of an app, by its number and name; submit presses Return", RiskTier::Mutate)
+            ActionDescriptor::new(TYPE, "type into a field of an app, by its number and name. This never submits a message", RiskTier::Mutate)
                 .ask_each_time()
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "ref", "name", "text"],
                     "properties": {
                         "app": app(), "ref": el(), "name": named(),
-                        "text": { "type": "string", "description": "replaces what the field holds" },
-                        "submit": { "type": "boolean" }
+                        "text": { "type": "string", "description": "replaces what the field holds" }
                     }
                 })),
-            ActionDescriptor::new(KEYS, "press a key or shortcut in an app: return, escape, tab, cmd+s, cmd+shift+n", RiskTier::Mutate)
+            ActionDescriptor::new(KEYS, "press a key or shortcut in an app: return, escape, tab, cmd+s, cmd+shift+n. Never use this to submit a message; use computer.draft and computer.send", RiskTier::Mutate)
                 .ask_each_time()
                 .with_input_schema(json!({
                     "type": "object", "required": ["app", "keys"],
@@ -757,6 +1639,41 @@ impl Adapter for Computer {
                         "ref": el(), "name": named()
                     }
                 })),
+            ActionDescriptor::new(DRAFT, "draft a message in a native app after its accessibility tree proves the exact conversation and composer. This does not send", RiskTier::Mutate)
+                .ask_each_time()
+                .with_input_schema(json!({
+                    "type": "object",
+                    "required": ["app", "recipient", "conversation_ref", "conversation_name", "composer_ref", "composer_name", "text"],
+                    "properties": {
+                        "app": app(),
+                        "recipient": { "type": "string", "description": "the exact conversation recipient shown by computer.look" },
+                        "conversation_ref": el(),
+                        "conversation_name": named(),
+                        "composer_ref": el(),
+                        "composer_name": named(),
+                        "text": { "type": "string", "description": "the exact message to draft" }
+                    }
+                })),
+            ActionDescriptor::new(SEND, "send the exact staged draft to the exact recipient, then prove a new outgoing message. Never retry an unconfirmed send", RiskTier::Mutate)
+                .ask_each_time()
+                .with_input_schema(json!({
+                    "type": "object", "required": ["app", "recipient", "text"],
+                    "properties": {
+                        "app": app(),
+                        "recipient": { "type": "string", "description": "the exact recipient named in the staged draft" },
+                        "text": { "type": "string", "description": "the exact staged message" }
+                    }
+                })),
+            ActionDescriptor::new(CANCEL, "clear the exact unchanged staged draft. If the person edited it, ARK refuses and asks for manual cleanup", RiskTier::Mutate)
+                .ask_each_time()
+                .with_input_schema(json!({
+                    "type": "object", "required": ["app", "recipient", "text"],
+                    "properties": {
+                        "app": app(),
+                        "recipient": { "type": "string" },
+                        "text": { "type": "string", "description": "the exact staged message to clear" }
+                    }
+                })),
         ]
     }
 
@@ -772,8 +1689,33 @@ impl Adapter for Computer {
             return Err(AdapterError::UnknownAction(action.into()));
         }
         let app = app_of(action, &input)?;
-        self.ready().await?;
-        match action {
+        self.ready(&app, action).await?;
+        if !matches!(action, LOOK | SEE) {
+            match self.svc.hazard() {
+                Ok(Some(hazard)) => {
+                    let allowed = matches!(action, SEND | CANCEL);
+                    if !allowed {
+                        let (phase, message) = match hazard.kind {
+                            HazardKind::DraftPresent => (ActivityPhase::Hazardous, format!(
+                                "a draft may still be present in {}; clear it there, then choose Check again",
+                                hazard.app
+                            )),
+                            HazardKind::SubmittedUnconfirmed => (ActivityPhase::SubmittedUnconfirmed, format!(
+                                "a message may already have sent in {}; check it, then choose Check again. ARK will not retry",
+                                hazard.app
+                            )),
+                        };
+                        self.svc.activity(&app, action, phase, None);
+                        return Err(tool(message));
+                    }
+                }
+                Err(e) => return Err(tool(e)),
+                Ok(None) => {}
+            }
+        }
+        self.svc.activity(&app, action, ActivityPhase::Acting, None);
+        let result = async {
+            match action {
             LOOK => self.look(&app).await,
             OPEN => {
                 let name = app.clone();
@@ -787,6 +1729,8 @@ impl Adapter for Computer {
             CLICK => {
                 let n = number(action, &input)?;
                 let c = self.control(action, &app, n, name_of(&input))?;
+                self.svc
+                    .activity(&app, action, ActivityPhase::Acting, c.frame());
                 let how = if input["right"] == json!(true) {
                     Some(Pointer::Right)
                 } else if input["double"] == json!(true) {
@@ -896,6 +1840,17 @@ impl Adapter for Computer {
                     Pointer::Click
                 };
                 let (sx, sy) = shot.to_screen(x, y);
+                self.svc.activity(
+                    &app,
+                    action,
+                    ActivityPhase::Acting,
+                    Some(Frame {
+                        x: sx - 10.0,
+                        y: sy - 10.0,
+                        w: 20.0,
+                        h: 20.0,
+                    }),
+                );
                 let name = app.clone();
                 self.svc
                     .blocking(move |s| {
@@ -950,8 +1905,9 @@ impl Adapter for Computer {
             TYPE => {
                 let n = number(action, &input)?;
                 let c = self.control(action, &app, n, name_of(&input))?;
+                self.svc
+                    .activity(&app, action, ActivityPhase::Acting, c.frame());
                 let text = input["text"].as_str().unwrap_or("").to_string();
-                let submit = input["submit"].as_bool().unwrap_or(false);
                 let name = app.clone();
                 // Typed as a person types: the field focused, what it holds selected, the text
                 // as keys, so the app hears every change (a text set from outside leaves some
@@ -969,10 +1925,6 @@ impl Adapter for Computer {
                             }
                         } else {
                             c.set_text(&text)?;
-                        }
-                        if submit {
-                            in_front(s, &name)?;
-                            s.keys("return")?;
                         }
                         Ok(())
                     })
@@ -1003,8 +1955,24 @@ impl Adapter for Computer {
                 tokio::time::sleep(Duration::from_millis(300)).await;
                 self.look(&app).await
             }
-            _ => unreachable!("checked above"),
+            DRAFT => self.draft_message(&app, &input).await,
+            SEND => self.send_message(&app, &input).await,
+            CANCEL => self.cancel_message(&app, &input).await,
+                _ => unreachable!("checked above"),
+            }
         }
+        .await;
+        if result.is_err() {
+            let phase = match self.svc.hazard().ok().flatten().map(|hazard| hazard.kind) {
+                Some(HazardKind::DraftPresent) => ActivityPhase::Hazardous,
+                Some(HazardKind::SubmittedUnconfirmed) => ActivityPhase::SubmittedUnconfirmed,
+                None => ActivityPhase::Failed,
+            };
+            self.svc.activity(&app, action, phase, None);
+        } else if !matches!(action, DRAFT | SEND) {
+            self.svc.activity(&app, action, ActivityPhase::Idle, None);
+        }
+        result
     }
 }
 
@@ -1289,5 +2257,23 @@ impl ark_runtime::AcquisitionProvider for TurnOn {
         }
         AcquisitionResult::changed("The Computer is on. Its tools are ready to call: computer.*.")
             .with_tools(self.tools())
+    }
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::has_new_fingerprint;
+
+    #[test]
+    fn status_changes_are_not_new_messages_but_duplicate_bubbles_are() {
+        let fingerprint = "same stable outgoing identity".to_string();
+        assert!(!has_new_fingerprint(
+            std::slice::from_ref(&fingerprint),
+            std::slice::from_ref(&fingerprint),
+        ));
+        assert!(has_new_fingerprint(
+            std::slice::from_ref(&fingerprint),
+            &[fingerprint.clone(), fingerprint.clone()],
+        ));
     }
 }

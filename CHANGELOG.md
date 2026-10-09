@@ -7,6 +7,31 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.18.0] - 2026-10-09
+
+### Breaking
+- `ark_computer::Element` literals add `identifier`, `description`, `focused` and `frame`;
+  `Look` literals add `window_identifier`.
+- `ark_tools::ActionOutput` and `ark_core::Invocation` literals add `effect: None`. Use
+  `ActionOutput::json` where possible.
+- `computer.type` no longer accepts or presses `submit`. Native messages use
+  `computer.draft`, `computer.send` and `computer.cancel`.
+
+### Added
+- ADR 0056: native message sends prove the exact conversation, staged draft and new outgoing
+  message. A durable global safety record blocks retries and other mutations when a draft or
+  submission still needs attention.
+- Computer activity has sequenced phases and target frames. The native window can show where
+  ARK is acting, with Stop and Check again available in the window and menu.
+- Trusted external effects can be confirmed or unconfirmed independently of model-visible tool
+  output. An unresolved effect replaces an optimistic final answer before it is kept or shown.
+
+### Changed
+- Computer brings the approved app to the front and revalidates the conversation inside the
+  dispatch lock immediately before posting Return. Stop, release and send share that lock.
+- Project processes refuse common direct desktop automation commands and point the agent to
+  Computer. This is a usability guard, not a sandbox boundary.
+
 ## [0.17.0] - 2026-10-09
 
 ### Breaking

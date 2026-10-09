@@ -48,8 +48,15 @@ impl ProcessTool {
                 .unwrap_or("")
                 .to_string()
         };
+        let command = s("command");
+        if direct_desktop_automation(&command) {
+            return Err(bad(
+                START,
+                "project processes do not open or control desktop apps; use the Computer capability",
+            ));
+        }
         let req = Start {
-            command: s("command"),
+            command,
             folder: s("folder"),
             port: input
                 .get("port")
@@ -113,6 +120,39 @@ impl ProcessTool {
             .await
             .ok_or_else(|| bad(STOP, format!("there is no process `{id}`")))?;
         Ok(ActionOutput::json(info_json(&info)))
+    }
+}
+
+/// A usability guard for the common mistake seen in the WhatsApp trace. Project processes are
+/// intentionally not a sandbox, so this rejects direct forms only and makes no security claim.
+fn direct_desktop_automation(command: &str) -> bool {
+    fn executable(word: &str) -> &str {
+        word.rsplit('/').next().unwrap_or(word)
+    }
+    let lower = command.trim().to_ascii_lowercase();
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    let mut at = 0;
+    if words.get(at).is_some_and(|w| executable(w) == "env") {
+        at += 1;
+        while words
+            .get(at)
+            .is_some_and(|w| w.contains('=') && !w.starts_with('='))
+        {
+            at += 1;
+        }
+    }
+    match words.get(at).map(|w| executable(w)) {
+        Some("osascript") => true,
+        Some("open") => words[at + 1..]
+            .iter()
+            .any(|w| matches!(*w, "-a" | "--application")),
+        Some("sh" | "bash" | "zsh") => {
+            let rest = words[at + 1..].join(" ");
+            rest.contains("osascript")
+                || (rest.contains("open")
+                    && (rest.contains(" -a ") || rest.contains(" --application ")))
+        }
+        _ => false,
     }
 }
 
@@ -230,4 +270,32 @@ fn line(p: &Json) -> String {
         _ => "running".into(),
     });
     t
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::direct_desktop_automation;
+
+    #[test]
+    fn common_direct_desktop_commands_use_computer_instead() {
+        for command in [
+            "open -a WhatsApp",
+            "/usr/bin/open --application WhatsApp",
+            "osascript -e 'tell application \"WhatsApp\" to activate'",
+            "/usr/bin/env LANG=C /usr/bin/osascript script.scpt",
+            "env FOO=bar open -a WhatsApp",
+            "sh -c 'open -a WhatsApp'",
+            "/bin/zsh -c '/usr/bin/osascript -e x'",
+        ] {
+            assert!(direct_desktop_automation(command), "{command}");
+        }
+        for command in [
+            "cargo test",
+            "npm run dev",
+            "openapi generate",
+            "echo osascript",
+        ] {
+            assert!(!direct_desktop_automation(command), "{command}");
+        }
+    }
 }

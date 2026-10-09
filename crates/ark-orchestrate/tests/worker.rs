@@ -183,10 +183,33 @@ struct Setup {
     _dir: tempfile::TempDir,
     store: PathBuf,
     log: PathBuf,
+    env: Vec<(&'static str, Option<std::ffi::OsString>)>,
+}
+
+impl Drop for Setup {
+    fn drop(&mut self) {
+        for (key, value) in self.env.drain(..) {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
 }
 
 fn setup() -> Setup {
     let one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+    let env = [
+        "ARK_FAKE_PROGRAM",
+        "ARK_TEST_FAKE_PROGRAM_PATH",
+        "FAKE_MODE",
+        "FAKE_KIND",
+        "FAKE_HANG",
+        "ANTHROPIC_API_KEY",
+    ]
+    .into_iter()
+    .map(|key| (key, std::env::var_os(key)))
+    .collect();
     for k in ["FAKE_MODE", "FAKE_KIND", "FAKE_HANG"] {
         std::env::remove_var(k);
     }
@@ -200,6 +223,7 @@ fn setup() -> Setup {
         _dir: dir,
         store,
         log,
+        env,
     }
 }
 

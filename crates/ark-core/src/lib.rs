@@ -42,7 +42,7 @@ pub use capability::{Capability, CapabilityCatalog, CapabilitySpec};
 pub use context::WorkspaceContext;
 pub use error::{CoreError, Result};
 pub use ids::{ArtifactId, InvocationId, NoteId, ProjectId, SessionId};
-pub use invocation::{Invocation, InvocationStatus};
+pub use invocation::{ExternalEffect, ExternalEffectState, Invocation, InvocationStatus};
 pub use project::{Author, Note, NoteKind, Project};
 pub use research::{
     Claim, ClaimType, EdgeRel, EvidenceCard, GraphEdge, GraphNode, Interesting, InvestigationGraph,

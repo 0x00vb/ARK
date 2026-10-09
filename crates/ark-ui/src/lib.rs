@@ -304,9 +304,10 @@ impl ArkUi {
     #[cfg(feature = "desktop")]
     pub fn run_desktop(self, context: tauri::Context<tauri::Wry>) -> std::process::ExitCode {
         let keep_running = self.keep_running;
+        let overlay_accent = self.info.accent.clone();
         let opened = tauri::async_runtime::block_on(self.open());
         match opened {
-            Ok((host, assets)) => desktop::run(host, assets, context, keep_running),
+            Ok((host, assets)) => desktop::run(host, assets, context, keep_running, overlay_accent),
             Err(e) => {
                 eprintln!("error: {e:#}");
                 std::process::ExitCode::FAILURE

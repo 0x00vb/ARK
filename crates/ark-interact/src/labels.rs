@@ -13,6 +13,29 @@ use serde_json::Value;
 
 use crate::fmt::clip;
 
+/// A Computer activity phase in words a person can act on. Front-ends draw these words; they do
+/// not expose action names or runtime terms.
+pub fn computer_activity_line(
+    activity: &ark_sdk::prelude::ark_computer::ComputerActivity,
+) -> String {
+    use ark_sdk::prelude::ark_computer::ActivityPhase;
+    match activity.phase {
+        ActivityPhase::WaitingPermission => format!("Allow ARK to use {}", activity.app),
+        ActivityPhase::WaitingPerson => "Waiting for you to finish".into(),
+        ActivityPhase::Acting => format!("Using {}", activity.app),
+        ActivityPhase::Verifying => format!("Checking {}", activity.app),
+        ActivityPhase::Hazardous => format!("A draft in {} needs attention", activity.app),
+        ActivityPhase::Stopped => "Stopped".into(),
+        ActivityPhase::Refused => "That action was not allowed".into(),
+        ActivityPhase::Failed => format!("Could not use {}", activity.app),
+        ActivityPhase::SubmittedUnconfirmed => {
+            format!("The message may have sent. Check {}", activity.app)
+        }
+        ActivityPhase::Confirmed => format!("Confirmed in {}", activity.app),
+        ActivityPhase::Idle => String::new(),
+    }
+}
+
 /// Custom wording for a consumer's tools. Every method is optional; `None` falls back to the
 /// default.
 pub trait ToolLabeler: Send + Sync {
@@ -632,16 +655,24 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
             s("app")
         ),
         "computer.type" => format!(
-            "Typing \"{}\" into {} in {}{}",
+            "Typing \"{}\" into {} in {}",
             clip(s("text"), 60),
             element(input),
-            s("app"),
-            if input.get("submit").and_then(Value::as_bool) == Some(true) {
-                ", then Return"
-            } else {
-                ""
-            }
+            s("app")
         ),
+        "computer.draft" => format!(
+            "Drafting \"{}\" to {} in {}",
+            clip(s("text"), 60),
+            s("recipient"),
+            s("app")
+        ),
+        "computer.send" => format!(
+            "Sending \"{}\" to {} in {}",
+            clip(s("text"), 60),
+            s("recipient"),
+            s("app")
+        ),
+        "computer.cancel" => format!("Clearing the draft to {} in {}", s("recipient"), s("app")),
         "computer.keys" => format!("Pressing {} in {}", s("keys"), s("app")),
         "computer.menu" => match s("path").trim() {
             "" => format!("Reading the menus of {}", s("app")),
@@ -982,7 +1013,14 @@ mod tests {
                 "computer.type",
                 &json!({ "app": "Notes", "ref": 3, "name": "Title", "text": "Plan", "submit": true })
             ),
-            "Typing \"Plan\" into “Title” in Notes, then Return"
+            "Typing \"Plan\" into “Title” in Notes"
+        );
+        assert_eq!(
+            l.call_label(
+                "computer.send",
+                &json!({ "app": "Messages", "recipient": "Lara", "text": "Hola" })
+            ),
+            "Sending \"Hola\" to Lara in Messages"
         );
         assert_eq!(
             l.call_label(

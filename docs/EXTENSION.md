@@ -250,7 +250,8 @@ that is off until the person allows it does the same through `PerAgent::acquisit
 |---|---|
 | `computer.apps` | The open apps. Runs on its own |
 | `computer.look {app}` | The app's front window: text and numbered controls |
-| `computer.open {app}`, `computer.click {app, ref, name}`, `computer.type {app, ref, name, text, submit}`, `computer.keys {app, keys}` | Start or bring forward an app; press a control; type into a field; a key or shortcut (`cmd+s`). The name must be the control's at that number. Each answers with the window after |
+| `computer.open {app}`, `computer.click {app, ref, name}`, `computer.type {app, ref, name, text}`, `computer.keys {app, keys}` | Start or bring forward an app; press a control; type into a field without submitting; press a key or shortcut (`cmd+s`). The name must be the control's at that number. Each answers with the window after |
+| `computer.draft`, `computer.send`, `computer.cancel` | Draft, verify, send or clear an exact message through a consumer's `MessageEvidence`. An uncertain submission is terminal and blocks Computer changes until the person checks the app (ADR 0056) |
 
 Every action but `apps` asks each time (`ActionDescriptor::ask_each_time`): Allow once or Deny,
 never remembered, so nothing on the screen runs unattended. Keys and text that go to the app in

@@ -28,6 +28,8 @@ struct Inner {
     person_typed: Option<Instant>,
     /// The field that has the focus: (app, control index).
     focus: Option<(String, usize)>,
+    sends_on_return: bool,
+    return_fails: bool,
 }
 
 /// A fake [`Screen`].
@@ -93,6 +95,26 @@ impl FakeScreen {
     /// Opening an app leaves another one in front (another window took the focus).
     pub fn front_stays_elsewhere(self) -> Self {
         self.inner.lock().unwrap().stuck_front = true;
+        self
+    }
+
+    /// Another app takes the front and opening apps can no longer move it. Used to prove that
+    /// global keys are never posted on stale accessibility focus.
+    pub fn keep_front_on(&self, app: &str) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.front = Some(app.to_string());
+        inner.stuck_front = true;
+    }
+
+    /// Return sends the focused field: it clears the field and appends an outgoing item.
+    pub fn sends_on_return(self) -> Self {
+        self.inner.lock().unwrap().sends_on_return = true;
+        self
+    }
+
+    /// Return reports an error, which cannot prove whether the app received it.
+    pub fn return_fails(self) -> Self {
+        self.inner.lock().unwrap().return_fails = true;
         self
     }
 
@@ -224,6 +246,18 @@ impl Screen for FakeScreen {
                     value: v.clone(),
                     disabled: false,
                     selected: false,
+                    identifier: Some(format!("fake-{k}")),
+                    description: Some(n.clone()),
+                    focused: i
+                        .focus
+                        .as_ref()
+                        .is_some_and(|(a, at)| a == name && *at == k),
+                    frame: Some(Frame {
+                        x: 10.0,
+                        y: 20.0 + 30.0 * k as f64,
+                        w: 100.0,
+                        h: 20.0,
+                    }),
                 }
             })
             .collect();
@@ -239,6 +273,7 @@ impl Screen for FakeScreen {
         Ok(Look {
             app: name.clone(),
             window: format!("{name} window"),
+            window_identifier: Some(format!("fake-{name}-window")),
             text: format!("The {name} window."),
             elements,
             controls: handles,
@@ -257,8 +292,22 @@ impl Screen for FakeScreen {
         Ok(())
     }
     fn keys(&self, keys: &str) -> Result<(), String> {
+        if keys == "return" && self.inner.lock().unwrap().return_fails {
+            return Err("Return had no acknowledgement".into());
+        }
         if keys == "delete" {
             self.type_into_focus("");
+        }
+        if keys == "return" {
+            let mut i = self.inner.lock().unwrap();
+            if i.sends_on_return {
+                if let Some((app, k)) = i.focus.clone() {
+                    if let Some((_, controls)) = i.apps.iter_mut().find(|(a, _)| *a == app) {
+                        let text = controls[k].2.take().unwrap_or_default();
+                        controls.push(("button".into(), format!("Outgoing {text}"), None));
+                    }
+                }
+            }
         }
         self.record(format!("keys {keys}"));
         Ok(())

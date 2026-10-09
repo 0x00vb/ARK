@@ -14,6 +14,8 @@ serde.workspace = true
 serde_json.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
+ring = "0.17"
+base64 = "0.22"
 tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -22,4 +24,5 @@ core-foundation = "0.10"
 [dev-dependencies]
 ark-core.workspace = true
 ark-model.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

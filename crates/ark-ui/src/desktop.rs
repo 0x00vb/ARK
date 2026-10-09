@@ -22,7 +22,7 @@
 //! stays in the menu bar (the tray elsewhere) with Open and Quit, and the Dock icon opens it.
 
 use std::borrow::Cow;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::Value;
@@ -30,7 +30,9 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent};
-use tauri::{LogicalPosition, LogicalSize, Manager, RunEvent, WebviewUrl, WindowEvent, Wry};
+use tauri::{
+    Emitter as _, LogicalPosition, LogicalSize, Manager, RunEvent, WebviewUrl, WindowEvent, Wry,
+};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::assets::Assets;
@@ -71,6 +73,8 @@ struct State(Arc<Host>);
 const MAIN: &str = "main";
 /// The Browser panel's webview, added to the window over the panel.
 const BROWSER: &str = "ark-browser";
+const COMPUTER_TARGET: &str = "ark-computer-target";
+const COMPUTER_CONTROL: &str = "ark-computer-control";
 /// The Browser's cookies and storage, apart from the app's own page (macOS 14 and later; before,
 /// the system's default store).
 const BROWSER_STORE: [u8; 16] = *b"ark-browser-view";
@@ -81,6 +85,7 @@ static PAGE_LOADS: AtomicU64 = AtomicU64::new(0);
 /// When the Browser last sent a download to the person's browser (ms since the epoch): at most
 /// one every few seconds, so a page cannot open tab after tab.
 static LAST_DOWNLOAD: AtomicU64 = AtomicU64::new(0);
+static REDUCE_COMPUTER_MOTION: AtomicBool = AtomicBool::new(false);
 
 /// Where the Browser panel's events go: the page that last showed it.
 #[derive(Default)]
@@ -546,6 +551,7 @@ pub(crate) fn run(
     assets: Arc<Assets>,
     mut context: tauri::Context<Wry>,
     keep_running: bool,
+    overlay_accent: Option<String>,
 ) -> std::process::ExitCode {
     context.config_mut().app.with_global_tauri = true;
     let name = context
@@ -559,6 +565,7 @@ pub(crate) fn run(
         fallback,
     }));
     let events = host.subscribe();
+    let computer_events = host.uses_computer().then(|| host.subscribe());
     let builder = tauri::Builder::default()
         // A second launch brings this window forward instead of starting a second runtime on
         // the same store.
@@ -584,6 +591,9 @@ pub(crate) fn run(
             ark_update_status,
             ark_update_check,
             ark_update_events
+            ,ark_computer_stop
+            ,ark_computer_check
+            ,ark_computer_motion
         ])
         // The window's page loads again (a reload, a visit to a runtime elsewhere, the way
         // back): the Browser's view belonged to the page before.
@@ -616,6 +626,15 @@ pub(crate) fn run(
             }
             if keep_running {
                 tray(app, &name)?;
+            }
+            if let Some(events) = computer_events {
+                if let Err(error) = start_computer_overlay(
+                    app,
+                    events,
+                    overlay_accent.as_deref().unwrap_or("#335eb7"),
+                ) {
+                    tracing::warn!(%error, "Computer overlay is unavailable; the main window controls remain available");
+                }
             }
             #[cfg(all(
                 feature = "desktop-updater",
@@ -655,6 +674,200 @@ pub(crate) fn run(
     std::process::ExitCode::SUCCESS
 }
 
+#[tauri::command]
+async fn ark_computer_stop(
+    webview: tauri::Webview,
+    state: tauri::State<'_, State>,
+) -> Result<Value, String> {
+    if !matches!(webview.label(), COMPUTER_CONTROL | MAIN) {
+        return Err("only ARK's Computer controls can stop it".into());
+    }
+    Ok(serde_json::json!({ "stopped": state.0.computer_stop() }))
+}
+
+#[tauri::command]
+async fn ark_computer_check(
+    webview: tauri::Webview,
+    state: tauri::State<'_, State>,
+) -> Result<Value, String> {
+    if !matches!(webview.label(), COMPUTER_CONTROL | MAIN) {
+        return Err("only ARK's Computer controls can check it".into());
+    }
+    state.0.computer_check().await
+}
+
+#[tauri::command]
+fn ark_computer_motion(webview: tauri::Webview, reduce: bool) -> Result<(), String> {
+    if !matches!(webview.label(), COMPUTER_TARGET | COMPUTER_CONTROL) {
+        return Err("only ARK's Computer overlay can set its motion preference".into());
+    }
+    REDUCE_COMPUTER_MOTION.store(reduce, Ordering::SeqCst);
+    Ok(())
+}
+
+fn start_computer_overlay(
+    app: &tauri::App,
+    mut events: tokio::sync::broadcast::Receiver<Value>,
+    accent: &str,
+) -> tauri::Result<()> {
+    let target = tauri::WebviewWindowBuilder::new(
+        app,
+        COMPUTER_TARGET,
+        WebviewUrl::App("computer-overlay.html?kind=target".into()),
+    )
+    .inner_size(52.0, 52.0)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .visible_on_all_workspaces(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .shadow(false)
+    .focused(false)
+    .visible(false)
+    .build()?;
+    target.set_ignore_cursor_events(true)?;
+    let _control = tauri::WebviewWindowBuilder::new(
+        app,
+        COMPUTER_CONTROL,
+        WebviewUrl::App("computer-overlay.html?kind=control".into()),
+    )
+    .inner_size(300.0, 44.0)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .visible_on_all_workspaces(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .shadow(false)
+    .focused(false)
+    .visible(false)
+    .build()?;
+    let accent = accent.to_string();
+    let handle = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        let mut newest = 0;
+        let mut last_target: Option<(f64, f64)> = None;
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            };
+            if event["kind"] != "computer_action" {
+                continue;
+            }
+            let Some(activity) = event.get("activity") else {
+                continue;
+            };
+            let sequence = activity["sequence"].as_u64().unwrap_or(0);
+            if !new_computer_activity(sequence, newest) {
+                continue;
+            }
+            newest = sequence;
+            let phase = activity["phase"].as_str().unwrap_or("idle");
+            let line = event["line"].as_str().unwrap_or("");
+            let payload = serde_json::json!({
+                "sequence": sequence, "phase": phase, "line": line, "accent": accent
+            });
+            if let Some(window) = handle.get_webview_window(COMPUTER_TARGET) {
+                let _ = window.emit("computer-overlay", &payload);
+            }
+            if let Some(window) = handle.get_webview_window(COMPUTER_CONTROL) {
+                let _ = window.emit("computer-overlay", &payload);
+            }
+            let target_frame = activity.get("target").filter(|v| v.is_object());
+            if let Some(frame) = target_frame {
+                let x = frame["x"].as_f64().unwrap_or(0.0);
+                let y = frame["y"].as_f64().unwrap_or(0.0);
+                let w = frame["w"].as_f64().unwrap_or(0.0);
+                let h = frame["h"].as_f64().unwrap_or(0.0);
+                let center = (x + w / 2.0, y + h / 2.0);
+                if let Some(window) = handle.get_webview_window(COMPUTER_TARGET) {
+                    let _ = window.show();
+                    if let Some(from) = last_target {
+                        if !REDUCE_COMPUTER_MOTION.load(Ordering::SeqCst) {
+                            for step in 1..=7 {
+                                let t = step as f64 / 7.0;
+                                let eased = 1.0 - (1.0 - t).powi(3);
+                                let px = from.0 + (center.0 - from.0) * eased - 26.0;
+                                let py = from.1 + (center.1 - from.1) * eased - 26.0;
+                                let _ = window.set_position(LogicalPosition::new(px, py));
+                                tokio::time::sleep(std::time::Duration::from_millis(16)).await;
+                            }
+                        } else {
+                            let _ = window.set_position(LogicalPosition::new(
+                                center.0 - 26.0,
+                                center.1 - 26.0,
+                            ));
+                        }
+                    } else {
+                        let _ = window
+                            .set_position(LogicalPosition::new(center.0 - 26.0, center.1 - 26.0));
+                    }
+                }
+                last_target = Some(center);
+                if let Some(window) = handle.get_webview_window(COMPUTER_CONTROL) {
+                    let (px, py) = overlay_control_position(&handle, x + w / 2.0, y, 300.0, 44.0);
+                    let _ = window.set_position(LogicalPosition::new(px, py));
+                }
+            } else if let Some(window) = handle.get_webview_window(COMPUTER_TARGET) {
+                let _ = window.hide();
+                last_target = None;
+            }
+            if computer_overlay_hidden(phase) {
+                if let Some(window) = handle.get_webview_window(COMPUTER_TARGET) {
+                    let _ = window.hide();
+                }
+                if let Some(window) = handle.get_webview_window(COMPUTER_CONTROL) {
+                    let _ = window.hide();
+                }
+                last_target = None;
+            } else if let Some(window) = handle.get_webview_window(COMPUTER_CONTROL) {
+                let _ = window.show();
+            }
+        }
+    });
+    Ok(())
+}
+
+fn new_computer_activity(sequence: u64, newest: u64) -> bool {
+    sequence > newest
+}
+
+fn computer_overlay_hidden(phase: &str) -> bool {
+    matches!(
+        phase,
+        "idle" | "stopped" | "failed" | "refused" | "confirmed"
+    )
+}
+
+fn overlay_control_position(
+    app: &tauri::AppHandle,
+    target_x: f64,
+    target_y: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let Some(monitor) = app.monitor_from_point(target_x, target_y).ok().flatten() else {
+        return (target_x - width / 2.0, target_y - height - 12.0);
+    };
+    let scale = monitor.scale_factor();
+    let position = monitor.position().to_logical::<f64>(scale);
+    let size = monitor.size().to_logical::<f64>(scale);
+    let x = (target_x - width / 2.0).clamp(position.x + 8.0, position.x + size.width - width - 8.0);
+    let above = target_y - height - 12.0;
+    let y = if above >= position.y + 8.0 {
+        above
+    } else {
+        target_y + 64.0
+    };
+    (
+        x,
+        y.clamp(position.y + 8.0, position.y + size.height - height - 8.0),
+    )
+}
+
 fn show(app: &tauri::AppHandle) {
     if let Some(w) = main_window(app) {
         let _ = w.unminimize();
@@ -663,17 +876,40 @@ fn show(app: &tauri::AppHandle) {
     }
 }
 
-/// The menu-bar item: open the window, or quit (which stops the agents' work).
+/// The menu-bar item: controls that remain reachable while another app is in front.
 fn tray(app: &tauri::App, name: &str) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", format!("Open {name}"), true, None::<&str>)?;
+    let stop = MenuItem::with_id(app, "computer-stop", "Stop Computer", true, None::<&str>)?;
+    let check = MenuItem::with_id(
+        app,
+        "computer-check",
+        "Check message again",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", format!("Quit {name}"), true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
+    let menu = if app.state::<State>().0.uses_computer() {
+        Menu::with_items(app, &[&open, &stop, &check, &quit])?
+    } else {
+        Menu::with_items(app, &[&open, &quit])?
+    };
     let mut b = TrayIconBuilder::with_id("ark")
         .tooltip(name)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, ev| match ev.id().as_ref() {
             "open" => show(app),
+            "computer-stop" => {
+                app.state::<State>().0.computer_stop();
+            }
+            "computer-check" => {
+                let host = app.state::<State>().0.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = host.computer_check().await {
+                        tracing::warn!(%error, "Computer message check did not clear the safety block");
+                    }
+                });
+            }
             "quit" => app.exit(0),
             _ => {}
         });
@@ -768,6 +1004,29 @@ mod tests {
         assert!(!own("http://127.0.0.1:8420/"));
         assert!(!own("http://tauri.localhost.example.com/"));
         assert!(!own(OWN_PAGE));
+    }
+
+    #[test]
+    fn terminal_computer_activity_hides_the_overlay_but_attention_stays_visible() {
+        for phase in ["idle", "stopped", "failed", "refused", "confirmed"] {
+            assert!(computer_overlay_hidden(phase), "{phase}");
+        }
+        for phase in [
+            "locating",
+            "acting",
+            "verifying",
+            "draft_present",
+            "submitted_unconfirmed",
+        ] {
+            assert!(!computer_overlay_hidden(phase), "{phase}");
+        }
+    }
+
+    #[test]
+    fn stale_computer_activity_cannot_restore_an_old_overlay() {
+        assert!(new_computer_activity(8, 7));
+        assert!(!new_computer_activity(7, 7));
+        assert!(!new_computer_activity(6, 7));
     }
 
     #[test]

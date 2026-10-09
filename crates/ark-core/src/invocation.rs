@@ -19,6 +19,24 @@ pub enum InvocationStatus {
     Denied,
 }
 
+/// A trusted outcome for an external effect. This is carried outside an adapter's JSON output,
+/// so ordinary tool data cannot impersonate it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalEffect {
+    pub id: String,
+    pub state: ExternalEffectState,
+    pub retry_allowed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalEffectState {
+    Confirmed,
+    Unconfirmed,
+}
+
 /// One recorded call to an action.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Invocation {
@@ -43,6 +61,10 @@ pub struct Invocation {
     pub consumed: Vec<ArtifactId>,
     #[serde(default)]
     pub error: Option<String>,
+    /// Trusted external-effect state set through an action's typed result, not parsed from the
+    /// adapter's model-visible JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<ExternalEffect>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option", default)]
@@ -83,6 +105,7 @@ impl Invocation {
             produced: Vec::new(),
             consumed: Vec::new(),
             error: None,
+            effect: None,
             created_at: OffsetDateTime::now_utc(),
             finished_at: None,
             pid: None,

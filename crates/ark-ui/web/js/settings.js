@@ -97,25 +97,48 @@ export function registerAppearance(ark) {
     icon: "sun",
     builtin: true,
     render(el) {
-      const choices = [["system", "System"], ["light", "Light"], ["dark", "Dark"], ["monokai", "Monokai"], ["dracula", "Dracula"], ["github", "GitHub"], ["xcode", "Xcode"]];
-      const group = h("div.theme-choices", { role: "radiogroup", "aria-label": "Theme" });
+      const modes = [["system", "System"], ["light", "Light"], ["dark", "Dark"]];
+      const palettes = [["monokai", "Monokai"], ["dracula", "Dracula"], ["github", "GitHub"], ["xcode", "Xcode"]];
+      const group = (name, className) => h(`div.${className}`, { role: "radiogroup", "aria-label": name });
+      const themeGroup = group("Theme", "appearance-theme-group");
+      const modeGroup = h("div.appearance-mode-grid");
+      const paletteGroup = h("div.appearance-palette-grid");
+      const materialGroup = group("Window style", "appearance-material-grid");
+      const preview = (kind) => h("span.appearance-preview", { "data-kind": kind, "aria-hidden": "true" },
+        h("span.appearance-preview-rail"),
+        h("span.appearance-preview-page", h("i"), h("i"), h("i")));
+      const option = (id, label, name, checked, change, kind = id) =>
+        h("label.appearance-choice", { "data-palette": id },
+          h("input", { type: "radio", name, value: id, checked, onchange: change }),
+          preview(kind), h("span.appearance-choice-name", label));
       const draw = () => {
         const now = window.arkTheme?.choice() || "system";
-        clear(group).append(...choices.map(([id, label]) => h("label.theme-choice", { "data-palette": id },
-          h("input", { type: "radio", name: "ark-theme", value: id, checked: now === id, onchange: () => { window.arkTheme?.set(id); draw(); } }),
-          h("span.theme-swatch", { "aria-hidden": "true" }),
-          h("span", label))));
+        clear(modeGroup).append(...modes.map(([id, label]) =>
+          option(id, label, "ark-theme", now === id, () => { window.arkTheme?.set(id); draw(); })));
+        clear(paletteGroup).append(...palettes.map(([id, label]) =>
+          option(id, label, "ark-theme", now === id, () => { window.arkTheme?.set(id); draw(); })));
+        const material = window.arkMaterial?.choice() || "solid";
+        clear(materialGroup).append(...[["solid", "Solid"], ["translucent", "Translucent"]].map(([id, label]) =>
+          option(id, label, "ark-material", material === id, () => { window.arkMaterial?.set(id); draw(); }, `material-${id}`)));
       };
-      group.addEventListener("keydown", (e) => {
-        if (e.key !== "Home" && e.key !== "End") return;
-        e.preventDefault();
-        const inputs = [...group.querySelectorAll("input")];
-        const input = e.key === "Home" ? inputs[0] : inputs.at(-1);
-        input?.focus();
-        input?.click();
-      });
+      const keys = (container) => container.addEventListener("keydown", (e) => {
+          if (e.key !== "Home" && e.key !== "End") return;
+          e.preventDefault();
+          const inputs = [...container.querySelectorAll("input")];
+          const input = e.key === "Home" ? inputs[0] : inputs.at(-1);
+          input?.focus();
+          input?.click();
+        });
+      [themeGroup, materialGroup].forEach(keys);
       draw();
-      el.append(h("div.plugin-list", settingRow("Theme", null, group)));
+      el.classList.add("appearance-settings");
+      el.append(
+        themeGroup);
+      themeGroup.append(
+        h("section.appearance-section", h("h2", "Mode"), modeGroup),
+        h("section.appearance-section", h("h2", "Palette"), paletteGroup));
+      if (document.querySelector('.app[data-shell="desktop"][data-os="macos"]'))
+        el.append(h("section.appearance-section", h("h2", "Window"), materialGroup));
     },
   });
 }

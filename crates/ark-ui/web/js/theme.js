@@ -7,7 +7,9 @@
 (() => {
   const root = document.documentElement;
   const KEY = "ark-theme";
+  const MATERIAL_KEY = "ark-window-style";
   const CHOICES = ["system", "light", "dark", "monokai", "dracula", "github", "xcode"];
+  const MATERIALS = ["solid", "translucent"];
   const DARK = new Set(["dark", "monokai", "dracula"]);
   const dark = matchMedia("(prefers-color-scheme: dark)");
 
@@ -19,6 +21,14 @@
     }
   };
   const choice = () => [saved(), root.dataset.themeDefault].find((c) => CHOICES.includes(c)) || "system";
+  const materialChoice = () => {
+    try {
+      const value = localStorage.getItem(MATERIAL_KEY);
+      return MATERIALS.includes(value) ? value : "translucent";
+    } catch {
+      return "translucent";
+    }
+  };
 
   function apply(force = false) {
     const c = choice();
@@ -28,6 +38,7 @@
     root.dataset.theme = theme;
     root.dataset.colorScheme = scheme;
     root.dataset.themeChoice = c;
+    root.dataset.material = materialChoice();
     if (!changed && !force) return;
     dispatchEvent(new CustomEvent("ark:theme", { detail: theme }));
   }
@@ -39,6 +50,16 @@
       if (!CHOICES.includes(c)) return;
       try {
         localStorage.setItem(KEY, c);
+      } catch {}
+      apply(true);
+    },
+  };
+  window.arkMaterial = {
+    choice: materialChoice,
+    set(value) {
+      if (!MATERIALS.includes(value)) return;
+      try {
+        localStorage.setItem(MATERIAL_KEY, value);
       } catch {}
       apply(true);
     },

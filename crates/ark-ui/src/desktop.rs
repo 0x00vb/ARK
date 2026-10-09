@@ -35,7 +35,7 @@ use tauri::{
 };
 use tauri_plugin_notification::NotificationExt;
 
-use crate::assets::Assets;
+use crate::assets::{versioned, Assets};
 use crate::host::Host;
 
 struct UiAssets {
@@ -553,6 +553,17 @@ pub(crate) fn run(
     keep_running: bool,
     overlay_accent: Option<String>,
 ) -> std::process::ExitCode {
+    // WebKit keeps local app modules across updates. A versioned base path makes every relative
+    // stylesheet, script and module URL new for this ARK release, while local storage stays put.
+    if let Some(window) = context
+        .config_mut()
+        .app
+        .windows
+        .iter_mut()
+        .find(|window| window.label == MAIN)
+    {
+        window.url = WebviewUrl::App(versioned("index.html").into());
+    }
     context.config_mut().app.with_global_tauri = true;
     let name = context
         .config()

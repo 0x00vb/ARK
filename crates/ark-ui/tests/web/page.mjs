@@ -998,31 +998,51 @@ async function settings(page) {
 
   // The test page opens light (no app default, a light system); Dark is kept across a reload.
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
+  await page.locator(".app").evaluate((app) => {
+    app.dataset.shell = "desktop";
+    app.dataset.os = "macos";
+    const root = document.documentElement.style;
+    root.setProperty("--appearance-light-bg", "#fafaf7");
+    root.setProperty("--appearance-light-accent", "#335eb7");
+  });
   await page.locator(".settings-list .nav-row", { hasText: "Appearance" }).click();
-  assert.equal(await page.locator(".settings-section .theme-choice").count(), 7);
-  await page.locator(".settings-section .theme-choice", { hasText: "Dark" }).click();
+  assert.equal(await page.locator(".settings-section .appearance-choice").count(), 9);
+  assert.equal(await page.locator('.appearance-settings [role="radiogroup"]').count(), 2);
+  assert.equal(await page.locator(".appearance-theme-group input:checked").count(), 1);
+  assert.equal(await page.locator(".appearance-mode-grid .appearance-preview").count(), 3);
+  assert.equal(await page.locator(".appearance-palette-grid .appearance-preview").count(), 4);
+  assert.equal(await page.locator(".appearance-material-grid .appearance-preview").count(), 2);
+  const brandedLight = await page.locator('.appearance-choice[data-palette="light"]').evaluate((choice) => ({
+    background: getComputedStyle(choice.querySelector(".appearance-preview")).backgroundColor,
+    accent: getComputedStyle(choice.querySelector(".appearance-preview-page i")).backgroundColor,
+  }));
+  assert.deepEqual(brandedLight, { background: "rgb(250, 250, 247)", accent: "rgb(51, 94, 183)" });
+  await page.locator(".appearance-material-grid .appearance-choice", { hasText: "Translucent" }).click();
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.material), "translucent");
+  assert.equal(await page.locator(".appearance-theme-group input:checked").count(), 1);
+  await page.locator(".settings-section .appearance-choice", { hasText: "Dark" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "dark");
   const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   assert.equal(await bg(), "rgb(27, 27, 27)");
-  await page.locator(".settings-section .theme-choice", { hasText: "Dracula" }).click();
+  await page.locator(".settings-section .appearance-choice", { hasText: "Dracula" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dracula");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "dark");
   assert.equal(await bg(), "rgb(40, 42, 54)");
-  await page.locator(".settings-section .theme-choice", { hasText: "GitHub" }).click();
+  await page.locator(".settings-section .appearance-choice", { hasText: "GitHub" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "light");
   await page.setViewportSize({ width: 360, height: 720 });
-  const themeLayout = await page.locator(".theme-choices").evaluate((group) => ({
+  const themeLayout = await page.locator(".appearance-settings").evaluate((group) => ({
     fits: group.scrollWidth <= group.clientWidth,
     targets: [...group.querySelectorAll("label")].map((label) => label.getBoundingClientRect().height),
   }));
   assert.equal(themeLayout.fits, true, "theme choices do not overflow a 360px window");
   assert.equal(themeLayout.targets.every((height) => height >= 40), true, "theme targets stay at least 40px tall");
-  await page.locator('.theme-choice input[value="dracula"]').focus();
+  await page.locator('.appearance-palette-grid input[value="dracula"]').focus();
   await page.keyboard.press("End");
   assert.equal(await page.evaluate(() => window.arkTheme.choice()), "xcode");
   await page.setViewportSize({ width: 1100, height: 800 });
-  await page.locator(".settings-section .theme-choice", { hasText: "Dark" }).click();
+  await page.locator(".settings-section .appearance-choice", { hasText: "Dark" }).click();
   await page.reload();
   await page.locator("#open-settings:not([hidden])").waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");

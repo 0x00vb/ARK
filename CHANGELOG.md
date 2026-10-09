@@ -7,6 +7,16 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.18.2] - 2026-10-09
+
+### Added
+- Appearance settings now show mode, palette and macOS window-material previews before a person
+  applies them.
+
+### Fixed
+- Native consumers load the web interface from an ARK-versioned asset path, so an update cannot
+  reuse stale WebKit modules and hide new settings.
+
 ## [0.18.1] - 2026-10-09
 
 ### Added

@@ -11,6 +11,12 @@ use crate::host::Theme;
 
 include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 
+const VERSIONED_ROOT: &str = "_ark";
+
+pub(crate) fn versioned(path: &str) -> String {
+    format!("{VERSIONED_ROOT}/{}/{path}", env!("CARGO_PKG_VERSION"))
+}
+
 pub struct Assets {
     title: String,
     consumer: HashMap<String, Cow<'static, [u8]>>,
@@ -48,6 +54,8 @@ impl Assets {
     /// A file by path (`index.html`, `js/app.js`, `ext/app.js`), with its media type.
     pub fn get(&self, path: &str) -> Option<(Cow<'static, [u8]>, &'static str)> {
         let path = path.trim_start_matches('/');
+        let prefix = format!("{VERSIONED_ROOT}/{}/", env!("CARGO_PKG_VERSION"));
+        let path = path.strip_prefix(&prefix).unwrap_or(path);
         let path = if path.is_empty() { "index.html" } else { path };
         if path.contains("..") {
             return None;
@@ -139,7 +147,10 @@ mod tests {
     fn index_loads_consumer_files_after_ark() {
         let a = Assets::new(
             "Demo <1>".into(),
-            HashMap::from([("demo.js".to_string(), Cow::Borrowed(&b"export {}"[..]))]),
+            HashMap::from([
+                ("demo.js".to_string(), Cow::Borrowed(&b"export {}"[..])),
+                ("demo.css".to_string(), Cow::Borrowed(&b"body {}"[..])),
+            ]),
             vec!["demo.js".into()],
             vec!["demo.css".into()],
             Theme::Light,
@@ -156,5 +167,16 @@ mod tests {
         assert!(a.get("ext/demo.js").is_some());
         assert!(a.get("../Cargo.toml").is_none());
         assert!(a.get("js/app.js").is_some());
+
+        let (versioned_html, _) = a.get(&versioned("index.html")).unwrap();
+        let versioned_html = String::from_utf8(versioned_html.into_owned()).unwrap();
+        assert!(versioned_html.contains("js/app.js"));
+        assert!(versioned_html.contains("ext/demo.css"));
+        for relative in ["app.css", "js/app.js", "ext/demo.css", "ext/demo.js"] {
+            assert!(
+                a.get(&versioned(relative)).is_some(),
+                "versioned index dependency does not resolve: {relative}"
+            );
+        }
     }
 }

@@ -62,6 +62,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0053](0053-scheduled-work-is-asked-for-each-time-runs-once-per-time-and-continues.md) | Scheduled work: dates, cron and the person's time zone; asked for each time with all a run is handed; pause, resume, change, run now; one run per time across a crash; a failure that may pass tried again later, continuing; missed runs run once or are let go; a line per schedule above its chat | Accepted |
 | [0054](0054-native-apps-opt-in-to-signed-background-updates.md) | Native apps opt in to signed background updates: Tauri verifies and installs, only the own page sees state, release packages are immutable and the app never forces a restart | Accepted |
 | [0055](0055-subscription-models-advertise-their-effort.md) | Subscription models advertise their effort: Codex is discovered from its signed-in CLI, effort belongs to the model spec, and old specs keep provider defaults | Accepted |
+| [0056](0056-a-message-is-drafted-sent-and-proved-as-separate-steps.md) | Messages are drafted, sent and proved separately: durable draft safety, race-free Stop, app-owned evidence and truthful unconfirmed results | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

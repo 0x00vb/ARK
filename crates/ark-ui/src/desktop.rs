@@ -35,7 +35,7 @@ use tauri::{
 };
 use tauri_plugin_notification::NotificationExt;
 
-use crate::assets::{versioned, Assets};
+use crate::assets::Assets;
 use crate::host::Host;
 
 struct UiAssets {
@@ -562,7 +562,7 @@ pub(crate) fn run(
         .iter_mut()
         .find(|window| window.label == MAIN)
     {
-        window.url = WebviewUrl::App(versioned("index.html").into());
+        window.url = WebviewUrl::App(assets.versioned("index.html").into());
     }
     context.config_mut().app.with_global_tauri = true;
     let name = context

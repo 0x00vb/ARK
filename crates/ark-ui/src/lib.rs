@@ -74,6 +74,7 @@ pub struct ArkUi {
     links: Vec<ark_interact::links::Link>,
     computers: Option<computers::ComputerSetup>,
     keep_computers: Vec<(String, String, String)>,
+    asset_version: Option<String>,
 }
 
 impl ArkUi {
@@ -117,6 +118,7 @@ impl ArkUi {
             links: Vec::new(),
             computers: None,
             keep_computers: Vec::new(),
+            asset_version: None,
         }
     }
     /// The accent colour, any CSS colour.
@@ -128,6 +130,12 @@ impl ArkUi {
     /// (default: follow the system).
     pub fn theme(mut self, theme: Theme) -> Self {
         self.info.theme = theme;
+        self
+    }
+    /// A consumer release identifier appended to ARK's version in the native page's
+    /// cache-busting URL. Set this when consumer styles or scripts can change independently.
+    pub fn asset_version(mut self, version: impl Into<String>) -> Self {
+        self.asset_version = Some(version.into());
         self
     }
     /// A logo image among the app's assets (`.asset("logo.svg", …)` then `.logo("logo.svg")`).
@@ -237,6 +245,7 @@ impl ArkUi {
             self.info.scripts.clone(),
             self.info.styles.clone(),
             self.info.theme,
+            self.asset_version,
         ));
         let host = Host::new(opened.interaction, approvals, self.info, self.handlers).await;
         if !self.links.is_empty() {

@@ -12,6 +12,7 @@
   const MATERIALS = ["solid", "translucent"];
   const DARK = new Set(["dark", "monokai", "dracula"]);
   const dark = matchMedia("(prefers-color-scheme: dark)");
+  const reducedTransparency = matchMedia("(prefers-reduced-transparency: reduce)");
 
   const saved = () => {
     try {
@@ -39,11 +40,13 @@
     root.dataset.colorScheme = scheme;
     root.dataset.themeChoice = c;
     root.dataset.material = materialChoice();
+    root.dataset.reducedTransparency = reducedTransparency.matches ? "true" : "false";
     if (!changed && !force) return;
     dispatchEvent(new CustomEvent("ark:theme", { detail: theme }));
   }
 
   dark.addEventListener("change", apply);
+  reducedTransparency.addEventListener("change", apply);
   window.arkTheme = {
     choice,
     set(c) {

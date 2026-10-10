@@ -15,6 +15,7 @@ fn appearance_offers_modes_palettes_and_a_window_style() {
     assert!(settings.contains("Translucent"));
     assert!(theme.contains("ark-window-style"));
     assert!(theme.contains("root.dataset.material = materialChoice()"));
+    assert!(theme.contains("root.dataset.reducedTransparency"));
 }
 
 #[test]

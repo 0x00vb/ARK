@@ -7,6 +7,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.18.3] - 2026-10-09
+
+### Added
+- Native consumers can give their own release version to the page asset URL, so consumer-only
+  interface changes cannot reuse files cached under an older app release.
+
 ## [0.18.2] - 2026-10-09
 
 ### Added

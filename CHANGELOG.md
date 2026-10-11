@@ -15,6 +15,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Fixed
 - Closing the sidebar now removes its full width instead of leaving a narrow strip.
+- An identical failed read or observation runs at most twice per turn. Later attempts return
+  immediately until a successful change may have repaired the dependency.
 
 ## [0.20.0] - 2026-10-11
 

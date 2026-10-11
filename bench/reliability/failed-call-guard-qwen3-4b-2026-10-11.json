@@ -1,0 +1,601 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.19.1",
+  "created_at": "2026-10-11T16:49:15.365783Z",
+  "mode": "live",
+  "model": "ollama:qwen3:4b-instruct",
+  "fast_model": null,
+  "reps": 3,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "critic": "true",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "120"
+  },
+  "workloads": [
+    {
+      "name": "failure-recovery",
+      "class": "failure-recovery",
+      "description": "primary mirror is down; retry at most once, then use the backup",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 3.0,
+        "input_tokens": 4999.666666666667,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 4999.666666666667,
+        "output_tokens": 107.0,
+        "total_tokens": 5106.666666666667,
+        "cost_usd": 0.011069333333333334,
+        "cost_per_success_usd": 0.011069333333333334,
+        "tool_calls": 2.0,
+        "tool_failed": 1.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.0,
+        "peak_context_tokens": 1459.0,
+        "mean_context_tokens": 1390.0,
+        "tool_schema_tokens": 1884.0,
+        "prefix_reuse_tokens": 2608.0,
+        "median_turn_ms": 2131.0,
+        "p95_turn_ms": 6290.0,
+        "median_first_token_ms": 256.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "failure-recovery",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Finding: The version listed in release.txt is 4.2.1, with notes indicating \"fixes and speedups.\"  \nCited evidence: inv:fa0c9c9d  \n\nNext step: Confirm if there are any additional details or context about this version that might be relevant.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5107
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5001,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5001,
+          "cache_write_tokens": 0,
+          "output_tokens": 106,
+          "total_tokens": 5107,
+          "tokens_measured": true,
+          "cost_usd": 0.011062,
+          "wall_ms": 6290,
+          "turn_ms": [
+            6290
+          ],
+          "first_token_ms": [
+            256
+          ],
+          "model_latency_ms": [
+            4681,
+            502,
+            1093
+          ],
+          "tool_calls": 2,
+          "tool_ok": 1,
+          "tool_failed": 1,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1459,
+          "mean_context_tokens": 1390,
+          "context_sources": {
+            "Capability index": 825,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 858,
+            "Model output": 66,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 120,
+            "Tool results": 148,
+            "Tool schemas": 1884,
+            "Working state": 117,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1884,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 96,
+          "result_raw_tokens": 19,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2608,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "failure-recovery",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Finding: The version listed in release.txt from the backup mirror is 4.2.1, with notes indicating \"fixes and speedups\".  \nCited evidence: inv:1fce9ed8  \n\nNext step: Confirm if there are any additional details or context about this version that might be relevant.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5109
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 5001,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 5001,
+          "cache_write_tokens": 0,
+          "output_tokens": 108,
+          "total_tokens": 5109,
+          "tokens_measured": true,
+          "cost_usd": 0.011082,
+          "wall_ms": 2131,
+          "turn_ms": [
+            2131
+          ],
+          "first_token_ms": [
+            262
+          ],
+          "model_latency_ms": [
+            455,
+            549,
+            1117
+          ],
+          "tool_calls": 2,
+          "tool_ok": 1,
+          "tool_failed": 1,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1459,
+          "mean_context_tokens": 1390,
+          "context_sources": {
+            "Capability index": 825,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 858,
+            "Model output": 66,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 120,
+            "Tool results": 148,
+            "Tool schemas": 1884,
+            "Working state": 117,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1884,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 96,
+          "result_raw_tokens": 19,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2608,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "failure-recovery",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Finding: The version listed in release.txt from the backup mirror is 4.2.1, with notes indicating \"fixes and speedups\".  \nCites: inv:cadc1093  \n\nNext step: Confirm if there are any additional details or context about this version that might be relevant.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 5104
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 3
+          },
+          "input_tokens": 4997,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 4997,
+          "cache_write_tokens": 0,
+          "output_tokens": 107,
+          "total_tokens": 5104,
+          "tokens_measured": true,
+          "cost_usd": 0.011064,
+          "wall_ms": 2062,
+          "turn_ms": [
+            2062
+          ],
+          "first_token_ms": [
+            255
+          ],
+          "model_latency_ms": [
+            440,
+            499,
+            1112
+          ],
+          "tool_calls": 2,
+          "tool_ok": 1,
+          "tool_failed": 1,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1459,
+          "mean_context_tokens": 1390,
+          "context_sources": {
+            "Capability index": 825,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 858,
+            "Model output": 66,
+            "Project": 150,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 120,
+            "Tool results": 148,
+            "Tool schemas": 1884,
+            "Working state": 117,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1884,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 96,
+          "result_raw_tokens": 19,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2608,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "web",
+      "class": "web",
+      "description": "find a page on the web, read it, and answer from the passage that holds the fact",
+      "summary": {
+        "runs": 3,
+        "successes": 3,
+        "success_rate": 1.0,
+        "model_calls": 5.333333333333333,
+        "input_tokens": 13219.0,
+        "cached_input_tokens": 0.0,
+        "uncached_input_tokens": 13219.0,
+        "output_tokens": 486.6666666666667,
+        "total_tokens": 13705.666666666666,
+        "cost_usd": 0.03130466666666667,
+        "cost_per_success_usd": 0.03130466666666667,
+        "tool_calls": 3.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 5.333333333333333,
+        "peak_context_tokens": 2889.0,
+        "mean_context_tokens": 1923.3333333333333,
+        "tool_schema_tokens": 3797.3333333333335,
+        "prefix_reuse_tokens": 7999.666666666667,
+        "median_turn_ms": 5559.0,
+        "p95_turn_ms": 18846.0,
+        "median_first_token_ms": 232.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "web",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Facts (cited):**  \n- Green tea should be brewed at 80 °C (175 °F) for two minutes, as stated in the \"A tea brewing guide\" at http://127.0.0.1:51658/guide.  \n- This information is directly supported by the text: \"Green tea: steep at 80 °C (175 °F) for two minutes.\"  \n\n**Inference:**  \n- The page \"A tea brewing guide\" (http://127.0.0.1:51658/guide) is the only source that explicitly mentions the b",
+          "turns": 1,
+          "steps": 8,
+          "model_calls": 8,
+          "calls_by_role": {
+            "reason": 8
+          },
+          "tokens_by_role": {
+            "reason": 22941
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 8
+          },
+          "input_tokens": 22021,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 22021,
+          "cache_write_tokens": 0,
+          "output_tokens": 920,
+          "total_tokens": 22941,
+          "tokens_measured": true,
+          "cost_usd": 0.053242,
+          "wall_ms": 18846,
+          "turn_ms": [
+            18846
+          ],
+          "first_token_ms": [
+            232,
+            504,
+            543
+          ],
+          "model_latency_ms": [
+            2102,
+            991,
+            1509,
+            2765,
+            3903,
+            1093,
+            1044,
+            5412
+          ],
+          "tool_calls": 5,
+          "tool_ok": 5,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2889,
+          "mean_context_tokens": 2198,
+          "context_sources": {
+            "Capability index": 2416,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 2288,
+            "Model output": 1366,
+            "Project": 400,
+            "Retrieved context": 135,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 256,
+            "Tool results": 4789,
+            "Tool schemas": 5696,
+            "Working state": 240,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 5696,
+          "tools_exposed_max": 8,
+          "tools_used": 2,
+          "result_context_tokens": 997,
+          "result_raw_tokens": 3039,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 14217,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "web",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Finding**: Green tea should be brewed at 80 °C (175 °F) for two minutes, as stated in the \"A tea brewing guide\" at http://127.0.0.1:51658/guide.  \n**Evidence**: [inv:8ad27b91] text, line 92: \"Green tea: steep at 80 °C (175 °F) for two minutes.\"\n\n**Next step**: Verify if this temperature recommendation is consistent with other authoritative sources or if further context (e.g., type of green tea) ",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 9091
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 8821,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8821,
+          "cache_write_tokens": 0,
+          "output_tokens": 270,
+          "total_tokens": 9091,
+          "tokens_measured": true,
+          "cost_usd": 0.020342,
+          "wall_ms": 5559,
+          "turn_ms": [
+            5559
+          ],
+          "first_token_ms": [
+            229
+          ],
+          "model_latency_ms": [
+            561,
+            991,
+            1513,
+            2480
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2108,
+          "mean_context_tokens": 1786,
+          "context_sources": {
+            "Capability index": 1208,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 1144,
+            "Model output": 165,
+            "Project": 200,
+            "Retrieved context": 27,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 128,
+            "Tool results": 1304,
+            "Tool schemas": 2848,
+            "Working state": 120,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2848,
+          "tools_exposed_max": 8,
+          "tools_used": 2,
+          "result_context_tokens": 585,
+          "result_raw_tokens": 2722,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4891,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "web",
+          "rep": 2,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Finding**: Green tea should be brewed at 80 °C (175 °F) for two minutes, as stated in the \"A tea brewing guide\" at http://127.0.0.1:51658/guide.  \n**Evidence**: [inv:7c3fd0a7] text, line 92: \"Green tea: steep at 80 °C (175 °F) for two minutes.\"\n\n**Next step**: Confirm whether this temperature recommendation is consistent with other authoritative sources or if further clarification is needed. How",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 9085
+          },
+          "calls_by_model": {
+            "qwen3:4b-instruct": 4
+          },
+          "input_tokens": 8815,
+          "cached_input_tokens": 0,
+          "uncached_input_tokens": 8815,
+          "cache_write_tokens": 0,
+          "output_tokens": 270,
+          "total_tokens": 9085,
+          "tokens_measured": true,
+          "cost_usd": 0.02033,
+          "wall_ms": 5513,
+          "turn_ms": [
+            5513
+          ],
+          "first_token_ms": [
+            229
+          ],
+          "model_latency_ms": [
+            524,
+            974,
+            1506,
+            2494
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "get_evidence": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 2108,
+          "mean_context_tokens": 1786,
+          "context_sources": {
+            "Capability index": 1208,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 1144,
+            "Model output": 165,
+            "Project": 200,
+            "Retrieved context": 27,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 128,
+            "Tool results": 1304,
+            "Tool schemas": 2848,
+            "Working state": 120,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2848,
+          "tools_exposed_max": 8,
+          "tools_used": 2,
+          "result_context_tokens": 585,
+          "result_raw_tokens": 2722,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4891,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 6,
+    "successes": 6,
+    "success_rate": 1.0,
+    "model_calls": 4.166666666666667,
+    "input_tokens": 9109.333333333334,
+    "cached_input_tokens": 0.0,
+    "uncached_input_tokens": 9109.333333333334,
+    "output_tokens": 296.8333333333333,
+    "total_tokens": 9406.166666666666,
+    "cost_usd": 0.021187,
+    "cost_per_success_usd": 0.021187,
+    "tool_calls": 2.5,
+    "tool_failed": 0.5,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 4.166666666666667,
+    "peak_context_tokens": 2889.0,
+    "mean_context_tokens": 1656.6666666666667,
+    "tool_schema_tokens": 2840.6666666666665,
+    "prefix_reuse_tokens": 5303.833333333333,
+    "median_turn_ms": 5513.0,
+    "p95_turn_ms": 18846.0,
+    "median_first_token_ms": 255.0,
+    "stall_stops": 0.0
+  }
+}

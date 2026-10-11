@@ -99,9 +99,9 @@ const api = {
   steer,
   cancel: () => transport.call("cancel").catch(() => {}),
   command: (line) => (line.endsWith(" ") ? composer.set(line) : runCommand(line)),
-  newSession: () => {
+  newSession: (project) => {
     showConversation();
-    return change("new_session");
+    return change("new_session", project ? { project } : undefined);
   },
   // A code to sign in another device (Settings › Devices, ADR 0047).
   pairCode: () => transport.pairCode(),

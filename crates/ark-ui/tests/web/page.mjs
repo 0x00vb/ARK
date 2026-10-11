@@ -1559,6 +1559,24 @@ async function projectAction(page) {
 }
 scenarios["project-action"] = projectAction;
 
+// A project row exposes a direct new-chat action beside its options. It opens a different
+// project before creating the chat, so the new chat belongs to the project the person chose.
+async function projectNewChat(page) {
+  const before = await page.evaluate(() => window.ark.summary());
+  await page.evaluate(() => window.ark.call("add_project", { name: "Other project" }));
+  await page.evaluate((project) => window.ark.call("open_project", { id: project }), before.project.id);
+  await page.waitForFunction((project) => window.ark.summary().project.id === project, before.project.id);
+  const other = page.locator(".project-row", { hasText: "Other project" });
+  await other.waitFor();
+  const action = other.locator(".project-new-chat");
+  await action.hover();
+  await action.click();
+  await page.waitForFunction((session) => window.ark.summary().session.id !== session, before.session.id);
+  assert.notEqual(await page.evaluate(() => window.ark.summary().project.id), before.project.id);
+  assert.equal(await page.evaluate(() => window.ark.summary().project.name), "Other project");
+}
+scenarios["project-new-chat"] = projectNewChat;
+
 // ADR 0041: a process start asks with its command and where, then runs beside the chat: the
 // Processes panel shows its output, its page opens in the Browser once ready, Stop ends it.
 async function processes(page) {

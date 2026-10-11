@@ -9,6 +9,10 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [0.20.1] - 2026-10-11
 
+### Added
+- Project rows reveal a direct New chat button, so a person can start a chat in the project they
+  are pointing at.
+
 ### Fixed
 - Closing the sidebar now removes its full width instead of leaving a narrow strip.
 

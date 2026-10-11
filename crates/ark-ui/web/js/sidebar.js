@@ -83,7 +83,8 @@ export class Sidebar {
       h("button.project-chev", { type: "button", tabindex: "-1", "aria-label": open ? "Fold" : "Unfold", onclick: (e) => { e.stopPropagation(); this.fold(p, !open); } }, icon("chevron-right")),
       h("span.project-name", p.name),
       !open && this.workingProjects.has(p.id) ? h("span.working-dot", { title: "Working", "aria-label": "Working" }) : null,
-      h("button.icon-btn.small.project-more", { type: "button", title: "Project", "aria-label": `${p.name}: options`, onclick: (e) => { e.stopPropagation(); this.projectMenu(e.currentTarget, p); } }, icon("more")));
+      h("button.icon-btn.small.project-more", { type: "button", title: "Project", "aria-label": `${p.name}: options`, onclick: (e) => { e.stopPropagation(); this.projectMenu(e.currentTarget, p); } }, icon("more")),
+      h("button.icon-btn.small.project-new-chat", { type: "button", title: `New chat in ${p.name}`, "aria-label": `New chat in ${p.name}`, onclick: (e) => { e.stopPropagation(); this.newChat(p); } }, icon("plus")));
     // The current project folds; another one opens where it left off.
     const pick = () => (p.current ? this.fold(p, !open) : this.openProject(p));
     row.addEventListener("click", pick);
@@ -137,6 +138,10 @@ export class Sidebar {
     return this.api.openProject(p.id);
   }
 
+  newChat(p) {
+    return this.api.newSession(p.id);
+  }
+
   renameProject(row, p) {
     this.inline(row, ".project-name", p.name, "Project name", (name) => this.api.call("rename_project", { id: p.id, name }));
   }
@@ -176,10 +181,7 @@ export class Sidebar {
     const item = (label, run) => h("button.menu-item", { type: "button", onclick: () => { menu.close(); run(); } }, h("span", label));
     const menu = this.api.popover(anchor, [
       h("div.menu-sub.pad", { title: p.workspace || "" }, p.workspace ? tail(p.workspace, 44) : "No folder yet"),
-      item("New chat", async () => {
-        if (!p.current) await this.openProject(p);
-        this.api.newSession();
-      }),
+      item("New chat", () => this.newChat(p)),
       item("Rename", () => {
         const row = this.tree.querySelector(`.project[data-id="${p.id}"] .project-row`);
         if (row) this.renameProject(row, p);

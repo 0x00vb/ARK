@@ -7,6 +7,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Added
+- Project rows reveal a direct New chat button, so a person can start a chat in the project they
+  are pointing at.
+
 ## [0.20.0] - 2026-10-11
 
 ### Changed

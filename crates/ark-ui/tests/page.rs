@@ -815,6 +815,11 @@ async fn an_apps_action_on_a_project_is_in_its_menu() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_project_row_starts_a_chat_in_that_project() {
+    drive("project-new-chat", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn skills_are_listed_in_settings_and_added_from_the_terminal() {
     drive("skills", vec![], Duration::ZERO).await;
 }

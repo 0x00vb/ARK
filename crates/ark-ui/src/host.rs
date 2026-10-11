@@ -3092,7 +3092,16 @@ impl Host {
             )?),
             // Moving to another chat never waits for a turn: a running one goes on in the
             // background (see `switch`).
-            "new_session" => self.switch(Target::Change, |ix| ix.new_session()).await,
+            "new_session" => {
+                let project = s("project");
+                self.switch(Target::Change, move |ix| {
+                    if !project.is_empty() {
+                        ix.open_project(&project)?;
+                    }
+                    ix.new_session()
+                })
+                .await
+            }
             "open_session" => {
                 let id = s("id");
                 let target = self

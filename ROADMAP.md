@@ -8,8 +8,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.20.0** (2026-10-11): an app can offer Grok as an isolated, place-bound agent program. Earlier releases are in `CHANGELOG.md`. |
-| `main` | v0.20.0 release tree. Grok setup, permissions, worker choice, remote routing and compatibility boundaries passed the full release gate. |
+| Stable release | **v0.20.1** (2026-10-11): an app can offer Grok as an isolated, place-bound agent program, and the window sidebar closes to the full edge. Earlier releases are in `CHANGELOG.md`. |
+| `main` | v0.20.1 release tree. Grok setup, permissions, worker choice, remote routing, Terminal compatibility and sidebar geometry passed the full release gate. |
 | Consumers | ARK Desktop (`ark-desktop` repo; v0.6.5 pins ARK v0.19.1 until its next release), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |

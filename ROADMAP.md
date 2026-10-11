@@ -121,6 +121,14 @@ credential); ARK never holds funds or card data and names no merchant, protocol 
 runtime. Plan, risks and order (T0 to T5): `../ark-cloud/docs/COMMERCE.md`. Trigger: the
 owner's go, after ARK Desktop is public.
 
+Event automations (planned, ADR 0061): schedules keep their shipped record and join event starts
+in one person-visible automation view and the existing task path. Provider events are saved before
+acknowledgement, matched deterministically and start one run per stable event id. Every event run
+has a mandatory narrow authority that broader grants and `--yes` cannot widen. The first proofs
+are Mail from an exact address on an outbound NAS poller and WhatsApp Business through a verified
+webhook. Design, states, NAS and scale path, delivery gates:
+[`docs/AUTOMATIONS.md`](docs/AUTOMATIONS.md).
+
 | Kept out on purpose | Until |
 |---|---|
 | Remote MCP servers (HTTP/SSE `url` entries) | a consumer needs one; stdio servers only today |

@@ -8,9 +8,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.18.3** (2026-10-09): consumer-aware native web asset versions. Earlier releases are in `CHANGELOG.md`. |
-| `main` | v0.18.3 |
-| Consumers | ARK Desktop (`ark-desktop` repo; v0.6.4 pins ARK v0.18.3), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Stable release | **v0.19.0** (2026-10-10): external protocol v1.1 and project Terminal without a chat. Earlier releases are in `CHANGELOG.md`. |
+| `main` | v0.19.0 release tree. Generated schema and Swift models, durable native mutations, strict bearer routes and project Terminal passed the full release gate. |
+| Consumers | ARK Desktop (`ark-desktop` repo; v0.6.4 still pins ARK v0.18.3), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

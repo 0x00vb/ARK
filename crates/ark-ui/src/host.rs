@@ -12,15 +12,15 @@
 //! coming back finds it. Each turn's events, and each question it asks, carry its `session`, so a
 //! window shows the current chat's and lists the others as working (`working`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::resource::{
-    ResourceKind, ResourceLocation, ResourceOperation, ResourceOperationKind, ResourceRef,
-    ResourceSubscribers,
+    ResourceAuthority, ResourceKind, ResourceLocation, ResourceOperation, ResourceOperationKind,
+    ResourceRef, ResourceSubscribers,
 };
 use ark_interact::activity::describe;
 use ark_interact::ark_orchestrate::{AgentSpec, Orchestrator, TaskSpec};
@@ -146,9 +146,68 @@ async fn forward_links(host: std::sync::Weak<Host>, mut rx: broadcast::Receiver<
                         "place": chat.place,
                     }));
                 }
+                let routes: Vec<ProjectResourceRoute> = {
+                    let mut kept = host.project_resource_routes.lock().unwrap();
+                    kept.retain(|_, route| {
+                        let Some(place) = route.place.as_deref() else {
+                            return true;
+                        };
+                        !matches!(
+                            host.links.state(place),
+                            None | Some(ark_interact::links::State::Refused)
+                        )
+                    });
+                    kept.values()
+                        .filter(|route| route.place.is_some())
+                        .cloned()
+                        .collect()
+                };
+                for route in routes {
+                    let place = route.place.as_deref().unwrap_or("");
+                    host.emit(json!({
+                        "kind": "resource_connection",
+                        "location": {
+                            "runtime": route.runtime,
+                            "project": route.local_project,
+                            "session": "",
+                        },
+                        "online": host.links.state(place) == Some(ark_interact::links::State::Ok),
+                        "place": place,
+                    }));
+                }
             }
             Err(broadcast::error::RecvError::Closed) => return,
         }
+    }
+}
+
+/// Project Terminal routes are capabilities for one live PTY. A natural exit invalidates every
+/// alias, including aliases opened by other windows or runtimes.
+async fn forward_project_terminal_exits(
+    host: std::sync::Weak<Host>,
+    mut rx: broadcast::Receiver<Value>,
+) {
+    loop {
+        let event = match rx.recv().await {
+            Ok(event) => event,
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => return,
+        };
+        if event["kind"] != "term" || event["exit"] != true {
+            continue;
+        }
+        let Ok(reference) = serde_json::from_value::<ResourceRef>(event["ref"].clone()) else {
+            continue;
+        };
+        if !matches!(&reference.authority, ResourceAuthority::Project { .. }) {
+            continue;
+        }
+        let Some(host) = host.upgrade() else { return };
+        host.end_project_terminal_routes(
+            &reference.location.runtime,
+            &reference.location.project,
+            &reference.id,
+        );
     }
 }
 
@@ -249,6 +308,7 @@ pub(crate) struct Feed {
 #[derive(Default)]
 struct FeedState {
     seq: u64,
+    recent: VecDeque<Value>,
     /// Each running turn's events since it started, by session.
     live: HashMap<String, Vec<Value>>,
 }
@@ -267,6 +327,10 @@ impl Feed {
         let mut st = self.state.lock().unwrap();
         st.seq += 1;
         v["seq"] = json!(st.seq);
+        st.recent.push_back(v.clone());
+        while st.recent.len() > 8_192 {
+            st.recent.pop_front();
+        }
         let kind = v["kind"].as_str().unwrap_or_default().to_string();
         // Only a turn's own events (they carry its session) rebuild it.
         if let Some(session) = v["session"].as_str().map(str::to_string) {
@@ -293,6 +357,25 @@ impl Feed {
 
     pub(crate) fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.tx.subscribe()
+    }
+
+    /// Events after `after`, or `None` when the retained range has a gap.
+    pub(crate) fn replay_after(&self, after: u64) -> Option<Vec<Value>> {
+        let st = self.state.lock().unwrap();
+        if after > st.seq {
+            return None;
+        }
+        let oldest = st.recent.front().and_then(|event| event["seq"].as_u64());
+        if oldest.is_some_and(|oldest| after.saturating_add(1) < oldest) {
+            return None;
+        }
+        Some(
+            st.recent
+                .iter()
+                .filter(|event| event["seq"].as_u64().is_some_and(|seq| seq > after))
+                .cloned()
+                .collect(),
+        )
     }
 }
 
@@ -435,6 +518,22 @@ struct Snapshot {
     project: Option<Project>,
 }
 
+/// An ephemeral capability for one project Terminal (ADR 0060).
+#[derive(Clone, Debug)]
+struct ProjectResourceRoute {
+    source_project: String,
+    local_project: String,
+    runtime: String,
+    place: Option<String>,
+    kind: ResourceKind,
+    terminal: String,
+    origin: Option<String>,
+    /// Paired-device digest for an external-client route. Window routes have no owner.
+    owner: Option<String>,
+    generation: String,
+    next_write: u64,
+}
+
 pub struct Host {
     /// The conversation windows show.
     current: Mutex<Arc<Conv>>,
@@ -452,6 +551,8 @@ pub struct Host {
     /// Held while the windows move to another chat and while a turn ends, so the two never
     /// interleave (a chat is never opened twice, nor left behind).
     switching: tokio::sync::Mutex<()>,
+    /// External-client mutations are accepted in strict device order.
+    client_mutations: tokio::sync::Mutex<()>,
     engine: Arc<Engine>,
     /// The names the conversation's skills are chosen by (`Ark::skill_names`).
     chat_skills: Vec<String>,
@@ -473,6 +574,8 @@ pub struct Host {
     terminals: crate::terminal::Terminals,
     /// Session-bound pane aliases for shared terminal and process resources.
     resource_subscribers: Arc<ResourceSubscribers>,
+    /// Server-issued project resource capabilities. They intentionally vanish on restart.
+    project_resource_routes: Mutex<HashMap<String, ProjectResourceRoute>>,
     /// One reconciliation at a time per project replica. Chats share replicas, so epoch checks,
     /// filesystem apply and manifest advancement are one critical section.
     copy_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -504,6 +607,22 @@ pub struct Host {
             ),
         >,
     >,
+}
+
+#[derive(Debug)]
+pub(crate) enum ClientMutationError {
+    InvalidCounter,
+    CounterConflict,
+    CounterGap,
+    AlreadyApplied,
+    Unsupported,
+    Store(anyhow::Error),
+}
+
+impl From<anyhow::Error> for ClientMutationError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Store(error)
+    }
 }
 
 impl Host {
@@ -567,6 +686,7 @@ impl Host {
             orchs: ix.orchestrators(),
             terminals: crate::terminal::Terminals::new(resource_subscribers.clone()),
             resource_subscribers,
+            project_resource_routes: Mutex::new(HashMap::new()),
             engine: ix.ark().shared_engine(),
             chat_skills: ix.ark().skill_names().to_vec(),
             caps: ark_interact::capabilities::Parts::of(ix.ark()),
@@ -583,6 +703,7 @@ impl Host {
             relays: Mutex::new(HashMap::new()),
             current: Mutex::new(Conv::new(ix)),
             switching: tokio::sync::Mutex::new(()),
+            client_mutations: tokio::sync::Mutex::new(()),
             background: Mutex::new(Vec::new()),
             addressed: Mutex::new(HashMap::new()),
             setup_terms: Mutex::new(Default::default()),
@@ -606,6 +727,10 @@ impl Host {
         host.notify_soon();
         // A linked runtime's list changed: windows read it again.
         tokio::spawn(forward_links(Arc::downgrade(&host), host.links.subscribe()));
+        tokio::spawn(forward_project_terminal_exits(
+            Arc::downgrade(&host),
+            host.feed.subscribe(),
+        ));
         // Chats held on other computers: their events, once their links are set.
         host.start_relays();
         if let Some(c) = &host.computer {
@@ -752,6 +877,308 @@ impl Host {
 
     pub fn subscribe(&self) -> broadcast::Receiver<Value> {
         self.feed.subscribe()
+    }
+
+    pub(crate) fn client_event_replay(&self, after: u64) -> Option<Vec<Value>> {
+        self.feed.replay_after(after)
+    }
+
+    pub(crate) fn client_terminal_ref(
+        &self,
+        owner: &str,
+        handle: &str,
+        generation: &str,
+    ) -> anyhow::Result<ResourceRef> {
+        let routes = self.project_resource_routes.lock().unwrap();
+        let kept = routes
+            .get(handle)
+            .ok_or_else(|| anyhow::anyhow!("that project Terminal route ended"))?;
+        anyhow::ensure!(
+            kept.owner.as_deref() == Some(owner),
+            "that project Terminal belongs to another device"
+        );
+        anyhow::ensure!(
+            kept.generation == generation,
+            "that project Terminal generation changed"
+        );
+        anyhow::ensure!(
+            !kept.terminal.is_empty(),
+            "that project Terminal did not open"
+        );
+        Ok(self.project_route_ref(handle, &kept.runtime, &kept.local_project, &kept.terminal))
+    }
+
+    pub(crate) fn client_owns_terminal(&self, owner: &str, handle: &str) -> bool {
+        self.project_resource_routes
+            .lock()
+            .unwrap()
+            .get(handle)
+            .is_some_and(|route| route.owner.as_deref() == Some(owner))
+    }
+
+    pub(crate) fn forget_client_terminal_routes(&self, owner: &str) {
+        let references = {
+            let routes = self.project_resource_routes.lock().unwrap();
+            routes
+                .iter()
+                .filter(|(_, route)| route.owner.as_deref() == Some(owner))
+                .map(|(handle, route)| {
+                    self.project_route_ref(
+                        handle,
+                        &route.runtime,
+                        &route.local_project,
+                        &route.terminal,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        self.project_resource_routes
+            .lock()
+            .unwrap()
+            .retain(|_, route| route.owner.as_deref() != Some(owner));
+        for reference in references {
+            self.resource_subscribers.unsubscribe(&reference);
+        }
+    }
+
+    pub(crate) fn client_mutation_counter(&self, device: &str, epoch: &str) -> anyhow::Result<u64> {
+        let id = format!("{device}:{epoch}");
+        Ok(self
+            .engine
+            .store
+            .get_record("client_mutation_highwater", &id)?
+            .and_then(|value| value["counter"].as_str()?.parse().ok())
+            .unwrap_or(0))
+    }
+
+    pub(crate) async fn apply_client_mutation(
+        self: &Arc<Self>,
+        device: &str,
+        request: &ark_protocol::MutationRequest,
+    ) -> Result<ark_protocol::MutationReceipt, ClientMutationError> {
+        match request.operation.as_str() {
+            "chat.send"
+                if request.input["body"]
+                    .as_str()
+                    .is_some_and(|body| !body.trim().is_empty()) => {}
+            "attention.answer" if request.input["choiceId"].as_str().is_some() => {}
+            "chat.send" | "attention.answer" => return Err(ClientMutationError::Unsupported),
+            _ => return Err(ClientMutationError::Unsupported),
+        }
+        let _serial = self.client_mutations.lock().await;
+        let counter = request
+            .counter
+            .as_str()
+            .parse::<u64>()
+            .map_err(|_| ClientMutationError::InvalidCounter)?;
+        let record_id = format!("{device}:{}:{counter}", request.epoch);
+
+        let existing = self
+            .engine
+            .store
+            .get_record("client_mutation", &record_id)
+            .map_err(|error| ClientMutationError::Store(error.into()))?;
+        let mut record = if let Some(record) = existing {
+            let same = record["operation"] == request.operation
+                && record["target"] == request.target
+                && record["inputDigest"] == request.input_digest;
+            if !same {
+                return Err(ClientMutationError::CounterConflict);
+            }
+            let receipt: ark_protocol::MutationReceipt =
+                serde_json::from_value(record["receipt"].clone())
+                    .map_err(|error| ClientMutationError::Store(error.into()))?;
+            if receipt.status != "accepted" {
+                return Ok(receipt);
+            }
+            record
+        } else {
+            let highwater = self.client_mutation_counter(device, &request.epoch)?;
+            if highwater > 0 {
+                let pending_id = format!("{device}:{}:{highwater}", request.epoch);
+                let pending = self
+                    .engine
+                    .store
+                    .get_record("client_mutation", &pending_id)
+                    .map_err(|error| ClientMutationError::Store(error.into()))?;
+                if pending
+                    .as_ref()
+                    .and_then(|record| record["receipt"]["status"].as_str())
+                    == Some("accepted")
+                {
+                    return Err(ClientMutationError::CounterGap);
+                }
+            }
+            if counter <= highwater {
+                return Err(ClientMutationError::AlreadyApplied);
+            }
+            if counter != highwater.saturating_add(1) {
+                return Err(ClientMutationError::CounterGap);
+            }
+
+            let accepted_at = time::OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(|error| ClientMutationError::Store(error.into()))?;
+            let receipt = ark_protocol::MutationReceipt {
+                id: uuid::Uuid::new_v4().to_string(),
+                status: "accepted".into(),
+                accepted_at,
+                display: "Accepted".into(),
+            };
+            let record = json!({
+                "device": device,
+                "epoch": request.epoch,
+                "counter": request.counter.as_str(),
+                "operation": request.operation,
+                "target": request.target,
+                "inputDigest": request.input_digest,
+                "input": request.input,
+                "receipt": receipt,
+            });
+            let highwater = json!({ "counter": request.counter.as_str() });
+            self.engine
+                .store
+                .put_records(&[
+                    ("client_mutation", &record_id, device, &record),
+                    (
+                        "client_mutation_highwater",
+                        &format!("{device}:{}", request.epoch),
+                        device,
+                        &highwater,
+                    ),
+                ])
+                .map_err(|error| ClientMutationError::Store(error.into()))?;
+            record
+        };
+
+        let (status, display) = match request.operation.as_str() {
+            "chat.send" => {
+                self.apply_client_send(&record_id, device, request, &mut record)
+                    .await?
+            }
+            "attention.answer" => {
+                let id = request
+                    .target
+                    .parse::<u64>()
+                    .map(Value::from)
+                    .unwrap_or_else(|_| Value::String(request.target.clone()));
+                match self
+                    .call(
+                        "approve",
+                        json!({ "id": id, "decision": request.input["choiceId"] }),
+                    )
+                    .await
+                {
+                    Ok(_) => ("completed", "Recorded"),
+                    Err(_) => ("no_longer_applicable", "Nothing changed"),
+                }
+            }
+            _ => unreachable!("operations were validated before acceptance"),
+        };
+        let mut receipt: ark_protocol::MutationReceipt =
+            serde_json::from_value(record["receipt"].clone())
+                .map_err(|error| ClientMutationError::Store(error.into()))?;
+        receipt.status = status.into();
+        receipt.display = display.into();
+        record["receipt"] = serde_json::to_value(&receipt)
+            .map_err(|error| ClientMutationError::Store(error.into()))?;
+        self.engine
+            .store
+            .put_record("client_mutation", &record_id, device, &record)
+            .map_err(|error| ClientMutationError::Store(error.into()))?;
+        Ok(receipt)
+    }
+
+    async fn apply_client_send(
+        self: &Arc<Self>,
+        record_id: &str,
+        device: &str,
+        request: &ark_protocol::MutationRequest,
+        record: &mut Value,
+    ) -> Result<(&'static str, &'static str), ClientMutationError> {
+        let body = request.input["body"].as_str().unwrap_or_default();
+        if let Some(index) = record["effect"]["turnIndex"].as_u64() {
+            let turns = self
+                .engine
+                .store
+                .list_session_turns(&request.target, None)
+                .map_err(|error| ClientMutationError::Store(error.into()))?;
+            if turns.iter().any(|turn| {
+                turn["index"].as_u64() == Some(index) && turn["input"].as_str() == Some(body)
+            }) {
+                return Ok(("completed", "Sent"));
+            }
+        }
+
+        let _quiet = self.switching.lock().await;
+        let Ok(conv) = self.chat_conv(&request.target, "", true).await else {
+            return Ok(("no_longer_applicable", "Nothing changed"));
+        };
+        if conv.is_running() {
+            return Ok(("accepted", "Accepted"));
+        }
+        let turn_index = self
+            .engine
+            .store
+            .get_session(&request.target)
+            .map_err(|error| ClientMutationError::Store(error.into()))?
+            .and_then(|session| session["turn_count"].as_u64())
+            .ok_or_else(|| ClientMutationError::Store(anyhow::anyhow!("chat has no turn count")))?;
+        if let Some(expected) = record["effect"]["turnIndex"].as_u64() {
+            if expected != turn_index {
+                return Ok(("no_longer_applicable", "Nothing changed"));
+            }
+        } else {
+            record["effect"] = json!({ "turnIndex": turn_index });
+            self.engine
+                .store
+                .put_record("client_mutation", record_id, device, record)
+                .map_err(|error| ClientMutationError::Store(error.into()))?;
+        }
+        if self.start_turn_on(conv, body.to_string(), true).is_err() {
+            return Ok(("no_longer_applicable", "Nothing changed"));
+        }
+        for _ in 0..100 {
+            let turns = self
+                .engine
+                .store
+                .list_session_turns(&request.target, Some(1))
+                .map_err(|error| ClientMutationError::Store(error.into()))?;
+            if turns.iter().any(|turn| {
+                turn["index"].as_u64() == Some(turn_index) && turn["input"].as_str() == Some(body)
+            }) {
+                return Ok(("completed", "Sent"));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        Ok(("accepted", "Accepted"))
+    }
+
+    pub(crate) async fn resume_client_mutations(self: &Arc<Self>) -> anyhow::Result<()> {
+        for record in self.engine.store.list_records("client_mutation", None)? {
+            if record["receipt"]["status"].as_str() != Some("accepted") {
+                continue;
+            }
+            let Some(device) = record["device"].as_str() else {
+                continue;
+            };
+            let request = ark_protocol::MutationRequest {
+                epoch: record["epoch"].as_str().unwrap_or_default().to_string(),
+                counter: ark_protocol::DecimalString::new(
+                    record["counter"].as_str().unwrap_or_default(),
+                )
+                .map_err(anyhow::Error::msg)?,
+                operation: record["operation"].as_str().unwrap_or_default().to_string(),
+                target: record["target"].as_str().unwrap_or_default().to_string(),
+                input_digest: record["inputDigest"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                input: record["input"].clone(),
+            };
+            let _ = self.apply_client_mutation(device, &request).await;
+        }
+        Ok(())
     }
 
     pub fn emitter(&self) -> Emitter {
@@ -1024,6 +1451,45 @@ impl Host {
             r.location.runtime == here,
             "that resource belongs to another runtime"
         );
+        if let ResourceAuthority::Project { route } = &r.authority {
+            anyhow::ensure!(
+                r.kind == ResourceKind::Terminal,
+                "that project route is not a Terminal"
+            );
+            anyhow::ensure!(
+                r.location.session.is_empty(),
+                "a project route cannot name a chat"
+            );
+            let routes = self.project_resource_routes.lock().unwrap();
+            let kept = routes
+                .get(route)
+                .ok_or_else(|| anyhow::anyhow!("that project Terminal route ended"))?;
+            anyhow::ensure!(
+                kept.runtime == here,
+                "that route belongs to another runtime"
+            );
+            anyhow::ensure!(
+                kept.local_project == r.location.project,
+                "that route belongs to another project"
+            );
+            anyhow::ensure!(
+                kept.kind == r.kind,
+                "that route belongs to another resource kind"
+            );
+            if !kept.terminal.is_empty() || !r.id.is_empty() {
+                anyhow::ensure!(
+                    kept.terminal == r.id,
+                    "that route belongs to another Terminal"
+                );
+            }
+            drop(routes);
+            let project = r.location.project.clone();
+            return self
+                .engine
+                .store
+                .get_project(&ProjectId(project.clone()))?
+                .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"));
+        }
         anyhow::ensure!(
             !r.location.session.is_empty(),
             "the resource has no opening chat"
@@ -1065,6 +1531,217 @@ impl Host {
             input["upload"].as_str().unwrap_or("")
         );
         format!("{:x}", sha2::Sha256::digest(identity.as_bytes()))
+    }
+
+    fn project_route_ref(
+        &self,
+        route: &str,
+        runtime: &str,
+        project: &str,
+        terminal: &str,
+    ) -> ResourceRef {
+        ResourceRef {
+            location: ResourceLocation {
+                runtime: runtime.to_string(),
+                project: project.to_string(),
+                session: String::new(),
+            },
+            kind: ResourceKind::Terminal,
+            id: terminal.to_string(),
+            authority: ResourceAuthority::Project {
+                route: route.to_string(),
+            },
+        }
+    }
+
+    fn end_project_terminal_routes(&self, runtime: &str, project: &str, terminal: &str) {
+        let routed: Vec<(ResourceRef, Option<String>)> = self
+            .project_resource_routes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, kept)| {
+                kept.runtime == runtime
+                    && kept.local_project == project
+                    && kept.kind == ResourceKind::Terminal
+                    && kept.terminal == terminal
+            })
+            .map(|(route, kept)| {
+                (
+                    self.project_route_ref(
+                        route,
+                        &kept.runtime,
+                        &kept.local_project,
+                        &kept.terminal,
+                    ),
+                    kept.owner.clone(),
+                )
+            })
+            .collect();
+        let aliases = self
+            .resource_subscribers
+            .aliases(ResourceKind::Terminal, project, terminal);
+        let mut references: HashMap<ResourceRef, Option<String>> = aliases
+            .into_iter()
+            .map(|reference| (reference, None))
+            .collect();
+        references.extend(routed);
+        for (reference, owner) in references {
+            self.feed.send(json!({
+                "kind": "term",
+                "session": reference.location.session,
+                "ref": reference,
+                "exit": true,
+                "_client_owner": owner,
+            }));
+        }
+        self.project_resource_routes
+            .lock()
+            .unwrap()
+            .retain(|_, kept| {
+                kept.runtime != runtime
+                    || kept.local_project != project
+                    || kept.kind != ResourceKind::Terminal
+                    || kept.terminal != terminal
+            });
+        self.resource_subscribers
+            .remove_resource(ResourceKind::Terminal, project, terminal);
+    }
+
+    /// Open a project's shell without opening or changing a chat (ADR 0060).
+    async fn project_terminal_open(self: &Arc<Self>, params: &Value) -> anyhow::Result<Value> {
+        let project_id = params["project"].as_str().unwrap_or("");
+        let project = self
+            .engine
+            .store
+            .get_project(&ProjectId(project_id.to_string()))?
+            .ok_or_else(|| anyhow::anyhow!("there is no project `{project_id}` here"))?;
+        anyhow::ensure!(
+            project.workspace.is_some(),
+            "choose a folder for this project first"
+        );
+        let place = params["place"].as_str().unwrap_or("");
+        let route = uuid::Uuid::new_v4().simple().to_string();
+        let here = ark_interact::held::runtime_id(&self.engine);
+        let operation = ResourceOperation {
+            kind: ResourceOperationKind::TerminalOpen,
+            input: json!({
+                "cols": params["cols"],
+                "rows": params["rows"],
+            }),
+        };
+
+        if place.is_empty() {
+            let reference = self.project_route_ref(&route, &here, project.id.as_str(), "");
+            self.project_resource_routes.lock().unwrap().insert(
+                route.clone(),
+                ProjectResourceRoute {
+                    source_project: project.id.as_str().to_string(),
+                    local_project: project.id.as_str().to_string(),
+                    runtime: here,
+                    place: None,
+                    kind: ResourceKind::Terminal,
+                    terminal: String::new(),
+                    origin: None,
+                    owner: params["_client_owner"].as_str().map(str::to_string),
+                    generation: String::new(),
+                    next_write: 1,
+                },
+            );
+            return match self.resource_call(reference, operation, false).await {
+                Ok(mut value) => {
+                    if let Some(kept) = self.project_resource_routes.lock().unwrap().get_mut(&route)
+                    {
+                        kept.generation = value["generation"].as_str().unwrap_or("").to_string();
+                    }
+                    value["place"] = json!(params["here"].as_str().unwrap_or("This computer"));
+                    value["project"] = json!({ "id": project.id, "name": project.name });
+                    Ok(value)
+                }
+                Err(error) => {
+                    self.project_resource_routes.lock().unwrap().remove(&route);
+                    Err(error)
+                }
+            };
+        }
+
+        let shown = self
+            .links
+            .shown()
+            .into_iter()
+            .find(|candidate| candidate.name == place)
+            .ok_or_else(|| anyhow::anyhow!("{place} is not set up here"))?;
+        anyhow::ensure!(
+            shown.state == ark_interact::links::State::Ok,
+            "{place} is not answering"
+        );
+        anyhow::ensure!(shown.project_terminal, "update ARK on {place}");
+        let runtime = self
+            .links
+            .runtime_id(place)
+            .ok_or_else(|| anyhow::anyhow!("update ARK on {place}"))?;
+        self.ensure_relay(place).await;
+        let sent = self
+            .copy_send(place, &project, params["big"].as_bool().unwrap_or(false))
+            .await?;
+        if !sent["ask"].is_null() || sent["busy"] == true {
+            return Ok(sent);
+        }
+        anyhow::ensure!(
+            sent["refused"].as_array().is_none_or(Vec::is_empty),
+            "some project files could not be copied"
+        );
+        let mut identity = self.origin(place, &project);
+        let state = self
+            .links
+            .chat(place, "copy_state", identity.clone())
+            .await?;
+        let remote_project = state["project"]["id"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("{place} did not identify the project copy"))?;
+        let reference = self.project_route_ref(&route, &runtime, remote_project, "");
+        identity["ref"] = serde_json::to_value(&reference)?;
+        identity["operation"] = serde_json::to_value(&operation)?;
+        let mut value = self
+            .links
+            .chat(place, "project_resource_open", identity)
+            .await?;
+        let opened_ref: ResourceRef = serde_json::from_value(value["ref"].clone())?;
+        anyhow::ensure!(
+            opened_ref.location.runtime == runtime,
+            "{place} returned another runtime"
+        );
+        anyhow::ensure!(
+            opened_ref.location.project == remote_project,
+            "{place} returned another project"
+        );
+        anyhow::ensure!(
+            opened_ref.kind == ResourceKind::Terminal,
+            "{place} returned another resource"
+        );
+        anyhow::ensure!(
+            opened_ref.authority == reference.authority,
+            "{place} returned another route"
+        );
+        self.project_resource_routes.lock().unwrap().insert(
+            route.clone(),
+            ProjectResourceRoute {
+                source_project: project.id.as_str().to_string(),
+                local_project: remote_project.to_string(),
+                runtime,
+                place: Some(place.to_string()),
+                kind: ResourceKind::Terminal,
+                terminal: opened_ref.id.clone(),
+                origin: None,
+                owner: params["_client_owner"].as_str().map(str::to_string),
+                generation: value["generation"].as_str().unwrap_or("").to_string(),
+                next_write: 1,
+            },
+        );
+        value["place"] = json!(place);
+        value["project"] = json!({ "id": project.id, "name": project.name });
+        Ok(value)
     }
 
     async fn resource_call(
@@ -1112,6 +1789,17 @@ impl Host {
                 let mut value = serde_json::to_value(&opened)?;
                 let mut opened_ref = r.clone();
                 opened_ref.id = opened.session;
+                if let ResourceAuthority::Project { route } = &opened_ref.authority {
+                    let mut routes = self.project_resource_routes.lock().unwrap();
+                    let kept = routes
+                        .get_mut(route)
+                        .ok_or_else(|| anyhow::anyhow!("that project Terminal route ended"))?;
+                    anyhow::ensure!(
+                        kept.terminal.is_empty() || kept.terminal == opened_ref.id,
+                        "that route belongs to another Terminal"
+                    );
+                    kept.terminal = opened_ref.id.clone();
+                }
                 self.terminals
                     .subscribe(project.id.as_str(), &opened_ref.id, opened_ref.clone());
                 value["ref"] = serde_json::to_value(opened_ref)?;
@@ -1128,14 +1816,39 @@ impl Host {
                 }
                 self.terminals
                     .subscribe(project.id.as_str(), &r.id, r.clone());
-                Ok(serde_json::to_value(self.terminals.read_for(
+                let read = self.terminals.read_for(
                     project.id.as_str(),
                     &r.id,
                     &s("generation"),
                     n("after").unwrap_or(0),
-                )?)?)
+                )?;
+                let ended = read.ended;
+                let value = serde_json::to_value(read)?;
+                if ended && matches!(&r.authority, ResourceAuthority::Project { .. }) {
+                    self.end_project_terminal_routes(
+                        &r.location.runtime,
+                        &r.location.project,
+                        &r.id,
+                    );
+                }
+                Ok(value)
             }
             O::TerminalWrite => {
+                if let ResourceAuthority::Project { route } = &r.authority {
+                    let sequence = n("sequence").ok_or_else(|| {
+                        anyhow::anyhow!("a project Terminal write needs a sequence")
+                    })?;
+                    let mut routes = self.project_resource_routes.lock().unwrap();
+                    let kept = routes
+                        .get_mut(route)
+                        .ok_or_else(|| anyhow::anyhow!("that project Terminal route ended"))?;
+                    anyhow::ensure!(
+                        sequence == kept.next_write,
+                        "that Terminal write is duplicate or out of order"
+                    );
+                    // Consume before I/O. A failed or uncertain write is never safe to retry.
+                    kept.next_write = kept.next_write.saturating_add(1);
+                }
                 if self
                     .setup_terms
                     .lock()
@@ -1179,6 +1892,13 @@ impl Host {
                     self.setup_terms.lock().unwrap().remove(&r.id);
                 } else {
                     self.terminals.close_for(project.id.as_str(), &r.id)?;
+                }
+                if matches!(&r.authority, ResourceAuthority::Project { .. }) {
+                    self.end_project_terminal_routes(
+                        &r.location.runtime,
+                        &r.location.project,
+                        &r.id,
+                    );
                 }
                 Ok(Value::Null)
             }
@@ -1854,6 +2574,7 @@ impl Host {
                         .map(|k| (k.as_str().to_string(), json!(k.noun())))
                         .collect::<serde_json::Map<_, _>>(),
                     "version": env!("CARGO_PKG_VERSION"),
+                    "project_terminal": true,
                     // This runtime's store id: another runtime knows it by this (ADR 0052).
                     "runtime": ark_interact::held::runtime_id(&self.engine),
                 }))
@@ -1882,7 +2603,7 @@ impl Host {
                     .links()
                     .shown()
                     .into_iter()
-                    .map(|l| json!({ "name": l.name, "state": l.state }))
+                    .map(|l| json!({ "name": l.name, "state": l.state, "project_terminal": l.project_terminal }))
                     .collect();
                 Ok(
                     json!({ "here": here, "places": places, "can_add": self.computers.get().is_some() }),
@@ -1964,6 +2685,7 @@ impl Host {
                     location: self.location_of(&self.cur()),
                     kind: ResourceKind::Terminal,
                     id: String::new(),
+                    authority: ResourceAuthority::Chat,
                 };
                 let opened = self.terminals.open_program(
                     &self.feed,
@@ -2337,6 +3059,7 @@ impl Host {
             }
             // The Browser panel in a plain browser: whether a page lets a frame show it.
             "frame_check" => Ok(crate::frame::check(&s("url")).await),
+            "project_terminal_open" => self.project_terminal_open(&params).await,
             "resource" => {
                 let reference: ResourceRef = serde_json::from_value(params["ref"].clone())?;
                 let operation: ResourceOperation =
@@ -2487,6 +3210,7 @@ impl Host {
             }
             m if m.starts_with("chat_") => self.chat_call(m, &params).await,
             m if m.starts_with("copy_") => self.copy_call(m, &params).await,
+            m if m.starts_with("project_resource") => self.chat_call(m, &params).await,
             other => anyhow::bail!("unknown method `{other}`"),
         }
     }
@@ -2721,6 +3445,22 @@ impl Host {
         v
     }
 
+    /// Make a chat for an external client without changing the chat shown in any window.
+    pub(crate) async fn create_client_chat(
+        self: &Arc<Self>,
+        project: &str,
+    ) -> anyhow::Result<Value> {
+        let project = self
+            .engine
+            .store
+            .get_project(&ProjectId(project.to_string()))?
+            .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))?;
+        let conv = self.open_sibling(None, &project.id)?;
+        let session = conv.session();
+        self.addressed.lock().unwrap().insert(session, conv.clone());
+        Ok(self.summary_of(&conv))
+    }
+
     /// The questions a chat asks now (`hello`'s shape).
     fn questions_of(&self, session: &str) -> Vec<Value> {
         self.approvals
@@ -2738,6 +3478,102 @@ impl Host {
         let s = |k: &str| params[k].as_str().unwrap_or("").to_string();
         let session = s("session");
         match method {
+            "project_resource_open" => {
+                let reference: ResourceRef = serde_json::from_value(params["ref"].clone())?;
+                let ResourceAuthority::Project { route } = &reference.authority else {
+                    anyhow::bail!("a project resource needs project authority")
+                };
+                let route = route.clone();
+                anyhow::ensure!(
+                    reference.kind == ResourceKind::Terminal,
+                    "only a Terminal may use project authority"
+                );
+                anyhow::ensure!(
+                    reference.id.is_empty(),
+                    "a new project route cannot name a Terminal"
+                );
+                anyhow::ensure!(
+                    reference.location.session.is_empty(),
+                    "a project route cannot name a chat"
+                );
+                let origin = s("origin");
+                let source_project = s("origin_project");
+                let project = ark_interact::held::origin_project(
+                    &self.engine,
+                    &origin,
+                    &source_project,
+                    &s("name"),
+                )?;
+                let here = ark_interact::held::runtime_id(&self.engine);
+                anyhow::ensure!(
+                    reference.location.runtime == here,
+                    "that route names another runtime"
+                );
+                anyhow::ensure!(
+                    reference.location.project == project.id.as_str(),
+                    "that route names another project copy"
+                );
+                {
+                    let mut routes = self.project_resource_routes.lock().unwrap();
+                    anyhow::ensure!(
+                        !routes.contains_key(&route),
+                        "that project route already exists"
+                    );
+                    routes.insert(
+                        route.clone(),
+                        ProjectResourceRoute {
+                            source_project,
+                            local_project: project.id.as_str().to_string(),
+                            runtime: here,
+                            place: None,
+                            kind: ResourceKind::Terminal,
+                            terminal: String::new(),
+                            origin: Some(origin),
+                            owner: None,
+                            generation: String::new(),
+                            next_write: 1,
+                        },
+                    );
+                }
+                let operation: ResourceOperation =
+                    serde_json::from_value(params["operation"].clone())?;
+                anyhow::ensure!(
+                    operation.kind == ResourceOperationKind::TerminalOpen,
+                    "a new project route must open a Terminal"
+                );
+                match self.resource_call(reference, operation, true).await {
+                    Ok(value) => Ok(value),
+                    Err(error) => {
+                        self.project_resource_routes.lock().unwrap().remove(&route);
+                        Err(error)
+                    }
+                }
+            }
+            "project_resource" => {
+                let reference: ResourceRef = serde_json::from_value(params["ref"].clone())?;
+                let ResourceAuthority::Project { route } = &reference.authority else {
+                    anyhow::bail!("a project resource needs project authority")
+                };
+                let origin = s("origin");
+                let source_project = s("origin_project");
+                {
+                    let routes = self.project_resource_routes.lock().unwrap();
+                    let kept = routes
+                        .get(route)
+                        .ok_or_else(|| anyhow::anyhow!("that project Terminal route ended"))?;
+                    anyhow::ensure!(
+                        kept.origin.as_deref() == Some(origin.as_str()),
+                        "that route belongs to another origin"
+                    );
+                    anyhow::ensure!(
+                        kept.source_project == source_project,
+                        "that route belongs to another source project"
+                    );
+                }
+                let operation: ResourceOperation =
+                    serde_json::from_value(params["operation"].clone())?;
+                self.resource_call(reference, operation, true).await
+            }
             "chat_resource" => {
                 let reference: ResourceRef = serde_json::from_value(params["ref"].clone())?;
                 anyhow::ensure!(
@@ -2939,6 +3775,7 @@ impl Host {
                     },
                     kind: ResourceKind::Terminal,
                     id: String::new(),
+                    authority: ResourceAuthority::Chat,
                 };
                 let opened = self.terminals.open_program(
                     &self.feed,

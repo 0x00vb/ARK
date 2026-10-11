@@ -740,6 +740,25 @@ impl Store {
         Ok(())
     }
 
+    /// Insert or replace several caller-owned records in one transaction.
+    pub fn put_records(&self, records: &[(&str, &str, &str, &serde_json::Value)]) -> Result<()> {
+        let encoded = records
+            .iter()
+            .map(|(kind, id, scope, value)| Ok((*kind, *id, *scope, serde_json::to_string(value)?)))
+            .collect::<Result<Vec<_>>>()?;
+        let mut db = self.db.lock().unwrap();
+        let transaction = db.transaction()?;
+        let updated_at = rfc(OffsetDateTime::now_utc());
+        for (kind, id, scope, json) in encoded {
+            transaction.execute(
+                "INSERT OR REPLACE INTO records(kind, id, scope, updated_at, json) VALUES(?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![kind, id, scope, updated_at, json],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn get_record(&self, kind: &str, id: &str) -> Result<Option<serde_json::Value>> {
         let db = self.db.lock().unwrap();
         one(db.query_row(

@@ -76,6 +76,8 @@ pub struct Shown {
     pub name: String,
     pub state: State,
     pub had_items: bool,
+    /// Whether this runtime advertises project-scoped Terminal routes (ADR 0060).
+    pub project_terminal: bool,
 }
 
 struct Followed {
@@ -84,6 +86,7 @@ struct Followed {
     state: Mutex<State>,
     /// Its store id, from its `hello` (ADR 0052); `None` until read, or from an older version.
     runtime: Mutex<Option<String>>,
+    project_terminal: Mutex<bool>,
     items: Mutex<Vec<Item>>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -149,6 +152,7 @@ impl Links {
                 link: l.clone(),
                 state: Mutex::new(State::Starting),
                 runtime: Mutex::new(None),
+                project_terminal: Mutex::new(false),
                 items: Mutex::new(Vec::new()),
                 task: Mutex::new(None),
             });
@@ -216,6 +220,7 @@ impl Links {
                 name: f.link.name.clone(),
                 state: *f.state.lock().unwrap(),
                 had_items: !f.items.lock().unwrap().is_empty(),
+                project_terminal: *f.project_terminal.lock().unwrap(),
             })
             .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -452,6 +457,7 @@ async fn follow(f: Arc<Followed>, changed: broadcast::Sender<()>) {
                 if let Some(id) = v["runtime"].as_str() {
                     *f.runtime.lock().unwrap() = Some(id.to_string());
                 }
+                *f.project_terminal.lock().unwrap() = v["project_terminal"] == true;
             }
         }
         set(State::Ok);

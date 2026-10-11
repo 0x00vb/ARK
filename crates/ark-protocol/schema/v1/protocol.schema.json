@@ -1,0 +1,1050 @@
+{
+  "$defs": {
+    "ApprovalChoice": {
+      "properties": {
+        "destructive": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "systemImage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "destructive"
+      ],
+      "type": "object"
+    },
+    "AttentionItem": {
+      "properties": {
+        "choices": {
+          "items": {
+            "$ref": "#/$defs/ApprovalChoice"
+          },
+          "type": "array"
+        },
+        "computer": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "teammate": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "detail",
+        "teammate",
+        "project",
+        "computer",
+        "choices"
+      ],
+      "type": "object"
+    },
+    "Bootstrap": {
+      "properties": {
+        "protocols": {
+          "items": {
+            "$ref": "#/$defs/ProtocolVersion"
+          },
+          "type": "array"
+        },
+        "runtimeVersion": {
+          "type": "string"
+        },
+        "updateUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "protocols",
+        "runtimeVersion"
+      ],
+      "type": "object"
+    },
+    "ChatMessage": {
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "delivery": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "author",
+        "body",
+        "createdAt"
+      ],
+      "type": "object"
+    },
+    "ChatSummary": {
+      "properties": {
+        "computer": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "preview": {
+          "type": "string"
+        },
+        "project": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "unread": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "project",
+        "computer",
+        "updatedAt",
+        "preview",
+        "unread"
+      ],
+      "type": "object"
+    },
+    "ChatsSnapshot": {
+      "properties": {
+        "chats": {
+          "items": {
+            "$ref": "#/$defs/ChatSummary"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "chats"
+      ],
+      "type": "object"
+    },
+    "ComputerSummary": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "projectTerminal": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "unavailableReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "state",
+        "projectTerminal"
+      ],
+      "type": "object"
+    },
+    "ComputersSnapshot": {
+      "properties": {
+        "computers": {
+          "items": {
+            "$ref": "#/$defs/ComputerSummary"
+          },
+          "type": "array"
+        },
+        "here": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "here",
+        "computers"
+      ],
+      "type": "object"
+    },
+    "ConversationSnapshot": {
+      "properties": {
+        "activeTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approvals": {
+          "items": {
+            "$ref": "#/$defs/AttentionItem"
+          },
+          "type": "array"
+        },
+        "chat": {
+          "$ref": "#/$defs/ChatSummary"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/ChatMessage"
+          },
+          "type": "array"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/ResultSummary"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "chat",
+        "messages",
+        "approvals",
+        "results"
+      ],
+      "type": "object"
+    },
+    "ErrorEnvelope": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "display": {
+          "type": "string"
+        },
+        "retryAfterSeconds": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "display"
+      ],
+      "type": "object"
+    },
+    "EventEnvelope": {
+      "properties": {
+        "affects": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "string"
+        },
+        "terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalEvent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sequence",
+        "type",
+        "affects"
+      ],
+      "type": "object"
+    },
+    "Hello": {
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "minimumClientMinor": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mutationEpoch": {
+          "type": "string"
+        },
+        "nextMutationCounter": {
+          "type": "string"
+        },
+        "protocolMajor": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "protocolMinor": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "protocolMajor",
+        "protocolMinor",
+        "minimumClientMinor",
+        "capabilities",
+        "limits",
+        "mutationEpoch",
+        "nextMutationCounter"
+      ],
+      "type": "object"
+    },
+    "HomeSnapshot": {
+      "properties": {
+        "attention": {
+          "items": {
+            "$ref": "#/$defs/AttentionItem"
+          },
+          "type": "array"
+        },
+        "mostRecentChat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recent": {
+          "items": {
+            "$ref": "#/$defs/ResultSummary"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "type": "string"
+        },
+        "working": {
+          "items": {
+            "$ref": "#/$defs/WorkingItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sequence",
+        "attention",
+        "working",
+        "recent"
+      ],
+      "type": "object"
+    },
+    "Limits": {
+      "properties": {
+        "eventBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "pageSize": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminalReplayBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminalWriteBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uploadBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "uploadPartBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pageSize",
+        "eventBytes",
+        "uploadPartBytes",
+        "uploadBytes",
+        "terminalWriteBytes",
+        "terminalReplayBytes"
+      ],
+      "type": "object"
+    },
+    "MutationReceipt": {
+      "properties": {
+        "acceptedAt": {
+          "type": "string"
+        },
+        "display": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "acceptedAt",
+        "display"
+      ],
+      "type": "object"
+    },
+    "MutationRequest": {
+      "properties": {
+        "counter": {
+          "type": "string"
+        },
+        "epoch": {
+          "type": "string"
+        },
+        "input": true,
+        "inputDigest": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "epoch",
+        "counter",
+        "operation",
+        "target",
+        "inputDigest",
+        "input"
+      ],
+      "type": "object"
+    },
+    "NewChatRequest": {
+      "properties": {
+        "project": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "type": "object"
+    },
+    "PairRequest": {
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "deviceName": {
+          "type": "string"
+        },
+        "installationNonce": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "deviceName",
+        "installationNonce"
+      ],
+      "type": "object"
+    },
+    "PairResponse": {
+      "properties": {
+        "credential": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "mutationEpoch": {
+          "type": "string"
+        },
+        "nextMutationCounter": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId",
+        "credential",
+        "expiresAt",
+        "mutationEpoch",
+        "nextMutationCounter"
+      ],
+      "type": "object"
+    },
+    "ProjectSummary": {
+      "properties": {
+        "computer": {
+          "type": "string"
+        },
+        "hasFolder": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "computer",
+        "hasFolder"
+      ],
+      "type": "object"
+    },
+    "ProjectsSnapshot": {
+      "properties": {
+        "projects": {
+          "items": {
+            "$ref": "#/$defs/ProjectSummary"
+          },
+          "type": "array"
+        },
+        "sequence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sequence",
+        "projects"
+      ],
+      "type": "object"
+    },
+    "ProtocolVersion": {
+      "properties": {
+        "latestMinor": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "major": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "major",
+        "latestMinor"
+      ],
+      "type": "object"
+    },
+    "ResultSummary": {
+      "properties": {
+        "byteCount": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "downloadPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "previewText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "project",
+        "createdAt",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TerminalEndRequest": {
+      "properties": {
+        "generation": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "handle",
+        "generation"
+      ],
+      "type": "object"
+    },
+    "TerminalEvent": {
+      "properties": {
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "gap": {
+          "type": "boolean"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "handle",
+        "generation",
+        "gap",
+        "ended"
+      ],
+      "type": "object"
+    },
+    "TerminalOpenRequest": {
+      "properties": {
+        "cols": {
+          "format": "uint16",
+          "maximum": 1000,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "computer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "copyLargeProject": {
+          "type": "boolean"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "rows": {
+          "format": "uint16",
+          "maximum": 1000,
+          "minimum": 2,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "projectId",
+        "cols",
+        "rows",
+        "copyLargeProject"
+      ],
+      "type": "object"
+    },
+    "TerminalOpenResponse": {
+      "properties": {
+        "computer": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        },
+        "history": {
+          "type": "string"
+        },
+        "project": {
+          "$ref": "#/$defs/ProjectSummary"
+        },
+        "reattached": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "handle",
+        "generation",
+        "cwd",
+        "history",
+        "cursor",
+        "ended",
+        "reattached",
+        "project",
+        "computer"
+      ],
+      "type": "object"
+    },
+    "TerminalOperationResponse": {
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "type": "object"
+    },
+    "TerminalReadRequest": {
+      "properties": {
+        "after": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "handle",
+        "generation",
+        "after"
+      ],
+      "type": "object"
+    },
+    "TerminalReadResponse": {
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "gap": {
+          "type": "boolean"
+        },
+        "generation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "data",
+        "base",
+        "cursor",
+        "gap",
+        "ended"
+      ],
+      "type": "object"
+    },
+    "TerminalResizeRequest": {
+      "properties": {
+        "cols": {
+          "format": "uint16",
+          "maximum": 1000,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        },
+        "rows": {
+          "format": "uint16",
+          "maximum": 1000,
+          "minimum": 2,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "handle",
+        "generation",
+        "cols",
+        "rows"
+      ],
+      "type": "object"
+    },
+    "TerminalWriteRequest": {
+      "properties": {
+        "data": {
+          "maxLength": 16384,
+          "type": "string"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "handle": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "handle",
+        "generation",
+        "sequence",
+        "data"
+      ],
+      "type": "object"
+    },
+    "WorkingItem": {
+      "properties": {
+        "chatId": {
+          "type": "string"
+        },
+        "computer": {
+          "type": "string"
+        },
+        "elapsedSeconds": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        },
+        "teammate": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "step",
+        "teammate",
+        "computer",
+        "elapsedSeconds",
+        "phase",
+        "chatId"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A schema root that names every type a separately released client may receive or send.",
+  "properties": {
+    "bootstrap": {
+      "$ref": "#/$defs/Bootstrap"
+    },
+    "chats": {
+      "$ref": "#/$defs/ChatsSnapshot"
+    },
+    "computers": {
+      "$ref": "#/$defs/ComputersSnapshot"
+    },
+    "conversation": {
+      "$ref": "#/$defs/ConversationSnapshot"
+    },
+    "error": {
+      "$ref": "#/$defs/ErrorEnvelope"
+    },
+    "event": {
+      "$ref": "#/$defs/EventEnvelope"
+    },
+    "hello": {
+      "$ref": "#/$defs/Hello"
+    },
+    "home": {
+      "$ref": "#/$defs/HomeSnapshot"
+    },
+    "mutation_receipt": {
+      "$ref": "#/$defs/MutationReceipt"
+    },
+    "mutation_request": {
+      "$ref": "#/$defs/MutationRequest"
+    },
+    "new_chat": {
+      "$ref": "#/$defs/NewChatRequest"
+    },
+    "pair_request": {
+      "$ref": "#/$defs/PairRequest"
+    },
+    "pair_response": {
+      "$ref": "#/$defs/PairResponse"
+    },
+    "projects": {
+      "$ref": "#/$defs/ProjectsSnapshot"
+    },
+    "terminal_end_request": {
+      "$ref": "#/$defs/TerminalEndRequest"
+    },
+    "terminal_open_request": {
+      "$ref": "#/$defs/TerminalOpenRequest"
+    },
+    "terminal_open_response": {
+      "$ref": "#/$defs/TerminalOpenResponse"
+    },
+    "terminal_operation_response": {
+      "$ref": "#/$defs/TerminalOperationResponse"
+    },
+    "terminal_read_request": {
+      "$ref": "#/$defs/TerminalReadRequest"
+    },
+    "terminal_read_response": {
+      "$ref": "#/$defs/TerminalReadResponse"
+    },
+    "terminal_resize_request": {
+      "$ref": "#/$defs/TerminalResizeRequest"
+    },
+    "terminal_write_request": {
+      "$ref": "#/$defs/TerminalWriteRequest"
+    }
+  },
+  "required": [
+    "bootstrap",
+    "pair_request",
+    "pair_response",
+    "hello",
+    "error",
+    "home",
+    "chats",
+    "conversation",
+    "new_chat",
+    "mutation_request",
+    "mutation_receipt",
+    "projects",
+    "computers",
+    "terminal_open_request",
+    "terminal_open_response",
+    "terminal_read_request",
+    "terminal_read_response",
+    "terminal_write_request",
+    "terminal_resize_request",
+    "terminal_end_request",
+    "terminal_operation_response",
+    "event"
+  ],
+  "title": "ProtocolSchema",
+  "type": "object"
+}

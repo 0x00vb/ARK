@@ -248,6 +248,17 @@ window.readyProbe.graph = await window.ark.call("graph");
     if scenario == "interrupted" {
         seed_interrupted(&host, dir.path()).await;
     }
+    if scenario == "project-terminal" {
+        let workspace = dir.path().join("terminal-project");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let summary = host.call("summary", json!({})).await.unwrap();
+        host.call(
+            "project_folder",
+            json!({ "id": summary["project"]["id"], "path": workspace }),
+        )
+        .await
+        .unwrap();
+    }
     let out = tokio::process::Command::new("node")
         .arg("page.mjs")
         .arg(scenario)
@@ -806,6 +817,11 @@ async fn skills_are_listed_in_settings_and_added_from_the_terminal() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_narrow_window_keeps_the_sidebar_reachable() {
     drive("narrow", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_terminal_opens_without_changing_the_chat() {
+    drive("project-terminal", vec![], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

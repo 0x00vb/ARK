@@ -7,6 +7,22 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.19.0] - 2026-10-10
+
+### Added
+- ADR 0060: a project Terminal can open in the shared web client without creating, selecting or
+  reading a chat. A host-issued project route binds its project and computer, and one-shot
+  sequenced writes fail closed.
+- External client protocol v1.1 adds an authoritative project list, computer capabilities and
+  device-bound Terminal open, read, write, resize, end and event payloads. Checked-in JSON Schema,
+  golden fixtures and generated Swift share the Rust wire types.
+
+### Changed
+- Linked runtimes advertise project Terminal support. An unsupported, unavailable or revoked
+  computer is refused before a project copy or shell starts, with no local fallback.
+- Native Terminal input is bounded and ordered outside the durable chat mutation queue. Output is
+  cursor-based, gap-aware, memory-only and filtered to the paired device that opened its route.
+
 ## [0.18.3] - 2026-10-09
 
 ### Added

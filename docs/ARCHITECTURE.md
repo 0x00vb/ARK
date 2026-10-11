@@ -54,6 +54,7 @@ flowchart LR
     model[ark-model] & store & tools --> runtime[ark-runtime] --> sdk[ark-sdk]
     runtime --> acp[ark-acp] --> sdk
     sdk --> orch[ark-orchestrate] --> interact[ark-interact] --> cli[ark-cli] & ui[ark-ui]
+    protocol[ark-protocol] --> ui
     orch --> bench[ark-bench]
 ```
 
@@ -61,6 +62,7 @@ Arrows point from a dependency to its user. There are no cycles.
 
 | Crate | Main types |
 |---|---|
+| `ark-protocol` | Additive external-client DTOs, protocol versions, decimal-string counters, schema and golden fixtures. It contains no transport or product decisions. |
 | `ark-core` | `Artifact`, `ArtifactKind` (+ `Other(String)`), `ActionDescriptor`, `RiskTier`, `Reuse`, `Invocation`, `Capability`, `CapabilityCatalog`, `EvidenceCard`, `ResearchState`, `WorkspaceContext`, `Focus`, `RuleSet`, `RuleBinding`. No tool or domain name. |
 | `ark-model` | `Provider`, `Completion`, `Usage`, `ProviderError`, `RetryPolicy`, `MockProvider`; Anthropic, OpenAI, Ollama, `CliModel` (Claude Code, Codex), `catalog`; `Capacity`, `Limiter`; `SubscriptionRuntime`, `ManagedSession` |
 | `ark-store` | `Store`: content-addressed blobs (blake3), SQLite metadata (WAL), Tantivy full-text index |

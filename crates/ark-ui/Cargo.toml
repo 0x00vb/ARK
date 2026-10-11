@@ -18,6 +18,7 @@ desktop-updater = ["desktop", "dep:tauri-plugin-updater"]
 ark-os.workspace = true
 ark-reach.workspace = true
 ark-interact.workspace = true
+ark-protocol.workspace = true
 ark-sdk.workspace = true
 ark-store.workspace = true
 serde.workspace = true

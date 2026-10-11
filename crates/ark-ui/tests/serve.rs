@@ -12,6 +12,7 @@ use ark_ui::access::Tokens;
 use ark_ui::remote::Client;
 use ark_ui::{Access, ArkUi};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 struct Notes;
 
@@ -37,27 +38,501 @@ impl Adapter for Notes {
     }
 }
 
+#[tokio::test]
+async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let code = tokens
+        .pair_code(
+            "Owner Mac",
+            Duration::from_secs(60),
+            Duration::from_secs(90 * 24 * 3600),
+            None,
+        )
+        .unwrap();
+    let (runtime, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let address = "runtime.example";
+
+    let bootstrap = raw(
+        served.port,
+        format!("GET /client/bootstrap HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+    )
+    .await;
+    assert!(bootstrap.starts_with("HTTP/1.1 200"), "{bootstrap}");
+    assert!(bootstrap.contains(r#""major":1"#));
+
+    let body = json!({
+        "code": code,
+        "deviceName": "Valentino's iPhone",
+        "installationNonce": "install-1",
+    })
+    .to_string();
+    let paired = raw(
+        served.port,
+        post("/client/v1/pair", address, None, "", &body),
+    )
+    .await;
+    assert!(paired.starts_with("HTTP/1.1 200"), "{paired}");
+    let paired: Value = serde_json::from_str(paired.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let credential = paired["credential"].as_str().unwrap();
+    let mutation_epoch = paired["mutationEpoch"].as_str().unwrap();
+    assert!(credential.starts_with("arks_"));
+    assert_eq!(paired["nextMutationCounter"], "1");
+    assert_eq!(
+        tokens.check(credential).as_deref(),
+        Some("Owner Mac › Valentino's iPhone")
+    );
+    let auth = format!("Authorization: Bearer {credential}\r\n");
+
+    for path in ["/client/v1/hello", "/client/v1/home", "/client/v1/chats"] {
+        let response = raw(
+            served.port,
+            format!("GET {path} HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n"),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");
+        let value: Value =
+            serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert!(value.is_object(), "{path}: {value}");
+        match path {
+            "/client/v1/hello" => {
+                serde_json::from_value::<ark_protocol::Hello>(value.clone()).unwrap();
+                assert_eq!(value["mutationEpoch"], mutation_epoch);
+                assert_eq!(value["nextMutationCounter"], "1");
+            }
+            "/client/v1/home" => {
+                serde_json::from_value::<ark_protocol::HomeSnapshot>(value).unwrap();
+            }
+            "/client/v1/chats" => {
+                serde_json::from_value::<ark_protocol::ChatsSnapshot>(value).unwrap();
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    let before_terminal = runtime
+        .call(
+            "add_project",
+            json!({ "name": "Phone Terminal", "path": work.path() }),
+        )
+        .await
+        .unwrap();
+    let project = before_terminal["project"]["id"].as_str().unwrap();
+    for path in ["/client/v1/projects", "/client/v1/computers"] {
+        let response = raw(
+            served.port,
+            format!("GET {path} HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n"),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");
+        let body = response.split("\r\n\r\n").nth(1).unwrap();
+        if path.ends_with("projects") {
+            serde_json::from_str::<ark_protocol::ProjectsSnapshot>(body).unwrap();
+        } else {
+            serde_json::from_str::<ark_protocol::ComputersSnapshot>(body).unwrap();
+        }
+    }
+    let opened = raw(
+        served.port,
+        post(
+            "/client/v1/terminals/open",
+            address,
+            None,
+            &auth,
+            &json!({
+                "projectId": project,
+                "computer": null,
+                "cols": 80,
+                "rows": 24,
+                "copyLargeProject": false,
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    assert!(opened.starts_with("HTTP/1.1 200"), "{opened}");
+    let opened_body = opened.split("\r\n\r\n").nth(1).unwrap();
+    serde_json::from_str::<ark_protocol::TerminalOpenResponse>(opened_body).unwrap();
+    let opened: Value = serde_json::from_str(opened_body).unwrap();
+    let handle = opened["handle"].as_str().unwrap();
+    let generation = opened["generation"].as_str().unwrap();
+    let write = json!({
+        "handle": handle,
+        "generation": generation,
+        "sequence": "1",
+        "data": "printf 'native-terminal-ok\\n'\r",
+    })
+    .to_string();
+    let written = raw(
+        served.port,
+        post("/client/v1/terminals/write", address, None, &auth, &write),
+    )
+    .await;
+    assert!(written.starts_with("HTTP/1.1 200"), "{written}");
+    let duplicate = raw(
+        served.port,
+        post("/client/v1/terminals/write", address, None, &auth, &write),
+    )
+    .await;
+    assert!(duplicate.starts_with("HTTP/1.1 409"), "{duplicate}");
+
+    let mut cursor = opened["cursor"].as_str().unwrap().to_string();
+    let mut output = String::new();
+    for _ in 0..20 {
+        let read = raw(
+            served.port,
+            post(
+                "/client/v1/terminals/read",
+                address,
+                None,
+                &auth,
+                &json!({ "handle": handle, "generation": generation, "after": cursor }).to_string(),
+            ),
+        )
+        .await;
+        assert!(read.starts_with("HTTP/1.1 200"), "{read}");
+        let read: Value = serde_json::from_str(read.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        output.push_str(read["data"].as_str().unwrap_or(""));
+        cursor = read["cursor"].as_str().unwrap().to_string();
+        if output.contains("native-terminal-ok") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(output.contains("native-terminal-ok"), "{output:?}");
+    let after_terminal = runtime.call("summary", json!({})).await.unwrap();
+    assert_eq!(
+        after_terminal["session"]["id"], before_terminal["session"]["id"],
+        "Terminal must not change the current chat"
+    );
+
+    let before = runtime.call("summary", json!({})).await.unwrap();
+
+    for request in [
+        format!("GET /client/v1/hello?token={credential} HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        format!(
+            "GET /client/v1/hello HTTP/1.1\r\nHost: {address}\r\nX-Ark-Token: {credential}\r\n\r\n"
+        ),
+    ] {
+        let response = raw(served.port, request).await;
+        assert!(response.starts_with("HTTP/1.1 401"), "{response}");
+    }
+
+    let create_body = json!({ "project": project }).to_string();
+    let created = raw(
+        served.port,
+        post("/client/v1/chats", address, None, &auth, &create_body),
+    )
+    .await;
+    assert!(created.starts_with("HTTP/1.1 200"), "{created}");
+    let created: Value = serde_json::from_str(created.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let after = runtime.call("summary", json!({})).await.unwrap();
+    assert_ne!(created["id"], before["session"]["id"]);
+    assert_eq!(after["session"]["id"], before["session"]["id"]);
+
+    let mutation_input = json!({ "attachmentIds": [], "body": "Review the delivery dates." });
+    let input_digest = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&mutation_input).unwrap())
+    );
+    let mutation = json!({
+        "epoch": mutation_epoch,
+        "counter": "2",
+        "operation": "chat.send",
+        "target": created["id"],
+        "inputDigest": input_digest.clone(),
+        "input": mutation_input.clone(),
+    })
+    .to_string();
+    let unsupported = json!({
+        "epoch": mutation_epoch,
+        "counter": "1",
+        "operation": "unknown.operation",
+        "target": created["id"],
+        "inputDigest": input_digest,
+        "input": mutation_input,
+    })
+    .to_string();
+    let refused = raw(
+        served.port,
+        post("/client/v1/mutations", address, None, &auth, &unsupported),
+    )
+    .await;
+    assert!(refused.starts_with("HTTP/1.1 400"), "{refused}");
+    let missing_input = json!({ "attachmentIds": [], "body": "No missing chat." });
+    let missing_digest = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&missing_input).unwrap())
+    );
+    let missing = json!({
+        "epoch": mutation_epoch,
+        "counter": "1",
+        "operation": "chat.send",
+        "target": "missing-chat",
+        "inputDigest": missing_digest,
+        "input": missing_input,
+    })
+    .to_string();
+    let missing = raw(
+        served.port,
+        post("/client/v1/mutations", address, None, &auth, &missing),
+    )
+    .await;
+    assert!(missing.starts_with("HTTP/1.1 200"), "{missing}");
+    assert!(missing.contains("no_longer_applicable"), "{missing}");
+    let first = raw(
+        served.port,
+        post("/client/v1/mutations", address, None, &auth, &mutation),
+    )
+    .await;
+    assert!(first.starts_with("HTTP/1.1 200"), "{first}");
+    let first_receipt: Value =
+        serde_json::from_str(first.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(first_receipt["status"], "completed");
+
+    let replay = raw(
+        served.port,
+        post("/client/v1/mutations", address, None, &auth, &mutation),
+    )
+    .await;
+    let replay_receipt: Value =
+        serde_json::from_str(replay.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(replay_receipt["id"], first_receipt["id"]);
+
+    let pending_input = json!({ "attachmentIds": [], "body": "Follow up once." });
+    let pending_digest = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&pending_input).unwrap())
+    );
+    let pending = json!({
+        "epoch": mutation_epoch,
+        "counter": "3",
+        "operation": "chat.send",
+        "target": created["id"],
+        "inputDigest": pending_digest,
+        "input": pending_input,
+    })
+    .to_string();
+    let accepted = raw(
+        served.port,
+        post("/client/v1/mutations", address, None, &auth, &pending),
+    )
+    .await;
+    assert!(accepted.starts_with("HTTP/1.1 200"), "{accepted}");
+    assert!(accepted.contains(r#""status":"accepted""#), "{accepted}");
+
+    let gap_input = json!({ "attachmentIds": [], "body": "Skipped counter." });
+    let gap_digest = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&gap_input).unwrap())
+    );
+    let gap = json!({
+        "epoch": mutation_epoch,
+        "counter": "4",
+        "operation": "chat.send",
+        "target": created["id"],
+        "inputDigest": gap_digest,
+        "input": gap_input,
+    })
+    .to_string();
+    let gap = raw(
+        served.port,
+        post("/client/v1/mutations", address, None, &auth, &gap),
+    )
+    .await;
+    assert!(gap.starts_with("HTTP/1.1 409"), "{gap}");
+    assert!(gap.contains("counter_gap"), "{gap}");
+
+    let mut pending_receipt = Value::Null;
+    for _ in 0..40 {
+        let response = raw(
+            served.port,
+            post("/client/v1/mutations", address, None, &auth, &pending),
+        )
+        .await;
+        pending_receipt = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        if pending_receipt["status"] == "completed" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(pending_receipt["status"], "completed");
+
+    let device = format!("{:x}", Sha256::digest(credential.as_bytes()));
+    let record_id = format!("{device}:{mutation_epoch}:3");
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    let turns = store
+        .list_session_turns(created["id"].as_str().unwrap(), None)
+        .unwrap();
+    assert_eq!(
+        turns
+            .iter()
+            .filter(|turn| turn["input"] == "Follow up once.")
+            .count(),
+        1
+    );
+    let mut interrupted = store
+        .get_record("client_mutation", &record_id)
+        .unwrap()
+        .unwrap();
+    assert!(interrupted["effect"]["turnIndex"].is_number());
+    interrupted["receipt"]["status"] = json!("accepted");
+    interrupted["receipt"]["display"] = json!("Accepted");
+    store
+        .put_record("client_mutation", &record_id, &device, &interrupted)
+        .unwrap();
+    let (_resumed, _served_again) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let resumed = store
+        .get_record("client_mutation", &record_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(resumed["receipt"]["status"], "completed");
+    let turns = store
+        .list_session_turns(created["id"].as_str().unwrap(), None)
+        .unwrap();
+    assert_eq!(
+        turns
+            .iter()
+            .filter(|turn| turn["input"] == "Follow up once.")
+            .count(),
+        1,
+        "restart after the durable turn began must not send it again"
+    );
+
+    let mut events = tokio::net::TcpStream::connect(("127.0.0.1", served.port))
+        .await
+        .unwrap();
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    events
+        .write_all(
+            format!("GET /client/v1/events?after=0 HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let streamed = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut streamed = Vec::new();
+        let mut chunk = [0; 4 * 1024];
+        while !String::from_utf8_lossy(&streamed).contains(r#""type":"terminal""#) {
+            let read = events.read(&mut chunk).await.unwrap();
+            assert!(read > 0, "event stream closed before an event");
+            streamed.extend_from_slice(&chunk[..read]);
+        }
+        String::from_utf8(streamed).unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(streamed.contains("text/event-stream"), "{streamed}");
+    assert!(streamed.contains(r#""sequence":"#), "{streamed}");
+    assert!(streamed.contains(r#""type":"terminal""#), "{streamed}");
+    assert!(streamed.contains(handle), "{streamed}");
+    assert!(
+        streamed.contains(r#""affects":[]"#) || streamed.contains(r#""affects":["#),
+        "{streamed}"
+    );
+
+    let mut future_events = tokio::net::TcpStream::connect(("127.0.0.1", served.port))
+        .await
+        .unwrap();
+    future_events
+        .write_all(
+            format!(
+                "GET /client/v1/events?after=18446744073709551615 HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let future = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut streamed = Vec::new();
+        let mut chunk = [0; 4 * 1024];
+        while !String::from_utf8_lossy(&streamed).contains(r#""type":"resync""#) {
+            let read = future_events.read(&mut chunk).await.unwrap();
+            assert!(read > 0, "event stream closed before resync");
+            streamed.extend_from_slice(&chunk[..read]);
+        }
+        String::from_utf8(streamed).unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(future.contains(r#""type":"resync""#), "{future}");
+
+    let ended = raw(
+        served.port,
+        post(
+            "/client/v1/terminals/end",
+            address,
+            None,
+            &auth,
+            &json!({ "handle": handle, "generation": generation }).to_string(),
+        ),
+    )
+    .await;
+    assert!(ended.starts_with("HTTP/1.1 200"), "{ended}");
+
+    let signed_out = raw(
+        served.port,
+        format!("DELETE /client/v1/session HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n"),
+    )
+    .await;
+    assert!(signed_out.starts_with("HTTP/1.1 204"), "{signed_out}");
+    let revoked = raw(
+        served.port,
+        format!("GET /client/v1/hello HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n"),
+    )
+    .await;
+    assert!(revoked.starts_with("HTTP/1.1 401"), "{revoked}");
+    let revoked_terminal = raw(
+        served.port,
+        post(
+            "/client/v1/terminals/read",
+            address,
+            None,
+            &auth,
+            &json!({ "handle": handle, "generation": generation, "after": cursor }).to_string(),
+        ),
+    )
+    .await;
+    assert!(
+        revoked_terminal.starts_with("HTTP/1.1 401"),
+        "{revoked_terminal}"
+    );
+}
+
 /// Reads the notes once, then answers "Read.".
 fn model() -> Arc<MockProvider> {
-    Arc::new(MockProvider::new("m", vec![]).with_fallback(|req| {
-        if req.messages.iter().any(|m| m.tool_call_id.is_some()) {
-            Completion {
-                content: "Read.".into(),
-                tool_calls: vec![],
-                usage: Usage::default(),
-            }
-        } else {
-            Completion {
-                content: String::new(),
-                tool_calls: vec![ToolCall {
-                    id: "c".into(),
-                    name: "notes.read".into(),
-                    arguments: json!({}),
-                }],
-                usage: Usage::default(),
-            }
-        }
-    }))
+    Arc::new(
+        MockProvider::new("m", vec![])
+            .with_chunk_delay(Duration::from_millis(200))
+            .with_fallback(|req| {
+                if req.messages.iter().any(|m| m.tool_call_id.is_some()) {
+                    Completion {
+                        content: "Read.".into(),
+                        tool_calls: vec![],
+                        usage: Usage::default(),
+                    }
+                } else {
+                    Completion {
+                        content: String::new(),
+                        tool_calls: vec![ToolCall {
+                            id: "c".into(),
+                            name: "notes.read".into(),
+                            arguments: json!({}),
+                        }],
+                        usage: Usage::default(),
+                    }
+                }
+            }),
+    )
 }
 
 fn app(dir: &std::path::Path) -> App {

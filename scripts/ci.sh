@@ -11,6 +11,9 @@ step() { printf '\n== %s\n' "$*"; }
 step "format"
 cargo fmt --all --check
 
+step "generated protocol contract"
+scripts/protocol.sh
+
 step "clippy (warnings are errors)"
 cargo clippy --workspace --all-targets --locked -- -D warnings
 

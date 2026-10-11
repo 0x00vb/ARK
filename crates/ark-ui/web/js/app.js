@@ -407,6 +407,7 @@ function setRunning(on) {
 
 function applySummary(s) {
   const changed = s.session.id !== state.sessionId;
+  const projectChanged = s.project?.id !== state.summary?.project?.id;
   state.summary = s;
   if (!isReady && validLocation(s.location)) {
     isReady = true;
@@ -416,6 +417,10 @@ function applySummary(s) {
   state.title = s.session.title || (s.session.turns ? "Untitled chat" : "");
   if (s.location) resourceOnline.set(locationKey(s.location), !s.place || s.place.state === "ok");
   showTitle();
+  if (projectChanged && state.view) {
+    const view = registry.views.get(state.view);
+    if (view?.projectScoped) views.get(state.view)?.ctl?.update?.({ project: s.project });
+  }
   composer.setModel(s.model);
   places?.show(s, state.running);
   // A chat on a computer that does not answer reads only.
@@ -699,6 +704,7 @@ function present(d) {
 function showView(id, params) {
   const v = id === SETTINGS ? settingsView : registry.views.get(id);
   if (!v) return toast(`No view named ${id}`);
+  if (v.projectScoped && params === undefined) params = { project: api.project() };
   let entry = views.get(id);
   if (!entry) {
     const el = h("div.view", { "data-view": id });
@@ -778,7 +784,9 @@ function palette() {
   const input = h("input.palette-input", { placeholder: "Search commands, views and actions", "aria-label": "Search" });
   const list = h("div.palette-list", { role: "listbox" });
   const items = [
-    ...[...registry.views.values()].map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),
+    ...[...registry.views.values()]
+      .filter((v) => !v.when || v.when({ project: api.project() }))
+      .map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),
     ...(registry.settings.size ? [{ label: "Settings", hint: label("⌘,"), run: () => api.openSettings() }] : []),
     ...[...registry.panels.values()].map((p) => ({ label: p.title, hint: "panel", run: () => api.openPanel(p.id) })),
     ...registry.actions.filter((a) => (!a.where || a.where === "palette") && shown(a)).map((a) => ({ label: a.label, hint: "action", run: () => a.run({}, window.ark) })),

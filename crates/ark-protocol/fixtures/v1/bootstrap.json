@@ -1,0 +1,10 @@
+{
+  "protocols": [
+    {
+      "major": 1,
+      "latestMinor": 1
+    }
+  ],
+  "runtimeVersion": "0.18.3",
+  "updateUrl": "https://aiark.dev/download"
+}

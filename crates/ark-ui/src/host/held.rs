@@ -436,6 +436,61 @@ impl Host {
                 if reference.location.runtime == here {
                     return None;
                 }
+                if let crate::resource::ResourceAuthority::Project { route } = &reference.authority
+                {
+                    let route = route.clone();
+                    let kept = {
+                        let routes = self.project_resource_routes.lock().unwrap();
+                        routes.get(&route).cloned()
+                    };
+                    let Some(kept) = kept else {
+                        return Some(Err(anyhow::anyhow!("that project Terminal route ended")));
+                    };
+                    if kept.runtime != reference.location.runtime
+                        || kept.local_project != reference.location.project
+                        || kept.kind != reference.kind
+                        || kept.terminal != reference.id
+                    {
+                        return Some(Err(anyhow::anyhow!(
+                            "the project Terminal route does not match that resource"
+                        )));
+                    }
+                    let Some(place) = kept.place.as_deref() else {
+                        return Some(Err(anyhow::anyhow!(
+                            "that project Terminal route is not remote"
+                        )));
+                    };
+                    if self.links.state(place) != Some(State::Ok) {
+                        return Some(Err(anyhow::anyhow!("{place} is not answering")));
+                    }
+                    let closes = serde_json::from_value::<crate::resource::ResourceOperation>(
+                        params["operation"].clone(),
+                    )
+                    .is_ok_and(|operation| {
+                        operation.kind == crate::resource::ResourceOperationKind::TerminalClose
+                    });
+                    let answer = self
+                        .links
+                        .chat(
+                            place,
+                            "project_resource",
+                            json!({
+                                "origin": ark_interact::held::runtime_id(&self.engine),
+                                "origin_project": kept.source_project,
+                                "ref": reference,
+                                "operation": params["operation"],
+                            }),
+                        )
+                        .await;
+                    if closes && answer.is_ok() {
+                        self.end_project_terminal_routes(
+                            &kept.runtime,
+                            &kept.local_project,
+                            &kept.terminal,
+                        );
+                    }
+                    return Some(answer);
+                }
                 let Some(chat) = self.held_chat(&reference.location.session) else {
                     return Some(Err(anyhow::anyhow!("no linked chat owns that resource")));
                 };
@@ -781,6 +836,10 @@ impl Host {
     /// The computer `place` was removed: its chats leave the screen, their questions the
     /// tray, its terminals and its follower stop.
     pub(super) async fn forget_place(&self, place: &str, sessions: &[String]) {
+        self.project_resource_routes
+            .lock()
+            .unwrap()
+            .retain(|_, route| route.place.as_deref() != Some(place));
         // Remove aliases where the resources live before deleting our knowledge of the chats.
         // Failure is harmless: aliases are ephemeral and a disconnected runtime cannot emit to
         // this removed link, but an available runtime must not retain them.
@@ -849,7 +908,7 @@ impl Host {
 
     /// Follow `place`'s events, and wait a little for the stream to start so a turn sent next
     /// is not missed.
-    async fn ensure_relay(self: &Arc<Self>, place: &str) {
+    pub(super) async fn ensure_relay(self: &Arc<Self>, place: &str) {
         let mut ready = self.spawn_relay(place);
         let _ = tokio::time::timeout(Duration::from_secs(5), ready.wait_for(|r| *r)).await;
     }
@@ -936,6 +995,24 @@ impl Host {
             else {
                 return;
             };
+            if let crate::resource::ResourceAuthority::Project { route } = &reference.authority {
+                let valid = self
+                    .project_resource_routes
+                    .lock()
+                    .unwrap()
+                    .get(route)
+                    .is_some_and(|kept| {
+                        kept.place.as_deref() == Some(place)
+                            && kept.runtime == reference.location.runtime
+                            && kept.local_project == reference.location.project
+                            && kept.kind == reference.kind
+                            && kept.terminal == reference.id
+                    });
+                if valid {
+                    self.emit(ev);
+                }
+                return;
+            }
             let Some(chat) = self
                 .held_chat(&reference.location.session)
                 .filter(|c| c.place == place)

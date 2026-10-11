@@ -15,7 +15,8 @@ export class Topbar {
   }
 
   render() {
-    const views = [...registry.views.values()].filter((v) => v.nav);
+    const project = this.api.project();
+    const views = [...registry.views.values()].filter((v) => v.nav && (!v.when || v.when({ project })));
     clear(this.tabs);
     // With no views there is only the conversation: no tabs.
     this.tabs.hidden = !views.length;

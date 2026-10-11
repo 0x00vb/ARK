@@ -176,6 +176,7 @@ export class Sidebar {
     const item = (label, run) => h("button.menu-item", { type: "button", onclick: () => { menu.close(); run(); } }, h("span", label));
     const menu = this.api.popover(anchor, [
       h("div.menu-sub.pad", { title: p.workspace || "" }, p.workspace ? tail(p.workspace, 44) : "No folder yet"),
+      ...(p.workspace ? [item("Open Terminal", () => this.api.openView("project-terminal", { project: p }))] : []),
       item("New chat", async () => {
         if (!p.current) await this.openProject(p);
         this.api.newSession();

@@ -23,6 +23,7 @@
 use std::sync::Arc;
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -107,20 +108,29 @@ pub(crate) async fn serve(
             (served, Check::Tokens(tokens))
         }
     };
+    host.resume_client_mutations().await?;
     let check = Arc::new(check);
     let entry = Arc::new(entry);
     let task = tokio::spawn(async move {
+        let mut mutations = tokio::time::interval(std::time::Duration::from_millis(250));
         loop {
-            let Ok(sock) = listener.accept().await else {
-                // Out of file descriptors or similar: pause instead of spinning.
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                continue;
-            };
-            let (host, assets, check, entry) =
-                (host.clone(), assets.clone(), check.clone(), entry.clone());
-            tokio::spawn(async move {
-                let _ = handle(sock, host, assets, &check, port, &entry).await;
-            });
+            tokio::select! {
+                accepted = listener.accept() => {
+                    let Ok(sock) = accepted else {
+                        // Out of file descriptors or similar: pause instead of spinning.
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        continue;
+                    };
+                    let (host, assets, check, entry) =
+                        (host.clone(), assets.clone(), check.clone(), entry.clone());
+                    tokio::spawn(async move {
+                        let _ = handle(sock, host, assets, &check, port, &entry).await;
+                    });
+                }
+                _ = mutations.tick() => {
+                    let _ = host.resume_client_mutations().await;
+                }
+            }
         }
     });
     Ok((served, task))
@@ -236,6 +246,14 @@ struct Request {
 }
 
 impl Request {
+    /// A native client's credential. Native protocol routes accept only an Authorization header,
+    /// never a URL token, browser cookie or compatibility header (ADR 0058).
+    fn bearer_token(&self) -> &str {
+        self.header("authorization")
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .unwrap_or("")
+    }
+
     fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
@@ -406,7 +424,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
     entry: &Option<String>,
 ) -> anyhow::Result<()> {
     let req = tokio::time::timeout(READ_TIMEOUT, read_request(&mut sock)).await??;
-    let authed = match check {
+    let token_authed = match check {
         Check::OneTime(token) => {
             let host_ok = matches!(
                 req.header("host"),
@@ -434,7 +452,13 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
             .map(str::to_string),
         _ => None,
     };
-    let authed = authed || session.is_some();
+    let client_credential = req.bearer_token();
+    let client_authed =
+        matches!(check, Check::Tokens(tokens) if tokens.check(client_credential).is_some());
+    let authed = token_authed || session.is_some();
+    if req.path.starts_with("/client/v1/") && !client_authed && !client_credential.is_empty() {
+        host.forget_client_terminal_routes(&client_device_id(client_credential));
+    }
     // A cookie rides along with whatever this browser sends here: a change must come from
     // this page.
     let changes = req.method != "GET" && req.method != "HEAD";
@@ -442,6 +466,646 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
         return respond(&mut sock, "403 Forbidden", "text/plain", b"origin").await;
     }
     match (req.method.as_str(), req.path.as_str()) {
+        ("GET", "/client/bootstrap") => {
+            let body =
+                serde_json::to_vec(&ark_protocol::Bootstrap::current(env!("CARGO_PKG_VERSION")))?;
+            respond(&mut sock, "200 OK", "application/json", &body).await
+        }
+        ("POST", "/client/v1/pair") => {
+            let Check::Tokens(tokens) = check else {
+                return client_error(
+                    &mut sock,
+                    "pairing_unavailable",
+                    "This computer is not available for device pairing.",
+                    "404 Not Found",
+                )
+                .await;
+            };
+            let request: ark_protocol::PairRequest = match serde_json::from_slice(&req.body) {
+                Ok(value) => value,
+                Err(_) => {
+                    return client_error(
+                        &mut sock,
+                        "invalid_request",
+                        "Check the pairing address and code.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            };
+            let Some(paired) = tokens.redeem_as(&request.code, &request.device_name)? else {
+                return client_error(
+                    &mut sock,
+                    "pairing_code",
+                    "That pairing code is no longer valid. Make a new one in ARK.",
+                    "401 Unauthorized",
+                )
+                .await;
+            };
+            let digest = Sha256::digest(paired.token.as_bytes());
+            let device_id = format!("{:x}", digest);
+            let epoch = client_mutation_epoch(&paired.token);
+            let expires_at = time::OffsetDateTime::from_unix_timestamp_nanos(
+                i128::from(paired.expires_ms) * 1_000_000,
+            )?
+            .format(&time::format_description::well_known::Rfc3339)?;
+            let body = serde_json::to_vec(&ark_protocol::PairResponse {
+                device_id,
+                credential: paired.token,
+                expires_at,
+                mutation_epoch: epoch,
+                next_mutation_counter: ark_protocol::DecimalString::new("1").expect("one"),
+            })?;
+            respond(&mut sock, "200 OK", "application/json", &body).await
+        }
+        ("GET", "/client/v1/hello") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let device_id = client_device_id(client_credential);
+            let epoch = client_mutation_epoch(client_credential);
+            let counter = host.client_mutation_counter(&device_id, &epoch)?;
+            let hello = ark_protocol::Hello {
+                protocol_major: ark_protocol::CURRENT_MAJOR,
+                protocol_minor: ark_protocol::CURRENT_MINOR,
+                minimum_client_minor: 0,
+                capabilities: vec![
+                    "home",
+                    "chats",
+                    "approvals",
+                    "results",
+                    "chat.send",
+                    "chat.create",
+                    "project.terminal",
+                ]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+                limits: ark_protocol::Limits {
+                    page_size: 50,
+                    event_bytes: 65_536,
+                    upload_part_bytes: 5 * 1024 * 1024,
+                    upload_bytes: 50 * 1024 * 1024,
+                    terminal_write_bytes: ark_protocol::TERMINAL_WRITE_BYTES,
+                    terminal_replay_bytes: ark_protocol::TERMINAL_REPLAY_BYTES,
+                },
+                mutation_epoch: epoch,
+                next_mutation_counter: ark_protocol::DecimalString::new(
+                    counter.saturating_add(1).to_string(),
+                )
+                .expect("u64 is decimal"),
+            };
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                &serde_json::to_vec(&hello)?,
+            )
+            .await
+        }
+        ("GET", "/client/v1/home") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let body = crate::client::home(&host).await?;
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
+        ("GET", "/client/v1/chats") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let body = crate::client::chats(&host).await?;
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
+        ("GET", "/client/v1/projects") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let body = crate::client::projects(&host).await?;
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                &serde_json::to_vec(&body)?,
+            )
+            .await
+        }
+        ("GET", "/client/v1/computers") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let body = crate::client::computers(&host).await?;
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                &serde_json::to_vec(&body)?,
+            )
+            .await
+        }
+        ("POST", "/client/v1/terminals/open") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let request: ark_protocol::TerminalOpenRequest = match serde_json::from_slice(&req.body)
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    return client_error(
+                        &mut sock,
+                        "invalid_request",
+                        "Check the Terminal details and try again.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            };
+            let owner = client_device_id(client_credential);
+            match crate::client::terminal_open(&host, &owner, &request).await {
+                Ok(body) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&body)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "terminal_unavailable",
+                        "This Terminal is not available. Check the project and computer.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/client/v1/terminals/read") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let request: ark_protocol::TerminalReadRequest = match serde_json::from_slice(&req.body)
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    return client_error(
+                        &mut sock,
+                        "invalid_request",
+                        "Check the Terminal details and try again.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            };
+            let owner = client_device_id(client_credential);
+            match crate::client::terminal_read(&host, &owner, &request).await {
+                Ok(body) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&body)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "terminal_stale",
+                        "This Terminal changed. Reopen it.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/client/v1/terminals/write") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let request: ark_protocol::TerminalWriteRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_request",
+                            "Check the Terminal input and try again.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            let owner = client_device_id(client_credential);
+            match crate::client::terminal_write(&host, &owner, &request).await {
+                Ok(body) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&body)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "terminal_write_refused",
+                        "This Terminal did not accept that input. Reopen it before typing again.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/client/v1/terminals/resize") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let request: ark_protocol::TerminalResizeRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_request",
+                            "Check the Terminal size and try again.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            let owner = client_device_id(client_credential);
+            match crate::client::terminal_resize(&host, &owner, &request).await {
+                Ok(body) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&body)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "terminal_stale",
+                        "This Terminal changed. Reopen it.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/client/v1/terminals/end") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let request: ark_protocol::TerminalEndRequest = match serde_json::from_slice(&req.body)
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    return client_error(
+                        &mut sock,
+                        "invalid_request",
+                        "Check the Terminal details and try again.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            };
+            let owner = client_device_id(client_credential);
+            match crate::client::terminal_end(&host, &owner, &request).await {
+                Ok(body) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&body)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "terminal_stale",
+                        "This Terminal already ended.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/client/v1/chats") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let input: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+            let project = input["project"].as_str().unwrap_or("");
+            let body = crate::client::create_chat(&host, project).await?;
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
+        ("GET", path) if path.starts_with("/client/v1/chats/") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let id = path.trim_start_matches("/client/v1/chats/");
+            let body = crate::client::conversation(&host, id).await?;
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                body.to_string().as_bytes(),
+            )
+            .await
+        }
+        ("POST", "/client/v1/mutations") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let input: ark_protocol::MutationRequest = match serde_json::from_slice(&req.body) {
+                Ok(value) => value,
+                Err(_) => {
+                    return client_error(
+                        &mut sock,
+                        "invalid_request",
+                        "That change could not be read. Update this device and try again.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            };
+            if input.epoch != client_mutation_epoch(client_credential) {
+                return client_error(
+                    &mut sock,
+                    "mutation_epoch",
+                    "This connection changed. Refresh before trying again.",
+                    "409 Conflict",
+                )
+                .await;
+            }
+            let encoded_input = serde_json::to_vec(&input.input)?;
+            let digest = format!("{:x}", Sha256::digest(encoded_input));
+            if input.input_digest != digest {
+                return client_error(
+                    &mut sock,
+                    "input_digest",
+                    "That change was not accepted. Refresh and try again.",
+                    "400 Bad Request",
+                )
+                .await;
+            }
+            let device_id = client_device_id(client_credential);
+            match host.apply_client_mutation(&device_id, &input).await {
+                Ok(receipt) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&receipt)?,
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::CounterConflict) => {
+                    client_error(
+                        &mut sock,
+                        "counter_conflict",
+                        "This change conflicts with an earlier one. Refresh before trying again.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::CounterGap) => {
+                    client_error(
+                        &mut sock,
+                        "counter_gap",
+                        "A previous change is still settling. Refresh before trying again.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::AlreadyApplied) => {
+                    client_error(
+                        &mut sock,
+                        "already_applied",
+                        "That change was already accepted. Refreshing will show its result.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::Unsupported) => {
+                    client_error(
+                        &mut sock,
+                        "unsupported_operation",
+                        "Update this device before using that action.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::InvalidCounter) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_counter",
+                        "Pair this device again before sending more changes.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::Store(error)) => Err(error),
+            }
+        }
+        ("DELETE", "/client/v1/session") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let Check::Tokens(tokens) = check else {
+                return client_error(
+                    &mut sock,
+                    "sign_out_unavailable",
+                    "This connection cannot be removed here.",
+                    "400 Bad Request",
+                )
+                .await;
+            };
+            host.forget_client_terminal_routes(&client_device_id(client_credential));
+            tokens.end(client_credential)?;
+            respond(&mut sock, "204 No Content", "application/json", b"").await
+        }
+        ("GET", "/client/v1/events") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let after = req
+                .query("after")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            let credential = match check {
+                Check::Tokens(tokens) => (tokens.clone(), client_credential.to_string()),
+                Check::OneTime(_) => unreachable!("native clients require saved tokens"),
+            };
+            let owner = client_device_id(client_credential);
+            let mut receiver = host.subscribe();
+            sock.write_all(
+                format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n{PAGE_HEADERS}Connection: keep-alive\r\n\r\n: ready\n\n")
+                    .as_bytes(),
+            )
+            .await?;
+            match host.client_event_replay(after) {
+                Some(events) => {
+                    for event in events {
+                        if credential.0.check(&credential.1).is_none() {
+                            return Ok(());
+                        }
+                        write_client_event(&mut sock, &host, &owner, &event).await?;
+                    }
+                }
+                None => {
+                    if credential.0.check(&credential.1).is_none() {
+                        return Ok(());
+                    }
+                    write_resync_event(&mut sock, after).await?
+                }
+            }
+            let mut credential_check = tokio::time::interval(std::time::Duration::from_millis(250));
+            let mut ping = tokio::time::interval(std::time::Duration::from_secs(15));
+            loop {
+                tokio::select! {
+                    event = receiver.recv() => match event {
+                        Ok(event) => {
+                            if credential.0.check(&credential.1).is_none() {
+                                return Ok(());
+                            }
+                            write_client_event(&mut sock, &host, &owner, &event).await?
+                        },
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            if credential.0.check(&credential.1).is_none() {
+                                return Ok(());
+                            }
+                            write_resync_event(&mut sock, after).await?
+                        }
+                        Err(_) => return Ok(()),
+                    },
+                    _ = credential_check.tick() => {
+                        if credential.0.check(&credential.1).is_none() {
+                            return Ok(());
+                        }
+                    }
+                    _ = ping.tick() => {
+                        sock.write_all(b": ping\n\n").await?;
+                    }
+                }
+            }
+        }
         ("GET", "/session") => {
             // `pairing`: a device without a link signs in here with a code (ADR 0047).
             let pairing = matches!(check, Check::Tokens(_));
@@ -644,6 +1308,123 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
         },
         _ => respond(&mut sock, "405 Method Not Allowed", "text/plain", b"").await,
     }
+}
+
+async fn client_error<S: AsyncWrite + Unpin>(
+    sock: &mut S,
+    code: &str,
+    display: &str,
+    status: &str,
+) -> anyhow::Result<()> {
+    let body = ark_protocol::ErrorEnvelope {
+        code: code.into(),
+        display: display.into(),
+        retry_after_seconds: None,
+    };
+    respond(
+        sock,
+        status,
+        "application/json",
+        &serde_json::to_vec(&body)?,
+    )
+    .await
+}
+
+fn client_mutation_epoch(credential: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"ark-native-mutation-epoch\0");
+    digest.update(credential.as_bytes());
+    format!("{:x}", digest.finalize())
+}
+
+fn client_device_id(credential: &str) -> String {
+    format!("{:x}", Sha256::digest(credential.as_bytes()))
+}
+
+fn client_event(
+    host: &Host,
+    owner: &str,
+    value: &Value,
+) -> anyhow::Result<Option<ark_protocol::EventEnvelope>> {
+    let sequence = value["seq"].as_u64().unwrap_or(0);
+    let mut event_type = value["kind"].as_str().unwrap_or("changed").to_string();
+    let mut affects = vec!["home".to_string()];
+    let terminal = if event_type == "term" {
+        let reference: crate::resource::ResourceRef =
+            match serde_json::from_value(value["ref"].clone()) {
+                Ok(reference) => reference,
+                Err(_) => return Ok(None),
+            };
+        let crate::resource::ResourceAuthority::Project { route } = reference.authority else {
+            return Ok(None);
+        };
+        let ended_owner = value["_client_owner"].as_str();
+        if ended_owner != Some(owner) && !host.client_owns_terminal(owner, &route) {
+            return Ok(None);
+        }
+        event_type = "terminal".into();
+        affects.clear();
+        affects.push(format!("terminal:{route}"));
+        Some(ark_protocol::TerminalEvent {
+            handle: route,
+            generation: value["generation"].as_str().unwrap_or("").to_string(),
+            cursor: value["cursor"].as_u64().map(|cursor| {
+                ark_protocol::DecimalString::new(cursor.to_string()).expect("u64 is decimal")
+            }),
+            data: value["data"].as_str().map(str::to_string),
+            gap: value["gap"].as_bool().unwrap_or(false),
+            ended: value["exit"].as_bool().unwrap_or(false),
+        })
+    } else {
+        None
+    };
+    if matches!(
+        event_type.as_str(),
+        "sessions" | "turn_started" | "turn_finished"
+    ) {
+        affects.push("chats".into());
+    }
+    if let Some(session) = value["session"].as_str() {
+        affects.push(format!("chat:{session}"));
+    }
+    Ok(Some(ark_protocol::EventEnvelope {
+        id: format!("event-{sequence}"),
+        sequence: ark_protocol::DecimalString::new(sequence.to_string())
+            .map_err(anyhow::Error::msg)?,
+        event_type,
+        affects,
+        terminal,
+    }))
+}
+
+async fn write_client_event<S: AsyncWrite + Unpin>(
+    sock: &mut S,
+    host: &Host,
+    owner: &str,
+    value: &Value,
+) -> anyhow::Result<()> {
+    let Some(event) = client_event(host, owner, value)? else {
+        return Ok(());
+    };
+    let body = serde_json::to_string(&event)?;
+    sock.write_all(format!("id: {}\ndata: {body}\n\n", event.id).as_bytes())
+        .await?;
+    Ok(())
+}
+
+async fn write_resync_event<S: AsyncWrite + Unpin>(sock: &mut S, after: u64) -> anyhow::Result<()> {
+    let event = ark_protocol::EventEnvelope {
+        id: format!("resync-{after}"),
+        sequence: ark_protocol::DecimalString::new(after.to_string())
+            .map_err(anyhow::Error::msg)?,
+        event_type: "resync".into(),
+        affects: vec!["home".into(), "chats".into(), "openChat".into()],
+        terminal: None,
+    };
+    let body = serde_json::to_string(&event)?;
+    sock.write_all(format!("id: {}\ndata: {body}\n\n", event.id).as_bytes())
+        .await?;
+    Ok(())
 }
 
 fn now_ms() -> u64 {

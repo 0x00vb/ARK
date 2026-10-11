@@ -45,6 +45,60 @@ async function finished(page, send) {
 }
 
 const scenarios = {
+  // A project shell opens as a project view. It does not create, select or read a chat.
+  async "project-terminal"(page) {
+    const before = await page.evaluate(() => window.ark.summary().session.id);
+    await page.evaluate(() => {
+      const original = window.ark.windowCall.bind(window.ark);
+      window.__projectTerminalCalls = [];
+      window.ark.windowCall = (method, params) => {
+        window.__projectTerminalCalls.push(method);
+        return original(method, params);
+      };
+    });
+    const project = page.locator(".project-row[aria-current='true']");
+    await project.locator(".project-more").click();
+    await page.getByRole("button", { name: "Open Terminal" }).click();
+    const view = page.locator(".project-terminal");
+    await view.waitFor();
+    await view.locator(".project-terminal-surface .xterm-helper-textarea").waitFor();
+    await page.waitForFunction(() => document.querySelector(".project-terminal")?.dataset.state === "live");
+    assert.equal(await page.evaluate(() => window.ark.summary().session.id), before);
+    const calls = await page.evaluate(() => window.__projectTerminalCalls);
+    assert.ok(calls.includes("project_terminal_open"), calls.join(", "));
+    for (const forbidden of ["open_project", "open_session", "new_session", "transcript", "send"]) {
+      assert.ok(!calls.includes(forbidden), `${forbidden} must not run`);
+    }
+
+    const textarea = view.locator(".xterm-helper-textarea");
+    const answer = view.locator(".xterm-rows", { hasText: "CHATLESS_42" });
+    for (let i = 0; ; i++) {
+      await textarea.type("echo CHATLESS_$((40+2))\n");
+      try {
+        await answer.waitFor({ timeout: 5000 });
+        break;
+      } catch (e) {
+        if (i === 3) throw e;
+      }
+    }
+    await page.keyboard.press("F6");
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.classList.contains("project-terminal-computer")),
+      true,
+      "F6 leaves terminal capture",
+    );
+
+    await page.setViewportSize({ width: 390, height: 760 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await shot(page, "project-terminal-narrow");
+    page.once("dialog", async (dialog) => {
+      assert.match(dialog.message(), /shared shell everywhere it is open/);
+      await dialog.accept();
+    });
+    await view.getByRole("button", { name: "End Terminal" }).click();
+    await page.waitForFunction(() => document.querySelector(".project-terminal")?.dataset.state === "ended");
+  },
+
   // Narration written just before a tool call keeps its last chunk, and the answer shows once.
   async stream(page) {
     await finished(page, () => page.locator("#input").fill("What do the notes say?").then(() => page.keyboard.press("Enter")));

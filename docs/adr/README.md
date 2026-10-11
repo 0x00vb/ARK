@@ -63,6 +63,10 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0054](0054-native-apps-opt-in-to-signed-background-updates.md) | Native apps opt in to signed background updates: Tauri verifies and installs, only the own page sees state, release packages are immutable and the app never forces a restart | Accepted |
 | [0055](0055-subscription-models-advertise-their-effort.md) | Subscription models advertise their effort: Codex is discovered from its signed-in CLI, effort belongs to the model spec, and old specs keep provider defaults | Accepted |
 | [0056](0056-a-message-is-drafted-sent-and-proved-as-separate-steps.md) | Messages are drafted, sent and proved separately: durable draft safety, race-free Stop, app-owned evidence and truthful unconfirmed results | Accepted |
+| [0057](0057-an-external-client-uses-a-versioned-contract.md) | Separately released clients use one versioned ARK contract with generated schema and models, capability discovery, resumable events and ordered mutations | Accepted |
+| [0058](0058-a-native-device-pairs-to-one-revocable-credential.md) | A native device pairs once to one revocable credential kept only in its device security store | Accepted |
+| [0059](0059-native-phone-notifications-use-a-blind-relay.md) | Native phone notifications use an optional blind relay with no work content or runtime credential | Accepted |
+| [0060](0060-a-project-terminal-does-not-need-a-chat.md) | A project Terminal opens without a chat: server-issued project authority, explicit computer binding, one-shot writes, shared PTY end semantics and staged native delivery | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

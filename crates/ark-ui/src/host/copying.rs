@@ -369,7 +369,7 @@ impl Host {
     // ---- on this computer ---------------------------------------------------------------------
 
     /// What identifies a project's copy on `place`, in the calls there.
-    fn origin(&self, place: &str, project: &Project) -> Value {
+    pub(super) fn origin(&self, place: &str, project: &Project) -> Value {
         let _ = place;
         json!({
             "origin": held::runtime_id(&self.engine),

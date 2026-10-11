@@ -1155,6 +1155,114 @@ async fn resources_keep_the_opening_chat_location_after_the_window_moves() {
 }
 
 #[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn project_terminal_opens_on_the_chosen_computer_without_a_chat() {
+    let (dir_a, dir_b, work) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    std::fs::write(work.path().join("where.txt"), "remote project\n").unwrap();
+    let (_b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
+    let summary = a
+        .call(
+            "add_project",
+            json!({ "name": "terminal-only", "path": work.path() }),
+        )
+        .await
+        .unwrap();
+    let project = summary["project"]["id"].as_str().unwrap();
+    let session = summary["session"]["id"].as_str().unwrap().to_string();
+    let missing = a
+        .call(
+            "project_terminal_open",
+            json!({ "project": project, "place": "missing", "cols": 80, "rows": 24, "big": true }),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(missing.contains("not set up"), "{missing}");
+    let local = a
+        .call(
+            "project_terminal_open",
+            json!({ "project": project, "place": "", "here": "This computer", "cols": 80, "rows": 24 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        local["reattached"], false,
+        "a refused remote choice must not have fallen back to a local shell"
+    );
+    a.call(
+        "resource",
+        json!({ "ref": local["ref"], "operation": { "kind": "terminal_close", "input": {} } }),
+    )
+    .await
+    .unwrap();
+    let opened = a
+        .call(
+            "project_terminal_open",
+            json!({ "project": project, "place": "vps", "cols": 80, "rows": 24, "big": true }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(opened["place"], "vps");
+    assert_eq!(opened["ref"]["authority"]["scope"], "project");
+    assert_eq!(opened["ref"]["location"]["session"], "");
+    assert_eq!(
+        a.call("summary", json!({})).await.unwrap()["session"]["id"],
+        session
+    );
+    let local_runtime = a.call("hello", json!({})).await.unwrap()["runtime"].clone();
+    assert_ne!(opened["ref"]["location"]["runtime"], local_runtime);
+
+    let mut other_project = opened["ref"].clone();
+    other_project["location"]["project"] = json!("another-project-copy");
+    assert!(a
+        .call(
+            "resource",
+            json!({
+                "ref": other_project,
+                "operation": { "kind": "terminal_read", "input": { "generation": opened["generation"], "after": 0 } },
+            }),
+        )
+        .await
+        .is_err());
+
+    a.call(
+        "resource",
+        json!({
+            "ref": opened["ref"],
+            "operation": { "kind": "terminal_write", "input": { "data": "printf remote\\n", "sequence": 1 } },
+        }),
+    )
+    .await
+    .unwrap();
+    let duplicate = a
+        .call(
+            "resource",
+            json!({
+                "ref": opened["ref"],
+                "operation": { "kind": "terminal_write", "input": { "data": "printf duplicate\\n", "sequence": 1 } },
+            }),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        duplicate.contains("duplicate or out of order"),
+        "{duplicate}"
+    );
+    a.call(
+        "resource",
+        json!({ "ref": opened["ref"], "operation": { "kind": "terminal_close", "input": {} } }),
+    )
+    .await
+    .unwrap();
+}
+
+#[cfg(unix)]
 #[tokio::test]
 async fn a_partial_project_transfer_resumes_and_its_final_receipt_is_idempotent() {
     use base64::Engine as _;

@@ -1,0 +1,20 @@
+{
+  "openRequest": { "projectId": "project-1", "computer": null, "cols": 80, "rows": 24, "copyLargeProject": false },
+  "openResponse": {
+    "handle": "route-1", "generation": "generation-1", "cwd": "/work/project",
+    "history": "ready\r\n", "cursor": "7", "ended": false, "reattached": false,
+    "project": { "id": "project-1", "name": "Project", "computer": "This computer", "hasFolder": true },
+    "computer": "This computer"
+  },
+  "readRequest": { "handle": "route-1", "generation": "generation-1", "after": "7" },
+  "readResponse": { "generation": "generation-1", "data": "done\r\n", "base": "0", "cursor": "13", "gap": false, "ended": false },
+  "writeRequest": { "handle": "route-1", "generation": "generation-1", "sequence": "1", "data": "pwd\r" },
+  "resizeRequest": { "handle": "route-1", "generation": "generation-1", "cols": 100, "rows": 30 },
+  "endRequest": { "handle": "route-1", "generation": "generation-1" },
+  "event": {
+    "id": "event-8", "sequence": "8", "type": "terminal", "affects": ["terminal:route-1"],
+    "terminal": { "handle": "route-1", "generation": "generation-1", "cursor": "13", "data": "done\r\n", "gap": false, "ended": false }
+  },
+  "error": { "code": "terminal_stale", "display": "This Terminal changed. Reopen it.", "retryAfterSeconds": null },
+  "bounds": { "writeBytes": 16384, "replayBytes": 262144 }
+}

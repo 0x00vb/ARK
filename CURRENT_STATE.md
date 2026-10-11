@@ -4,14 +4,14 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-09 (v0.18.3 release: consumer-aware native asset versions)
+Last updated: 2026-10-10 (v0.19.0 release tree verified)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.18.3 (2026-10-09), release checks passed |
-| `main` | v0.18.3 lets native consumers include their own release in web asset paths, so an app-only interface update cannot reopen cached CSS or modules. |
+| Latest tag | v0.19.0 (2026-10-10), release checks passed |
+| `main` | v0.19.0 release tree: ADR 0057 to 0060 add protocol v1.1 and a project-owned Terminal that does not create or select a chat. Generated schema and Swift, durable native mutations, strict bearer HTTP/SSE routes, local and linked-runtime routes, ordered writes and the shared web view passed the full ARK gate. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
@@ -25,6 +25,7 @@ Last updated: 2026-10-09 (v0.18.3 release: consumer-aware native asset versions)
 | What | State |
 |---|---|
 | Signed background updates for native consumers (ADR 0054) | In v0.17.0: opt-in `desktop-updater`, official Tauri updater in local and direct-remote window paths, an own-page-only state bridge, background download and install on macOS and Linux, no forced restart. Windows is explicitly unavailable until it has a non-disruptive installer design. Left: ARK Desktop's staged 0.5.2 to 0.5.3 proof |
+| Project Terminal without a chat (ADR 0060) | Implemented in ARK's host, shared web client and external protocol v1.1. Rust types generate the checked-in schema and Swift; native routes cover authoritative projects and computers plus Terminal open, cursor replay, ordered writes, resize, end and typed events. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` and the ignored local ARK Desktop override pass. Not shipped. Left: owner-approved release, permanent Desktop pin, generated iPhone consumption, SwiftTerm keyboard spike and native interruption, accessibility and device checks. |
 | A chat runs on the computer the person picks (ADR 0052, accepted 2026-10-07): the place chip, held chats and `chat_*` calls, the project copy and Bring back, `ark-reach` (setup and a tunnel over the person's `ssh`), Settings › Computers, programs installed and signed in there, ARK Desktop's contract and builds, the writer as second app | In v0.15.0 (steps 0 to 6 and 8). The resource-location amendment is in v0.16.0: every surface carries a validated runtime, project and chat; transfer retry has exact plans, epochs and durable receipts; the remote Browser is rendered by Chromium there. Automated two-runtime tests and a real Linux x86_64 runtime cover Files, editors, spreadsheet, document, Terminal, process, artifacts and Browser, with no local replica. Left: a real-VPS run with a subscription (the owner), step 7 (OpenCode, Cursor: needs a signed-in provider and Cursor) |
 
 ## Open follow-ups (not started)

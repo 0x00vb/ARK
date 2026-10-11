@@ -28,6 +28,7 @@
 
 pub mod access;
 mod assets;
+mod client;
 pub mod computers;
 pub mod copy;
 #[cfg(feature = "desktop")]

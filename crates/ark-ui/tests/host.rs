@@ -16,6 +16,158 @@ struct Notes {
     saves: Arc<AtomicUsize>,
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn project_terminal_opens_without_changing_the_chat_and_deduplicates_writes() {
+    let store = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let host = ArkUi::new(app(store.path(), mock("notes.read"), Arc::default()))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let summary = host
+        .call(
+            "add_project",
+            json!({ "name": "Shell only", "path": work.path() }),
+        )
+        .await
+        .unwrap();
+    let session = summary["session"]["id"].as_str().unwrap().to_string();
+    let project = summary["project"]["id"].as_str().unwrap().to_string();
+
+    let opened = host
+        .call(
+            "project_terminal_open",
+            json!({ "project": project, "place": "", "here": "This computer", "cols": 80, "rows": 24 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(opened["ref"]["authority"]["scope"], "project");
+    assert_eq!(opened["ref"]["location"]["session"], "");
+    assert_eq!(
+        host.call("summary", json!({})).await.unwrap()["session"]["id"],
+        session,
+        "opening a project Terminal must not select or create a chat"
+    );
+    let second = host
+        .call(
+            "project_terminal_open",
+            json!({ "project": project, "place": "", "here": "This computer", "cols": 80, "rows": 24 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second["ref"]["id"], opened["ref"]["id"]);
+    assert_ne!(
+        second["ref"]["authority"]["route"], opened["ref"]["authority"]["route"],
+        "each window gets its own opaque route"
+    );
+
+    for forged in [
+        {
+            let mut r = opened["ref"].clone();
+            r["location"]["project"] = json!("another-project");
+            r
+        },
+        {
+            let mut r = opened["ref"].clone();
+            r["location"]["runtime"] = json!("another-runtime");
+            r
+        },
+        {
+            let mut r = opened["ref"].clone();
+            r["id"] = json!("term-forged");
+            r
+        },
+        {
+            let mut r = opened["ref"].clone();
+            r["authority"]["route"] = json!("route-forged");
+            r
+        },
+    ] {
+        assert!(host
+            .call(
+                "resource",
+                json!({ "ref": forged, "operation": { "kind": "terminal_read", "input": { "generation": opened["generation"], "after": 0 } } }),
+            )
+            .await
+            .is_err());
+    }
+
+    let write = |sequence| {
+        json!({
+            "ref": opened["ref"],
+            "operation": { "kind": "terminal_write", "input": { "data": "printf x\\n", "sequence": sequence } },
+        })
+    };
+    host.call("resource", write(1)).await.unwrap();
+    let duplicate = host
+        .call("resource", write(1))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        duplicate.contains("duplicate or out of order"),
+        "{duplicate}"
+    );
+    host.call(
+        "resource",
+        json!({ "ref": opened["ref"], "operation": { "kind": "terminal_close", "input": {} } }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        host.call("resource", write(2)).await.is_err(),
+        "an ended route is stale"
+    );
+    assert!(
+        host.call(
+            "resource",
+            json!({ "ref": second["ref"], "operation": { "kind": "terminal_read", "input": { "generation": second["generation"], "after": 0 } } }),
+        )
+        .await
+        .is_err(),
+        "ending one alias invalidates every route to the shared shell"
+    );
+
+    let natural = host
+        .call(
+            "project_terminal_open",
+            json!({ "project": project, "place": "", "here": "This computer", "cols": 80, "rows": 24 }),
+        )
+        .await
+        .unwrap();
+    assert!(host
+        .call(
+            "resource",
+            json!({ "ref": natural["ref"], "operation": { "kind": "terminal_read", "input": { "generation": "stale-generation", "after": 0 } } }),
+        )
+        .await
+        .is_err());
+    host.call(
+        "resource",
+        json!({ "ref": natural["ref"], "operation": { "kind": "terminal_write", "input": { "data": "exit\n", "sequence": 1 } } }),
+    )
+    .await
+    .unwrap();
+    let mut stale = false;
+    for _ in 0..100 {
+        if host
+            .call(
+                "resource",
+                json!({ "ref": natural["ref"], "operation": { "kind": "terminal_read", "input": { "generation": natural["generation"], "after": 0 } } }),
+            )
+            .await
+            .is_err()
+        {
+            stale = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(stale, "a natural shell exit invalidates its project route");
+}
+
 #[async_trait::async_trait]
 impl Adapter for Notes {
     fn name(&self) -> &str {

@@ -1,4 +1,4 @@
-//! Stable identities for resources a chat opens (ADR 0052).
+//! Stable identities for resources a chat or project opens (ADR 0052, 0060).
 //!
 //! A resource reference names its owning runtime, project replica and opening chat. The host
 //! validates all three before doing I/O. Keeping this type in the protocol prevents a pane from
@@ -15,6 +15,16 @@ pub struct ResourceLocation {
     pub runtime: String,
     pub project: String,
     pub session: String,
+}
+
+/// What granted access to a resource. Old references omit this field and remain chat-scoped.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "scope", rename_all = "snake_case")]
+pub enum ResourceAuthority {
+    #[default]
+    Chat,
+    /// An opaque host-issued route. Project and runtime strings alone grant nothing.
+    Project { route: String },
 }
 
 /// The authority and lifetime rules an id follows.
@@ -39,6 +49,14 @@ pub struct ResourceRef {
     pub kind: ResourceKind,
     #[serde(default)]
     pub id: String,
+    #[serde(default, skip_serializing_if = "ResourceAuthority::is_chat")]
+    pub authority: ResourceAuthority,
+}
+
+impl ResourceAuthority {
+    pub fn is_chat(&self) -> bool {
+        matches!(self, Self::Chat)
+    }
 }
 
 /// Every operation that may cross a runtime boundary.
@@ -259,6 +277,13 @@ impl ResourceSubscribers {
             !aliases.is_empty()
         });
     }
+
+    pub fn remove_resource(&self, kind: ResourceKind, project: &str, id: &str) {
+        self.refs
+            .lock()
+            .unwrap()
+            .remove(&(kind, project.to_string(), id.to_string()));
+    }
 }
 
 #[cfg(test)]
@@ -274,6 +299,17 @@ mod tests {
     }
 
     #[test]
+    fn an_old_reference_without_authority_stays_chat_scoped() {
+        let reference: ResourceRef = serde_json::from_value(serde_json::json!({
+            "location": { "runtime": "runtime", "project": "project", "session": "chat" },
+            "kind": "terminal",
+            "id": "term-old"
+        }))
+        .unwrap();
+        assert_eq!(reference.authority, ResourceAuthority::Chat);
+    }
+
+    #[test]
     fn shared_resources_emit_one_alias_per_chat_and_unsubscribe_cleanly() {
         let subscribers = ResourceSubscribers::default();
         let reference = |session: &str| ResourceRef {
@@ -284,6 +320,7 @@ mod tests {
             },
             kind: ResourceKind::Process,
             id: "process".into(),
+            authority: ResourceAuthority::Chat,
         };
         let (one, two) = (reference("one"), reference("two"));
         subscribers.subscribe(ResourceKind::Process, "project", "process", one.clone());

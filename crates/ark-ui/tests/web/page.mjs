@@ -220,6 +220,22 @@ const scenarios = {
   // A narrow window folds the sidebar into a drawer the reveal button opens; it closes on a
   // pick, and the width never scrolls sideways.
   async narrow(page) {
+    const wide = () => page.evaluate(() => {
+      const sidebar = document.querySelector(".sidebar");
+      const main = document.querySelector(".main");
+      const style = getComputedStyle(sidebar);
+      return {
+        sidebarWidth: Math.round(sidebar.getBoundingClientRect().width),
+        sidebarPadding: Math.round(parseFloat(style.paddingLeft)),
+        mainLeft: Math.round(main.getBoundingClientRect().left),
+        hscroll: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    assert.deepEqual(await wide(), { sidebarWidth: 252, sidebarPadding: 10, mainLeft: 252, hscroll: false });
+    await page.click("#toggle-sidebar");
+    await page.waitForTimeout(350);
+    assert.deepEqual(await wide(), { sidebarWidth: 0, sidebarPadding: 0, mainLeft: 0, hscroll: false });
+
     await page.setViewportSize({ width: 720, height: 800 });
     // Wait for the layout to switch rather than a fixed time (flaky on a busy machine).
     await page.waitForFunction(() => document.getElementById("app").dataset.compact === "true");
@@ -227,13 +243,17 @@ const scenarios = {
       compact: document.getElementById("app").dataset.compact,
       drawer: document.getElementById("app").dataset.drawer || "",
       sidebarLeft: Math.round(document.querySelector(".sidebar").getBoundingClientRect().left),
+      sidebarWidth: Math.round(document.querySelector(".sidebar").getBoundingClientRect().width),
+      sidebarPadding: Math.round(parseFloat(getComputedStyle(document.querySelector(".sidebar")).paddingLeft)),
       hscroll: document.documentElement.scrollWidth > innerWidth,
     }));
     assert.equal((await state()).compact, "true");
     assert.ok(await page.locator("#reveal-sidebar").isVisible(), "the sidebar can be reached");
     await page.click("#reveal-sidebar");
     await page.waitForTimeout(350);
-    assert.deepEqual(await state(), { compact: "true", drawer: "open", sidebarLeft: 0, hscroll: false });
+    assert.deepEqual(await state(), {
+      compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 252, sidebarPadding: 10, hscroll: false,
+    });
     await page.click("#new-session");
     await page.waitForTimeout(350);
     const closed = await state();
@@ -241,7 +261,9 @@ const scenarios = {
     assert.ok(closed.sidebarLeft < 0, JSON.stringify(closed));
     await page.setViewportSize({ width: 1200, height: 800 });
     await page.waitForTimeout(100);
-    assert.deepEqual(await state(), { compact: "false", drawer: "", sidebarLeft: 0, hscroll: false });
+    assert.deepEqual(await state(), {
+      compact: "false", drawer: "", sidebarLeft: 0, sidebarWidth: 0, sidebarPadding: 0, hscroll: false,
+    });
   },
 
   // The model chip names the model only. Its menu groups models by backend: a signed-in

@@ -1370,7 +1370,7 @@ async function background(page) {
   await tray.waitFor();
   assert.match(await tray.innerText(), /^In /, "the tray says which chat asks");
   assert.equal(await page.locator("#thread .approval").count(), 0);
-  await page.locator(`.session[data-id="${first}"] .working-dot`).waitFor();
+  await page.locator(`.session[data-id="${first}"] .session-working[aria-label="Working"]`).waitFor();
   assert.equal(await page.locator("#app").getAttribute("data-running"), "false", "the new chat is free");
 
   await finished(page, () => page.locator("#input").fill("And a second question?").then(() => page.keyboard.press("Enter")));

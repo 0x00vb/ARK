@@ -335,7 +335,14 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .session[aria-current="true"] { background: var(--active); color: var(--text); }
 .session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-time { font-size: 11.5px; color: var(--text-3); flex: none; }
-/* A chat working in the background. */
+.session-working {
+  width: 12px; height: 12px; flex: none; align-self: center;
+  box-sizing: border-box; border: 1.5px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: session-spin 720ms linear infinite;
+}
+@keyframes session-spin { to { rotate: 1turn; } }
+/* Other background work indicators use a quiet dot. */
 .working-dot {
   width: 7px; height: 7px; flex: none; align-self: center; margin-right: 4px;
   border-radius: 50%; background: var(--accent);

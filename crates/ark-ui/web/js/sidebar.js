@@ -115,9 +115,9 @@ export class Sidebar {
       h("span.session-title", clip(title, 60)),
       // A chat that runs on another computer: its mark, muted while that computer is away.
       s.place ? h("span.session-place", { title: `Runs on ${s.place.name}`, "data-state": s.place.state }, icon("server")) : null,
-      // A chat working in the background: a dot where its time would be.
+      // A chat working in the background: a spinner where its time would be.
       s.working || this.working.has(s.id)
-        ? h("span.working-dot", { title: "Working", "aria-label": "Working" })
+        ? h("span.session-working", { role: "status", title: "Working", "aria-label": "Working" })
         : h("span.session-time", ago(s.updated_at)));
     row.title = `${title}\n${s.turns} turn${s.turns === 1 ? "" : "s"} · double-click to rename`;
     row.addEventListener("click", () => this.api.openSession(s.id));

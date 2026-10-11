@@ -32,6 +32,7 @@ case let .array(v): try value.encode(v)
         }
     }
 }
+
 public struct DecimalString: Codable, Hashable, Sendable, Comparable, ExpressibleByStringLiteral {
 public let rawValue: String
     public init(_ value: String) throws {

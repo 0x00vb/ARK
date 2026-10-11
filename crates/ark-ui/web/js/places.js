@@ -262,12 +262,14 @@ export async function terminalSheet(api, title, sub, open, done) {
     box);
   const overlay = h("div.program-overlay", sheet);
   document.body.append(overlay);
-  const s = { id: null, ref: null, term: null, offs: [] };
+  const s = { id: null, ref: null, term: null, offs: [], pendingWrite: "", writing: false, ended: false };
   const resource = (kind, input = {}) => {
     if (!s.ref) return Promise.reject(new Error("The terminal has no resource location"));
     return api.resource(s.ref, kind, input);
   };
   const end = () => {
+    s.ended = true;
+    s.pendingWrite = "";
     for (const off of s.offs) off();
     if (s.ref) resource("terminal_close", { session: s.id }).catch(() => {});
     s.term?.dispose();
@@ -299,7 +301,26 @@ export async function terminalSheet(api, title, sub, open, done) {
     if (!s.ref) early.push(p);
     else if (p.ref && JSON.stringify(p.ref) === JSON.stringify(s.ref)) output(p);
   }));
-  term.onData((data) => s.ref && resource("terminal_write", { session: s.id, data }).catch(() => {}));
+  const pumpWrite = async () => {
+    if (s.writing || !s.pendingWrite || !s.ref || s.ended) return;
+    const data = s.pendingWrite;
+    s.pendingWrite = "";
+    s.writing = true;
+    try {
+      await resource("terminal_write", { session: s.id, data });
+    } catch (error) {
+      s.pendingWrite = "";
+      term.write(`\r\n\x1b[31m${error.message || "The computer is not answering"}\x1b[0m\r\n`);
+    } finally {
+      s.writing = false;
+      pumpWrite();
+    }
+  };
+  term.onData((data) => {
+    if (!s.ref || s.ended) return;
+    s.pendingWrite += data;
+    pumpWrite();
+  });
   try {
     const opened = await open(term.cols, term.rows);
     s.id = opened.session;

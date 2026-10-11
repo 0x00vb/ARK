@@ -97,6 +97,10 @@ fn swift(schema: &Value) -> anyhow::Result<String> {
         }
         out.push_str("    }\n}\n\n");
     }
+    while out.ends_with('\n') {
+        out.pop();
+    }
+    out.push('\n');
     Ok(out)
 }
 

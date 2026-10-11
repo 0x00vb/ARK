@@ -7,6 +7,14 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.19.1] - 2026-10-10
+
+### Fixed
+- Swift protocol generation now emits stable formatting and exactly one final newline, so a clean
+  release checkout reproduces the checked-in client contract byte for byte.
+- Program sign-in terminals now serialize typed input and show write failures inline. Fast typing
+  can no longer send Return before the preceding text.
+
 ## [0.19.0] - 2026-10-10
 
 ### Added

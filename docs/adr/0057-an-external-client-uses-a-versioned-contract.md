@@ -1,4 +1,5 @@
 # 0057. An external client uses a versioned contract
+
 Status: Accepted
 Date: 2026-10-10
 

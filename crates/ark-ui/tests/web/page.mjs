@@ -1643,6 +1643,7 @@ scenarios.places = async (page) => {
   const sheet = page.locator(".program-sheet");
   await sheet.getByText("Paste code here").waitFor();
   await shot(page, "places-sign-in");
+  await sheet.locator(".xterm-helper-textarea").focus();
   await page.keyboard.type("abc-123");
   await page.keyboard.press("Enter");
   await sheet.getByText("signed in with abc-123").waitFor();

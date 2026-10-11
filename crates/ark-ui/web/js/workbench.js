@@ -44,37 +44,89 @@ export async function xterm() {
 
 function terminal(el, params, ark) {
   el.classList.add("wb-terminal");
-  const s = { session: null, ref: null, generation: null, cursor: 0, term: null, fit: null, pending: params?.locator || "", offs: [], ended: false };
+  const project = params?.project;
+  const place = params?.place || "";
+  const s = {
+    session: null, ref: null, generation: null, cursor: 0, sequence: 1,
+    term: null, fit: null, pending: params?.locator || "", pendingWrite: "",
+    writing: false, offs: [], ended: false, connected: false, alive: true,
+  };
   const gap = h("div.term-gap", { role: "status", hidden: true }, "Earlier output unavailable");
   const reopen = h("button.btn.small.term-reopen", { type: "button", hidden: true }, "Reopen");
   el.append(gap, reopen);
-  const write = (data) => s.session && !s.ended && ark.call("term_write", { session: s.session, data }).catch(() => {});
+  const call = (kind, data = {}) => ark.resource(s.ref, kind, data);
+  const pumpWrite = async () => {
+    if (s.writing || !s.pendingWrite || !s.ref || s.ended || !s.connected) return;
+    const data = s.pendingWrite;
+    s.pendingWrite = "";
+    s.writing = true;
+    const sequence = s.sequence++;
+    try { await call("terminal_write", { data, sequence }); }
+    catch {
+      s.connected = false;
+      s.pendingWrite = "";
+      if (s.term) s.term.options.disableStdin = true;
+    }
+    finally {
+      s.writing = false;
+      pumpWrite();
+    }
+  };
+  const write = (data) => {
+    if (!s.ref || s.ended || !s.connected) return;
+    s.pendingWrite += data;
+    pumpWrite();
+  };
   const ended = () => {
     if (s.ended) return;
     s.ended = true;
+    s.connected = false;
+    s.pendingWrite = "";
     if (s.term) s.term.options.disableStdin = true;
     s.term?.write("\r\n\x1b[2m[shell exited]\x1b[0m\r\n");
     reopen.hidden = false;
   };
   const adopt = (info) => {
-    s.session = info.session;
+    s.session = info.ref?.id || info.session;
     s.ref = info.ref;
     s.generation = info.generation;
     s.cursor = info.cursor || 0;
+    s.sequence = 1;
     s.ended = false;
+    s.connected = true;
     reopen.hidden = true;
     if (s.term) s.term.options.disableStdin = false;
     if (info.ended) ended();
   };
+  const openProjectTerminal = async () => {
+    if (!project?.id) throw new Error("Choose a project first");
+    const places = await ark.windowCall("places");
+    const input = {
+      project: project.id,
+      place,
+      here: places.here || "This computer",
+      cols: s.term?.cols || 80,
+      rows: s.term?.rows || 24,
+      big: false,
+    };
+    let info = await ark.windowCall("project_terminal_open", input);
+    if (info.ask) {
+      const bytes = Number(info.ask.bytes || 0).toLocaleString();
+      if (!confirm(`Copy ${bytes} bytes to ${place}?`)) throw new Error("Copy cancelled");
+      info = await ark.windowCall("project_terminal_open", { ...input, big: true });
+    }
+    if (info.busy) throw new Error(`Work is running in this project on ${place}`);
+    return info;
+  };
   reopen.onclick = async () => {
     reopen.disabled = true;
     try {
-      if (s.ref) await ark.resource(s.ref, "terminal_close", { session: s.session });
-      const info = await ark.call("term_open", { cols: s.term?.cols || 80, rows: s.term?.rows || 24 });
+      const info = await openProjectTerminal();
       adopt(info);
       if (info.history) s.term?.write(info.history);
       s.term?.focus();
     } catch (e) {
+      if (!s.alive) return;
       s.term?.write(`\r\n\x1b[31m${e.message}\x1b[0m\r\n`);
     } finally {
       reopen.disabled = false;
@@ -82,8 +134,9 @@ function terminal(el, params, ark) {
   };
   let fitFrame = 0;
   const fit = () => {
+    if (!s.alive) return;
     cancelAnimationFrame(fitFrame);
-    fitFrame = requestAnimationFrame(() => { try { s.fit?.fit(); } catch {} });
+    fitFrame = requestAnimationFrame(() => { if (s.alive) { try { s.fit?.fit(); } catch {} } });
   };
   const theme = () => ({
     background: css("--term-bg") || css("--pane") || "#181818",
@@ -111,10 +164,11 @@ function terminal(el, params, ark) {
     term.open(el);
     fit();
     term.onData(write);
-    term.onResize(({ cols, rows }) => s.session && ark.call("term_resize", { session: s.session, cols, rows }).catch(() => {}));
+    term.onResize(({ cols, rows }) => s.ref && call("terminal_resize", { cols, rows }).catch(() => {}));
     // Output can arrive before `term_open` answers with the session id; hold it until then.
     const early = [];
     const output = (p) => {
+      if (!s.alive) return;
       if (p.generation && s.generation && p.generation !== s.generation) return;
       if (p.exit) return ended();
       term.write(p.data);
@@ -131,7 +185,11 @@ function terminal(el, params, ark) {
       else if (p.ref ? JSON.stringify(p.ref) === JSON.stringify(s.ref) : p.session === s.session) output(p);
     }));
     try {
-      const info = await ark.call("term_open", { cols: term.cols, rows: term.rows });
+      const info = await openProjectTerminal();
+      if (!s.alive) {
+        if (info.ref) ark.resource(info.ref, "unsubscribe").catch(() => {});
+        return;
+      }
       adopt(info);
       if (info.reattached && info.history) term.write(info.history);
       // A re-attached shell's history already holds what arrived early.
@@ -143,6 +201,7 @@ function terminal(el, params, ark) {
       fit();
       term.focus();
     } catch (e) {
+      if (!s.alive) return;
       term.write(`\r\n\x1b[31mCould not start a shell: ${e.message}\x1b[0m\r\n`);
     }
   })();
@@ -154,16 +213,27 @@ function terminal(el, params, ark) {
   const replay = async () => {
     if (!s.session || !s.generation) return;
     try {
-      const r = await ark.call("term_read", { session: s.session, generation: s.generation, after: s.cursor });
+      const r = await call("terminal_read", { generation: s.generation, after: s.cursor });
+      if (!s.alive) return;
       if (r.gap) gap.hidden = false;
       if (r.data) s.term?.write(r.data);
       s.cursor = r.cursor;
       if (r.ended) ended();
+      else {
+        s.connected = true;
+        if (s.term) s.term.options.disableStdin = false;
+      }
     } catch (e) {
+      if (!s.alive) return;
       s.term?.write(`\r\n\x1b[2m[${e.message}]\x1b[0m\r\n`);
     }
   };
   s.offs.push(ark.on("ark:connected", replay));
+  s.offs.push(ark.on("ark:disconnected", () => {
+    s.connected = false;
+    s.pendingWrite = "";
+    if (s.term) s.term.options.disableStdin = true;
+  }));
   return {
     focus: () => ({ surface: { kind_tag: "terminal", title: "Terminal" } }),
     update: (p) => p?.locator && write(typedCommand(p.locator)),
@@ -171,321 +241,19 @@ function terminal(el, params, ark) {
     reconnect: replay,
     // Closing the tab keeps the shell; reopening re-attaches with its scrollback.
     dispose: () => {
+      s.alive = false;
+      s.connected = false;
+      s.pendingWrite = "";
       cancelAnimationFrame(fitFrame);
       ro.disconnect();
       removeEventListener("ark:theme", retheme);
       for (const off of s.offs) off();
-      if (s.ref) ark.resource(s.ref, "unsubscribe").catch(() => {});
-      s.term?.dispose();
-    },
-  };
-}
-
-// A project-owned Terminal in the main column. It never opens or selects a chat (ADR 0060).
-export function projectTerminal(el, params, ark) {
-  el.classList.add("project-terminal");
-  const s = {
-    project: params?.project || ark.project(), place: null, ref: null, generation: null,
-    cursor: 0, sequence: 1, term: null, fit: null, ended: false, connected: false,
-    offs: [], early: [], generationId: 0, pendingWrite: "", pendingOutput: "", writing: false,
-  };
-  const projectName = h("span.project-terminal-project");
-  const computer = h("button.btn.small.project-terminal-computer", { type: "button" }, "Computer");
-  const end = h("button.btn.small.danger", { type: "button", disabled: true }, "End Terminal");
-  const status = h("span.project-terminal-status", { role: "status", "aria-live": "polite" });
-  const bar = h("div.project-terminal-bar", projectName, computer, end, status);
-  const gap = h("div.term-gap", { role: "status", hidden: true }, "Earlier output unavailable");
-  const reopen = h("button.btn.small.term-reopen", { type: "button", hidden: true }, "Reopen");
-  const picker = h("div.project-terminal-picker", { hidden: true });
-  const surface = h("div.project-terminal-surface", gap, reopen);
-  el.append(bar, picker, surface);
-
-  const announce = (text, state = "") => {
-    if (status.textContent !== text) status.textContent = text;
-    el.dataset.state = state;
-  };
-  const input = (enabled) => {
-    s.connected = enabled && !s.ended;
-    if (!s.connected) s.pendingWrite = "";
-    if (s.term) s.term.options.disableStdin = !s.connected;
-  };
-  const sameRef = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null);
-  const call = (kind, data = {}) => ark.resource(s.ref, kind, data);
-  const output = (data) => {
-    if (!data) return;
-    if (s.term) return s.term.write(data);
-    s.pendingOutput = (s.pendingOutput + data).slice(-1_000_000);
-  };
-  const pumpWrite = async () => {
-    if (s.writing || !s.pendingWrite || !s.ref || !s.connected || s.ended) return;
-    const data = s.pendingWrite;
-    s.pendingWrite = "";
-    s.writing = true;
-    const sequence = s.sequence++;
-    try {
-      await call("terminal_write", { data, sequence });
-    } catch (e) {
-      input(false);
-      announce(e.message || "The computer is not answering", "disconnected");
-    } finally {
-      s.writing = false;
-      if (s.connected) pumpWrite();
-    }
-  };
-  const write = (data) => {
-    if (!s.ref || !s.connected || s.ended) return;
-    // Coalesce input only while the live route is healthy. It is cleared on every disconnect
-    // and each chunk is dispatched once, in order, with no retry.
-    s.pendingWrite += data;
-    pumpWrite();
-  };
-  let fitFrame = 0;
-  const fit = () => {
-    cancelAnimationFrame(fitFrame);
-    fitFrame = requestAnimationFrame(() => { try { s.fit?.fit(); } catch {} });
-  };
-  const theme = () => ({
-    background: css("--term-bg") || css("--pane") || "#181818",
-    foreground: css("--term-fg") || css("--text") || "#ececeb",
-    cursor: css("--term-cursor") || css("--accent") || "#888",
-    selectionBackground: css("--term-selection") || "rgba(127,127,127,0.3)",
-  });
-  const detach = async () => {
-    input(false);
-    const ref = s.ref;
-    s.ref = null;
-    if (ref) await ark.resource(ref, "unsubscribe").catch(() => {});
-  };
-  const ended = () => {
-    if (s.ended) return;
-    s.ended = true;
-    input(false);
-    output("\r\n\x1b[2m[shell exited]\x1b[0m\r\n");
-    reopen.hidden = false;
-    end.disabled = true;
-    announce("Ended", "ended");
-  };
-  const adopt = (info, place) => {
-    s.ref = info.ref;
-    s.place = place;
-    s.generation = info.generation;
-    s.cursor = info.cursor || 0;
-    s.sequence = 1;
-    s.ended = false;
-    reopen.hidden = true;
-    end.disabled = false;
-    computer.textContent = place.label;
-    computer.setAttribute("aria-label", `Computer: ${place.label}`);
-    announce("Connected", "live");
-    input(true);
-    output(info.history);
-    for (const event of s.early.splice(0)) {
-      if (!sameRef(event.ref, s.ref)) continue;
-      if (event.exit) ended();
-      else if (Number(event.cursor || 0) > Number(info.cursor || 0)) output(event.data);
-      if (event.cursor) s.cursor = Math.max(s.cursor, event.cursor);
-    }
-    fit();
-    s.term?.focus();
-  };
-  const open = async (place, big = false) => {
-    const generationId = ++s.generationId;
-    input(false);
-    s.early = [];
-    if (s.ref) await detach();
-    if (generationId !== s.generationId) return;
-    picker.hidden = true;
-    announce(place.id ? `Copying to ${place.label}` : `Connecting to ${place.label}`, place.id ? "copying" : "connecting");
-    try {
-      const info = await ark.windowCall("project_terminal_open", {
-        project: s.project.id, place: place.id, here: place.label,
-        cols: s.term?.cols || 80, rows: s.term?.rows || 24, big,
-      });
-      if (generationId !== s.generationId) {
-        if (info.ref) await ark.resource(info.ref, "unsubscribe").catch(() => {});
-        return;
-      }
-      if (info.ask) {
-        announce("Copy needs confirmation", "copying");
-        const bytes = Number(info.ask.bytes || 0).toLocaleString();
-        if (confirm(`Copy ${bytes} bytes to ${place.label}?`)) return open(place, true);
-        announce("Copy cancelled", "cancelled");
-        return choose();
-      }
-      if (info.busy) throw new Error(`Work is running in this project on ${place.label}`);
-      adopt(info, place);
-    } catch (e) {
-      if (generationId !== s.generationId) return;
-      input(false);
-      announce(e.message || `Could not connect to ${place.label}`, "refused");
-      picker.hidden = false;
-    }
-  };
-  const placeReason = (p) => {
-    if (!p.project_terminal) return `Update ARK on ${p.name}`;
-    if (p.state === "refused") return `Reconnect ${p.name}`;
-    if (p.state !== "ok") return `${p.name} is not answering`;
-    return "";
-  };
-  const choose = async (generationId = ++s.generationId) => {
-    input(false);
-    announce("Choose a computer", "choosing");
-    clear(picker);
-    picker.hidden = false;
-    let list;
-    try { list = await ark.windowCall("places"); }
-    catch (e) { return picker.append(h("div.wb-empty", e.message)); }
-    if (generationId !== s.generationId) return;
-    const places = [
-      { id: "", label: list.here || "This computer", name: list.here || "This computer", state: "ok", project_terminal: true },
-      ...(list.places || []).map((p) => ({ ...p, id: p.name, label: p.name })),
-    ];
-    const eligible = places.filter((p) => !placeReason(p));
-    if (places.length === 1 && eligible.length === 1) return open(eligible[0]);
-    picker.append(h("div.project-terminal-choices", ...places.map((p) => {
-      const reason = placeReason(p);
-      const button = h("button.project-terminal-choice", {
-        type: "button", "aria-disabled": String(!!reason),
-        "aria-label": reason ? `${p.label}. ${reason}` : p.label,
-        onclick: () => { if (!reason) open(p); },
-      }, h("span", p.label), reason ? h("small", reason) : null);
-      return button;
-    })));
-  };
-  const switchProject = async (project) => {
-    const generationId = ++s.generationId;
-    await detach();
-    if (generationId !== s.generationId) return;
-    s.project = project;
-    s.place = null;
-    s.generation = null;
-    s.cursor = 0;
-    s.ended = false;
-    s.pendingOutput = "";
-    s.early = [];
-    s.term?.reset();
-    s.term?.clear();
-    gap.hidden = true;
-    reopen.hidden = true;
-    projectName.textContent = project?.name || "Terminal";
-    projectName.title = project?.name || "Terminal";
-    computer.textContent = "Computer";
-    end.disabled = true;
-    if (!project?.workspace) {
-      announce("Choose a folder for this project", "unavailable");
-      picker.hidden = false;
-      clear(picker).append(h("div.wb-empty", "Choose a folder for this project"));
-      return;
-    }
-    choose(generationId);
-  };
-
-  computer.onclick = () => choose();
-  end.onclick = async () => {
-    if (!s.ref || s.ended) return;
-    const where = s.place?.label || "this computer";
-    if (!confirm(`End Terminal for ${s.project.name} on ${where}?\n\nThis ends the shared shell everywhere it is open.`)) return;
-    input(false);
-    try { await call("terminal_close", {}); } catch (e) { announce(e.message, "refused"); return; }
-    ended();
-  };
-  reopen.onclick = async () => {
-    reopen.disabled = true;
-    const place = s.place;
-    if (s.ref) await call("terminal_close", {}).catch(() => {});
-    s.ref = null;
-    s.ended = false;
-    try { await open(place || { id: "", label: "This computer" }); }
-    finally { reopen.disabled = false; }
-  };
-
-  (async () => {
-    let Terminal;
-    try { Terminal = await xterm(); }
-    catch (e) { return surface.append(h("div.wb-empty", e.message)); }
-    const term = (s.term = new Terminal({
-      cursorBlink: true, disableStdin: true, fontSize: 12.5,
-      fontFamily: css("--mono") || "ui-monospace, Menlo, monospace",
-      theme: theme(), scrollback: 5000,
-    }));
-    term.options.disableStdin = !s.connected;
-    s.fit = new window.FitAddon.FitAddon();
-    term.loadAddon(s.fit);
-    term.open(surface);
-    if (s.pendingOutput) {
-      term.write(s.pendingOutput);
-      s.pendingOutput = "";
-    }
-    term.onData(write);
-    term.onResize(({ cols, rows }) => s.ref && call("terminal_resize", { cols, rows }).catch(() => {}));
-    term.attachCustomKeyEventHandler((event) => {
-      if (event.key === "F6" && event.type === "keydown") {
-        event.preventDefault();
-        computer.focus();
-        return false;
-      }
-      return true;
-    });
-    fit();
-  })();
-
-  s.offs.push(ark.on("ark:term", (p) => {
-    if (!s.ref) {
-      if (["copying", "connecting"].includes(el.dataset.state)) {
-        s.early.push(p);
-        if (s.early.length > 1_000) s.early.shift();
-      }
-      return;
-    }
-    if (!sameRef(p.ref, s.ref)) return;
-    if (p.generation && s.generation && p.generation !== s.generation) return;
-    if (p.exit) return ended();
-    output(p.data);
-    if (p.cursor) s.cursor = p.cursor;
-  }));
-  const refreshConnection = async () => {
-    if (!s.ref || !s.place?.id || s.ended) return;
-    const all = await ark.windowCall("places").catch(() => null);
-    const p = all?.places?.find((x) => x.name === s.place.id);
-    if (!p || p.state !== "ok" || !p.project_terminal) {
-      input(false);
-      announce(p?.state === "refused" ? `Reconnect ${s.place.label}` : `${s.place.label} is not answering`, "disconnected");
-      return;
-    }
-    try {
-      const r = await call("terminal_read", { generation: s.generation, after: s.cursor });
-      if (r.gap) gap.hidden = false;
-      output(r.data);
-      s.cursor = r.cursor;
-      if (r.ended) return ended();
-      announce("Connected", "live");
-      input(true);
-    } catch (e) {
-      input(false);
-      announce(e.message, "disconnected");
-    }
-  };
-  s.offs.push(ark.on("ark:attention", (p) => p.linked && refreshConnection()));
-  s.offs.push(ark.on("ark:connected", refreshConnection));
-  s.offs.push(ark.on("ark:disconnected", () => { input(false); announce("Not connected", "disconnected"); }));
-  const ro = new ResizeObserver(fit);
-  ro.observe(surface);
-  const retheme = () => s.term && (s.term.options.theme = theme());
-  addEventListener("ark:theme", retheme);
-  switchProject(s.project);
-  return {
-    focus: () => ({ surface: { kind_tag: "terminal", title: `Terminal: ${s.project?.name || "Project"}` } }),
-    update: (next) => next?.project && next.project.id !== s.project?.id && switchProject(next.project),
-    refresh: refreshConnection,
-    dispose: () => {
-      ++s.generationId;
-      input(false);
-      cancelAnimationFrame(fitFrame);
-      ro.disconnect();
-      removeEventListener("ark:theme", retheme);
-      for (const off of s.offs) off();
-      detach();
-      s.term?.dispose();
+      if (s.ref) call("unsubscribe").catch(() => {});
+      // WebKit may deliver a viewport resize to xterm after this controller is detached. Let
+      // that queued event finish before xterm tears down its renderer.
+      const term = s.term;
+      s.term = null;
+      setTimeout(() => { try { term?.dispose(); } catch {} }, 100);
     },
   };
 }
@@ -941,18 +709,17 @@ function size(n) {
 
 /// The built-in panels with their keys, in + menu order. `key` matches a keydown.
 export const BUILTINS = [
-  { id: "terminal", title: "Terminal", icon: "terminal", presents: ["terminal"], wide: true, fill: true, keys: "⌃`", key: (e) => e.ctrlKey && !e.metaKey && e.key === "`", render: terminal },
+  { id: "terminal", title: "Terminal", icon: "terminal", presents: ["terminal"], projectScoped: true, wide: true, fill: true, keys: "⌃`", key: (e) => e.ctrlKey && !e.metaKey && e.key === "`", render: terminal },
   { id: "browser", title: "Browser", icon: "globe", presents: ["browser"], wide: true, fill: true, keys: "⌘T", key: (e) => mod(e) && !e.shiftKey && e.key.toLowerCase() === "t", render: browser },
   { id: "files", title: "Files", icon: "folder", presents: ["file", "folder"], wide: true, fill: true, keys: "⌘P", key: (e) => (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "p", render: files },
 ];
 
 export function registerBuiltins(ark) {
-  for (const p of BUILTINS) ark.panel({ ...p, nav: true, builtin: true, render: (el, params, scoped) => p.render(el, params, scoped || ark) });
-  ark.view({
-    id: "project-terminal", title: "Terminal", nav: "Terminal", wide: true,
-    projectScoped: true,
-    when: ({ project } = {}) => !!project?.workspace,
-    render: (el, params, scoped) => projectTerminal(el, params, scoped || ark),
+  for (const p of BUILTINS) ark.panel({
+    ...p,
+    nav: true,
+    builtin: true,
+    render: (el, params, scoped) => p.render(el, params, p.projectScoped ? ark : scoped || ark),
   });
   // Processes, only where the app lets agents start them (`procs` fails otherwise).
   let added = false;

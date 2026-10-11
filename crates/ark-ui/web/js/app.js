@@ -147,12 +147,28 @@ const api = {
   openPanel(id, params) {
     const p = registry.panels.get(id);
     if (!p) return toast(`No panel named ${id}`);
-    const location = currentLocation();
+    const current = currentLocation();
+    const project = params?.project || state.summary?.project;
+    const place = params && Object.hasOwn(params, "place") ? params.place : state.summary?.place?.name || "";
+    const location = p.projectScoped ? { ...current, session: "" } : current;
+    if (p.projectScoped) params = { ...(params || {}), project, place };
     const ark = scopedApi(location);
-    pane.openTab(resourceKey("panel", location, id), p.title, p.icon || "box", (el, prm) => p.render(el, prm, ark) || {}, params, { wide: !!p.wide, fill: !!p.fill, api: ark });
+    const where = place || api.hereName() || "This computer";
+    const title = p.projectScoped ? `${p.title} · ${project?.name || "Project"} · ${where}` : p.title;
+    pane.openTab(resourceKey("panel", location, id), title, p.icon || "box", (el, prm) => p.render(el, prm, ark) || {}, params, {
+      wide: !!p.wide, fill: !!p.fill, api: ark, projectScoped: !!p.projectScoped, project: project?.id,
+    });
   },
-  setPanelTitle: (id, title) => retitle(resourceKey("panel", currentLocation(), id), title),
-  closePanel: (id) => pane.remove(resourceKey("panel", currentLocation(), id)),
+  setPanelTitle: (id, title) => {
+    const p = registry.panels.get(id);
+    const location = p?.projectScoped ? { ...currentLocation(), session: "" } : currentLocation();
+    retitle(resourceKey("panel", location, id), title);
+  },
+  closePanel: (id) => {
+    const p = registry.panels.get(id);
+    const location = p?.projectScoped ? { ...currentLocation(), session: "" } : currentLocation();
+    pane.remove(resourceKey("panel", location, id));
+  },
   toast,
   popover,
   refreshSidebar: () => sidebar.refresh(state.sessionId),
@@ -251,6 +267,7 @@ function scopedApi(location) {
   scoped.openPanel = (id, params) => {
     const panel = registry.panels.get(id);
     if (!panel) return toast(`No panel named ${id}`);
+    if (panel.projectScoped) return api.openPanel(id, params);
     pane.openTab(resourceKey("panel", location, id), panel.title, panel.icon || "box", (el, prm) => panel.render(el, prm, scoped) || {}, params, { wide: !!panel.wide, fill: !!panel.fill, api: scoped });
   };
   scoped.setPanelTitle = (id, title) => retitle(resourceKey("panel", location, id), title);

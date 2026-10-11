@@ -7,6 +7,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Changed
+- A chatless project Terminal now opens in the existing Terminal pane. The duplicate project
+  action and main-column Terminal view were removed.
+
 ## [0.19.1] - 2026-10-10
 
 ### Fixed

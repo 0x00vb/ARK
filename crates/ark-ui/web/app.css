@@ -1153,30 +1153,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .wb-terminal .xterm { height: 100%; }
 .wb-terminal .xterm-viewport { background: transparent !important; }
 
-/* A project Terminal is a main view, not part of a chat (ADR 0060). */
-.view[data-view="project-terminal"] { height: 100%; }
-.project-terminal { display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: 100%; min-width: 0; background: var(--pane); }
-.project-terminal-bar { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
-.project-terminal-project { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.project-terminal-computer { max-width: min(34vw, 280px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-terminal-status { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
-.project-terminal-picker { max-height: min(48vh, 420px); overflow: auto; padding: 10px; border-bottom: 1px solid var(--line); background: var(--bg); }
-.project-terminal-choices { display: grid; gap: 6px; max-width: 560px; margin: 0 auto; }
-.project-terminal-choice { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); color: var(--text); text-align: left; }
-.project-terminal-choice:not([aria-disabled="true"]):hover { border-color: var(--muted); }
-.project-terminal-choice[aria-disabled="true"] { color: var(--muted); cursor: not-allowed; }
-.project-terminal-choice small { color: inherit; }
-.project-terminal-surface { position: relative; min-height: 0; padding: 8px 6px 8px 14px; overflow: hidden; }
-.project-terminal-surface .xterm { height: 100%; }
-.project-terminal-surface .xterm-viewport { background: transparent !important; }
-.project-terminal-surface .term-gap { position: absolute; z-index: 2; inset: 8px auto auto 50%; transform: translateX(-50%); padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--pane); color: var(--muted); font-size: 11px; }
-@media (max-width: 620px) {
-  .project-terminal-bar { flex-wrap: wrap; }
-  .project-terminal-project { flex: 1 1 100%; }
-  .project-terminal-status { order: 4; flex: 1 1 100%; margin-left: 0; }
-  .project-terminal-computer { max-width: calc(100vw - 150px); }
-}
-
 .wb-crumbs { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; font-size: 13px; }
 .wb-crumbs .spacer { flex: 1; }
 .wb-crumb {

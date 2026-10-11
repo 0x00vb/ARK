@@ -52,14 +52,13 @@ The first release supports these jobs, in order:
 3. Check what is working and what finished.
 4. Continue or start a chat.
 5. Open and share a result.
-6. Use a project's Terminal without opening or changing a chat.
 
 Use three destinations. Frequent tab changes do not animate.
 
 | Destination | Contains | Excludes |
 |---|---|---|
 | Home | Needs you, Working, Recent results | Dashboard metrics and a duplicate activity feed |
-| Chats | Projects, project Terminal, chats, search, New chat | Agent setup, provider setup and a file tree |
+| Chats | Chats, search, New chat | Projects, Terminal, agent setup, provider setup and a file tree |
 | Me | This phone, notifications, appearance, help and settings | Protocol and runtime words outside Advanced |
 
 ## 4. Screens
@@ -110,12 +109,12 @@ Stop at the bottom.
 - The composer stays above the keyboard and home indicator.
 - Phone navigation never changes the chat shown on Desktop.
 
-### Project and Terminal
+### Future Terminal artifacts
 
-Chats starts with the runtime's authoritative projects, including projects with no chats. A
-project page places Open Terminal before its chats. Terminal is full screen and follows ADR 0060:
-computer choice, input controls, lifecycle fail-closed behavior, accessibility, themes, replay,
-End Terminal and every unavailable or ended state. It never creates, selects or reads a chat.
+The iPhone does not yet have a generic path for interactive artifacts, so Terminal is not part of
+the first release. If that path is added, Terminal must use it. It must not add a Projects section,
+project page, Open Terminal button or standalone destination. The project-scoped protocol in ADR
+0060 remains available for that future artifact.
 
 ### Review, result and Me
 
@@ -347,7 +346,7 @@ every other core job without help. Nobody may cause an unintended mutation.
 | 0. Decisions | ARK and workspace | External protocol ADR, native auth ADR, APNs relay ADR, minimum iOS and owner-confirmed repo boundary | Independent design QA says GO |
 | 1. Protocol | ARK | Types, schema, compatibility, chat-local calls, SSE resume and durable mutations | Conformance, failpoint and cross-version tests pass |
 | 2. App foundation | `ark-ios` | Generated models, transport, pairing, Keychain, restoration shell and UI kit | Unit, fixture, accessibility and snapshot checks pass |
-| 3. Core app | `ark-ios` | Home, Chats, Project, Terminal, Conversation, Review, Result and Me | Core UI tests and parity tests pass |
+| 3. Core app | `ark-ios` | Home, Chats, Conversation, Review, Result and Me | Core UI tests and parity tests pass |
 | 4. Native services | ARK, relay and `ark-ios` | APNs, notification routing, pickers and share | Sandbox and production APNs plus physical-device checks |
 | 5. Distribution | `ark-ios` | Signed archive, TestFlight, metadata and review runtime | Release QA says GO; owner approves submission |
 
@@ -368,8 +367,6 @@ every other core job without help. Nobody may cause an unintended mutation.
 11. Swift tests, Rust conformance, simulator matrix, physical iPhone matrix, TestFlight upgrade and
     clean archive all pass.
 12. App Store metadata, privacy disclosures, review notes and stable review access are complete.
-13. A project with no chats opens Terminal, ordered input and cursor replay work, and no chat or
-    model context changes.
 
 ## 13. First-release cuts
 
@@ -383,3 +380,4 @@ every other core job without help. Nobody may cause an unintended mutation.
 - Persistent offline chats or drafts
 - Arbitrary self-hosted Universal Links
 - Android native app
+- Interactive Terminal artifacts, until the generic artifact path owns their presentation

@@ -10,6 +10,7 @@
 //! [`Harness::ask`]: crate::harness::Harness::ask
 
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::approval::ApprovalGate;
@@ -26,6 +27,63 @@ pub const SPEC: &str = "agent:";
 pub const CHANGE: &str = "program.change";
 pub const RUN: &str = "program.run";
 pub const OTHER: &str = "program.other";
+
+/// One program an app can offer for an agent's work.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WorkerOffer {
+    /// The saved model spec, such as `agent:claude-code`.
+    pub spec: String,
+    /// What a person calls the program.
+    pub title: String,
+    /// Whether a person who has not selected this program may discover it in the chooser.
+    /// Compatibility entries stay usable without becoming newly offered integrations.
+    #[serde(default)]
+    pub discoverable: bool,
+    pub state: WorkerState,
+    /// Models the program currently offers. The base `spec` lets the program choose its default.
+    #[serde(default)]
+    pub models: Vec<WorkerModel>,
+    /// The only setup action that is valid in this state.
+    pub action: Option<WorkerAction>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerState {
+    Ready,
+    Missing,
+    ConnectorMissing,
+    SignedOut,
+    NeedsUpdate,
+    TimedOut,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WorkerModel {
+    pub spec: String,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WorkerAction {
+    /// Opaque to clients. The target runtime resolves it again immediately before use.
+    pub id: String,
+    /// `install`, `install_connector`, `update`, `sign_in` or `check`.
+    pub kind: String,
+    pub label: String,
+}
+
+/// A reviewed setup command resolved on the runtime that will execute it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkerSetup {
+    pub argv: Vec<String>,
+    pub cwd: PathBuf,
+    /// Start without the app's environment before applying `env`.
+    pub clear_env: bool,
+    /// The setup terminal receives these variables after the optional clear.
+    pub env: Vec<(String, String)>,
+}
 
 /// One task, as a worker gets it.
 pub struct WorkerJob<'a> {
@@ -78,6 +136,18 @@ pub trait Workers: Send + Sync {
     /// The worker an `agent:<name>[:<model>]` spec names, if this catalog has it: `Err` when
     /// it is known but cannot run here (not installed), with what to do.
     fn worker(&self, name: &str) -> Option<Result<Arc<dyn Worker>, String>>;
+
+    /// Programs this runtime knows, including the one current action for an unready program.
+    /// Old catalogs remain valid and expose no choices.
+    fn offers(&self) -> Vec<WorkerOffer> {
+        Vec::new()
+    }
+
+    /// Resolve an offered opaque setup action. `None` means the program is unknown. An action
+    /// that is no longer current returns an error, so a stale client cannot run it.
+    fn setup(&self, _spec: &str, _action: &str) -> Option<Result<WorkerSetup, String>> {
+        None
+    }
 }
 
 /// `(name, model)` of a worker spec, `None` for any other spec.

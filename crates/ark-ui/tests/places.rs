@@ -100,6 +100,71 @@ fn app(dir: &std::path::Path, who: &'static str, saves: Arc<AtomicUsize>) -> App
     App::new("Test").ark(ark)
 }
 
+struct SetupWorkers {
+    title: &'static str,
+    marker: std::path::PathBuf,
+}
+
+impl ark_runtime::worker::Workers for SetupWorkers {
+    fn worker(&self, _: &str) -> Option<Result<Arc<dyn ark_runtime::worker::Worker>, String>> {
+        None
+    }
+
+    fn offers(&self) -> Vec<ark_runtime::worker::WorkerOffer> {
+        vec![ark_runtime::worker::WorkerOffer {
+            spec: "agent:test".into(),
+            title: self.title.into(),
+            discoverable: true,
+            state: ark_runtime::worker::WorkerState::Missing,
+            models: Vec::new(),
+            action: Some(ark_runtime::worker::WorkerAction {
+                id: "test-install".into(),
+                kind: "install".into(),
+                label: "Install test".into(),
+            }),
+        }]
+    }
+
+    fn setup(
+        &self,
+        spec: &str,
+        action: &str,
+    ) -> Option<Result<ark_runtime::worker::WorkerSetup, String>> {
+        (spec == "agent:test").then(|| {
+            if action != "test-install" {
+                return Err("stale setup action".into());
+            }
+            Ok(ark_runtime::worker::WorkerSetup {
+                argv: vec![
+                    "sh".into(),
+                    "-c".into(),
+                    format!("printf remote > '{}'; sleep 2", self.marker.display()),
+                ],
+                cwd: self.marker.parent().unwrap().to_path_buf(),
+                clear_env: true,
+                env: vec![("PATH".into(), std::env::var("PATH").unwrap())],
+            })
+        })
+    }
+}
+
+fn app_with_workers(
+    dir: &std::path::Path,
+    who: &'static str,
+    workers: Arc<dyn ark_runtime::worker::Workers>,
+) -> App {
+    let provider: Arc<dyn ark_model::Provider> = model(who);
+    let ark = Ark::builder()
+        .store_root(dir)
+        .provider(provider)
+        .planner(false)
+        .critic(false)
+        .workers_with(workers)
+        .build()
+        .unwrap();
+    App::new("Test").ark(ark)
+}
+
 async fn until(what: &str, mut f: impl AsyncFnMut() -> bool) {
     for _ in 0..300 {
         if f().await {
@@ -866,6 +931,85 @@ async fn a_program_signs_in_on_the_server_from_here() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("no openai key is saved here"), "{e}");
+}
+
+/// Worker offers and their opaque setup actions come from the chat's runtime. A remote chat
+/// never falls back to a similarly configured worker on this computer.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn worker_setup_runs_only_on_the_chats_runtime() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let local_marker = dir_a.path().join("local-worker");
+    let remote_marker = dir_b.path().join("remote-worker");
+    let tokens = Tokens::in_store(dir_b.path());
+    let token = tokens.create("laptop").unwrap();
+    let remote_workers = Arc::new(SetupWorkers {
+        title: "Remote worker",
+        marker: remote_marker.clone(),
+    });
+    let (b, served) = ArkUi::new(app_with_workers(dir_b.path(), "B", remote_workers))
+        .access(Access::Tokens(tokens))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let local_workers = Arc::new(SetupWorkers {
+        title: "Local worker",
+        marker: local_marker.clone(),
+    });
+    let (a, _) = ArkUi::new(app_with_workers(dir_a.path(), "A", local_workers))
+        .link("vps", &format!("http://127.0.0.1:{}", served.port), &token)
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    until("the worker link to answer", async || {
+        a.links().state("vps") == Some(ark_interact::links::State::Ok)
+    })
+    .await;
+    a.call("new_session", json!({ "place": "vps" }))
+        .await
+        .unwrap();
+
+    let offers = a.call("worker_offers", json!({})).await.unwrap();
+    assert_eq!(offers[0]["title"], "Remote worker", "{offers}");
+    assert!(a
+        .call(
+            "worker_setup",
+            json!({ "spec": "agent:test", "action": "wrong" })
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("stale"));
+    let request = || {
+        a.call(
+            "worker_setup",
+            json!({ "spec": "agent:test", "action": "test-install" }),
+        )
+    };
+    let (first, second) = tokio::join!(request(), request());
+    let first = first.unwrap();
+    let second = second.unwrap();
+    assert_eq!(first["session"], second["session"]);
+    assert_ne!(first["reattached"], second["reattached"]);
+    assert!(first["reattached"] == true || second["reattached"] == true);
+    let opened = if first["reattached"] == true {
+        second
+    } else {
+        first
+    };
+    until("remote worker setup", async || remote_marker.is_file()).await;
+    assert_eq!(std::fs::read_to_string(&remote_marker).unwrap(), "remote");
+    assert!(!local_marker.exists(), "the local setup must not run");
+    resource_call(
+        &a,
+        "terminal",
+        "terminal_close",
+        opened["session"].as_str().unwrap(),
+        json!({ "session": opened["session"] }),
+    )
+    .await
+    .unwrap();
+    drop(b);
 }
 
 #[cfg(unix)]

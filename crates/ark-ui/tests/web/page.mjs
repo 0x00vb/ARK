@@ -45,6 +45,42 @@ async function finished(page, send) {
 }
 
 const scenarios = {
+  // Closing while the target runtime is still opening leaves no sheet or terminal behind. If
+  // the late reply contains a terminal, the UI closes it immediately.
+  async "terminal-close-race"(page) {
+    await page.evaluate(async () => {
+      const { terminalSheet } = await import("/js/places.js");
+      window.__lateCloses = [];
+      const api = {
+        resource: async (ref, kind, input) => window.__lateCloses.push({ ref, kind, input }),
+      };
+      const opened = new Promise((resolve) => { window.__resolveLateTerminal = resolve; });
+      window.__lateSheet = terminalSheet(
+        api,
+        "Install Grok",
+        "on this Mac",
+        () => opened,
+      );
+    });
+    const sheet = page.locator(".program-sheet");
+    await sheet.waitFor();
+    await sheet.getByRole("button", { name: "Close", exact: true }).last().click();
+    await sheet.waitFor({ state: "detached" });
+    await page.evaluate(() => window.__resolveLateTerminal({
+      session: "late-terminal",
+      ref: { runtime: "remote", project: "project", session: "chat" },
+    }));
+    await page.evaluate(() => window.__lateSheet);
+    await page.waitForFunction(() => window.__lateCloses.length === 1);
+    const closes = await page.evaluate(() => window.__lateCloses);
+    assert.deepEqual(closes, [{
+      ref: { runtime: "remote", project: "project", session: "chat" },
+      kind: "terminal_close",
+      input: { session: "late-terminal" },
+    }]);
+    assert.equal(await page.locator(".program-overlay").count(), 0);
+  },
+
   // A project shell opens as a project view. It does not create, select or read a chat.
   async "project-terminal"(page) {
     const before = await page.evaluate(() => window.ark.summary().session.id);
@@ -1647,7 +1683,7 @@ scenarios.places = async (page) => {
   await page.keyboard.type("abc-123");
   await page.keyboard.press("Enter");
   await sheet.getByText("signed in with abc-123").waitFor();
-  await sheet.getByRole("button", { name: "Close" }).click();
+  await sheet.getByRole("button", { name: "Close", exact: true }).last().click();
   await sheet.waitFor({ state: "detached" });
 };
 

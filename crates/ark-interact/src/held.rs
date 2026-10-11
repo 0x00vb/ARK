@@ -36,6 +36,8 @@ pub const CHAT_CALLS: &[&str] = &[
     "chat_models",
     "chat_setup",
     "chat_key",
+    "chat_worker_offers",
+    "chat_worker_setup",
     // The project's copy there (ADR 0052, Project copy).
     "copy_state",
     "copy_put",

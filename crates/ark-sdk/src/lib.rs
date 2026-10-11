@@ -733,7 +733,7 @@ pub struct ArkBuilder {
     browser: Option<BrowserChoice>,
     computer: Option<ComputerChoice>,
     processes: Option<ProcessesChoice>,
-    workers: Option<Arc<dyn ark_runtime::worker::Workers>>,
+    workers: Option<WorkersChoice>,
     connections: Option<ConnectionsChoice>,
     secrets: Option<Arc<dyn ark_connect::Secrets>>,
 }
@@ -765,6 +765,11 @@ enum ConnectionsChoice {
     /// [`secrets`](ArkBuilder::secrets)), records in the store root.
     Default,
     Given(Connections),
+}
+
+enum WorkersChoice {
+    Default,
+    Given(Arc<dyn ark_runtime::worker::Workers>),
 }
 
 impl Default for ArkBuilder {
@@ -969,15 +974,13 @@ impl ArkBuilder {
     /// ARK's: what the program wants to change asks the person through ARK, and its results
     /// come from the project folder. ARK's own agent stays the default.
     pub fn workers(mut self, yes: bool) -> Self {
-        self.workers = yes.then(|| {
-            Arc::new(ark_acp::Catalog::installed()) as Arc<dyn ark_runtime::worker::Workers>
-        });
+        self.workers = yes.then_some(WorkersChoice::Default);
         self
     }
 
     /// [`workers`](ArkBuilder::workers) with the app's own catalog.
     pub fn workers_with(mut self, w: Arc<dyn ark_runtime::worker::Workers>) -> Self {
-        self.workers = Some(w);
+        self.workers = Some(WorkersChoice::Given(w));
         self
     }
 
@@ -1125,6 +1128,13 @@ impl ArkBuilder {
         if let Some(svc) = &computer {
             per_agent.push(Arc::new(ark_computer::Computers(svc.clone())));
         }
+        let workers = self.workers.map(|workers| match workers {
+            WorkersChoice::Default => {
+                Arc::new(ark_acp::Catalog::at(engine.store.root().join("workers")))
+                    as Arc<dyn ark_runtime::worker::Workers>
+            }
+            WorkersChoice::Given(workers) => workers,
+        });
         let engine = Arc::new(engine);
         let subscriptions = self.subscriptions.unwrap_or_else(|| {
             SubscriptionRuntime::builder()
@@ -1149,7 +1159,7 @@ impl ArkBuilder {
             computer,
             processes,
             browser,
-            workers: self.workers,
+            workers,
         })
     }
 }

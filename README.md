@@ -9,7 +9,7 @@ ARK came out of a security research workstation (SecRes, now retired) and keeps 
 The same runtime runs [`examples/writing-agent`](examples/writing-agent), an editor for
 novelists, with no change to any ARK crate.
 
-Latest release: **v0.19.1**. A git tag is the release (not on crates.io). Rust 1.90 or newer.
+Latest release: **v0.20.0**. A git tag is the release (not on crates.io). Rust 1.90 or newer.
 State and next steps: [`ROADMAP.md`](ROADMAP.md).
 
 ## How it is structured
@@ -45,13 +45,13 @@ Pin a release tag:
 
 ```toml
 [dependencies]
-ark-sdk = { git = "https://github.com/0x00vb/ARK", tag = "v0.19.1" }
-ark-model = { git = "https://github.com/0x00vb/ARK", tag = "v0.19.1" }
+ark-sdk = { git = "https://github.com/0x00vb/ARK", tag = "v0.20.0" }
+ark-model = { git = "https://github.com/0x00vb/ARK", tag = "v0.20.0" }
 # several agents (also re-exported as `ark_interact::ark_orchestrate`)
-ark-orchestrate = { git = "https://github.com/0x00vb/ARK", tag = "v0.19.1" }
+ark-orchestrate = { git = "https://github.com/0x00vb/ARK", tag = "v0.20.0" }
 # optional front-ends, same tag
-ark-interact = { git = "https://github.com/0x00vb/ARK", tag = "v0.19.1" }
-ark-cli = { git = "https://github.com/0x00vb/ARK", tag = "v0.19.1" }
+ark-interact = { git = "https://github.com/0x00vb/ARK", tag = "v0.20.0" }
+ark-cli = { git = "https://github.com/0x00vb/ARK", tag = "v0.20.0" }
 ```
 
 A tool and an agent:

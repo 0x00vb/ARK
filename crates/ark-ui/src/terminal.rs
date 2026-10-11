@@ -60,6 +60,16 @@ pub(crate) struct Opened {
     pub reattached: bool,
 }
 
+pub(crate) struct Program<'a> {
+    pub argv: &'a [String],
+    pub clear_env: bool,
+    pub env: &'a [(String, String)],
+    pub cwd: PathBuf,
+    pub cols: u16,
+    pub rows: u16,
+    pub reference: ResourceRef,
+}
+
 #[derive(Debug, serde::Serialize)]
 pub(crate) struct ReadBack {
     pub generation: String,
@@ -82,6 +92,22 @@ impl Terminals {
     pub fn subscribe(&self, project: &str, session: &str, r: ResourceRef) {
         self.subscribers
             .subscribe(ResourceKind::Terminal, project, session, r);
+    }
+
+    /// Reattach to a program terminal that is still kept by this runtime.
+    pub fn opened(&self, session: &str) -> Option<Opened> {
+        let shells = self.shells.lock().unwrap();
+        let shell = shells.get(session)?;
+        let state = shell.state.lock().unwrap();
+        Some(Opened {
+            session: session.to_string(),
+            generation: shell.generation.clone(),
+            cwd: shell.cwd.clone(),
+            history: String::from_utf8_lossy(&state.history).into_owned(),
+            cursor: state.next,
+            ended: state.ended,
+            reattached: true,
+        })
     }
 
     /// The project's shell: the live one with its scrollback, or a new one in `cwd`.
@@ -196,15 +222,16 @@ impl Terminals {
     /// A program in a terminal of its own (no shell, no project): a program's install or
     /// sign-in the person watches and answers (ADR 0052). Its output is never kept beyond the
     /// scrollback a window re-attaches to.
-    pub fn open_program(
-        &self,
-        feed: &Arc<Feed>,
-        argv: &[String],
-        cwd: PathBuf,
-        cols: u16,
-        rows: u16,
-        mut reference: ResourceRef,
-    ) -> anyhow::Result<Opened> {
+    pub fn open_program(&self, feed: &Arc<Feed>, program: Program<'_>) -> anyhow::Result<Opened> {
+        let Program {
+            argv,
+            clear_env,
+            env,
+            cwd,
+            cols,
+            rows,
+            mut reference,
+        } = program;
         anyhow::ensure!(!argv.is_empty(), "nothing to run");
         let pair = native_pty_system().openpty(PtySize {
             rows,
@@ -215,7 +242,13 @@ impl Terminals {
         let mut cmd = CommandBuilder::new(&argv[0]);
         cmd.args(&argv[1..]);
         cmd.cwd(&cwd);
+        if clear_env {
+            cmd.env_clear();
+        }
         cmd.env("TERM", "xterm-256color");
+        for (name, value) in env {
+            cmd.env(name, value);
+        }
         let mut child = pair.slave.spawn_command(cmd)?;
         let mut reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;

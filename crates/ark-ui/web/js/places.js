@@ -254,37 +254,68 @@ export function programSheet(api, backend, place, done) {
 
 /// A terminal over the page for one program: `open(cols, rows)` starts it and answers its
 /// terminal's id. Closing ends it; `done` runs after.
-export async function terminalSheet(api, title, sub, open, done) {
+export async function terminalSheet(api, title, sub, open, done, options = {}) {
+  const before = document.activeElement;
   const box = h("div.term-box");
   const close = h("button.icon-btn", { type: "button", "aria-label": "Close", title: "Close" }, icon("x"));
-  const sheet = h("div.program-sheet", { role: "dialog", "aria-label": `${title} ${sub}`.trim(), "data-ark-overlay": "" },
-    h("div.program-head", h("span", title), h("span.menu-sub", sub), close),
-    box);
+  const heading = h("span", { id: `program-title-${Math.random().toString(36).slice(2)}` }, title);
+  const status = h("span.program-state", { id: `${heading.id}-state`, role: "status", "aria-live": "polite" }, "Opening…");
+  const hint = h("span.program-hint", { id: `${heading.id}-hint` }, "Terminal. Press F6 to move to the dialog controls.");
+  const retry = h("button.btn.small", { type: "button", hidden: true }, "Retry");
+  const finish = h("button.btn.small.primary", { type: "button", hidden: true }, "Done");
+  const closeText = h("button.btn.small", { type: "button" }, "Close");
+  const controls = h("div.program-controls", status, h("span.program-actions", retry, finish, closeText));
+  const sheet = h("div.program-sheet", {
+    role: "dialog", "aria-modal": "true", "aria-labelledby": heading.id,
+    "aria-describedby": `${status.id} ${hint.id}`, "data-ark-overlay": "",
+  }, h("div.program-head", heading, h("span.menu-sub", sub), close), hint, box, controls);
   const overlay = h("div.program-overlay", sheet);
   document.body.append(overlay);
-  const s = { id: null, ref: null, term: null, offs: [], pendingWrite: "", writing: false, ended: false };
+  const s = { id: null, ref: null, term: null, offs: [], pendingWrite: "", writing: false, closed: false, opening: false, running: false, succeeded: false };
   const resource = (kind, input = {}) => {
     if (!s.ref) return Promise.reject(new Error("The terminal has no resource location"));
     return api.resource(s.ref, kind, input);
   };
-  const end = () => {
-    s.ended = true;
+  const end = (success = s.succeeded) => {
+    if (s.closed) return;
+    s.closed = true;
     s.pendingWrite = "";
     for (const off of s.offs) off();
     if (s.ref) resource("terminal_close", { session: s.id }).catch(() => {});
     s.term?.dispose();
     overlay.remove();
-    done?.();
+    done?.(success);
+    requestAnimationFrame(() => {
+      if (!document.activeElement || document.activeElement === document.body) before?.focus?.();
+    });
   };
-  close.onclick = end;
-  sheet.addEventListener("keydown", (e) => e.key === "Escape" && e.metaKey && end());
+  close.onclick = () => end(false);
+  closeText.onclick = () => end(false);
+  finish.onclick = () => end(true);
+  sheet.addEventListener("keydown", (event) => {
+    if (event.key === "F6") {
+      event.preventDefault();
+      (finish.hidden ? retry.hidden ? closeText : retry : finish).focus();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [...sheet.querySelectorAll("button:not([hidden]):not([disabled]), [tabindex]:not([tabindex='-1'])")];
+    if (!focusable.length) return;
+    const first = focusable[0], last = focusable.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
   let Terminal;
   try {
     Terminal = await xterm();
   } catch (e) {
+    if (s.closed) return;
     box.append(h("div.wb-empty", e.message));
+    status.textContent = e.message;
+    closeText.focus();
     return;
   }
+  if (s.closed) return;
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
   const term = (s.term = new Terminal({
     cursorBlink: true, fontSize: 12.5, scrollback: 2000,
@@ -294,15 +325,46 @@ export async function terminalSheet(api, title, sub, open, done) {
   const fit = new window.FitAddon.FitAddon();
   term.loadAddon(fit);
   term.open(box);
+  if (s.closed) {
+    term.dispose();
+    return;
+  }
   try { fit.fit(); } catch {}
   const early = [];
-  const output = (p) => (p.exit ? term.write("\r\n\x1b[2m[finished]\x1b[0m\r\n") : term.write(p.data));
+  const failed = (message) => {
+    s.running = false;
+    status.textContent = message;
+    retry.hidden = false;
+    finish.hidden = true;
+  };
+  const completed = async () => {
+    if (!s.running || s.closed) return;
+    s.running = false;
+    term.write("\r\n\x1b[2m[finished]\x1b[0m\r\n");
+    status.textContent = "Finished";
+    try {
+      s.succeeded = options.check ? await options.check() : true;
+    } catch {
+      s.succeeded = false;
+    }
+    if (s.closed) return;
+    if (s.succeeded) {
+      finish.hidden = false;
+      retry.hidden = true;
+    } else {
+      failed(options.unconfirmed || `Could not confirm ${title}`);
+    }
+  };
+  const output = (p) => (p.exit ? void completed() : term.write(p.data));
   s.offs.push(window.ark.on("ark:term", (p) => {
     if (!s.ref) early.push(p);
     else if (p.ref && JSON.stringify(p.ref) === JSON.stringify(s.ref)) output(p);
   }));
+  s.offs.push(window.ark.on("ark:disconnected", () => {
+    if (s.running) failed("Disconnected");
+  }));
   const pumpWrite = async () => {
-    if (s.writing || !s.pendingWrite || !s.ref || s.ended) return;
+    if (s.writing || !s.pendingWrite || !s.ref || s.closed || !s.running) return;
     const data = s.pendingWrite;
     s.pendingWrite = "";
     s.writing = true;
@@ -316,19 +378,48 @@ export async function terminalSheet(api, title, sub, open, done) {
       pumpWrite();
     }
   };
-  term.onData((data) => {
-    if (!s.ref || s.ended) return;
+  const dataInput = term.onData((data) => {
+    if (!s.ref || s.closed || !s.running) return;
     s.pendingWrite += data;
     pumpWrite();
   });
-  try {
-    const opened = await open(term.cols, term.rows);
-    s.id = opened.session;
-    s.ref = opened.ref;
-    if (!s.ref) throw new Error("The runtime did not return a terminal resource reference");
-    for (const p of early.splice(0)) if (p.ref && JSON.stringify(p.ref) === JSON.stringify(s.ref)) output(p);
-    term.focus();
-  } catch (e) {
-    term.write(`\x1b[31m${e.message}\x1b[0m\r\n`);
-  }
+  s.offs.push(() => dataInput.dispose());
+  const start = async () => {
+    if (s.running || s.opening || s.closed) return;
+    s.opening = true;
+    if (s.ref) await resource("terminal_close", { session: s.id }).catch(() => {});
+    s.id = null;
+    s.ref = null;
+    s.succeeded = false;
+    retry.hidden = true;
+    finish.hidden = true;
+    status.textContent = "Opening…";
+    term.reset();
+    try {
+      const opened = await open(term.cols, term.rows);
+      s.opening = false;
+      if (s.closed) {
+        if (opened?.ref && opened?.session) {
+          api.resource(opened.ref, "terminal_close", { session: opened.session }).catch(() => {});
+        }
+        return;
+      }
+      s.id = opened.session;
+      s.ref = opened.ref;
+      if (!s.ref) throw new Error("The runtime did not return a terminal resource reference");
+      s.running = true;
+      status.textContent = options.working || "Working…";
+      if (opened.history) term.write(opened.history);
+      for (const p of early.splice(0)) if (p.ref && JSON.stringify(p.ref) === JSON.stringify(s.ref)) output(p);
+      if (opened.ended) await completed();
+      else term.focus();
+    } catch (e) {
+      s.opening = false;
+      if (s.closed) return;
+      term.write(`\x1b[31m${e.message}\x1b[0m\r\n`);
+      failed(e.message || "Could not open the terminal");
+    }
+  };
+  retry.onclick = start;
+  await start();
 }

@@ -37,10 +37,21 @@ impl Command for Agents {
         let g = o.graph();
         let task = args.trim();
         if task.is_empty() {
-            return Ok(crate::orchestration::graph_report(&g, ix.labels()).into());
+            return Ok(crate::orchestration::graph_report_with_workers(
+                &g,
+                ix.labels(),
+                ix.ark().workers().map(|workers| workers.as_ref()),
+            )
+            .into());
         }
         let events = o.task_trace(task)?;
-        Ok(crate::orchestration::task_report(&g, task, &events).into())
+        Ok(crate::orchestration::task_report_with_workers(
+            &g,
+            task,
+            &events,
+            ix.ark().workers().map(|workers| workers.as_ref()),
+        )
+        .into())
     }
 }
 

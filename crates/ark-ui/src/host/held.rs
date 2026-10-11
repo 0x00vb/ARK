@@ -734,6 +734,21 @@ impl Host {
                 let chat = self.shown_held()?;
                 Some(self.on_place(&chat, "chat_models", json!({})).await)
             }
+            "worker_offers" => {
+                let chat = self.shown_held()?;
+                Some(self.on_place(&chat, "chat_worker_offers", json!({})).await)
+            }
+            "worker_setup" => {
+                let chat = self.shown_held()?;
+                Some(
+                    async {
+                        let mut p = params.clone();
+                        p["session"] = json!(chat.session);
+                        self.on_place(&chat, "chat_worker_setup", p).await
+                    }
+                    .await,
+                )
+            }
             "place_setup" => {
                 let chat = self.shown_held()?;
                 Some(

@@ -151,7 +151,7 @@ async fn project_terminal_opens_without_changing_the_chat_and_deduplicates_write
     .await
     .unwrap();
     let mut stale = false;
-    for _ in 0..100 {
+    for _ in 0..500 {
         if host
             .call(
                 "resource",

@@ -63,6 +63,12 @@ impl Worker for Acp {
                 cmd.env(k, v);
             }
         }
+        if let Some(home) = &self.entry.isolated_home {
+            cmd.env("HOME", home)
+                .env("GROK_HOME", home)
+                .env("GROK_AGENT_DASHBOARD", "0")
+                .env("GROK_WORKFLOWS", "0");
+        }
         // The adapter reads the person's settings from its home: it gets an empty one. The
         // program it starts gets the person's real home (its login, its sessions) through the
         // session's options, exactly as when the person runs it.
@@ -105,7 +111,7 @@ impl Worker for Acp {
             reader: BufReader::new(child.stdout.take().ok_or("started without output")?),
             next: 0,
         };
-        let mut turn = Turn::new(&folder, title);
+        let mut turn = Turn::new(&folder, title, self.entry.name == "grok");
         let ran = self
             .session(
                 &job,
@@ -171,7 +177,10 @@ impl Acp {
                 Updates::Ignore,
             )
             .await?;
-        let version = init["agentInfo"]["version"].as_str().unwrap_or("");
+        let version = init["agentInfo"]["version"]
+            .as_str()
+            .or_else(|| init["_meta"]["agentVersion"].as_str())
+            .unwrap_or("");
         tracing::info!(worker = self.entry.name, version, "started");
         let checked = self.entry.checked;
         if !checked.is_empty() && !checked.iter().any(|c| version.starts_with(c)) {
@@ -235,6 +244,19 @@ impl Acp {
             .to_string();
         turn.session = sid.clone();
         (job.keep)(json!({ "group": group, "session": sid }));
+        if let (ModelSetting::ConfigOption, Some(model)) =
+            (self.entry.model, job.model.or(self.entry.default_model))
+        {
+            conn.call(
+                "session/set_config_option",
+                json!({ "sessionId": sid, "configId": "model", "value": model }),
+                turn,
+                job,
+                Updates::Ignore,
+            )
+            .await
+            .map_err(|error| format!("would not use model `{model}` ({error})"))?;
+        }
         // The mode that asks before a change, whatever the program's own settings say.
         if let Some(want) = self.entry.mode {
             if opened["modes"]["currentModeId"].as_str() != Some(want) {
@@ -264,12 +286,16 @@ impl Acp {
                 Updates::Take,
             )
             .await?;
-        if let Some(u) = done.get("usage").filter(|u| u.is_object()) {
+        if let Some(u) = done
+            .get("usage")
+            .or_else(|| done.get("_meta").and_then(|meta| meta.get("usage")))
+            .filter(|u| u.is_object())
+        {
             let n = |k: &str| u[k].as_u64().unwrap_or(0).min(u32::MAX as u64) as u32;
             let (input, read, write) = (
                 n("inputTokens"),
                 n("cachedReadTokens"),
-                n("cachedWriteTokens"),
+                n("cachedWriteTokens").max(n("cacheCreationTokens")),
             );
             (job.on_event)(HarnessEvent::ModelCall {
                 role: "reason".into(),
@@ -425,6 +451,8 @@ struct Turn {
     folder: PathBuf,
     /// The program, as a person calls it.
     by: &'static str,
+    /// Grok is offered only with the permission shapes recorded in ADR 0061.
+    strict_permissions: bool,
     session: String,
     text: String,
     since_tool: String,
@@ -433,10 +461,11 @@ struct Turn {
 }
 
 impl Turn {
-    fn new(folder: &Path, by: &'static str) -> Turn {
+    fn new(folder: &Path, by: &'static str, strict_permissions: bool) -> Turn {
         Turn {
             folder: folder.to_path_buf(),
             by,
+            strict_permissions,
             session: String::new(),
             text: String::new(),
             since_tool: String::new(),
@@ -513,6 +542,12 @@ impl Turn {
     /// options only: a grant is ARK's, kept by its gate, and names the file or the command.
     async fn permission(&mut self, params: &Value, job: &WorkerJob<'_>) -> Result<Value, String> {
         let request = request(&params["toolCall"], &self.folder, self.by);
+        if self.strict_permissions && !known_grok_permission(&request) {
+            return Err(format!(
+                "sent an unrecognized permission request ({})",
+                request.preview
+            ));
+        }
         let inside_change = request.action == CHANGE && !request.ask_each_time;
         let allowed = if job.allow_mutate && inside_change {
             true
@@ -538,6 +573,10 @@ impl Turn {
     }
 }
 
+fn known_grok_permission(request: &ApprovalRequest) -> bool {
+    matches!(request.action.as_str(), CHANGE | RUN)
+}
+
 /// The ARK question for a program's permission request: what it wants to change or run, in
 /// plain words, with a grant that names exactly that (ADR 0043 › Authority over work). `by` is
 /// the program as a person calls it: the question says who acts, and where.
@@ -550,6 +589,21 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
         let Some(p) = l["path"].as_str() else {
             continue;
         };
+        match relative(Path::new(p), folder) {
+            Some(r) => paths.push(r),
+            None => {
+                outside = true;
+                paths.push(p.to_string());
+            }
+        }
+    }
+    for p in [
+        call["rawInput"]["file_path"].as_str(),
+        call["_meta"]["x.ai/tool"]["input"]["path"].as_str(),
+    ]
+    .into_iter()
+    .flatten()
+    {
         match relative(Path::new(p), folder) {
             Some(r) => paths.push(r),
             None => {
@@ -683,6 +737,7 @@ fn step(method: &str) -> &'static str {
         "session/new" => "opening its session",
         "session/load" => "loading its earlier session",
         "session/set_mode" => "setting the mode that asks before a change",
+        "session/set_config_option" => "choosing its model",
         "session/prompt" => "working",
         _ => "talking to it",
     }
@@ -850,6 +905,42 @@ impl Tail {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn grok_rejects_unknown_permission_shapes_before_approval() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let keep = |_: Value| {};
+        let on_event = |_: HarnessEvent| {};
+        let job = WorkerJob {
+            brief: "Fetch the page",
+            folder: &root,
+            model: None,
+            approvals: None,
+            allow_mutate: false,
+            cancel: ark_runtime::cancel::CancelToken::new(),
+            kept: None,
+            keep: &keep,
+            on_event: &on_event,
+        };
+        let mut turn = Turn::new(&root, "Grok", true);
+
+        let error = turn
+            .permission(
+                &json!({
+                    "toolCall": { "kind": "fetch", "title": "Fetch a page" },
+                    "options": [
+                        { "kind": "allow_once", "optionId": "yes" },
+                        { "kind": "reject_once", "optionId": "no" }
+                    ]
+                }),
+                &job,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("unrecognized permission request"), "{error}");
+    }
+
     #[test]
     fn requests_name_the_file_or_the_command() {
         let dir = tempfile::tempdir().unwrap();
@@ -934,11 +1025,30 @@ mod tests {
         );
         assert_eq!(other.action, OTHER);
         assert!(other.ask_each_time);
+        assert!(!known_grok_permission(&other));
+        assert!(known_grok_permission(&run));
         let up = request(
             &json!({ "kind": "edit", "title": "x", "locations": [{ "path": root.join("../x.md") }] }),
             &root,
             "Fake",
         );
         assert!(up.ask_each_time);
+
+        let grok_edit = request(
+            &json!({ "kind": "edit", "title": "Edit report", "rawInput": {
+                "file_path": root.join("report.md")
+            } }),
+            &root,
+            "Grok",
+        );
+        assert_eq!(grok_edit.class, "program.change:report.md");
+        let grok_meta = request(
+            &json!({ "kind": "edit", "title": "Edit nested", "_meta": {
+                "x.ai/tool": { "input": { "path": root.join("web/a.md") } }
+            } }),
+            &root,
+            "Grok",
+        );
+        assert_eq!(grok_meta.class, "program.change:web/a.md");
     }
 }

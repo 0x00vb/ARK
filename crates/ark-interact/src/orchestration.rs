@@ -256,6 +256,16 @@ pub fn schedules_report(o: &ark_orchestrate::Orchestrator) -> Report {
 /// The whole graph: tasks as a tree (who delegated what to whom), agents with their model,
 /// session and context use, and each account's capacity.
 pub fn graph_report(g: &Graph, labels: &Labels) -> Report {
+    graph_report_with_workers(g, labels, None)
+}
+
+/// [`graph_report`] with the app's names for agent programs. Technical records keep the saved
+/// spec; the ordinary command view says the same name as the window.
+pub fn graph_report_with_workers(
+    g: &Graph,
+    labels: &Labels,
+    workers: Option<&dyn ark_sdk::prelude::ark_runtime::worker::Workers>,
+) -> Report {
     let mut r = Report::titled("Agents and tasks");
     if g.tasks.is_empty() && g.agents.is_empty() {
         return r.note("No agents yet.");
@@ -318,8 +328,8 @@ pub fn graph_report(g: &Graph, labels: &Labels) -> Report {
                 // The profile it starts from, when the app's and not the base one.
                 Cell::new(
                     match &n.profile {
-                        Some(p) => format!("{} · {p}", n.model),
-                        None => n.model.clone(),
+                        Some(p) => format!("{} · {p}", worker_name(&n.model, workers)),
+                        None => worker_name(&n.model, workers),
                     },
                     Tone::Muted,
                 ),
@@ -365,6 +375,29 @@ pub fn graph_report(g: &Graph, labels: &Labels) -> Report {
     .data("orchestration", g)
 }
 
+fn worker_name(
+    model: &str,
+    workers: Option<&dyn ark_sdk::prelude::ark_runtime::worker::Workers>,
+) -> String {
+    if !model.starts_with(ark_sdk::prelude::ark_runtime::worker::SPEC) {
+        return model.to_string();
+    }
+    workers
+        .and_then(|workers| {
+            workers.offers().into_iter().find_map(|offer| {
+                if offer.spec == model {
+                    return Some(offer.title);
+                }
+                offer
+                    .models
+                    .into_iter()
+                    .find(|choice| choice.spec == model)
+                    .map(|choice| choice.title)
+            })
+        })
+        .unwrap_or_else(|| "Unavailable".into())
+}
+
 fn push_tree(g: &Graph, t: &TaskNode, depth: usize, table: &mut Table) {
     let indent = "  ".repeat(depth);
     let state = match &t.waiting_on {
@@ -390,6 +423,15 @@ fn push_tree(g: &Graph, t: &TaskNode, depth: usize, table: &mut Table) {
 
 /// One task: what it was given, what it did, what it returned, and its trace.
 pub fn task_report(g: &Graph, task: &str, events: &[OrchEvent]) -> Report {
+    task_report_with_workers(g, task, events, None)
+}
+
+pub fn task_report_with_workers(
+    g: &Graph,
+    task: &str,
+    events: &[OrchEvent],
+    workers: Option<&dyn ark_sdk::prelude::ark_runtime::worker::Workers>,
+) -> Report {
     let Some(t) = g.task(task) else {
         return Report::new().error(format!("no task `{task}`"));
     };
@@ -401,7 +443,7 @@ pub fn task_report(g: &Graph, task: &str, events: &[OrchEvent]) -> Report {
         .field_toned("state", t.state.as_str(), task_tone(t.state))
         .field("asked by", by)
         .field("objective", clip(&t.objective, 300))
-        .field("model", t.model.clone())
+        .field("model", worker_name(&t.model, workers))
         .field(
             "brief",
             format!("{} tokens (all the agent was given)", t.brief_tokens),

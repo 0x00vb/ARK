@@ -294,6 +294,11 @@ window.readyProbe.graph = await window.ark.call("graph");
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn closing_a_setup_sheet_while_it_opens_closes_the_late_terminal() {
+    drive("terminal-close-race", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn streamed_text_keeps_its_last_chunk_and_answers_once() {
     let script = vec![
         say("Reading the notes now.", true),

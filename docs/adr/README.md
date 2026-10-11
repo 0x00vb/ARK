@@ -67,6 +67,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0058](0058-a-native-device-pairs-to-one-revocable-credential.md) | A native device pairs once to one revocable credential kept only in its device security store | Accepted |
 | [0059](0059-native-phone-notifications-use-a-blind-relay.md) | Native phone notifications use an optional blind relay with no work content or runtime credential | Accepted |
 | [0060](0060-a-project-terminal-does-not-need-a-chat.md) | A project Terminal opens without a chat: server-issued project authority, explicit computer binding, one-shot writes, shared PTY end semantics and staged native delivery | Accepted |
+| [0061](0061-subscription-agents-keep-their-credentials.md) | Subscription agents keep their credentials on the computer that runs them; Grok is offered without ARK handling its login | Proposed |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

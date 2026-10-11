@@ -7,6 +7,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.20.0] - 2026-10-11
+
+### Changed
+- Apps can offer Grok as an agent program through the project runtime. Grok keeps its own login
+  in an isolated profile, and its file changes and commands still ask through ARK.
+
 ## [0.19.1] - 2026-10-10
 
 ### Fixed

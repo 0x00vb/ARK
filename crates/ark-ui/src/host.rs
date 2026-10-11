@@ -543,6 +543,12 @@ pub struct Host {
     /// Terminals another runtime opened here for a program's install or sign-in (`chat_setup`):
     /// the only terminals it may type into.
     setup_terms: Mutex<HashMap<String, String>>,
+    /// One live setup terminal per worker spec. A reload reconnects to it instead of starting
+    /// another install or sign-in process.
+    worker_setup_terms: Mutex<HashMap<String, String>>,
+    /// Chats currently allowed to operate each worker setup terminal. Several windows may
+    /// reconnect to the same live process.
+    worker_setup_owners: Mutex<HashMap<String, std::collections::HashSet<String>>>,
     /// Chats another runtime holds here and reaches by name (`chat_*`, ADR 0052), by session.
     /// None of them moves the windows; a window that opens one takes it from here.
     addressed: Mutex<HashMap<String, Arc<Conv>>>,
@@ -585,6 +591,8 @@ pub struct Host {
     processes: Option<ark_sdk::prelude::ark_proc::Processes>,
     /// Chromium on this runtime, for a person's chat-owned rendered Browser.
     browser: Option<Arc<ark_sdk::prelude::ark_browser::BrowserService>>,
+    /// Agent programs offered by this runtime. Catalog and setup never cross runtime bounds.
+    workers: Option<Arc<dyn ark_sdk::prelude::ark_runtime::worker::Workers>>,
     /// Notifications to the person's devices (ADR 0047).
     pub(crate) notifier: Arc<crate::notify::Notifier>,
     /// The app's links to other runtimes, shared with its conversations.
@@ -696,6 +704,7 @@ impl Host {
             computer: ix.ark().computer().cloned(),
             processes: ix.ark().processes().cloned(),
             browser: ix.ark().browser_service().cloned(),
+            workers: ix.ark().workers().cloned(),
             notifier: Arc::new(crate::notify::Notifier::new(ix.ark().shared_engine())),
             links: ix.links().clone(),
             held: Mutex::new(None),
@@ -707,6 +716,8 @@ impl Host {
             background: Mutex::new(Vec::new()),
             addressed: Mutex::new(HashMap::new()),
             setup_terms: Mutex::new(Default::default()),
+            worker_setup_terms: Mutex::new(Default::default()),
+            worker_setup_owners: Mutex::new(Default::default()),
             copy_locks: Mutex::new(Default::default()),
             computers: Default::default(),
             feed: Feed::new(),
@@ -1806,8 +1817,7 @@ impl Host {
                 Ok(value)
             }
             O::TerminalRead => {
-                let setup = self.setup_terms.lock().unwrap().get(&r.id).cloned();
-                if setup.as_deref() == Some(&r.location.session) {
+                if self.owns_setup_terminal(&r.id, &r.location.session) {
                     return Ok(serde_json::to_value(self.terminals.read_owned(
                         &r.id,
                         &s("generation"),
@@ -1849,14 +1859,7 @@ impl Host {
                     // Consume before I/O. A failed or uncertain write is never safe to retry.
                     kept.next_write = kept.next_write.saturating_add(1);
                 }
-                if self
-                    .setup_terms
-                    .lock()
-                    .unwrap()
-                    .get(&r.id)
-                    .map(String::as_str)
-                    == Some(r.location.session.as_str())
-                {
+                if self.owns_setup_terminal(&r.id, &r.location.session) {
                     self.terminals.write(&r.id, &s("data"))?;
                 } else {
                     self.terminals
@@ -1866,14 +1869,7 @@ impl Host {
             }
             O::TerminalResize => {
                 let size = |k: &str| n(k).unwrap_or(24).clamp(2, 1000) as u16;
-                if self
-                    .setup_terms
-                    .lock()
-                    .unwrap()
-                    .get(&r.id)
-                    .map(String::as_str)
-                    == Some(r.location.session.as_str())
-                {
+                if self.owns_setup_terminal(&r.id, &r.location.session) {
                     self.terminals.resize(&r.id, size("cols"), size("rows"))?;
                 } else {
                     self.terminals.resize_for(
@@ -1886,10 +1882,14 @@ impl Host {
                 Ok(Value::Null)
             }
             O::TerminalClose => {
-                let setup = self.setup_terms.lock().unwrap().get(&r.id).cloned();
-                if setup.as_deref() == Some(&r.location.session) {
+                if self.owns_setup_terminal(&r.id, &r.location.session) {
                     self.terminals.close(&r.id);
                     self.setup_terms.lock().unwrap().remove(&r.id);
+                    self.worker_setup_terms
+                        .lock()
+                        .unwrap()
+                        .retain(|_, terminal| terminal != &r.id);
+                    self.worker_setup_owners.lock().unwrap().remove(&r.id);
                 } else {
                     self.terminals.close_for(project.id.as_str(), &r.id)?;
                 }
@@ -2509,6 +2509,112 @@ impl Host {
         Ok(conv.ix.clone().lock_owned().await)
     }
 
+    fn worker_offers(&self) -> Vec<ark_sdk::prelude::ark_runtime::worker::WorkerOffer> {
+        self.workers
+            .as_ref()
+            .map(|workers| workers.offers())
+            .unwrap_or_default()
+    }
+
+    fn owns_setup_terminal(&self, terminal: &str, session: &str) -> bool {
+        self.setup_terms
+            .lock()
+            .unwrap()
+            .get(terminal)
+            .is_some_and(|owner| owner == session)
+            || self
+                .worker_setup_owners
+                .lock()
+                .unwrap()
+                .get(terminal)
+                .is_some_and(|owners| owners.contains(session))
+    }
+
+    fn open_worker_setup(&self, session: &str, params: &Value) -> anyhow::Result<Value> {
+        let text = |key: &str| params[key].as_str().unwrap_or("");
+        let workers = self
+            .workers
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("this runtime offers no agent programs"))?;
+        let setup = workers
+            .setup(text("spec"), text("action"))
+            .ok_or_else(|| anyhow::anyhow!("that agent program is not offered here"))?
+            .map_err(anyhow::Error::msg)?;
+        let size =
+            |key: &str, default: u64| params[key].as_u64().unwrap_or(default).clamp(2, 1000) as u16;
+        let record = self
+            .engine
+            .store
+            .get_session(session)?
+            .ok_or_else(|| anyhow::anyhow!("there is no chat `{session}` here"))?;
+        let reference = ResourceRef {
+            location: ResourceLocation {
+                runtime: ark_interact::held::runtime_id(&self.engine),
+                project: record["project"].as_str().unwrap_or_default().to_string(),
+                session: session.to_string(),
+            },
+            kind: ResourceKind::Terminal,
+            id: String::new(),
+            authority: ResourceAuthority::Chat,
+        };
+        let spec = text("spec").to_string();
+        // Hold this through process creation. Two clients asking at the same time must either
+        // attach to the same terminal or see the one this call inserts.
+        let mut worker_setups = self.worker_setup_terms.lock().unwrap();
+        if let Some(existing) = worker_setups.get(&spec).cloned() {
+            if let Some(opened) = self.terminals.opened(&existing) {
+                if !opened.ended {
+                    self.terminals.subscribe(
+                        &reference.location.project,
+                        &existing,
+                        ResourceRef {
+                            id: existing.clone(),
+                            ..reference.clone()
+                        },
+                    );
+                    self.worker_setup_owners
+                        .lock()
+                        .unwrap()
+                        .entry(existing)
+                        .or_default()
+                        .insert(session.to_string());
+                    let mut value = serde_json::to_value(&opened)?;
+                    let mut attached = reference;
+                    attached.id = opened.session;
+                    value["ref"] = serde_json::to_value(attached)?;
+                    return Ok(value);
+                }
+                self.terminals.close(&existing);
+            }
+            worker_setups.remove(&spec);
+            self.worker_setup_owners.lock().unwrap().remove(&existing);
+        }
+        let opened = self.terminals.open_program(
+            &self.feed,
+            crate::terminal::Program {
+                argv: &setup.argv,
+                clear_env: setup.clear_env,
+                env: &setup.env,
+                cwd: setup.cwd,
+                cols: size("cols", 80),
+                rows: size("rows", 24),
+                reference: reference.clone(),
+            },
+        )?;
+        self.worker_setup_owners
+            .lock()
+            .unwrap()
+            .entry(opened.session.clone())
+            .or_default()
+            .insert(session.to_string());
+        worker_setups.insert(spec, opened.session.clone());
+        let mut reference = reference;
+        reference.id = opened.session.clone();
+        let mut value = serde_json::to_value(opened)?;
+        value["ref"] = serde_json::to_value(reference)?;
+        Ok(value)
+    }
+
     /// Handle one request. Errors become `{ "error": … }` at the transport.
     pub async fn call(self: &Arc<Self>, method: &str, params: Value) -> anyhow::Result<Value> {
         let s = |k: &str| {
@@ -2689,11 +2795,15 @@ impl Host {
                 };
                 let opened = self.terminals.open_program(
                     &self.feed,
-                    &argv,
-                    home,
-                    size("cols", 80),
-                    size("rows", 24),
-                    reference.clone(),
+                    crate::terminal::Program {
+                        argv: &argv,
+                        clear_env: false,
+                        env: &[],
+                        cwd: home,
+                        cols: size("cols", 80),
+                        rows: size("rows", 24),
+                        reference: reference.clone(),
+                    },
                 )?;
                 self.setup_terms
                     .lock()
@@ -2948,6 +3058,8 @@ impl Host {
             "models" => Ok(serde_json::to_value(
                 ark_interact::ark_sdk::prelude::ark_model::catalog().await,
             )?),
+            "worker_offers" => Ok(serde_json::to_value(self.worker_offers())?),
+            "worker_setup" => self.open_worker_setup(&self.session_id(), &params),
             // Saved API keys (ark-connect): which providers have one, save one (checked with
             // the provider first), forget one. Without connections, keys come from the
             // environment only and these refuse.
@@ -3598,6 +3710,13 @@ impl Host {
                     self.terminals.close(&id);
                     self.setup_terms.lock().unwrap().remove(&id);
                 }
+                self.worker_setup_owners
+                    .lock()
+                    .unwrap()
+                    .retain(|_, owners| {
+                        owners.remove(&session);
+                        !owners.is_empty()
+                    });
                 if let Some(browser) = &self.browser {
                     let _ = browser.surface(&session).close().await;
                 }
@@ -3742,6 +3861,8 @@ impl Host {
             "chat_models" => Ok(serde_json::to_value(
                 ark_interact::ark_sdk::prelude::ark_model::catalog().await,
             )?),
+            "chat_worker_offers" => Ok(serde_json::to_value(self.worker_offers())?),
+            "chat_worker_setup" => self.open_worker_setup(&session, params),
             // A program's install or sign-in, in a terminal the other runtime shows and the person
             // answers. Only the steps the catalog names run, never a command sent from there.
             "chat_setup" => {
@@ -3779,11 +3900,15 @@ impl Host {
                 };
                 let opened = self.terminals.open_program(
                     &self.feed,
-                    &argv,
-                    home,
-                    size("cols", 80),
-                    size("rows", 24),
-                    reference.clone(),
+                    crate::terminal::Program {
+                        argv: &argv,
+                        clear_env: false,
+                        env: &[],
+                        cwd: home,
+                        cols: size("cols", 80),
+                        rows: size("rows", 24),
+                        reference: reference.clone(),
+                    },
                 );
                 let opened = opened?;
                 self.setup_terms

@@ -151,6 +151,7 @@ fn catalog_checked(checked: &'static [&'static str]) -> Arc<dyn ark_runtime::wor
         name: "fake",
         title: "Fake",
         program: "fake-program",
+        provider_program: "fake-program",
         path_var: "ARK_TEST_FAKE_PROGRAM_PATH",
         args: &["fake_program", "--exact", "--nocapture", "--test-threads=1"],
         model: ark_acp::ModelSetting::ConfigArg,
@@ -160,6 +161,8 @@ fn catalog_checked(checked: &'static [&'static str]) -> Arc<dyn ark_runtime::wor
         checked,
         settings_dir: None,
         env: &["ARK_FAKE_PROGRAM", "FAKE_MODE", "FAKE_KIND", "FAKE_HANG"],
+        isolated_home: None,
+        models: &[],
         setup: "",
     }]))
 }

@@ -4,7 +4,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-10 (v0.19.1 release tree verified)
+Last updated: 2026-10-11 (repeated failed calls bounded on `codex/harness-errors`)
 
 ## Release
 
@@ -24,6 +24,7 @@ Last updated: 2026-10-10 (v0.19.1 release tree verified)
 
 | What | State |
 |---|---|
+| Repeated failed tool calls | On `codex/harness-errors`: an identical failed read or observation runs once and gets one retry, then returns immediately. A successful change reopens the read. Focused runtime tests pass. The 22-workload simulated suite has no metric change. Live qwen3:4b passes `failure-recovery` and `web` 3/3, and writer dogfood passes. Implementation QA is GO. Full CI reaches and passes this runtime suite, but is blocked by the unchanged `ark-ui` natural-shell-exit test, reproduced twice and tracked separately on the board. |
 | Signed background updates for native consumers (ADR 0054) | In v0.17.0: opt-in `desktop-updater`, official Tauri updater in local and direct-remote window paths, an own-page-only state bridge, background download and install on macOS and Linux, no forced restart. Windows is explicitly unavailable until it has a non-disruptive installer design. Left: ARK Desktop's staged 0.5.2 to 0.5.3 proof |
 | Project Terminal without a chat (ADR 0060) | Released in v0.19.0 and stabilized in v0.19.1. ARK's host, shared web client and external protocol v1.1 cover authoritative projects and computers plus Terminal open, cursor replay, ordered writes, resize, end and typed events. Rust types generate the checked-in schema and Swift. ARK Desktop 0.6.5 pins v0.19.1 and is public. Left: generated iPhone consumption, SwiftTerm keyboard spike and native interruption, accessibility and device checks. |
 | A chat runs on the computer the person picks (ADR 0052, accepted 2026-10-07): the place chip, held chats and `chat_*` calls, the project copy and Bring back, `ark-reach` (setup and a tunnel over the person's `ssh`), Settings › Computers, programs installed and signed in there, ARK Desktop's contract and builds, the writer as second app | In v0.15.0 (steps 0 to 6 and 8). The resource-location amendment is in v0.16.0: every surface carries a validated runtime, project and chat; transfer retry has exact plans, epochs and durable receipts; the remote Browser is rendered by Chromium there. Automated two-runtime tests and a real Linux x86_64 runtime cover Files, editors, spreadsheet, document, Terminal, process, artifacts and Browser, with no local replica. Left: a real-VPS run with a subscription (the owner), step 7 (OpenCode, Cursor: needs a signed-in provider and Cursor) |

@@ -9,9 +9,9 @@ use ark_core::{ActionDescriptor, ArtifactKind, Provenance, RiskTier};
 use ark_model::{Completion, MockProvider, Provider, ToolCall, Usage};
 use ark_runtime::{
     AgentProfile, ApprovalDecision, ApprovalGate, Engine, FixedApprover, Harness, HarnessEvent,
-    ModelRouter,
+    HarnessOutcome, ModelRouter,
 };
-use ark_tools::{ActionOutput, Adapter, Registry, RunCtx};
+use ark_tools::{ActionOutput, Adapter, AdapterError, Registry, RunCtx};
 use serde_json::{json, Value};
 
 /// `kv.get` reads a value that `kv.set` changes; `kv.sample` is volatile; `kv.parse` reads a
@@ -32,6 +32,12 @@ impl Adapter for Kv {
             ActionDescriptor::new("kv.set", "change the value", RiskTier::Mutate),
             ActionDescriptor::new("kv.sample", "sample a live counter", RiskTier::Observe)
                 .volatile(),
+            ActionDescriptor::new(
+                "kv.flaky",
+                "read a service that may be down",
+                RiskTier::Observe,
+            )
+            .volatile(),
             ActionDescriptor::new("kv.parse", "parse a stored file", RiskTier::Read),
             ActionDescriptor::new("kv.peek", "observe a device for a file", RiskTier::Observe),
         ]
@@ -43,6 +49,9 @@ impl Adapter for Kv {
         _c: &RunCtx<'_>,
     ) -> ark_tools::Result<ActionOutput> {
         self.runs.fetch_add(1, Ordering::SeqCst);
+        if action == "kv.flaky" && self.value.lock().unwrap().as_str() == "slow" {
+            return Err(AdapterError::bad_input(action, "service did not start"));
+        }
         if action == "kv.set" {
             *self.value.lock().unwrap() = input["value"].as_str().unwrap_or("").to_string();
         }
@@ -102,7 +111,14 @@ fn calls(steps: Vec<(&str, Value)>, end: &str) -> Vec<Completion> {
 async fn turn(f: &Fixture, script: Vec<Completion>) -> (Vec<String>, usize) {
     let p: Arc<dyn Provider> = Arc::new(MockProvider::new("m", script));
     let profile = AgentProfile::builder()
-        .core_actions(["kv.get", "kv.set", "kv.sample", "kv.parse", "kv.peek"])
+        .core_actions([
+            "kv.get",
+            "kv.set",
+            "kv.sample",
+            "kv.flaky",
+            "kv.parse",
+            "kv.peek",
+        ])
         .build();
     let gate = Arc::new(ApprovalGate::new(Arc::new(FixedApprover(
         ApprovalDecision::AllowOnce,
@@ -129,6 +145,39 @@ async fn turn(f: &Fixture, script: Vec<Completion>) -> (Vec<String>, usize) {
         .await
         .unwrap();
     (values, dups)
+}
+
+async fn failure_turn(
+    f: &Fixture,
+    script: Vec<Completion>,
+) -> (HarnessOutcome, Arc<MockProvider>, usize, usize) {
+    let model = Arc::new(MockProvider::new("m", script));
+    let provider: Arc<dyn Provider> = model.clone();
+    let profile = AgentProfile::builder()
+        .core_actions(["kv.flaky", "kv.set"])
+        .build();
+    let gate = Arc::new(ApprovalGate::new(Arc::new(FixedApprover(
+        ApprovalDecision::AllowOnce,
+    ))));
+    let (mut duplicate_events, mut results) = (0, 0);
+    let out = Harness::new(ModelRouter::single(provider))
+        .planner(false)
+        .critic(false)
+        .approvals(Some(gate))
+        .ask(
+            &f.engine,
+            &profile,
+            &f.project,
+            "check the service",
+            |e| match e {
+                HarnessEvent::Duplicate { .. } => duplicate_events += 1,
+                HarnessEvent::ToolResult { .. } => results += 1,
+                _ => {}
+            },
+        )
+        .await
+        .unwrap();
+    (out, model, duplicate_events, results)
 }
 
 #[tokio::test]
@@ -188,6 +237,122 @@ async fn a_volatile_action_always_runs() {
     .await;
     assert_eq!(dups, 0);
     assert_eq!(values.len(), 2);
+}
+
+#[tokio::test]
+async fn an_identical_failed_observation_runs_once_and_one_retry() {
+    let f = fixture();
+    let flaky = || ("kv.flaky", json!({ "service": "browser" }));
+    let (out, model, duplicate_events, results) =
+        failure_turn(&f, calls(vec![flaky(), flaky(), flaky(), flaky()], "done")).await;
+
+    assert_eq!(out.answer, "done");
+    assert_eq!(f.runs.load(Ordering::SeqCst), 2);
+    assert_eq!(results, 2, "suppressed attempts are not tool results");
+    assert_eq!(
+        duplicate_events, 0,
+        "suppressed failures must not be described as reused results"
+    );
+    assert_eq!(out.metrics.tool_calls, 2);
+    assert_eq!(out.metrics.duplicate_tool_calls, 2);
+    assert_eq!(
+        f.engine.store.list_invocations(&f.project).unwrap().len(),
+        2
+    );
+    assert!(model.recorded().iter().skip(2).any(|request| {
+        request
+            .messages
+            .iter()
+            .any(|message| message.content.contains("already failed twice"))
+    }));
+}
+
+#[tokio::test]
+async fn identical_failures_in_one_reply_are_also_bounded() {
+    let f = fixture();
+    let tool_calls = (0..4)
+        .map(|i| ToolCall {
+            id: format!("c{i}"),
+            name: "kv.flaky".into(),
+            arguments: json!({ "service": "browser" }),
+        })
+        .collect();
+    let script = vec![
+        Completion {
+            content: String::new(),
+            tool_calls,
+            usage: Usage::measured(10, 5),
+        },
+        Completion {
+            content: "done".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(10, 5),
+        },
+    ];
+    let (out, _, duplicate_events, results) = failure_turn(&f, script).await;
+
+    assert_eq!(out.answer, "done");
+    assert_eq!(f.runs.load(Ordering::SeqCst), 2);
+    assert_eq!(results, 2);
+    assert_eq!(duplicate_events, 0);
+    assert_eq!(out.metrics.duplicate_tool_calls, 2);
+}
+
+#[tokio::test]
+async fn a_successful_change_reopens_a_failed_observation() {
+    let f = fixture();
+    let flaky = || ("kv.flaky", json!({ "service": "browser" }));
+    let script = calls(
+        vec![
+            flaky(),
+            flaky(),
+            flaky(),
+            ("kv.set", json!({ "key": "mode", "value": "fast" })),
+            flaky(),
+        ],
+        "done",
+    );
+    let (out, _, duplicate_events, results) = failure_turn(&f, script).await;
+
+    assert_eq!(out.answer, "done");
+    assert_eq!(duplicate_events, 0);
+    assert_eq!(
+        out.metrics.duplicate_tool_calls, 1,
+        "only the third failed read is suppressed"
+    );
+    assert_eq!(
+        results, 4,
+        "two failures, the repair and the recovered read"
+    );
+    assert_eq!(f.runs.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        f.engine.store.list_invocations(&f.project).unwrap().len(),
+        4
+    );
+}
+
+#[tokio::test]
+async fn failed_observations_with_different_inputs_still_run() {
+    let f = fixture();
+    let (out, _, duplicate_events, results) = failure_turn(
+        &f,
+        calls(
+            vec![
+                ("kv.flaky", json!({ "service": "browser-a" })),
+                ("kv.flaky", json!({ "service": "browser-a" })),
+                ("kv.flaky", json!({ "service": "browser-a" })),
+                ("kv.flaky", json!({ "service": "browser-b" })),
+            ],
+            "done",
+        ),
+    )
+    .await;
+
+    assert_eq!(out.answer, "done");
+    assert_eq!(duplicate_events, 0);
+    assert_eq!(out.metrics.duplicate_tool_calls, 1);
+    assert_eq!(results, 3);
+    assert_eq!(f.runs.load(Ordering::SeqCst), 3);
 }
 
 #[tokio::test]

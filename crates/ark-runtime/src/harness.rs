@@ -646,6 +646,10 @@ impl Harness {
         let mut meta_seen: HashSet<String> = HashSet::new();
         // State-changing calls run this task, by digest (see `MAX_IDENTICAL_CHANGES`).
         let mut changes_run: HashMap<String, u32> = HashMap::new();
+        // Failed read and observation calls run this turn, by digest. One retry may recover a
+        // transient failure. More identical attempts are kept from spending time on the same
+        // input until a successful change may have repaired what they read.
+        let mut failures_run: HashMap<String, u32> = HashMap::new();
         // Changes an earlier run of this work already made, by digest (`done_before`).
         let done_before: HashMap<String, &Invocation> = self
             .done_before
@@ -895,6 +899,7 @@ impl Harness {
                 metrics: &mut metrics,
                 cited: &mut cited,
                 repeated_failures: &mut repeated_failures,
+                failed_runs: &mut failures_run,
                 changed_at: &mut changed_at,
                 written: &mut written,
             };
@@ -968,6 +973,12 @@ impl Harness {
                 // the same call.
                 let canonical = engine.canonical_input(project, call.arguments.clone());
                 let digest = call_digest(&call.name, &canonical);
+                // An identical call in this reply must finish before its failure count is read.
+                // Otherwise four copies in one reply could all pass the limit before the first
+                // result arrives.
+                if batch.iter().any(|p| p.digest == digest) {
+                    flush!();
+                }
                 // An identical change that already ran twice in this task is not run, or asked
                 // about, again: the same program fails the same way, the same refused write is
                 // refused again. Twice allows one retry of a transient failure.
@@ -999,6 +1010,18 @@ impl Harness {
                     }
                     // A change waits for the reads before it, and runs alone.
                     flush!();
+                }
+                // A failed read or observation gets one retry. A third identical execution has
+                // the same input and no intervening successful change, so return feedback at
+                // once. Different input still runs, and a successful change clears this guard.
+                if desc.risk != RiskTier::Mutate
+                    && tally.failed_runs.get(&digest).copied().unwrap_or(0)
+                        >= MAX_IDENTICAL_FAILURES
+                {
+                    flush!();
+                    tally.metrics.record_duplicate();
+                    round.push(Message::tool_result(call, REPEATED_FAILURE_NOTE));
+                    continue;
                 }
                 // Asked of the person until they allow it once; with no one to ask, it is never
                 // run again on its own: only the person can tell whether it happened.
@@ -1053,16 +1076,10 @@ impl Harness {
                 // timeout, a missing tool) may be transient, so the same call runs again; a
                 // repeat that fails again counts as no progress, which keeps the stall guard
                 // working.
-                if batch.iter().any(|p| p.digest == digest) {
-                    // The same call is already pending: let it finish so this one can reuse it.
-                    flush!();
-                }
-                let mut failed_before = false;
+                let failed_before = desc.risk != RiskTier::Mutate
+                    && tally.failed_runs.get(&digest).copied().unwrap_or(0) > 0;
                 if desc.risk != RiskTier::Mutate && desc.reuse != Reuse::Volatile {
                     let prior = engine.store.find_card_by_digest(project, &digest)?;
-                    failed_before = prior
-                        .as_ref()
-                        .is_some_and(|c| !c.ok && c.created_at >= turn_started);
                     let reuse = prior.filter(|card| {
                         card.ok
                             && match desc.reuse {
@@ -1506,6 +1523,15 @@ impl Harness {
             }
             tally.metrics.record_tool_call();
             let ok = matches!(inv.status, InvocationStatus::Ok);
+            if ok {
+                tally.failed_runs.remove(&p.digest);
+                if p.risk == RiskTier::Mutate {
+                    // A successful change may have repaired any failed read or observation.
+                    tally.failed_runs.clear();
+                }
+            } else if p.risk != RiskTier::Mutate {
+                *tally.failed_runs.entry(p.digest.clone()).or_default() += 1;
+            }
             let card = distill(&inv, &profile.distillers);
             engine.store.put_evidence_card(project, &card)?;
             tally.metrics.record_card_created();
@@ -2403,6 +2429,7 @@ struct Tally<'a> {
     metrics: &'a mut Metrics,
     cited: &'a mut Vec<InvocationId>,
     repeated_failures: &'a mut u32,
+    failed_runs: &'a mut HashMap<String, u32>,
     changed_at: &'a mut time::OffsetDateTime,
     /// Files of the project folder the turn's calls wrote (relative paths).
     written: &'a mut Vec<String>,
@@ -2663,6 +2690,9 @@ fn unwritten_note(missing: &[String], written: &[String]) -> String {
 /// Runs of one identical state-changing call in a task: the first and one retry.
 pub const MAX_IDENTICAL_CHANGES: u32 = 2;
 
+/// Runs of one identical failed read or observation in a turn: the first and one retry.
+const MAX_IDENTICAL_FAILURES: u32 = 2;
+
 /// Replies that could not be used the model is asked to send again: in a row, and in a turn.
 const MAX_REPAIRS_IN_ROW: u32 = 2;
 const MAX_REPAIRS: u32 = 4;
@@ -2671,6 +2701,7 @@ const REPAIR_NOTE: &str = "Your last reply could not be used, so nothing ran. Se
 const DONE_BEFORE_NOTE: &str = "not run again: this exact change already ran before the work was interrupted, so running it again would make it twice. Its result";
 const CUT_SHORT_NOTE: &str = "not run: this exact change was under way when the work was interrupted, so it may already have happened, and only the person can tell. Do not try it again; say in your answer that it was cut short and may need to be checked.";
 const REPEATED_CHANGE_NOTE: &str = "not run: this exact call already ran twice in this task, with the results above. Running it again gives the same result. Change the input to fix what went wrong (for a program, fix the error it reported), or answer from what you have.";
+const REPEATED_FAILURE_NOTE: &str = "not run: this exact call already failed twice in this turn. ARK already gave it one retry. Use a different tool or input, or answer from what you know.";
 
 const ANNOUNCED_NOTE: &str = "Your reply says what you will do next, but it called no tool, so nothing was done and the turn would end here. Do it now by calling the tool. If the work is already done or cannot be done, reply with the final answer only.";
 

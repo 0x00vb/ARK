@@ -3,6 +3,27 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Repeated failed calls stop after one retry (2026-10-11)
+
+An identical failed read or observation now runs once and gets one retry in a turn. Later
+attempts return immediately until a successful change may have repaired the dependency. The
+runtime test asks for the same failing observation four times. Two calls run, two are
+suppressed, and only the two calls that ran create invocations and tool-result events.
+
+The deterministic suite still passes all 22 workloads with no metric change from
+`baseline.json`. Its report is `reliability/failed-call-guard-sim-2026-10-11.json`.
+
+Live qwen3:4b, three runs per workload:
+
+| Workload | Success | Model calls | Total tokens | Tool calls | Median turn |
+|---|---:|---:|---:|---:|---:|
+| `failure-recovery` | 3/3 | 3.0 | 5,107 | 2.0 | 2.13 s |
+| `web` | 3/3 | 5.3 | 13,706 | 3.0 | 5.56 s |
+
+Report: `reliability/failed-call-guard-qwen3-4b-2026-10-11.json`. The writer app was also run
+on its seeded four-chapter project with the same model. It answered the chapter count and word
+counts correctly in 12.30 seconds, with three model calls and one tool call.
+
 ## Subscription model and effort selection (2026-10-09)
 
 One live run of `simple`, `tool-lookup` and `multi-step` after ARK added explicit model and

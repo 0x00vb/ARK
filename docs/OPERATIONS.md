@@ -166,6 +166,12 @@ action. Three steps in a row without it get a nudge to change course; five end t
 force a final answer. Repeating a search, a hypothesis or a failing call does not count. The
 step limit (16 by default) still applies to work that keeps making progress.
 
+An identical failed read or observation runs once and gets one retry. A third attempt returns
+immediately and tells the model to change the input, use another tool or answer. A successful
+call clears its own failure count. A successful state-changing call clears all read failure
+counts because it may have repaired their dependency. The limit is per turn. It does not reuse
+a failed result or create an invocation for a call that did not run.
+
 ## Reuse of earlier results
 
 An identical successful call may be served from its earlier result instead of running again.

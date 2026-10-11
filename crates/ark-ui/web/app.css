@@ -185,12 +185,14 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 
 .sidebar {
   background: var(--sidebar);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
   padding: 0 10px;
 }
+.app:not([data-compact="true"])[data-sidebar="closed"] .sidebar { padding-inline: 0; }
 .sidebar > * { min-width: 232px; }
 .sidebar-top { height: 52px; display: flex; align-items: center; justify-content: flex-end; flex: none; }
 .app[data-shell="browser"] .sidebar-top { height: 44px; justify-content: flex-start; padding-left: 2px; }

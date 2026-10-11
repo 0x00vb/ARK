@@ -7,6 +7,11 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Fixed
+- Closing the sidebar now removes its full width instead of leaving a narrow strip.
+
 ## [0.20.0] - 2026-10-11
 
 ### Changed

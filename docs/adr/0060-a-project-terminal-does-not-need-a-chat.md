@@ -48,74 +48,30 @@ route and generation, ignores cursors it already applied, and performs a bounded
 or reconnect. Reads retain ADR 0052's generation and cursor replay. Resize is idempotent and may
 be repeated after the viewport settles.
 
-One PTY is shared by a project on a computer. Closing or leaving a view only removes that view's
-subscription. **End Terminal** ends the shared PTY for every attached view and always confirms
-with the project and computer names. Output stays in the Terminal. It never enters a chat,
+One PTY is shared by a project on a computer. Closing the pane only removes that view's
+subscription. The shell ends when the person exits it or its process ends. The protocol retains
+an explicit end operation for clients that already have a suitable artifact lifecycle action, but
+the shared page adds no new control for it. Output stays in the Terminal. It never enters a chat,
 transcript or model context.
 
 ### Interface
 
-The authoritative project list includes projects with no chats. In the shared page, `Open
-Terminal` is a text action in each eligible project's menu. On iPhone, Chats begins with Projects;
-a project row opens a project page whose first action is `Open Terminal`, followed by that
-project's chats. It opens a full-screen project view. The current chat remains unchanged. The
-command palette offers it only when it has a current project with a folder. On Desktop or the web
-page running on that computer, a project without a folder offers `Choose folder`. On iPhone it is
-not a button: Terminal stays unavailable and says `Choose a folder in ARK on <computer>`.
+The shared page keeps one Terminal concept. The existing Terminal pane, its existing plus-menu
+entry and its shortcut open the current project's shell through project authority. There is no
+project-menu action, main-column Terminal view, new button or Terminal section. Opening the pane
+leaves the current chat unchanged. A project without a folder shows the pane's existing error
+state.
 
-The view shows the bound project, computer and connection state before input is enabled. One
-eligible computer is selected before connecting. Several require a choice before any copy or
-PTY starts. Unsupported and unavailable computers remain visible with their state but cannot be
-chosen. Controls precede the terminal in keyboard order: Computer, End Terminal, then the
-terminal. The terminal is the main surface.
+Opening captures the current project and the current chat's selected computer. It never falls
+back to this computer after a remote failure. The pane is keyed by project, so chats in one
+project do not create duplicate Terminal tabs. Its existing tab label names the captured project
+and computer. Switching projects disposes the old pane before it can accept more input.
 
-Connecting, copying, disconnected, refused, cancelled, stale, ended and output-gap states are
-visible and recoverable. Output remains readable when input is disabled. Changing project or
-computer disables input before detaching the old view. A deleted project becomes a read-only
-ended view with a Close action.
-
-The iPhone uses the same state model after the generated protocol is released. Computer choice
-is a sheet and Terminal is a full-screen project destination. No projects shows `No projects`.
-No eligible computers shows the computers already known to the runtime with their reason and
-`Add or update computers in ARK Desktop`. A missing `project.terminal` capability hides Open
-Terminal and shows `Update this computer`. Removing the selected computer or project immediately
-makes the view read only. A deleted project remains readable with Close. Ended and stale shells
-offer Reopen.
-
-The native renderer is SwiftTerm 1.99.0, pinned by exact tag under its MIT license. ARK uses its
-UIKit view inside SwiftUI, never its sample SSH app. It supplies ANSI, 256 and true colour, UTF-8
-and grapheme rendering, selection, paste, hyperlinks, resizing and VoiceOver. The app caps local
-raw replay at 256 KiB to match the runtime, configures rendered scrollback to 5,000 lines and
-disables recording. Terminal bytes are memory-only: they do not enter logs, analytics, crash
-metadata, restoration state or caches. User-invoked Copy intentionally places only the selected
-text on the system clipboard.
-
-Tapping the terminal opens the software keyboard. An input accessory has Keyboard, Esc, Ctrl,
-Tab and arrow controls. Ctrl is a one-shot modifier with visible selected state. Keyboard dismiss
-leaves output scroll and selection available. Paste uses the system edit menu and sends only after
-the person invokes Paste. A two-finger drag scrolls output without input. The same selection,
-copy, scrolling and keyboard dismissal remain available while the route is read only.
-
-Hardware commands that the terminal never consumes are Command-Option-C for Computer,
-Command-Option-E for End Terminal and Command-Option-Left Arrow for Back. They appear in the
-system shortcut overlay. A hosting controller intercepts those three `UIKeyCommand` values before
-the SwiftTerm view forwards input. A physical-keyboard spike must prove every chord reaches ARK
-while the terminal is first responder before the dependency is accepted. End Terminal has a
-destructive accessibility trait and confirms the project and computer.
-
-On inactive, background, lock, network loss, project switch or computer switch, the app disables
-input synchronously before covering, refreshing, copying or navigating. Returning revalidates the
-route, generation and byte cursor before input returns. The grid stays inside safe areas and the
-space above the keyboard. Rotation and keyboard changes send one idempotent resize after layout
-settles. Chrome uses Dynamic Type. Terminal cells have an independent, grid-safe text-size control.
-Long project and computer names truncate visually but remain complete to VoiceOver.
-
-ARK defines tested light and dark terminal palettes for ANSI colours, foreground, background,
-cursor, selection, links and read-only overlay. Streaming output is not announced line by line.
-The terminal has one stable accessibility label, exposes readable selected and line content, and
-announces only connection, gap and ended state changes. Computer rows expose their full name,
-availability, disabled reason and selection state. No native client hand-writes a parallel wire
-model.
+A native client must use an existing artifact presentation path for Terminal. It must not add a
+Projects section, project page, Open Terminal button or Terminal destination only to reach it.
+The iPhone does not yet have a generic interactive artifact path, so it retains the generated
+protocol types and transport endpoints but ships no Terminal renderer or entry point. Renderer,
+keyboard, accessibility and lifecycle decisions wait until that artifact path exists.
 
 ## Consequences
 
@@ -132,10 +88,8 @@ model.
 - Forged project, runtime, kind and terminal ids, stale routes and generations, revoked links,
   duplicate writes and cross-project operations fail before I/O.
 - Remote copy failure and cancellation create no route and do not execute locally.
-- Page tests cover keyboard and narrow layouts, long names, dark mode and every connection state.
-- Native tests cover backgrounding, lock, network loss, external keyboard input, Dynamic Type,
-  safe areas, project switching and write non-retry after the generated protocol is released.
-- Physical-device checks cover VoiceOver reading, software-keyboard resize, all three hardware
-  shortcuts and background-to-foreground revalidation; simulator results do not close those gates.
+- Page tests cover the existing entry points, one pane per project, captured placement, project
+  switching, ordered input and the narrow layout.
+- Native protocol tests keep the generated Terminal payloads and transport endpoints compatible.
 - Old runtimes omit `project.terminal`; old clients ignore the additive protocol minor. New
   clients never show a nonfunctional Terminal destination against an old runtime.

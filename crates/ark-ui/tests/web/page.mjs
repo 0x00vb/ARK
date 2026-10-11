@@ -81,30 +81,40 @@ const scenarios = {
     assert.equal(await page.locator(".program-overlay").count(), 0);
   },
 
-  // A project shell opens as a project view. It does not create, select or read a chat.
+  // The existing Terminal panel opens a project shell. No project action or main-column view is
+  // added, and opening it does not create, select or read a chat.
   async "project-terminal"(page) {
-    const before = await page.evaluate(() => window.ark.summary().session.id);
+    const before = await page.evaluate(() => ({
+      session: window.ark.summary().session.id,
+      project: window.ark.summary().project,
+    }));
     await page.evaluate(() => {
       const original = window.ark.windowCall.bind(window.ark);
       window.__projectTerminalCalls = [];
       window.ark.windowCall = (method, params) => {
-        window.__projectTerminalCalls.push(method);
+        window.__projectTerminalCalls.push({ method, params });
         return original(method, params);
       };
     });
-    const project = page.locator(".project-row[aria-current='true']");
-    await project.locator(".project-more").click();
-    await page.getByRole("button", { name: "Open Terminal" }).click();
-    const view = page.locator(".project-terminal");
+    await page.locator(".project-row[aria-current='true'] .project-more").click();
+    assert.equal(await page.getByRole("button", { name: "Open Terminal" }).count(), 0);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator('[data-view="project-terminal"]').count(), 0);
+    await page.evaluate(() => window.ark.openPanel("terminal"));
+    const view = page.locator(".wb-terminal");
     await view.waitFor();
-    await view.locator(".project-terminal-surface .xterm-helper-textarea").waitFor();
-    await page.waitForFunction(() => document.querySelector(".project-terminal")?.dataset.state === "live");
-    assert.equal(await page.evaluate(() => window.ark.summary().session.id), before);
+    await view.locator(".xterm-helper-textarea").waitFor();
+    assert.equal(await page.evaluate(() => window.ark.summary().session.id), before.session);
     const calls = await page.evaluate(() => window.__projectTerminalCalls);
-    assert.ok(calls.includes("project_terminal_open"), calls.join(", "));
+    const opened = calls.find((call) => call.method === "project_terminal_open");
+    assert.equal(opened.params.project, before.project.id);
+    assert.equal(opened.params.place, "");
     for (const forbidden of ["open_project", "open_session", "new_session", "transcript", "send"]) {
-      assert.ok(!calls.includes(forbidden), `${forbidden} must not run`);
+      assert.ok(!calls.some((call) => call.method === forbidden), `${forbidden} must not run`);
     }
+    assert.match(await page.locator(".pane-tab[aria-selected='true']").getAttribute("title"), new RegExp(`Terminal · ${before.project.name}`));
+    await page.evaluate(() => window.ark.openPanel("terminal"));
+    assert.equal(await page.locator(".wb-terminal").count(), 1, "one Terminal pane per project");
 
     const textarea = view.locator(".xterm-helper-textarea");
     const answer = view.locator(".xterm-rows", { hasText: "CHATLESS_42" });
@@ -117,22 +127,23 @@ const scenarios = {
         if (i === 3) throw e;
       }
     }
-    await page.keyboard.press("F6");
-    assert.equal(
-      await page.evaluate(() => document.activeElement?.classList.contains("project-terminal-computer")),
-      true,
-      "F6 leaves terminal capture",
-    );
-
     await page.setViewportSize({ width: 390, height: 760 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await shot(page, "project-terminal-narrow");
-    page.once("dialog", async (dialog) => {
-      assert.match(dialog.message(), /shared shell everywhere it is open/);
-      await dialog.accept();
+
+    await page.evaluate(() => {
+      window.ark.closePanel("terminal");
+      window.__projectTerminalCalls = [];
+      window.ark.openPanel("terminal", { place: "Missing computer" });
     });
-    await view.getByRole("button", { name: "End Terminal" }).click();
-    await page.waitForFunction(() => document.querySelector(".project-terminal")?.dataset.state === "ended");
+    await page.waitForFunction(() => window.__projectTerminalCalls.some((call) => call.method === "project_terminal_open"));
+    const remoteCalls = await page.evaluate(() => window.__projectTerminalCalls.filter((call) => call.method === "project_terminal_open"));
+    assert.deepEqual(remoteCalls.map((call) => call.params.place), ["Missing computer"], "a failed remote open must not fall back locally");
+
+    await page.evaluate(() => window.ark.addProject({ name: "Terminal disposal check" }));
+    await page.waitForFunction((id) => window.ark.summary().project.id !== id, before.project.id);
+    await page.waitForFunction(() => !document.querySelector(".wb-terminal"));
+    assert.equal(await page.locator(".wb-terminal").count(), 0, "switching projects disposes the old Terminal pane");
   },
 
   // Narration written just before a tool call keeps its last chunk, and the answer shows once.

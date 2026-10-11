@@ -248,7 +248,7 @@ window.readyProbe.graph = await window.ark.call("graph");
     if scenario == "interrupted" {
         seed_interrupted(&host, dir.path()).await;
     }
-    if scenario == "project-terminal" {
+    if matches!(scenario, "project-terminal" | "workbench" | "skills") {
         let workspace = dir.path().join("terminal-project");
         std::fs::create_dir_all(&workspace).unwrap();
         let summary = host.call("summary", json!({})).await.unwrap();

@@ -69,7 +69,11 @@ export class Pane {
   add(key, title, ic, make, opts = {}) {
     const view = h("div.pane-view", { "data-key": key });
     if (opts.fill) view.classList.add("fill");
-    const tab = { key, title, icon: ic, make, view, ctl: null, built: false, params: null, wide: !!opts.wide, api: opts.api || this.api };
+    const tab = {
+      key, title, icon: ic, make, view, ctl: null, built: false, params: null,
+      wide: !!opts.wide, api: opts.api || this.api,
+      projectScoped: !!opts.projectScoped, project: opts.project || null,
+    };
     this.tabs.set(key, tab);
     this.body.append(view);
     this.renderTabs();
@@ -182,6 +186,9 @@ export class Pane {
   /// A new session does not rebind or discard open resources. Each tab retains the location it
   /// captured when it opened and can keep operating after the window changes chats.
   reset(project) {
+    for (const [key, tab] of [...this.tabs]) {
+      if (tab.projectScoped && tab.project !== project) this.remove(key);
+    }
     this.project = project;
   }
 }

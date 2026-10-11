@@ -151,6 +151,8 @@ async fn project_terminal_opens_without_changing_the_chat_and_deduplicates_write
     .await
     .unwrap();
     let mut stale = false;
+    // A heavily loaded CI host can take more than a second to schedule the PTY reader after the
+    // shell exits. The route must still disappear as soon as that exit is observed.
     for _ in 0..500 {
         if host
             .call(

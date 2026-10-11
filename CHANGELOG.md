@@ -12,6 +12,8 @@ What changed for people building on ARK, per release. Not a commit log.
 ### Changed
 - Apps can offer Grok as an agent program through the project runtime. Grok keeps its own login
   in an isolated profile, and its file changes and commands still ask through ARK.
+- A chatless project Terminal now opens in the existing Terminal pane. The duplicate project
+  action and main-column Terminal view were removed.
 
 ## [0.19.1] - 2026-10-10
 

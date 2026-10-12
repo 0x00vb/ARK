@@ -20,6 +20,7 @@ pub struct Assets {
     title: String,
     consumer: HashMap<String, Cow<'static, [u8]>>,
     scripts: Vec<String>,
+    required_scripts: Vec<String>,
     styles: Vec<String>,
     theme: Theme,
     namespace: String,
@@ -32,6 +33,7 @@ impl Assets {
         title: String,
         consumer: HashMap<String, Cow<'static, [u8]>>,
         scripts: Vec<String>,
+        required_scripts: Vec<String>,
         styles: Vec<String>,
         theme: Theme,
         version: Option<String>,
@@ -49,6 +51,7 @@ impl Assets {
             title,
             consumer,
             scripts,
+            required_scripts,
             styles,
             theme,
             namespace,
@@ -130,7 +133,23 @@ impl Assets {
         let scripts: String = self
             .scripts
             .iter()
-            .map(|s| format!("    <script type=\"module\" src=\"ext/{s}\"></script>\n"))
+            .map(|s| {
+                let id = s
+                    .strip_suffix(".js")
+                    .unwrap_or(s)
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(s);
+                let required = self.required_scripts.iter().any(|required| required == s);
+                format!(
+                    "    <script type=\"module\" src=\"ext/{s}\"{}></script>\n",
+                    if required {
+                        format!(" data-ark-extension=\"{}\"", escape(id))
+                    } else {
+                        String::new()
+                    }
+                )
+            })
             .collect();
         let reload = if self.development() {
             "    <script type=\"module\" src=\"js/dev-reload.js\"></script>\n"
@@ -231,8 +250,10 @@ mod tests {
             "Demo <1>".into(),
             HashMap::from([
                 ("demo.js".to_string(), Cow::Borrowed(&b"export {}"[..])),
+                ("optional.js".to_string(), Cow::Borrowed(&b"export {}"[..])),
                 ("demo.css".to_string(), Cow::Borrowed(&b"body {}"[..])),
             ]),
+            vec!["demo.js".into(), "optional.js".into()],
             vec!["demo.js".into()],
             vec!["demo.css".into()],
             Theme::Light,
@@ -246,6 +267,11 @@ mod tests {
         let ark = html.find("js/app.js").unwrap();
         let ext = html.find("ext/demo.js").unwrap();
         assert!(ext > ark, "consumer scripts load after ARK's");
+        assert!(html.contains(r#"data-ark-extension="demo""#), "{html}");
+        assert!(
+            html.contains(r#"src="ext/optional.js"></script>"#),
+            "{html}"
+        );
         assert!(html.contains("href=\"ext/demo.css\""));
         assert!(a.get("ext/demo.js").is_some());
         assert!(a.get("../Cargo.toml").is_none());
@@ -274,6 +300,7 @@ mod tests {
             HashMap::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
             Theme::Light,
             Some("../old".into()),
         );
@@ -297,6 +324,7 @@ mod tests {
         let mut a = Assets::new(
             "Demo".into(),
             HashMap::new(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Theme::Light,

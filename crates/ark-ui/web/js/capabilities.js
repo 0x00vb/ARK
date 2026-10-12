@@ -1,4 +1,4 @@
-// Settings › Capabilities: what ARK can use (`capabilities`, `capability_connect`,
+// Settings › Connections: accounts and optional computer control (`capabilities`, `capability_connect`,
 // `capability_disconnect`, `capability_turn`; the same list as `/connect` in a terminal).
 // Connect opens the provider's sign-in in the browser; the row turns ready once the person
 // allows it there. A capability with a switch (the Computer) turns on and off in place.
@@ -14,7 +14,7 @@ function section(el, ark) {
   const draw = (all) => {
     clear(list);
     if (!all.length) {
-      list.append(h("p.settings-none", "This app gives its agents no capabilities yet."));
+      list.append(h("p.settings-none", "No connections are available."));
       return;
     }
     for (const c of all) {
@@ -64,7 +64,10 @@ function section(el, ark) {
   };
 
   const load = async () => {
-    const all = (await ark.call("capabilities").catch(() => [])) || [];
+    // Web, files, browser and code are part of ARK and need no settings row. Keep only things
+    // the person can connect, disconnect or explicitly turn on. Viewing this page starts nothing.
+    const all = ((await ark.call("capabilities").catch(() => [])) || [])
+      .filter((c) => !c.added && (c.switch || c.account || c.state === "connect" || (c.state === "unavailable" && c.provider)));
     draw(all);
     return all;
   };
@@ -112,6 +115,7 @@ function section(el, ark) {
 
 /// Offer the section when the host lists capabilities.
 export async function registerCapabilities(ark) {
-  const has = await ark.call("capabilities").then(Array.isArray, () => false);
-  if (has) ark.setting({ id: "capabilities", title: "Capabilities", icon: "plug", builtin: true, render: (el) => section(el, ark) });
+  const all = await ark.call("capabilities").catch(() => []);
+  const has = Array.isArray(all) && all.some((c) => !c.added && (c.switch || c.account || c.state === "connect" || (c.state === "unavailable" && c.provider)));
+  if (has) ark.setting({ id: "connections", title: "Connections", icon: "plug", builtin: true, render: (el) => section(el, ark) });
 }

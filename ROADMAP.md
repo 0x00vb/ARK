@@ -8,9 +8,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.20.2** (2026-10-12): the window has fixed Home and Schedules destinations and reloads local interface files during development. Earlier releases are in `CHANGELOG.md`. |
-| `main` | v0.20.2 release tree. Project navigation, schedule states, compact layout, keyboard focus, project-switch race protection and the complete page-enabled release gate pass. |
-| Consumers | ARK Desktop (`ark-desktop` repo; v0.7.0 pins ARK v0.20.1 and the next release moves to v0.20.2), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Stable release | **v0.20.3** (2026-10-12): required app modules fail visibly, chat search is built in, and light and dark palettes stay separate. Earlier releases are in `CHANGELOG.md`. |
+| `main` | v0.20.3 release tree. Required module startup, chat search, compact rail geometry and appearance behavior pass the page-enabled release gate. |
+| Consumers | ARK Desktop (`ark-desktop` repo; v0.7.1 moves to ARK v0.20.3), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

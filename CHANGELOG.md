@@ -7,16 +7,20 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
-## [Unreleased]
+## [0.20.3] - 2026-10-12
 
 ### Added
 
 - Spreadsheet files render embedded XLSX and XLSM charts beside the cell grid. Documents expose
   base line, paragraph and character spacing plus custom section margins, with a live page preview.
+- Required app entry modules can register their complete import graph before the workspace starts.
+- Search finds chats across projects without replacing the command palette.
 
 ### Fixed
 
 - Release checks use available parallelism for builds and normal tests, serialize WebKit tests, reuse a stable fresh-checkout cache, install the locked browser-test dependency, and reject stale release metadata before the expensive gate.
+- The destination rail divider begins below native titlebars. Light and dark modes retain their
+  own palette choices, and Settings omits built-in capabilities that need no action.
 
 ## [0.20.2] - 2026-10-12
 

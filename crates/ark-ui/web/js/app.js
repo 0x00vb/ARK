@@ -12,7 +12,7 @@ import { Destinations } from "./destinations.js";
 import { Topbar } from "./topbar.js";
 import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
-import { registry, installApi, dispatchExt, presenterFor, onExt } from "./ext.js";
+import { registry, installApi, dispatchExt, presenterFor, onExt, waitForExtension, loadedExtensions } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
 import { fileView, kindOf, KIND_ICON, setFileKinds } from "./file.js";
 import { registerCapabilities } from "./capabilities.js";
@@ -173,6 +173,7 @@ const api = {
   toast,
   popover,
   refreshSidebar: () => sidebar.refresh(state.sessionId),
+  refreshNavigation: () => topbar?.render(),
   refreshModel: () => composer.setModel(state.summary?.model),
   // Ask the window to reflect a view's focus again (after its selection changed).
   reportFocus: () => reportFocus(),
@@ -280,6 +281,51 @@ function scopedApi(location) {
 registerBuiltins(installApi(api));
 
 let thread, composer, sidebar, destinations, topbar, pane, waiting, places;
+
+const expectedExtensions = [...document.querySelectorAll("script[data-ark-extension]")]
+  .map((script) => ({ id: script.dataset.arkExtension, src: script.getAttribute("src") }));
+const extensionErrors = [];
+let rejectExtension;
+const extensionFailed = expectedExtensions.length
+  ? new Promise((_, reject) => { rejectExtension = reject; })
+  : null;
+addEventListener("error", (event) => {
+  const source = event.filename || event.target?.src;
+  if (source && expectedExtensions.some((entry) => source.includes(entry.src))) {
+    const failure = { source, message: event.message || "The module did not load" };
+    extensionErrors.push(failure);
+    rejectExtension?.(new Error(failure.message));
+  }
+}, true);
+
+async function extensionsReady() {
+  if (!expectedExtensions.length) return;
+  const loaded = () => new Set(loadedExtensions().map((entry) => entry.id));
+  const pending = expectedExtensions.filter(({ id }) => !loaded().has(id));
+  if (!pending.length) return;
+  let timeout;
+  try {
+    await Promise.race([
+      Promise.all(pending.map(({ id }) => waitForExtension(id))),
+      extensionFailed,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("The app extension did not finish loading")), 5000);
+      }),
+    ]);
+  } catch (error) {
+    const ready = loaded();
+    const missing = expectedExtensions.filter(({ id }) => !ready.has(id));
+    console.error("ARK extension startup failed", { missing, loaded: [...ready], errors: extensionErrors, cause: error });
+    document.body.replaceChildren(h("main.startup-failure", { role: "alert" },
+      h("div.startup-failure-card",
+        h("h1", "ARK could not finish opening"),
+        h("p", "A Desktop component did not load. Quit and open ARK again."),
+        h("details", h("summary", "Details"), h("pre", JSON.stringify({ missing, errors: extensionErrors }, null, 2))))));
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function retitle(key, title) {
   const t = pane.tabs.get(key);
@@ -889,6 +935,110 @@ function closePalette() {
   composer.focus();
 }
 
+let searchGeneration = 0;
+async function searchChats() {
+  const overlay = $("#overlay");
+  if (!overlay.hidden) return closePalette();
+  const restore = document.activeElement;
+  const generation = ++searchGeneration;
+  const input = h("input.palette-input", { placeholder: "Search chats", "aria-label": "Search chats", role: "combobox", "aria-autocomplete": "list", "aria-controls": "chat-search-results", "aria-expanded": "true" });
+  const list = h("div.palette-list", { id: "chat-search-results", role: "listbox", "aria-busy": "true" }, h("div.palette-empty", "Searching…"));
+  let items = [];
+  let failedProjects = 0;
+  let loadState = "loading";
+  let loadError = "";
+  let selected = 0;
+  const close = () => {
+    searchGeneration++;
+    overlay.hidden = true;
+    if (restore?.isConnected) restore.focus();
+    else composer.focus();
+  };
+  const open = async (item) => {
+    close();
+    if (!item.project.current) await api.openProject(item.project.id);
+    await api.openSession(item.session.id);
+  };
+  const paint = () => {
+    const query = input.value.trim().toLocaleLowerCase();
+    const shown = items.filter((item) => !query || item.session.title?.toLocaleLowerCase().includes(query) || item.project.name.toLocaleLowerCase().includes(query)).slice(0, 100);
+    selected = Math.min(selected, Math.max(0, shown.length - 1));
+    clear(list);
+    list.setAttribute("aria-busy", String(loadState === "loading"));
+    if (loadState === "loading") {
+      list.append(h("div.palette-empty", "Searching…"));
+      input.removeAttribute("aria-activedescendant");
+      return [];
+    }
+    if (loadState === "error") {
+      list.append(h("div.palette-empty", loadError || "Search is not available", h("button.dk-btn", { type: "button", onclick: () => void loadResults() }, "Try again")));
+      input.removeAttribute("aria-activedescendant");
+      return [];
+    }
+    if (failedProjects) list.append(h("div.palette-note", "Some projects are not available", h("button.dk-btn.ghost", { type: "button", onclick: () => void loadResults() }, "Try again")));
+    if (!shown.length) {
+      const message = failedProjects
+        ? (items.length ? "No matches in the chats that are available" : "Some chats could not be searched")
+        : (items.length ? "No matching chats" : "No chats yet");
+      list.append(h("div.palette-empty", message));
+    }
+    shown.forEach((item, index) => {
+      const row = h("div.palette-item", { id: `chat-search-${index}`, role: "option", "aria-selected": String(index === selected) },
+        h("span.palette-item-main", h("span", item.session.title || "Untitled"), h("span.palette-hint", item.project.name)),
+        h("span.palette-hint", ago(item.session.updated_at)));
+      row.addEventListener("mousedown", (event) => { event.preventDefault(); void open(item); });
+      list.append(row);
+    });
+    const active = shown.length ? `chat-search-${selected}` : "";
+    if (active) {
+      input.setAttribute("aria-activedescendant", active);
+      list.querySelector(`#${active}`)?.scrollIntoView({ block: "nearest" });
+    } else input.removeAttribute("aria-activedescendant");
+    return shown;
+  };
+  input.addEventListener("input", () => { selected = 0; paint(); });
+  input.addEventListener("keydown", (event) => {
+    const shown = paint();
+    if (event.key === "ArrowDown" && shown.length) { selected = (selected + 1) % shown.length; paint(); event.preventDefault(); }
+    if (event.key === "ArrowUp" && shown.length) { selected = (selected + shown.length - 1) % shown.length; paint(); event.preventDefault(); }
+    if (event.key === "Enter" && shown[selected]) { event.preventDefault(); void open(shown[selected]); }
+    if (event.key === "Escape") { event.stopPropagation(); close(); }
+  });
+  clear(overlay).append(h("div.palette-box", input, list));
+  overlay.hidden = false;
+  overlay.onmousedown = (event) => event.target === overlay && close();
+  input.focus();
+  const loadResults = async () => {
+    loadState = "loading";
+    loadError = "";
+    failedProjects = 0;
+    paint();
+    try {
+      const projects = await api.call("projects");
+      const sessions = await Promise.all(projects.map(async (project) => {
+        try {
+          return await api.call("sessions", { project: project.id });
+        } catch {
+          failedProjects++;
+          return [];
+        }
+      }));
+      if (generation !== searchGeneration) return;
+      items = projects.flatMap((project, index) => sessions[index].map((session) => ({ project, session })))
+        .filter((item) => item.session.turns > 0)
+        .sort((a, b) => new Date(b.session.updated_at) - new Date(a.session.updated_at));
+      loadState = "ready";
+      paint();
+    } catch (error) {
+      if (generation !== searchGeneration) return;
+      loadState = "error";
+      loadError = error.message || "Search is not available";
+      paint();
+    }
+  };
+  await loadResults();
+}
+
 // The desktop window is an app, not a browser: no reload or print keys, and no browser menu
 // except on text, a link or a selection, where it copies and pastes.
 function appLike() {
@@ -905,6 +1055,7 @@ function appLike() {
 function keys(e) {
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); return palette(); }
+  if (mod && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); return searchChats(); }
   if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); return api.newSession(); }
   if (mod && e.key === "," && registry.settings.size) { e.preventDefault(); return api.openSettings(); }
   // The built-in panels' keys, unless an app replaced the panel.
@@ -1080,6 +1231,7 @@ async function bootOnce(again) {
 }
 
 async function start() {
+  await extensionsReady();
   hydrateIcons();
   for (const [id, name] of [["toggle-sidebar", "sidebar"], ["reveal-sidebar", "sidebar"], ["toggle-pane", "pane"], ["close-pane", "x"]]) $(`#${id}`).append(icon(name));
   appEl.dataset.tabs = "0";
@@ -1112,6 +1264,7 @@ async function start() {
     if (!inside || e.target.closest("button, a, .session")) appEl.dataset.drawer = "closed";
   });
   $("#toggle-sidebar").addEventListener("click", toggleSidebar);
+  $("#search-chats").addEventListener("click", searchChats);
   $("#reveal-sidebar").addEventListener("click", toggleSidebar);
   $("#toggle-pane").addEventListener("click", () => pane.toggle());
   $("#ctx-ring").addEventListener("click", () => runCommand("/context"));

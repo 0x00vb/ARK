@@ -23,6 +23,7 @@
 //                      suggestion; not commands). Return true, or a promise of true, when the
 //                      app took it; the conversation then sends nothing.
 //   ark.status({ id, render(el, api) })
+//   ark.refreshNavigation() redraws project-dependent app tabs and panel launchers.
 //   ark.sidebar({ id, render(el, api) })
 //                      a row at the top of the projects list, for what the list as a whole
 //                      depends on (an app with runtimes in several places says which here)
@@ -67,6 +68,34 @@ export const registry = {
   modelPicker: null,
   submitHooks: [],
 };
+
+// A consumer entry module registers only after its complete static import graph evaluated.
+// Script order cannot provide that guarantee for separate ES module graphs.
+const extensions = new Map();
+const extensionWaiters = new Map();
+
+function extensionReady(id, details = {}) {
+  need({ id }, ["id"], "extensionReady");
+  if (extensions.has(id)) throw new Error(`ark.extensionReady registered \`${id}\` twice`);
+  const record = { id, ...details };
+  extensions.set(id, record);
+  extensionWaiters.get(id)?.resolve(record);
+  window.dispatchEvent(new CustomEvent("ark:extension-ready", { detail: record }));
+}
+
+export function waitForExtension(id) {
+  if (extensions.has(id)) return Promise.resolve(extensions.get(id));
+  if (!extensionWaiters.has(id)) {
+    let resolve;
+    const promise = new Promise((done) => (resolve = done));
+    extensionWaiters.set(id, { promise, resolve });
+  }
+  return extensionWaiters.get(id).promise;
+}
+
+export function loadedExtensions() {
+  return [...extensions.values()];
+}
 
 const listeners = new Map();
 
@@ -140,10 +169,12 @@ export function installApi(api) {
       registry.sidebars.push(s);
       api._changed();
     },
+    extensionReady,
     on: onExt,
   };
   delete ark._changed;
   window.ark = ark;
+  window.dispatchEvent(new CustomEvent("ark:api-ready", { detail: ark }));
   return ark;
 }
 

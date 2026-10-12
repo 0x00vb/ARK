@@ -98,12 +98,13 @@ export function registerAppearance(ark) {
     builtin: true,
     render(el) {
       const modes = [["system", "System"], ["light", "Light"], ["dark", "Dark"]];
-      const palettes = [["monokai", "Monokai"], ["dracula", "Dracula"], ["github", "GitHub"], ["xcode", "Xcode"]];
+      const names = { light: "Light", dark: "Dark", monokai: "Monokai", dracula: "Dracula", github: "GitHub", xcode: "Xcode" };
       const group = (name, className) => h(`div.${className}`, { role: "radiogroup", "aria-label": name });
-      const themeGroup = group("Theme", "appearance-theme-group");
-      const modeGroup = h("div.appearance-mode-grid");
-      const paletteGroup = h("div.appearance-palette-grid");
+      const themeGroup = h("div.appearance-theme-group");
+      const modeGroup = group("Mode", "appearance-mode-grid");
+      const paletteGroup = group("Palette", "appearance-palette-grid");
       const materialGroup = group("Window style", "appearance-material-grid");
+      let pendingFocus = null;
       const preview = (kind) => h("span.appearance-preview", { "data-kind": kind, "aria-hidden": "true" },
         h("span.appearance-preview-rail"),
         h("span.appearance-preview-page", h("i"), h("i"), h("i")));
@@ -112,14 +113,21 @@ export function registerAppearance(ark) {
           h("input", { type: "radio", name, value: id, checked, onchange: change }),
           preview(kind), h("span.appearance-choice-name", label));
       const draw = () => {
-        const now = window.arkTheme?.choice() || "system";
+        const focused = pendingFocus || (el.contains(document.activeElement)
+          ? { name: document.activeElement.name, value: document.activeElement.value }
+          : null);
+        pendingFocus = null;
+        const now = window.arkTheme?.mode?.() || "system";
         clear(modeGroup).append(...modes.map(([id, label]) =>
-          option(id, label, "ark-theme", now === id, () => { window.arkTheme?.set(id); draw(); })));
-        clear(paletteGroup).append(...palettes.map(([id, label]) =>
-          option(id, label, "ark-theme", now === id, () => { window.arkTheme?.set(id); draw(); })));
+          option(id, label, "ark-theme-mode", now === id, () => { pendingFocus = { name: "ark-theme-mode", value: id }; window.arkTheme?.setMode(id); })));
+        const currentPalette = window.arkTheme?.palette?.() || document.documentElement.dataset.theme;
+        const palettes = window.arkTheme?.palettes?.() || ["light", "github", "xcode"];
+        clear(paletteGroup).append(...palettes.map((id) =>
+          option(id, names[id], "ark-theme-palette", currentPalette === id, () => { pendingFocus = { name: "ark-theme-palette", value: id }; window.arkTheme?.setPalette(id); })));
         const material = window.arkMaterial?.choice() || "solid";
         clear(materialGroup).append(...[["solid", "Solid"], ["translucent", "Translucent"]].map(([id, label]) =>
-          option(id, label, "ark-material", material === id, () => { window.arkMaterial?.set(id); draw(); }, `material-${id}`)));
+          option(id, label, "ark-material", material === id, () => { pendingFocus = { name: "ark-material", value: id }; window.arkMaterial?.set(id); }, `material-${id}`)));
+        if (focused?.name) el.querySelector(`input[name="${focused.name}"][value="${focused.value}"]`)?.focus();
       };
       const keys = (container) => container.addEventListener("keydown", (e) => {
           if (e.key !== "Home" && e.key !== "End") return;
@@ -129,7 +137,9 @@ export function registerAppearance(ark) {
           input?.focus();
           input?.click();
         });
-      [themeGroup, materialGroup].forEach(keys);
+      [modeGroup, paletteGroup, materialGroup].forEach(keys);
+      const themeChanged = () => draw();
+      window.addEventListener("ark:theme", themeChanged);
       draw();
       el.classList.add("appearance-settings");
       el.append(
@@ -139,6 +149,7 @@ export function registerAppearance(ark) {
         h("section.appearance-section", h("h2", "Palette"), paletteGroup));
       if (document.querySelector('.app[data-shell="desktop"][data-os="macos"]'))
         el.append(h("section.appearance-section", h("h2", "Window"), materialGroup));
+      return { dispose: () => window.removeEventListener("ark:theme", themeChanged) };
     },
   });
 }

@@ -245,6 +245,26 @@ window.readyProbe.graph = await window.ark.call("graph");
             )
             .script("ready-app.js");
     }
+    if scenario == "startup-extension-failure" {
+        ui = ui
+            .asset(
+                "broken.js",
+                br#"import "./missing-transitive.js";
+window.ark.extensionReady("broken");"#
+                    .as_slice(),
+            )
+            .extension_script("broken.js");
+    }
+    if scenario == "late-extension" {
+        ui = ui
+            .asset(
+                "late.js",
+                br#"await new Promise((resolve) => setTimeout(resolve, 120));
+window.ark.extensionReady("late");"#
+                    .as_slice(),
+            )
+            .extension_script("late.js");
+    }
     let (host, served) = ui.serve_background("127.0.0.1:0").await.unwrap();
     if scenario == "waiting" {
         seed_waiting(&host, dir.path()).await;
@@ -636,6 +656,21 @@ async fn a_run_writes_a_chart_and_a_report_that_open_beside_the_conversation() {
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_sections_show_and_compose_fills_the_composer_unsent() {
     drive("settings", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_search_keeps_the_composer_and_keyboard_focus() {
+    drive("search", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn required_extension_failure_blocks_the_workspace_and_names_the_module() {
+    drive("startup-extension-failure", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn required_extension_may_register_after_the_shared_page() {
+    drive("late-extension", vec![], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

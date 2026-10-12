@@ -280,10 +280,16 @@ const scenarios = {
         hscroll: document.documentElement.scrollWidth > innerWidth,
       };
     });
-    assert.deepEqual(await wide(), { railWidth: 64, sidebarWidth: 252, sidebarPadding: 10, mainLeft: 316, hscroll: false });
+    assert.deepEqual(await wide(), { railWidth: 58, sidebarWidth: 252, sidebarPadding: 10, mainLeft: 310, hscroll: false });
+    const rail = await page.locator(".destinations").evaluate((el) => ({
+      dividerTop: getComputedStyle(el, "::after").insetBlockStart,
+      labels: [...el.querySelectorAll(".destination-label")].map((label) => Math.round(label.getBoundingClientRect().width)),
+    }));
+    assert.equal(rail.dividerTop, "44px", "the browser rail divider starts below its titlebar");
+    assert.deepEqual(rail.labels, [1, 1], "wide rail labels stay available to assistive technology only");
     await page.click("#toggle-sidebar");
     await page.waitForTimeout(350);
-    assert.deepEqual(await wide(), { railWidth: 64, sidebarWidth: 0, sidebarPadding: 0, mainLeft: 64, hscroll: false });
+    assert.deepEqual(await wide(), { railWidth: 58, sidebarWidth: 0, sidebarPadding: 0, mainLeft: 58, hscroll: false });
 
     await page.setViewportSize({ width: 720, height: 800 });
     // Wait for the layout to switch rather than a fixed time (flaky on a busy machine).
@@ -323,7 +329,7 @@ const scenarios = {
     const restored = await state();
     assert.equal(restored.compact, "false");
     assert.equal(restored.drawer, "");
-    assert.equal(restored.sidebarLeft, 64);
+    assert.equal(restored.sidebarLeft, 58);
     assert.equal(restored.sidebarWidth, 0);
     assert.equal(restored.sidebarPadding, 0);
     assert.equal(restored.hscroll, false);
@@ -1089,7 +1095,7 @@ async function workbench(page) {
   // Colours ease into the new theme.
   await page.waitForTimeout(400);
   await shot(page, "editor-code-dark");
-  await page.evaluate(() => window.arkTheme.set("system"));
+  await page.evaluate(() => window.arkTheme.setMode("system"));
   // A huge file is the plain editor: no layer to repaint, its own text shown.
   await page.evaluate((text) => window.ark.call("file_write", { path: "big.js", text }), "let x = 1;\n".repeat(16000));
   await page.evaluate(() => window.ark.openFile("big.js"));
@@ -1333,13 +1339,13 @@ async function settings(page) {
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
   const rows = page.locator(".settings-list .nav-row");
   await rows.nth(2).waitFor();
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Capabilities", "Devices", "Permissions", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Devices", "Permissions", "Skills", "Tool servers"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.setting({ id: "debug", title: "Debug", advanced: true, render: (el) => el.append("the debug") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Capabilities", "Devices", "Permissions", "Debug", "Skills", "Tool servers"]);
-  assert.deepEqual(await page.locator(".settings-list > *").evaluateAll((els) => els.map((e) => e.textContent).slice(5, 7)), ["Permissions", "Advanced"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Devices", "Permissions", "Debug", "Skills", "Tool servers"]);
+  assert.deepEqual(await page.locator(".settings-list > *").evaluateAll((els) => els.map((e) => e.textContent).slice(4, 6)), ["Permissions", "Advanced"]);
 
   // The test page opens light (no app default, a light system); Dark is kept across a reload.
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
@@ -1351,29 +1357,31 @@ async function settings(page) {
     root.setProperty("--appearance-light-accent", "#335eb7");
   });
   await page.locator(".settings-list .nav-row", { hasText: "Appearance" }).click();
-  assert.equal(await page.locator(".settings-section .appearance-choice").count(), 9);
-  assert.equal(await page.locator('.appearance-settings [role="radiogroup"]').count(), 2);
-  assert.equal(await page.locator(".appearance-theme-group input:checked").count(), 1);
+  assert.equal(await page.locator(".settings-section .appearance-choice").count(), 8);
+  assert.equal(await page.locator('.appearance-settings [role="radiogroup"]').count(), 3);
+  assert.equal(await page.locator(".appearance-theme-group input:checked").count(), 2);
   assert.equal(await page.locator(".appearance-mode-grid .appearance-preview").count(), 3);
-  assert.equal(await page.locator(".appearance-palette-grid .appearance-preview").count(), 4);
+  assert.equal(await page.locator(".appearance-palette-grid .appearance-preview").count(), 3);
   assert.equal(await page.locator(".appearance-material-grid .appearance-preview").count(), 2);
-  const brandedLight = await page.locator('.appearance-choice[data-palette="light"]').evaluate((choice) => ({
+  const brandedLight = await page.locator('.appearance-palette-grid .appearance-choice[data-palette="light"]').evaluate((choice) => ({
     background: getComputedStyle(choice.querySelector(".appearance-preview")).backgroundColor,
     accent: getComputedStyle(choice.querySelector(".appearance-preview-page i")).backgroundColor,
   }));
   assert.deepEqual(brandedLight, { background: "rgb(250, 250, 247)", accent: "rgb(51, 94, 183)" });
   await page.locator(".appearance-material-grid .appearance-choice", { hasText: "Translucent" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.material), "translucent");
-  assert.equal(await page.locator(".appearance-theme-group input:checked").count(), 1);
-  await page.locator(".settings-section .appearance-choice", { hasText: "Dark" }).click();
+  assert.equal(await page.locator(".appearance-theme-group input:checked").count(), 2);
+  await page.locator(".appearance-mode-grid .appearance-choice", { hasText: "Dark" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "dark");
+  assert.equal(await page.evaluate(() => document.activeElement?.value), "dark", "redrawing appearance preserves keyboard focus");
   const bg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   assert.equal(await bg(), "rgb(27, 27, 27)");
   await page.locator(".settings-section .appearance-choice", { hasText: "Dracula" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dracula");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "dark");
   assert.equal(await bg(), "rgb(40, 42, 54)");
+  await page.locator(".appearance-mode-grid .appearance-choice", { hasText: "Light" }).click();
   await page.locator(".settings-section .appearance-choice", { hasText: "GitHub" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "light");
   await page.setViewportSize({ width: 360, height: 720 });
@@ -1383,16 +1391,22 @@ async function settings(page) {
   }));
   assert.equal(themeLayout.fits, true, "theme choices do not overflow a 360px window");
   assert.equal(themeLayout.targets.every((height) => height >= 40), true, "theme targets stay at least 40px tall");
-  await page.locator('.appearance-palette-grid input[value="dracula"]').focus();
+  await page.locator('.appearance-palette-grid input[value="github"]').focus();
   await page.keyboard.press("End");
   assert.equal(await page.evaluate(() => window.arkTheme.choice()), "xcode");
   await page.setViewportSize({ width: 1100, height: 800 });
-  await page.locator(".settings-section .appearance-choice", { hasText: "Dark" }).click();
+  await page.locator(".appearance-mode-grid .appearance-choice", { hasText: "Dark" }).click();
   await page.reload();
   await page.locator("#open-settings:not([hidden])").waitFor();
-  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
-  await page.evaluate(() => window.arkTheme.set("system"));
-  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dracula");
+  await page.evaluate(() => window.arkTheme.setMode("system"));
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "xcode");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dracula");
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dracula", "system mode recalls the dark palette");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "xcode");
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "xcode", "system mode recalls the light palette");
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.openSettings("look"));
   await page.locator(".settings-list .nav-row", { hasText: "Look" }).click();
@@ -1406,6 +1420,47 @@ async function settings(page) {
   assert.equal(await page.locator(".user").count(), 0, "nothing was sent");
 }
 scenarios.settings = settings;
+
+scenarios.search = async (page) => {
+  const composer = page.locator("#input");
+  await composer.fill("Keep this draft");
+  await composer.focus();
+  await page.keyboard.press("Meta+Shift+f");
+  const search = page.getByRole("combobox", { name: "Search chats" });
+  await search.waitFor();
+  assert.equal(await search.getAttribute("aria-controls"), "chat-search-results");
+  await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
+  assert.match(await page.locator("#chat-search-results").innerText(), /No chats yet/);
+  assert.equal(await composer.inputValue(), "Keep this draft");
+  await page.keyboard.press("Escape");
+  assert.equal(await composer.evaluate((el) => document.activeElement === el), true, "closing search restores focus");
+  assert.equal(await composer.inputValue(), "Keep this draft");
+};
+
+scenarios["startup-extension-failure"] = async (page) => {
+  const failure = page.locator(".startup-failure");
+  await failure.waitFor({ timeout: 7000 });
+  assert.match(await failure.innerText(), /ARK could not finish opening/);
+  await failure.locator("summary").click();
+  assert.match(await failure.locator("pre").innerText(), /broken/);
+  assert.equal(await page.locator("#app.ready").count(), 0, "the incomplete workspace never becomes ready");
+  assert.equal(await page.locator("#input").count(), 0, "the incomplete composer is removed");
+  const duplicate = await page.evaluate(() => {
+    window.ark.extensionReady("duplicate");
+    try {
+      window.ark.extensionReady("duplicate");
+      return "accepted";
+    } catch (error) {
+      return error.message;
+    }
+  });
+  assert.match(duplicate, /twice/);
+};
+
+scenarios["late-extension"] = async (page) => {
+  await page.locator("#app.ready").waitFor();
+  assert.equal(await page.locator(".startup-failure").count(), 0);
+};
 
 // An app that draws the model picker: until a model is chosen the button asks for one, and
 // sending opens the menu with the text kept. `ark.onSubmit` sees each message first and can
@@ -1495,17 +1550,16 @@ async function plugins(page) {
 }
 scenarios.plugins = plugins;
 
-// Settings › Capabilities: Web is ready, Mail and Calendar are one sign-in away. Connect opens
+// Settings › Connections omits built-in Web. Mail and Calendar are one sign-in away. Connect opens
 // the provider's page (here it approves at once), the row turns ready with the account, and
 // Disconnect (two clicks) makes it connectable again. `tools` then lists the web too.
 async function capabilities(page) {
   await page.locator("#open-settings:not([hidden])").waitFor();
-  await page.evaluate(() => window.ark.openSettings("capabilities"));
-  await page.locator(".settings-title", { hasText: "Capabilities" }).waitFor();
+  await page.evaluate(() => window.ark.openSettings("connections"));
+  await page.locator(".settings-title", { hasText: "Connections" }).waitFor();
   const row = (id) => page.locator(`.capability-row[data-id="${id}"]`);
   await row("mail").waitFor();
-  assert.deepEqual(await page.locator(".capability-row .plugin-name").allInnerTexts(), ["Web", "Mail", "Calendar"]);
-  assert.equal(await row("web").getAttribute("class"), "plugin-row capability-row");
+  assert.deepEqual(await page.locator(".capability-row .plugin-name").allInnerTexts(), ["Mail", "Calendar"]);
   assert.match(await row("mail").getAttribute("class"), /off/);
 
   await row("mail").locator(".btn.primary").click();
@@ -2028,9 +2082,9 @@ try {
     });
   }
   await page.goto(url);
-  await page.locator("#input").waitFor();
+  if (scenario !== "startup-extension-failure") await page.locator("#input").waitFor();
   await run(page);
-  assert.deepEqual(errors, [], "the page threw");
+  if (scenario !== "startup-extension-failure") assert.deepEqual(errors, [], "the page threw");
   console.log(`${scenario}: ok`);
 } catch (e) {
   console.error(`${scenario}: ${e.stack || e}`);

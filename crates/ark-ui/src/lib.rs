@@ -67,6 +67,7 @@ pub struct ArkUi {
     app: App,
     info: UiInfo,
     files: HashMap<String, Cow<'static, [u8]>>,
+    required_scripts: Vec<String>,
     handlers: HashMap<String, Handler>,
     start: Start,
     access: Access,
@@ -111,6 +112,7 @@ impl ArkUi {
             app,
             info: UiInfo::default(),
             files: HashMap::new(),
+            required_scripts: Vec::new(),
             handlers: HashMap::new(),
             start: Start::default(),
             access: Access::default(),
@@ -166,6 +168,14 @@ impl ArkUi {
     /// Load one of the app's assets as a script module after ARK's own.
     pub fn script(mut self, asset: impl Into<String>) -> Self {
         self.info.scripts.push(asset.into());
+        self
+    }
+    /// Load a consumer entry module and require its `ark.extensionReady(id)` handshake before
+    /// the workspace starts. Use this for first-party surfaces that must never disappear silently.
+    pub fn extension_script(mut self, asset: impl Into<String>) -> Self {
+        let asset = asset.into();
+        self.required_scripts.push(asset.clone());
+        self.info.scripts.push(asset);
         self
     }
     /// Load one of the app's assets as a stylesheet after ARK's own.
@@ -244,6 +254,7 @@ impl ArkUi {
             title,
             self.files,
             self.info.scripts.clone(),
+            self.required_scripts,
             self.info.styles.clone(),
             self.info.theme,
             self.asset_version,

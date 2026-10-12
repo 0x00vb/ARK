@@ -28,7 +28,7 @@ export class Topbar {
       this.tabs.append(tab(null, "Chat"), ...views.map((v) => tab(v.id, v.nav === true ? v.title : v.nav)));
     }
     clear(this.launchers);
-    if ([...registry.panels.values()].some((p) => p.nav)) {
+    if ([...registry.panels.values()].some((p) => p.nav && (!p.when || p.when({ project })))) {
       this.launchers.append(h("button.icon-btn", {
         type: "button", id: "open-menu", title: "Open", "aria-label": "Open a panel", "aria-haspopup": "menu",
         onclick: (e) => this.menu(e.currentTarget),
@@ -39,7 +39,8 @@ export class Topbar {
 
   /// The + menu: every `nav` panel, with its key when it has one.
   menu(anchor) {
-    const panels = [...registry.panels.values()].filter((p) => p.nav);
+    const project = this.api.project();
+    const panels = [...registry.panels.values()].filter((p) => p.nav && (!p.when || p.when({ project })));
     const pop = this.api.popover(anchor, panels.map((p) => {
       const label = p.nav === true ? p.title : p.nav;
       return h("button.menu-item.open-item", { type: "button", role: "menuitem", "data-panel": p.id, onclick: () => { pop.close(); this.api.openPanel(p.id); } },

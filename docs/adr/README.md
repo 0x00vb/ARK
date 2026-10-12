@@ -69,6 +69,8 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0060](0060-a-project-terminal-does-not-need-a-chat.md) | A project Terminal opens without a chat: server-issued project authority, explicit computer binding, one-shot writes, shared PTY end semantics and staged native delivery | Accepted |
 | [0061](0061-subscription-agents-keep-their-credentials.md) | Subscription agents keep their credentials on the computer that runs them; Grok is offered without ARK handling its login | Accepted |
 | [0062](0062-event-automations-use-durable-events-and-run-scoped-authority.md) | Event automations: transport-authenticated provider events with actor claims, deterministic matching and one durable run per event; schedules stay compatible under one view; every event run has mandatory authority that broader grants cannot widen | Proposed |
+| [0063](0063-two-chats-can-share-one-window-without-sharing-state.md) | Multi-chat windows: session-scoped conversation operations, many project tabs and at most two visible panes; each pane keeps its own transcript, draft, approvals, events and resource authority | Proposed |
+| [0064](0064-execution-mode-is-per-chat-and-per-turn.md) | Plan, Manual and bounded Auto execution modes are per chat and frozen into each turn; only explicitly project-bound actions can skip approval | Proposed |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

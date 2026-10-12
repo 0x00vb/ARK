@@ -817,7 +817,10 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 /* ---- views in the main column (ark.view) -------------------------------------------------- */
 
 .stage { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.app[data-view] .chat-workspace, .app[data-view] .chat-tabs, .app[data-view] .scroller, .app[data-view] .dock { display: none; }
+.app[data-view] .chat-tabs, .app[data-view] .scroller, .app[data-view] .dock { display: none; }
+.app[data-view] .chat-workspace { position: absolute; inset: 0; z-index: 20; display: block; pointer-events: none; }
+.app[data-view] .chat-surface { position: static; }
+.app[data-view] .asks { pointer-events: auto; }
 .view { min-height: 100%; }
 .nav-row[aria-current="true"] { background: var(--active); }
 .projects[data-dim="true"] .session[aria-current="true"] { background: transparent; color: var(--text-2); }

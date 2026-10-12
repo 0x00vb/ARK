@@ -1580,6 +1580,7 @@ async function capabilities(page) {
   await page.locator("#open-settings:not([hidden])").waitFor();
   await page.evaluate(() => window.ark.openSettings("connections"));
   await page.locator(".settings-title", { hasText: "Connections" }).waitFor();
+  await page.getByRole("button", { name: "Browse" }).click();
   const row = (id) => page.locator(`.capability-row[data-id="${id}"]`);
   await row("mail").waitFor();
   assert.deepEqual(await page.locator(".capability-row .plugin-name").allInnerTexts(), ["Mail", "Calendar"]);

@@ -21,10 +21,17 @@ step "clippy (warnings are errors)"
 cargo clippy --workspace --all-targets --locked -- -D warnings
 
 step "tests"
+page_tests=${ARK_UI_PAGE_TESTS:-}
+unset ARK_UI_PAGE_TESTS
 if [ -n "${RUST_TEST_THREADS:-}" ]; then
   cargo test --workspace --locked -- --test-threads "$RUST_TEST_THREADS"
 else
   cargo test --workspace --locked
+fi
+
+if [ -n "$page_tests" ]; then
+  step "WebKit page tests"
+  ARK_UI_PAGE_TESTS="$page_tests" cargo test -p ark-ui --test page --locked -- --test-threads 1
 fi
 
 step "release build"

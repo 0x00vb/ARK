@@ -11,7 +11,7 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Fixed
 
-- Release checks use available build and test parallelism, reuse a stable fresh-checkout cache, install the locked browser-test dependency, and reject stale release metadata before the expensive gate.
+- Release checks use available parallelism for builds and normal tests, serialize WebKit tests, reuse a stable fresh-checkout cache, install the locked browser-test dependency, and reject stale release metadata before the expensive gate.
 
 ## [0.20.2] - 2026-10-12
 

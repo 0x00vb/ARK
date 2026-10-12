@@ -40,14 +40,14 @@ flowchart LR
 | 3 | Pick the version (see the table above) and set it in the root `Cargo.toml`: `workspace.package.version` and the eleven internal `ark-*` dependency versions | `Cargo.toml` |
 | 4 | Rename `## [Unreleased]` in `CHANGELOG.md` to `## [X.Y.Z] - YYYY-MM-DD` | `CHANGELOG.md` |
 | 5 | Update `ROADMAP.md` (current version, state, limits) and the tag in the README install block | `ROADMAP.md`, `README.md` |
-| 6 | Full check on the release commit, page tests included. Tests use the machine's available parallelism | `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` |
+| 6 | Full check on the release commit, page tests included. Normal tests use the machine; WebKit tests serialize | `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` |
 | 7 | Commit `vX.Y.Z: <one line>`, then tag that commit | `git tag -a vX.Y.Z -m vX.Y.Z` |
 | 8 | Push | `git push origin main vX.Y.Z && git push github main vX.Y.Z` |
 | 9 | Verify as a consumer gets it: clone at the tag into an empty directory, check the tag matches the version, run every check | `scripts/verify-release.sh vX.Y.Z` |
 | 10 | Move ARK Desktop's pin (its `CURRENT_STATE.md`, ARK pin) | |
 
 `scripts/ci.sh` runs, in order: `cargo fmt --check`, the fast version and release-state check,
-clippy with `-D warnings`, all tests with Cargo's available parallelism, a release build, and the simulated benchmark compared with
+clippy with `-D warnings`, normal tests with Cargo's available parallelism, WebKit tests serially, a release build, and the simulated benchmark compared with
 `bench/baseline.json`. A regression fails the run. Do not cap `CARGO_BUILD_JOBS` on a normal
 developer machine. `scripts/verify-release.sh` uses a clean checkout at a stable path and a
 persistent target cache, so the first verification is cold and later releases reuse it.

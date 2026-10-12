@@ -4,14 +4,14 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-11 (v0.20.1 release tree verified; multi-chat boundary proposed)
+Last updated: 2026-10-11 (v0.20.1 released; local interface development reload added on main)
 
 ## Release
 
 | | |
 |---|---|
 | Latest tag | v0.20.1 (2026-10-11), release checks passed |
-| `main` | v0.20.1 release tree: ADR 0061 adds an isolated, place-bound Grok worker catalog and setup without importing subscription credentials into ARK. The corrected chatless project Terminal uses the existing Terminal pane, and a closed sidebar leaves no hidden strip. |
+| `main` | v0.20.1 plus proposed multi-chat and execution-mode boundaries (ADR 0063 and 0064). Development asset mode serves shared and app interface files from disk and reloads browser pages after a save. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |

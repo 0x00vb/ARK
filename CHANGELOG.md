@@ -7,6 +7,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Changed
+- Development asset mode reloads browser pages when shared or app-specific interface files
+  change on disk.
+
 ## [0.20.1] - 2026-10-11
 
 ### Added

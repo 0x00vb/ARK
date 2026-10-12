@@ -5,13 +5,16 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::time::UNIX_EPOCH;
 
 use crate::host::Theme;
 
 include!(concat!(env!("OUT_DIR"), "/web_assets.rs"));
 
 const VERSIONED_ROOT: &str = "_ark";
+const DEV_REVISION: &str = "__ark_dev_revision";
 
 pub struct Assets {
     title: String,
@@ -78,6 +81,12 @@ impl Assets {
                 "text/html; charset=utf-8",
             ));
         }
+        if path == DEV_REVISION && self.development() {
+            return Some((
+                Cow::Owned(self.development_revision().into_bytes()),
+                "text/plain; charset=utf-8",
+            ));
+        }
         let mime = mime(path);
         if let Some(rest) = path.strip_prefix("ext/") {
             if let Some(dir) = &self.asset_dir {
@@ -123,10 +132,71 @@ impl Assets {
             .iter()
             .map(|s| format!("    <script type=\"module\" src=\"ext/{s}\"></script>\n"))
             .collect();
+        let reload = if self.development() {
+            "    <script type=\"module\" src=\"js/dev-reload.js\"></script>\n"
+        } else {
+            ""
+        };
         raw.replace("<!--ark:title-->", &escape(&self.title))
             .replace("<!--ark:theme-->", self.theme.as_str())
             .replace("    <!--ark:styles-->\n", &styles)
             .replace("    <!--ark:scripts-->\n", &scripts)
+            .replace("  </head>\n", &format!("{reload}  </head>\n"))
+    }
+
+    fn development(&self) -> bool {
+        self.web_dir.is_some() || self.asset_dir.is_some()
+    }
+
+    fn development_revision(&self) -> String {
+        let mut files = Vec::new();
+        for dir in [&self.web_dir, &self.asset_dir].into_iter().flatten() {
+            collect_files(dir, dir, &mut files);
+        }
+        files.sort();
+        let mut state = std::collections::hash_map::DefaultHasher::new();
+        for (path, len, modified) in files {
+            path.hash(&mut state);
+            len.hash(&mut state);
+            modified.hash(&mut state);
+        }
+        format!("{:016x}", state.finish())
+    }
+}
+
+fn collect_files(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    out: &mut Vec<(PathBuf, u64, u128)>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_files(root, &path, out);
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_nanos());
+        out.push((
+            path.strip_prefix(root).unwrap_or(&path).to_path_buf(),
+            metadata.len(),
+            modified,
+        ));
     }
 }
 
@@ -211,5 +281,40 @@ mod tests {
             a.versioned("index.html"),
             format!("_ark/{}/index.html", env!("CARGO_PKG_VERSION"))
         );
+    }
+
+    #[test]
+    fn development_files_reload_the_page_after_a_save() {
+        let root = std::env::temp_dir().join(format!(
+            "ark-ui-live-assets-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("change.js");
+        std::fs::write(&file, "one").unwrap();
+
+        let mut a = Assets::new(
+            "Demo".into(),
+            HashMap::new(),
+            Vec::new(),
+            Vec::new(),
+            Theme::Light,
+            None,
+        );
+        assert!(!String::from_utf8(a.get("/").unwrap().0.into_owned())
+            .unwrap()
+            .contains("dev-reload.js"));
+        assert!(a.get(DEV_REVISION).is_none());
+        a.asset_dir = Some(root.clone());
+        let html = String::from_utf8(a.get("/").unwrap().0.into_owned()).unwrap();
+        assert!(html.contains("js/dev-reload.js"), "{html}");
+        let before = a.get(DEV_REVISION).unwrap().0;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        std::fs::write(&file, "two").unwrap();
+        let after = a.get(DEV_REVISION).unwrap().0;
+        assert_ne!(before, after);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -7,14 +7,24 @@ import { h, clear } from "./dom.js";
 
 function section(el, ark) {
   el.classList.add("plugins");
+  const browse = h("button.btn.small.ghost", { type: "button" }, "Browse");
+  const head = h("div.connections-head", h("span.connections-count"), browse);
   const list = h("div.plugin-list");
   const why = h("p.plugin-why", { role: "status" });
   let waiting = null;
+  let catalog = [];
+  let browsing = false;
 
-  const draw = (all) => {
+  const draw = () => {
+    const all = browsing
+      ? catalog.filter((c) => c.provider)
+      : catalog.filter((c) => c.switch || c.state === "ready" || c.state === "off");
+    const active = catalog.filter((c) => c.state === "ready").length;
+    head.querySelector(".connections-count").textContent = browsing ? "Available" : `${active} active`;
+    browse.textContent = browsing ? "Done" : "Browse";
     clear(list);
     if (!all.length) {
-      list.append(h("p.settings-none", "No connections are available."));
+      list.append(h("p.settings-none", browsing ? "No connections are available." : "No connections yet."));
       return;
     }
     for (const c of all) {
@@ -66,10 +76,10 @@ function section(el, ark) {
   const load = async () => {
     // Web, files, browser and code are part of ARK and need no settings row. Keep only things
     // the person can connect, disconnect or explicitly turn on. Viewing this page starts nothing.
-    const all = ((await ark.call("capabilities").catch(() => [])) || [])
+    catalog = ((await ark.call("capabilities").catch(() => [])) || [])
       .filter((c) => !c.added && (c.switch || c.account || c.state === "connect" || (c.state === "unavailable" && c.provider)));
-    draw(all);
-    return all;
+    draw();
+    return catalog;
   };
 
   async function act(fn) {
@@ -108,7 +118,8 @@ function section(el, ark) {
     await load();
   }
 
-  el.append(list, why);
+  browse.onclick = () => { browsing = !browsing; draw(); };
+  el.append(head, list, why);
   load();
   return { refresh: load, dispose: () => { waiting = null; } };
 }

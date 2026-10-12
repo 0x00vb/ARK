@@ -1,6 +1,6 @@
 # 0064. Execution mode is per chat and frozen for a turn
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-11
 
 ## Context

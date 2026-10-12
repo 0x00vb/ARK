@@ -54,6 +54,7 @@ const PATHS = {
   compose: '<path d="M11.5 2.5l2 2L7 11H5V9z"/><path d="M13 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4"/>',
   sidebar: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6 3v10"/>',
   pane: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M10 3v10"/>',
+  split: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M8 3v10"/>',
   "chevron-down": '<path d="M4.5 6.5L8 10l3.5-3.5"/>',
   "chevron-right": '<path d="M6.5 4.5L10 8l-3.5 3.5"/>',
   "arrow-up": '<path d="M8 13V3.5M4 7.5l4-4 4 4"/>',

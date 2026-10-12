@@ -816,6 +816,8 @@ pub struct Summary {
     pub session: SessionSummary,
     pub grants: Vec<String>,
     pub detail: bool,
+    pub execution_mode: ark_sdk::prelude::ark_core::ExecutionMode,
+    pub execution_mode_revision: u64,
 }
 
 /// Turns kept in memory for `/trace`; older ones are read back from the store.
@@ -1031,6 +1033,8 @@ impl Interaction {
             session: SessionSummary::of(self.session.record(), &self.project.name, true),
             grants: self.gate.grants(),
             detail: self.detail,
+            execution_mode: self.session.execution_mode(),
+            execution_mode_revision: self.session.execution_mode_revision(),
         }
     }
 
@@ -1103,6 +1107,16 @@ impl Interaction {
                 title,
             )?)
         }
+    }
+
+    pub fn set_execution_mode(
+        &mut self,
+        expected_revision: u64,
+        mode: ark_sdk::prelude::ark_core::ExecutionMode,
+    ) -> anyhow::Result<()> {
+        self.session
+            .set_execution_mode(self.ark.engine(), expected_revision, mode)?;
+        Ok(())
     }
 
     pub fn projects(&self) -> anyhow::Result<Vec<ProjectSummary>> {
@@ -1362,6 +1376,7 @@ impl Interaction {
             steer: Some(ctl.steer.clone()),
             present: self.present,
             tools: self.turn_tools(),
+            execution_mode: self.session.execution_mode(),
         };
         let mut last_context = None;
         let Interaction {

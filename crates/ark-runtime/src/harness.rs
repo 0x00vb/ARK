@@ -18,9 +18,9 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use ark_core::{
-    ArtifactId, Author, Claim, ClaimType, EvidenceCard, Focus, Interesting, Invocation,
-    InvocationId, InvocationStatus, Note, NoteKind, ProjectId, ResearchState, Reuse, RiskTier,
-    WorkspaceContext,
+    ArtifactId, Author, Claim, ClaimType, EvidenceCard, ExecutionMode, Focus, Interesting,
+    Invocation, InvocationId, InvocationStatus, Note, NoteKind, ProjectId, ResearchState, Reuse,
+    RiskTier, WorkspaceContext,
 };
 use ark_model::{estimate_tokens, Completion, Message, ToolDef, Usage};
 use serde::{Deserialize, Serialize};
@@ -277,6 +277,7 @@ pub struct Harness {
     /// State-changing calls an earlier run of the same work had under way when it stopped
     /// (see [`Harness::cut_short`]).
     cut_short: Vec<Invocation>,
+    execution_mode: ExecutionMode,
 }
 
 /// The pieces of the first user message, kept separate so the context report can attribute
@@ -354,6 +355,7 @@ impl Harness {
             skills: None,
             done_before: Vec::new(),
             cut_short: Vec::new(),
+            execution_mode: ExecutionMode::Manual,
         }
     }
 
@@ -431,6 +433,10 @@ impl Harness {
     }
     pub fn allow_mutate(mut self, yes: bool) -> Self {
         self.allow_mutate = yes;
+        self
+    }
+    pub fn execution_mode(mut self, mode: ExecutionMode) -> Self {
+        self.execution_mode = mode;
         self
     }
     pub fn max_steps(mut self, n: usize) -> Self {
@@ -591,7 +597,7 @@ impl Harness {
         let system = sys.render();
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
-            acquisition: acquisition_on(profile),
+            acquisition: self.execution_mode != ExecutionMode::Plan && acquisition_on(profile),
             present: self.presentation,
         };
 
@@ -600,11 +606,14 @@ impl Harness {
         // Loaded action schemas: the profile's core set (present in the registry), then each
         // on-demand load appended. The order never changes within a turn, so loading one more
         // action keeps every earlier tool definition in the cacheable prefix.
-        let mut loaded: Vec<String> = core_loaded(engine, profile);
+        let mut loaded: Vec<String> = core_loaded(engine, profile)
+            .into_iter()
+            .filter(|name| self.action_available(engine, name))
+            .collect();
         for name in
             catalog::matching_actions(&engine.registry, &self.with_focus(&goal_text), self.preload)
         {
-            if !loaded.contains(&name) {
+            if self.action_available(engine, &name) && !loaded.contains(&name) {
                 loaded.push(name);
             }
         }
@@ -614,7 +623,9 @@ impl Harness {
             conversation: self.conversation.clone(),
             rules: self.rules_text(),
             skills: self.skills.clone(),
-            can_add: can_add(profile),
+            can_add: (self.execution_mode != ExecutionMode::Plan)
+                .then(|| can_add(profile))
+                .flatten(),
             ready: self.ready_block(engine, &loaded),
             task: self.task_text(question, budget),
         };
@@ -969,6 +980,15 @@ impl Harness {
                     continue;
                 };
 
+                if self.execution_mode == ExecutionMode::Plan && desc.risk == RiskTier::Mutate {
+                    flush!();
+                    round.push(Message::tool_result(
+                        call,
+                        "unavailable in Plan: answer with a plan and do not change state.",
+                    ));
+                    continue;
+                }
+
                 // The digest uses the canonical artifact id, so a short id and a full id name
                 // the same call.
                 let canonical = engine.canonical_input(project, call.arguments.clone());
@@ -1036,7 +1056,10 @@ impl Harness {
                     input: call.arguments.clone(),
                 });
 
-                let mut approved = self.allow_mutate && !again;
+                let auto = self.execution_mode == ExecutionMode::Auto
+                    && desc.auto_eligible
+                    && !desc.ask_each_time;
+                let mut approved = (self.allow_mutate || auto) && !again;
                 if desc.risk == RiskTier::Mutate && !approved {
                     match self
                         .request_approval(profile, &desc, call, again, &mut on_event)
@@ -1364,7 +1387,7 @@ impl Harness {
         let (_, est) = ws.assemble_with(&system, WorkingSet::message_tokens(&tail));
         let meta_cfg = MetaToolConfig {
             knowledge: profile.knowledge.is_some(),
-            acquisition: acquisition_on(profile),
+            acquisition: self.execution_mode != ExecutionMode::Plan && acquisition_on(profile),
             present: self.presentation,
         };
         let tools = self.tool_set(engine, &loaded, meta_cfg);
@@ -1626,9 +1649,15 @@ impl Harness {
     /// its goal with what the person said since (the question last). The goal's request is
     /// clipped to fit the budget: `budget / 2` characters, 1,000 to 4,000.
     fn task_text(&self, question: &str, budget: u32) -> String {
-        match &self.goal {
+        let task = match &self.goal {
             Some(g) => g.render((budget as usize / 2).clamp(1_000, 4_000)),
             None => question.to_string(),
+        };
+        match self.execution_mode {
+            ExecutionMode::Plan => format!(
+                "Plan only. Inspect what you need, but do not change project or external state. Return an actionable plan.\n\n{task}"
+            ),
+            _ => task,
         }
     }
 
@@ -1848,7 +1877,11 @@ impl Harness {
     ) -> Vec<ark_model::ToolDef> {
         let mut tools = catalog::meta_tool_defs(cfg);
         for name in loaded {
-            if let Some(d) = engine.registry.descriptor(name) {
+            if let Some(d) = engine
+                .registry
+                .descriptor(name)
+                .filter(|d| self.descriptor_available(d))
+            {
                 tools.push(catalog::action_tooldef(&d));
             }
         }
@@ -1874,7 +1907,10 @@ impl Harness {
             catalog::LIST_ACTIONS => {
                 let adapter = normalize_action_name(&sarg("adapter"));
                 let adapter = adapter.split('.').next().unwrap_or(&adapter).to_string();
-                let acts = catalog::list_actions(&engine.registry, &adapter);
+                let acts: Vec<_> = catalog::list_actions(&engine.registry, &adapter)
+                    .into_iter()
+                    .filter(|d| self.descriptor_available(d))
+                    .collect();
                 if acts.is_empty() {
                     return Ok(format!(
                         "no adapter named `{adapter}`. See the capability index."
@@ -1888,7 +1924,11 @@ impl Harness {
             }
             catalog::LOAD_ACTION => {
                 let name = normalize_action_name(&sarg("name"));
-                match engine.registry.descriptor(&name) {
+                match engine
+                    .registry
+                    .descriptor(&name)
+                    .filter(|d| self.descriptor_available(d))
+                {
                     Some(d) => {
                         if !loaded.contains(&name) {
                             loaded.push(name.clone());
@@ -2042,6 +2082,11 @@ impl Harness {
             catalog::FIND_CAPABILITY
             | catalog::PROPOSE_CAPABILITY
             | catalog::ACQUIRE_CAPABILITY => {
+                if self.execution_mode == ExecutionMode::Plan
+                    && call.name == catalog::ACQUIRE_CAPABILITY
+                {
+                    return Ok("unavailable in Plan: do not connect or install anything.".into());
+                }
                 match &profile.acquisition {
                     None => Ok("capability acquisition is not enabled for this agent.".into()),
                     Some(acq) => {
@@ -2502,6 +2547,17 @@ impl Harness {
             }
         }
         Some(s)
+    }
+
+    fn descriptor_available(&self, descriptor: &ark_core::ActionDescriptor) -> bool {
+        self.execution_mode != ExecutionMode::Plan || descriptor.risk != RiskTier::Mutate
+    }
+
+    fn action_available(&self, engine: &Engine, name: &str) -> bool {
+        engine
+            .registry
+            .descriptor(name)
+            .is_some_and(|descriptor| self.descriptor_available(&descriptor))
     }
 }
 

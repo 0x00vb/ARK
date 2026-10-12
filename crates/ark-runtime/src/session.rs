@@ -18,7 +18,7 @@
 //! own stream, apart from its numbered turns, so posting never races a turn. The next turn
 //! carries the posts that arrived since the last answer, at most [`POSTS_CARRIED`], clipped.
 
-use ark_core::{ProjectId, SessionId};
+use ark_core::{ExecutionMode, ProjectId, SessionId};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
@@ -123,6 +123,12 @@ pub struct SessionRecord {
     /// The last post ([`Post`]) a turn has carried; later ones are new to the model.
     #[serde(default)]
     pub posts_read: u64,
+    /// Authority selected for the next turn in this chat.
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
+    /// Changes whenever a client changes `execution_mode`.
+    #[serde(default)]
+    pub execution_mode_revision: u64,
 }
 
 /// Posts a turn carries at most; older unread ones are counted, not shown.
@@ -258,6 +264,9 @@ pub struct Turn {
     /// ([`HarnessOutcome::ran_out`]): the next turn continues its goal.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ran_out: bool,
+    /// Authority frozen when this turn began.
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
 }
 
 /// Follow-ups a goal keeps in full, newest kept, and the characters of each.
@@ -379,6 +388,7 @@ impl Turn {
             pid_start: crate::process::own_start(),
             goal: None,
             ran_out: false,
+            execution_mode: ExecutionMode::Manual,
         }
     }
 }
@@ -523,6 +533,8 @@ pub struct Session {
     /// What the person said while the turn under way ran ([`Session::steered_now`]), kept
     /// with it however it ends.
     steered: Vec<String>,
+    /// Authority copied into the begun turn. A later mode change cannot alter it.
+    turn_execution_mode: Option<ExecutionMode>,
 }
 
 impl Session {
@@ -550,6 +562,8 @@ impl Session {
             compactions: 0,
             policy,
             posts_read: 0,
+            execution_mode: ExecutionMode::Manual,
+            execution_mode_revision: 0,
         };
         let s = Session {
             record,
@@ -557,6 +571,7 @@ impl Session {
             unread: Vec::new(),
             goal: None,
             steered: Vec::new(),
+            turn_execution_mode: None,
         };
         s.save(engine)?;
         Ok(s)
@@ -613,8 +628,10 @@ impl Session {
             unread: Vec::new(),
             goal: None,
             steered: Vec::new(),
+            turn_execution_mode: None,
         };
         if let Some(mut t) = begun {
+            session.turn_execution_mode = Some(t.execution_mode);
             match t.pid {
                 // Stored in full (finished, or failed with its error), and the process stopped
                 // before the header counted it: count it as it is.
@@ -686,6 +703,34 @@ impl Session {
     }
     pub fn turn_count(&self) -> u32 {
         self.record.turn_count
+    }
+
+    pub fn execution_mode(&self) -> ExecutionMode {
+        self.record.execution_mode
+    }
+
+    pub fn execution_mode_revision(&self) -> u64 {
+        self.record.execution_mode_revision
+    }
+
+    /// Change future-turn authority only when the caller saw the current revision.
+    pub fn set_execution_mode(
+        &mut self,
+        engine: &Engine,
+        expected_revision: u64,
+        mode: ExecutionMode,
+    ) -> Result<(), AgentError> {
+        if self.record.execution_mode_revision != expected_revision {
+            return Err(AgentError::StaleExecutionMode);
+        }
+        if self.record.execution_mode != mode {
+            self.record.execution_mode = mode;
+            self.record.execution_mode_revision =
+                self.record.execution_mode_revision.saturating_add(1);
+            self.record.updated_at = OffsetDateTime::now_utc();
+            self.save(engine)?;
+        }
+        Ok(())
     }
 
     /// Read the posts that arrived since the last turn, for the next turn to carry.
@@ -900,9 +945,11 @@ impl Session {
         goal: Option<Goal>,
     ) -> Result<(), AgentError> {
         let mut t = Turn::placeholder(self.record.turn_count, input);
+        t.execution_mode = self.record.execution_mode;
         t.goal = goal.clone();
         self.goal = goal;
         self.steered.clear();
+        self.turn_execution_mode = Some(t.execution_mode);
         engine.store.put_session_turn(
             self.record.id.as_str(),
             t.index,
@@ -966,6 +1013,10 @@ impl Session {
             pid_start: None,
             goal: self.goal.take(),
             ran_out: outcome.ran_out && !outcome.cancelled,
+            execution_mode: self
+                .turn_execution_mode
+                .take()
+                .unwrap_or(self.record.execution_mode),
             // `outcome.steered` is what reached the model; it holds what `steered_now` kept.
         };
         self.push_turn(engine, turn, &outcome.metrics)
@@ -979,6 +1030,10 @@ impl Session {
         error: &str,
     ) -> Result<(), AgentError> {
         let mut t = Turn::placeholder(self.record.turn_count, input);
+        t.execution_mode = self
+            .turn_execution_mode
+            .take()
+            .unwrap_or(self.record.execution_mode);
         t.error = Some(error.to_string());
         t.pid = None;
         t.pid_start = None;
@@ -994,6 +1049,7 @@ impl Session {
         turn: Turn,
         metrics: &Metrics,
     ) -> Result<(), AgentError> {
+        self.turn_execution_mode = None;
         engine.store.put_session_turn(
             self.record.id.as_str(),
             turn.index,
@@ -1400,6 +1456,34 @@ mod tests {
         let p = engine.create_project("p", "").unwrap();
         let s = Session::start(&engine, &p.id).unwrap();
         (dir, engine, s)
+    }
+
+    #[test]
+    fn execution_mode_is_revisioned_persisted_and_frozen_on_the_turn() {
+        let (_dir, engine, mut session) = chat();
+        assert_eq!(session.execution_mode(), ExecutionMode::Manual);
+        session
+            .set_execution_mode(&engine, 0, ExecutionMode::Auto)
+            .unwrap();
+        assert_eq!(session.execution_mode_revision(), 1);
+        assert!(matches!(
+            session.set_execution_mode(&engine, 0, ExecutionMode::Plan),
+            Err(AgentError::StaleExecutionMode)
+        ));
+        session.begin_turn(&engine, "update the project").unwrap();
+        session
+            .set_execution_mode(&engine, 1, ExecutionMode::Plan)
+            .unwrap();
+        session
+            .record_turn(&engine, "update the project", &outcome("done"))
+            .unwrap();
+        let turns = Session::read_turns(&engine, session.id(), None).unwrap();
+        assert_eq!(turns[0].execution_mode, ExecutionMode::Auto);
+        let reopened = Session::open(&engine, session.id().as_str())
+            .unwrap()
+            .unwrap();
+        assert_eq!(reopened.execution_mode(), ExecutionMode::Plan);
+        assert_eq!(reopened.execution_mode_revision(), 2);
     }
 
     /// A turn that fails, continuing whatever came before it.

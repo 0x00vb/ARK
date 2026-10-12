@@ -41,6 +41,9 @@ pub enum AgentError {
     /// A plugin could not be added, removed or started.
     #[error("{0}")]
     Plugin(String),
+
+    #[error("the execution mode changed in another window")]
+    StaleExecutionMode,
 }
 
 /// How an [`AgentError::UnusableReply`] reads, so a front-end can word it for the person.

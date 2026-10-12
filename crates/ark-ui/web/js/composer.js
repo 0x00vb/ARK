@@ -10,14 +10,16 @@ import { label } from "./keys.js";
 import { programSheet } from "./places.js";
 
 export class Composer {
-  constructor(api) {
+  constructor(api, elements = {}) {
     this.api = api;
-    this.input = $("#input");
-    this.form = $("#composer");
-    this.send = $("#send");
-    this.queueEl = $("#queue");
-    this.slash = $("#slash");
-    this.model = $("#model-chip");
+    this.input = elements.input || $("#input");
+    this.form = elements.form || $("#composer");
+    this.send = elements.send || $("#send");
+    this.queueEl = elements.queue || $("#queue");
+    this.slash = elements.slash || $("#slash");
+    this.model = elements.model || $("#model-chip");
+    this.mode = elements.mode || $("#mode-chip");
+    this.attach = elements.attach || $("#attach");
     this.queue = [];
     this.running = false;
     this.commands = [];
@@ -32,7 +34,8 @@ export class Composer {
       else this.submit(false);
     });
     this.model.addEventListener("click", () => this.modelMenu());
-    $("#attach").addEventListener("click", () => chooseFiles(api, this));
+    this.mode.addEventListener("click", () => this.modeMenu());
+    this.attach?.addEventListener("click", () => chooseFiles(api, this));
     this.changed();
   }
 
@@ -75,6 +78,7 @@ export class Composer {
   /// Name the model on its button: the app's words when it draws the picker. With nothing
   /// chosen yet the button asks for a choice, and sending opens the menu.
   setModel(desc) {
+    this.modelDescription = desc;
     let label = desc || "model";
     let missing = false;
     const p = registry.modelPicker;
@@ -92,7 +96,56 @@ export class Composer {
     this.missing = missing;
   }
 
+  setExecutionMode(mode, revision = 0) {
+    this.executionMode = ["plan", "manual", "auto"].includes(mode) ? mode : "manual";
+    this.executionModeRevision = revision;
+    this.mode.textContent = this.executionMode[0].toUpperCase() + this.executionMode.slice(1);
+    this.mode.dataset.mode = this.executionMode;
+    this.mode.setAttribute("aria-label", `${this.mode.textContent} execution mode`);
+  }
+
+  async chooseMode(mode) {
+    if (mode === this.executionMode) return;
+    this.mode.disabled = true;
+    try {
+      await this.api.setExecutionMode(mode);
+    } finally {
+      this.mode.disabled = false;
+      this.focus();
+    }
+  }
+
+  cycleMode() {
+    const modes = ["plan", "manual", "auto"];
+    const next = modes[(modes.indexOf(this.executionMode || "manual") + 1) % modes.length];
+    void this.chooseMode(next);
+  }
+
+  modeMenu() {
+    const open = document.querySelector(".popover.modes-pop.open");
+    if (open) return open.close();
+    const choices = [
+      ["plan", "Plan", "Inspect and return a plan. No changes."],
+      ["manual", "Manual", "Ask before ungranted changes."],
+      ["auto", "Auto", "Continue confined project work without asking."],
+    ];
+    let menu;
+    const rows = choices.map(([id, name, detail]) => h("button.menu-item.mode-item", {
+      type: "button",
+      role: "menuitemradio",
+      "aria-checked": String(id === this.executionMode),
+      onclick: () => { menu.close(); void this.chooseMode(id); },
+    }, h("span", name), h("span.menu-sub", detail)));
+    menu = this.api.popover(this.mode, rows, { above: true });
+    menu.classList.add("modes-pop");
+  }
+
   key(e) {
+    if (e.key === "Tab" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      this.cycleMode();
+      return;
+    }
     if (!this.slash.hidden) {
       const items = [...this.slash.querySelectorAll(".slash-item")];
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -235,7 +288,11 @@ export class Composer {
       menu.classList.add("models-pop");
       try {
         // Closing returns to the message, so Enter sends what waited for a model.
-        picker.render(el, { close: () => { menu.close(); this.focus(); } });
+        picker.render(el, {
+          close: () => { menu.close(); this.focus(); },
+          current: this.modelDescription,
+          choose: this.api.chooseModel,
+        });
       } catch (e) {
         console.error(e);
         el.append(h("div.menu-sub.pad", String(e)));

@@ -92,6 +92,8 @@ pub struct TurnOptions {
     pub present: bool,
     /// Tools for this turn only, beside the app's (see [`TurnTools`]).
     pub tools: Vec<TurnTools>,
+    /// Authority frozen for this turn.
+    pub execution_mode: ark_core::ExecutionMode,
 }
 
 /// Tools a front-end adds to one turn, such as an orchestrator's for the person's own
@@ -388,6 +390,7 @@ impl Ark {
             .steering(opts.steer)
             .presentation(opts.present)
             .focus(opts.focus)
+            .execution_mode(opts.execution_mode)
             .rules(rules)
             .skills(catalog);
         session.begin_turn_with_goal(&self.engine, input, goal)?;

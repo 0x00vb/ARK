@@ -118,6 +118,7 @@ impl Adapter for Files {
                 "create or replace a whole file: text; a document (.docx) from Markdown; a spreadsheet (.xlsx, .csv) from rows",
                 RiskTier::Mutate,
             )
+            .auto_eligible()
             .with_input_schema(json!({
                 "type": "object", "required": ["path"],
                 "properties": {
@@ -135,6 +136,7 @@ impl Adapter for Files {
                 "change part of a file and keep the rest (its look, formulas, other sheets): set cells or add a sheet in a spreadsheet (.xlsx, .csv), replace or insert blocks in a document (.docx), find and replace text in any file",
                 RiskTier::Mutate,
             )
+            .auto_eligible()
             .with_input_schema(json!({
                 "type": "object", "required": ["path", "edits"],
                 "properties": {

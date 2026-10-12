@@ -345,7 +345,7 @@ impl Adapter for Exec {
                 self.shows
             ));
         }
-        vec![ActionDescriptor::new(RUN, summary, RiskTier::Mutate).with_input_schema(json!({
+        vec![ActionDescriptor::new(RUN, summary, RiskTier::Mutate).auto_eligible().with_input_schema(json!({
             "type": "object", "required": ["code"],
             "properties": {
                 "purpose": { "type": "string", "description": "what the run does, in one short sentence the person understands (no code words), e.g. \"join the two sales files by customer and total each month\"" },

@@ -1,6 +1,6 @@
 # 0063. Two chats can share one window without sharing state
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-11
 
 ## Context

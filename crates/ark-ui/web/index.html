@@ -64,6 +64,11 @@
           </div>
         </header>
 
+        <nav class="chat-tabs" id="chat-tabs" aria-label="Open chats" hidden>
+          <div class="chat-tab-list" id="chat-tab-list" role="tablist"></div>
+          <button class="icon-btn chat-split" id="chat-split" type="button" title="Split with another open chat" aria-label="Split with another open chat" data-icon="split"></button>
+        </nav>
+
         <section class="scroller" id="scroller">
           <div class="thread" id="thread"></div>
         </section>
@@ -83,6 +88,7 @@
               <button type="button" class="icon-btn attach" id="attach" title="Add files" aria-label="Add files" data-icon="plus"></button>
               <button type="button" class="chip place-chip" id="place-chip" hidden></button>
               <button type="button" class="chip model-chip" id="model-chip" title="Model"></button>
+              <button type="button" class="chip mode-chip" id="mode-chip" title="Execution mode (⇧Tab)" aria-haspopup="menu">Manual</button>
               <button type="button" class="ctx-meter" id="ctx-ring" title="Context"></button>
               <button type="submit" class="send" id="send" aria-label="Send"></button>
             </div>

@@ -2827,6 +2827,19 @@ impl Host {
                 }
                 let ask = params.get("ask").and_then(|v| v.as_bool()).unwrap_or(true);
                 let _quiet = self.switching.lock().await;
+                if params.get("execution_mode").is_some() {
+                    let expected: ark_interact::ark_sdk::prelude::ark_core::ExecutionMode =
+                        serde_json::from_value(params["execution_mode"].clone())?;
+                    let revision = params["execution_mode_revision"].as_u64().unwrap_or(0);
+                    let conv = self.cur();
+                    let ix = conv.ix.lock().await;
+                    let summary = ix.summary();
+                    anyhow::ensure!(
+                        summary.execution_mode == expected
+                            && summary.execution_mode_revision == revision,
+                        "the execution mode changed; review it and send again"
+                    );
+                }
                 self.start_turn(text, ask)?;
                 Ok(json!({ "started": true }))
             }
@@ -3139,6 +3152,18 @@ impl Host {
                     ix.rename_session(target, &title).map(|_| ())
                 })
                 .await
+            }
+            "execution_mode" => {
+                let mode = serde_json::from_value(params["mode"].clone())?;
+                let revision = n("revision").unwrap_or(0);
+                let conv = self.cur();
+                let mut ix = conv.ix.lock().await;
+                ix.set_execution_mode(revision, mode)?;
+                conv.note(&ix);
+                drop(ix);
+                let summary = self.summary_of(&conv);
+                self.emit(json!({ "kind": "summary", "summary": summary }));
+                Ok(summary)
             }
             "switch_project" => {
                 let name = s("name");
@@ -3772,6 +3797,18 @@ impl Host {
                     ix.switch_model(&model)?;
                     conv.note(&ix);
                 }
+                if params.get("execution_mode").is_some() {
+                    let expected: ark_interact::ark_sdk::prelude::ark_core::ExecutionMode =
+                        serde_json::from_value(params["execution_mode"].clone())?;
+                    let revision = params["execution_mode_revision"].as_u64().unwrap_or(0);
+                    let ix = conv.ix.lock().await;
+                    let summary = ix.summary();
+                    anyhow::ensure!(
+                        summary.execution_mode == expected
+                            && summary.execution_mode_revision == revision,
+                        "the execution mode changed; review it and send again"
+                    );
+                }
                 self.start_turn_on(conv, text, ask)?;
                 Ok(json!({ "started": true }))
             }
@@ -3848,6 +3885,15 @@ impl Host {
                 ix.switch_model(&s("spec"))?;
                 conv.note(&ix);
                 drop(ix);
+                Ok(self.summary_of(&conv))
+            }
+            "chat_execution_mode" => {
+                let conv = self.chat_conv(&session, &s("model"), false).await?;
+                let mode = serde_json::from_value(params["mode"].clone())?;
+                let revision = params["revision"].as_u64().unwrap_or(0);
+                let mut ix = conv.ix.lock().await;
+                ix.set_execution_mode(revision, mode)?;
+                conv.note(&ix);
                 Ok(self.summary_of(&conv))
             }
             "chat_rename" => {

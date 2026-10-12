@@ -39,6 +39,7 @@ const firstReady = new Promise((resolve) => (readyResolve = resolve));
 const validLocation = (location) => !!(location?.runtime && location?.project && location?.session);
 // Main-column views (`ark.view`), built on first show and kept while hidden.
 const views = new Map();
+let secondaryElements;
 
 // ---- the api views and app scripts use ------------------------------------------------------
 
@@ -107,8 +108,7 @@ const api = {
   // A code to sign in another device (Settings › Devices, ADR 0047).
   pairCode: () => transport.pairCode(),
   openSession: (id) => {
-    showConversation();
-    if (id !== state.sessionId) return change("open_session", { id });
+    return openChatTab(id);
   },
   openView: (id, params) => showView(id, params),
   showConversation: () => showConversation(),
@@ -150,6 +150,7 @@ const api = {
     if (!p) return toast(`No panel named ${id}`);
     const current = currentLocation();
     const project = params?.project || state.summary?.project;
+    if (!panelShown(p, project)) return toast(`${p.title} is not available for this project`);
     const place = params && Object.hasOwn(params, "place") ? params.place : state.summary?.place?.name || "";
     const location = p.projectScoped ? { ...current, session: "" } : current;
     if (p.projectScoped) params = { ...(params || {}), project, place };
@@ -175,6 +176,22 @@ const api = {
   refreshSidebar: () => sidebar.refresh(state.sessionId),
   refreshNavigation: () => topbar?.render(),
   refreshModel: () => composer.setModel(state.summary?.model),
+  setExecutionMode: async (mode) => {
+    try {
+      const summary = await transport.call("execution_mode", {
+        mode,
+        revision: state.summary?.execution_mode_revision || 0,
+      });
+      applySummary(summary);
+      dispatchExt("ark:summary", { kind: "summary", summary });
+      return summary;
+    } catch (error) {
+      toast(error.message || String(error));
+      const summary = await transport.call("summary");
+      applySummary(summary);
+      throw error;
+    }
+  },
   // Ask the window to reflect a view's focus again (after its selection changed).
   reportFocus: () => reportFocus(),
   _changed: () => {
@@ -212,7 +229,7 @@ const RESOURCE_METHODS = {
 };
 
 function currentLocation() {
-  const location = state.summary?.location;
+  const location = secondaryChat?.active ? secondaryChat.summary?.location : state.summary?.location;
   if (!location?.runtime || !location?.project || !location?.session) throw new Error("This chat has no resource location");
   return location;
 }
@@ -281,6 +298,301 @@ function scopedApi(location) {
 registerBuiltins(installApi(api));
 
 let thread, composer, sidebar, destinations, topbar, pane, waiting, places;
+let secondaryChat = null;
+const chatTabs = { ids: [], titles: new Map() };
+
+function draftKey(session) {
+  return `ark-draft:${state.runtime || "runtime"}:${session}`;
+}
+
+function scrollKey(session) {
+  return `ark-scroll:${state.runtime || "runtime"}:${session}`;
+}
+
+function saveDraft(session = state.sessionId, value = composer?.input?.value) {
+  if (!session || value == null) return;
+  try { localStorage.setItem(draftKey(session), value); } catch {}
+}
+
+function savedDraft(session) {
+  try { return localStorage.getItem(draftKey(session)) || ""; } catch { return ""; }
+}
+
+function saveScroll(session, element) {
+  if (!session || !element) return;
+  try { localStorage.setItem(scrollKey(session), String(element.scrollTop)); } catch {}
+}
+
+function restoreScroll(session, element) {
+  if (!session || !element) return;
+  let top = 0;
+  try { top = Number(localStorage.getItem(scrollKey(session)) || 0); } catch {}
+  requestAnimationFrame(() => { element.scrollTop = Number.isFinite(top) ? top : 0; });
+}
+
+function saveTabs() {
+  try { localStorage.setItem("ark-open-chats", JSON.stringify(chatTabs.ids.slice(-12))); } catch {}
+}
+
+function saveSplit(session) {
+  try {
+    if (session) localStorage.setItem("ark-split-chat", session);
+    else localStorage.removeItem("ark-split-chat");
+  } catch {}
+}
+
+function rememberTab(summary = state.summary) {
+  const session = summary?.session;
+  if (!session?.id) return;
+  chatTabs.ids = chatTabs.ids.filter((id) => id !== session.id);
+  chatTabs.ids.push(session.id);
+  chatTabs.titles.set(session.id, session.title || "Untitled chat");
+  saveTabs();
+  renderChatTabs();
+}
+
+async function openChatTab(id) {
+  if (!id || id === state.sessionId) return showConversation();
+  if (secondaryChat?.session === id) {
+    secondaryChat.focus();
+    return;
+  }
+  saveDraft();
+  showConversation(false);
+  if (!chatTabs.ids.includes(id)) chatTabs.ids.push(id);
+  saveTabs();
+  await change("open_session", { id });
+}
+
+async function closeChatTab(id) {
+  if (secondaryChat?.session === id) closeSplit();
+  const at = chatTabs.ids.indexOf(id);
+  chatTabs.ids = chatTabs.ids.filter((entry) => entry !== id);
+  chatTabs.titles.delete(id);
+  saveTabs();
+  if (id === state.sessionId) {
+    const next = chatTabs.ids[Math.min(at, chatTabs.ids.length - 1)];
+    if (next) await openChatTab(next);
+    else await api.newSession();
+  }
+  renderChatTabs();
+}
+
+function renderChatTabs() {
+  const bar = $("#chat-tabs");
+  const list = $("#chat-tab-list");
+  if (!bar || !list) return;
+  bar.hidden = chatTabs.ids.length < 2 && !secondaryChat;
+  clear(list);
+  for (const id of chatTabs.ids) {
+    const close = h("button.chat-tab-close", { type: "button", title: "Close chat", "aria-label": "Close chat" }, icon("x"));
+    close.addEventListener("click", (event) => { event.stopPropagation(); void closeChatTab(id); });
+    const open = (event) => event.altKey ? void openSplit(id) : void openChatTab(id);
+    const tab = h("div.chat-tab", {
+      role: "tab", tabindex: "0", "aria-selected": String(id === state.sessionId),
+      "data-secondary": String(id === secondaryChat?.session), title: chatTabs.titles.get(id) || "Chat",
+      onclick: open,
+      onkeydown: (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(event); }
+      },
+    }, h("span.chat-tab-title", chatTabs.titles.get(id) || "Untitled chat"), close);
+    list.append(tab);
+  }
+  const split = $("#chat-split");
+  if (split) {
+    split.disabled = !secondaryChat && !chatTabs.ids.some((id) => id !== state.sessionId);
+    split.setAttribute("aria-pressed", String(!!secondaryChat));
+    split.title = secondaryChat ? "Close split" : "Split with another open chat";
+  }
+}
+
+function buildSecondarySurface() {
+  const scroller = h("section.scroller");
+  const threadEl = h("div.thread");
+  scroller.append(threadEl);
+  const asks = h("div.asks", { "aria-live": "polite" });
+  const queue = h("div.queue");
+  const slash = h("div.palette", { hidden: true });
+  const input = h("textarea", { rows: "1", placeholder: "Ask anything", spellcheck: "true" });
+  const attach = h("button.icon-btn.attach", { type: "button", title: "Add files", "aria-label": "Add files" }, icon("plus"));
+  const model = h("button.chip.model-chip", { type: "button", title: "Model" });
+  const mode = h("button.chip.mode-chip", { type: "button", title: "Execution mode (⇧Tab)", "aria-haspopup": "menu" }, "Manual");
+  const send = h("button.send", { type: "submit", "aria-label": "Send" });
+  const form = h("form.composer", { autocomplete: "off" }, input,
+    h("div.composer-bar", attach, model, mode, send));
+  const dock = h("div.dock", queue, slash, form);
+  const heading = h("strong", "Chat");
+  const surface = h("section.chat-surface.secondary", { hidden: true, "data-active": "false" },
+    h("div.secondary-head", heading), scroller, asks, dock);
+  return { surface, scroller, threadEl, asks, queue, slash, input, attach, model, mode, send, form, heading };
+}
+
+class SecondaryChat {
+  constructor(read, elements) {
+    this.elements = elements;
+    this.summary = read.summary;
+    this.session = read.summary.session.id;
+    this.running = false;
+    const base = scopedApi(read.summary.location);
+    const chat = this;
+    this.api = Object.create(base);
+    this.api.summary = () => chat.summary;
+    this.api.submit = (text) => chat.submit(text);
+    this.api.send = this.api.submit;
+    this.api.steer = (text) => transport.call("chat_steer", { session: chat.session, text });
+    this.api.cancel = () => transport.call("chat_cancel", { session: chat.session }).catch(() => {});
+    this.api.loadEarlier = async (before) => {
+      const read = await transport.call("chat_read", { session: chat.session, model: chat.summary.model, before, limit: 30 });
+      chat.thread.renderStored(read.transcript || [], { prepend: true, hasMore: (read.transcript || []).length === 30 });
+    };
+    this.api.chooseModel = async (spec) => {
+      const summary = await transport.call("chat_model", { session: chat.session, spec, model: chat.summary.model });
+      chat.applySummary(summary);
+      return summary;
+    };
+    this.api.setExecutionMode = async (mode) => {
+      const summary = await transport.call("chat_execution_mode", {
+        session: chat.session,
+        mode,
+        revision: chat.summary.execution_mode_revision || 0,
+        model: chat.summary.model,
+      });
+      chat.applySummary(summary);
+      return summary;
+    };
+    this.thread = new Thread(elements.threadEl, elements.scroller, this.api);
+    this.composer = new Composer(this.api, elements);
+    this.composer.commands = state.commands || [];
+    this.composer.placeholder = `Ask ${read.summary.name} anything`;
+    this.applySummary(read.summary);
+    if (read.transcript?.length) this.thread.renderStored(read.transcript, { hasMore: read.transcript.length === 30 });
+    else this.thread.welcome({ title: "New chat", subtitle: "" }, [], () => {});
+    if (read.running) {
+      this.thread.begin(read.running);
+      this.setRunning(true);
+      for (const message of read.live || []) this.handle(message);
+    }
+    for (const approval of read.approvals || []) this.handle({ kind: "approval", ...approval });
+    elements.surface.hidden = false;
+    elements.surface.addEventListener("pointerdown", () => this.focus(), true);
+    this.composer.input.value = savedDraft(this.session);
+    this.composer.changed();
+    this.composer.input.addEventListener("input", () => saveDraft(this.session, this.composer.input.value));
+    elements.scroller.addEventListener("scroll", () => saveScroll(this.session, elements.scroller), { passive: true });
+    restoreScroll(this.session, elements.scroller);
+  }
+
+  applySummary(summary) {
+    this.summary = summary;
+    this.elements.heading.textContent = summary.session.title || "Untitled chat";
+    this.composer.setModel(summary.model);
+    this.composer.setExecutionMode(summary.execution_mode || "manual", summary.execution_mode_revision || 0);
+    chatTabs.titles.set(this.session, summary.session.title || "Untitled chat");
+    renderChatTabs();
+  }
+
+  setRunning(running) {
+    this.running = running;
+    this.composer.setRunning(running);
+  }
+
+  async submit(text) {
+    text = String(text || "").trim();
+    if (!text || this.running) return;
+    this.thread.begin(text).local = true;
+    this.setRunning(true);
+    try {
+      await transport.call("chat_send", {
+        session: this.session,
+        text,
+        model: this.summary.model,
+        execution_mode: this.composer.executionMode || "manual",
+        execution_mode_revision: this.composer.executionModeRevision || 0,
+      });
+    } catch (error) {
+      this.thread.finish({ ok: false, error: error.message });
+      this.setRunning(false);
+      this.composer.set(text);
+      toast(error.message);
+    }
+  }
+
+  handle(message) {
+    if (message.session && message.session !== this.session) return false;
+    switch (message.kind) {
+      case "turn_started":
+        if (!this.thread.live) this.thread.begin(message.input);
+        this.setRunning(true);
+        break;
+      case "text": this.thread.event(message); break;
+      case "event":
+        this.thread.event(message);
+        if (message.event?.type === "steered") this.composer.delivered(message.event.text);
+        else if (message.event?.type === "present") present(message.event.directive, this.api);
+        break;
+      case "approval":
+        this.thread.approval(message, (id, decision) => transport.call("chat_approve", { session: this.session, id, decision }).catch((error) => toast(error.message)));
+        break;
+      case "approval_closed": this.thread.approvalClosed(message.id); break;
+      case "post": this.thread.post(message.post); break;
+      case "turn_finished": {
+        this.thread.finish(message);
+        this.setRunning(false);
+        if (message.summary) this.applySummary(message.summary);
+        this.composer.clearSteering();
+        const next = this.composer.takeNext(message.undelivered || []);
+        if (next) setTimeout(() => this.submit(next), 120);
+        break;
+      }
+      default: return false;
+    }
+    return true;
+  }
+
+  focus() {
+    if (secondaryChat !== this) return;
+    this.active = true;
+    this.elements.surface.dataset.active = "true";
+    document.querySelector(".chat-surface.primary")?.setAttribute("data-active", "false");
+    this.composer.focus();
+    renderChatTabs();
+  }
+}
+
+async function openSplit(id) {
+  if (!id || id === state.sessionId) return;
+  if (secondaryChat?.session === id) return secondaryChat.focus();
+  closeSplit();
+  try {
+    const read = await transport.call("chat_read", { session: id, model: state.summary?.model, limit: 30 });
+    const current = state.summary?.location;
+    const other = read.summary?.location;
+    if (!current || !other || current.project !== other.project || current.runtime !== other.runtime) {
+      toast("Open chats from the same project and computer in a split");
+      return;
+    }
+    secondaryChat = new SecondaryChat(read, secondaryElements);
+    $("#chat-workspace").dataset.split = "true";
+    saveSplit(id);
+    rememberTab(read.summary);
+    secondaryChat.focus();
+  } catch (error) {
+    toast(error.message || String(error));
+  }
+}
+
+function closeSplit() {
+  if (!secondaryChat) return;
+  saveDraft(secondaryChat.session, secondaryChat.composer.input.value);
+  saveScroll(secondaryChat.session, secondaryChat.elements.scroller);
+  secondaryChat.elements.surface.hidden = true;
+  secondaryChat = null;
+  saveSplit(null);
+  const workspace = $("#chat-workspace");
+  if (workspace) workspace.dataset.split = "false";
+  document.querySelector(".chat-surface.primary")?.setAttribute("data-active", "true");
+  renderChatTabs();
+}
 
 const expectedExtensions = [...document.querySelectorAll("script[data-ark-extension]")]
   .map((script) => ({ id: script.dataset.arkExtension, src: script.getAttribute("src") }));
@@ -404,11 +716,16 @@ async function submit(text) {
   thread.begin(text).local = true;
   setRunning(true);
   try {
-    await transport.call("send", { text });
+    await transport.call("send", {
+      text,
+      execution_mode: composer.executionMode || "manual",
+      execution_mode_revision: composer.executionModeRevision || 0,
+    });
   } catch (e) {
     toast(e.message);
     thread.finish({ ok: false, error: e.message });
     setRunning(false);
+    composer.set(text);
   }
 }
 
@@ -470,8 +787,14 @@ function setRunning(on) {
 // ---- session display -------------------------------------------------------------------------
 
 function applySummary(s) {
+  if (state.sessionId && s.session.id !== state.sessionId) saveDraft();
   const changed = s.session.id !== state.sessionId;
   const projectChanged = s.project?.id !== state.summary?.project?.id;
+  if (state.summary && projectChanged) {
+    closeSplit();
+    chatTabs.ids = [];
+    chatTabs.titles.clear();
+  }
   state.summary = s;
   if (!isReady && validLocation(s.location)) {
     isReady = true;
@@ -486,6 +809,8 @@ function applySummary(s) {
     if (view?.projectScoped) views.get(state.view)?.ctl?.update?.({ project: s.project });
   }
   composer.setModel(s.model);
+  composer.setExecutionMode(s.execution_mode || "manual", s.execution_mode_revision || 0);
+  rememberTab(s);
   places?.show(s, state.running);
   // A chat on a computer that does not answer reads only.
   const away = !!s.place && s.place.state !== "ok";
@@ -510,6 +835,12 @@ async function loadSession() {
   sidebar.refresh(state.sessionId);
   refreshRing();
   schedulesFollow();
+  const draft = savedDraft(state.sessionId);
+  if (draft && !composer.input.value) {
+    composer.input.value = draft;
+    composer.changed();
+  }
+  restoreScroll(state.sessionId, $("#scroller"));
 }
 
 function showWelcome() {
@@ -620,7 +951,10 @@ function onEvent(msg) {
   // chat. Summary is dispatched in its case below, after `applySummary`.
   if (msg.kind !== "ext" && msg.kind !== "text" && msg.kind !== "summary") dispatchExt(`ark:${msg.kind}`, msg);
   // A question an orchestrated agent asks belongs to no chat (`session` is empty).
-  if (msg.session && msg.session !== state.sessionId) return elsewhere(msg);
+  if (msg.session && msg.session !== state.sessionId) {
+    if (secondaryChat?.session === msg.session && secondaryChat.handle(msg)) return;
+    return elsewhere(msg);
+  }
   switch (msg.kind) {
     case "turn_started":
       if (!thread.live) {
@@ -750,14 +1084,14 @@ function openArtifactTab(id, viewerId, params, location = currentLocation()) {
   }, prm, { wide: v ? !!v.wide : registry.viewers.some((x) => x.wide), fill: true, api: ark });
 }
 
-function present(d) {
+function present(d, target = api) {
   const by = presenterFor(d.view);
   // A file opens in a tab of its own, unless the app shows files itself.
-  if (d.view === "file" && d.path && (!by?.panel || by.panel.builtin)) return api.openFile(d.path, d);
-  if (by?.panel) return api.openPanel(by.panel.id, d);
-  if (by?.viewer && d.artifact) return api.openArtifact(d.artifact, by.viewer.id, d);
-  if (d.artifact) return api.openArtifact(d.artifact, undefined, d);
-  if (d.view === "evidence" && d.locator) return api.openInvocation(d.locator);
+  if (d.view === "file" && d.path && (!by?.panel || by.panel.builtin)) return target.openFile(d.path, d);
+  if (by?.panel) return target.openPanel(by.panel.id, d);
+  if (by?.viewer && d.artifact) return target.openArtifact(d.artifact, by.viewer.id, d);
+  if (d.artifact) return target.openArtifact(d.artifact, undefined, d);
+  if (d.view === "evidence" && d.locator) return target.openInvocation(d.locator);
   toast(`The agent asked to show ${d.view === "split" ? "a split view" : `a ${d.view}`}, which this window cannot show.`);
 }
 
@@ -886,6 +1220,14 @@ function shown(a) {
   }
 }
 
+function panelShown(panel, project = api.project()) {
+  try {
+    return !panel.when || !!panel.when({ project });
+  } catch {
+    return false;
+  }
+}
+
 function palette() {
   const overlay = $("#overlay");
   if (!overlay.hidden) return closePalette();
@@ -896,7 +1238,9 @@ function palette() {
       .filter((v) => !v.when || v.when({ project: api.project() }))
       .map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),
     ...(registry.settings.size ? [{ label: "Settings", hint: label("⌘,"), run: () => api.openSettings() }] : []),
-    ...[...registry.panels.values()].map((p) => ({ label: p.title, hint: "panel", run: () => api.openPanel(p.id) })),
+    ...[...registry.panels.values()]
+      .filter((p) => panelShown(p))
+      .map((p) => ({ label: p.title, hint: "panel", run: () => api.openPanel(p.id) })),
     ...registry.actions.filter((a) => (!a.where || a.where === "palette") && shown(a)).map((a) => ({ label: a.label, hint: "action", run: () => a.run({}, window.ark) })),
     ...(state.commands || []).map((c) => ({ label: `/${c.name}${c.usage ? " " + c.usage : ""}`, hint: c.summary, run: () => (c.usage && !c.usage.startsWith("[") ? composer.set(`/${c.name} `) : runCommand(`/${c.name}`)) })),
   ];
@@ -1243,6 +1587,23 @@ async function start() {
   appEl.dataset.os = os;
   relabel(document.body);
   if (transport.shell === "desktop") appLike();
+  try {
+    const restored = JSON.parse(localStorage.getItem("ark-open-chats") || "[]");
+    if (Array.isArray(restored)) chatTabs.ids = restored.filter((id) => typeof id === "string").slice(-12);
+  } catch {}
+  const primary = h("section.chat-surface.primary", { "data-active": "true" });
+  primary.append($("#scroller"), $("#asks"), document.querySelector(".dock"));
+  const workspace = h("div.chat-workspace", { id: "chat-workspace", "data-split": "false" }, primary);
+  secondaryElements = buildSecondarySurface();
+  workspace.append(secondaryElements.surface);
+  $("#stage").before(workspace);
+  primary.addEventListener("pointerdown", () => {
+    if (!secondaryChat) return;
+    secondaryChat.active = false;
+    secondaryElements.surface.dataset.active = "false";
+    primary.dataset.active = "true";
+    renderChatTabs();
+  }, true);
   thread = new Thread($("#thread"), $("#scroller"), api);
   composer = new Composer(api);
   places = new Places(api);
@@ -1265,6 +1626,11 @@ async function start() {
   });
   $("#toggle-sidebar").addEventListener("click", toggleSidebar);
   $("#search-chats").addEventListener("click", searchChats);
+  $("#chat-split").addEventListener("click", () => {
+    if (secondaryChat) return closeSplit();
+    const other = [...chatTabs.ids].reverse().find((id) => id !== state.sessionId);
+    if (other) void openSplit(other);
+  });
   $("#reveal-sidebar").addEventListener("click", toggleSidebar);
   $("#toggle-pane").addEventListener("click", () => pane.toggle());
   $("#ctx-ring").addEventListener("click", () => runCommand("/context"));
@@ -1272,6 +1638,19 @@ async function start() {
   document.addEventListener("keydown", keys);
   transport.subscribe(receive);
   await boot();
+  try {
+    const sessions = await transport.call("sessions", { project: state.summary?.project?.id });
+    const available = new Set((sessions || []).map((session) => session.id));
+    chatTabs.ids = chatTabs.ids.filter((id) => available.has(id));
+    for (const session of sessions || []) {
+      if (chatTabs.ids.includes(session.id)) chatTabs.titles.set(session.id, session.title || "Untitled chat");
+    }
+    renderChatTabs();
+    const split = localStorage.getItem("ark-split-chat");
+    if (split && split !== state.sessionId && chatTabs.ids.includes(split)) void openSplit(split);
+  } catch {}
+  composer.input.addEventListener("input", () => saveDraft());
+  $("#scroller").addEventListener("scroll", () => saveScroll(state.sessionId, $("#scroller")), { passive: true });
   composer.focus();
   requestAnimationFrame(() => appEl.classList.add("ready"));
 }

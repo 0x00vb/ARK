@@ -5,6 +5,19 @@
 use crate::capability::Capability;
 use serde::{Deserialize, Serialize};
 
+/// The authority a person gives one chat for its next turn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Inspect and answer. State-changing actions are not offered.
+    Plan,
+    /// Ask before state-changing actions that no existing grant covers.
+    #[default]
+    Manual,
+    /// Run only explicitly project-bound mutations without asking.
+    Auto,
+}
+
 /// How consequential an action is. Drives the approval gate: `Read` and `Observe`
 /// auto-run; `Mutate` always needs explicit human approval before it executes.
 ///
@@ -24,7 +37,7 @@ pub enum RiskTier {
     #[serde(alias = "device_read")]
     Observe,
     /// Changes state: write or modify a file, push to a remote system, send state-changing
-    /// traffic, spend money. Always needs explicit human approval before it executes.
+    /// traffic, spend money. Needs approval unless a narrow action explicitly opts into Auto.
     Mutate,
 }
 
@@ -85,6 +98,10 @@ pub struct ActionDescriptor {
     /// one app). See [`GrantKey`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant: Option<GrantKey>,
+    /// This mutation is constrained to the selected project or contained runtime and may run
+    /// without a question in [`ExecutionMode::Auto`]. False is the safe default.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_eligible: bool,
 }
 
 /// Splits approval answers by input: a grant covers the calls of `group` whose `fields` have
@@ -143,6 +160,7 @@ impl ActionDescriptor {
             reuse: Reuse::Auto,
             ask_each_time: false,
             grant: None,
+            auto_eligible: false,
         }
     }
 
@@ -169,6 +187,12 @@ impl ActionDescriptor {
     /// Ask the person at every call; no earlier answer covers it ([`Self::ask_each_time`]).
     pub fn ask_each_time(mut self) -> Self {
         self.ask_each_time = true;
+        self
+    }
+
+    /// Allow this project-bound mutation to run without a question in Auto mode.
+    pub fn auto_eligible(mut self) -> Self {
+        self.auto_eligible = true;
         self
     }
 
@@ -235,5 +259,16 @@ mod tests {
             any.class(&json!({ "app": "WhatsApp" })).as_deref(),
             Some("app:whatsapp")
         );
+    }
+
+    #[test]
+    fn auto_eligibility_is_explicit_and_old_descriptors_stay_manual() {
+        let plain = ActionDescriptor::new("files.write", "write", RiskTier::Mutate);
+        assert!(!plain.auto_eligible);
+        assert!(plain.clone().auto_eligible().auto_eligible);
+        let mut value = serde_json::to_value(plain).unwrap();
+        value.as_object_mut().unwrap().remove("auto_eligible");
+        let restored: ActionDescriptor = serde_json::from_value(value).unwrap();
+        assert!(!restored.auto_eligible);
     }
 }

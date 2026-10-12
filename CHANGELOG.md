@@ -7,6 +7,17 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Added
+
+- Each chat remembers Plan, Manual or Auto execution mode. Plan cannot mutate state. Auto skips
+  prompts only for explicitly classified, project-bound actions. `Shift+Tab` cycles the choice.
+- A window can keep several chats in tabs and show two chats from the same project and computer
+  side by side. Each pane keeps its own draft, scroll, model, mode, approvals and running work.
+- Settings > Connections can browse the first curated built-in connection catalog without
+  signing in or activating anything until Connect is chosen.
+
 ## [0.20.3] - 2026-10-12
 
 ### Added

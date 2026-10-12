@@ -45,3 +45,4 @@ tauri-plugin-updater = { version = "2.13", optional = true }
 [dev-dependencies]
 tempfile.workspace = true
 async-trait.workspace = true
+url.workspace = true

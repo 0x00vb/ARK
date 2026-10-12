@@ -1444,7 +1444,15 @@ async function connectMidTask(page) {
   assert.deepEqual(buttons, ["Connect", "Not now"]);
   await card.locator('button[data-decision="allow_once"]').click();
   const send = page.locator(".approval:not(.decided)");
-  await send.waitFor({ timeout: 15000 });
+  try {
+    await send.waitFor({ timeout: 15000 });
+  } catch (error) {
+    const thread = await page.locator("#thread").innerText();
+    const approvals = await page.locator(".approval").evaluateAll((rows) =>
+      rows.map((row) => ({ className: row.className, text: row.innerText })),
+    );
+    throw new Error(`${error.message}\nthread:\n${thread}\napprovals:\n${JSON.stringify(approvals, null, 2)}`);
+  }
   assert.match(await send.locator(".approval-line").innerText(), /mail\.send|Send|bob@example\.com/i);
   await send.locator('button[data-decision="allow_once"]').click();
   await page.locator(".agent", { hasText: "Sent the report to Bob." }).waitFor({ timeout: 15000 });

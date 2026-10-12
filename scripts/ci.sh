@@ -18,7 +18,11 @@ step "clippy (warnings are errors)"
 cargo clippy --workspace --all-targets --locked -- -D warnings
 
 step "tests"
-cargo test --workspace --locked
+if [ -n "${RUST_TEST_THREADS:-}" ]; then
+  cargo test --workspace --locked -- --test-threads "$RUST_TEST_THREADS"
+else
+  cargo test --workspace --locked
+fi
 
 step "release build"
 cargo build --workspace --release --locked

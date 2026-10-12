@@ -4,14 +4,14 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-12 (v0.20.1 released; workspace destinations added on main)
+Last updated: 2026-10-12 (v0.20.2 release tree verified)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.20.1 (2026-10-11), release checks passed |
-| `main` | v0.20.1 plus proposed multi-chat and execution-mode boundaries (ADR 0063 and 0064), and the accepted Home and Schedules rail (ADR 0065). Development asset mode serves shared and app interface files from disk and reloads browser pages after a save. |
+| Latest tag | v0.20.2 (2026-10-12), complete page-enabled release gate passed |
+| `main` | v0.20.2 release tree. It includes proposed multi-chat and execution-mode boundaries (ADR 0063 and 0064), the accepted Home and Schedules rail (ADR 0065), development asset reload, and release-gate fixes for serialized page tests and OAuth callback retries. The complete page-enabled release gate passes. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
@@ -25,7 +25,7 @@ Last updated: 2026-10-12 (v0.20.1 released; workspace destinations added on main
 | What | State |
 |---|---|
 | Subscription agents keep their credentials on their computer (ADR 0061) | In v0.20.0: Grok 1.0 is an offered ACP worker with an isolated provider-owned login, fixed ask rules, no inherited app secrets, place-bound setup and a checked model selector. Claude Code and Codex explicit worker compatibility remains, but neither subscription is newly offered: Anthropic requires explicit permission for automated consumer access, and OpenAI's supported third-party route is app-specific Sign in with ChatGPT. ARK's full release gate passed. Left: ARK Desktop's permanent pin, native check and release. |
-| Repeated failed tool calls | In the v0.20.1 candidate: an identical failed read or observation runs once and gets one retry, then returns immediately. A successful change reopens the read. Focused runtime tests pass. The 22-workload simulated suite has no non-timing metric change. Live qwen3:4b passes `failure-recovery` and `web` 3/3, writer dogfood passes and implementation QA is GO. |
+| Repeated failed tool calls | In v0.20.1, an identical failed read or observation runs once and gets one retry, then returns immediately. A successful change reopens the read. Focused runtime tests pass. The 22-workload simulated suite has no non-timing metric change. Live qwen3:4b passes `failure-recovery` and `web` 3/3, writer dogfood passes and implementation QA is GO. |
 | Signed background updates for native consumers (ADR 0054) | In v0.17.0: opt-in `desktop-updater`, official Tauri updater in local and direct-remote window paths, an own-page-only state bridge, background download and install on macOS and Linux, no forced restart. Windows is explicitly unavailable until it has a non-disruptive installer design. Left: ARK Desktop's staged 0.5.2 to 0.5.3 proof |
 | Project Terminal without a chat (ADR 0060) | Protocol support was released in v0.19.0 and stabilized in v0.19.1. The v0.20.0 correction makes the existing web Terminal pane use project authority, capture the current chat's computer and leave the chat unchanged. It removes the duplicate project view. Protocol v1.1 retains generated Terminal types and transport for future artifact clients. ARK Desktop 0.6.5 remains public on v0.19.1; a corrected Desktop release is still needed. |
 | A chat runs on the computer the person picks (ADR 0052, accepted 2026-10-07): the place chip, held chats and `chat_*` calls, the project copy and Bring back, `ark-reach` (setup and a tunnel over the person's `ssh`), Settings › Computers, programs installed and signed in there, ARK Desktop's contract and builds, the writer as second app | In v0.15.0 (steps 0 to 6 and 8). The resource-location amendment is in v0.16.0: every surface carries a validated runtime, project and chat; transfer retry has exact plans, epochs and durable receipts; the remote Browser is rendered by Chromium there. Automated two-runtime tests and a real Linux x86_64 runtime cover Files, editors, spreadsheet, document, Terminal, process, artifacts and Browser, with no local replica. Left: a real-VPS run with a subscription (the owner), step 7 (OpenCode, Cursor: needs a signed-in provider and Cursor) |
@@ -112,8 +112,10 @@ in the tray after the restart saved the file once.
 Checks on the W1 to W3 commits: `scripts/ci.sh` passes (fmt, clippy, every test, release build,
 bench gate); the 26 WebKit page tests passed on the first full run. `files-edit` reads 8 tokens
 over the baseline both before and after this work: from v0.10.0's versions before (checked on
-8bd8b96), within the gate. The page test `an_agent_asks_to_connect_mail_and_the_turn_goes_on`
-is flaky: 1 of 5 passed before this work, 4 of 5 after (a card on the board).
+8bd8b96), within the gate. In v0.20.2, the page gate maps
+`RUST_TEST_THREADS` to libtest's real setting. Its fake OAuth browser decodes complete form values
+and retries transient loopback closes. The former connect-mid-task flake passes 25 of 25 focused
+runs and the complete 43-scenario page gate.
 
 ## Working notes
 

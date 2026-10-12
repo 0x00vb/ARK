@@ -211,7 +211,11 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         // The person's browser: follow the sign-in page back to ARK, without a real browser.
         app = app.sign_in(Arc::new(|url: &str| {
             let url = url.to_string();
-            std::thread::spawn(move || follow(&url));
+            std::thread::spawn(move || {
+                if let Err(error) = follow(&url) {
+                    eprintln!("test sign-in browser failed: {error}");
+                }
+            });
             true
         }));
     }
@@ -694,11 +698,10 @@ async fn fake_provider() -> String {
                 let head = String::from_utf8_lossy(&buf[..n]).to_string();
                 let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
                 let reply = if path.starts_with("/auth") {
-                    let url = reqwest_url(&path);
+                    let query = reqwest_url(&path);
                     let get = |k: &str| {
-                        url.split('&')
-                            .find_map(|kv| kv.strip_prefix(&format!("{k}=")))
-                            .map(|v| v.replace("%3A", ":").replace("%2F", "/"))
+                        url::form_urlencoded::parse(query.as_bytes())
+                            .find_map(|(name, value)| (name == k).then(|| value.into_owned()))
                             .unwrap_or_default()
                     };
                     format!(
@@ -730,26 +733,70 @@ async fn fake_provider() -> String {
 }
 
 /// GET `url` and the place it redirects to, as a browser would (plain HTTP on loopback).
-fn follow(url: &str) {
+fn follow(url: &str) -> std::io::Result<()> {
     use std::io::{Read, Write};
     let mut url = url.to_string();
     for _ in 0..3 {
         let rest = url.trim_start_matches("http://");
         let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
-        let Ok(mut s) = std::net::TcpStream::connect(host) else {
-            return;
-        };
-        let _ = write!(
-            s,
-            "GET /{path} HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
-        );
-        let mut reply = String::new();
-        let _ = s.read_to_string(&mut reply);
-        match reply.lines().find_map(|l| l.strip_prefix("location: ")) {
-            Some(next) => url = next.trim().to_string(),
-            None => return,
+        // The browser callback runs on a separate thread while the loopback provider and ARK
+        // callback listener are starting. A busy full-suite run can reach either address before
+        // its one-shot route is ready, or see the close as a reset after the complete response.
+        // Retry the navigation hop instead of silently dropping the sign-in.
+        let mut next = None;
+        for _ in 0..50 {
+            let Ok(mut stream) = std::net::TcpStream::connect(host) else {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            };
+            if write!(
+                stream,
+                "GET /{path} HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+            )
+            .is_err()
+            {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+            let mut reply = String::new();
+            if let Err(error) = stream.read_to_string(&mut reply) {
+                let closed_after_reply = !reply.is_empty()
+                    && matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionReset
+                            | std::io::ErrorKind::ConnectionAborted
+                            | std::io::ErrorKind::BrokenPipe
+                    );
+                if !closed_after_reply {
+                    std::thread::sleep(Duration::from_millis(20));
+                    continue;
+                }
+            }
+            if let Some(location) = reply.lines().find_map(|l| l.strip_prefix("location: ")) {
+                next = Some(location.trim().to_string());
+                break;
+            }
+            if reply.starts_with("HTTP/1.1 2") {
+                return Ok(());
+            }
+            if reply.starts_with("HTTP/1.1 404") {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+            return Err(std::io::Error::other(format!(
+                "unexpected response from {host} for {url}: {}",
+                reply.lines().next().unwrap_or("empty response")
+            )));
         }
+        let Some(next) = next else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("could not complete {url}"),
+            ));
+        };
+        url = next;
     }
+    Ok(())
 }
 
 /// The query of a request path.

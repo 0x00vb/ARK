@@ -14,6 +14,9 @@ cargo fmt --all --check
 step "generated protocol contract"
 scripts/protocol.sh
 
+step "version and release state"
+scripts/check-version.sh
+
 step "clippy (warnings are errors)"
 cargo clippy --workspace --all-targets --locked -- -D warnings
 
@@ -26,9 +29,6 @@ fi
 
 step "release build"
 cargo build --workspace --release --locked
-
-step "version"
-scripts/check-version.sh
 
 step "simulated benchmark against the committed baseline"
 out=$(mktemp -d)

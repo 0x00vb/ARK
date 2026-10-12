@@ -7,6 +7,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Fixed
+
+- Release checks use available build and test parallelism, reuse a stable fresh-checkout cache, install the locked browser-test dependency, and reject stale release metadata before the expensive gate.
+
 ## [0.20.2] - 2026-10-12
 
 ### Added

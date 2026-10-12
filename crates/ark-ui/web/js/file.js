@@ -45,13 +45,14 @@ export function kindOf(path) {
 export function fileView(el, path, ark, params) {
   el.classList.add("fv");
   const s = { path, file: null, view: null, version: null, busy: 0, offs: [], alive: true, ctl: null };
-  const status = h("span.fv-status", { "aria-live": "polite" });
+  const status = h("span.fv-status", { "aria-live": "polite", role: "status" });
   const show = (state) => {
     status.dataset.state = state || "";
-    status.title = { saving: "Saving", saved: "Saved", error: "Not saved" }[state] || "";
+    status.textContent = { saving: "Saving", saved: "Saved", error: "Not saved" }[state] || "";
+    status.title = status.textContent;
     if (state === "saved") {
       clearTimeout(s.statusTimer);
-      s.statusTimer = setTimeout(() => (status.dataset.state = ""), 1400);
+      s.statusTimer = setTimeout(() => { status.dataset.state = ""; status.textContent = ""; }, 1400);
     }
   };
   const tools = h("div.fv-tools", status,

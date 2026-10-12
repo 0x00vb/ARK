@@ -4,7 +4,7 @@
 // edits the agent sends (`{block, text}`, `{after, text}`, `{delete}`), so both always work on
 // the one file.
 
-import { h, clear } from "./dom.js";
+import { h, clear, icon } from "./dom.js";
 
 /// Quiet time before typing is saved.
 const SAVE_AFTER = 700;
@@ -107,7 +107,13 @@ function blockEl(b) {
     const label = (b.label || "content").replace(/^./, (c) => c.toUpperCase());
     return h("div.dv-b", { "data-kind": "other", contenteditable: "false" }, h("span.dv-other", label));
   }
-  const el = h("div.dv-b", { "data-kind": kind, "data-level": String(b.level || 0) });
+  const layout = b.layout || {};
+  const style = {};
+  if (Number.isFinite(layout.line_spacing)) style.lineHeight = String(layout.line_spacing);
+  if (Number.isFinite(layout.paragraph_before)) style.marginTop = `${layout.paragraph_before}pt`;
+  if (Number.isFinite(layout.paragraph_after)) style.marginBottom = `${layout.paragraph_after}pt`;
+  if (Number.isFinite(layout.character_spacing)) style.letterSpacing = `${layout.character_spacing}pt`;
+  const el = h("div.dv-b", { "data-kind": kind, "data-level": String(b.level || 0), style });
   el.innerHTML = inlineHtml(b.text) || "<br>";
   return el;
 }
@@ -139,10 +145,145 @@ export function documentView(el, file, ctx) {
   const name = file.path.split("/").pop();
   const page = h("div.dv-page", { contenteditable: "true", spellcheck: "true", role: "textbox", "aria-multiline": "true", "aria-label": name });
   const scroll = h("div.dv-scroll", page);
-  // No bar: the tab names the file; saving and "open in its app" float in the corner.
+  const inspector = h("aside.dv-inspector", { hidden: true, "aria-label": "Document formatting" });
+  const body = h("div.dv-body", scroll, inspector);
+  const format = h("button.icon-btn.dv-format", { type: "button", title: "Format document", "aria-label": "Format document", "aria-expanded": "false" }, icon("settings"));
+  ctx.tools.prepend(format);
+  // The tab names the file; saving, formatting and "open in its app" sit in the corner.
   ctx.tools.classList.add("dv-tools");
-  el.append(scroll, ctx.tools);
-  const s = { count: 0, timer: null, saving: null, again: false, touched: new Set() };
+  el.append(body, ctx.tools);
+  const s = { count: 0, timer: null, saving: null, again: false, touched: new Set(), file, undo: null, layoutSaving: false, layoutPending: null, layoutPromise: null };
+
+  const DEFAULT_LAYOUT = { line_spacing: 1.15, paragraph_before: 0, paragraph_after: 8, character_spacing: 0, margin_top: 1, margin_right: 1, margin_bottom: 1, margin_left: 1 };
+  const fields = {};
+  const specs = [
+    ["line_spacing", "Line", 0.5, 4, 0.05, ""],
+    ["paragraph_before", "Before", 0, 144, 1, "pt"],
+    ["paragraph_after", "After", 0, 144, 1, "pt"],
+    ["character_spacing", "Characters", -2, 20, 0.1, "pt"],
+    ["margin_top", "Top", 0, 6, 0.05, "in"],
+    ["margin_right", "Right", 0, 6, 0.05, "in"],
+    ["margin_bottom", "Bottom", 0, 6, 0.05, "in"],
+    ["margin_left", "Left", 0, 6, 0.05, "in"],
+  ];
+  const error = h("p.dv-format-error", { role: "alert", hidden: true });
+  const undo = h("button.btn.small", { type: "button", hidden: true }, "Undo");
+  const close = h("button.icon-btn", { type: "button", title: "Close", "aria-label": "Close formatting" }, icon("x"));
+  const groups = [h("div.dv-format-head", h("h2", "Document"), close)];
+  for (const [title, keys] of [["Base spacing", specs.slice(0, 4)], ["Margins", specs.slice(4)]]) {
+    const rows = keys.map(([key, label, min, max, step, unit]) => {
+      const input = h("input", { type: "number", min, max, step, inputmode: "decimal", "aria-label": label, "aria-describedby": "dv-format-error" });
+      fields[key] = { input, min, max };
+      return h("label.dv-format-row", h("span", label), h("span.dv-format-value", input, unit ? h("span", unit) : null));
+    });
+    groups.push(h("section.dv-format-group", h("h3", title), rows));
+  }
+  const reset = h("button.btn.small", { type: "button" }, "Reset");
+  error.id = "dv-format-error";
+  inspector.append(...groups, error, h("div.dv-format-actions", reset, undo));
+
+  function setInspector(layout) {
+    for (const [key] of specs) {
+      const value = layout?.[key];
+      fields[key].input.value = Number.isFinite(value) ? String(Math.round(value * 100) / 100) : "";
+      fields[key].input.placeholder = value == null ? "Mixed" : "";
+      fields[key].input.removeAttribute("aria-invalid");
+    }
+    applyPageLayout(layout || DEFAULT_LAYOUT);
+  }
+
+  function applyPageLayout(layout) {
+    const inch = (v, fallback) => `${(Number.isFinite(v) ? v : fallback) * 96}px`;
+    page.style.setProperty("--dv-top", inch(layout.margin_top, 1));
+    page.style.setProperty("--dv-right", inch(layout.margin_right, 1));
+    page.style.setProperty("--dv-bottom", inch(layout.margin_bottom, 1));
+    page.style.setProperty("--dv-left", inch(layout.margin_left, 1));
+    page.style.setProperty("--dv-line", String(layout.line_spacing ?? 1.15));
+    page.style.setProperty("--dv-before", `${layout.paragraph_before ?? 0}pt`);
+    page.style.setProperty("--dv-after", `${layout.paragraph_after ?? 8}pt`);
+    page.style.setProperty("--dv-character", `${layout.character_spacing ?? 0}pt`);
+  }
+
+  function values() {
+    const next = {};
+    let bad = null;
+    for (const [key, label] of specs) {
+      const input = fields[key].input;
+      if (input.value === "" && input.placeholder === "Mixed") continue;
+      const value = Number(input.value);
+      if (!Number.isFinite(value) || value < fields[key].min || value > fields[key].max) {
+        bad ||= { input, label, min: fields[key].min, max: fields[key].max };
+      } else next[key] = value;
+    }
+    if (bad) {
+      bad.input.setAttribute("aria-invalid", "true");
+      error.textContent = `${bad.label} must be from ${bad.min} to ${bad.max}.`;
+      error.hidden = false;
+      return null;
+    }
+    error.hidden = true;
+    return next;
+  }
+
+  function saveLayout(next, previous = null) {
+    if (!next) return Promise.resolve(false);
+    // Remote writes can overlap a second blur. Keep the latest complete inspector state and
+    // serialize it after the active write instead of dropping or visually reverting it.
+    s.layoutPending = { next, previous };
+    if (s.layoutPromise) return s.layoutPromise;
+    s.layoutPromise = (async () => {
+      let ok = true;
+      s.layoutSaving = true;
+      while (s.layoutPending) {
+        const request = s.layoutPending;
+        s.layoutPending = null;
+        try {
+          const saved = await ctx.save([{ layout: request.next }]);
+          if (!saved) { ok = false; continue; }
+          s.file = saved;
+          if (s.layoutPending) {
+            applyPageLayout({ ...(saved.layout || {}), ...s.layoutPending.next });
+          } else {
+            setInspector(saved.layout);
+          }
+          if (request.previous) { s.undo = request.previous; undo.hidden = false; }
+          else { s.undo = null; undo.hidden = true; }
+        } catch (e) {
+          ok = false;
+          error.textContent = e.message || "The formatting was not saved.";
+          error.hidden = false;
+        }
+      }
+      s.layoutSaving = false;
+      s.layoutPromise = null;
+      return ok;
+    })();
+    return s.layoutPromise;
+  }
+
+  const commitLayout = () => saveLayout(values());
+  for (const { input } of Object.values(fields)) {
+    input.addEventListener("change", commitLayout);
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+      if (e.key === "Escape") { setInspector(s.file.layout); input.blur(); }
+    });
+  }
+  reset.onclick = () => saveLayout({ ...DEFAULT_LAYOUT }, { ...(s.file.layout || DEFAULT_LAYOUT) });
+  undo.onclick = async () => {
+    const previous = s.undo;
+    if (previous && await saveLayout(previous)) { s.undo = null; undo.hidden = true; }
+  };
+  const showInspector = (show) => {
+    inspector.hidden = !show;
+    format.setAttribute("aria-expanded", String(show));
+    el.classList.toggle("format-open", show);
+    if (show) { setInspector(s.file.layout); inspector.querySelector("input")?.focus(); }
+    else { s.undo = null; undo.hidden = true; format.focus(); }
+  };
+  format.onclick = () => showInspector(inspector.hidden);
+  close.onclick = () => showInspector(false);
 
   function render(blocks) {
     const top = scroll.scrollTop;
@@ -433,6 +574,7 @@ export function documentView(el, file, ctx) {
   const off = ctx.ark.on("ark:turn_finished", () => s.touched.clear());
 
   render(file.blocks);
+  setInspector(file.layout || DEFAULT_LAYOUT);
 
   return {
     focus() {
@@ -449,6 +591,8 @@ export function documentView(el, file, ctx) {
     },
     dirty: () => !!s.timer || !!s.saving,
     update(f) {
+      s.file = f;
+      setInspector(f.layout || DEFAULT_LAYOUT);
       render(f.blocks);
     },
     flush: () => s.timer && save(),

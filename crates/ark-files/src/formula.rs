@@ -1105,7 +1105,10 @@ mod tests {
                 crate::model::typed(&serde_json::json!(v), Default::default()),
             );
         }
-        Workbook { sheets: vec![s] }
+        Workbook {
+            sheets: vec![s],
+            ..Workbook::default()
+        }
     }
 
     fn value(b: &Workbook, at: &str) -> Value {

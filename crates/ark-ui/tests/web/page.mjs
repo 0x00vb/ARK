@@ -717,8 +717,74 @@ async function files(page) {
   };
   const total = (f) => f.sheets[0].rows[3][1].t;
 
+  // A second formatting blur during a slow remote save is queued, not overwritten by the
+  // first response. The queued edit carries the complete inspector state.
+  await page.evaluate(async () => {
+    const { documentView } = await import("/js/document.js");
+    const host = document.createElement("div");
+    host.className = "layout-race";
+    document.body.append(host);
+    const base = { line_spacing: 1.15, paragraph_before: 0, paragraph_after: 8, character_spacing: 0, margin_top: 1, margin_right: 1, margin_bottom: 1, margin_left: 1, section_margins: [{ top: 1, right: 1, bottom: 1, left: 1 }] };
+    let current = { path: "slow.docx", layout: base, blocks: [{ kind: "paragraph", text: "Slow", layout: {} }] };
+    window.__layoutSaveCalls = [];
+    window.__layoutSaveResolvers = [];
+    documentView(host, current, {
+      ark: { isLocal: () => false, on: () => () => {} },
+      tools: document.createElement("div"), status: () => {}, focusChanged: () => {},
+      save: (edits) => new Promise((resolve) => {
+        window.__layoutSaveCalls.push(edits[0].layout);
+        window.__layoutSaveResolvers.push(() => {
+          current = { ...current, layout: { ...current.layout, ...edits[0].layout } };
+          resolve(current);
+        });
+      }),
+    });
+  });
+  const race = page.locator(".layout-race");
+  await race.getByRole("button", { name: "Format document" }).click();
+  await race.getByRole("spinbutton", { name: "Line" }).fill("1.4");
+  await race.getByRole("spinbutton", { name: "Line" }).blur();
+  await page.waitForFunction(() => window.__layoutSaveCalls.length === 1);
+  await race.getByRole("spinbutton", { name: "After" }).fill("12");
+  await race.getByRole("spinbutton", { name: "After" }).blur();
+  assert.equal(await page.evaluate(() => window.__layoutSaveCalls.length), 1);
+  await page.evaluate(() => window.__layoutSaveResolvers[0]());
+  await page.waitForFunction(() => window.__layoutSaveCalls.length === 2);
+  assert.deepEqual(await page.evaluate(() => window.__layoutSaveCalls[1]), {
+    line_spacing: 1.4, paragraph_before: 0, paragraph_after: 12, character_spacing: 0,
+    margin_top: 1, margin_right: 1, margin_bottom: 1, margin_left: 1,
+  });
+  await page.evaluate(() => window.__layoutSaveResolvers[1]());
+  await page.waitForFunction(() => document.querySelector('.layout-race [aria-label="After"]')?.value === "12");
+  await page.evaluate(() => document.querySelector(".layout-race").remove());
+
   await finished(page, () => ask("Make the sales workbook."));
   await page.locator(".file-card", { hasText: "sales.xlsx" }).click();
+  // Drive the production sheet renderer with the same chart shape ark-files extracts from
+  // native XLSX parts. Parser and byte-preservation behavior are covered in ark-files.
+  await page.evaluate(async () => {
+    const { sheetView } = await import("/js/sheet.js");
+    const host = document.createElement("div");
+    host.className = "fv chart-test-host";
+    Object.assign(host.style, { position: "fixed", inset: "0", zIndex: "100", background: "var(--bg)" });
+    document.body.append(host);
+    sheetView(host, {
+      path: "sales.xlsx", charts: [{ sheet: "Sheet1", title: "Quarterly sales", type: "column", sampled: false, series: [{ name: "Q1", categories: ["North", "South"], values: [120, 80], x_values: [] }] }],
+      chart_warnings: [], sheets: [{ name: "Sheet1", rows: [], cols: 0, more_rows: 0, more_cols: 0 }],
+    }, { ark: { isLocal: () => true, on: () => () => {} }, tools: document.createElement("div"), save: async () => null, status: () => {}, focusChanged: () => {} });
+  });
+  await page.getByRole("tab", { name: "Charts" }).click();
+  await page.getByRole("heading", { name: "Quarterly sales" }).waitFor();
+  assert.equal(await page.locator('.sh-chart svg[role="img"]').count(), 1);
+  assert.equal(await page.locator('.sh-chart table[aria-label="Quarterly sales data"]').count(), 1);
+  await shot(page, "office-charts-wide");
+  await page.setViewportSize({ width: 430, height: 760 });
+  await page.evaluate(() => document.documentElement.dataset.theme = "dark");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await shot(page, "office-charts-narrow-dark");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => document.documentElement.dataset.theme = "light");
+  await page.evaluate(() => document.querySelector(".chart-test-host").remove());
   const cell = (r, c) => page.locator(`td[data-r="${r}"][data-c="${c}"]`);
   await page.waitForFunction(() => document.querySelector('td[data-r="3"][data-c="1"]')?.textContent === "200");
   await cell(1, 1).click();
@@ -740,6 +806,34 @@ async function files(page) {
   await page.locator(".dv-page").waitFor();
   assert.deepEqual(await page.locator(".dv-b").allInnerTexts(), ["Sales", "North led.", "Check the south"]);
   assert.equal(await page.locator(".dv-b").nth(2).getAttribute("data-kind"), "bullet");
+  await page.getByRole("button", { name: "Format document" }).click();
+  const line = page.getByRole("spinbutton", { name: "Line" });
+  await line.fill("1.5");
+  await line.blur();
+  await until("report.docx", (f) => f.layout?.line_spacing === 1.5);
+  assert.equal(await page.locator(".dv-page").evaluate((el) => el.style.getPropertyValue("--dv-line")), "1.5");
+  await shot(page, "office-document-format-wide");
+  await page.locator(".dv").evaluate((el) => {
+    const marker = document.createComment("document-view-home");
+    el.before(marker);
+    document.body.append(el);
+    window.__documentViewHome = marker;
+    Object.assign(el.style, { position: "fixed", inset: "0", zIndex: "100", background: "var(--bg)" });
+  });
+  await page.setViewportSize({ width: 430, height: 760 });
+  await page.evaluate(() => document.documentElement.dataset.theme = "dark");
+  await page.waitForTimeout(300);
+  assert.ok((await page.locator(".dv-inspector").boundingBox()).y < 300, "mobile formatting sheet is inside the viewport");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await shot(page, "office-document-format-narrow-dark");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.evaluate(() => document.documentElement.dataset.theme = "light");
+  await page.locator(".dv").evaluate((el) => {
+    window.__documentViewHome.replaceWith(el);
+    delete window.__documentViewHome;
+    el.removeAttribute("style");
+  });
+  await page.getByRole("button", { name: "Close formatting" }).click();
   await page.evaluate(() => {
     const b = document.querySelectorAll(".dv-b")[1];
     const r = document.createRange();

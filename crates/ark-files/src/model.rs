@@ -94,6 +94,57 @@ pub struct Media {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Workbook {
     pub sheets: Vec<Sheet>,
+    /// Charts embedded in worksheets, in workbook and drawing order. They are a view of the
+    /// workbook, not an editable shape: XLSX keeps the chart parts byte for byte.
+    pub charts: Vec<Chart>,
+    /// A malformed chart must not make the cells disappear. The window shows these beside any
+    /// charts it could read.
+    pub chart_warnings: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Chart {
+    pub sheet: String,
+    pub title: String,
+    pub kind: ChartKind,
+    pub series: Vec<ChartSeries>,
+    pub sampled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum ChartKind {
+    Bar,
+    Column,
+    Line,
+    Area,
+    Pie,
+    Doughnut,
+    Scatter,
+    #[default]
+    Unsupported,
+}
+
+impl ChartKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ChartKind::Bar => "bar",
+            ChartKind::Column => "column",
+            ChartKind::Line => "line",
+            ChartKind::Area => "area",
+            ChartKind::Pie => "pie",
+            ChartKind::Doughnut => "doughnut",
+            ChartKind::Scatter => "scatter",
+            ChartKind::Unsupported => "unsupported",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ChartSeries {
+    pub name: String,
+    pub categories: Vec<String>,
+    pub values: Vec<f64>,
+    pub x_values: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -414,6 +465,59 @@ pub fn parse_number(s: &str) -> Option<f64> {
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Document {
     pub blocks: Vec<Block>,
+    pub layout: DocumentLayout,
+}
+
+/// The document-wide base formatting. Direct paragraph, run and named-style values keep
+/// precedence over these values. Margins are `None` when sections disagree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DocumentLayout {
+    pub line_spacing: f64,
+    pub paragraph_before: f64,
+    pub paragraph_after: f64,
+    pub character_spacing: f64,
+    pub margin_top: Option<f64>,
+    pub margin_right: Option<f64>,
+    pub margin_bottom: Option<f64>,
+    pub margin_left: Option<f64>,
+    /// Exact margins for each section. The UI round-trips this when undoing a reset.
+    pub section_margins: Vec<SectionMargins>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SectionMargins {
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub left: f64,
+}
+
+impl Default for DocumentLayout {
+    fn default() -> Self {
+        Self {
+            line_spacing: 1.15,
+            paragraph_before: 0.0,
+            paragraph_after: 8.0,
+            character_spacing: 0.0,
+            margin_top: Some(1.0),
+            margin_right: Some(1.0),
+            margin_bottom: Some(1.0),
+            margin_left: Some(1.0),
+            section_margins: Vec::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct BlockLayout {
+    pub line_spacing: f64,
+    pub paragraph_before: f64,
+    pub paragraph_after: f64,
+    pub character_spacing: f64,
+    pub line_override: bool,
+    pub before_override: bool,
+    pub after_override: bool,
+    pub character_override: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -426,6 +530,8 @@ pub struct Block {
     /// Which block of the file this one was read from; `None` for a new block. A format copies
     /// an unchanged block's bytes as they were.
     pub origin: Option<usize>,
+    /// Effective values for the page preview. Content equality intentionally ignores these.
+    pub layout: BlockLayout,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -447,6 +553,7 @@ impl Block {
             text: text.into(),
             rows: Vec::new(),
             origin: None,
+            layout: BlockLayout::default(),
         }
     }
 
@@ -456,6 +563,7 @@ impl Block {
             text: String::new(),
             rows,
             origin: None,
+            layout: BlockLayout::default(),
         }
     }
 
@@ -721,6 +829,20 @@ pub enum Edit {
     Delete {
         block: usize,
     },
+    /// Document-wide base formatting. Omitted values stay as they are. Margins are inches;
+    /// paragraph and character spacing are points.
+    Layout {
+        line_spacing: Option<f64>,
+        paragraph_before: Option<f64>,
+        paragraph_after: Option<f64>,
+        character_spacing: Option<f64>,
+        margin_top: Option<f64>,
+        margin_right: Option<f64>,
+        margin_bottom: Option<f64>,
+        margin_left: Option<f64>,
+        /// Internal UI restore token. The compact agent format intentionally omits this.
+        section_margins: Option<Vec<SectionMargins>>,
+    },
     /// Text replaced wherever it appears (in a text file, every cell, every block).
     FindReplace {
         find: String,
@@ -733,6 +855,7 @@ impl Edit {
     pub fn parse(v: &Json) -> Result<Edit, Error> {
         let s = |k: &str| v.get(k).and_then(Json::as_str).map(str::to_string);
         let n = |k: &str| v.get(k).and_then(Json::as_u64).map(|x| x as usize);
+        let f = |v: &Json, k: &str| v.get(k).and_then(Json::as_f64);
         let sheet = s("sheet");
         let rows = |v: &Json| -> Vec<Vec<Json>> {
             match v.get("rows").or_else(|| v.get("values")) {
@@ -794,9 +917,80 @@ impl Edit {
                 text: s("text").unwrap_or_default(),
             });
         }
+        if let (Some(key), Some(value)) = (s("format"), f(v, "value")) {
+            let mut values = [None; 8];
+            let index = match key.as_str() {
+                "line_spacing" => 0,
+                "paragraph_before" => 1,
+                "paragraph_after" => 2,
+                "character_spacing" => 3,
+                "margin_top" => 4,
+                "margin_right" => 5,
+                "margin_bottom" => 6,
+                "margin_left" => 7,
+                _ => return Err(Error::Input(format!("unknown document format `{key}`"))),
+            };
+            values[index] = Some(value);
+            return Ok(Edit::Layout {
+                line_spacing: values[0],
+                paragraph_before: values[1],
+                paragraph_after: values[2],
+                character_spacing: values[3],
+                margin_top: values[4],
+                margin_right: values[5],
+                margin_bottom: values[6],
+                margin_left: values[7],
+                section_margins: None,
+            });
+        }
+        if let Some(layout) = v.get("layout").and_then(Json::as_object) {
+            let layout = Json::Object(layout.clone());
+            let change = Edit::Layout {
+                line_spacing: f(&layout, "line_spacing"),
+                paragraph_before: f(&layout, "paragraph_before"),
+                paragraph_after: f(&layout, "paragraph_after"),
+                character_spacing: f(&layout, "character_spacing"),
+                margin_top: f(&layout, "margin_top"),
+                margin_right: f(&layout, "margin_right"),
+                margin_bottom: f(&layout, "margin_bottom"),
+                margin_left: f(&layout, "margin_left"),
+                section_margins: layout.get("section_margins").and_then(Json::as_array).map(
+                    |sections| {
+                        sections
+                            .iter()
+                            .filter_map(|section| {
+                                Some(SectionMargins {
+                                    top: section.get("top")?.as_f64()?,
+                                    right: section.get("right")?.as_f64()?,
+                                    bottom: section.get("bottom")?.as_f64()?,
+                                    left: section.get("left")?.as_f64()?,
+                                })
+                            })
+                            .collect()
+                    },
+                ),
+            };
+            if matches!(
+                &change,
+                Edit::Layout {
+                    line_spacing: None,
+                    paragraph_before: None,
+                    paragraph_after: None,
+                    character_spacing: None,
+                    margin_top: None,
+                    margin_right: None,
+                    margin_bottom: None,
+                    margin_left: None,
+                    section_margins: None,
+                }
+            ) {
+                return Err(Error::Input("`layout` has no formatting values".into()));
+            }
+            return Ok(change);
+        }
         Err(Error::Input(format!(
             "an edit is one of: {{cell, value}} or {{cell, rows}} (spreadsheets), {{clear}}, {{add_sheet, rows}}, \
-             {{block, text}}, {{after, text}}, {{delete}} (documents), {{find, replace}} (any file); got {v}"
+             {{block, text}}, {{after, text}}, {{delete}}, {{format, value}} (documents), {{find, replace}} (any file); got {v}"
         )))
     }
 
@@ -860,6 +1054,7 @@ impl Edit {
             Edit::Replace { block, text } => format!("block {block}: {}", clip(text, 60)),
             Edit::Insert { after, text } => format!("after block {after}: {}", clip(text, 60)),
             Edit::Delete { block } => format!("delete block {block}"),
+            Edit::Layout { .. } => "change document formatting".into(),
             Edit::FindReplace { find, replace } => {
                 format!("\"{}\" to \"{}\"", clip(find, 30), clip(replace, 30))
             }
@@ -870,7 +1065,7 @@ impl Edit {
 fn wrong(kind: Kind, e: &Edit) -> Error {
     let hint = match kind {
         Kind::Sheet => "a spreadsheet takes {cell, value}, {cell, rows}, {clear}, {add_sheet}, {delete_sheet}, {rename_sheet} and {find, replace}",
-        Kind::Document => "a document takes {block, text}, {after, text}, {delete} and {find, replace}",
+        Kind::Document => "a document takes {block, text}, {after, text}, {delete}, {layout} and {find, replace}",
         Kind::Text | Kind::Markdown => {
             "a text file takes {find, replace}, or files.write with the whole text"
         }
@@ -1035,6 +1230,7 @@ pub fn apply_document(doc: &mut Document, edits: &[Edit]) -> Result<(), Error> {
                 keyed.push((*after, 0, e));
             }
             Edit::FindReplace { .. } => {}
+            Edit::Layout { .. } => {}
             other => return Err(wrong(Kind::Document, other)),
         }
     }
@@ -1068,6 +1264,88 @@ pub fn apply_document(doc: &mut Document, edits: &[Edit]) -> Result<(), Error> {
         }
     }
     for e in edits {
+        if let Edit::Layout {
+            line_spacing,
+            paragraph_before,
+            paragraph_after,
+            character_spacing,
+            margin_top,
+            margin_right,
+            margin_bottom,
+            margin_left,
+            section_margins,
+        } = e
+        {
+            let valid = |name: &str, v: Option<f64>, min: f64, max: f64| -> Result<(), Error> {
+                if let Some(v) = v {
+                    if !v.is_finite() || v < min || v > max {
+                        return Err(Error::Input(format!("{name} must be from {min} to {max}")));
+                    }
+                }
+                Ok(())
+            };
+            valid("line spacing", *line_spacing, 0.5, 4.0)?;
+            valid("paragraph before", *paragraph_before, 0.0, 144.0)?;
+            valid("paragraph after", *paragraph_after, 0.0, 144.0)?;
+            valid("character spacing", *character_spacing, -2.0, 20.0)?;
+            for (name, value) in [
+                ("top margin", margin_top),
+                ("right margin", margin_right),
+                ("bottom margin", margin_bottom),
+                ("left margin", margin_left),
+            ] {
+                valid(name, *value, 0.0, 6.0)?;
+            }
+            if let Some(sections) = section_margins {
+                for section in sections {
+                    for (name, value) in [
+                        ("top margin", section.top),
+                        ("right margin", section.right),
+                        ("bottom margin", section.bottom),
+                        ("left margin", section.left),
+                    ] {
+                        valid(name, Some(value), 0.0, 6.0)?;
+                    }
+                }
+            }
+            if let Some(v) = line_spacing {
+                doc.layout.line_spacing = *v;
+            }
+            if let Some(v) = paragraph_before {
+                doc.layout.paragraph_before = *v;
+            }
+            if let Some(v) = paragraph_after {
+                doc.layout.paragraph_after = *v;
+            }
+            if let Some(v) = character_spacing {
+                doc.layout.character_spacing = *v;
+            }
+            if let Some(v) = margin_top {
+                doc.layout.margin_top = Some(*v);
+            }
+            if let Some(v) = margin_right {
+                doc.layout.margin_right = Some(*v);
+            }
+            if let Some(v) = margin_bottom {
+                doc.layout.margin_bottom = Some(*v);
+            }
+            if let Some(v) = margin_left {
+                doc.layout.margin_left = Some(*v);
+            }
+            if let Some(v) = section_margins {
+                doc.layout.section_margins = v.clone();
+                let same = |pick: fn(&SectionMargins) -> f64| {
+                    v.first().map(pick).filter(|first| {
+                        v.iter()
+                            .all(|section| (pick(section) - *first).abs() < 0.0001)
+                    })
+                };
+                doc.layout.margin_top = same(|m| m.top);
+                doc.layout.margin_right = same(|m| m.right);
+                doc.layout.margin_bottom = same(|m| m.bottom);
+                doc.layout.margin_left = same(|m| m.left);
+            }
+        }
         if let Edit::FindReplace { find, replace } = e {
             if find.is_empty() {
                 return Err(Error::Input("`find` is empty".into()));
@@ -1209,6 +1487,7 @@ mod tests {
                     ..b
                 })
                 .collect(),
+            ..Document::default()
         };
         let edits = Edit::parse_all(&json!([
             {"block": 2, "text": "ONE"},
@@ -1226,6 +1505,14 @@ mod tests {
             "a replaced block keeps its place"
         );
         assert_eq!(doc.blocks[3].origin, None);
+        let format = Edit::parse_all(&json!([
+            {"format": "line_spacing", "value": 1.5},
+            {"format": "margin_left", "value": 1.25}
+        ]))
+        .unwrap();
+        apply_document(&mut doc, &format).unwrap();
+        assert_eq!(doc.layout.line_spacing, 1.5);
+        assert_eq!(doc.layout.margin_left, Some(1.25));
         assert!(
             apply_document(&mut doc, &Edit::parse_all(&json!([{"delete": 9}])).unwrap()).is_err()
         );
@@ -1235,6 +1522,7 @@ mod tests {
     fn sheet_edits_and_errors() {
         let mut book = Workbook {
             sheets: vec![Sheet::new("Sales")],
+            ..Workbook::default()
         };
         let edits = Edit::parse_all(&json!([
             {"cell": "A1", "rows": [["Region", "Q1"], ["North", 10], ["South", "20"]]},

@@ -68,6 +68,7 @@ fn seed() -> Workbook {
                 unread: 0,
             },
         ],
+        ..Workbook::default()
     }
 }
 

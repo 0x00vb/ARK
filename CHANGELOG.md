@@ -9,6 +9,11 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+
+- Spreadsheet files render embedded XLSX and XLSM charts beside the cell grid. Documents expose
+  base line, paragraph and character spacing plus custom section margins, with a live page preview.
+
 ### Fixed
 
 - Release checks use available parallelism for builds and normal tests, serialize WebKit tests, reuse a stable fresh-checkout cache, install the locked browser-test dependency, and reject stale release metadata before the expensive gate.

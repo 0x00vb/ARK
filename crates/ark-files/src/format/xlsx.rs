@@ -7,7 +7,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::formula;
-use crate::model::{apply_sheet, cell_ref, Cell, Content, Edit, Fmt, Kind, Sheet, Value, Workbook};
+use crate::model::{
+    apply_sheet, cell_ref, parse_range, Cell, Chart, ChartKind, ChartSeries, Content, Edit, Fmt,
+    Kind, Sheet, Value, Workbook,
+};
 use crate::package::{
     add_override, insert_before_close, next_rel_id, relationships, rels_of, remove_override,
     resolve, Package,
@@ -257,6 +260,7 @@ impl Book {
                 .iter_mut()
                 .map(|s| std::mem::replace(&mut s.model, Sheet::new("")))
                 .collect(),
+            ..Workbook::default()
         };
         formula::recalc(&mut model);
         for (s, m) in book.sheets.iter_mut().zip(model.sheets) {
@@ -267,14 +271,34 @@ impl Book {
 
     /// The workbook's values, without a copy.
     fn into_model(self) -> Workbook {
+        let sheets: Vec<Sheet> = self.sheets.iter().map(|s| s.model.clone()).collect();
+        let (charts, mut chart_warnings) = read_charts(&self.pkg, &self.sheets, &sheets);
+        chart_warnings.extend(
+            self.entries
+                .iter()
+                .filter(|entry| entry.sheet.is_none())
+                .map(|entry| format!("{} is a chart sheet and is not shown here.", entry.name)),
+        );
         Workbook {
-            sheets: self.sheets.into_iter().map(|s| s.model).collect(),
+            sheets,
+            charts,
+            chart_warnings,
         }
     }
 
     fn model(&self) -> Workbook {
+        let sheets: Vec<Sheet> = self.sheets.iter().map(|s| s.model.clone()).collect();
+        let (charts, mut chart_warnings) = read_charts(&self.pkg, &self.sheets, &sheets);
+        chart_warnings.extend(
+            self.entries
+                .iter()
+                .filter(|entry| entry.sheet.is_none())
+                .map(|entry| format!("{} is a chart sheet and is not shown here.", entry.name)),
+        );
         Workbook {
-            sheets: self.sheets.iter().map(|s| s.model.clone()).collect(),
+            sheets,
+            charts,
+            chart_warnings,
         }
     }
 
@@ -453,6 +477,345 @@ impl Book {
         self.pkg.set(&rels_part, rels);
         self.pkg.set("[Content_Types].xml", types);
         self.pkg.write()
+    }
+}
+
+// ---- charts -----------------------------------------------------------------------------------
+
+/// Read charts through worksheet -> drawing -> chart relationships. A chart is only a view:
+/// edits still leave every drawing and chart part byte for byte as it was.
+fn read_charts(pkg: &Package, parts: &[SheetPart], sheets: &[Sheet]) -> (Vec<Chart>, Vec<String>) {
+    let mut charts = Vec::new();
+    let mut warnings = Vec::new();
+    for (part, sheet) in parts.iter().zip(sheets) {
+        let worksheet = pkg.text_opt(&part.part).unwrap_or_else(|| part.xml.clone());
+        let rels = relationships(&pkg.text_opt(&rels_of(&part.part)).unwrap_or_default());
+        for t in Lexer::new(&worksheet) {
+            let Tok::Open { name, attrs, .. } = t else {
+                continue;
+            };
+            if local(name) != "drawing" {
+                continue;
+            }
+            let rid = xml::attrs(attrs)
+                .into_iter()
+                .find(|(k, _)| k.ends_with(":id") || local(k) == "id")
+                .map(|(_, v)| v.to_string());
+            let Some((_, _, target)) = rid
+                .as_deref()
+                .and_then(|id| rels.iter().find(|r| r.0 == id))
+            else {
+                warnings.push(format!("A chart on {} is unavailable", sheet.name));
+                continue;
+            };
+            let drawing_part = resolve(&part.part, target);
+            let Some(drawing) = pkg.text_opt(&drawing_part) else {
+                warnings.push(format!("A chart on {} is unavailable", sheet.name));
+                continue;
+            };
+            let drawing_rels =
+                relationships(&pkg.text_opt(&rels_of(&drawing_part)).unwrap_or_default());
+            for dt in Lexer::new(&drawing) {
+                let Tok::Open { name, attrs, .. } = dt else {
+                    continue;
+                };
+                if local(name) != "chart" {
+                    continue;
+                }
+                let id = xml::attrs(attrs)
+                    .into_iter()
+                    .find(|(k, _)| k.ends_with(":id") || local(k) == "id")
+                    .map(|(_, v)| v.to_string());
+                let Some((_, _, target)) = id
+                    .as_deref()
+                    .and_then(|id| drawing_rels.iter().find(|r| r.0 == id))
+                else {
+                    warnings.push(format!("A chart on {} is unavailable", sheet.name));
+                    continue;
+                };
+                let chart_part = resolve(&drawing_part, target);
+                match pkg
+                    .text_opt(&chart_part)
+                    .and_then(|x| parse_chart(&x, &sheet.name, sheets))
+                {
+                    Some(chart) => charts.push(chart),
+                    None => warnings.push(format!("A chart on {} is unavailable", sheet.name)),
+                }
+            }
+        }
+    }
+    (charts, warnings)
+}
+
+fn parse_chart(raw: &str, sheet: &str, sheets: &[Sheet]) -> Option<Chart> {
+    let mut kinds = Vec::new();
+    for t in Lexer::new(raw) {
+        let Tok::Open { name, attrs, .. } = t else {
+            continue;
+        };
+        let kind = match local(name) {
+            "barChart" => {
+                let body = element(raw, "barChart")?;
+                if value(body, "barDir").as_deref() == Some("bar") {
+                    ChartKind::Bar
+                } else {
+                    ChartKind::Column
+                }
+            }
+            "lineChart" => ChartKind::Line,
+            "areaChart" => ChartKind::Area,
+            "pieChart" => ChartKind::Pie,
+            "doughnutChart" => ChartKind::Doughnut,
+            "scatterChart" => ChartKind::Scatter,
+            "radarChart" | "stockChart" | "surfaceChart" | "bubbleChart" | "ofPieChart" => {
+                ChartKind::Unsupported
+            }
+            _ => continue,
+        };
+        let _ = attrs;
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    let kind = if kinds.len() == 1 {
+        kinds.remove(0)
+    } else {
+        ChartKind::Unsupported
+    };
+    let title = element(raw, "title")
+        .map(all_text)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Chart".into());
+    let mut series = Vec::new();
+    let mut at = 0;
+    while let Some((start, end)) = next_element(raw, "ser", at) {
+        let body = &raw[start..end];
+        let name = element(body, "tx")
+            .map(all_text)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("Series {}", series.len() + 1));
+        let (categories, _) = source_strings(body, "cat", sheets);
+        let (mut values, _) = source_numbers(body, "val", sheets);
+        let (mut x_values, _) = source_numbers(body, "xVal", sheets);
+        let (y_values, _) = source_numbers(body, "yVal", sheets);
+        if !y_values.is_empty() {
+            values = y_values;
+        }
+        if kind != ChartKind::Scatter {
+            x_values.clear();
+        }
+        series.push(ChartSeries {
+            name,
+            categories,
+            values,
+            x_values,
+        });
+        at = end;
+    }
+    let mut sampled = false;
+    for s in &mut series {
+        if s.values.len() > 1000 {
+            sampled = true;
+            sample_series(s, 1000);
+        }
+    }
+    Some(Chart {
+        sheet: sheet.into(),
+        title,
+        kind,
+        series,
+        sampled,
+    })
+}
+
+fn element<'a>(raw: &'a str, name: &str) -> Option<&'a str> {
+    let (a, b) = next_element(raw, name, 0)?;
+    Some(&raw[a..b])
+}
+
+fn value(raw: &str, name: &str) -> Option<String> {
+    for t in Lexer::new(raw) {
+        if let Tok::Open { name: n, attrs, .. } = t {
+            if local(n) == name {
+                return xml::attrs(attrs)
+                    .into_iter()
+                    .find(|(k, _)| local(k) == "val")
+                    .map(|(_, v)| xml::unescape(v).into_owned());
+            }
+        }
+    }
+    None
+}
+
+fn all_text(raw: &str) -> String {
+    let mut out = Vec::new();
+    let mut in_text = 0usize;
+    for t in Lexer::new(raw) {
+        match t {
+            Tok::Open {
+                name, empty: false, ..
+            } if matches!(local(name), "t" | "v") => in_text += 1,
+            Tok::Close { name, .. } if matches!(local(name), "t" | "v") => {
+                in_text = in_text.saturating_sub(1)
+            }
+            Tok::Text { raw, .. } if in_text > 0 => {
+                let x = xml::unescape(raw).trim().to_string();
+                if !x.is_empty() {
+                    out.push(x);
+                }
+            }
+            _ => {}
+        }
+    }
+    out.join(" ")
+}
+
+fn formula(raw: &str) -> Option<String> {
+    let f = element(raw, "f")?;
+    let mut in_f = false;
+    let mut out = String::new();
+    for t in Lexer::new(f) {
+        match t {
+            Tok::Open {
+                name, empty: false, ..
+            } if local(name) == "f" => in_f = true,
+            Tok::Close { name, .. } if local(name) == "f" => in_f = false,
+            Tok::Text { raw, .. } if in_f => out.push_str(&xml::unescape(raw)),
+            _ => {}
+        }
+    }
+    (!out.trim().is_empty()).then(|| out.trim().to_string())
+}
+
+fn cached(raw: &str) -> Vec<String> {
+    let mut out: Vec<(usize, String)> = Vec::new();
+    let mut at = 0;
+    while let Some((a, b)) = next_element(raw, "pt", at) {
+        let pt = &raw[a..b];
+        let idx = Lexer::new(pt)
+            .find_map(|t| match t {
+                Tok::Open { name, attrs, .. } if local(name) == "pt" => {
+                    value_from(attrs, "idx").and_then(|v| v.parse().ok())
+                }
+                _ => None,
+            })
+            .unwrap_or(out.len());
+        let v = element(pt, "v").map(all_text).unwrap_or_default();
+        out.push((idx, v));
+        at = b;
+    }
+    out.sort_by_key(|x| x.0);
+    out.into_iter().map(|x| x.1).collect()
+}
+
+fn value_from(attrs: &str, key: &str) -> Option<String> {
+    xml::attrs(attrs)
+        .into_iter()
+        .find(|(k, _)| local(k) == key)
+        .map(|(_, v)| v.to_string())
+}
+
+fn referred<'a>(f: &str, sheets: &'a [Sheet]) -> Option<Vec<&'a Cell>> {
+    let f = f.trim().trim_start_matches('=');
+    let (name, range) = f.rsplit_once('!')?;
+    let name = name.trim_matches('\'').replace("''", "'");
+    let sheet = sheets.iter().find(|s| s.name.eq_ignore_ascii_case(&name))?;
+    // A view read can stop after READ_CELLS. Never let that partial prefix replace a complete
+    // chart cache: either the full reference is live, or the cache wins.
+    if sheet.unread > 0 {
+        return None;
+    }
+    let ((r0, c0), (r1, c1)) = parse_range(range)?;
+    let mut out = Vec::new();
+    for r in r0..=r1 {
+        for c in c0..=c1 {
+            out.push(sheet.get(r, c)?);
+        }
+    }
+    Some(out)
+}
+
+fn source_strings(raw: &str, wrapper: &str, sheets: &[Sheet]) -> (Vec<String>, bool) {
+    let Some(src) = element(raw, wrapper) else {
+        return (Vec::new(), false);
+    };
+    if let Some(v) = formula(src).and_then(|f| referred(&f, sheets)) {
+        return (v.into_iter().map(Cell::display).collect(), true);
+    }
+    (cached(src), false)
+}
+
+fn source_numbers(raw: &str, wrapper: &str, sheets: &[Sheet]) -> (Vec<f64>, bool) {
+    let Some(src) = element(raw, wrapper) else {
+        return (Vec::new(), false);
+    };
+    if let Some(v) = formula(src).and_then(|f| referred(&f, sheets)) {
+        let values: Vec<f64> = v
+            .into_iter()
+            .filter_map(|c| match c.value {
+                Value::Number(n) => Some(n),
+                _ => c.display().parse().ok(),
+            })
+            .collect();
+        if !values.is_empty() {
+            return (values, true);
+        }
+    }
+    (
+        cached(src)
+            .into_iter()
+            .filter_map(|v| v.parse().ok())
+            .collect(),
+        false,
+    )
+}
+
+fn sample_series(series: &mut ChartSeries, limit: usize) {
+    let len = series.values.len();
+    if len <= limit || limit < 2 {
+        return;
+    }
+    // Preserve the extrema of each time-ordered bucket so narrow spikes and dips remain visible.
+    // Indices stay in source order, which keeps categories and scatter x-values aligned.
+    let buckets = (limit / 2).max(1);
+    let mut pick = Vec::with_capacity(limit);
+    for bucket in 0..buckets {
+        let start = bucket * len / buckets;
+        let end = ((bucket + 1) * len / buckets).max(start + 1).min(len);
+        let mut low = start;
+        let mut high = start;
+        for index in start + 1..end {
+            if series.values[index] < series.values[low] {
+                low = index;
+            }
+            if series.values[index] > series.values[high] {
+                high = index;
+            }
+        }
+        if low <= high {
+            pick.push(low);
+            if high != low {
+                pick.push(high);
+            }
+        } else {
+            pick.push(high);
+            pick.push(low);
+        }
+    }
+    pick.sort_unstable();
+    pick.dedup();
+    series.values = pick.iter().map(|i| series.values[*i]).collect();
+    if !series.categories.is_empty() {
+        series.categories = pick
+            .iter()
+            .filter_map(|i| series.categories.get(*i).cloned())
+            .collect();
+    }
+    if !series.x_values.is_empty() {
+        series.x_values = pick
+            .iter()
+            .filter_map(|i| series.x_values.get(*i).copied())
+            .collect();
     }
 }
 
@@ -1500,6 +1863,7 @@ mod tests {
         );
         Xlsx.create(&Content::Sheet(Workbook {
             sheets: vec![big, small],
+            ..Workbook::default()
         }))
         .unwrap()
     }
@@ -1540,9 +1904,17 @@ mod tests {
     #[test]
     fn creates_reads_and_edits_in_place() {
         let mut s = Sheet::new("Sales");
-        crate::model::apply_sheet(&mut Workbook { sheets: vec![] }, &[]).unwrap();
+        crate::model::apply_sheet(
+            &mut Workbook {
+                sheets: vec![],
+                ..Workbook::default()
+            },
+            &[],
+        )
+        .unwrap();
         let mut book = Workbook {
             sheets: vec![Sheet::new("Sales")],
+            ..Workbook::default()
         };
         crate::model::apply_sheet(
             &mut book,
@@ -1551,7 +1923,10 @@ mod tests {
         .unwrap();
         s.cells = book.sheets[0].cells.clone();
         let bytes = Xlsx
-            .create(&Content::Sheet(Workbook { sheets: vec![s] }))
+            .create(&Content::Sheet(Workbook {
+                sheets: vec![s],
+                ..Workbook::default()
+            }))
             .unwrap();
         let read = Xlsx.read(&bytes).unwrap();
         let sh = sheet_of(&read, 0);
@@ -1708,5 +2083,116 @@ mod tests {
         assert_eq!(fmt_of(166, Some("0.0%")), Fmt::Percent(1));
         assert_eq!(fmt_of(167, Some("[Red]0.000;-0")), Fmt::Decimals(3));
         assert_eq!(fmt_of(168, Some("@")), Fmt::General);
+    }
+
+    #[test]
+    fn embedded_charts_use_live_cells_and_survive_edits() {
+        let mut book = Workbook {
+            sheets: vec![Sheet::new("Sales")],
+            ..Workbook::default()
+        };
+        apply_sheet(
+            &mut book,
+            &Edit::parse_all(
+                &json!([{"cell":"A1","rows":[["Region","Q1"],["North",120],["South",80]]}]),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let bytes = Xlsx.create(&Content::Sheet(book)).unwrap();
+        let mut p = Package::read(&bytes).unwrap();
+        let sheet = p
+            .text("xl/worksheets/sheet1.xml")
+            .unwrap()
+            .replace("</worksheet>", "<drawing r:id=\"rId9\"/></worksheet>");
+        p.set("xl/worksheets/sheet1.xml", sheet);
+        p.set("xl/worksheets/_rels/sheet1.xml.rels", r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>"#);
+        p.set("xl/drawings/drawing1.xml", r#"<xdr:wsDr xmlns:xdr="x" xmlns:c="c" xmlns:r="r"><xdr:twoCellAnchor><xdr:graphicFrame><c:chart r:id="rId1"/></xdr:graphicFrame></xdr:twoCellAnchor><xdr:oneCellAnchor><xdr:graphicFrame><c:chart r:id="rId2"/></xdr:graphicFrame></xdr:oneCellAnchor></xdr:wsDr>"#);
+        p.set("xl/drawings/_rels/drawing1.xml.rels", r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart2.xml"/></Relationships>"#);
+        p.set("xl/charts/chart1.xml", r#"<c:chartSpace xmlns:c="c"><c:chart><c:title><c:tx><c:rich><a:p xmlns:a="a"><a:r><a:t>Quarterly sales</a:t></a:r></a:p></c:rich></c:tx></c:title><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:tx><c:v>Q1</c:v></c:tx><c:cat><c:strRef><c:f>Sales!$A$2:$A$3</c:f><c:strCache><c:pt idx="0"><c:v>stale</c:v></c:pt></c:strCache></c:strRef></c:cat><c:val><c:numRef><c:f>Sales!$B$2:$B$3</c:f><c:numCache><c:pt idx="0"><c:v>999</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#);
+        p.set("xl/charts/chart2.xml", r#"<c:chartSpace xmlns:c="c"><c:chart><c:title><c:tx><c:v>Radar</c:v></c:tx></c:title><c:plotArea><c:radarChart><c:ser><c:val><c:numLit><c:pt idx="0"><c:v>1</c:v></c:pt></c:numLit></c:val></c:ser></c:radarChart></c:plotArea></c:chart></c:chartSpace>"#);
+        p.set("xl/vbaProject.bin", b"macro bytes".to_vec());
+        let bytes = p.write().unwrap();
+
+        let Content::Sheet(read) = Xlsx.read(&bytes).unwrap() else {
+            panic!()
+        };
+        assert_eq!(read.charts.len(), 2, "warnings: {:?}", read.chart_warnings);
+        assert_eq!(read.charts[0].title, "Quarterly sales");
+        assert_eq!(read.charts[0].kind, ChartKind::Column);
+        assert_eq!(read.charts[0].series[0].categories, ["North", "South"]);
+        assert_eq!(
+            read.charts[0].series[0].values,
+            [120.0, 80.0],
+            "live cells beat stale caches"
+        );
+        assert_eq!(read.charts[1].kind, ChartKind::Unsupported);
+
+        let edited = Xlsx
+            .edit(
+                &bytes,
+                &Edit::parse_all(&json!([{"cell":"B2","value":150}])).unwrap(),
+            )
+            .unwrap();
+        let pkg = Package::read(&edited).unwrap();
+        assert_eq!(
+            pkg.get("xl/vbaProject.bin"),
+            Some(b"macro bytes".as_slice())
+        );
+        assert_eq!(
+            pkg.text("xl/charts/chart1.xml").unwrap(),
+            p.text("xl/charts/chart1.xml").unwrap()
+        );
+        assert_eq!(
+            pkg.text("xl/charts/chart2.xml").unwrap(),
+            p.text("xl/charts/chart2.xml").unwrap()
+        );
+        let Content::Sheet(read) = Xlsx.read(&edited).unwrap() else {
+            panic!()
+        };
+        assert_eq!(read.charts[0].series[0].values, [150.0, 80.0]);
+    }
+
+    #[test]
+    fn chart_cache_wins_when_live_range_is_partial() {
+        let mut sheet = Sheet::new("Data");
+        sheet.cells.insert(
+            (0, 0),
+            Cell {
+                value: Value::Number(7.0),
+                ..Cell::default()
+            },
+        );
+        sheet.unread = 2;
+        let raw = r#"<c:chartSpace xmlns:c="c"><c:chart><c:plotArea><c:lineChart><c:ser><c:val><c:numRef><c:f>Data!$A$1:$A$3</c:f><c:numCache><c:pt idx="0"><c:v>7</c:v></c:pt><c:pt idx="1"><c:v>80</c:v></c:pt><c:pt idx="2"><c:v>9</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser></c:lineChart></c:plotArea></c:chart></c:chartSpace>"#;
+        let chart = parse_chart(raw, "Data", &[sheet]).unwrap();
+        assert_eq!(chart.series[0].values, [7.0, 80.0, 9.0]);
+
+        let unsupported = raw.replace("lineChart", "radarChart");
+        assert_eq!(
+            parse_chart(&unsupported, "Data", &[]).unwrap().kind,
+            ChartKind::Unsupported
+        );
+    }
+
+    #[test]
+    fn chart_sampling_preserves_bucket_spikes_and_alignment() {
+        let mut series = ChartSeries {
+            name: "Signal".into(),
+            categories: (0..5000).map(|i| format!("P{i}")).collect(),
+            values: vec![0.0; 5000],
+            x_values: (0..5000).map(|i| i as f64).collect(),
+        };
+        series.values[1234] = 10_000.0;
+        series.values[3456] = -8_000.0;
+        sample_series(&mut series, 1000);
+        assert!(series.values.len() <= 1000);
+        assert!(series.values.contains(&10_000.0));
+        assert!(series.values.contains(&-8_000.0));
+        assert_eq!(series.values.len(), series.categories.len());
+        assert_eq!(series.values.len(), series.x_values.len());
+        let high = series.values.iter().position(|v| *v == 10_000.0).unwrap();
+        assert_eq!(series.categories[high], "P1234");
+        assert_eq!(series.x_values[high], 1234.0);
     }
 }

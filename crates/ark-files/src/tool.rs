@@ -64,6 +64,7 @@ fn edit_schema() -> Json {
     let edit = |required: &[&str], props: Json| json!({ "type": "object", "required": required, "properties": props, "additionalProperties": false });
     let s = json!({ "type": "string" });
     let n = json!({ "type": "integer" });
+    let f = json!({ "type": "number" });
     let cell_value = json!({ "type": ["string", "number", "boolean"] });
     json!({ "anyOf": [
         edit(&["find", "replace"], json!({ "find": s, "replace": s })),
@@ -76,6 +77,7 @@ fn edit_schema() -> Json {
         edit(&["block", "text"], json!({ "block": n, "text": s })),
         edit(&["after", "text"], json!({ "after": n, "text": s })),
         edit(&["delete"], json!({ "delete": n })),
+        edit(&["format", "value"], json!({ "format": s, "value": f })),
     ] })
 }
 
@@ -139,7 +141,7 @@ impl Adapter for Files {
                     "path": { "type": "string" },
                     "edits": {
                         "type": "array",
-                        "description": "in order. Spreadsheets: {cell:\"B4\", value:150}, {cell:\"A10\", rows:[[\"Total\",\"=SUM(B2:B9)\"]]}, {sheet:\"Name\", ...} for another sheet, {clear:\"A2:C9\"}, {add_sheet:\"Summary\", rows:[[...]]}, {rename_sheet:\"Old\", to:\"New\"}, {delete_sheet:\"Name\"}. Documents, with the block numbers of the last read: {block:3, text:\"Markdown\"} replaces (empty text deletes), {after:3, text:\"Markdown\"} inserts (after:0 is the start), {delete:3}. Any file: {find:\"old\", replace:\"new\"}",
+                        "description": "Apply in order. Sheets: set {cell,value|rows}; optionally add, clear, rename or delete a sheet; use sheet to target one. Documents: {block,text}, {after,text}, {delete}; numbers come from read. Set a read layout field with {format,value}; spacing is points, margins inches. Any file: {find,replace}.",
                         "items": edit_schema()
                     },
                     "version": { "type": "string", "description": "the version the last read gave; the edit is refused if the file changed since" }
@@ -372,6 +374,7 @@ fn created(rel: &str, edits: &[Edit]) -> std::result::Result<Content, Error> {
             }
             Ok(Content::Document(Document {
                 blocks: parse_markdown(&text.join("\n")),
+                ..Document::default()
             }))
         }
         Kind::Sheet => {
@@ -412,6 +415,7 @@ fn content_from(rel: &str, input: &Json) -> std::result::Result<Content, Error> 
             blocks: parse_markdown(
                 text.ok_or_else(|| Error::Input("a document takes `text` as Markdown".into()))?,
             ),
+            ..Document::default()
         })),
         Kind::Sheet => {
             let mut book = Workbook::default();

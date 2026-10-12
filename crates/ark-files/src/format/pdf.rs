@@ -37,7 +37,10 @@ impl Format for Pdf {
                 "this PDF has no text layer (a scan or images only)",
             ));
         }
-        Ok(Content::Document(Document { blocks }))
+        Ok(Content::Document(Document {
+            blocks,
+            ..Document::default()
+        }))
     }
     fn edit(&self, _: &[u8], _: &[Edit]) -> Result<Vec<u8>, Error> {
         Err(Error::Input(

@@ -487,6 +487,7 @@ mod tests {
                 );
                 s
             }],
+            ..Workbook::default()
         });
         let first = write(root, "data.csv", &rows, None).unwrap();
         let edits = Edit::parse_all(&json!([{"cell": "A1", "value": 2}])).unwrap();

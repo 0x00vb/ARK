@@ -7,7 +7,8 @@
 use std::collections::HashMap;
 
 use crate::model::{
-    apply_document, inline_runs, runs_markdown, Block, BlockKind, Content, Document, Edit, Kind,
+    apply_document, inline_runs, runs_markdown, Block, BlockKind, BlockLayout, Content, Document,
+    DocumentLayout, Edit, Kind, SectionMargins,
 };
 use crate::package::{
     add_override, insert_before_close, next_rel_id, relationships, rels_of, resolve, Package,
@@ -23,6 +24,74 @@ const REL_NUMBERING: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering";
 const CT_NUMBERING: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
+const REL_STYLES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+const CT_STYLES: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml";
+
+#[derive(Clone, Debug, Default)]
+struct LayoutPatch {
+    line_spacing: Option<f64>,
+    paragraph_before: Option<f64>,
+    paragraph_after: Option<f64>,
+    character_spacing: Option<f64>,
+    margin_top: Option<f64>,
+    margin_right: Option<f64>,
+    margin_bottom: Option<f64>,
+    margin_left: Option<f64>,
+    section_margins: Option<Vec<SectionMargins>>,
+}
+
+impl LayoutPatch {
+    fn from_edits(edits: &[Edit]) -> Self {
+        let mut out = Self::default();
+        for edit in edits {
+            if let Edit::Layout {
+                line_spacing,
+                paragraph_before,
+                paragraph_after,
+                character_spacing,
+                margin_top,
+                margin_right,
+                margin_bottom,
+                margin_left,
+                section_margins,
+            } = edit
+            {
+                macro_rules! take {
+                    ($field:ident) => {
+                        if $field.is_some() {
+                            out.$field = $field.clone();
+                        }
+                    };
+                }
+                take!(line_spacing);
+                take!(paragraph_before);
+                take!(paragraph_after);
+                take!(character_spacing);
+                take!(margin_top);
+                take!(margin_right);
+                take!(margin_bottom);
+                take!(margin_left);
+                take!(section_margins);
+            }
+        }
+        out
+    }
+
+    fn paragraph(&self) -> bool {
+        self.line_spacing.is_some()
+            || self.paragraph_before.is_some()
+            || self.paragraph_after.is_some()
+    }
+
+    fn margins(&self) -> bool {
+        self.margin_top.is_some()
+            || self.margin_right.is_some()
+            || self.margin_bottom.is_some()
+            || self.margin_left.is_some()
+            || self.section_margins.is_some()
+    }
+}
 
 impl Format for Docx {
     fn name(&self) -> &'static str {
@@ -41,7 +110,7 @@ impl Format for Docx {
         let mut doc = Doc::read(Package::read(bytes)?)?;
         let mut model = doc.model();
         apply_document(&mut model, edits)?;
-        doc.write(&model.blocks)
+        doc.write(&model, &LayoutPatch::from_edits(edits))
     }
     fn create(&self, content: &Content) -> Result<Vec<u8>, Error> {
         let blocks = match content {
@@ -54,7 +123,11 @@ impl Format for Docx {
             .map(|b| Block { origin: None, ..b })
             .collect();
         let mut doc = Doc::read(template())?;
-        doc.write(&blocks)
+        let document = Document {
+            blocks,
+            ..Document::default()
+        };
+        doc.write(&document, &LayoutPatch::default())
     }
 }
 
@@ -102,9 +175,12 @@ impl Doc {
                 .find(|r| r.1.ends_with(kind))
                 .map(|r| resolve(&part, &r.2))
         };
+        let styles_part = find("/styles");
         let styles = Styles::read(
-            find("/styles")
-                .and_then(|p| pkg.text_opt(&p))
+            styles_part.clone(),
+            styles_part
+                .as_ref()
+                .and_then(|p| pkg.text_opt(p))
                 .unwrap_or_default(),
         );
         let numbering_part = find("/numbering");
@@ -161,7 +237,7 @@ impl Doc {
             };
             pos = end;
             let raw = &xml[start..end];
-            let (block, props, run, marker) = match local(name) {
+            let (mut block, props, run, marker) = match local(name) {
                 "p" => paragraph(raw, &styles, &lists),
                 "tbl" => (
                     Block::table(table_rows(raw, &styles, &lists)),
@@ -181,6 +257,7 @@ impl Doc {
                 // Bookmarks and other markers ride with the next block.
                 _ => continue,
             };
+            block.layout = styles.block_layout(props.as_deref(), run.as_deref());
             els.push(El {
                 lead: (lead_start, start),
                 range: (start, end),
@@ -211,10 +288,12 @@ impl Doc {
     fn model(&self) -> Document {
         Document {
             blocks: self.els.iter().map(|e| e.block.clone()).collect(),
+            layout: document_layout(&self.xml, &self.styles),
         }
     }
 
-    fn write(&mut self, blocks: &[Block]) -> Result<Vec<u8>, Error> {
+    fn write(&mut self, document: &Document, patch: &LayoutPatch) -> Result<Vec<u8>, Error> {
+        let blocks = &document.blocks;
         let w = self.styles.w.clone();
         let mut out = String::new();
         let mut led = vec![false; self.els.len()];
@@ -263,12 +342,15 @@ impl Doc {
             out.push_str(&self.xml[s..e]);
         }
         let _ = w;
-        let xml = format!(
+        let mut xml = format!(
             "{}{out}{}",
             &self.xml[..self.body.0],
             &self.xml[self.body.1..]
         );
+        xml = set_all_margins(&xml, patch, &document.layout);
         self.pkg.set(&self.part, xml);
+        self.styles
+            .set_defaults(patch, &document.layout, &mut self.pkg, &self.part);
         self.lists.save(&mut self.pkg, &self.part);
         self.pkg.write()
     }
@@ -859,17 +941,419 @@ fn content_text(raw: &str, styles: &Styles, lists: &Lists) -> String {
     parts.join("\n")
 }
 
+fn element_range(raw: &str, wanted: &str) -> Option<(usize, usize)> {
+    Lexer::new(raw).find_map(|t| match t {
+        Tok::Open {
+            name,
+            start,
+            empty,
+            end,
+            ..
+        } if local(name) == wanted => Some((
+            start,
+            if empty {
+                end
+            } else {
+                xml::element_end(raw, start)
+            },
+        )),
+        _ => None,
+    })
+}
+
+fn element_named<'a>(raw: &'a str, wanted: &str) -> Option<&'a str> {
+    let (a, b) = element_range(raw, wanted)?;
+    Some(&raw[a..b])
+}
+
+fn paragraph_style(ppr: &str) -> Option<String> {
+    Lexer::new(ppr).find_map(|t| match t {
+        Tok::Open { name, attrs, .. } if local(name) == "pStyle" => xml::attrs(attrs)
+            .into_iter()
+            .find(|(k, _)| local(k) == "val")
+            .map(|(_, v)| xml::unescape(v).into_owned()),
+        _ => None,
+    })
+}
+
+fn spacing_attrs(raw: &str) -> Option<HashMap<String, String>> {
+    Lexer::new(raw).find_map(|t| match t {
+        Tok::Open { name, attrs, .. } if local(name) == "spacing" => Some(
+            xml::attrs(attrs)
+                .into_iter()
+                .map(|(k, v)| (local(k).to_string(), v.to_string()))
+                .collect(),
+        ),
+        _ => None,
+    })
+}
+
+fn apply_paragraph_spacing(
+    raw: &str,
+    layout: &mut DocumentLayout,
+    flags: Option<&mut BlockLayout>,
+) {
+    let Some(a) = spacing_attrs(raw) else { return };
+    let mut line_override = false;
+    let mut before_override = false;
+    let mut after_override = false;
+    if let Some(v) = a.get("line").and_then(|v| v.parse::<f64>().ok()) {
+        layout.line_spacing = v / 240.0;
+        line_override = true;
+    }
+    if let Some(v) = a.get("before").and_then(|v| v.parse::<f64>().ok()) {
+        layout.paragraph_before = v / 20.0;
+        before_override = true;
+    }
+    if let Some(v) = a.get("after").and_then(|v| v.parse::<f64>().ok()) {
+        layout.paragraph_after = v / 20.0;
+        after_override = true;
+    }
+    if let Some(f) = flags {
+        f.line_override |= line_override;
+        f.before_override |= before_override;
+        f.after_override |= after_override;
+    }
+}
+
+fn apply_character_spacing(
+    raw: &str,
+    layout: &mut DocumentLayout,
+    flags: Option<&mut BlockLayout>,
+) {
+    let Some(v) = spacing_attrs(raw).and_then(|a| a.get("val").and_then(|v| v.parse::<f64>().ok()))
+    else {
+        return;
+    };
+    layout.character_spacing = v / 20.0;
+    if let Some(f) = flags {
+        f.character_override = true;
+    }
+}
+
+fn document_layout(xml: &str, styles: &Styles) -> DocumentLayout {
+    let mut layout = styles.base.clone();
+    let mut margins: Vec<[f64; 4]> = Vec::new();
+    let mut at = 0;
+    while let Some((a, b)) = Lexer::at(xml, at).find_map(|t| match t {
+        Tok::Open {
+            name,
+            start,
+            empty,
+            end,
+            ..
+        } if local(name) == "sectPr" => Some((
+            start,
+            if empty {
+                end
+            } else {
+                xml::element_end(xml, start)
+            },
+        )),
+        _ => None,
+    }) {
+        if let Some(pg) = element_named(&xml[a..b], "pgMar") {
+            let attrs = Lexer::new(pg)
+                .find_map(|t| match t {
+                    Tok::Open { attrs, .. } => Some(attrs),
+                    _ => None,
+                })
+                .unwrap_or("");
+            let get = |name: &str| {
+                xml::attrs(attrs)
+                    .into_iter()
+                    .find(|(k, _)| local(k) == name)
+                    .and_then(|(_, v)| v.parse::<f64>().ok())
+                    .unwrap_or(1440.0)
+                    / 1440.0
+            };
+            margins.push([get("top"), get("right"), get("bottom"), get("left")]);
+        } else {
+            margins.push([1.0; 4]);
+        }
+        at = b;
+    }
+    if margins.is_empty() {
+        margins.push([1.0; 4]);
+    }
+    let same = |i: usize| {
+        margins
+            .first()
+            .map(|m| m[i])
+            .filter(|v| margins.iter().all(|m| (m[i] - *v).abs() < 0.0001))
+    };
+    layout.margin_top = same(0);
+    layout.margin_right = same(1);
+    layout.margin_bottom = same(2);
+    layout.margin_left = same(3);
+    layout.section_margins = margins
+        .into_iter()
+        .map(|m| SectionMargins {
+            top: m[0],
+            right: m[1],
+            bottom: m[2],
+            left: m[3],
+        })
+        .collect();
+    layout
+}
+
+fn set_xml_attr(raw: &str, key: &str, value: &str) -> String {
+    let needle = format!(" {key}=\"");
+    if let Some(at) = raw.find(&needle) {
+        let start = at + needle.len();
+        if let Some(end) = raw[start..].find('"') {
+            return format!("{}{}{}", &raw[..start], escape(value), &raw[start + end..]);
+        }
+    }
+    let at = raw.find('>').unwrap_or(raw.len());
+    let at = raw[..at].trim_end_matches('/').trim_end().len();
+    format!("{} {key}=\"{}\"{}", &raw[..at], escape(value), &raw[at..])
+}
+
+fn set_child_value(raw: &str, prefix: &str, name: &str, value: i64) -> String {
+    if let Some((a, b)) = element_range(raw, name) {
+        let child = set_xml_attr(&raw[a..b], &format!("{prefix}val"), &value.to_string());
+        return format!("{}{}{}", &raw[..a], child, &raw[b..]);
+    }
+    let child = format!("<{prefix}{name} {prefix}val=\"{value}\"/>");
+    insert_xml_child(raw, &child)
+}
+
+fn insert_xml_child(raw: &str, child: &str) -> String {
+    if raw.trim_end().ends_with("/>") {
+        let trimmed = raw.trim_end();
+        let whitespace = &raw[trimmed.len()..];
+        let name = Lexer::new(trimmed)
+            .find_map(|t| match t {
+                Tok::Open { name, .. } => Some(name.to_string()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        return format!(
+            "{}>{child}</{name}>{whitespace}",
+            trimmed.trim_end_matches("/>")
+        );
+    }
+    let close = raw.rfind("</").unwrap_or(raw.len());
+    format!("{}{}{}", &raw[..close], child, &raw[close..])
+}
+
+fn prefix_for(raw: &str, element_name: &str) -> String {
+    Lexer::new(raw)
+        .find_map(|t| match t {
+            Tok::Open { name, .. } if local(name) == element_name => {
+                Some(name.strip_suffix(element_name).unwrap_or("w:").to_string())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| "w:".into())
+}
+
+fn set_local_attr(raw: &str, prefix: &str, name: &str, value: &str) -> String {
+    let open_end = raw.find('>').unwrap_or(raw.len());
+    let attrs = Lexer::new(raw).find_map(|t| match t {
+        Tok::Open { attrs, .. } => Some(attrs),
+        _ => None,
+    });
+    if let Some((key, _)) = attrs.and_then(|attrs| {
+        xml::attrs(attrs)
+            .into_iter()
+            .find(|(key, _)| local(key) == name)
+    }) {
+        return set_xml_attr(raw, key, value);
+    }
+    let key = format!("{prefix}{name}");
+    let mut open = raw[..open_end].to_string();
+    let insert = open.trim_end_matches('/').trim_end().len();
+    open.insert_str(insert, &format!(" {key}=\"{}\"", escape(value)));
+    format!("{}{}", open, &raw[open_end..])
+}
+
+fn set_spacing_element(ppr: &str, patch: &LayoutPatch, layout: &DocumentLayout) -> String {
+    let prefix = Lexer::new(ppr)
+        .find_map(|t| match t {
+            Tok::Open { name, .. } if local(name) == "pPr" => {
+                Some(name.strip_suffix("pPr").unwrap_or("w:").to_string())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| "w:".into());
+    let (mut spacing, range) = if let Some((a, b)) = element_range(ppr, "spacing") {
+        (ppr[a..b].to_string(), Some((a, b)))
+    } else {
+        (format!("<{prefix}spacing/>"), None)
+    };
+    if patch.paragraph_before.is_some() {
+        spacing = set_local_attr(
+            &spacing,
+            &prefix,
+            "before",
+            &((layout.paragraph_before * 20.0).round() as i64).to_string(),
+        );
+    }
+    if patch.paragraph_after.is_some() {
+        spacing = set_local_attr(
+            &spacing,
+            &prefix,
+            "after",
+            &((layout.paragraph_after * 20.0).round() as i64).to_string(),
+        );
+    }
+    if patch.line_spacing.is_some() {
+        spacing = set_local_attr(
+            &spacing,
+            &prefix,
+            "line",
+            &((layout.line_spacing * 240.0).round() as i64).to_string(),
+        );
+        spacing = set_local_attr(&spacing, &prefix, "lineRule", "auto");
+    }
+    if let Some((a, b)) = range {
+        format!("{}{}{}", &ppr[..a], spacing, &ppr[b..])
+    } else {
+        insert_xml_child(ppr, &spacing)
+    }
+}
+
+fn set_all_margins(xml: &str, patch: &LayoutPatch, layout: &DocumentLayout) -> String {
+    if !patch.margins() {
+        return xml.to_string();
+    }
+    let mut out = xml.to_string();
+    if !Lexer::new(&out).any(|t| matches!(t, Tok::Open { name, .. } if local(name) == "sectPr")) {
+        let prefix = prefix_for(&out, "document");
+        let body = format!("{prefix}body");
+        if let Some(next) = insert_before_close(&out, &body, &format!("<{prefix}sectPr/>")) {
+            out = next;
+        }
+    }
+    let mut ranges = Vec::new();
+    let mut at = 0;
+    while let Some((a, b)) = Lexer::at(&out, at).find_map(|t| match t {
+        Tok::Open {
+            name,
+            start,
+            empty,
+            end,
+            ..
+        } if local(name) == "sectPr" => Some((
+            start,
+            if empty {
+                end
+            } else {
+                xml::element_end(&out, start)
+            },
+        )),
+        _ => None,
+    }) {
+        ranges.push((a, b));
+        at = b;
+    }
+    let section_count = ranges.len();
+    for (index, (a, b)) in ranges.into_iter().enumerate().rev() {
+        let mut sect = out[a..b].to_string();
+        let prefix = prefix_for(&sect, "sectPr");
+        let (mut margin, range) = match element_range(&sect, "pgMar") {
+            Some((m0, m1)) => (sect[m0..m1].to_string(), Some((m0, m1))),
+            None => (format!("<{prefix}pgMar/>"), None),
+        };
+        let exact = patch
+            .section_margins
+            .as_ref()
+            .filter(|values| values.len() == section_count)
+            .and_then(|values| values.get(index));
+        let values = [
+            (
+                "top",
+                exact
+                    .map(|m| m.top)
+                    .or(patch.margin_top)
+                    .or(layout.margin_top),
+            ),
+            (
+                "right",
+                exact
+                    .map(|m| m.right)
+                    .or(patch.margin_right)
+                    .or(layout.margin_right),
+            ),
+            (
+                "bottom",
+                exact
+                    .map(|m| m.bottom)
+                    .or(patch.margin_bottom)
+                    .or(layout.margin_bottom),
+            ),
+            (
+                "left",
+                exact
+                    .map(|m| m.left)
+                    .or(patch.margin_left)
+                    .or(layout.margin_left),
+            ),
+        ];
+        for (name, value) in values {
+            if exact.is_some()
+                || match name {
+                    "top" => patch.margin_top.is_some(),
+                    "right" => patch.margin_right.is_some(),
+                    "bottom" => patch.margin_bottom.is_some(),
+                    _ => patch.margin_left.is_some(),
+                }
+            {
+                if let Some(value) = value {
+                    margin = set_local_attr(
+                        &margin,
+                        &prefix,
+                        name,
+                        &((value * 1440.0).round() as i64).to_string(),
+                    );
+                }
+            }
+        }
+        sect = if let Some((m0, m1)) = range {
+            format!("{}{}{}", &sect[..m0], margin, &sect[m1..])
+        } else {
+            if sect.ends_with("/>") {
+                let name = Lexer::new(&sect)
+                    .find_map(|t| match t {
+                        Tok::Open { name, .. } => Some(name.to_string()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| format!("{prefix}sectPr"));
+                format!("{}>{margin}</{name}>", sect.trim_end_matches("/>"))
+            } else {
+                let close = sect.rfind("</").unwrap_or(sect.len());
+                format!("{}{}{}", &sect[..close], margin, &sect[close..])
+            }
+        };
+        out = format!("{}{}{}", &out[..a], sect, &out[b..]);
+    }
+    out
+}
+
 // ---- styles and lists --------------------------------------------------------------------------
 
 struct Styles {
     /// The prefix of the WordprocessingML namespace (`w:`).
     w: String,
-    /// Paragraph style id: (lowercase name, based on, outline level).
-    by_id: HashMap<String, (String, Option<String>, Option<u8>)>,
+    part: Option<String>,
+    xml: String,
+    base: DocumentLayout,
+    by_id: HashMap<String, Style>,
+}
+
+struct Style {
+    name: String,
+    based: Option<String>,
+    outline: Option<u8>,
+    ppr: Option<String>,
+    rpr: Option<String>,
 }
 
 impl Styles {
-    fn read(xml: String) -> Styles {
+    fn read(part: Option<String>, xml: String) -> Styles {
         let w = Lexer::new(&xml)
             .find_map(|t| match t {
                 Tok::Open { name, .. } if local(name) == "styles" => {
@@ -921,39 +1405,68 @@ impl Styles {
                 }
             }
             if let (Some(id), Some("paragraph") | None) = (id, ty.as_deref()) {
-                by_id.insert(id, (sname, based, outline));
+                by_id.insert(
+                    id,
+                    Style {
+                        name: sname,
+                        based,
+                        outline,
+                        ppr: first_child(body, "pPr"),
+                        rpr: first_child(body, "rPr"),
+                    },
+                );
             }
             pos = end;
         }
-        Styles { w, by_id }
+        let mut base = DocumentLayout::default();
+        if let Some(defaults) = element_named(&xml, "docDefaults") {
+            if let Some(ppr) =
+                element_named(defaults, "pPrDefault").and_then(|x| element_named(x, "pPr"))
+            {
+                apply_paragraph_spacing(ppr, &mut base, None);
+            }
+            if let Some(rpr) =
+                element_named(defaults, "rPrDefault").and_then(|x| element_named(x, "rPr"))
+            {
+                apply_character_spacing(rpr, &mut base, None);
+            }
+        }
+        Styles {
+            w,
+            part,
+            xml,
+            base,
+            by_id,
+        }
     }
 
     fn heading_level(&self, id: &str) -> Option<u8> {
         let mut cur = Some(id.to_string());
         for _ in 0..6 {
-            let (name, based, outline) = self.by_id.get(cur.as_deref()?)?;
-            if let Some(n) = name
+            let style = self.by_id.get(cur.as_deref()?)?;
+            if let Some(n) = style
+                .name
                 .strip_prefix("heading ")
                 .and_then(|n| n.trim().parse::<u8>().ok())
             {
                 return Some(n.clamp(1, 6));
             }
-            if name == "title" {
+            if style.name == "title" {
                 return Some(1);
             }
-            if let Some(o) = outline.filter(|o| *o < 6) {
+            if let Some(o) = style.outline.filter(|o| *o < 6) {
                 return Some(o + 1);
             }
-            cur = based.clone();
+            cur = style.based.clone();
         }
         None
     }
 
     fn list_kind(&self, id: &str) -> Option<BlockKind> {
-        let (name, ..) = self.by_id.get(id)?;
-        if name.starts_with("list bullet") {
+        let style = self.by_id.get(id)?;
+        if style.name.starts_with("list bullet") {
             Some(BlockKind::Bullet(0))
-        } else if name.starts_with("list number") {
+        } else if style.name.starts_with("list number") {
             Some(BlockKind::Numbered(0))
         } else {
             None
@@ -963,13 +1476,159 @@ impl Styles {
     fn by_name(&self, name: &str) -> Option<String> {
         self.by_id
             .iter()
-            .find(|(_, v)| v.0 == name)
+            .find(|(_, v)| v.name == name)
             .map(|(k, _)| k.clone())
     }
 
     fn heading(&self, level: u8) -> Option<String> {
         self.by_name(&format!("heading {level}"))
             .or_else(|| (level == 1).then(|| self.by_name("title")).flatten())
+    }
+
+    fn block_layout(&self, ppr: Option<&str>, rpr: Option<&str>) -> BlockLayout {
+        let mut values = self.base.clone();
+        let mut out = BlockLayout::default();
+        let style_id = ppr.and_then(paragraph_style);
+        let mut chain = Vec::new();
+        let mut cur = style_id;
+        for _ in 0..8 {
+            let Some(id) = cur else { break };
+            let Some(style) = self.by_id.get(&id) else {
+                break;
+            };
+            chain.push(id);
+            cur = style.based.clone();
+        }
+        for id in chain.into_iter().rev() {
+            if let Some(style) = self.by_id.get(&id) {
+                if let Some(p) = &style.ppr {
+                    apply_paragraph_spacing(p, &mut values, Some(&mut out));
+                }
+                if let Some(r) = &style.rpr {
+                    apply_character_spacing(r, &mut values, Some(&mut out));
+                }
+            }
+        }
+        if let Some(p) = ppr {
+            apply_paragraph_spacing(p, &mut values, Some(&mut out));
+        }
+        if let Some(r) = rpr {
+            apply_character_spacing(r, &mut values, Some(&mut out));
+        }
+        out.line_spacing = values.line_spacing;
+        out.paragraph_before = values.paragraph_before;
+        out.paragraph_after = values.paragraph_after;
+        out.character_spacing = values.character_spacing;
+        out
+    }
+
+    fn set_defaults(
+        &mut self,
+        patch: &LayoutPatch,
+        layout: &DocumentLayout,
+        pkg: &mut Package,
+        document_part: &str,
+    ) {
+        if !patch.paragraph() && patch.character_spacing.is_none() {
+            return;
+        }
+        let part = self.part.clone().unwrap_or_else(|| {
+            document_part.rsplit_once('/').map_or_else(
+                || "styles.xml".into(),
+                |(dir, _)| format!("{dir}/styles.xml"),
+            )
+        });
+        if self.xml.is_empty() {
+            self.w = "w:".into();
+            self.xml = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:styles xmlns:w=\"{NS_W}\"></w:styles>"
+            );
+        }
+        let prefix = self.w.clone();
+        if element_range(&self.xml, "docDefaults").is_none() {
+            let defaults = format!("<{prefix}docDefaults></{prefix}docDefaults>");
+            if let Some(next) =
+                insert_before_close(&self.xml, &format!("{prefix}styles"), &defaults)
+            {
+                self.xml = next;
+            }
+        }
+        let Some((d0, d1)) = element_range(&self.xml, "docDefaults") else {
+            return;
+        };
+        let mut defaults = self.xml[d0..d1].to_string();
+        if patch.paragraph() {
+            if element_range(&defaults, "pPrDefault").is_none() {
+                let child = format!("<{prefix}pPrDefault><{prefix}pPr/></{prefix}pPrDefault>");
+                defaults = insert_xml_child(&defaults, &child);
+            }
+            if let Some((a, b)) = element_range(&defaults, "pPrDefault") {
+                let mut wrapper = defaults[a..b].to_string();
+                if element_range(&wrapper, "pPr").is_none() {
+                    let child = format!("<{prefix}pPr/>");
+                    wrapper = insert_xml_child(&wrapper, &child);
+                }
+                if let Some((p0, p1)) = element_range(&wrapper, "pPr") {
+                    let ppr = set_spacing_element(&wrapper[p0..p1], patch, layout);
+                    wrapper = format!("{}{}{}", &wrapper[..p0], ppr, &wrapper[p1..]);
+                }
+                defaults = format!("{}{}{}", &defaults[..a], wrapper, &defaults[b..]);
+            }
+        }
+        if patch.character_spacing.is_some() {
+            if element_range(&defaults, "rPrDefault").is_none() {
+                let child = format!("<{prefix}rPrDefault><{prefix}rPr/></{prefix}rPrDefault>");
+                defaults = insert_xml_child(&defaults, &child);
+            }
+            if let Some((a, b)) = element_range(&defaults, "rPrDefault") {
+                let mut wrapper = defaults[a..b].to_string();
+                if element_range(&wrapper, "rPr").is_none() {
+                    let child = format!("<{prefix}rPr/>");
+                    wrapper = insert_xml_child(&wrapper, &child);
+                }
+                if let Some((r0, r1)) = element_range(&wrapper, "rPr") {
+                    let rpr = set_child_value(
+                        &wrapper[r0..r1],
+                        &prefix,
+                        "spacing",
+                        (layout.character_spacing * 20.0).round() as i64,
+                    );
+                    wrapper = format!("{}{}{}", &wrapper[..r0], rpr, &wrapper[r1..]);
+                }
+                defaults = format!("{}{}{}", &defaults[..a], wrapper, &defaults[b..]);
+            }
+        }
+        self.xml = format!("{}{}{}", &self.xml[..d0], defaults, &self.xml[d1..]);
+        pkg.set(&part, self.xml.clone());
+        if self.part.is_none() {
+            let rels_part = rels_of(document_part);
+            let mut rels = pkg.text_opt(&rels_part).unwrap_or_else(|| {
+                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"></Relationships>".into()
+            });
+            let id = next_rel_id(&rels);
+            let target = part
+                .rsplit_once('/')
+                .map_or(part.as_str(), |(_, file)| file);
+            if let Some(next) = insert_before_close(
+                &rels,
+                "Relationships",
+                &format!(
+                    "<Relationship Id=\"{id}\" Type=\"{REL_STYLES}\" Target=\"{}\"/>",
+                    escape(target)
+                ),
+            ) {
+                rels = next;
+            }
+            pkg.set(&rels_part, rels);
+            if let Some(types) = pkg.text_opt("[Content_Types].xml") {
+                pkg.set(
+                    "[Content_Types].xml",
+                    add_override(&types, &part, CT_STYLES),
+                );
+            }
+            self.part = Some(part);
+        }
+        self.base = layout.clone();
     }
 }
 
@@ -1338,5 +1997,164 @@ mod tests {
             .unwrap();
         assert!(doc.contains(r#"<w:pPr><w:ind w:left="720"/></w:pPr><w:r><w:tab/><w:t xml:space="preserve">•</w:t><w:tab/><w:t xml:space="preserve">South fell</w:t></w:r>"#), "{doc}");
         assert!(doc.contains(r#"<w:rPr><w:b/><w:sz w:val="48"/></w:rPr><w:t xml:space="preserve">Q1 report</w:t>"#), "a heading keeps its weight: {doc}");
+    }
+
+    #[test]
+    fn document_layout_round_trips_without_erasing_direct_formatting() {
+        let mut p = template();
+        let doc = p.text("word/document.xml").unwrap().replace("<w:body>", "<w:body><w:p><w:pPr><w:spacing w:line=\"480\" w:after=\"40\"/></w:pPr><w:r><w:rPr><w:spacing w:val=\"10\"/></w:rPr><w:t>Direct</w:t></w:r></w:p>");
+        p.set("word/document.xml", doc);
+        p.set("word/header1.xml", b"header stays exact".to_vec());
+        let bytes = p.write().unwrap();
+        let edits = Edit::parse_all(&json!([{"layout":{"line_spacing":1.5,"paragraph_before":6,"paragraph_after":12,"character_spacing":0.5,"margin_top":0.75,"margin_right":1.25,"margin_bottom":0.8,"margin_left":1.1}}])).unwrap();
+        let out = Docx.edit(&bytes, &edits).unwrap();
+        let pkg = Package::read(&out).unwrap();
+        assert_eq!(
+            pkg.get("word/header1.xml"),
+            Some(b"header stays exact".as_slice())
+        );
+        let xml = pkg.text("word/document.xml").unwrap();
+        assert!(
+            xml.contains(r#"<w:pPr><w:spacing w:line="480" w:after="40"/></w:pPr>"#),
+            "{xml}"
+        );
+        assert!(xml.contains(r#"w:top="1080""#), "{xml}");
+        assert!(xml.contains(r#"w:right="1800""#), "{xml}");
+        let Content::Document(read) = Docx.read(&out).unwrap() else {
+            panic!()
+        };
+        assert_eq!(read.layout.line_spacing, 1.5);
+        assert_eq!(read.layout.paragraph_before, 6.0);
+        assert_eq!(read.layout.paragraph_after, 12.0);
+        assert_eq!(read.layout.character_spacing, 0.5);
+        assert_eq!(read.layout.margin_left, Some(1.1));
+        assert_eq!(read.blocks[0].layout.line_spacing, 2.0);
+        assert!(read.blocks[0].layout.line_override);
+        assert_eq!(read.blocks[0].layout.character_spacing, 0.5);
+        assert!(read.blocks[0].layout.character_override);
+    }
+
+    #[test]
+    fn layout_creates_missing_word_defaults_and_margins() {
+        let mut p = Package::new();
+        p.set(
+            "[Content_Types].xml",
+            r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#,
+        );
+        p.set(
+            "_rels/.rels",
+            r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#,
+        );
+        p.set(
+            "word/document.xml",
+            format!(r#"<w:document xmlns:w="{NS_W}"><w:body><w:p><w:r><w:t>Plain</w:t></w:r></w:p></w:body></w:document>"#),
+        );
+        p.set("word/media/image1.png", b"image exact".to_vec());
+        p.set("word/comments.xml", b"comments exact".to_vec());
+        let input = p.write().unwrap();
+        let edits = Edit::parse_all(&json!([{
+            "layout": {"line_spacing": 1.4, "character_spacing": 0.3, "margin_left": 1.25}
+        }]))
+        .unwrap();
+        let output = Docx.edit(&input, &edits).unwrap();
+        let package = Package::read(&output).unwrap();
+        let styles = package.text("word/styles.xml").unwrap();
+        assert!(styles.contains(r#"w:line="336""#), "{styles}");
+        assert!(styles.contains(r#"w:lineRule="auto""#), "{styles}");
+        assert!(styles.contains(r#"w:val="6""#), "{styles}");
+        assert!(package
+            .text("word/_rels/document.xml.rels")
+            .unwrap()
+            .contains(REL_STYLES));
+        assert!(package
+            .text("[Content_Types].xml")
+            .unwrap()
+            .contains("/word/styles.xml"));
+        let document = package.text("word/document.xml").unwrap();
+        assert!(document.contains(r#"w:left="1800""#), "{document}");
+        assert_eq!(
+            package.get("word/media/image1.png"),
+            Some(b"image exact".as_slice())
+        );
+        assert_eq!(
+            package.get("word/comments.xml"),
+            Some(b"comments exact".as_slice())
+        );
+    }
+
+    #[test]
+    fn margin_only_preserves_spacing_and_mixed_sections_can_be_restored() {
+        let mut p = template();
+        p.set(
+            "word/styles.xml",
+            format!(r#"<w:styles xmlns:w="{NS_W}"><w:docDefaults><w:pPrDefault><w:pPr><w:spacing w:line="480" w:lineRule="exact" w:beforeAutospacing="1"/></w:pPr></w:pPrDefault></w:docDefaults></w:styles>"#),
+        );
+        p.set(
+            "word/document.xml",
+            format!(r#"<w:document xmlns:w="{NS_W}"><w:body><w:p><w:pPr><w:sectPr><w:pgMar w:top="720" w:right="1440" w:bottom="1440" w:left="720"/></w:sectPr></w:pPr><w:r><w:t>One</w:t></w:r></w:p><w:sectPr><w:pgMar w:top="2160" w:right="1440" w:bottom="1440" w:left="2160"/></w:sectPr></w:body></w:document>"#),
+        );
+        let input = p.write().unwrap();
+        let Content::Document(original) = Docx.read(&input).unwrap() else {
+            panic!()
+        };
+        assert_eq!(original.layout.margin_top, None);
+        assert_eq!(original.layout.section_margins.len(), 2);
+
+        let reset = Docx
+            .edit(
+                &input,
+                &Edit::parse_all(&json!([{"layout":{"margin_top":1,"margin_right":1,"margin_bottom":1,"margin_left":1}}])).unwrap(),
+            )
+            .unwrap();
+        let reset_package = Package::read(&reset).unwrap();
+        assert_eq!(
+            reset_package.text("word/styles.xml").unwrap(),
+            p.text("word/styles.xml").unwrap(),
+            "a margin edit must not normalize paragraph spacing"
+        );
+        let sections: Vec<_> = original
+            .layout
+            .section_margins
+            .iter()
+            .map(|m| {
+                json!({
+                    "top": m.top, "right": m.right, "bottom": m.bottom, "left": m.left
+                })
+            })
+            .collect();
+        let restored = Docx
+            .edit(
+                &reset,
+                &Edit::parse_all(&json!([{"layout":{"section_margins":sections}}])).unwrap(),
+            )
+            .unwrap();
+        let Content::Document(restored) = Docx.read(&restored).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            restored.layout.section_margins,
+            original.layout.section_margins
+        );
+        assert_eq!(restored.layout.margin_top, None);
+    }
+
+    #[test]
+    fn named_styles_inherit_spacing() {
+        let mut p = template();
+        p.set(
+            "word/styles.xml",
+            format!(r#"<w:styles xmlns:w="{NS_W}"><w:docDefaults><w:pPrDefault><w:pPr><w:spacing w:line="276" w:after="160"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Base"><w:name w:val="Base"/><w:pPr><w:spacing w:line="360"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="Child"><w:name w:val="Child"/><w:basedOn w:val="Base"/><w:pPr><w:spacing w:after="200"/></w:pPr></w:style></w:styles>"#),
+        );
+        p.set(
+            "word/document.xml",
+            format!(r#"<w:document xmlns:w="{NS_W}"><w:body><w:p><w:pPr><w:pStyle w:val="Child"/></w:pPr><w:r><w:t>Inherited</w:t></w:r></w:p><w:sectPr/></w:body></w:document>"#),
+        );
+        let Content::Document(document) = Docx.read(&p.write().unwrap()).unwrap() else {
+            panic!()
+        };
+        assert_eq!(document.blocks[0].layout.line_spacing, 1.5);
+        assert_eq!(document.blocks[0].layout.paragraph_after, 10.0);
+        assert!(document.blocks[0].layout.line_override);
+        assert!(document.blocks[0].layout.after_override);
     }
 }

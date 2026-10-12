@@ -21,6 +21,7 @@ impl Format for Csv {
         let text = decode(bytes);
         Ok(Content::Sheet(Workbook {
             sheets: vec![parse_upto(&text, delimiter(&text), Some(crate::READ_CELLS))],
+            ..Workbook::default()
         }))
     }
     fn edit(&self, bytes: &[u8], edits: &[Edit]) -> Result<Vec<u8>, Error> {
@@ -38,6 +39,7 @@ impl Format for Csv {
         let d = delimiter(&text);
         let mut book = Workbook {
             sheets: vec![parse(&text, d)],
+            ..Workbook::default()
         };
         apply_sheet(&mut book, edits)?;
         let crlf = text.contains("\r\n");
@@ -198,6 +200,7 @@ pub fn parse_upto(text: &str, d: u8, limit: Option<usize>) -> Sheet {
     }
     let mut book = Workbook {
         sheets: vec![sheet],
+        ..Workbook::default()
     };
     crate::formula::recalc(&mut book);
     book.sheets.pop().unwrap_or_default()

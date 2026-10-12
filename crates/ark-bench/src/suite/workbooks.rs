@@ -316,6 +316,7 @@ fn targets_book() -> Workbook {
     }
     Workbook {
         sheets: vec![sheet("Targets", cells)],
+        ..Workbook::default()
     }
 }
 
@@ -327,6 +328,7 @@ fn write_sources(dir: &Path) -> anyhow::Result<()> {
             order_sheet("Q1", &d.q1, None),
             order_sheet("Q2", &d.q2, Some("Orders, April to June 2026")),
         ],
+        ..Workbook::default()
     };
     ark_files::write(dir, ORDERS, &Content::Sheet(orders), None)?;
     std::fs::write(dir.join(CUSTOMERS), customers_csv())?;
@@ -491,6 +493,7 @@ fn write_outputs(dir: &Path) -> Result<(), String> {
     }
     let book = Workbook {
         sheets: vec![sheet("Monthly revenue", cells), sheet("Q2 vs target", vs)],
+        ..Workbook::default()
     };
     ark_files::write(dir, SUMMARY, &Content::Sheet(book), None).map_err(|e| e.to_string())?;
     let mut chart = PNG_MAGIC.to_vec();

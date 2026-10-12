@@ -171,9 +171,38 @@ impl File {
             }),
             Content::Text(t) => json!({ "text": t }),
             Content::Sheet(book) => json!({
-                "sheets": book.sheets.iter().map(sheet_page).collect::<Vec<_>>()
+                "sheets": book.sheets.iter().map(sheet_page).collect::<Vec<_>>(),
+                "charts": book.charts.iter().map(|chart| json!({
+                    "sheet": chart.sheet,
+                    "title": chart.title,
+                    "type": chart.kind.as_str(),
+                    "sampled": chart.sampled,
+                    "series": chart.series.iter().map(|series| json!({
+                        "name": series.name,
+                        "categories": series.categories,
+                        "values": series.values,
+                        "x_values": series.x_values,
+                    })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
+                "chart_warnings": book.chart_warnings,
             }),
             Content::Document(doc) => json!({
+                "layout": {
+                    "line_spacing": doc.layout.line_spacing,
+                    "paragraph_before": doc.layout.paragraph_before,
+                    "paragraph_after": doc.layout.paragraph_after,
+                    "character_spacing": doc.layout.character_spacing,
+                    "margin_top": doc.layout.margin_top,
+                    "margin_right": doc.layout.margin_right,
+                    "margin_bottom": doc.layout.margin_bottom,
+                    "margin_left": doc.layout.margin_left,
+                    "section_margins": doc.layout.section_margins.iter().map(|m| json!({
+                        "top": m.top,
+                        "right": m.right,
+                        "bottom": m.bottom,
+                        "left": m.left,
+                    })).collect::<Vec<_>>(),
+                },
                 "blocks": doc.blocks.iter().map(|b| {
                     let (kind, level) = match &b.kind {
                         BlockKind::Heading(n) => ("heading", *n),
@@ -183,7 +212,19 @@ impl File {
                         BlockKind::Table => ("table", 0),
                         BlockKind::Other(_) => ("other", 0),
                     };
-                    let mut v = json!({ "kind": kind, "level": level, "text": b.text });
+                    let mut v = json!({
+                        "kind": kind, "level": level, "text": b.text,
+                        "layout": {
+                            "line_spacing": b.layout.line_spacing,
+                            "paragraph_before": b.layout.paragraph_before,
+                            "paragraph_after": b.layout.paragraph_after,
+                            "character_spacing": b.layout.character_spacing,
+                            "line_override": b.layout.line_override,
+                            "before_override": b.layout.before_override,
+                            "after_override": b.layout.after_override,
+                            "character_override": b.layout.character_override,
+                        }
+                    });
                     if let BlockKind::Other(what) = &b.kind {
                         v["label"] = json!(what);
                     }
@@ -362,6 +403,7 @@ mod tests {
     fn a_sheet_lists_with_addresses_and_formulas() {
         let mut book = Workbook {
             sheets: vec![Sheet::new("Sales")],
+            ..Workbook::default()
         };
         apply_sheet(
             &mut book,
@@ -396,7 +438,10 @@ mod tests {
 
     #[test]
     fn a_workbook_read_without_a_sheet_shows_the_start_of_every_sheet() {
-        let mut book = Workbook { sheets: vec![] };
+        let mut book = Workbook {
+            sheets: vec![],
+            ..Workbook::default()
+        };
         for name in ["Jan", "Feb", "Mar"] {
             let rows: Vec<Vec<serde_json::Value>> = (0..400)
                 .map(|i| {
@@ -442,9 +487,12 @@ mod tests {
         s.cells.insert((0, 0), crate::model::Cell::default());
         s.cells.get_mut(&(0, 0)).unwrap().value = Value::Number(1.0);
         s.unread = 250;
-        let l = file(Content::Sheet(Workbook { sheets: vec![s] }))
-            .listing(&Window::default())
-            .unwrap();
+        let l = file(Content::Sheet(Workbook {
+            sheets: vec![s],
+            ..Workbook::default()
+        }))
+        .listing(&Window::default())
+        .unwrap();
         assert!(
             l.text.contains("Data (A1:A1, and 250 more rows not read)"),
             "{}",
@@ -457,9 +505,12 @@ mod tests {
     fn a_document_lists_numbered_blocks_without_spacing() {
         let mut blocks = parse_markdown("# Title\nOne");
         blocks.insert(1, crate::model::Block::new(BlockKind::Paragraph, ""));
-        let l = file(Content::Document(Document { blocks }))
-            .listing(&Window::default())
-            .unwrap();
+        let l = file(Content::Document(Document {
+            blocks,
+            ..Document::default()
+        }))
+        .listing(&Window::default())
+        .unwrap();
         assert_eq!(l.text, "x: document, 2 blocks\n(the numbers are what files.edit takes)\n\n[1] # Title\n[3] One\n");
     }
 }

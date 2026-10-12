@@ -42,6 +42,145 @@ function loadSoon() {
 /// The tone of a state: what needs the person stands out, the rest stays quiet.
 const TONE = { asking: "ask", failed: "err", retrying: "warn", running: "live", paused: "muted" };
 
+function counters(s) {
+  const out = [];
+  if (s.missed) out.push(`${s.missed} missed`);
+  if (s.skipped) out.push(`${s.skipped} skipped`);
+  return out.join(" · ");
+}
+
+/// Every schedule in the current project. This is separate from `store`, whose compact lines
+/// intentionally follow only the open chat. A request generation keeps a late reply from one
+/// project out of the next project's view.
+function schedulesView(el, params, ark) {
+  el.classList.add("sv");
+  let project = params?.project?.id || ark.project?.()?.id || null;
+  let generation = 0;
+  let list = [];
+  let loading = true;
+  let error = "";
+  let stale = false;
+  let reloadTimer;
+
+  const heading = h("h1.sv-title", { tabindex: "-1", "data-destination-heading": "" }, "Schedules");
+  const live = h("div.sr-only", { role: "status", "aria-live": "polite", "aria-atomic": "true" });
+  const body = h("div.sv-body");
+  el.append(h("header.sv-head", heading), live, body);
+
+  function row(s) {
+    const count = counters(s);
+    const objective = s.objective || "Schedule";
+    const status = s.status || s.state || "Scheduled";
+    const says = s.says || "";
+    const agent = s.agent || "";
+    const last = s.last && !status.startsWith(s.last) ? s.last : "";
+    const label = [objective, status, last, count, says, agent].filter(Boolean).join(". ");
+    return h("li.sv-item",
+      h("button.sv-row", {
+        type: "button",
+        "data-state": s.state,
+        onclick: () => ark.openPanel("schedule", { id: s.id }),
+        "aria-label": label,
+      },
+      h("span.sv-mark", s.state === "running" ? h("span.working-dot") : icon("clock")),
+      h("span.sv-main",
+        h("span.sv-objective", objective),
+        h("span.sv-meta", h("span", says), agent ? h("span.sv-agent", agent) : null)),
+      h("span.sv-state", { "data-tone": TONE[s.state] || null },
+        h("span.sv-status", status),
+        last ? h("span.sv-last", last) : null,
+        count ? h("span.sv-count", count) : null)));
+  }
+
+  function draw({ announce = "" } = {}) {
+    clear(body);
+    live.textContent = announce;
+    el.setAttribute("aria-busy", String(loading));
+    if (loading && !list.length) {
+      body.append(h("div.sv-loading", { "aria-hidden": "true" },
+        h("span.sv-skeleton"), h("span.sv-skeleton"), h("span.sv-skeleton")));
+      return;
+    }
+    if (error && !list.length) {
+      body.append(h("div.sv-empty",
+        h("div.sv-empty-icon", icon("alert")),
+        h("h2", "Schedules are unavailable"),
+        h("p", "Nothing changed. Try again when the connection is back."),
+        h("button.btn.small", { type: "button", onclick: () => load() }, "Try again")));
+      return;
+    }
+    if (!list.length) {
+      body.append(h("div.sv-empty",
+        h("div.sv-empty-icon", icon("clock")),
+        h("h2", "No schedules"),
+        h("p", "Ask in a chat for work to run at a date or time.")));
+      return;
+    }
+    if (stale) {
+      body.append(h("div.sv-stale",
+        h("span", "Could not refresh. Showing the last update."),
+        h("button.btn.ghost.small", { type: "button", onclick: () => load() }, "Try again")));
+    }
+    body.append(h("ul.sv-list", list.map(row)));
+  }
+
+  async function load() {
+    const requestedProject = project;
+    const request = ++generation;
+    loading = true;
+    error = "";
+    draw({ announce: list.length ? "" : "Loading schedules" });
+    try {
+      const next = (await ark.call("schedules", {})) || [];
+      if (request !== generation || requestedProject !== project) return;
+      list = next;
+      stale = false;
+      loading = false;
+      draw();
+    } catch (e) {
+      if (request !== generation || requestedProject !== project) return;
+      error = String(e?.message || e || "unavailable");
+      stale = list.length > 0;
+      loading = false;
+      draw({ announce: stale ? "Schedules could not refresh" : "Schedules are unavailable" });
+    }
+  }
+
+  const reload = () => load();
+  const soon = () => {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => project && load(), 250);
+  };
+  const offs = [
+    ark.on("ark:orch", (m) => { if (!m.ref && MOVES.has(m.event?.type)) soon(); }),
+    ark.on("ark:orch_lagged", reload),
+    ark.on("ark:connected", reload),
+    ark.on("ark:post", soon),
+  ];
+  load();
+  return {
+    update(next) {
+      const id = next?.project?.id || ark.project?.()?.id || null;
+      if (id === project) return load();
+      generation++;
+      project = id;
+      list = [];
+      error = "";
+      stale = false;
+      loading = true;
+      draw({ announce: "Loading schedules" });
+      load();
+    },
+    refresh: load,
+    focus: () => ({ surface: { kind_tag: "schedules", title: "Schedules" } }),
+    dispose() {
+      generation++;
+      clearTimeout(reloadTimer);
+      for (const off of offs) off?.();
+    },
+  };
+}
+
 function draw() {
   const el = document.getElementById("plans");
   if (!el) return;
@@ -184,6 +323,7 @@ function word(state) {
 export function registerSchedules(ark) {
   store.ark = ark;
   ark.panel({ id: "schedule", title: "Schedule", icon: "clock", builtin: true, render: (el, params, scoped) => schedulePanel(el, params, scoped || ark) });
+  ark.view({ id: "schedules", title: "Schedules", icon: "clock", projectScoped: true, render: (el, params, scoped) => schedulesView(el, params, scoped || ark) });
   ark.on("ark:orch", (m) => {
     if (m.ref) return;
     if (MOVES.has(m.event?.type)) loadSoon();

@@ -1030,6 +1030,11 @@ async fn a_schedule_asked_in_words_is_seen_run_paused_and_stopped_beside_its_cha
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn schedule_destinations_cover_states_recovery_and_project_races() {
+    drive_app("schedule-destination-states", vec![], Duration::ZERO, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_chat_keeps_working_in_the_background_while_another_runs() {
     let save = Completion {
         content: String::new(),

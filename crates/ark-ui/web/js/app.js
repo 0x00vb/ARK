@@ -8,6 +8,7 @@ import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
 import { acceptDrops } from "./drop.js";
 import { Sidebar } from "./sidebar.js";
+import { Destinations } from "./destinations.js";
 import { Topbar } from "./topbar.js";
 import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
@@ -29,7 +30,7 @@ import { registerComputers } from "./computers.js";
 const transport = connect();
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
 const appEl = $("#app");
-const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, view: null };
+const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, view: null, homeView: null };
 const resourceOnline = new Map();
 const locationKey = (location) => `${location?.runtime || ""}:${location?.project || ""}:${location?.session || ""}`;
 let readyResolve;
@@ -278,7 +279,7 @@ function scopedApi(location) {
 // Terminal, Browser and Files first, so an app's panel with the same id replaces one.
 registerBuiltins(installApi(api));
 
-let thread, composer, sidebar, topbar, pane, waiting, places;
+let thread, composer, sidebar, destinations, topbar, pane, waiting, places;
 
 function retitle(key, title) {
   const t = pane.tabs.get(key);
@@ -742,24 +743,68 @@ function showView(id, params) {
   }
   for (const [k, x] of views) x.el.hidden = k !== id;
   state.view = id;
+  if (id !== "schedules" && id !== SETTINGS) state.homeView = id;
   appEl.dataset.view = id;
   $("#stage").hidden = false;
   showTitle();
   sidebar.markView(id);
   topbar.mark(id);
+  destinations?.mark(id === "schedules" ? "schedules" : id === SETTINGS ? null : "home");
   reportFocus();
 }
 
-function showConversation() {
-  if (!state.view) return;
+function showConversation(focusComposer = true) {
+  state.homeView = null;
+  if (!state.view) {
+    destinations?.mark("home");
+    return;
+  }
   state.view = null;
   delete appEl.dataset.view;
   $("#stage").hidden = true;
   showTitle();
   sidebar.markView(null);
   topbar.mark(null);
+  destinations?.mark("home");
   reportFocus();
-  composer.focus();
+  if (focusComposer) composer.focus();
+}
+
+/// Home is the current project's workspace. It remembers whether the person last used Chat or
+/// one of the project's app views. A view that is not offered in the new project falls back to
+/// Chat instead of restoring an invalid mode.
+function showHome(focusComposer = true) {
+  const id = state.homeView;
+  const view = id && registry.views.get(id);
+  let offered = false;
+  try { offered = !!view && (!view.when || view.when({ project: api.project() })); } catch {}
+  if (offered) showView(id);
+  else showConversation(focusComposer);
+}
+
+function destinationTarget(destination) {
+  if (destination === "schedules") return views.get("schedules")?.el.querySelector("[data-destination-heading]") || $("#session-title");
+  const entry = state.view && views.get(state.view);
+  return entry?.el.querySelector("[data-destination-heading], h1, [role='heading']") || $("#session-title");
+}
+
+/// A keyboard jump is instant and moves focus to the destination. A pointer jump leaves focus on
+/// its button and gives the new surface one quiet, compositor-only arrival.
+function openDestination(destination, { keyboard = false } = {}) {
+  if (appEl.dataset.compact === "true") appEl.dataset.drawer = "closed";
+  if (destination === "schedules") showView("schedules");
+  else showHome(false);
+  const target = destinationTarget(destination);
+  if (keyboard) {
+    target?.focus({ preventScroll: true });
+    return;
+  }
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    target?.closest(".view, .scroller")?.animate(
+      [{ opacity: 0.72, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }],
+      { duration: 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
+    );
+  }
 }
 
 /// The chat's title over the conversation; over a view of the project (whose tab says which),
@@ -1051,6 +1096,7 @@ async function start() {
   places = new Places(api);
   acceptDrops(api, composer, $(".main"));
   sidebar = new Sidebar(api);
+  destinations = new Destinations(openDestination);
   waiting = new Waiting(api, transport, () => state.sessionId);
   topbar = new Topbar(api);
   pane = new Pane(appEl, api);

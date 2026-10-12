@@ -268,20 +268,22 @@ const scenarios = {
   // pick, and the width never scrolls sideways.
   async narrow(page) {
     const wide = () => page.evaluate(() => {
+      const rail = document.querySelector(".destinations");
       const sidebar = document.querySelector(".sidebar");
       const main = document.querySelector(".main");
       const style = getComputedStyle(sidebar);
       return {
+        railWidth: Math.round(rail.getBoundingClientRect().width),
         sidebarWidth: Math.round(sidebar.getBoundingClientRect().width),
         sidebarPadding: Math.round(parseFloat(style.paddingLeft)),
         mainLeft: Math.round(main.getBoundingClientRect().left),
         hscroll: document.documentElement.scrollWidth > innerWidth,
       };
     });
-    assert.deepEqual(await wide(), { sidebarWidth: 252, sidebarPadding: 10, mainLeft: 252, hscroll: false });
+    assert.deepEqual(await wide(), { railWidth: 64, sidebarWidth: 252, sidebarPadding: 10, mainLeft: 316, hscroll: false });
     await page.click("#toggle-sidebar");
     await page.waitForTimeout(350);
-    assert.deepEqual(await wide(), { sidebarWidth: 0, sidebarPadding: 0, mainLeft: 0, hscroll: false });
+    assert.deepEqual(await wide(), { railWidth: 64, sidebarWidth: 0, sidebarPadding: 0, mainLeft: 64, hscroll: false });
 
     await page.setViewportSize({ width: 720, height: 800 });
     // Wait for the layout to switch rather than a fixed time (flaky on a busy machine).
@@ -292,15 +294,25 @@ const scenarios = {
       sidebarLeft: Math.round(document.querySelector(".sidebar").getBoundingClientRect().left),
       sidebarWidth: Math.round(document.querySelector(".sidebar").getBoundingClientRect().width),
       sidebarPadding: Math.round(parseFloat(getComputedStyle(document.querySelector(".sidebar")).paddingLeft)),
+      destinations: (() => { const r = document.querySelector(".destinations").getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: Math.round(r.height) }; })(),
+      mainBottom: Math.round(document.querySelector(".main").getBoundingClientRect().bottom),
       hscroll: document.documentElement.scrollWidth > innerWidth,
     }));
     assert.equal((await state()).compact, "true");
     assert.ok(await page.locator("#reveal-sidebar").isVisible(), "the sidebar can be reached");
     await page.click("#reveal-sidebar");
     await page.waitForTimeout(350);
-    assert.deepEqual(await state(), {
-      compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 252, sidebarPadding: 10, hscroll: false,
+    const open = await state();
+    assert.deepEqual({ ...open, destinations: undefined, mainBottom: undefined }, {
+      compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 252, sidebarPadding: 10, destinations: undefined, mainBottom: undefined, hscroll: false,
     });
+    assert.equal(open.destinations.height, 56, "compact destinations keep their own layout row");
+    assert.equal(open.mainBottom, open.destinations.top, "the bar does not cover the workspace");
+    assert.equal(await page.locator(".destination").count(), 2);
+    for (const button of await page.locator(".destination").all()) {
+      const box = await button.boundingBox();
+      assert.ok(box.width >= 44 && box.height >= 44, JSON.stringify(box));
+    }
     await page.click("#new-session");
     await page.waitForTimeout(350);
     const closed = await state();
@@ -308,9 +320,13 @@ const scenarios = {
     assert.ok(closed.sidebarLeft < 0, JSON.stringify(closed));
     await page.setViewportSize({ width: 1200, height: 800 });
     await page.waitForTimeout(100);
-    assert.deepEqual(await state(), {
-      compact: "false", drawer: "", sidebarLeft: 0, sidebarWidth: 0, sidebarPadding: 0, hscroll: false,
-    });
+    const restored = await state();
+    assert.equal(restored.compact, "false");
+    assert.equal(restored.drawer, "");
+    assert.equal(restored.sidebarLeft, 64);
+    assert.equal(restored.sidebarWidth, 0);
+    assert.equal(restored.sidebarPadding, 0);
+    assert.equal(restored.hscroll, false);
   },
 
   // The model chip names the model only. Its menu groups models by backend: a signed-in
@@ -537,6 +553,15 @@ async function schedules(page) {
   assert.match(await line.locator(".plan-state").innerText(), /^next /);
   await shot(page, "schedule-line");
 
+  const destinations = page.getByRole("navigation", { name: "Destinations" });
+  assert.equal(await destinations.getByRole("button", { name: "Home" }).getAttribute("aria-current"), "page");
+  await destinations.getByRole("button", { name: "Schedules" }).click();
+  await page.locator('.view[data-view="schedules"] .sv-row').waitFor();
+  assert.equal(await destinations.getByRole("button", { name: "Schedules" }).getAttribute("aria-current"), "page");
+  assert.equal(await page.locator('.view[data-view="schedules"] .sv-row').count(), 1);
+  await destinations.getByRole("button", { name: "Home" }).click();
+  assert.equal(await page.locator("#stage").isHidden(), true);
+
   await line.click();
   const panel = page.locator(".sc-panel");
   await panel.locator(".sc-what", { hasText: "Recount the stock" }).waitFor();
@@ -568,6 +593,109 @@ async function schedules(page) {
   assert.ok(await page.locator(".post", { hasText: "120 boxes" }).count() > 0);
 }
 scenarios.schedules = schedules;
+
+// The fixed destinations have one hierarchy, every schedule state, useful offline recovery and
+// no way for a late response from one project to appear in another.
+async function scheduleDestinationStates(page) {
+  await page.evaluate(() => {
+    const original = window.ark.call.bind(window.ark);
+    window.__scheduleReplies = [];
+    window.__scheduleReply = (reply) => window.__scheduleReplies.push(reply);
+    window.ark.call = (method, params = {}) => {
+      if (method !== "schedules" || params.session) return original(method, params);
+      const reply = window.__scheduleReplies.shift();
+      if (!reply) return Promise.resolve([]);
+      return typeof reply === "function" ? reply() : Promise.resolve(reply);
+    };
+    window.ark.view({
+      id: "home-proof", title: "Home proof", nav: true,
+      render(el) { el.innerHTML = '<h1 tabindex="-1" data-destination-heading>Home proof</h1>'; },
+    });
+    window.ark.openView("home-proof");
+  });
+  await page.locator('.view[data-view="home-proof"] h1').waitFor();
+
+  await page.evaluate(() => {
+    window.__scheduleReply(() => new Promise((resolve) => { window.__resolveSchedules = resolve; }));
+  });
+  const scheduleButton = page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Schedules" });
+  await scheduleButton.focus();
+  await page.keyboard.press("Enter");
+  const view = page.locator('.view[data-view="schedules"]');
+  await view.locator(".sv-loading").waitFor();
+  assert.equal(await view.getByRole("heading", { name: "Schedules" }).evaluate((el) => el === document.activeElement), true);
+
+  const rows = [
+    ["scheduled", "Upcoming", "next Fri 09:00"],
+    ["running", "Running", "running now"],
+    ["asking", "Waiting", "waits for you"],
+    ["retrying", "Retrying", "trying again at 09:10"],
+    ["succeeded", "Succeeded", "next Sat 09:00"],
+    ["failed", "Failed", "did not finish Thu 09:00"],
+    ["paused", "Paused", "paused"],
+  ].map(([state, objective, status], i) => ({
+    id: `s${i}`, agent: `agent-${i}`, objective, context: "", says: "every day at 09:00",
+    tz: "UTC", next_ms: 1, next: "Fri 09:00", paused: state === "paused", state, status,
+    last: state === "succeeded" ? "ran Thu 09:00" : null, chat: "chat", runs: i,
+    missed: i === 0 ? 2 : 0, skipped: i === 0 ? 1 : 0, last_task: null,
+  }));
+  await page.evaluate((value) => window.__resolveSchedules(value), rows);
+  await view.locator(".sv-row").first().waitFor();
+  assert.equal(await view.locator(".sv-row").count(), 7);
+  for (const state of ["scheduled", "running", "asking", "retrying", "succeeded", "failed", "paused"]) {
+    assert.equal(await view.locator(`.sv-row[data-state="${state}"]`).count(), 1, state);
+  }
+  assert.equal((await view.locator('.sv-row[data-state="scheduled"] .sv-count').innerText()).trim(), "2 missed · 1 skipped");
+  assert.match(await view.locator('.sv-row[data-state="succeeded"]').innerText(), /ran Thu 09:00/);
+  assert.match(await view.locator('.sv-row[data-state="scheduled"]').getAttribute("aria-label"), /2 missed · 1 skipped/);
+  assert.match(await view.locator('.sv-row[data-state="succeeded"]').getAttribute("aria-label"), /ran Thu 09:00/);
+  await shot(page, "schedule-destination-states");
+
+  // Same-project refresh failure retains useful rows and offers recovery.
+  await page.evaluate(() => {
+    window.__scheduleReply(() => Promise.reject(new Error("offline")));
+    window.ark.openView("schedules");
+  });
+  await view.locator(".sv-stale").waitFor();
+  assert.equal(await view.locator(".sv-row").count(), 7);
+  assert.equal(await view.locator('.sv-stale[role="status"]').count(), 0, "one live region announces refresh failures");
+  assert.ok(await view.getByRole("button", { name: "Try again" }).isVisible());
+
+  // A project update clears old rows immediately and ignores the old request when it resolves.
+  await page.evaluate(() => {
+    window.__scheduleReply(() => new Promise((resolve) => { window.__resolveOldProject = resolve; }));
+    window.ark.openView("schedules");
+    window.__scheduleReply(() => new Promise((resolve) => { window.__resolveNewProject = resolve; }));
+    window.ark.openView("schedules", { project: { id: "other-project", name: "Other" } });
+  });
+  assert.equal(await view.locator(".sv-row").count(), 0, "old project rows clear before the new load");
+  await page.evaluate(() => window.__resolveOldProject([{ id: "old", agent: "old", objective: "Old project", says: "daily", state: "scheduled", status: "next tomorrow", runs: 0, missed: 0, skipped: 0 }]));
+  await page.waitForTimeout(50);
+  assert.equal(await view.getByText("Old project").count(), 0);
+  await page.evaluate(() => window.__resolveNewProject([{ id: "new", agent: "new", objective: "New project", says: "daily", state: "scheduled", status: "next tomorrow", runs: 0, missed: 0, skipped: 0 }]));
+  await view.getByText("New project").waitFor();
+
+  // Empty and offline-without-data are distinct, and Retry can recover to the empty state.
+  await page.evaluate(() => {
+    window.__scheduleReply([]);
+    window.ark.openView("schedules");
+  });
+  await view.getByRole("heading", { name: "No schedules" }).waitFor();
+  await page.evaluate(() => {
+    window.__scheduleReply(() => Promise.reject(new Error("offline")));
+    window.ark.openView("schedules");
+  });
+  await view.getByRole("heading", { name: "Schedules are unavailable" }).waitFor();
+  await shot(page, "schedule-destination-offline");
+  await page.evaluate(() => window.__scheduleReply([]));
+  await view.getByRole("button", { name: "Try again" }).click();
+  await view.getByRole("heading", { name: "No schedules" }).waitFor();
+
+  // Home restores its last subview instead of duplicating Chat.
+  await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Home" }).click();
+  assert.equal(await page.locator('.view[data-view="home-proof"]').isVisible(), true);
+}
+scenarios["schedule-destination-states"] = scheduleDestinationStates;
 
 // Files the agent writes are cards that open beside the conversation; the person edits them in
 // place and the file changes: a cell (the total follows), a document's lines.
@@ -1788,7 +1916,7 @@ const browser = await engine.launch();
 const errors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
-  page.on("pageerror", (e) => errors.push(String(e)));
+  page.on("pageerror", (e) => errors.push(e.stack || String(e)));
   if (inits[scenario]) await page.addInitScript(inits[scenario]);
   if (scenario === "ready") {
     await page.route("**/*", async (route) => {

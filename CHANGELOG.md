@@ -9,6 +9,11 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+- A fixed Home and Schedules rail keeps project navigation available when the sidebar closes and
+  becomes a bottom bar in compact windows. Home restores Chat, Agents or Board; Schedules shows
+  every schedule in the project with complete loading, empty, offline and recovery states.
+
 ### Changed
 - Development asset mode reloads browser pages when shared or app-specific interface files
   change on disk.

@@ -47,6 +47,7 @@ export const esc = (s) =>
 
 // Icons: 16px strokes, drawn to one grid so they sit on the same optical baseline.
 const PATHS = {
+  home: '<path d="M2.5 7.2L8 2.75l5.5 4.45v5.3a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/><path d="M6 13.5V9h4v4.5"/>',
   compose: '<path d="M11.5 2.5l2 2L7 11H5V9z"/><path d="M13 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4"/>',
   sidebar: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6 3v10"/>',
   pane: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M10 3v10"/>',

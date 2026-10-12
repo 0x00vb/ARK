@@ -16,6 +16,17 @@
   </head>
   <body>
     <div id="app" class="app" data-pane="closed" data-sidebar="open">
+      <nav class="destinations" id="destinations" aria-label="Destinations">
+        <div class="destination-drag" data-tauri-drag-region></div>
+        <button class="destination" type="button" data-destination="home" aria-current="page" title="Home">
+          <span class="destination-icon" data-icon="home"></span>
+          <span class="destination-label">Home</span>
+        </button>
+        <button class="destination" type="button" data-destination="schedules" title="Schedules">
+          <span class="destination-icon" data-icon="clock"></span>
+          <span class="destination-label">Schedules</span>
+        </button>
+      </nav>
       <aside class="sidebar" aria-label="Projects">
         <div class="sidebar-top" data-tauri-drag-region>
           <button class="icon-btn" id="toggle-sidebar" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
@@ -43,7 +54,7 @@
       <main class="main">
         <header class="topbar" data-tauri-drag-region>
           <button class="icon-btn reveal-sidebar" id="reveal-sidebar" title="Show sidebar (⌘B)" aria-label="Show sidebar"></button>
-          <div class="title" id="session-title" data-tauri-drag-region></div>
+          <div class="title" id="session-title" tabindex="-1" data-tauri-drag-region></div>
           <nav class="segs view-tabs" id="view-tabs" role="tablist" aria-label="Views" hidden></nav>
           <div class="top-actions">
             <div class="computer-use" id="computer-use" role="status" hidden></div>

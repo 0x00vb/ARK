@@ -17,6 +17,9 @@ What changed for people building on ARK, per release. Not a commit log.
   side by side. Each pane keeps its own draft, scroll, model, mode, approvals and running work.
 - Settings > Connections can browse the first curated built-in connection catalog without
   signing in or activating anything until Connect is chosen.
+- OpenAI `gpt-5` and newer API models can generate a PNG through an approval-gated native action.
+  The image is validated, saved as a project file, shown in its chat file card and opened in the
+  existing image view beside the conversation (ADR 0066).
 
 ## [0.20.3] - 2026-10-12
 

@@ -192,7 +192,7 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     if scenario == "files" || scenario == "drop" {
         builder = builder.files(true);
     }
-    if scenario == "analysis" || scenario == "restore" {
+    if scenario == "analysis" || scenario == "image-failure" || scenario == "restore" {
         let Some(sandbox) = ark_sdk::prelude::ark_exec::Sandbox::native() else {
             eprintln!("skipped: no sandbox for runs on this platform");
             return;
@@ -651,6 +651,19 @@ async fn a_run_writes_a_chart_and_a_report_that_open_beside_the_conversation() {
         say("The chart, the table and the report are ready.", false),
     ];
     drive("analysis", script, Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreadable_image_keeps_its_named_file_card() {
+    let program = "cat > generated-image.png <<'EOF'\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2\" height=\"2\"><rect width=\"2\" height=\"2\"/></svg>\nEOF";
+    let script = vec![
+        call(
+            ark_sdk::prelude::ark_exec::RUN,
+            json!({ "code": program, "runtime": "sh", "purpose": "make an image" }),
+        ),
+        say("The image is ready.", false),
+    ];
+    drive("image-failure", script, Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

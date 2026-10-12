@@ -162,6 +162,7 @@ impl Labels {
             .or_else(|| process_approval(&request.action, &request.input))
             .or_else(|| program_approval(&request.action, &request.input))
             .or_else(|| schedule_approval(&request.action, &request.input))
+            .or_else(|| image_approval(&request.action, &request.input))
             .or_else(|| runtime_label(&request.action, &request.input))
             .unwrap_or_else(|| request.preview.clone())
     }
@@ -189,12 +190,24 @@ impl Labels {
     }
 }
 
+fn image_approval(action: &str, input: &Value) -> Option<String> {
+    (action == "image.generate").then(|| {
+        format!(
+            "Generate an image\n  Prompt: {}",
+            clip(
+                input.get("prompt").and_then(Value::as_str).unwrap_or(""),
+                240
+            )
+        )
+    })
+}
+
 /// Arguments that usually name the thing an action works on, in priority order. Only words
 /// any domain uses; an application with its own (a process, a cell, a scene) labels its
 /// actions with a `ToolLabeler`.
 const SUBJECT_KEYS: &[&str] = &[
     "path", "file", "name", "query", "term", "pattern", "command", "cmd", "url", "host", "domain",
-    "target", "at", "artifact", "id", "text",
+    "target", "at", "artifact", "id", "text", "prompt",
 ];
 
 const VERBS: &[(&[&str], &str)] = &[
@@ -806,6 +819,23 @@ fn humanize(action: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn image_generation_approval_exposes_the_prompt() {
+        let line = Labels::new(Vec::new()).approval_line(&ApprovalRequest {
+            action: "image.generate".into(),
+            summary: "generate one image".into(),
+            risk: ark_sdk::prelude::RiskTier::Mutate,
+            input: json!({"prompt": "a blue square on white"}),
+            class: "image.generate".into(),
+            preview: "image.generate(…)".into(),
+            agent: None,
+            task: None,
+            ask_each_time: true,
+            cut_short: false,
+        });
+        assert!(line.contains("a blue square on white"), "{line}");
+    }
 
     #[test]
     fn a_file_change_asks_with_what_it_writes() {

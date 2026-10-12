@@ -506,9 +506,25 @@ function fileCard(api, path, here, before) {
   const kind = kindOf(path);
   const name = path.split("/").pop();
   const sub = h("span.file-card-sub", here ? kindNoun(kind) : "Removed");
+  const preview = kind === "image" && here ? h("img.file-card-image", { alt: "", hidden: true }) : null;
   const card = h("button.file-card", { type: "button", "data-kind": kind, title: path, disabled: !here, onclick: () => api.openFile(path) },
-    h("span.file-card-ico", icon(KIND_ICON[kind])),
+    preview || h("span.file-card-ico", icon(KIND_ICON[kind])),
     h("span.file-card-text", h("span.file-card-name", name), sub));
+  if (preview) {
+    api.call("file_media", { path }).then((m) => {
+      if (!card.isConnected) return;
+      const bytes = Uint8Array.from(atob(m.data), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: m.media_type }));
+      preview.onload = () => {
+        URL.revokeObjectURL(url);
+        if (!card.isConnected) return;
+        preview.hidden = false;
+        card.classList.add("image-preview");
+      };
+      preview.onerror = () => URL.revokeObjectURL(url);
+      preview.src = url;
+    }).catch(() => {});
+  }
   if (!before) return card;
   let version = before;
   let restored = false;

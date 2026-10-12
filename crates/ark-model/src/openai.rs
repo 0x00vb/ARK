@@ -4,11 +4,15 @@
 use crate::resilience::{status_error, HttpConfig};
 use crate::stream::{for_each_line, parse_args, sse_data, OpenAiFold};
 use crate::{
-    mangle_tool_name, unmangle_tool_name, Completion, Message, Provider, ProviderError, Result,
-    Role, TextSink, ToolCall, ToolDef,
+    mangle_tool_name, unmangle_tool_name, Completion, GeneratedImage, Message, Provider,
+    ProviderError, Result, Role, TextSink, ToolCall, ToolDef,
 };
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde_json::{json, Value};
+
+const MAX_GENERATED_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+const MAX_IMAGE_RESPONSE_BYTES: usize = 36 * 1024 * 1024;
 
 pub struct OpenAi {
     /// The provider name it reports (`openai`, or a named endpoint's).
@@ -152,6 +156,16 @@ fn openai_window(model: &str) -> Option<u32> {
 
 #[async_trait]
 impl Provider for OpenAi {
+    fn generates_images(&self) -> bool {
+        self.name == "openai" && supports_image_tool(&self.model)
+    }
+
+    async fn generate_image(&self, prompt: &str) -> Option<Result<GeneratedImage>> {
+        if !self.generates_images() {
+            return None;
+        }
+        Some(self.generate_image_request(prompt).await)
+    }
     fn reads_pictures(&self) -> bool {
         self.pictures
     }
@@ -237,6 +251,66 @@ impl Provider for OpenAi {
 }
 
 impl OpenAi {
+    async fn generate_image_request(&self, prompt: &str) -> Result<GeneratedImage> {
+        use base64::Engine as _;
+        let model =
+            std::env::var("ARK_IMAGE_MODEL").unwrap_or_else(|_| "gpt-image-2.5-flare".into());
+        let body = json!({
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+            "response_format": "b64_json",
+            "output_format": "png"
+        });
+        let resp = self
+            .client
+            .post(format!("{}/images/generations", self.base))
+            .bearer_auth(&self.key)
+            .json(&body)
+            .timeout(self.http.request_timeout)
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(status_error(&self.name, resp, error_detail).await);
+        }
+        if resp
+            .content_length()
+            .is_some_and(|length| length > MAX_IMAGE_RESPONSE_BYTES as u64)
+        {
+            return Err(image_response_too_large(&self.name));
+        }
+        let mut body = Vec::new();
+        let mut stream = resp.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            if body.len().saturating_add(chunk.len()) > MAX_IMAGE_RESPONSE_BYTES {
+                return Err(image_response_too_large(&self.name));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let value: Value = serde_json::from_slice(&body)?;
+        let encoded = value["data"][0]["b64_json"]
+            .as_str()
+            .ok_or_else(|| ProviderError::Api {
+                provider: self.name.clone(),
+                detail: "image generation returned no image bytes".into(),
+            })?;
+        let max_encoded = MAX_GENERATED_IMAGE_BYTES.div_ceil(3) * 4;
+        if encoded.len() > max_encoded {
+            return Err(image_response_too_large(&self.name));
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|_| ProviderError::Api {
+                provider: self.name.clone(),
+                detail: "image generation returned invalid base64".into(),
+            })?;
+        Ok(GeneratedImage {
+            media_type: "image/png".into(),
+            bytes,
+        })
+    }
+
     fn body(&self, system: &str, messages: &[Message], tools: &[ToolDef], stream: bool) -> Value {
         let mut wire: Vec<Value> = vec![json!({ "role": "system", "content": system })];
         wire.extend(messages.iter().flat_map(to_wire));
@@ -269,6 +343,27 @@ impl OpenAi {
         }
         Ok(req.send().await?)
     }
+}
+
+fn image_response_too_large(provider: &str) -> ProviderError {
+    ProviderError::Api {
+        provider: provider.into(),
+        detail: "image generation response exceeds the 25 MB image limit".into(),
+    }
+}
+
+fn supports_image_tool(model: &str) -> bool {
+    let Some(rest) = model
+        .to_ascii_lowercase()
+        .strip_prefix("gpt-")
+        .map(str::to_string)
+    else {
+        return false;
+    };
+    rest.split(['.', '-'])
+        .next()
+        .and_then(|n| n.parse::<u32>().ok())
+        .is_some_and(|major| major >= 5)
 }
 
 #[cfg(test)]
@@ -308,5 +403,14 @@ mod tests {
         assert_eq!(openai_window("gpt-4o"), Some(128_000));
         assert_eq!(openai_window("o3"), Some(200_000));
         assert_eq!(openai_window("some-local-model"), None);
+    }
+
+    #[test]
+    fn only_supported_mainline_openai_models_offer_image_generation() {
+        assert!(supports_image_tool("gpt-5"));
+        assert!(supports_image_tool("gpt-6.1"));
+        assert!(!supports_image_tool("gpt-4o"));
+        assert!(!supports_image_tool("o3"));
+        assert!(!supports_image_tool("gpt-image-2.5-flare"));
     }
 }

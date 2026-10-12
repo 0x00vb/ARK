@@ -379,6 +379,7 @@ version = "0.20.3"
 dependencies = [
  "ark-os",
  "async-trait",
+ "base64 0.22.1",
  "futures",
  "reqwest 0.12.28",
  "serde",
@@ -503,6 +504,7 @@ dependencies = [
  "ark-runtime",
  "ark-tools",
  "async-trait",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "tempfile",

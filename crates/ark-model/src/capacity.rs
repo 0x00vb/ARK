@@ -217,6 +217,16 @@ impl Limited {
 
 #[async_trait]
 impl Provider for Limited {
+    fn generates_images(&self) -> bool {
+        self.inner.generates_images()
+    }
+    async fn generate_image(&self, prompt: &str) -> Option<Result<crate::GeneratedImage>> {
+        if !self.inner.generates_images() {
+            return None;
+        }
+        let _slot = self.limiter.acquire().await;
+        self.inner.generate_image(prompt).await
+    }
     fn reads_pictures(&self) -> bool {
         self.inner.reads_pictures()
     }

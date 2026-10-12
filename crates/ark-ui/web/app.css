@@ -1441,6 +1441,13 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .file-card-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .file-card-name { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-card-sub { font-size: 12px; color: var(--text-3); }
+.file-card.image-preview { display: grid; grid-template-columns: minmax(0, 180px); gap: 0; padding: 0; overflow: hidden; text-align: left; }
+.file-card-image { display: block; width: 100%; max-height: 180px; object-fit: cover; background: var(--well); }
+.file-card.image-preview .file-card-text { padding: 10px 12px 11px; }
+@media (max-width: 560px) {
+  .file-card.image-preview { grid-template-columns: minmax(0, 1fr); width: min(100%, 280px); }
+  .file-card-image { max-height: 220px; }
+}
 /* A file the turn changed or removed, with Restore beside it (ADR 0034). */
 .file-item { display: inline-flex; align-items: stretch; min-width: 0; animation: rise 220ms var(--ease) both; }
 .file-item .file-card { border-radius: 12px 0 0 12px; animation: none; }

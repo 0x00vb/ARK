@@ -348,6 +348,13 @@ pub struct Completion {
     pub usage: Usage,
 }
 
+/// One image returned by a provider's native image-generation API.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeneratedImage {
+    pub media_type: String,
+    pub bytes: Vec<u8>,
+}
+
 /// One web search result from a provider's own search ([`Provider::web_search`]).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WebHit {
@@ -415,6 +422,14 @@ pub trait Provider: Send + Sync {
     /// Search the web with the vendor's own search. `None`: this provider has none. The
     /// default has none; wrappers forward to what they wrap.
     async fn web_search(&self, _query: &str, _limit: usize) -> Option<Result<Vec<WebHit>>> {
+        None
+    }
+    /// Whether this model can decide to call its provider's image generator.
+    fn generates_images(&self) -> bool {
+        false
+    }
+    /// Generate one image. `None` means this provider has no native image generator.
+    async fn generate_image(&self, _prompt: &str) -> Option<Result<GeneratedImage>> {
         None
     }
     /// Whether this provider sends [`Message::pictures`] to a model that reads them. When it

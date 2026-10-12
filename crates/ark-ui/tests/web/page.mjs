@@ -875,8 +875,13 @@ async function analysis(page) {
   const cards = await page.locator(".file-card").evaluateAll((els) => els.map((e) => `${e.dataset.kind}:${e.innerText.replace(/\s+/g, " ").trim()}`));
   assert.deepEqual(cards.sort(), ["image:chart.svg Image", "markdown:report.md Markdown document", "pdf:summary.pdf PDF", "sheet:table.csv Spreadsheet"]);
 
-  // The chart: the file's own bytes, drawn.
-  await page.locator(".file-card", { hasText: "chart.svg" }).click();
+  // The image file card is its inline preview. The same keyboard control opens the existing
+  // image view beside the conversation.
+  const chartCard = page.locator(".file-card", { hasText: "chart.svg" });
+  await page.waitForFunction(() => document.querySelector(".file-card-image")?.naturalWidth > 0);
+  assert.match(await chartCard.getAttribute("title"), /chart\.svg$/);
+  await chartCard.focus();
+  await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector("img.media-image")?.naturalWidth > 0);
 
   // The report renders as a page and shows the chart it links to.
@@ -901,6 +906,24 @@ async function analysis(page) {
   assert.equal(read.media_type, "application/pdf");
 }
 scenarios.analysis = analysis;
+
+async function imageFailure(page) {
+  await page.evaluate(() => {
+    URL.createObjectURL = () => "blob:unreadable-image";
+  });
+  await page.locator("#input").fill("Make me an image.");
+  const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:turn_finished", ok)));
+  await page.keyboard.press("Enter");
+  await page.locator(".approval .btn.primary").click();
+  await done;
+  await page.waitForTimeout(150);
+  const card = page.locator(".file-card", { hasText: "generated-image.png" });
+  await card.waitFor();
+  assert.equal(await card.locator(".file-card-image").isHidden(), true);
+  assert.equal(await card.evaluate((el) => el.classList.contains("image-preview")), false);
+  assert.match(await card.innerText(), /generated-image\.png\s+Image/);
+}
+scenarios["image-failure"] = imageFailure;
 
 // ADR 0034: a run changes one file and removes another. Each card of that turn puts the file
 // back as it was before the turn, and the changed one can take the turn's version back.

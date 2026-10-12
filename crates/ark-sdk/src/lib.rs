@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ark_connect::Connections;
-use ark_core::{Focus, Project, ProjectId, RuleScope};
+use ark_core::{ActionDescriptor, ArtifactKind, Focus, Project, ProjectId, RiskTier, RuleScope};
 use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
 use ark_runtime::per_agent::{Owner, PerAgent};
@@ -36,7 +36,144 @@ use ark_runtime::{
     Steering, StoreLedger,
 };
 use ark_tools::web::WebAdapter;
-use ark_tools::{Adapter, Registry};
+use ark_tools::{ActionOutput, Adapter, AdapterError, ProducedArtifact, Registry, RunCtx};
+
+const IMAGE_GENERATE: &str = "image.generate";
+const MAX_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+const MAX_IMAGE_EDGE: u32 = 8192;
+const MAX_IMAGE_PIXELS: u64 = 32_000_000;
+
+struct ImageGenerator {
+    provider: Arc<dyn Provider>,
+}
+
+#[async_trait::async_trait]
+impl Adapter for ImageGenerator {
+    fn name(&self) -> &str {
+        "image"
+    }
+
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![ActionDescriptor::new(
+            IMAGE_GENERATE,
+            "generate one PNG image with OpenAI and save it in the project",
+            RiskTier::Mutate,
+        )
+        .with_input_schema(serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "prompt": { "type": "string", "minLength": 1 } },
+            "required": ["prompt"]
+        }))
+        .ask_each_time()]
+    }
+
+    async fn run(
+        &self,
+        action: &str,
+        input: serde_json::Value,
+        ctx: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        if action != IMAGE_GENERATE {
+            return Err(AdapterError::UnknownAction(action.into()));
+        }
+        let prompt = input["prompt"].as_str().map(str::trim).unwrap_or("");
+        if prompt.is_empty() {
+            return Err(AdapterError::bad_input(action, "prompt is required"));
+        }
+        let image = self
+            .provider
+            .generate_image(prompt)
+            .await
+            .ok_or_else(|| AdapterError::ToolUnavailable {
+                tool: IMAGE_GENERATE.into(),
+                detail: "the selected model does not generate images".into(),
+            })?
+            .map_err(|e| AdapterError::Tool(e.to_string()))?;
+        let (width, height) = validate_generated_png(&image.media_type, &image.bytes)
+            .map_err(|detail| AdapterError::Tool(format!("invalid generated image: {detail}")))?;
+        let root = ctx
+            .workspace
+            .as_ref()
+            .ok_or_else(|| AdapterError::ToolUnavailable {
+                tool: IMAGE_GENERATE.into(),
+                detail: "this project has no writable folder".into(),
+            })?;
+        std::fs::create_dir_all(root)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(root)?;
+        std::io::Write::write_all(&mut temporary, &image.bytes)?;
+        temporary.as_file().sync_all()?;
+        let mut path = None;
+        for n in 1..=10_000u32 {
+            let name = if n == 1 {
+                "generated-image.png".to_string()
+            } else {
+                format!("generated-image-{n}.png")
+            };
+            match temporary.persist_noclobber(root.join(&name)) {
+                Ok(_) => {
+                    path = Some(name);
+                    break;
+                }
+                Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    temporary = e.file;
+                }
+                Err(e) => return Err(AdapterError::Io(e.error)),
+            }
+        }
+        let path = path.ok_or_else(|| {
+            AdapterError::Tool("could not choose an unused generated image filename".into())
+        })?;
+        Ok(ActionOutput::json(serde_json::json!({
+            "path": path,
+            "width": width,
+            "height": height
+        }))
+        .with_artifact(
+            ProducedArtifact::bytes(ArtifactKind::Image, path.clone(), image.bytes).at(path),
+        ))
+    }
+
+    fn summary(&self) -> Option<&str> {
+        Some("generate an image in the project")
+    }
+}
+
+fn validate_generated_png(media_type: &str, bytes: &[u8]) -> Result<(u32, u32), String> {
+    if media_type != "image/png" {
+        return Err("only PNG output is accepted".into());
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err("the PNG is larger than 25 MB".into());
+    }
+    if bytes.windows(4).any(|chunk| chunk == b"acTL") {
+        return Err("animated PNG output is not accepted".into());
+    }
+    if !bytes.ends_with(b"\0\0\0\0IEND\xaeB`\x82") {
+        return Err("the PNG has trailing or incomplete data".into());
+    }
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder
+        .read_info()
+        .map_err(|_| "the PNG container is invalid".to_string())?;
+    let info = reader.info();
+    let width = info.width;
+    let height = info.height;
+    if width == 0 || height == 0 || width > MAX_IMAGE_EDGE || height > MAX_IMAGE_EDGE {
+        return Err("the PNG dimensions are outside 1 through 8192 pixels".into());
+    }
+    if u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
+        return Err("the PNG contains more than 32 megapixels".into());
+    }
+    let size = reader
+        .output_buffer_size()
+        .ok_or_else(|| "the PNG output size is too large".to_string())?;
+    let mut decoded = vec![0; size];
+    reader
+        .next_frame(&mut decoded)
+        .map_err(|_| "the PNG image data is invalid".to_string())?;
+    Ok((width, height))
+}
 
 /// A convenient, curated prelude for consumers.
 pub mod prelude {
@@ -574,6 +711,15 @@ impl Ark {
     /// model (a search needs no reasoning).
     fn turn_tools(&self, tools: &[TurnTools], router: &ModelRouter, owner: &str) -> Vec<TurnTools> {
         let mut all = tools.to_vec();
+        let reason = router.provider(Role::Reason);
+        if reason.generates_images() {
+            all.push(TurnTools {
+                adapter: Arc::new(ImageGenerator {
+                    provider: reason.clone(),
+                }),
+                distiller: None,
+            });
+        }
         all.extend(self.agent_tools(&Owner {
             name: owner,
             model: router.provider(Role::Plan),
@@ -1170,8 +1316,145 @@ impl ArkBuilder {
 #[cfg(test)]
 mod tests {
     use super::prelude::*;
-    use ark_model::{Completion, MockProvider, ToolCall, Usage};
+    use super::{validate_generated_png, ImageGenerator, IMAGE_GENERATE};
+    use ark_model::{Completion, GeneratedImage, MockProvider, Provider, ToolCall, Usage};
+    use ark_tools::{Adapter, AdapterError, BlobResolver, RunCtx};
+    use std::path::PathBuf;
     use std::sync::Arc;
+
+    struct NoBlobs;
+    impl BlobResolver for NoBlobs {
+        fn path(&self, _id: &ArtifactId) -> Option<PathBuf> {
+            None
+        }
+        fn read(&self, id: &ArtifactId) -> ark_tools::Result<Vec<u8>> {
+            Err(AdapterError::ArtifactNotFound(id.to_string()))
+        }
+    }
+
+    struct ImageProvider(Vec<u8>);
+    #[async_trait::async_trait]
+    impl Provider for ImageProvider {
+        async fn complete(
+            &self,
+            _system: &str,
+            _messages: &[ark_model::Message],
+            _tools: &[ark_model::ToolDef],
+        ) -> ark_model::Result<Completion> {
+            unreachable!()
+        }
+        fn generates_images(&self) -> bool {
+            true
+        }
+        async fn generate_image(&self, _prompt: &str) -> Option<ark_model::Result<GeneratedImage>> {
+            Some(Ok(GeneratedImage {
+                media_type: "image/png".into(),
+                bytes: self.0.clone(),
+            }))
+        }
+        fn describe(&self) -> String {
+            "image-test".into()
+        }
+    }
+
+    fn small_png() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 2, 2);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&[0; 12]).unwrap();
+        }
+        bytes
+    }
+
+    #[test]
+    fn generated_pngs_are_bounded_before_the_project_is_written() {
+        let png = small_png();
+        assert_eq!(validate_generated_png("image/png", &png), Ok((2, 2)));
+        assert!(validate_generated_png("image/svg+xml", b"<svg/>").is_err());
+        let mut truncated = png.clone();
+        truncated.truncate(24);
+        assert!(validate_generated_png("image/png", &truncated).is_err());
+        let mut too_wide = Vec::new();
+        {
+            let encoder = png::Encoder::new(&mut too_wide, 8193, 1);
+            let _ = encoder.write_header().unwrap();
+        }
+        assert!(validate_generated_png("image/png", &too_wide).is_err());
+    }
+
+    #[tokio::test]
+    async fn image_generation_asks_each_time_and_writes_a_durable_artifact() {
+        let png = small_png();
+        let adapter = ImageGenerator {
+            provider: Arc::new(ImageProvider(png.clone())),
+        };
+        let action = adapter.actions().remove(0);
+        assert_eq!(action.name, IMAGE_GENERATE);
+        assert_eq!(action.risk, RiskTier::Mutate);
+        assert!(action.ask_each_time);
+
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("generated-image.png"), b"keep").unwrap();
+        let ctx = RunCtx::new(&NoBlobs).with_workspace(project.path().to_path_buf());
+        let output = adapter
+            .run(
+                IMAGE_GENERATE,
+                serde_json::json!({"prompt": "a blue square"}),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert_eq!(output.output["path"], "generated-image-2.png");
+        assert_eq!(
+            std::fs::read(project.path().join("generated-image.png")).unwrap(),
+            b"keep"
+        );
+        assert_eq!(
+            std::fs::read(project.path().join("generated-image-2.png")).unwrap(),
+            png
+        );
+        assert_eq!(output.produced.len(), 1);
+        assert_eq!(output.produced[0].kind, ArtifactKind::Image);
+        assert_eq!(
+            output.produced[0].path.as_deref(),
+            Some("generated-image-2.png")
+        );
+        assert_eq!(output.produced[0].bytes, png);
+    }
+
+    #[tokio::test]
+    async fn invalid_generated_image_writes_nothing() {
+        let adapter = ImageGenerator {
+            provider: Arc::new(ImageProvider(b"not a png".to_vec())),
+        };
+        let project = tempfile::tempdir().unwrap();
+        let ctx = RunCtx::new(&NoBlobs).with_workspace(project.path().to_path_buf());
+        assert!(adapter
+            .run(IMAGE_GENERATE, serde_json::json!({"prompt": "bad"}), &ctx)
+            .await
+            .is_err());
+        assert_eq!(std::fs::read_dir(project.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dangling_symlink_is_a_collision_not_an_infinite_retry() {
+        let project = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("missing.png", project.path().join("generated-image.png"))
+            .unwrap();
+        let adapter = ImageGenerator {
+            provider: Arc::new(ImageProvider(small_png())),
+        };
+        let ctx = RunCtx::new(&NoBlobs).with_workspace(project.path().to_path_buf());
+        let output = adapter
+            .run(IMAGE_GENERATE, serde_json::json!({"prompt": "safe"}), &ctx)
+            .await
+            .unwrap();
+        assert_eq!(output.output["path"], "generated-image-2.png");
+    }
 
     struct Reverse;
     #[async_trait::async_trait]

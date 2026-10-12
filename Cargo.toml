@@ -68,6 +68,7 @@ futures = "0.3"
 url = "2"
 portable-pty = "0.9"
 tempfile = "3"
+png = "0.18"
 tar = "0.4"
 
 # internal: the ARK crates

@@ -110,7 +110,7 @@ pub async fn catalog() -> Vec<Backend> {
             "ANTHROPIC_API_KEY",
             "claude-sonnet-5-5",
         ),
-        ("openai", "OpenAI API", "OPENAI_API_KEY", "gpt-4o-mini"),
+        ("openai", "OpenAI API", "OPENAI_API_KEY", "gpt-5"),
     ] {
         let ready = crate::keys::has_api_key(key);
         out.push(Backend {

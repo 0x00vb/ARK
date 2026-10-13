@@ -73,6 +73,7 @@ pub struct ArkUi {
     access: Access,
     entry: Option<String>,
     keep_running: bool,
+    ambient_window: bool,
     links: Vec<ark_interact::links::Link>,
     computers: Option<computers::ComputerSetup>,
     keep_computers: Vec<(String, String, String)>,
@@ -118,6 +119,7 @@ impl ArkUi {
             access: Access::default(),
             entry: None,
             keep_running: false,
+            ambient_window: false,
             links: Vec::new(),
             computers: None,
             keep_computers: Vec::new(),
@@ -241,6 +243,14 @@ impl ArkUi {
         self
     }
 
+    /// Let a kept native window offer a compact presentation of its current page from the
+    /// menu-bar item. This changes only the window frame and a `data-ambient` page attribute;
+    /// the consumer remains responsible for the compact page presentation. Default: off.
+    pub fn ambient_window(mut self, on: bool) -> Self {
+        self.ambient_window = on;
+        self
+    }
+
     /// Open the app and wrap it in a [`Host`]. Transports and tests start here.
     pub async fn open(self) -> anyhow::Result<(Arc<Host>, Arc<Assets>)> {
         let title = self.app.name().to_string();
@@ -325,10 +335,18 @@ impl ArkUi {
     #[cfg(feature = "desktop")]
     pub fn run_desktop(self, context: tauri::Context<tauri::Wry>) -> std::process::ExitCode {
         let keep_running = self.keep_running;
+        let ambient_window = self.ambient_window;
         let overlay_accent = self.info.accent.clone();
         let opened = tauri::async_runtime::block_on(self.open());
         match opened {
-            Ok((host, assets)) => desktop::run(host, assets, context, keep_running, overlay_accent),
+            Ok((host, assets)) => desktop::run(
+                host,
+                assets,
+                context,
+                keep_running,
+                ambient_window,
+                overlay_accent,
+            ),
             Err(e) => {
                 eprintln!("error: {e:#}");
                 std::process::ExitCode::FAILURE

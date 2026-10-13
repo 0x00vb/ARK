@@ -9,6 +9,11 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+
+- Native consumers can opt into a compact menu-bar chat presentation that preserves the current
+  page, conversation, runtime location and full-window frame.
+
 ## [0.22.2] - 2026-10-13
 
 ### Fixed

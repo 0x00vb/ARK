@@ -31,7 +31,8 @@ use tauri::tray::TrayIconBuilder;
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent};
 use tauri::{
-    Emitter as _, LogicalPosition, LogicalSize, Manager, RunEvent, WebviewUrl, WindowEvent, Wry,
+    Emitter as _, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, RunEvent,
+    WebviewUrl, WindowEvent, Wry,
 };
 use tauri_plugin_notification::NotificationExt;
 
@@ -100,6 +101,137 @@ pub(crate) static VISITS: AtomicU64 = AtomicU64::new(0);
 /// What a page elsewhere loads to bring the window back to its own page (`ark.openLocal()`).
 /// Never fetched: `.invalid` does not resolve, and the window catches it first.
 pub(crate) const OWN_PAGE: &str = "https://ark-local.invalid/";
+/// A page at any runtime uses this navigation to ask its native shell to restore the full
+/// presentation. It is caught before loading and does not expose native IPC to remote pages.
+pub const OPEN_FULL_PAGE: &str = "https://ark-window.invalid/open";
+
+#[derive(Clone, Copy)]
+struct NormalFrame {
+    position: PhysicalPosition<i32>,
+    size: PhysicalSize<u32>,
+}
+
+struct AmbientWindow {
+    enabled: bool,
+    compact: AtomicBool,
+    normal: Mutex<Option<NormalFrame>>,
+    minimum: Option<LogicalSize<f64>>,
+}
+
+impl AmbientWindow {
+    fn new(enabled: bool, minimum: Option<LogicalSize<f64>>) -> Self {
+        Self {
+            enabled,
+            compact: AtomicBool::new(false),
+            normal: Mutex::new(None),
+            minimum,
+        }
+    }
+}
+
+fn ambient_script(compact: bool) -> String {
+    format!(
+        "document.querySelector('.app')?.setAttribute('data-ambient','{}');window.dispatchEvent(new CustomEvent('ark:ambient',{{detail:{{active:{compact}}}}}));",
+        if compact { "true" } else { "false" }
+    )
+}
+
+fn apply_ambient_page(app: &tauri::AppHandle) {
+    let compact = app.state::<AmbientWindow>().compact.load(Ordering::SeqCst);
+    if let Some(webview) = main_webview(app) {
+        let _ = webview.eval(ambient_script(compact));
+    }
+}
+
+fn atomic_window_transition<E>(
+    apply: impl FnOnce() -> Result<(), E>,
+    rollback: impl FnOnce(),
+    commit: impl FnOnce(),
+) -> Result<(), E> {
+    match apply() {
+        Ok(()) => {
+            commit();
+            Ok(())
+        }
+        Err(error) => {
+            rollback();
+            Err(error)
+        }
+    }
+}
+
+fn present(app: &tauri::AppHandle, compact: bool) -> tauri::Result<()> {
+    let state = app.state::<AmbientWindow>();
+    if compact && !state.enabled {
+        return Ok(());
+    }
+    let Some(window) = main_window(app) else {
+        return Ok(());
+    };
+    if compact == state.compact.load(Ordering::SeqCst) {
+        let _ = window.unminimize();
+        window.show()?;
+        window.set_focus()?;
+        return Ok(());
+    }
+    if compact {
+        let frame = NormalFrame {
+            position: window.outer_position()?,
+            size: window.outer_size()?,
+        };
+        *state.normal.lock().unwrap() = Some(frame);
+        atomic_window_transition(
+            || {
+                window.set_min_size(Some(LogicalSize::new(360.0, 480.0)))?;
+                window.set_size(LogicalSize::new(420.0, 640.0))?;
+                if let Some(monitor) = window.current_monitor()? {
+                    let scale = monitor.scale_factor();
+                    let size = window.outer_size()?;
+                    let right = monitor.position().x + monitor.size().width as i32;
+                    let x = right - size.width as i32 - (24.0 * scale) as i32;
+                    let y = monitor.position().y + (36.0 * scale) as i32;
+                    window.set_position(PhysicalPosition::new(x, y))?;
+                }
+                Ok::<(), tauri::Error>(())
+            },
+            || {
+                let _ = window.set_min_size(state.minimum);
+                let _ = window.set_size(frame.size);
+                let _ = window.set_position(frame.position);
+                *state.normal.lock().unwrap() = None;
+            },
+            || {},
+        )?;
+    } else {
+        let compact_frame = NormalFrame {
+            position: window.outer_position()?,
+            size: window.outer_size()?,
+        };
+        let frame = *state.normal.lock().unwrap();
+        atomic_window_transition(
+            || {
+                window.set_min_size(state.minimum)?;
+                if let Some(frame) = frame {
+                    window.set_size(frame.size)?;
+                    window.set_position(frame.position)?;
+                }
+                Ok::<(), tauri::Error>(())
+            },
+            || {
+                let _ = window.set_min_size(Some(LogicalSize::new(360.0, 480.0)));
+                let _ = window.set_size(compact_frame.size);
+                let _ = window.set_position(compact_frame.position);
+            },
+            || *state.normal.lock().unwrap() = None,
+        )?;
+    }
+    state.compact.store(compact, Ordering::SeqCst);
+    apply_ambient_page(app);
+    let _ = window.unminimize();
+    window.show()?;
+    window.set_focus()?;
+    Ok(())
+}
 
 /// The app's own page: its asset origin (`tauri:` on macOS and Linux, `http://tauri.localhost`
 /// on Windows). Anything else the window shows is a page elsewhere and gets no IPC.
@@ -140,11 +272,12 @@ pub(crate) fn main_webview(app: &tauri::AppHandle) -> Option<tauri::Webview> {
 /// schemes that reach the app (its assets, IPC, files). Frames inside a page ask too, so
 /// `about:`, `data:` and `blob:` frames stay allowed.
 fn browser_may_open(url: &tauri::Url) -> bool {
-    const APP_HOSTS: [&str; 4] = [
+    const APP_HOSTS: [&str; 5] = [
         "tauri.localhost",
         "ipc.localhost",
         "asset.localhost",
         "ark-local.invalid",
+        "ark-window.invalid",
     ];
     if url.as_str() == OWN_PAGE || own_page(url) {
         return false;
@@ -227,6 +360,17 @@ fn window_plugin() -> tauri::plugin::TauriPlugin<Wry> {
         .on_navigation(|webview, url| {
             if webview.label() == BROWSER {
                 return browser_may_open(url);
+            }
+            if url.as_str() == OPEN_FULL_PAGE {
+                if webview.label() == MAIN {
+                    let app = webview.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = present(&app, false) {
+                            tracing::warn!(%error, "the full ARK window could not be restored");
+                        }
+                    });
+                }
+                return false;
             }
             if url.as_str() != OWN_PAGE {
                 return true;
@@ -551,10 +695,21 @@ pub(crate) fn run(
     assets: Arc<Assets>,
     mut context: tauri::Context<Wry>,
     keep_running: bool,
+    ambient_window: bool,
     overlay_accent: Option<String>,
 ) -> std::process::ExitCode {
     // WebKit keeps local app modules across updates. A versioned base path makes every relative
     // stylesheet, script and module URL new for this ARK release, while local storage stays put.
+    let configured_minimum = context
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN)
+        .and_then(|window| match (window.min_width, window.min_height) {
+            (Some(width), Some(height)) => Some(LogicalSize::new(width, height)),
+            _ => None,
+        });
     if let Some(window) = context
         .config_mut()
         .app
@@ -581,13 +736,16 @@ pub(crate) fn run(
         // A second launch brings this window forward instead of starting a second runtime on
         // the same store.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show(app)
+            if present(app, false).is_err() {
+                show(app);
+            }
         }));
     #[cfg(feature = "desktop-updater")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let built = builder
         .manage(State(host))
         .manage(BrowserEvents::default())
+        .manage(AmbientWindow::new(ambient_window, configured_minimum))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(window_plugin())
@@ -615,6 +773,9 @@ pub(crate) fn run(
                     let _ = view.close();
                 }
             }
+            if webview.label() == MAIN && matches!(p.event(), PageLoadEvent::Finished) {
+                apply_ambient_page(webview.app_handle());
+            }
         })
         .on_window_event(move |w, ev| {
             if let WindowEvent::CloseRequested { api, .. } = ev {
@@ -636,7 +797,7 @@ pub(crate) fn run(
                 let _ = w.show();
             }
             if keep_running {
-                tray(app, &name)?;
+                tray(app, &name, ambient_window, app.state::<State>().0.uses_computer())?;
             }
             if let Some(events) = computer_events {
                 if let Err(error) = start_computer_overlay(
@@ -677,7 +838,10 @@ pub(crate) fn run(
         // The Dock icon (or opening the app again) brings back a hidden window.
         #[cfg(target_os = "macos")]
         if let RunEvent::Reopen { .. } = ev {
-            show(app);
+            if let Err(error) = present(app, false) {
+                tracing::warn!(%error, "ARK could not restore its full window");
+                show(app);
+            }
         }
         #[cfg(not(target_os = "macos"))]
         let _ = app;
@@ -888,7 +1052,8 @@ fn show(app: &tauri::AppHandle) {
 }
 
 /// The menu-bar item: controls that remain reachable while another app is in front.
-fn tray(app: &tauri::App, name: &str) -> tauri::Result<()> {
+fn tray(app: &tauri::App, name: &str, ambient_window: bool, computer: bool) -> tauri::Result<()> {
+    let compact = MenuItem::with_id(app, "compact", "Compact chat", true, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", format!("Open {name}"), true, None::<&str>)?;
     let stop = MenuItem::with_id(app, "computer-stop", "Stop Computer", true, None::<&str>)?;
     let check = MenuItem::with_id(
@@ -899,17 +1064,28 @@ fn tray(app: &tauri::App, name: &str) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let quit = MenuItem::with_id(app, "quit", format!("Quit {name}"), true, None::<&str>)?;
-    let menu = if app.state::<State>().0.uses_computer() {
-        Menu::with_items(app, &[&open, &stop, &check, &quit])?
-    } else {
-        Menu::with_items(app, &[&open, &quit])?
+    let menu = match (ambient_window, computer) {
+        (true, true) => Menu::with_items(app, &[&compact, &open, &stop, &check, &quit])?,
+        (true, false) => Menu::with_items(app, &[&compact, &open, &quit])?,
+        (false, true) => Menu::with_items(app, &[&open, &stop, &check, &quit])?,
+        (false, false) => Menu::with_items(app, &[&open, &quit])?,
     };
     let mut b = TrayIconBuilder::with_id("ark")
         .tooltip(name)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, ev| match ev.id().as_ref() {
-            "open" => show(app),
+            "compact" => {
+                if let Err(error) = present(app, true) {
+                    tracing::warn!(%error, "ARK could not open compact chat");
+                }
+            }
+            "open" => {
+                if let Err(error) = present(app, false) {
+                    tracing::warn!(%error, "ARK could not restore its full window");
+                    show(app);
+                }
+            }
             "computer-stop" => {
                 app.state::<State>().0.computer_stop();
             }
@@ -929,6 +1105,93 @@ fn tray(app: &tauri::App, name: &str) -> tauri::Result<()> {
     }
     b.build(app)?;
     Ok(())
+}
+
+/// A native shell for a page served by another ARK runtime. The page keeps HTTP authority and
+/// receives no Tauri global; only the outside window shell can change its presentation.
+pub(crate) fn run_remote(
+    target: tauri::Url,
+    mut context: tauri::Context<Wry>,
+    ambient_window: bool,
+) -> std::process::ExitCode {
+    let minimum = context.config().app.windows.first().and_then(|window| {
+        match (window.min_width, window.min_height) {
+            (Some(width), Some(height)) => Some(LogicalSize::new(width, height)),
+            _ => None,
+        }
+    });
+    let name = context
+        .config()
+        .product_name
+        .clone()
+        .unwrap_or_else(|| "ARK".into());
+    let config = context.config_mut();
+    config.app.with_global_tauri = false;
+    if let Some(window) = config.app.windows.first_mut() {
+        window.url = WebviewUrl::External(target);
+        window.title_bar_style = tauri::TitleBarStyle::Visible;
+        window.hidden_title = false;
+    }
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if present(app, false).is_err() {
+                show(app);
+            }
+        }))
+        .manage(AmbientWindow::new(ambient_window, minimum))
+        .plugin(window_plugin())
+        .on_page_load(|webview, event| {
+            if webview.label() == MAIN && matches!(event.event(), PageLoadEvent::Finished) {
+                apply_ambient_page(webview.app_handle());
+            }
+        })
+        .on_window_event(move |window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if ambient_window {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .setup(move |app| {
+            if let Some(window) = main_window(app.handle()) {
+                fit_to_screen(&window);
+                let _ = window.show();
+            }
+            if ambient_window {
+                tray(app, &name, true, false)?;
+            }
+            #[cfg(all(
+                feature = "desktop-updater",
+                not(debug_assertions),
+                not(target_os = "windows")
+            ))]
+            crate::updates::start(app.handle().clone());
+            Ok(())
+        });
+    #[cfg(feature = "desktop-updater")]
+    let builder = builder
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    let built = builder.build(context);
+    let app = match built {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen { .. } = event {
+            if present(app, false).is_err() {
+                show(app);
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (app, event);
+    });
+    std::process::ExitCode::SUCCESS
 }
 
 /// A question that waits while the window is not in front (hidden, minimized, or another app
@@ -1052,6 +1315,7 @@ mod tests {
             "asset://localhost/x",
             "file:///etc/passwd",
             OWN_PAGE,
+            OPEN_FULL_PAGE,
             "https://ark-local.invalid/elsewhere",
         ] {
             assert!(!may(refused), "{refused}");
@@ -1067,6 +1331,48 @@ mod tests {
         ] {
             assert!(may(allowed), "{allowed}");
         }
+    }
+
+    #[test]
+    fn ambient_page_state_is_only_a_presentation_signal() {
+        let compact = ambient_script(true);
+        assert!(compact.contains("data-ambient','true"));
+        assert!(compact.contains("active:true"));
+        assert!(!compact.contains("session"));
+        assert!(!compact.contains("runtime"));
+
+        let full = ambient_script(false);
+        assert!(full.contains("data-ambient','false"));
+        assert!(full.contains("active:false"));
+    }
+
+    #[test]
+    fn window_transition_commits_or_rolls_back_as_one_operation() {
+        use std::cell::RefCell;
+
+        let events = RefCell::new(Vec::new());
+        let applied = atomic_window_transition::<&str>(
+            || {
+                events.borrow_mut().push("apply");
+                Ok(())
+            },
+            || events.borrow_mut().push("rollback"),
+            || events.borrow_mut().push("commit"),
+        );
+        assert_eq!(applied, Ok(()));
+        assert_eq!(*events.borrow(), ["apply", "commit"]);
+
+        events.borrow_mut().clear();
+        let failed = atomic_window_transition(
+            || {
+                events.borrow_mut().push("apply");
+                Err("window refused the size")
+            },
+            || events.borrow_mut().push("rollback"),
+            || events.borrow_mut().push("commit"),
+        );
+        assert_eq!(failed, Err("window refused the size"));
+        assert_eq!(*events.borrow(), ["apply", "rollback"]);
     }
 
     #[test]

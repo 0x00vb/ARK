@@ -256,7 +256,19 @@ async fn flush(client: &Client, upload: &str, batch: &mut Vec<Value>) -> anyhow:
 pub fn run_window(
     url: &str,
     token: &str,
-    mut context: tauri::Context<tauri::Wry>,
+    context: tauri::Context<tauri::Wry>,
+) -> std::process::ExitCode {
+    run_window_with_ambient(url, token, context, false)
+}
+
+/// Open the remote runtime with the same menu-bar compact presentation as a kept local window.
+/// The remote page still receives no Tauri IPC or global.
+#[cfg(feature = "desktop")]
+pub fn run_window_with_ambient(
+    url: &str,
+    token: &str,
+    context: tauri::Context<tauri::Wry>,
+    ambient_window: bool,
 ) -> std::process::ExitCode {
     let client = Client::new(url, token);
     let target = match plain_http_refused(url)
@@ -269,33 +281,7 @@ pub fn run_window(
         eprintln!("error: `{url}` is not an address");
         return std::process::ExitCode::FAILURE;
     };
-    let config = context.config_mut();
-    // A remote page must not see the window's IPC.
-    config.app.with_global_tauri = false;
-    if let Some(w) = config.app.windows.first_mut() {
-        w.url = tauri::WebviewUrl::External(target);
-        w.title_bar_style = tauri::TitleBarStyle::Visible;
-        w.hidden_title = false;
-    }
-    let builder = tauri::Builder::default();
-    #[cfg(feature = "desktop-updater")]
-    let builder = builder
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .setup(|app| {
-            #[cfg(all(not(debug_assertions), not(target_os = "windows")))]
-            crate::updates::start(app.handle().clone());
-            #[cfg(any(debug_assertions, target_os = "windows"))]
-            let _ = app;
-            Ok(())
-        });
-    match builder.run(context) {
-        Ok(()) => std::process::ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: {e}");
-            std::process::ExitCode::FAILURE
-        }
-    }
+    crate::desktop::run_remote(target, context, ambient_window)
 }
 
 /// Open the window on the runtime at `url` in place of the app's own page (ADR 0029): the page

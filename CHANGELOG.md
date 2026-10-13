@@ -9,6 +9,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-12
+
 ### Added
 
 - Each chat remembers Plan, Manual or Auto execution mode. Plan cannot mutate state. Auto skips

@@ -100,6 +100,30 @@ fn app(dir: &std::path::Path, who: &'static str, saves: Arc<AtomicUsize>) -> App
     App::new("Test").ark(ark)
 }
 
+fn app_with_computer(
+    dir: &std::path::Path,
+    who: &'static str,
+    saves: Arc<AtomicUsize>,
+    screen: ark_computer::fake::FakeScreen,
+) -> App {
+    let provider: Arc<dyn ark_model::Provider> = model(who);
+    let ark = Ark::builder()
+        .store_root(dir)
+        .tool(Arc::new(Notes { saves }))
+        .profile(
+            AgentProfile::builder()
+                .core_actions(["notes.save", "notes.read", "notes.jot"])
+                .build(),
+        )
+        .provider(provider)
+        .planner(false)
+        .critic(false)
+        .computer_with(ark_computer::ComputerService::with_screen(Arc::new(screen)))
+        .build()
+        .unwrap();
+    App::new("Test").ark(ark)
+}
+
 struct SetupWorkers {
     title: &'static str,
     marker: std::path::PathBuf,
@@ -373,6 +397,49 @@ async fn a_chat_placed_on_the_server_runs_there_and_shows_here() {
         .unwrap_err()
         .to_string();
     assert!(e.contains("runs on vps"), "{e}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_chat_cannot_read_or_change_this_computers_ambient_context() {
+    let (dir_a, dir_b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (_b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
+    let screen = ark_computer::fake::FakeScreen::new().app("Notes", &[]);
+    screen.keep_front_on("Notes");
+    let computer = app_with_computer(dir_a.path(), "A", Arc::new(AtomicUsize::new(0)), screen);
+    let (a, _) = ArkUi::new(computer)
+        .link("vps", &format!("http://127.0.0.1:{port}"), &token)
+        .open()
+        .await
+        .unwrap();
+    until("the link to answer", async || {
+        a.links().state("vps") == Some(ark_interact::links::State::Ok)
+    })
+    .await;
+
+    assert_eq!(a.remember_front_app().unwrap().as_deref(), Some("Notes"));
+    assert_eq!(
+        a.call("computer_context", json!({})).await.unwrap()["app"],
+        "Notes"
+    );
+    a.call("new_session", json!({ "place": "vps" }))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        a.remember_front_app().unwrap(),
+        None,
+        "a held chat never samples this screen"
+    );
+    assert_eq!(
+        a.call("computer_context", json!({})).await.unwrap(),
+        Value::Null
+    );
+    let error = a
+        .call("capability_turn", json!({ "id": "computer", "on": false }))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("running elsewhere"), "{error}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

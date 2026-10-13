@@ -876,6 +876,23 @@ impl Host {
             .and_then(|computer| computer.take_back())
     }
 
+    /// Remember the foreground app for Ambient Desktop only while this window shows a chat
+    /// running here. A held SSH or Cloud chat never samples this computer.
+    pub fn remember_front_app(&self) -> Result<Option<String>, String> {
+        if self.shown_held().is_some() {
+            return Ok(None);
+        }
+        match &self.computer {
+            Some(computer) => computer.remember_front_app(),
+            None => Ok(None),
+        }
+    }
+
+    /// The runtime-owned Computer switch and volatile app-name projection.
+    pub fn computer_context(&self) -> Option<ark_sdk::prelude::ark_computer::ComputerContext> {
+        self.computer.as_ref().map(|computer| computer.context())
+    }
+
     /// Re-read a message draft after the person has checked the app themselves.
     pub async fn computer_check(&self) -> Result<Value, String> {
         let computer = self
@@ -2697,6 +2714,7 @@ impl Host {
                 )?),
                 None => anyhow::bail!("this app does not use the computer"),
             },
+            "computer_context" => Ok(serde_json::to_value(self.computer_context())?),
             // Where a new chat can run (ADR 0052): this computer, by its name, and the person's
             // other computers with how each is.
             "places" => {
@@ -3291,6 +3309,13 @@ impl Host {
             })),
             // A capability the app offers and the person turns on or off (the Computer).
             "capability_turn" => {
+                if s("id").eq_ignore_ascii_case(ark_sdk::prelude::ark_computer::ID)
+                    && self.shown_held().is_some()
+                {
+                    anyhow::bail!(
+                        "Computer belongs to the chat's runtime; this chat is running elsewhere"
+                    );
+                }
                 ark_interact::capabilities::turn(
                     self.caps.computer.as_ref(),
                     &s("id"),

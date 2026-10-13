@@ -1,6 +1,6 @@
 # 0018. The Computer: one screen, one agent, every action asked
 
-Status: Accepted, amended by 0042 (rows and items, menus, scrolling, pictures) and 0045 (off until the person turns it on)
+Status: Accepted, amended by 0042 (rows and items, menus, scrolling, pictures), 0045 (off until the person turns it on) and ARK Desktop 0013 (ambient context)
 Date: 2026-10-04
 
 ## Context
@@ -24,6 +24,7 @@ A crate, `ark-computer`, with the same shape as the Browser: a `PerAgent` source
 | Question | Decision |
 |---|---|
 | What an agent sees | `computer.look {app}`: the front window's text and its controls (button, text field, checkbox, link, …), each numbered. `computer.apps` lists the open apps |
+| Minimum window context | `computer.active_window` asks each time, then reads only the remembered app's front window name and identifier. Its platform seam reads `AXTitle` and `AXIdentifier`; it never enables or walks the accessibility tree. The title is untrusted evidence, not an instruction |
 | What it does | `open {app}`, `click {app, ref, name}`, `type {app, ref, name, text, submit?}`, `keys {app, keys}` (`cmd+s`). Each answers with the window after, so the agent sees what happened |
 | What asks | Everything but `apps` is `Mutate`, through the approval gate, and `ask_each_time`: Allow once or Deny only. No "for this session" or "always" answer covers a later call, so nothing on the screen ever runs unattended (a scheduled run at 3 a.m. waits for a person). Reading a window asks too, because it can show anything |
 | What the person approves | The control by name: "Clicking “Send” in Mail", "Typing “Plan” into “Title” in Notes" (`ark_interact::labels`). The tool refuses when the name is not the one at that number in the agent's last look, so the approval says what is pressed, and a window that changed since is caught |
@@ -34,6 +35,7 @@ A crate, `ark-computer`, with the same shape as the Browser: a `PerAgent` source
 | Element numbers | They belong to the owner's last look, in that look's app. A number for another app, a stale number or a look by another owner is refused |
 | Permission | macOS's Accessibility permission, once. The first action asks the system to show its prompt and waits up to two minutes for the person to allow ARK, then goes on. Nothing to set up beforehand |
 | Turning it on | `ArkBuilder::computer(true)`. A catalog capability "Computer: use the apps on this computer, one agent at a time". Only macOS has a `Screen` today; elsewhere it is not offered |
+| Ambient app name | While Computer is on, a first-party local window may remember the front app's display name immediately before it takes focus. It keeps no PID, title, identifier, screenshot or tree. The value is replaced on each compact open, cleared on off, never logged and never sampled for a held SSH, Cloud or direct-remote chat |
 
 ## Consequences
 - Any model can use apps. One look is a few hundred to a few thousand tokens, clipped the way
@@ -50,6 +52,9 @@ A crate, `ark-computer`, with the same shape as the Browser: a `PerAgent` source
   bound them in time.
 - Not in the bench: no workload has a screen. Tested against a fake screen, and read-only
   against the real one.
+- Window metadata, the accessibility tree and a picture remain distinct reads. Metadata asks and
+  reads two attributes. `computer.look` asks and walks the bounded tree. `computer.see` asks and
+  captures only the chosen app's front window. Turning Computer on does not approve any of them.
 
 ## Check
 - `crates/ark-computer/tests/computer.rs`: acting by number and name (a wrong name refused),

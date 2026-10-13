@@ -479,10 +479,102 @@ async fn an_agent_reads_a_window_and_acts_on_it_by_number() {
         .collect();
     assert_eq!(
         risky,
-        vec![LOOK, OPEN, CLICK, TYPE, KEYS, MENU, SEE, POINT, SCROLL, DRAFT, SEND, CANCEL,]
+        vec![
+            ACTIVE_WINDOW,
+            LOOK,
+            OPEN,
+            CLICK,
+            TYPE,
+            KEYS,
+            MENU,
+            SEE,
+            POINT,
+            SCROLL,
+            DRAFT,
+            SEND,
+            CANCEL,
+        ]
     );
     drop(a);
     assert_eq!(svc.holder(), None, "the screen is free when the turn ends");
+}
+
+#[tokio::test]
+async fn active_window_reads_only_remembered_window_metadata() {
+    let screen = notes();
+    screen.keep_front_on("Notes");
+    let svc = service(&screen);
+    assert_eq!(svc.remember_front_app().unwrap().as_deref(), Some("Notes"));
+    assert_eq!(svc.context().app.as_deref(), Some("Notes"));
+
+    let agent = svc.for_owner("p/writer");
+    let metadata = run(&agent, ACTIVE_WINDOW, json!({})).await.unwrap();
+    assert_eq!(metadata["app"], "Notes");
+    assert_eq!(metadata["window"], "Notes window");
+    assert_eq!(*screen.log.lock().unwrap(), vec!["metadata Notes"]);
+    let (card, _) = distill(ACTIVE_WINDOW, &metadata).unwrap();
+    assert!(card.contains("metadata only") && card.contains("untrusted"));
+
+    let error = run(
+        &agent,
+        CLICK,
+        json!({ "app": "Notes", "ref": 1, "name": "Title" }),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("look at Notes first"), "{error}");
+
+    svc.set_on(false).unwrap();
+    assert_eq!(
+        svc.context().app,
+        None,
+        "turning off clears the volatile app"
+    );
+}
+
+#[test]
+fn turning_computer_off_revokes_an_in_flight_ambient_sample() {
+    use std::sync::{Arc, Barrier};
+
+    let started = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let screen = notes().apps_blocked(started.clone(), release.clone());
+    screen.keep_front_on("Notes");
+    let svc = service(&screen);
+    let sampling = {
+        let svc = svc.clone();
+        std::thread::spawn(move || svc.remember_front_app())
+    };
+
+    started.wait();
+    svc.set_on(false).unwrap();
+    svc.set_on(true).unwrap();
+    release.wait();
+
+    assert_eq!(sampling.join().unwrap().unwrap(), None);
+    assert_eq!(svc.context().app, None);
+}
+
+#[test]
+fn ambient_context_has_truthful_empty_failure_and_permission_states() {
+    let no_front = notes();
+    let svc = service(&no_front);
+    assert_eq!(svc.remember_front_app().unwrap(), None);
+    let context = svc.context();
+    assert!(context.on && context.app.is_none() && !context.sample_failed);
+
+    let failed = FakeScreen::new().app("Notes", &[]).apps_fail();
+    let svc = service(&failed);
+    assert!(svc.remember_front_app().is_err());
+    let context = svc.context();
+    assert!(context.on && context.app.is_none() && context.sample_failed);
+
+    let denied = FakeScreen::new()
+        .app("Notes", &[])
+        .not_allowed_until_asked(Duration::from_secs(60));
+    let context = service(&denied).context();
+    assert_eq!(context.permission, "not_yet");
+    assert!(context.permission_help.is_some());
 }
 
 /// Keys go to whatever is in front, so they are sent only once the approved app is there.

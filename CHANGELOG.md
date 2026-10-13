@@ -7,12 +7,14 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
-## [Unreleased]
+## [0.23.0] - 2026-10-13
 
 ### Added
 
 - Native consumers can opt into a compact menu-bar chat presentation that preserves the current
   page, conversation, runtime location and full-window frame.
+- The Computer can remember only the foreground app for an ambient window, then read that app's
+  window name and identifier through a separate approval without reading its contents or controls.
 
 ## [0.22.2] - 2026-10-13
 

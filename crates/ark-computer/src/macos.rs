@@ -13,7 +13,10 @@ use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef};
 
-use crate::{Access, App, Control, Element, Frame, Look, Menu, MenuItem, Pointer, Screen, Shot};
+use crate::{
+    Access, App, Control, Element, Frame, Look, Menu, MenuItem, Pointer, Screen, Shot,
+    WindowMetadata,
+};
 
 type AxRef = CFTypeRef;
 
@@ -640,6 +643,15 @@ fn app_element(pid: i32) -> (Ax, bool) {
     (root, fresh)
 }
 
+/// The app's root for metadata-only reads. Unlike `app_element`, this never asks an app to
+/// enable or build its accessibility tree.
+fn metadata_element(pid: i32) -> Ax {
+    // SAFETY: creates an element we own for a running process.
+    let root = Ax(unsafe { CFType::wrap_under_create_rule(AXUIElementCreateApplication(pid)) });
+    unsafe { AXUIElementSetMessagingTimeout(root.raw(), 2.0) };
+    root
+}
+
 fn front_window(root: &Ax, app: &str) -> Result<Ax, String> {
     root.attr("AXFocusedWindow")
         .map(Ax)
@@ -922,6 +934,26 @@ impl Screen for Mac {
             });
         }
         Ok(apps)
+    }
+
+    fn window_metadata(&self, app: &str) -> Result<WindowMetadata, String> {
+        if self.access() != Access::Allowed {
+            return Err("ARK is not allowed to use apps yet".into());
+        }
+        let found = self.find(app)?;
+        let root = metadata_element(found.pid);
+        let window = front_window(&root, &found.name)?;
+        Ok(WindowMetadata {
+            app: found.name,
+            window: window
+                .text("AXTitle")
+                .map(|value| clean(&value))
+                .unwrap_or_default(),
+            window_identifier: window
+                .text("AXIdentifier")
+                .map(|value| clean(&value))
+                .filter(|value| !value.is_empty()),
+        })
     }
 
     fn capture(&self, app: &str, max: u32) -> Result<Shot, String> {

@@ -4,18 +4,18 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-13 (v0.22.2)
+Last updated: 2026-10-13 (v0.23.0)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.22.2 (2026-10-13), independent project expansion |
-| `main` | v0.22.2 release tree. |
+| Latest tag | v0.23.0 (2026-10-13), Ambient Desktop and permissioned window metadata |
+| `main` | v0.23.0 release tree. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
-| Next tag | not set. `[Unreleased]` is empty. |
+| Next tag | not set. |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | `ci/windows` merged into v0.14.0 (`ark-os`, ADR 0022): every OS difference ARK had on 2026-10-05 goes through it; code written on `main` after that (processes, notifications, durable turns) mostly does not yet, and newer shell-script tests are not marked unix-only. Never run on Windows. Next: the machine run (`scripts/windows-check.ps1`), Office fixes in `ark-files`, one runtime per store. Analysis and plan: `ark-desktop/docs/WINDOWS.md` |
 | Accounts | In v0.10.0: `ark-account` (ADR 0026, 0031), an optional ARK Account for ARK Cloud. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local) |
@@ -24,6 +24,7 @@ Last updated: 2026-10-13 (v0.22.2)
 
 | What | State |
 |---|---|
+| Ambient Desktop | Released in v0.23.0. A native consumer can keep one page and runtime alive, switch it into a compact menu-bar presentation, project agent state and restore the exact chat. Computer keeps only a volatile foreground app name for this view. Window name and identifier use a separate approval each time. Accessibility content and capture remain the existing higher-permission actions. Held SSH and Cloud chats never fall back to this Mac. |
 | Workspace UI polish | Released through v0.22.2: chat tabs match artifact tabs, composer controls share one baseline, project New chat hover stays inside its visible control, familiar Home and Schedule symbols replace abstract rail glyphs, split view hides the project selector until it closes, and every sidebar project can remain expanded. Chat search renders result times again. Implementation QA is GO. |
 | Plan, Manual and Auto execution modes (ADR 0064) | Released in v0.22.0. The chat persists a revisioned mode and each turn freezes it. Plan omits and rejects mutations. Auto bypasses approval only for explicitly eligible project file and contained code actions. Browser, Computer, connections, automations and unknown tools remain Manual. The composer exposes the choice and `Shift+Tab` cycles it. |
 | Multi-chat tabs and a two-pane split (ADR 0063) | Released in v0.22.0. A window restores up to 12 open tabs and at most two visible chats from the same project and computer. Each pane owns its transcript, turn, queue, approvals, draft, scroll, model and mode. Closing a view keeps work running. The shared side pane follows the active chat. |

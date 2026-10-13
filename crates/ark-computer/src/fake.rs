@@ -2,10 +2,13 @@
 //! was pressed and typed, and a person who can be made to type.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Barrier, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::{Access, App, Control, Element, Frame, Look, Menu, MenuItem, Pointer, Screen, Shot};
+use crate::{
+    Access, App, Control, Element, Frame, Look, Menu, MenuItem, Pointer, Screen, Shot,
+    WindowMetadata,
+};
 
 /// What happened on the fake screen, in order: `open Notes`, `press Notes/Save`,
 /// `set Notes/Title = "x"`, `keys cmd+s`.
@@ -21,6 +24,9 @@ struct Inner {
     front: Option<String>,
     allowed: bool,
     asked: bool,
+    apps_error: bool,
+    apps_started: Option<Arc<Barrier>>,
+    apps_release: Option<Arc<Barrier>>,
     /// Fields refuse text set directly (it must be typed).
     no_set_text: bool,
     /// Opening an app does not bring it to the front.
@@ -95,6 +101,21 @@ impl FakeScreen {
     /// Opening an app leaves another one in front (another window took the focus).
     pub fn front_stays_elsewhere(self) -> Self {
         self.inner.lock().unwrap().stuck_front = true;
+        self
+    }
+
+    /// Listing apps fails, for ambient-context recovery tests.
+    pub fn apps_fail(self) -> Self {
+        self.inner.lock().unwrap().apps_error = true;
+        self
+    }
+
+    /// Hold an app listing between the two barriers, for deterministic revocation tests.
+    pub fn apps_blocked(self, started: Arc<Barrier>, release: Arc<Barrier>) -> Self {
+        let mut inner = self.inner.lock().unwrap();
+        inner.apps_started = Some(started);
+        inner.apps_release = Some(release);
+        drop(inner);
         self
     }
 
@@ -212,7 +233,20 @@ impl Screen for FakeScreen {
         self.record("asked for access".into());
     }
     fn apps(&self) -> Result<Vec<App>, String> {
+        let (started, release) = {
+            let i = self.inner.lock().unwrap();
+            (i.apps_started.clone(), i.apps_release.clone())
+        };
+        if let Some(started) = started {
+            started.wait();
+        }
+        if let Some(release) = release {
+            release.wait();
+        }
         let i = self.inner.lock().unwrap();
+        if i.apps_error {
+            return Err("the app list is unavailable".into());
+        }
         Ok(i.apps
             .iter()
             .enumerate()
@@ -225,6 +259,23 @@ impl Screen for FakeScreen {
                     .is_some_and(|f| f.eq_ignore_ascii_case(a)),
             })
             .collect())
+    }
+    fn window_metadata(&self, app: &str) -> Result<WindowMetadata, String> {
+        let name = self
+            .inner
+            .lock()
+            .unwrap()
+            .apps
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(app))
+            .map(|(name, _)| name.clone())
+            .ok_or_else(|| format!("{app} is not open; computer.open opens it"))?;
+        self.record(format!("metadata {name}"));
+        Ok(WindowMetadata {
+            app: name.clone(),
+            window: format!("{name} window"),
+            window_identifier: Some(format!("fake-{name}-window")),
+        })
     }
     fn look(&self, app: &str) -> Result<Look, String> {
         let i = self.inner.lock().unwrap();

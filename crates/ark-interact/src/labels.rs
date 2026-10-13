@@ -653,6 +653,10 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
         "program.files" => "Looking at what changed in the folder".into(),
         a if a.starts_with("program.") && !s("title").is_empty() => s("title").to_string(),
         "computer.apps" => "Listing the open apps".into(),
+        "computer.active_window" => {
+            "Reading the remembered app's window name and identifier, not its contents or controls"
+                .into()
+        }
         "computer.look" => format!("Looking at {}", s("app")),
         "computer.open" => format!("Opening {}", s("app")),
         "computer.click" => format!(
@@ -1031,6 +1035,21 @@ mod tests {
     #[test]
     fn scheduling_and_the_computer_read_naturally() {
         let l = Labels::new(Vec::new());
+        assert_eq!(
+            l.approval_line(&ApprovalRequest {
+                action: "computer.active_window".into(),
+                summary: String::new(),
+                risk: ark_sdk::prelude::RiskTier::Mutate,
+                input: json!({}),
+                class: "computer.active_window".into(),
+                preview: String::new(),
+                agent: None,
+                task: None,
+                ask_each_time: true,
+                cut_short: false,
+            }),
+            "Reading the remembered app's window name and identifier, not its contents or controls"
+        );
         assert_eq!(
             l.call_label(
                 "agents.schedule",

@@ -518,6 +518,9 @@ impl Host {
                 let chat = self.shown_held()?;
                 Some(Ok(self.held_summary(&chat)))
             }
+            // Ambient context belongs to the runtime that owns the chat. A held SSH or Cloud
+            // chat must never fall back to the foreground app on this computer.
+            "computer_context" => self.shown_held().map(|_| Ok(Value::Null)),
             "send" => {
                 let chat = self.shown_held()?;
                 let ask = params["ask"].as_bool().unwrap_or(true);

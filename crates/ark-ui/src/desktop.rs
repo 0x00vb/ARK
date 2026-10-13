@@ -143,6 +143,29 @@ fn apply_ambient_page(app: &tauri::AppHandle) {
     }
 }
 
+fn remember_ambient_context(app: &tauri::AppHandle) -> Result<(), String> {
+    let Some(webview) = main_webview(app) else {
+        return Ok(());
+    };
+    if !webview.url().is_ok_and(|url| own_page(&url)) {
+        return Ok(());
+    }
+    let Some(state) = app.try_state::<State>() else {
+        return Ok(());
+    };
+    state.0.remember_front_app().map(|_| ())
+}
+
+fn finish_ambient_presentation<T, E>(
+    sample: Option<Result<(), String>>,
+    show_and_focus: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    if let Some(Err(error)) = sample {
+        tracing::warn!(%error, "ARK could not read the foreground app for compact chat");
+    }
+    show_and_focus()
+}
+
 fn atomic_window_transition<E>(
     apply: impl FnOnce() -> Result<(), E>,
     rollback: impl FnOnce(),
@@ -168,11 +191,20 @@ fn present(app: &tauri::AppHandle, compact: bool) -> tauri::Result<()> {
     let Some(window) = main_window(app) else {
         return Ok(());
     };
+    let ambient_sample = if compact {
+        // Sample before this window takes focus. The Host refuses while the chat is held on
+        // another runtime, and a remote page has no access to the local Host.
+        Some(remember_ambient_context(app))
+    } else {
+        None
+    };
     if compact == state.compact.load(Ordering::SeqCst) {
-        let _ = window.unminimize();
-        window.show()?;
-        window.set_focus()?;
-        return Ok(());
+        return finish_ambient_presentation(ambient_sample, || {
+            let _ = window.unminimize();
+            window.show()?;
+            window.set_focus()?;
+            Ok(())
+        });
     }
     if compact {
         let frame = NormalFrame {
@@ -227,10 +259,12 @@ fn present(app: &tauri::AppHandle, compact: bool) -> tauri::Result<()> {
     }
     state.compact.store(compact, Ordering::SeqCst);
     apply_ambient_page(app);
-    let _ = window.unminimize();
-    window.show()?;
-    window.set_focus()?;
-    Ok(())
+    finish_ambient_presentation(ambient_sample, || {
+        let _ = window.unminimize();
+        window.show()?;
+        window.set_focus()?;
+        Ok(())
+    })
 }
 
 /// The app's own page: its asset origin (`tauri:` on macOS and Linux, `http://tauri.localhost`
@@ -1344,6 +1378,22 @@ mod tests {
         let full = ambient_script(false);
         assert!(full.contains("data-ambient','false"));
         assert!(full.contains("active:false"));
+    }
+
+    #[test]
+    fn ambient_sampling_precedes_focus_and_cannot_block_it() {
+        use std::cell::RefCell;
+
+        for sample in [Ok(()), Err("Accessibility is unavailable".to_string())] {
+            let events = RefCell::new(vec!["sample"]);
+            let result = finish_ambient_presentation::<_, &str>(Some(sample), || {
+                events.borrow_mut().push("show");
+                events.borrow_mut().push("focus");
+                Ok(())
+            });
+            assert_eq!(result, Ok(()));
+            assert_eq!(*events.borrow(), ["sample", "show", "focus"]);
+        }
     }
 
     #[test]

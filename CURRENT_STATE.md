@@ -4,18 +4,18 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-12 (v0.20.3)
+Last updated: 2026-10-12 (v0.22.0)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.20.3 (2026-10-12), complete page-enabled release gate passed |
-| `main` | Unreleased: per-chat Plan, Manual and bounded Auto modes; persistent chat tabs and a two-pane split; a curated Connections browser; native generated images. The complete release gate passes. |
+| Latest tag | v0.22.0 (2026-10-12), complete page-enabled release gate passed |
+| `main` | v0.22.0 release tree. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
-| Next tag | not set. `[Unreleased]` contains the next ARK and Desktop workspace features. |
+| Next tag | not set. `[Unreleased]` is empty. |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | `ci/windows` merged into v0.14.0 (`ark-os`, ADR 0022): every OS difference ARK had on 2026-10-05 goes through it; code written on `main` after that (processes, notifications, durable turns) mostly does not yet, and newer shell-script tests are not marked unix-only. Never run on Windows. Next: the machine run (`scripts/windows-check.ps1`), Office fixes in `ark-files`, one runtime per store. Analysis and plan: `ark-desktop/docs/WINDOWS.md` |
 | Accounts | In v0.10.0: `ark-account` (ADR 0026, 0031), an optional ARK Account for ARK Cloud. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local) |
@@ -24,9 +24,9 @@ Last updated: 2026-10-12 (v0.20.3)
 
 | What | State |
 |---|---|
-| Plan, Manual and Auto execution modes (ADR 0064) | Implemented on `main`. The chat persists a revisioned mode and each turn freezes it. Plan omits and rejects mutations. Auto bypasses approval only for explicitly eligible project file and contained code actions. Browser, Computer, connections, automations and unknown tools remain Manual. The composer exposes the choice and `Shift+Tab` cycles it. `scripts/ci.sh` passes. |
-| Multi-chat tabs and a two-pane split (ADR 0063) | Implemented on `main`. A window restores up to 12 open tabs and at most two visible chats from the same project and computer. Each pane owns its transcript, turn, queue, approvals, draft, scroll, model and mode. Closing a view keeps work running. The shared side pane follows the active chat. Browser dogfood and `scripts/ci.sh` pass. |
-| Native generated images (ADR 0066) | Implemented on `main`: supported OpenAI reasoning models get an approval-gated `image.generate` action. Valid PNG output becomes a durable project file, renders as the image file card in chat and opens in the shared image view. Page-enabled full CI passes. A paid live API generation was not run. |
+| Plan, Manual and Auto execution modes (ADR 0064) | Released in v0.22.0. The chat persists a revisioned mode and each turn freezes it. Plan omits and rejects mutations. Auto bypasses approval only for explicitly eligible project file and contained code actions. Browser, Computer, connections, automations and unknown tools remain Manual. The composer exposes the choice and `Shift+Tab` cycles it. |
+| Multi-chat tabs and a two-pane split (ADR 0063) | Released in v0.22.0. A window restores up to 12 open tabs and at most two visible chats from the same project and computer. Each pane owns its transcript, turn, queue, approvals, draft, scroll, model and mode. Closing a view keeps work running. The shared side pane follows the active chat. |
+| Native generated images (ADR 0066) | Released in v0.22.0: supported OpenAI reasoning models get an approval-gated `image.generate` action. Valid PNG output becomes a durable project file, renders as the image file card in chat and opens in the shared image view. A paid live API generation was not run. |
 | Subscription agents keep their credentials on their computer (ADR 0061) | In v0.20.0: Grok 1.0 is an offered ACP worker with an isolated provider-owned login, fixed ask rules, no inherited app secrets, place-bound setup and a checked model selector. Claude Code and Codex explicit worker compatibility remains, but neither subscription is newly offered: Anthropic requires explicit permission for automated consumer access, and OpenAI's supported third-party route is app-specific Sign in with ChatGPT. ARK's full release gate passed. Left: ARK Desktop's permanent pin, native check and release. |
 | Repeated failed tool calls | In v0.20.1, an identical failed read or observation runs once and gets one retry, then returns immediately. A successful change reopens the read. Focused runtime tests pass. The 22-workload simulated suite has no non-timing metric change. Live qwen3:4b passes `failure-recovery` and `web` 3/3, writer dogfood passes and implementation QA is GO. |
 | Signed background updates for native consumers (ADR 0054) | In v0.17.0: opt-in `desktop-updater`, official Tauri updater in local and direct-remote window paths, an own-page-only state bridge, background download and install on macOS and Linux, no forced restart. Windows is explicitly unavailable until it has a non-disruptive installer design. Left: ARK Desktop's staged 0.5.2 to 0.5.3 proof |

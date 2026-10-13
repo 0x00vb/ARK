@@ -9,6 +9,13 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.22.2] - 2026-10-13
+
+### Fixed
+
+- Projects keep their independent expanded state when another project becomes current. Any number
+  of projects can remain expanded in the sidebar.
+
 ## [0.22.1] - 2026-10-13
 
 ### Changed

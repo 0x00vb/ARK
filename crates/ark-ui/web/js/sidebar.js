@@ -1,7 +1,7 @@
 // Projects and their chats. A project is a folder; its chats are listed beneath it. The current
 // project is unfolded, the others fold away and unfold with their chevron. Everything comes from
 // the host (`projects`, `sessions`); nothing is kept here that could drift from the store, except
-// which projects the person folded or unfolded since they last changed project.
+// which projects the person folded or unfolded.
 
 import { h, icon, clear, ago, clip, touch, $ } from "./dom.js";
 import { registry } from "./ext.js";
@@ -60,11 +60,12 @@ export class Sidebar {
     } catch {
       return; // busy while a turn runs; the list refreshes when it ends
     }
-    // Another project is current: start from its defaults again.
+    // A project that stops being current stays unfolded. Project expansion is independent, so
+    // moving between projects never turns the sidebar into a one-open accordion.
     const current = projects.find((p) => p.current)?.id || null;
     if (current !== this.current) {
+      if (this.current && this.folds[this.current] === undefined) this.folds[this.current] = true;
       this.current = current;
-      this.folds = {};
     }
     const chats = await Promise.all(projects.map((p) =>
       this.unfolded(p) ? this.api.call("sessions", { project: p.id }).catch(() => []) : null));

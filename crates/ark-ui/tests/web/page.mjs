@@ -1889,6 +1889,30 @@ async function projectNewChat(page) {
 }
 scenarios["project-new-chat"] = projectNewChat;
 
+// Project expansion is independent. Moving to another project keeps every project the person
+// already unfolded open instead of imposing accordion behavior.
+async function expandedProjects(page) {
+  const original = await page.evaluate(() => window.ark.summary().project);
+  await page.evaluate(() => window.ark.call("add_project", { name: "Second project" }));
+  await page.evaluate(() => window.ark.call("add_project", { name: "Third project" }));
+  await page.evaluate((id) => window.ark.call("open_project", { id }), original.id);
+  await page.waitForFunction((id) => window.ark.summary().project.id === id, original.id);
+
+  const second = page.locator(".project-row", { hasText: "Second project" });
+  const third = page.locator(".project-row", { hasText: "Third project" });
+  await second.waitFor();
+  if (await second.getAttribute("aria-expanded") !== "true") await second.locator(".project-chev").click();
+  await page.waitForFunction(() => [...document.querySelectorAll(".project-row")]
+    .some((row) => row.textContent.includes("Second project") && row.getAttribute("aria-expanded") === "true"));
+
+  await third.click();
+  await page.waitForFunction(() => window.ark.summary().project.name === "Third project");
+  for (const name of [original.name, "Second project", "Third project"]) {
+    assert.equal(await page.locator(".project-row", { hasText: name }).getAttribute("aria-expanded"), "true", `${name} stays expanded`);
+  }
+}
+scenarios["expanded-projects"] = expandedProjects;
+
 // Multi-chat controls use the same quiet tab grammar as artifacts. Split view has one clear
 // scope, so project views disappear while it is open and return on every exit path.
 async function chatWorkspacePolish(page) {

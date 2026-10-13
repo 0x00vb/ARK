@@ -915,6 +915,11 @@ async fn a_project_row_starts_a_chat_in_that_project() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn every_project_can_stay_expanded() {
+    drive("expanded-projects", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn chat_tabs_composer_and_split_share_one_visual_model() {
     drive("chat-workspace-polish", vec![], Duration::ZERO).await;
 }

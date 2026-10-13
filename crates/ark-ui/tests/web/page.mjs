@@ -1446,6 +1446,7 @@ scenarios.settings = settings;
 
 scenarios.search = async (page) => {
   const composer = page.locator("#input");
+  await finished(page, () => composer.fill("A searchable chat").then(() => page.keyboard.press("Enter")));
   await composer.fill("Keep this draft");
   await composer.focus();
   await page.keyboard.press("Meta+Shift+f");
@@ -1453,7 +1454,10 @@ scenarios.search = async (page) => {
   await search.waitFor();
   assert.equal(await search.getAttribute("aria-controls"), "chat-search-results");
   await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
-  assert.match(await page.locator("#chat-search-results").innerText(), /No chats yet/);
+  const results = await page.locator("#chat-search-results").innerText();
+  assert.match(results, /A searchable chat/);
+  assert.match(results, /now/);
+  assert.doesNotMatch(results, /ago is not defined/);
   assert.equal(await composer.inputValue(), "Keep this draft");
   await page.keyboard.press("Escape");
   assert.equal(await composer.evaluate((el) => document.activeElement === el), true, "closing search restores focus");
@@ -1884,6 +1888,116 @@ async function projectNewChat(page) {
   assert.equal(await page.evaluate(() => window.ark.summary().project.name), "Other project");
 }
 scenarios["project-new-chat"] = projectNewChat;
+
+// Multi-chat controls use the same quiet tab grammar as artifacts. Split view has one clear
+// scope, so project views disappear while it is open and return on every exit path.
+async function chatWorkspacePolish(page) {
+  const first = await page.evaluate(() => window.ark.summary().session.id);
+  await page.locator("#new-session").click();
+  await page.waitForFunction((id) => window.ark.summary().session.id !== id, first);
+  const primary = await page.evaluate(() => window.ark.summary().session.id);
+  await page.waitForFunction(() => document.querySelectorAll(".chat-tab").length === 2);
+
+  await page.evaluate(() => {
+    window.ark.view({
+      id: "split-view-proof", title: "Proof", nav: true,
+      render(el) { el.textContent = "Proof"; },
+    });
+    window.ark.panel({
+      id: "artifact-tab-proof", title: "Artifact proof", icon: "file",
+      render(el) { el.textContent = "Artifact"; },
+    });
+    window.ark.openPanel("artifact-tab-proof");
+  });
+  const grammar = await page.evaluate(() => {
+    const pick = (selector) => {
+      const s = getComputedStyle(document.querySelector(selector));
+      return {
+        radius: s.borderRadius,
+        fontSize: s.fontSize,
+        fontWeight: s.fontWeight,
+        selected: s.backgroundColor,
+      };
+    };
+    return { chat: pick('.chat-tab-item[data-selected="true"]'), artifact: pick('.pane-tab[aria-selected="true"]') };
+  });
+  assert.deepEqual(grammar.chat, grammar.artifact, "chat and artifact tabs share one visual grammar");
+
+  const firstItem = page.locator(`.chat-tab-item[data-session="${first}"]`);
+  const firstTab = firstItem.getByRole("tab");
+  const firstClose = firstItem.getByRole("button", { name: /^Close / });
+  assert.equal(await firstTab.count(), 1, "chat activation is its own accessible control");
+  assert.equal(await firstClose.count(), 1, "chat close is its own accessible control");
+  const closeBox = await firstClose.boundingBox();
+  assert.ok(closeBox.width >= 40 && closeBox.height >= 40, JSON.stringify(closeBox));
+  await firstTab.focus();
+  await page.keyboard.press("Tab");
+  assert.equal(await firstClose.evaluate((el) => el === document.activeElement), true, "Tab reaches the matching close action");
+
+  const centers = await page.evaluate(() => {
+    const center = (selector) => {
+      const r = document.querySelector(selector).getBoundingClientRect();
+      return r.top + r.height / 2;
+    };
+    return [center("#model-chip"), center("#mode-chip"), center("#send")];
+  });
+  assert.ok(Math.max(...centers) - Math.min(...centers) <= 1, JSON.stringify(centers));
+
+  const newChat = page.locator(".project-row[aria-current='true'] .project-new-chat");
+  await newChat.hover();
+  await page.waitForTimeout(140);
+  const hover = await newChat.evaluate((el) => ({
+    button: getComputedStyle(el).backgroundColor,
+    inset: getComputedStyle(el, "::after").inset,
+    opacity: getComputedStyle(el, "::after").opacity,
+  }));
+  assert.equal(hover.button, "rgba(0, 0, 0, 0)", "the 40px hit target is not a 40px hover block");
+  assert.equal(hover.inset, "6px");
+  assert.equal(hover.opacity, "1");
+
+  await page.locator("#close-pane").click();
+  const views = page.locator("#view-tabs");
+  assert.equal(await views.isVisible(), true);
+  await page.locator("#chat-split").click();
+  await page.waitForFunction(() => document.getElementById("app").dataset.split === "true");
+  assert.equal(await views.isVisible(), false, "project selector is out of scope during split view");
+  assert.equal(await page.locator('.chat-tab[aria-selected="true"]').count(), 1, "one chat owns composer focus");
+
+  const primaryTab = page.locator(`.chat-tab-item[data-session="${primary}"] .chat-tab`);
+  const secondaryTab = page.locator(`.chat-tab-item[data-session="${first}"] .chat-tab`);
+  await primaryTab.click();
+  assert.equal(await primaryTab.getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator(".chat-surface.primary").getAttribute("data-active"), "true");
+  await secondaryTab.click();
+  assert.equal(await secondaryTab.getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator(".chat-surface.secondary").getAttribute("data-active"), "true");
+  await shot(page, "chat-workspace-polish");
+
+  await page.setViewportSize({ width: 800, height: 700 });
+  assert.equal(await page.locator(".chat-surface:not([hidden])").count(), 2);
+  assert.equal(await page.locator(".chat-surface:not([hidden])").evaluateAll((els) => els.filter((el) => getComputedStyle(el).display !== "none").length), 1);
+  await primaryTab.click();
+  assert.equal(await primaryTab.getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator(".chat-surface.primary").evaluate((el) => getComputedStyle(el).display), "flex");
+  assert.equal(await page.locator(".chat-surface.secondary").evaluate((el) => getComputedStyle(el).display), "none");
+  await secondaryTab.click();
+  assert.equal(await secondaryTab.getAttribute("aria-selected"), "true");
+  assert.equal(await page.locator(".chat-surface.primary").evaluate((el) => getComputedStyle(el).display), "none");
+  assert.equal(await page.locator(".chat-surface.secondary").evaluate((el) => getComputedStyle(el).display), "flex");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.setViewportSize({ width: 1100, height: 800 });
+
+  await page.locator("#chat-split").click();
+  assert.equal(await page.locator("#app").getAttribute("data-split"), "false");
+  assert.equal(await views.isVisible(), true, "selector returns when split closes");
+
+  await page.locator("#chat-split").click();
+  await page.waitForFunction(() => document.getElementById("app").dataset.split === "true");
+  await page.evaluate(() => window.ark.openView("split-view-proof"));
+  assert.equal(await page.locator("#app").getAttribute("data-split"), "false");
+  assert.equal(await views.isVisible(), true, "opening a project view exits split and keeps the way back");
+}
+scenarios["chat-workspace-polish"] = chatWorkspacePolish;
 
 // ADR 0041: a process start asks with its command and where, then runs beside the chat: the
 // Processes panel shows its output, its page opens in the Browser once ready, Stop ends it.

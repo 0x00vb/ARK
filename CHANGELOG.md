@@ -9,6 +9,19 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-13
+
+### Changed
+
+- Chat tabs now use the same compact visual model as artifact tabs. Split view hides the
+  project view selector until split closes, and the composer controls share one baseline.
+
+### Fixed
+
+- Project New chat actions use a contained hover surface, and the destination rail uses familiar
+  Home and Schedule symbols instead of abstract workspace glyphs.
+- Chat search renders result timestamps instead of failing on an unavailable formatter.
+
 ## [0.22.0] - 2026-10-12
 
 ### Added

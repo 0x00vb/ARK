@@ -8,9 +8,9 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.22.0** (2026-10-12): execution modes, multi-chat panes, native images and the curated Connections browser are ready for consumers. Earlier releases are in `CHANGELOG.md`. |
-| `main` | v0.22.0 release tree. The complete page-enabled release gate passed. |
-| Consumers | ARK Desktop (`ark-desktop` repo; 0.7.3 moves to ARK v0.22.0), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Stable release | **v0.22.1** (2026-10-13): workspace tab, split-view, composer and search fixes for consumers. Earlier releases are in `CHANGELOG.md`. |
+| `main` | v0.22.1 release tree. |
+| Consumers | ARK Desktop (`ark-desktop` repo; 0.7.4 moves to ARK v0.22.1), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

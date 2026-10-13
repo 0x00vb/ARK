@@ -673,7 +673,7 @@ async fn settings_sections_show_and_compose_fills_the_composer_unsent() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn chat_search_keeps_the_composer_and_keyboard_focus() {
-    drive("search", vec![], Duration::ZERO).await;
+    drive("search", vec![say("Search answer", false)], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -912,6 +912,11 @@ async fn an_apps_action_on_a_project_is_in_its_menu() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_row_starts_a_chat_in_that_project() {
     drive("project-new-chat", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_tabs_composer_and_split_share_one_visual_model() {
+    drive("chat-workspace-polish", vec![], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

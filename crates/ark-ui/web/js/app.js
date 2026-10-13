@@ -2,7 +2,7 @@
 // conversation, composer, sidebar and side pane to the host's event stream.
 
 import { connect } from "./transport.js";
-import { h, icon, clear, $, hydrateIcons, tokens } from "./dom.js";
+import { h, icon, clear, $, hydrateIcons, tokens, ago } from "./dom.js";
 import { markdown } from "./md.js";
 import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
@@ -352,7 +352,7 @@ function rememberTab(summary = state.summary) {
 }
 
 async function openChatTab(id) {
-  if (!id || id === state.sessionId) return showConversation();
+  if (!id || id === state.sessionId) return focusPrimaryChat();
   if (secondaryChat?.session === id) {
     secondaryChat.focus();
     return;
@@ -384,19 +384,26 @@ function renderChatTabs() {
   if (!bar || !list) return;
   bar.hidden = chatTabs.ids.length < 2 && !secondaryChat;
   clear(list);
+  const active = secondaryChat?.active ? secondaryChat.session : state.sessionId;
   for (const id of chatTabs.ids) {
-    const close = h("button.chat-tab-close", { type: "button", title: "Close chat", "aria-label": "Close chat" }, icon("x"));
+    const title = chatTabs.titles.get(id) || "Untitled chat";
+    const selected = id === active;
+    const close = h("button.chat-tab-close", { type: "button", title: `Close ${title}`, "aria-label": `Close ${title}` }, icon("x"));
     close.addEventListener("click", (event) => { event.stopPropagation(); void closeChatTab(id); });
     const open = (event) => event.altKey ? void openSplit(id) : void openChatTab(id);
-    const tab = h("div.chat-tab", {
-      role: "tab", tabindex: "0", "aria-selected": String(id === state.sessionId),
-      "data-secondary": String(id === secondaryChat?.session), title: chatTabs.titles.get(id) || "Chat",
+    const tab = h("button.chat-tab", {
+      type: "button", role: "tab", "aria-selected": String(selected), title,
       onclick: open,
       onkeydown: (event) => {
+        if (event.key === "Tab" && !event.shiftKey) {
+          event.preventDefault();
+          close.focus();
+          return;
+        }
         if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(event); }
       },
-    }, h("span.chat-tab-title", chatTabs.titles.get(id) || "Untitled chat"), close);
-    list.append(tab);
+    }, h("span.chat-tab-title", title));
+    list.append(h("div.chat-tab-item", { "data-session": id, "data-selected": String(selected) }, tab, close));
   }
   const split = $("#chat-split");
   if (split) {
@@ -559,6 +566,17 @@ class SecondaryChat {
   }
 }
 
+function focusPrimaryChat(focusComposer = true) {
+  showConversation(false);
+  if (secondaryChat) {
+    secondaryChat.active = false;
+    secondaryChat.elements.surface.dataset.active = "false";
+  }
+  document.querySelector(".chat-surface.primary")?.setAttribute("data-active", "true");
+  renderChatTabs();
+  if (focusComposer) composer.focus();
+}
+
 async function openSplit(id) {
   if (!id || id === state.sessionId) return;
   if (secondaryChat?.session === id) return secondaryChat.focus();
@@ -573,6 +591,7 @@ async function openSplit(id) {
     }
     secondaryChat = new SecondaryChat(read, secondaryElements);
     $("#chat-workspace").dataset.split = "true";
+    appEl.dataset.split = "true";
     saveSplit(id);
     rememberTab(read.summary);
     secondaryChat.focus();
@@ -590,6 +609,7 @@ function closeSplit() {
   saveSplit(null);
   const workspace = $("#chat-workspace");
   if (workspace) workspace.dataset.split = "false";
+  appEl.dataset.split = "false";
   document.querySelector(".chat-surface.primary")?.setAttribute("data-active", "true");
   renderChatTabs();
 }
@@ -1102,6 +1122,9 @@ function present(d, target = api) {
 function showView(id, params) {
   const v = id === SETTINGS ? settingsView : registry.views.get(id);
   if (!v) return toast(`No view named ${id}`);
+  // A project view owns the full main column. End the two-chat layout before showing it so the
+  // top selector always remains a visible route back to Chat.
+  if (secondaryChat) closeSplit();
   if (v.projectScoped && params === undefined) params = { project: api.project() };
   let entry = views.get(id);
   if (!entry) {
@@ -1599,10 +1622,7 @@ async function start() {
   $("#stage").before(workspace);
   primary.addEventListener("pointerdown", () => {
     if (!secondaryChat) return;
-    secondaryChat.active = false;
-    secondaryElements.surface.dataset.active = "false";
-    primary.dataset.active = "true";
-    renderChatTabs();
+    focusPrimaryChat(false);
   }, true);
   thread = new Thread($("#thread"), $("#scroller"), api);
   composer = new Composer(api);

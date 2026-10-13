@@ -4,14 +4,14 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-12 (v0.22.0)
+Last updated: 2026-10-13 (v0.22.1)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.22.0 (2026-10-12), complete page-enabled release gate passed |
-| `main` | v0.22.0 release tree. |
+| Latest tag | v0.22.1 (2026-10-13), workspace UI and search fixes |
+| `main` | v0.22.1 release tree. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
@@ -24,6 +24,7 @@ Last updated: 2026-10-12 (v0.22.0)
 
 | What | State |
 |---|---|
+| Workspace UI polish | Released in v0.22.1: chat tabs match artifact tabs, composer controls share one baseline, project New chat hover stays inside its visible control, familiar Home and Schedule symbols replace abstract rail glyphs, and split view hides the project selector until it closes. Chat search renders result times again. Implementation QA is GO. |
 | Plan, Manual and Auto execution modes (ADR 0064) | Released in v0.22.0. The chat persists a revisioned mode and each turn freezes it. Plan omits and rejects mutations. Auto bypasses approval only for explicitly eligible project file and contained code actions. Browser, Computer, connections, automations and unknown tools remain Manual. The composer exposes the choice and `Shift+Tab` cycles it. |
 | Multi-chat tabs and a two-pane split (ADR 0063) | Released in v0.22.0. A window restores up to 12 open tabs and at most two visible chats from the same project and computer. Each pane owns its transcript, turn, queue, approvals, draft, scroll, model and mode. Closing a view keeps work running. The shared side pane follows the active chat. |
 | Native generated images (ADR 0066) | Released in v0.22.0: supported OpenAI reasoning models get an approval-gated `image.generate` action. Valid PNG output becomes a durable project file, renders as the image file card in chat and opens in the shared image view. A paid live API generation was not run. |

@@ -7,7 +7,7 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
-## [Unreleased]
+## [0.23.2] - 2026-10-14
 
 ### Added
 

@@ -7,6 +7,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::path::{Component, Path};
+use std::sync::RwLock;
 use std::time::UNIX_EPOCH;
 
 use crate::host::Theme;
@@ -24,8 +26,15 @@ pub struct Assets {
     styles: Vec<String>,
     theme: Theme,
     namespace: String,
+    release: RwLock<Option<ReleasedAssets>>,
     web_dir: Option<PathBuf>,
     asset_dir: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ReleasedAssets {
+    pub(crate) root: PathBuf,
+    pub(crate) revision: String,
 }
 
 impl Assets {
@@ -55,13 +64,37 @@ impl Assets {
             styles,
             theme,
             namespace,
+            release: RwLock::new(None),
             web_dir: std::env::var_os("ARK_UI_WEB").map(PathBuf::from),
             asset_dir: std::env::var_os("ARK_UI_ASSETS").map(PathBuf::from),
         }
     }
 
     pub(crate) fn versioned(&self, path: &str) -> String {
-        format!("{VERSIONED_ROOT}/{}/{path}", self.namespace)
+        format!("{VERSIONED_ROOT}/{}/{path}", self.current_namespace())
+    }
+
+    fn current_namespace(&self) -> String {
+        self.release
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|release| format!("{}/{}", self.namespace, release.revision))
+            .unwrap_or_else(|| self.namespace.clone())
+    }
+
+    #[cfg(feature = "desktop-updater")]
+    pub(crate) fn use_release(&self, release: Option<ReleasedAssets>) {
+        *self.release.write().unwrap() = release;
+    }
+
+    #[cfg(feature = "desktop-updater")]
+    pub(crate) fn release_revision(&self) -> String {
+        self.release
+            .read()
+            .unwrap()
+            .as_ref()
+            .map_or_else(|| "embedded".into(), |release| release.revision.clone())
     }
 
     /// The app's name, as the page's title says it.
@@ -72,10 +105,10 @@ impl Assets {
     /// A file by path (`index.html`, `js/app.js`, `ext/app.js`), with its media type.
     pub fn get(&self, path: &str) -> Option<(Cow<'static, [u8]>, &'static str)> {
         let path = path.trim_start_matches('/');
-        let prefix = format!("{VERSIONED_ROOT}/{}/", self.namespace);
+        let prefix = format!("{VERSIONED_ROOT}/{}/", self.current_namespace());
         let path = path.strip_prefix(&prefix).unwrap_or(path);
         let path = if path.is_empty() { "index.html" } else { path };
-        if path.contains("..") {
+        if !confined_asset_path(path) {
             return None;
         }
         if path == "index.html" {
@@ -92,6 +125,11 @@ impl Assets {
         }
         let mime = mime(path);
         if let Some(rest) = path.strip_prefix("ext/") {
+            if let Some(release) = self.release.read().unwrap().as_ref() {
+                if let Ok(b) = std::fs::read(release.root.join("consumer").join(rest)) {
+                    return Some((Cow::Owned(b), mime));
+                }
+            }
             if let Some(dir) = &self.asset_dir {
                 if let Ok(b) = std::fs::read(dir.join(rest)) {
                     return Some((Cow::Owned(b), mime));
@@ -103,6 +141,11 @@ impl Assets {
     }
 
     fn ark_file(&self, path: &str) -> Option<Cow<'static, [u8]>> {
+        if let Some(release) = self.release.read().unwrap().as_ref() {
+            if let Ok(b) = std::fs::read(release.root.join("web").join(path)) {
+                return Some(Cow::Owned(b));
+            }
+        }
         if let Some(dir) = &self.web_dir {
             if let Ok(b) = std::fs::read(dir.join(path)) {
                 return Some(Cow::Owned(b));
@@ -158,6 +201,19 @@ impl Assets {
         };
         raw.replace("<!--ark:title-->", &escape(&self.title))
             .replace("<!--ark:theme-->", self.theme.as_str())
+            .replace(
+                "<html lang=\"en\"",
+                &format!(
+                    "<html lang=\"en\" data-ark-assets=\"{}\"",
+                    escape(
+                        self.release
+                            .read()
+                            .unwrap()
+                            .as_ref()
+                            .map_or("embedded", |release| release.revision.as_str())
+                    )
+                ),
+            )
             .replace("    <!--ark:styles-->\n", &styles)
             .replace("    <!--ark:scripts-->\n", &scripts)
             .replace("  </head>\n", &format!("{reload}  </head>\n"))
@@ -181,6 +237,15 @@ impl Assets {
         }
         format!("{:016x}", state.finish())
     }
+}
+
+fn confined_asset_path(value: &str) -> bool {
+    !value.is_empty()
+        && !value.contains('\\')
+        && !Path::new(value).is_absolute()
+        && Path::new(value)
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)))
 }
 
 fn collect_files(
@@ -275,6 +340,8 @@ mod tests {
         assert!(html.contains("href=\"ext/demo.css\""));
         assert!(a.get("ext/demo.js").is_some());
         assert!(a.get("../Cargo.toml").is_none());
+        assert!(a.get("ext//etc/passwd").is_none());
+        assert!(a.get("js//etc/passwd").is_none());
         assert!(a.get("js/app.js").is_some());
 
         let (versioned_html, _) = a.get(&a.versioned("index.html")).unwrap();

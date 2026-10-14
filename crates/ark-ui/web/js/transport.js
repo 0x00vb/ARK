@@ -41,6 +41,17 @@ export function connect() {
           return tauri.core.invoke("ark_update_events", { channel: ch });
         },
       },
+      pageUpdates: {
+        status: () => tauri.core.invoke("ark_page_update_status"),
+        check: () => tauri.core.invoke("ark_page_update_check"),
+        apply: () => tauri.core.invoke("ark_page_update_apply"),
+        ready: (revision) => tauri.core.invoke("ark_page_update_ready", { revision }),
+        listen(fn) {
+          const ch = new tauri.core.Channel();
+          ch.onmessage = fn;
+          return tauri.core.invoke("ark_page_update_events", { channel: ch });
+        },
+      },
       // The Browser panel's page in a webview of the window's own, placed over the panel
       // (ADR 0044): pages that refuse to be framed show too.
       browserView: {
@@ -122,6 +133,7 @@ export function connect() {
     // A page in a browser cannot see the runtime's disk: no native picker.
     pickFolder: async () => undefined,
     updates: undefined,
+    pageUpdates: undefined,
     /// Trade a code typed from a signed-in device for a session (ADR 0047), naming this device.
     /// True when it worked.
     async signIn(code, name) {

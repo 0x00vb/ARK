@@ -4,14 +4,14 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-14 (v0.23.1)
+Last updated: 2026-10-14 (signed page update bootstrap in progress after v0.23.1)
 
 ## Release
 
 | | |
 |---|---|
 | Latest tag | v0.23.1 (2026-10-14), compact aligned workspace tabs and a continuous destination rail |
-| `main` | v0.23.1 release tree. |
+| `main` | v0.23.1 is released. The signed page update bootstrap is uncommitted. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
@@ -24,6 +24,7 @@ Last updated: 2026-10-14 (v0.23.1)
 
 | What | State |
 |---|---|
+| Signed page updates (ADR 0067) | In progress after v0.23.1. An opted-in native consumer verifies a separately signed manifest, exact native versions, a monotonic sequence and a bounded exact file set. Apply reloads only the page. A seven-second readiness failure restores the previous page while the runtime keeps running. ARK Desktop provides the first consumer and release path. |
 | Ambient Desktop | Released in v0.23.0. A native consumer can keep one page and runtime alive, switch it into a compact menu-bar presentation, project agent state and restore the exact chat. Computer keeps only a volatile foreground app name for this view. Window name and identifier use a separate approval each time. Accessibility content and capture remain the existing higher-permission actions. Held SSH and Cloud chats never fall back to this Mac. |
 | Workspace UI polish | Released through v0.23.1. Open chat tabs and Chat, Agents and Board share one top rail; chat and side-pane tabs share the compact 30 px Terminal-tab control grammar; split panes do not repeat the selected chat title; the fixed destination rail reaches the window edge without a partial divider; WebKit side panes keep their intended width. Pixel inspection, the full ARK gate and 49 WebKit scenarios pass. |
 | Plan, Manual and Auto execution modes (ADR 0064) | Released in v0.22.0. The chat persists a revisioned mode and each turn freezes it. Plan omits and rejects mutations. Auto bypasses approval only for explicitly eligible project file and contained code actions. Browser, Computer, connections, automations and unknown tools remain Manual. The composer exposes the choice and `Shift+Tab` cycles it. |

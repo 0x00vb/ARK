@@ -7,6 +7,14 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Added
+
+- Native consumers can opt into a separate signed page update channel. It verifies exact native
+  compatibility, monotonic sequence and every declared asset, then supports staged apply,
+  page-only reload and automatic rollback without restarting the runtime.
+
 ## [0.23.1] - 2026-10-14
 
 ### Fixed

@@ -556,6 +556,7 @@ dependencies = [
  "ark-store",
  "async-trait",
  "base64 0.22.1",
+ "minisign-verify",
  "portable-pty",
  "reqwest 0.12.28",
  "ring",

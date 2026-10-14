@@ -6,13 +6,18 @@ license.workspace = true
 rust-version.workspace = true
 description = "ARK graphical agent workspace: a desktop window (Tauri) or a local browser page over the same interaction layer."
 
+[[example]]
+name = "verify-page-signature"
+path = "examples/verify-page-signature.rs"
+required-features = ["desktop-updater"]
+
 [features]
 default = ["desktop"]
 # The native window. Without it, ark-ui still serves the workspace to a local browser.
 desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-notification", "dep:tauri-plugin-single-instance"]
 # Signed background updates for a packaged native app. A consumer opts in and supplies the
 # endpoint and public key in its Tauri config; browser and server builds stay unchanged.
-desktop-updater = ["desktop", "dep:tauri-plugin-updater"]
+desktop-updater = ["desktop", "dep:tauri-plugin-updater", "dep:minisign-verify"]
 
 [dependencies]
 ark-os.workspace = true
@@ -41,6 +46,7 @@ tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2.13", optional = true }
+minisign-verify = { version = ">=0.2, <0.4", optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

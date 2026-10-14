@@ -724,6 +724,84 @@ fn ark_update_events(
     Ok(())
 }
 
+#[tauri::command]
+fn ark_page_update_status(webview: tauri::Webview) -> Result<Option<serde_json::Value>, String> {
+    from_own_page(&webview)?;
+    #[cfg(feature = "desktop-updater")]
+    return crate::page_updates::status()
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|error| error.to_string());
+    #[cfg(not(feature = "desktop-updater"))]
+    Ok(None)
+}
+
+#[tauri::command]
+async fn ark_page_update_check(
+    webview: tauri::Webview,
+) -> Result<Option<serde_json::Value>, String> {
+    from_own_page(&webview)?;
+    #[cfg(feature = "desktop-updater")]
+    return crate::page_updates::check_now()
+        .await
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|error| error.to_string());
+    #[cfg(not(feature = "desktop-updater"))]
+    Ok(None)
+}
+
+#[tauri::command]
+fn ark_page_update_apply(webview: tauri::Webview) -> Result<Option<serde_json::Value>, String> {
+    from_own_page(&webview)?;
+    #[cfg(feature = "desktop-updater")]
+    return crate::page_updates::apply(webview.app_handle().clone())
+        .and_then(|status| {
+            status
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(Into::into)
+        })
+        .map_err(|error| error.to_string());
+    #[cfg(not(feature = "desktop-updater"))]
+    Ok(None)
+}
+
+#[tauri::command]
+fn ark_page_update_ready(
+    webview: tauri::Webview,
+    revision: String,
+) -> Result<Option<serde_json::Value>, String> {
+    from_own_page(&webview)?;
+    #[cfg(feature = "desktop-updater")]
+    return crate::page_updates::ready(&revision)
+        .and_then(|status| {
+            status
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(Into::into)
+        })
+        .map_err(|error| error.to_string());
+    #[cfg(not(feature = "desktop-updater"))]
+    {
+        let _ = revision;
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn ark_page_update_events(
+    webview: tauri::Webview,
+    channel: tauri::ipc::Channel<serde_json::Value>,
+) -> Result<(), String> {
+    from_own_page(&webview)?;
+    #[cfg(feature = "desktop-updater")]
+    crate::page_updates::listen(channel);
+    #[cfg(not(feature = "desktop-updater"))]
+    let _ = channel;
+    Ok(())
+}
+
 pub(crate) fn run(
     host: Arc<Host>,
     assets: Arc<Assets>,
@@ -731,7 +809,15 @@ pub(crate) fn run(
     keep_running: bool,
     ambient_window: bool,
     overlay_accent: Option<String>,
+    #[cfg(feature = "desktop-updater")] page_update_config: Option<crate::page_updates::Config>,
+    #[cfg(not(feature = "desktop-updater"))] page_update_config: Option<()>,
 ) -> std::process::ExitCode {
+    #[cfg(all(feature = "desktop-updater", target_os = "macos"))]
+    if let Some(config) = page_update_config.as_ref() {
+        assets.use_release(crate::page_updates::active(config));
+    }
+    #[cfg(not(all(feature = "desktop-updater", target_os = "macos")))]
+    let _ = &page_update_config;
     // WebKit keeps local app modules across updates. A versioned base path makes every relative
     // stylesheet, script and module URL new for this ARK release, while local storage stays put.
     let configured_minimum = context
@@ -761,7 +847,7 @@ pub(crate) fn run(
         .unwrap_or_else(|| "ARK".into());
     let fallback = context.set_assets(Box::new(EmptyAssets));
     context.set_assets(Box::new(UiAssets {
-        ark: assets,
+        ark: assets.clone(),
         fallback,
     }));
     let events = host.subscribe();
@@ -793,10 +879,15 @@ pub(crate) fn run(
             ark_browser,
             ark_update_status,
             ark_update_check,
-            ark_update_events
-            ,ark_computer_stop
-            ,ark_computer_check
-            ,ark_computer_motion
+            ark_update_events,
+            ark_page_update_status,
+            ark_page_update_check,
+            ark_page_update_apply,
+            ark_page_update_ready,
+            ark_page_update_events,
+            ark_computer_stop,
+            ark_computer_check,
+            ark_computer_motion
         ])
         // The window's page loads again (a reload, a visit to a runtime elsewhere, the way
         // back): the Browser's view belonged to the page before.
@@ -821,6 +912,10 @@ pub(crate) fn run(
         })
         .setup(move |app| {
             let _ = APP.set(app.handle().clone());
+            #[cfg(all(feature = "desktop-updater", target_os = "macos"))]
+            if let Some(config) = page_update_config.clone() {
+                crate::page_updates::start(app.handle().clone(), assets.clone(), config);
+            }
             if let Some(v) = main_webview(app.handle()) {
                 if let Some(url) = v.url().ok().filter(own_page) {
                     let _ = HOME.set(url);

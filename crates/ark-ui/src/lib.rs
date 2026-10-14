@@ -37,6 +37,8 @@ mod files;
 mod frame;
 pub mod host;
 mod notify;
+#[cfg(feature = "desktop-updater")]
+pub mod page_updates;
 pub mod push;
 pub mod remote;
 pub mod resource;
@@ -62,6 +64,9 @@ pub use host::{
 };
 pub use serve::{Access, Served};
 
+/// The ARK build whose native page contract this crate provides.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Builds the workspace for an app. See the crate docs.
 pub struct ArkUi {
     app: App,
@@ -78,6 +83,8 @@ pub struct ArkUi {
     computers: Option<computers::ComputerSetup>,
     keep_computers: Vec<(String, String, String)>,
     asset_version: Option<String>,
+    #[cfg(feature = "desktop-updater")]
+    page_updates: Option<page_updates::Config>,
 }
 
 impl ArkUi {
@@ -124,6 +131,8 @@ impl ArkUi {
             computers: None,
             keep_computers: Vec::new(),
             asset_version: None,
+            #[cfg(feature = "desktop-updater")]
+            page_updates: None,
         }
     }
     /// The accent colour, any CSS colour.
@@ -141,6 +150,12 @@ impl ArkUi {
     /// cache-busting URL. Set this when consumer styles or scripts can change independently.
     pub fn asset_version(mut self, version: impl Into<String>) -> Self {
         self.asset_version = Some(version.into());
+        self
+    }
+    /// Allow the local native page to receive separately signed page assets (ADR 0067).
+    #[cfg(feature = "desktop-updater")]
+    pub fn page_updates(mut self, config: page_updates::Config) -> Self {
+        self.page_updates = Some(config);
         self
     }
     /// A logo image among the app's assets (`.asset("logo.svg", …)` then `.logo("logo.svg")`).
@@ -337,6 +352,10 @@ impl ArkUi {
         let keep_running = self.keep_running;
         let ambient_window = self.ambient_window;
         let overlay_accent = self.info.accent.clone();
+        #[cfg(feature = "desktop-updater")]
+        let page_updates = self.page_updates.clone();
+        #[cfg(not(feature = "desktop-updater"))]
+        let page_updates = None;
         let opened = tauri::async_runtime::block_on(self.open());
         match opened {
             Ok((host, assets)) => desktop::run(
@@ -346,6 +365,7 @@ impl ArkUi {
                 keep_running,
                 ambient_window,
                 overlay_accent,
+                page_updates,
             ),
             Err(e) => {
                 eprintln!("error: {e:#}");

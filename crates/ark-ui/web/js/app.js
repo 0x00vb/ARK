@@ -69,6 +69,7 @@ const api = {
   // Signed native-app updates. Undefined in a browser; `status()` is null in development and
   // when the packaged consumer did not opt in.
   updates: transport.updates,
+  pageUpdates: transport.pageUpdates,
   // True when the runtime runs on the computer showing this page (the window's own runtime,
   // or a browser on this machine). False for a runtime elsewhere: its files, programs and
   // sign-ins are on that machine, so actions that need this one should not be offered.
@@ -1718,6 +1719,19 @@ async function start() {
   $("#session-title").addEventListener("dblclick", renameInline);
   document.addEventListener("keydown", keys);
   transport.subscribe(receive);
+  // Prove the page graph and first usable shell before waiting on runtime or store data. A slow
+  // runtime is not evidence that a downloaded interface is broken.
+  requestAnimationFrame(() => {
+    void transport.pageUpdates?.ready(document.documentElement.dataset.arkAssets || "embedded").then((outcome) => {
+      if (["applied", "rolled_back"].includes(outcome?.state)) {
+        const key = `ark-page-update-outcome:${outcome.state}:${outcome.failed || outcome.current}`;
+        if (sessionStorage.getItem(key) !== "shown") {
+          sessionStorage.setItem(key, "shown");
+          toast(outcome.state === "applied" ? "Interface update applied" : "The previous interface was restored");
+        }
+      }
+    }).catch(() => {});
+  });
   await boot();
   try {
     const sessions = await transport.call("sessions", { project: state.summary?.project?.id });

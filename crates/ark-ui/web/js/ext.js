@@ -34,6 +34,9 @@
 //                      when the packaged app did not opt in. A packaged but unsupported OS
 //                      returns `{ state: "unavailable", reason: "platform" }`. No release input
 //                      comes from JS.
+//   ark.pageUpdates    signed page-only updates: `status()`, `check()`, `apply()`, `listen(fn)`.
+//                      The native app fixes the endpoint, key and compatibility contract. The
+//                      object is undefined outside its own native page.
 //   ark.isLocal()      true when the runtime runs on this computer; false for a runtime
 //                      elsewhere. Also `<html data-runtime="local|remote">`, for styles
 //   ark.openLocal()    only in the window on a runtime elsewhere it opened (Rust:

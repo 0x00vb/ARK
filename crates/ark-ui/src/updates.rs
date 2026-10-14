@@ -9,6 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
+use std::fs::OpenOptions;
+
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
@@ -150,6 +153,18 @@ async fn check_and_install(app: AppHandle) {
         return;
     };
     let installed = current(&app);
+    // A disk image looks like a normal app bundle, but macOS mounts it read-only. Tauri's
+    // replacement happens after the download, so reject that location before touching an update.
+    // The app keeps running and the person can copy it to Applications first.
+    #[cfg(target_os = "macos")]
+    if let Err(error) = replacement_location() {
+        set(Status::Failed {
+            current: installed,
+            kind: Failure::Install,
+        });
+        eprintln!("native update needs a writable app location: {error}");
+        return;
+    }
     set(Status::Checking {
         current: installed.clone(),
     });
@@ -244,6 +259,29 @@ async fn check_and_install(app: AppHandle) {
         .show();
 }
 
+/// Confirm that the installed `.app` bundle can be replaced before the updater downloads a
+/// package. A metadata-only check is not enough: a mounted disk image reports ordinary paths
+/// while refusing writes.
+#[cfg(target_os = "macos")]
+fn replacement_location() -> std::io::Result<()> {
+    replacement_location_for(&std::env::current_exe()?)
+}
+
+#[cfg(target_os = "macos")]
+fn replacement_location_for(executable: &std::path::Path) -> std::io::Result<()> {
+    let bundle = executable
+        .ancestors()
+        .find(|path| path.extension().is_some_and(|extension| extension == "app"))
+        .ok_or_else(|| std::io::Error::other("the app bundle was not found"))?;
+    let folder = bundle
+        .parent()
+        .ok_or_else(|| std::io::Error::other("the app bundle has no enclosing folder"))?;
+    let probe = folder.join(format!(".ark-update-{}", std::process::id()));
+    let _file = OpenOptions::new().write(true).create_new(true).open(&probe)?;
+    drop(_file);
+    std::fs::remove_file(probe)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +302,24 @@ mod tests {
             version: "1.1.0".into(),
         });
         assert!(!busy());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_replacement_probe_needs_an_app_bundle() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("ark-desktop");
+        let error = replacement_location_for(&executable).unwrap_err();
+        assert!(error.to_string().contains("app bundle"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_replacement_probe_accepts_a_writable_bundle_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("ARK.app/Contents/MacOS/ark-desktop");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        replacement_location_for(&executable).unwrap();
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 1);
     }
 }

@@ -17,7 +17,9 @@ the middle of work.
 ## Decision
 
 `ark-ui` has an opt-in `desktop-updater` feature. It registers Tauri's updater in both native
-window paths, checks after startup, and downloads and installs a signed update in the
+window paths. On macOS it first proves that the enclosing app bundle's folder accepts a temporary
+write. A read-only disk image therefore remains unchanged, and the person copies the app to
+Applications before trying again. It then checks after startup, and downloads and installs a signed update in the
 background on macOS and Linux. It never restarts the app. The new version opens after the person
 next quits and reopens it. Updater 2.12 or later is used with signed-version verification, HTTPS
 transport and the normal no-downgrade version comparison. Windows stays disabled because the

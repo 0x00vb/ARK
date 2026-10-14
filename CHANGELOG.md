@@ -7,6 +7,14 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.23.5] - 2026-10-14
+
+### Fixed
+
+- Native macOS updates now confirm that the enclosing app location is writable before checking or
+  downloading. An app opened from a read-only disk image stays unchanged and can be copied to
+  Applications first.
+
 ## [0.23.4] - 2026-10-14
 
 ### Fixed

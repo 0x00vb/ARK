@@ -916,6 +916,44 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .plugin-hint { font-size: 12px; color: var(--text-3); }
 .plugin-why { margin: 0; font-size: 12.5px; color: var(--err); overflow-wrap: anywhere; }
 .plugin-why:empty { display: none; }
+
+/* Settings › Plugins. A catalog is a compact list of possible next actions, not a grid of
+   promotional cards. Row controls stay next to the integration they change. */
+.marketplace { max-width: 860px; }
+.market-body { display: flex; flex-direction: column; gap: 24px; }
+.market-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.market-top .settings-lead { margin: 0; }
+.market-search { width: 230px; height: 36px; box-sizing: border-box; padding: 0 11px 0 31px; border: 0; border-radius: 10px; background: var(--card); color: var(--text); outline: none; font: 13px var(--font); box-shadow: 0 0 0 1px var(--hair); }
+.market-search:focus { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
+.market-heading { margin: 0 0 10px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.market-catalog, .market-installed { display: flex; flex-direction: column; gap: 18px; }
+.market-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 28px; }
+.market-row { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 4px 0; border-radius: 9px; }
+.market-open { min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 10px; padding: 3px 0; border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+@media (hover: hover) and (pointer: fine) { .market-open:hover { background: var(--hover); } }
+.market-open:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent); outline-offset: 2px; }
+.market-open:active, .market-add:active { transform: scale(0.97); }
+.market-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--accent) 12%, var(--card)); color: var(--accent); font-size: 13px; font-weight: 700; box-shadow: 0 0 0 1px var(--hair); }
+.market-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.market-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
+.market-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12.5px; }
+.market-add { width: 28px; min-width: 28px; padding: 0; display: grid; place-items: center; }
+.market-add .ico { width: 15px; height: 15px; }
+.market-detail-head { margin: -4px 0 -12px; }
+.market-detail { display: flex; align-items: center; gap: 14px; padding-top: 10px; }
+.market-detail .market-icon { width: 46px; height: 46px; font-size: 17px; border-radius: 12px; }
+.market-detail h2 { margin: 0 0 3px; font-size: 18px; letter-spacing: -0.015em; }
+.market-detail p, .market-state { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.45; }
+.market-detail-actions { display: flex; align-items: flex-start; gap: 12px; padding: 18px 0; border-bottom: 1px solid var(--hair); }
+.market-detail-actions .btn { flex: none; }
+.market-facts { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.market-facts div { min-width: 0; }
+.market-facts dt { margin-bottom: 4px; color: var(--text-3); font-size: 11.5px; }
+.market-facts dd { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.4; }
+.market-remove-detail { align-self: flex-start; color: var(--err); }
+.market-notice { margin: 0; color: var(--err); font-size: 12.5px; }
+.market-notice:empty { display: none; }
+@media (max-width: 680px) { .market-top { flex-direction: column; gap: 12px; } .market-search { width: 100%; } .market-grid { grid-template-columns: 1fr; gap: 2px; } .market-facts { grid-template-columns: 1fr; gap: 12px; } .market-detail-actions { flex-direction: column; } }
 .skill-scope { margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 500; color: var(--text-2); background: var(--hover); }
 .skill-desc { font-size: 12.5px; line-height: 1.45; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .skill-add { display: flex; gap: 8px; }

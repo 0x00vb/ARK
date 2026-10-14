@@ -75,6 +75,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0066](0066-generated-images-are-durable-project-files.md) | Generated images are validated raster outputs written as durable project files; chat previews and the side pane use that one file and viewer path | Accepted |
 | [0067](0067-signed-page-assets-can-update-without-the-native-app.md) | A local native page may load a separately signed, exact-compatible asset release with atomic activation and automatic last-known-good rollback | Accepted |
 | [0068](0068-tabs-form-a-spatial-window-layout.md) | Tabs form a spatial window layout with nested drag-created splits and a four-chat visibility bound | Accepted |
+| [0069](0069-plugins-are-reviewed-capabilities-from-independent-providers.md) | Plugins are reviewed capabilities from independent providers; packages, servers, provider integrations, accounts, account activation and action approval stay distinct | Proposed |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

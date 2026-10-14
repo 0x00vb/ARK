@@ -15,6 +15,10 @@
 //!
 //! Relative `command` and `args` paths resolve against the root.
 
+/// Provider-neutral marketplace records. These do not grant execution by themselves.
+pub mod catalog;
+pub mod provider;
+
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -23,10 +27,39 @@ use std::time::Duration;
 use ark_tools::{Adapter, McpAdapter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use time::OffsetDateTime;
 
 use crate::error::AgentError;
 
 const FILE: &str = "plugins.json";
+const MARKETPLACE_FILE: &str = "marketplace.json";
+
+/// An inert marketplace installation. It records a person's Add decision only. A provider
+/// binding and an approval are separate records and actions.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketplacePlugin {
+    pub id: String,
+    pub added_at: OffsetDateTime,
+}
+
+/// The durable, versioned form of local marketplace choices. A Cloud connection belongs to the
+/// person's ARK account. This file only controls what this installation shows in its catalog.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct MarketplaceFile {
+    schema_version: u16,
+    plugins: Vec<MarketplacePlugin>,
+}
+
+impl MarketplaceFile {
+    const VERSION: u16 = 1;
+
+    fn empty() -> Self {
+        Self {
+            schema_version: Self::VERSION,
+            plugins: Vec::new(),
+        }
+    }
+}
 
 /// One entry of `plugins.json`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -115,6 +148,7 @@ impl ark_tools::ToolSource for Plugins {
 pub struct Plugins {
     root: PathBuf,
     entries: RwLock<Vec<Entry>>,
+    marketplace: RwLock<Result<MarketplaceFile, String>>,
     limit: Duration,
 }
 
@@ -125,6 +159,7 @@ impl Plugins {
         let plugins = Plugins {
             root: root.to_path_buf(),
             entries: RwLock::new(Vec::new()),
+            marketplace: RwLock::new(Ok(MarketplaceFile::empty())),
             limit: ark_tools::mcp::HANDSHAKE_TIMEOUT,
         };
         let specs = match plugins.read_file() {
@@ -155,6 +190,11 @@ impl Plugins {
             })
             .collect();
         *plugins.entries.write().unwrap() = entries;
+        *plugins.marketplace.write().unwrap() = plugins.read_marketplace();
+        if let Err(e) = plugins.marketplace.read().unwrap().as_ref() {
+            // Leave malformed or newer data intact. Mutations remain disabled until recovery.
+            tracing::warn!("{MARKETPLACE_FILE}: {e}");
+        }
         plugins
     }
 
@@ -172,6 +212,64 @@ impl Plugins {
             .iter()
             .map(Entry::status)
             .collect()
+    }
+
+    /// Marketplace entries the person has added. They do not execute, connect an account or
+    /// grant an agent access by themselves.
+    pub fn marketplace(&self) -> Vec<MarketplacePlugin> {
+        self.marketplace
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|file| file.plugins.clone())
+            .unwrap_or_default()
+    }
+
+    /// Persist an Add decision. The catalog source and provider connection are deliberately not
+    /// inferred here: a front-end must show them and ask for the later Connect action.
+    pub fn add_marketplace(&self, id: &str) -> Result<MarketplacePlugin, AgentError> {
+        let id = id.trim();
+        if !valid_marketplace_id(id) {
+            return Err(AgentError::Plugin(
+                "a marketplace id has invalid characters".into(),
+            ));
+        }
+        let mut state = self.marketplace.write().unwrap();
+        let file = state
+            .as_mut()
+            .map_err(|e| AgentError::Plugin(format!("cannot change marketplace choices: {e}")))?;
+        if let Some(entry) = file.plugins.iter().find(|entry| entry.id == id) {
+            return Ok(entry.clone());
+        }
+        let entry = MarketplacePlugin {
+            id: id.into(),
+            added_at: OffsetDateTime::now_utc(),
+        };
+        let mut next = file.clone();
+        next.plugins.push(entry.clone());
+        self.write_marketplace(&next)?;
+        *file = next;
+        Ok(entry)
+    }
+
+    /// Forget the local marketplace record. A front-end must separately ask whether to revoke a
+    /// connected account, because removal defaults to preserving it.
+    pub fn remove_marketplace(&self, id: &str) -> Result<(), AgentError> {
+        let mut state = self.marketplace.write().unwrap();
+        let file = state
+            .as_mut()
+            .map_err(|e| AgentError::Plugin(format!("cannot change marketplace choices: {e}")))?;
+        let mut next = file.clone();
+        let before = next.plugins.len();
+        next.plugins.retain(|entry| entry.id != id);
+        if next.plugins.len() == before {
+            return Err(AgentError::Plugin(format!(
+                "no marketplace plugin named `{id}`"
+            )));
+        }
+        self.write_marketplace(&next)?;
+        *file = next;
+        Ok(())
     }
 
     /// The connected plugins' adapters.
@@ -328,6 +426,34 @@ impl Plugins {
         ark_os::fs::replace(&tmp, &path)?;
         Ok(())
     }
+
+    fn read_marketplace(&self) -> Result<MarketplaceFile, String> {
+        let path = self.root.join(MARKETPLACE_FILE);
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(MarketplaceFile::empty())
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let file: MarketplaceFile =
+            serde_json::from_str(&text).map_err(|e| format!("not valid JSON: {e}"))?;
+        if file.schema_version != MarketplaceFile::VERSION {
+            return Err(format!(
+                "unsupported schema version {}",
+                file.schema_version
+            ));
+        }
+        Ok(file)
+    }
+
+    fn write_marketplace(&self, file: &MarketplaceFile) -> Result<(), AgentError> {
+        let path = self.root.join(MARKETPLACE_FILE);
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string_pretty(file)? + "\n")?;
+        ark_os::fs::replace(&tmp, &path)?;
+        Ok(())
+    }
 }
 
 fn check_name(name: &str) -> Result<(), AgentError> {
@@ -342,5 +468,47 @@ fn check_name(name: &str) -> Result<(), AgentError> {
         Err(AgentError::Plugin(format!(
             "`{name}` is not a plugin name (lower-case letters, digits, - and _)"
         )))
+    }
+}
+
+fn valid_marketplace_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 120
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
+}
+
+#[cfg(test)]
+mod marketplace_tests {
+    use super::*;
+
+    #[test]
+    fn marketplace_add_is_inert_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = Plugins::load(dir.path());
+        let added = plugins.add_marketplace("composio.gmail").unwrap();
+        assert_eq!(added.id, "composio.gmail");
+        assert_eq!(plugins.marketplace().len(), 1);
+        // Add is idempotent and does not create a process entry.
+        plugins.add_marketplace("composio.gmail").unwrap();
+        assert!(plugins.list().is_empty());
+        let reloaded = Plugins::load(dir.path());
+        assert_eq!(reloaded.marketplace(), plugins.marketplace());
+        reloaded.remove_marketplace("composio.gmail").unwrap();
+        assert!(reloaded.marketplace().is_empty());
+    }
+
+    #[test]
+    fn marketplace_keeps_corrupt_choices_until_recovered() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(MARKETPLACE_FILE), "not json").unwrap();
+        let plugins = Plugins::load(dir.path());
+        assert!(plugins.marketplace().is_empty());
+        assert!(plugins.add_marketplace("composio.gmail").is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(MARKETPLACE_FILE)).unwrap(),
+            "not json"
+        );
     }
 }

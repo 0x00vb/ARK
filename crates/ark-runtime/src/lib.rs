@@ -61,7 +61,10 @@ pub use harness::{FileBefore, Harness, HarnessEvent, HarnessOutcome, STATE_DIGES
 pub use knowledge::{KnowledgeHit, KnowledgeProvider};
 pub use ledger::StoreLedger;
 pub use metrics::{role_name, Metrics};
-pub use plugins::{PluginSpec, PluginStatus, Plugins};
+pub use plugins::provider::{
+    IntegrationProvider, ProviderError, ProviderErrorKind, ProviderResult,
+};
+pub use plugins::{MarketplacePlugin, PluginSpec, PluginStatus, Plugins};
 pub use profile::{AgentProfile, AgentProfileBuilder, Prompts};
 pub use router::{ModelRouter, Role};
 pub use rules::{ProjectInstructions, RuleBook, RuleSelection, RulesTool};

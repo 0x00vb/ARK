@@ -15,6 +15,10 @@ What changed for people building on ARK, per release. Not a commit log.
   compatibility, monotonic sequence and every declared asset, then supports staged apply,
   page-only reload and automatic rollback without restarting the runtime.
 
+- Settings › Plugins records a person's marketplace choices separately from account connection,
+  account activation and per-action approval. Its provider-neutral catalog contract is documented
+  in [ADR 0069](docs/adr/0069-plugins-are-reviewed-capabilities-from-independent-providers.md).
+
 ### Changed
 
 - Open chat tabs can be dragged onto a pane edge to make nested horizontal or vertical layouts.

@@ -707,6 +707,11 @@ async fn tool_servers_are_added_and_removed_in_settings() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn marketplace_adds_an_inert_plugin_and_explains_the_connection_step() {
+    drive("marketplace", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn capabilities_connect_through_the_browser_and_disconnect() {
     drive("capabilities", vec![], Duration::ZERO).await;
 }

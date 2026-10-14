@@ -73,6 +73,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0064](0064-execution-mode-is-per-chat-and-per-turn.md) | Plan, Manual and bounded Auto execution modes are per chat and frozen into each turn; only explicitly project-bound actions can skip approval | Proposed |
 | [0065](0065-workspace-destinations-have-one-stable-rail.md) | Home and Schedules use one icon rail; Home restores its last project view and Schedules has race-safe project-wide states | Accepted |
 | [0066](0066-generated-images-are-durable-project-files.md) | Generated images are validated raster outputs written as durable project files; chat previews and the side pane use that one file and viewer path | Accepted |
+| [0068](0068-plugins-are-reviewed-capabilities-from-independent-providers.md) | Plugins are reviewed capabilities from independent providers; packages, servers, provider integrations, accounts, account activation and action approval stay distinct | Proposed |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

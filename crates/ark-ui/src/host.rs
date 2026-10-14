@@ -3341,6 +3341,23 @@ impl Host {
                     &self.engine,
                 ))?)
             }
+            // Marketplace installs are inert local records. Connecting an account is a distinct
+            // managed-provider operation and will never be inferred from Add.
+            "marketplace_plugins" => {
+                if !ark_interact::plugins::supported(&self.engine) {
+                    return Ok(Value::Null);
+                }
+                Ok(serde_json::to_value(ark_interact::plugins::marketplace(
+                    &self.engine,
+                ))?)
+            }
+            "marketplace_add" => Ok(serde_json::to_value(
+                ark_interact::plugins::add_marketplace(self.engine.clone(), s("id")).await?,
+            )?),
+            "marketplace_remove" => {
+                ark_interact::plugins::remove_marketplace(self.engine.clone(), s("id")).await?;
+                Ok(json!({}))
+            }
             // `spec`: one plugin; `text`: what `/plugin add` takes (words or a JSON snippet).
             // Answers with the plugins added.
             "plugin_add" => {

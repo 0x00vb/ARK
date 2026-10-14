@@ -18,6 +18,7 @@ import { fileView, kindOf, KIND_ICON, setFileKinds } from "./file.js";
 import { registerCapabilities } from "./capabilities.js";
 import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
+import { registerMarketplace } from "./marketplace.js";
 import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
 import { registerSchedules, schedulesFollow } from "./schedules.js";
@@ -1622,6 +1623,7 @@ async function bootOnce(again) {
     registerAppearance(window.ark);
     registerCapabilities(window.ark);
     registerGrants(window.ark);
+    registerMarketplace(window.ark);
     registerPlugins(window.ark);
     registerSkills(window.ark);
     registerDevices(window.ark);

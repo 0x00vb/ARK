@@ -1586,6 +1586,16 @@ async function plugins(page) {
 }
 scenarios.plugins = plugins;
 
+// Settings › Plugins is unavailable rather than inventing an unsigned catalog when the broker
+// has not supplied a reviewed offer list.
+async function marketplace(page) {
+  await page.locator("#open-settings:not([hidden])").waitFor();
+  await page.evaluate(() => window.ark.openSettings("marketplace"));
+  await page.locator(".settings-title", { hasText: "Plugins" }).waitFor();
+  assert.match(await page.locator(".marketplace").innerText(), /No plugins match that search/);
+}
+scenarios.marketplace = marketplace;
+
 // Settings › Connections omits built-in Web. Mail and Calendar are one sign-in away. Connect opens
 // the provider's page (here it approves at once), the row turns ready with the account, and
 // Disconnect (two clicks) makes it connectable again. `tools` then lists the web too.

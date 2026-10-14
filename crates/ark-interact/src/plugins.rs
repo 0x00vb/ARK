@@ -4,10 +4,13 @@
 //!
 //! None of these waits for a running turn. A change applies from the next one.
 
+/// Provider-neutral marketplace views and state derivation.
+pub mod catalog;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ark_sdk::prelude::ark_runtime::{PluginSpec, PluginStatus};
+use ark_sdk::prelude::ark_runtime::{MarketplacePlugin, PluginSpec, PluginStatus};
 use ark_sdk::prelude::Engine;
 
 use crate::report::{Cell, Report, Row, Table, Tone};
@@ -20,6 +23,31 @@ pub fn list(engine: &Engine) -> Vec<PluginStatus> {
 /// Whether this app can have plugins at all (it was opened on a store root).
 pub fn supported(engine: &Engine) -> bool {
     engine.plugins().is_some()
+}
+
+/// Local records for marketplace entries the person has added. Add is intentionally inert until
+/// the later account-wide provider connection completes.
+pub fn marketplace(engine: &Engine) -> Vec<MarketplacePlugin> {
+    engine
+        .plugins()
+        .map(|plugins| plugins.marketplace())
+        .unwrap_or_default()
+}
+
+pub async fn add_marketplace(engine: Arc<Engine>, id: String) -> anyhow::Result<MarketplacePlugin> {
+    let plugins = engine
+        .plugins()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("this app has no plugins"))?;
+    Ok(tokio::task::spawn_blocking(move || plugins.add_marketplace(&id)).await??)
+}
+
+pub async fn remove_marketplace(engine: Arc<Engine>, id: String) -> anyhow::Result<()> {
+    let plugins = engine
+        .plugins()
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("this app has no plugins"))?;
+    Ok(tokio::task::spawn_blocking(move || plugins.remove_marketplace(&id)).await??)
 }
 
 /// Start a server, list its tools and save it. Runs off the async runtime: a server may take

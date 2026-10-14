@@ -7,6 +7,14 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Added
+
+- Settings › Plugins records a person's marketplace choices separately from account connection,
+  account activation and per-action approval. Its provider-neutral catalog contract is documented
+  in [ADR 0068](docs/adr/0068-plugins-are-reviewed-capabilities-from-independent-providers.md).
+
 ## [0.23.1] - 2026-10-14
 
 ### Fixed

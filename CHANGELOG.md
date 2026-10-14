@@ -7,6 +7,13 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.23.3] - 2026-10-14
+
+### Fixed
+
+- The release lockfile now records the same workspace version as the manifests. v0.23.2 remains
+  tagged but is superseded by this reproducible release.
+
 ## [0.23.2] - 2026-10-14
 
 ### Added

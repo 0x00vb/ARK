@@ -55,6 +55,10 @@
       <main class="main">
         <header class="topbar" data-tauri-drag-region>
           <button class="icon-btn reveal-sidebar" id="reveal-sidebar" title="Show sidebar (⌘B)" aria-label="Show sidebar"></button>
+          <nav class="chat-tabs" id="chat-tabs" aria-label="Open chats" hidden>
+            <div class="chat-tab-list" id="chat-tab-list" role="tablist"></div>
+            <button class="icon-btn chat-split" id="chat-split" type="button" title="Split with another open chat" aria-label="Split with another open chat" data-icon="split"></button>
+          </nav>
           <div class="title" id="session-title" tabindex="-1" data-tauri-drag-region></div>
           <nav class="segs view-tabs" id="view-tabs" role="tablist" aria-label="Views" hidden></nav>
           <div class="top-actions">
@@ -63,11 +67,6 @@
             <button class="icon-btn" id="toggle-pane" title="Side panel (⌘\\)" aria-label="Side panel"></button>
           </div>
         </header>
-
-        <nav class="chat-tabs" id="chat-tabs" aria-label="Open chats" hidden>
-          <div class="chat-tab-list" id="chat-tab-list" role="tablist"></div>
-          <button class="icon-btn chat-split" id="chat-split" type="button" title="Split with another open chat" aria-label="Split with another open chat" data-icon="split"></button>
-        </nav>
 
         <section class="scroller" id="scroller">
           <div class="thread" id="thread"></div>

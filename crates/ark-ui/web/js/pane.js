@@ -52,6 +52,7 @@ export class Pane {
       this.app.style.removeProperty("--pw-user");
       delete this.app.dataset.sized;
       try { localStorage.removeItem("ark-pane-width"); } catch {}
+      dispatchEvent(new Event("resize"));
     });
   }
 
@@ -59,6 +60,8 @@ export class Pane {
     const max = Math.max(360, window.innerWidth - 420);
     this.width = Math.round(Math.min(Math.max(px, 320), max));
     this.app.style.setProperty("--pw-user", `${this.width}px`);
+    const room = Number.parseFloat(getComputedStyle(this.app).getPropertyValue("--pw-room")) || max;
+    this.app.style.setProperty("--pw", `${Math.min(this.width, room)}px`);
     this.app.dataset.sized = "";
   }
 
@@ -84,18 +87,13 @@ export class Pane {
     this.app.dataset.tabs = String(this.tabs.size);
     clear(this.tabsEl);
     for (const t of this.tabs.values()) {
-      const b = h("button.pane-tab", { role: "tab", "aria-selected": String(t.key === this.active), title: t.title },
+      const selected = t.key === this.active;
+      const b = h("button.pane-tab", { type: "button", role: "tab", "aria-selected": String(selected), title: t.title },
         h("span.pane-tab-title", t.title));
       b.addEventListener("click", () => this.show(t.key));
-      {
-        const x = h("span.pane-tab-x", { title: "Close" }, icon("x"));
-        x.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this.remove(t.key);
-        });
-        b.append(x);
-      }
-      this.tabsEl.append(b);
+      const close = h("button.pane-tab-close", { type: "button", title: `Close ${t.title}`, "aria-label": `Close ${t.title}` }, icon("x"));
+      close.addEventListener("click", () => this.remove(t.key));
+      this.tabsEl.append(h("div.pane-tab-item", { "data-selected": String(selected) }, b, close));
     }
   }
 

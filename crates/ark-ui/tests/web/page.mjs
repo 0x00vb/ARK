@@ -282,11 +282,20 @@ const scenarios = {
     });
     assert.deepEqual(await wide(), { railWidth: 58, sidebarWidth: 252, sidebarPadding: 10, mainLeft: 310, hscroll: false });
     const rail = await page.locator(".destinations").evaluate((el) => ({
-      dividerTop: getComputedStyle(el, "::after").insetBlockStart,
+      divider: getComputedStyle(el, "::after").content,
+      height: Math.round(el.getBoundingClientRect().height),
+      sameSurface: getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor,
       labels: [...el.querySelectorAll(".destination-label")].map((label) => Math.round(label.getBoundingClientRect().width)),
     }));
-    assert.equal(rail.dividerTop, "44px", "the browser rail divider starts below its titlebar");
+    assert.equal(rail.divider, "none", "the fixed rail has no detached partial divider");
+    assert.equal(rail.height, 800, "the fixed rail reaches the full window height");
+    assert.equal(rail.sameSurface, true, "the fixed rail and project sidebar read as one navigation surface");
     assert.deepEqual(rail.labels, [1, 1], "wide rail labels stay available to assistive technology only");
+    await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    assert.equal(await page.locator(".destinations").evaluate((el) =>
+      getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor), true,
+    "the navigation surface stays continuous in dark mode");
+    await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
     await page.click("#toggle-sidebar");
     await page.waitForTimeout(350);
     assert.deepEqual(await wide(), { railWidth: 58, sidebarWidth: 0, sidebarPadding: 0, mainLeft: 58, hscroll: false });
@@ -1221,7 +1230,7 @@ async function browserview(page) {
   await until("reload");
 
   // Closing the tab ends the view.
-  await page.locator(".pane-tab", { hasText: "localhost" }).locator(".pane-tab-x").click();
+  await page.locator(".pane-tab-item", { hasText: "localhost" }).locator(".pane-tab-close").click();
   await until("close");
 }
 scenarios.browserview = browserview;
@@ -1933,19 +1942,71 @@ async function chatWorkspacePolish(page) {
     });
     window.ark.openPanel("artifact-tab-proof");
   });
+  await page.waitForFunction(() =>
+    document.querySelector("#app").dataset.pane === "open"
+    && document.querySelector(".pane").getBoundingClientRect().width >= 320);
+  const paneGeometry = await page.evaluate(() => {
+    const main = document.querySelector(".topbar").getBoundingClientRect();
+    const pane = document.querySelector(".pane").getBoundingClientRect();
+    const paneHead = document.querySelector(".pane-head").getBoundingClientRect();
+    const tab = document.querySelector('.pane-tab-item[data-selected="true"]').getBoundingClientRect();
+    return {
+      paneWidth: Math.round(pane.width),
+      headerCenterDelta: Math.round(Math.abs((main.top + main.height / 2) - (paneHead.top + paneHead.height / 2))),
+      tabCenterDelta: Math.round(Math.abs((paneHead.top + paneHead.height / 2) - (tab.top + tab.height / 2))),
+    };
+  });
+  assert.ok(paneGeometry.paneWidth >= 320, JSON.stringify(paneGeometry));
+  assert.deepEqual({ headerCenterDelta: paneGeometry.headerCenterDelta, tabCenterDelta: paneGeometry.tabCenterDelta }, { headerCenterDelta: 0, tabCenterDelta: 0 });
+  const topRail = await page.evaluate(() => {
+    const app = document.querySelector("#app");
+    const topbar = document.querySelector(".topbar");
+    const chats = document.querySelector("#chat-tabs");
+    const views = document.querySelector("#view-tabs");
+    const center = (el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+    const browserHeight = Math.round(topbar.getBoundingClientRect().height);
+    app.dataset.shell = "desktop";
+    const nativeHeight = Math.round(topbar.getBoundingClientRect().height);
+    app.dataset.shell = "browser";
+    return {
+      chatsParent: chats.parentElement.className,
+      viewsParent: views.parentElement.className,
+      chatLabel: chats.getAttribute("aria-label"),
+      viewLabel: views.getAttribute("aria-label"),
+      browserHeight,
+      nativeHeight,
+      centerDelta: Math.round(Math.abs(center(chats) - center(views))),
+      titleDisplay: getComputedStyle(document.querySelector("#session-title")).display,
+    };
+  });
+  assert.deepEqual(topRail, {
+    chatsParent: "topbar", viewsParent: "topbar", chatLabel: "Open chats", viewLabel: "Views",
+    browserHeight: 44, nativeHeight: 52, centerDelta: 0, titleDisplay: "none",
+  });
+  await shot(page, "chat-workspace-top-rail");
   const grammar = await page.evaluate(() => {
     const pick = (selector) => {
       const s = getComputedStyle(document.querySelector(selector));
       return {
+        height: s.height,
         radius: s.borderRadius,
         fontSize: s.fontSize,
         fontWeight: s.fontWeight,
         selected: s.backgroundColor,
       };
     };
-    return { chat: pick('.chat-tab-item[data-selected="true"]'), artifact: pick('.pane-tab[aria-selected="true"]') };
+    return { chat: pick('.chat-tab-item[data-selected="true"]'), artifact: pick('.pane-tab-item[data-selected="true"]') };
   });
   assert.deepEqual(grammar.chat, grammar.artifact, "chat and artifact tabs share one visual grammar");
+  assert.equal(grammar.chat.height, "30px", "workspace tabs keep the compact Terminal-tab scale");
+
+  const artifactItem = page.locator('.pane-tab-item[data-selected="true"]');
+  const artifactTab = artifactItem.getByRole("tab");
+  const artifactClose = artifactItem.getByRole("button", { name: /^Close / });
+  assert.equal(await artifactTab.count(), 1, "panel activation is its own accessible control");
+  assert.equal(await artifactClose.count(), 1, "panel close is its own accessible control");
+  const artifactCloseBox = await artifactClose.boundingBox();
+  assert.ok(artifactCloseBox.width >= 30 && artifactCloseBox.height >= 30, JSON.stringify(artifactCloseBox));
 
   const firstItem = page.locator(`.chat-tab-item[data-session="${first}"]`);
   const firstTab = firstItem.getByRole("tab");
@@ -1953,10 +2014,33 @@ async function chatWorkspacePolish(page) {
   assert.equal(await firstTab.count(), 1, "chat activation is its own accessible control");
   assert.equal(await firstClose.count(), 1, "chat close is its own accessible control");
   const closeBox = await firstClose.boundingBox();
-  assert.ok(closeBox.width >= 40 && closeBox.height >= 40, JSON.stringify(closeBox));
+  assert.ok(closeBox.width >= 30 && closeBox.height >= 30, JSON.stringify(closeBox));
   await firstTab.focus();
   await page.keyboard.press("Tab");
   assert.equal(await firstClose.evaluate((el) => el === document.activeElement), true, "Tab reaches the matching close action");
+
+  const selectedTab = page.locator('.chat-tab[aria-selected="true"]');
+  await selectedTab.dblclick();
+  const renameInput = page.getByRole("textbox", { name: "Chat title" });
+  await renameInput.fill("Discarded title");
+  await renameInput.press("Escape");
+  assert.equal(await selectedTab.innerText(), "Untitled chat", "Escape keeps the saved title");
+  await page.waitForFunction(() => document.querySelector('.chat-tab[aria-selected="true"]') === document.activeElement);
+  assert.equal(await selectedTab.evaluate((el) => el === document.activeElement), true, "Escape returns focus to the active chat");
+
+  await selectedTab.dblclick();
+  await renameInput.fill("Blurred chat");
+  await renameInput.evaluate((el) => el.blur());
+  await page.waitForFunction(() => document.querySelector('.chat-tab[aria-selected="true"]')?.textContent.includes("Blurred chat"));
+  await page.waitForFunction(() => document.querySelector('.chat-tab[aria-selected="true"]') === document.activeElement);
+  assert.equal(await selectedTab.evaluate((el) => el === document.activeElement), true, "blur saves and returns focus");
+
+  await selectedTab.dblclick();
+  await renameInput.fill("Aligned chat");
+  await renameInput.press("Enter");
+  await page.waitForFunction(() => document.querySelector('.chat-tab[aria-selected="true"]')?.textContent.includes("Aligned chat"));
+  await page.waitForFunction(() => document.querySelector('.chat-tab[aria-selected="true"]') === document.activeElement);
+  assert.equal(await page.locator('.chat-tab[aria-selected="true"]').evaluate((el) => el === document.activeElement), true, "rename returns focus to the active chat");
 
   const centers = await page.evaluate(() => {
     const center = (selector) => {
@@ -1986,6 +2070,7 @@ async function chatWorkspacePolish(page) {
   await page.waitForFunction(() => document.getElementById("app").dataset.split === "true");
   assert.equal(await views.isVisible(), false, "project selector is out of scope during split view");
   assert.equal(await page.locator('.chat-tab[aria-selected="true"]').count(), 1, "one chat owns composer focus");
+  assert.equal(await page.locator(".secondary-head").count(), 0, "the chat tab is the only title for the secondary chat");
 
   const primaryTab = page.locator(`.chat-tab-item[data-session="${primary}"] .chat-tab`);
   const secondaryTab = page.locator(`.chat-tab-item[data-session="${first}"] .chat-tab`);
@@ -1995,6 +2080,24 @@ async function chatWorkspacePolish(page) {
   await secondaryTab.click();
   assert.equal(await secondaryTab.getAttribute("aria-selected"), "true");
   assert.equal(await page.locator(".chat-surface.secondary").getAttribute("data-active"), "true");
+  await page.evaluate(() => {
+    window.__workspaceFetch = window.fetch;
+    window.fetch = async (input, init) => {
+      const call = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      if (String(input).endsWith("/rpc") && call?.method === "rename_session") {
+        return new Response(JSON.stringify({ ok: false, error: "A working chat cannot be renamed" }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      return window.__workspaceFetch(input, init);
+    };
+  });
+  await secondaryTab.dblclick();
+  await page.getByRole("textbox", { name: "Chat title" }).fill("Unsaved split title");
+  await page.getByRole("textbox", { name: "Chat title" }).press("Enter");
+  await page.waitForFunction(() => !document.querySelector('.chat-tab-item[data-selected="true"] input'));
+  assert.equal(await secondaryTab.innerText(), "Untitled chat", "a host-rejected split rename never changes the displayed title");
+  await page.evaluate(() => { window.fetch = window.__workspaceFetch; delete window.__workspaceFetch; });
   await shot(page, "chat-workspace-polish");
 
   await page.setViewportSize({ width: 800, height: 700 });
@@ -2020,6 +2123,42 @@ async function chatWorkspacePolish(page) {
   await page.evaluate(() => window.ark.openView("split-view-proof"));
   assert.equal(await page.locator("#app").getAttribute("data-split"), "false");
   assert.equal(await views.isVisible(), true, "opening a project view exits split and keeps the way back");
+
+  await views.getByRole("tab", { name: "Chat" }).click();
+  for (let index = 0; index < 8; index++) {
+    const before = await page.evaluate(() => window.ark.summary().session.id);
+    await page.locator("#new-session").click();
+    await page.waitForFunction((id) => window.ark.summary().session.id !== id, before);
+  }
+  const overflow = await page.evaluate(() => {
+    const list = document.querySelector("#chat-tab-list");
+    const selected = list.querySelector('[data-selected="true"]');
+    const bounds = list.getBoundingClientRect();
+    const chosen = selected.getBoundingClientRect();
+    const effectiveTarget = (selector) => {
+      const el = document.querySelector(selector);
+      const box = el.getBoundingClientRect();
+      const inset = Math.abs(parseFloat(getComputedStyle(el, "::before").inset));
+      return [Math.round(box.width + inset * 2), Math.round(box.height + inset * 2)];
+    };
+    return {
+      overflow: list.scrollWidth > list.clientWidth,
+      selectedVisible: chosen.right > bounds.left && chosen.left < bounds.right,
+      splitTarget: effectiveTarget("#chat-split"),
+      paneTarget: effectiveTarget("#toggle-pane"),
+    };
+  });
+  assert.deepEqual(overflow, { overflow: true, selectedVisible: true, splitTarget: [40, 40], paneTarget: [40, 40] });
+
+  await views.getByRole("tab", { name: "Proof" }).click();
+  const projectName = await page.evaluate(() => window.ark.summary().project.name);
+  assert.equal(await page.locator("#session-title").innerText(), projectName);
+  assert.equal(await page.locator("#session-title").evaluate((el) => getComputedStyle(el).display), "block", "project views keep the project title");
+  const home = page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Home" });
+  await home.focus();
+  await home.press("Enter");
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("chat-tab")), false, "keyboard Home never targets a hidden chat tab");
+  assert.equal(await page.evaluate(() => !!document.activeElement && document.activeElement.getClientRects().length > 0), true, "keyboard Home focuses visible view context");
 }
 scenarios["chat-workspace-polish"] = chatWorkspacePolish;
 
@@ -2089,7 +2228,7 @@ async function waiting(page) {
 
   // A result posted into a chat: opening it opens the chat, where the post is.
   await rows.first().click();
-  await page.locator("#session-title", { hasText: "hi" }).waitFor();
+  await page.locator('.chat-tab[aria-selected="true"]', { hasText: "hi" }).waitFor();
   await page.locator("#thread", { hasText: "Filed." }).waitFor();
   await page.locator(".asks .waiting").waitFor({ state: "detached" });
 

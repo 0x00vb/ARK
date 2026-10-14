@@ -7,6 +7,16 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.23.1] - 2026-10-14
+
+### Fixed
+
+- Open chat tabs and project view selectors share one top rail. The fixed destination rail no
+  longer draws a detached partial divider.
+- Chat tabs and Terminal, Browser, Files and artifact tabs share one compact size, spacing and
+  active-state treatment. Split panes no longer repeat the selected chat title inside the pane.
+  Side panes no longer collapse to zero width in WebKit.
+
 ## [0.23.0] - 2026-10-13
 
 ### Added

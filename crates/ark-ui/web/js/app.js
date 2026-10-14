@@ -352,8 +352,14 @@ function rememberTab(summary = state.summary) {
 }
 
 async function openChatTab(id) {
-  if (!id || id === state.sessionId) return focusPrimaryChat();
+  if (!id) return focusPrimaryChat();
+  if (id === state.sessionId) {
+    if (secondaryChat?.active) return focusPrimaryChat();
+    showConversation(false);
+    return composer.focus();
+  }
   if (secondaryChat?.session === id) {
+    if (secondaryChat.active) return secondaryChat.composer.focus();
     secondaryChat.focus();
     return;
   }
@@ -385,6 +391,7 @@ function renderChatTabs() {
   bar.hidden = chatTabs.ids.length < 2 && !secondaryChat;
   clear(list);
   const active = secondaryChat?.active ? secondaryChat.session : state.sessionId;
+  let selectedItem = null;
   for (const id of chatTabs.ids) {
     const title = chatTabs.titles.get(id) || "Untitled chat";
     const selected = id === active;
@@ -392,7 +399,8 @@ function renderChatTabs() {
     close.addEventListener("click", (event) => { event.stopPropagation(); void closeChatTab(id); });
     const open = (event) => event.altKey ? void openSplit(id) : void openChatTab(id);
     const tab = h("button.chat-tab", {
-      type: "button", role: "tab", "aria-selected": String(selected), title,
+      type: "button", role: "tab", "aria-selected": String(selected),
+      title: selected ? `${title}\nDouble-click to rename` : title,
       onclick: open,
       onkeydown: (event) => {
         if (event.key === "Tab" && !event.shiftKey) {
@@ -403,14 +411,50 @@ function renderChatTabs() {
         if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(event); }
       },
     }, h("span.chat-tab-title", title));
-    list.append(h("div.chat-tab-item", { "data-session": id, "data-selected": String(selected) }, tab, close));
+    const item = h("div.chat-tab-item", { "data-session": id, "data-selected": String(selected) }, tab, close);
+    tab.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      renameChatTabInline(item, id, title);
+    });
+    list.append(item);
+    if (selected) selectedItem = item;
   }
+  requestAnimationFrame(() => selectedItem?.scrollIntoView({ block: "nearest", inline: "nearest" }));
   const split = $("#chat-split");
   if (split) {
     split.disabled = !secondaryChat && !chatTabs.ids.some((id) => id !== state.sessionId);
     split.setAttribute("aria-pressed", String(!!secondaryChat));
     split.title = secondaryChat ? "Close split" : "Split with another open chat";
   }
+}
+
+function renameChatTabInline(item, id, before) {
+  const active = secondaryChat?.active ? secondaryChat.session : state.sessionId;
+  const running = id === state.sessionId
+    ? state.running
+    : id === secondaryChat?.session && (secondaryChat.running || secondaryChat.composer.running);
+  if (item.querySelector("input") || id !== active || running) return;
+  const input = h("input.chat-tab-rename", { value: before === "Untitled chat" ? "" : before, "aria-label": "Chat title" });
+  clear(item).append(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    const title = input.value.trim();
+    if (save && title) {
+      if (await change("rename_session", { id, title })) chatTabs.titles.set(id, title);
+    }
+    renderChatTabs();
+    requestAnimationFrame(() => document.querySelector(`.chat-tab-item[data-session="${CSS.escape(id)}"] .chat-tab`)?.focus());
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); void finish(true); }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); void finish(false); }
+  });
+  input.addEventListener("blur", () => void finish(true));
 }
 
 function buildSecondarySurface() {
@@ -428,10 +472,9 @@ function buildSecondarySurface() {
   const form = h("form.composer", { autocomplete: "off" }, input,
     h("div.composer-bar", attach, model, mode, send));
   const dock = h("div.dock", queue, slash, form);
-  const heading = h("strong", "Chat");
   const surface = h("section.chat-surface.secondary", { hidden: true, "data-active": "false" },
-    h("div.secondary-head", heading), scroller, asks, dock);
-  return { surface, scroller, threadEl, asks, queue, slash, input, attach, model, mode, send, form, heading };
+    scroller, asks, dock);
+  return { surface, scroller, threadEl, asks, queue, slash, input, attach, model, mode, send, form };
 }
 
 class SecondaryChat {
@@ -491,7 +534,6 @@ class SecondaryChat {
 
   applySummary(summary) {
     this.summary = summary;
-    this.elements.heading.textContent = summary.session.title || "Untitled chat";
     this.composer.setModel(summary.model);
     this.composer.setExecutionMode(summary.execution_mode || "manual", summary.execution_mode_revision || 0);
     chatTabs.titles.set(this.session, summary.session.title || "Untitled chat");
@@ -783,8 +825,10 @@ async function runCommand(line) {
 async function change(method, params) {
   try {
     await transport.call(method, params);
+    return true;
   } catch (e) {
     toast(e.message);
+    return false;
   }
 }
 
@@ -1188,7 +1232,10 @@ function showHome(focusComposer = true) {
 function destinationTarget(destination) {
   if (destination === "schedules") return views.get("schedules")?.el.querySelector("[data-destination-heading]") || $("#session-title");
   const entry = state.view && views.get(state.view);
-  return entry?.el.querySelector("[data-destination-heading], h1, [role='heading']") || $("#session-title");
+  const visibleChatTitle = state.view || $("#chat-tabs").hidden
+    ? $("#session-title")
+    : document.querySelector('.chat-tab[aria-selected="true"]');
+  return entry?.el.querySelector("[data-destination-heading], h1, [role='heading']") || visibleChatTitle;
 }
 
 /// A keyboard jump is instant and moves focus to the destination. A pointer jump leaves focus on
@@ -1483,8 +1530,22 @@ function toggleSidebar() {
 /// the sidebar folds into a drawer. The person's own open/closed choice is kept for wider sizes.
 function fit() {
   const w = innerWidth;
-  const compact = w <= 760 || (w <= 1000 && appEl.dataset.pane === "open");
+  const compact = w <= 760 || (w <= 1050 && appEl.dataset.pane === "open");
   appEl.dataset.compact = String(compact);
+  const styles = getComputedStyle(appEl);
+  const px = (name) => Number.parseFloat(styles.getPropertyValue(name)) || 0;
+  const chrome = compact ? 0 : px("--rail") + px("--sb");
+  const room = Math.max(320, w - chrome - px("--chat-min"));
+  appEl.style.setProperty("--pw-room", `${room}px`);
+  let paneWidth = 0;
+  if (appEl.dataset.pane === "open") {
+    if (w <= 760) paneWidth = w;
+    else {
+      const preferred = appEl.hasAttribute("data-sized") ? px("--pw-user") : appEl.dataset.wide === "true" ? 760 : 470;
+      paneWidth = Math.min(Math.max(320, preferred), room);
+    }
+  }
+  appEl.style.setProperty("--pw", `${paneWidth}px`);
   if (!compact) delete appEl.dataset.drawer;
 }
 

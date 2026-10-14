@@ -50,6 +50,9 @@ pub struct RunCtx<'a> {
     /// Earlier work this call's work continues: runs of it that stopped before they finished.
     /// An adapter can take up a record they left open instead of making another.
     pub continues: Vec<String>,
+    /// The durable invocation currently executing. Adapters use this opaque id for external
+    /// idempotency. They must not send a chat or work id to a provider.
+    pub invocation: Option<String>,
 }
 
 impl<'a> RunCtx<'a> {
@@ -59,6 +62,7 @@ impl<'a> RunCtx<'a> {
             workspace: None,
             work: None,
             continues: Vec::new(),
+            invocation: None,
         }
     }
     pub fn with_workspace(mut self, workspace: PathBuf) -> Self {
@@ -68,6 +72,11 @@ impl<'a> RunCtx<'a> {
     pub fn with_work(mut self, work: Option<String>, continues: Vec<String>) -> Self {
         self.work = work;
         self.continues = continues;
+        self
+    }
+    /// Name the durable invocation which owns this call.
+    pub fn with_invocation(mut self, invocation: impl Into<String>) -> Self {
+        self.invocation = Some(invocation.into());
         self
     }
 }

@@ -6,17 +6,16 @@ specifies the provider-neutral contract and the Settings interface.
 
 ## Status, 2026-10-14
 
-The first implementation slice is in this tree. It supplies the typed, vendor-neutral catalog
-and provider boundary, persistent inert Add records, shared host calls, and the Settings › Plugins
-catalog. Add is deliberately harmless. It does not start code, connect an account or let an agent
-call a service.
+The marketplace supplies a typed, vendor-neutral catalog and provider boundary, persistent inert
+Add records, shared host calls, and the Settings › Plugins catalog. Add is deliberately harmless.
+It does not start code, connect an account or let an agent call a service.
 
 The managed broker lives in `ark-cloud/api`. ARK Desktop bridges its signed-in Account to that
 broker, where configured. Connections belong to the person's ARK Account and are available across
-their projects, matching the account-wide model in Codex. The next slice still needed before any
-integration can reach a turn is conversion of a selected operation into an ordinary ARK tool and
-the existing approval path. No unsigned local fallback catalog is shown when the broker has no
-reviewed offers.
+their projects. On each new turn, the Desktop exposes only generic `integration.list` and
+approval-gated `integration.run` actions. The broker maps ARK-owned connection, offer and
+operation ids to the reviewed provider mapping. It keeps the provider's names and credentials on
+the server. No unsigned local fallback catalog is shown when the broker has no reviewed offers.
 
 ## Ownership
 
@@ -28,8 +27,8 @@ reviewed offers.
 | `ark-interact::plugins` | Person-only operations and the view model shared by terminal and window |
 | `ark-ui` | The Settings screen, focus and feedback |
 
-No operation below is an agent tool. A window host call or terminal command may invoke it only on
-the person's behalf.
+Adding, connecting and disconnecting are person-only host calls. The two generic managed actions
+above are ordinary agent tools: listing is Observe; every execution is Mutate and asks for approval.
 
 ## Public contract
 

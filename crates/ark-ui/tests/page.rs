@@ -925,6 +925,16 @@ async fn chat_tabs_composer_and_split_share_one_visual_model() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn chat_tabs_form_nested_resizable_window_layouts() {
+    drive("spatial-chat-layouts", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_detached_chat_window_keeps_its_own_foreground_and_layout() {
+    drive("detached-chat-window", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn skills_are_listed_in_settings_and_added_from_the_terminal() {
     drive("skills", vec![], Duration::ZERO).await;
 }

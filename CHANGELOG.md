@@ -15,6 +15,14 @@ What changed for people building on ARK, per release. Not a commit log.
   compatibility, monotonic sequence and every declared asset, then supports staged apply,
   page-only reload and automatic rollback without restarting the runtime.
 
+### Changed
+
+- Open chat tabs can be dragged onto a pane edge to make nested horizontal or vertical layouts.
+  Up to four visible chats keep independent live state, dividers resize with a pointer or keyboard,
+  tabs reorder by drag, and the layout restores after a reload. In a native app, dropping a tab
+  beyond the window opens that chat in a full ARK window with its own tabs, layout and Browser
+  panel, without changing the original window's foreground (ADR 0068).
+
 ## [0.23.1] - 2026-10-14
 
 ### Fixed

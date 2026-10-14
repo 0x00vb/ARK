@@ -90,7 +90,7 @@ static REDUCE_COMPUTER_MOTION: AtomicBool = AtomicBool::new(false);
 
 /// Where the Browser panel's events go: the page that last showed it.
 #[derive(Default)]
-struct BrowserEvents(Mutex<Option<tauri::ipc::Channel<Value>>>);
+struct BrowserEvents(Mutex<std::collections::HashMap<String, tauri::ipc::Channel<Value>>>);
 
 /// The running app, once its window exists.
 pub(crate) static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
@@ -439,6 +439,95 @@ async fn ark_call(
         .map_err(|e| format!("{e:#}"))
 }
 
+fn detached_window_label(session: &str) -> Result<String, String> {
+    if session.is_empty()
+        || session.len() > 128
+        || !session
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err("that chat cannot be opened in a window".into());
+    }
+    Ok(format!("chat-{session}"))
+}
+
+/// Open one chat in a native window of its own. The page in that window uses the addressed
+/// `chat_*` calls, so changing its visible chat never changes another window's foreground.
+#[tauri::command]
+async fn ark_detach_chat(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    state: tauri::State<'_, State>,
+    session: String,
+    x: f64,
+    y: f64,
+) -> Result<Value, String> {
+    from_own_page(&webview)?;
+    let label = detached_window_label(&session)?;
+    if let Some(window) = app.get_window(&label) {
+        window.unminimize().map_err(|error| error.to_string())?;
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(serde_json::json!({ "window": label, "created": false }));
+    }
+
+    let read = state
+        .0
+        .call(
+            "chat_read",
+            serde_json::json!({ "session": session, "limit": 1 }),
+        )
+        .await
+        .map_err(|error| format!("{error:#}"))?;
+    let title = read["summary"]["session"]["title"]
+        .as_str()
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or("Untitled chat");
+
+    let mut url = webview.url().map_err(|error| error.to_string())?;
+    url.set_query(None);
+    url.query_pairs_mut()
+        .append_pair("detached", &session)
+        .append_pair("window", &label);
+
+    let source = webview.window();
+    let scale = source.scale_factor().unwrap_or(1.0);
+    let size = source
+        .inner_size()
+        .map(|size| size.to_logical::<f64>(scale))
+        .unwrap_or_else(|_| LogicalSize::new(980.0, 720.0));
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == MAIN)
+        .cloned()
+        .ok_or_else(|| "the main window has no configuration".to_string())?;
+    config.label = label.clone();
+    config.url = WebviewUrl::External(url);
+    config.title = title.to_string();
+    config.width = size.width.max(config.min_width.unwrap_or(680.0));
+    config.height = size.height.max(config.min_height.unwrap_or(480.0));
+    config.center = false;
+    config.maximized = false;
+    config.fullscreen = false;
+    if x.is_finite() && y.is_finite() && (x > 0.0 || y > 0.0) {
+        config.x = Some((x - 44.0).max(0.0));
+        config.y = Some((y - 22.0).max(0.0));
+    } else if let Ok(position) = source.outer_position() {
+        let position = position.to_logical::<f64>(scale);
+        config.x = Some(position.x + 28.0);
+        config.y = Some(position.y + 28.0);
+    }
+    let window = tauri::WebviewWindowBuilder::from_config(&app, &config)
+        .map_err(|error| error.to_string())?
+        .build()
+        .map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({ "window": label, "created": true }))
+}
+
 #[tauri::command]
 fn ark_subscribe(
     webview: tauri::Webview,
@@ -493,8 +582,16 @@ async fn ark_pick_folder(
     Some(path.display().to_string())
 }
 
-fn browser_event(app: &tauri::AppHandle, ev: Value) {
-    if let Some(ch) = app.state::<BrowserEvents>().0.lock().unwrap().as_ref() {
+fn browser_label(owner: &str) -> String {
+    if owner == MAIN {
+        BROWSER.to_string()
+    } else {
+        format!("{BROWSER}-{owner}")
+    }
+}
+
+fn browser_event_for(app: &tauri::AppHandle, owner: &str, ev: Value) {
+    if let Some(ch) = app.state::<BrowserEvents>().0.lock().unwrap().get(owner) {
         let _ = ch.send(ev);
     }
 }
@@ -502,25 +599,34 @@ fn browser_event(app: &tauri::AppHandle, ev: Value) {
 /// The Browser's webview: its loads go to the page; a new window opens in the same view; a
 /// download is not saved (the person's browser opens its address instead, at most one every
 /// few seconds).
-fn browser_builder(app: &tauri::AppHandle, url: tauri::Url) -> tauri::webview::WebviewBuilder<Wry> {
+fn browser_builder(
+    app: &tauri::AppHandle,
+    owner: String,
+    url: tauri::Url,
+) -> tauri::webview::WebviewBuilder<Wry> {
     let (loads, opens) = (app.clone(), app.clone());
-    tauri::webview::WebviewBuilder::new(BROWSER, WebviewUrl::External(url))
+    let label = browser_label(&owner);
+    let load_owner = owner.clone();
+    let open_label = label.clone();
+    tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(url))
         .data_store_identifier(BROWSER_STORE)
         // Clear for its whole life: the panel paints what shows through, its own colour until a
         // page arrives, then white (a page without a background of its own expects white).
         .background_color(tauri::webview::Color(0, 0, 0, 0))
         .on_page_load(move |_, p| {
             let loading = matches!(p.event(), PageLoadEvent::Started);
-            browser_event(
+            browser_event_for(
                 &loads,
+                &load_owner,
                 serde_json::json!({ "url": p.url().as_str(), "loading": loading }),
             );
         })
         .on_new_window(move |url, _| {
             if browser_may_open(&url) {
                 let app = opens.clone();
+                let label = open_label.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Some(w) = app.get_webview(BROWSER) {
+                    if let Some(w) = app.get_webview(&label) {
                         let _ = w.navigate(url);
                     }
                 });
@@ -569,7 +675,9 @@ async fn ark_browser_show(
     let position = LogicalPosition::new(x.max(0.0), y.max(0.0));
     let size = LogicalSize::new(width.max(1.0), height.max(1.0));
     let err = |e: tauri::Error| e.to_string();
-    if let Some(view) = app.get_webview(BROWSER) {
+    let owner = webview.label().to_string();
+    let label = browser_label(&owner);
+    if let Some(view) = app.get_webview(&label) {
         view.set_position(position).map_err(err)?;
         view.set_size(size).map_err(err)?;
         view.show().map_err(err)?;
@@ -587,7 +695,7 @@ async fn ark_browser_show(
     }
     let loads = PAGE_LOADS.load(Ordering::SeqCst);
     let view = window
-        .add_child(browser_builder(&app, u), position, size)
+        .add_child(browser_builder(&app, owner, u), position, size)
         .map_err(err)?;
     // The page that asked loaded again (or left) while the view was made: nobody will place it.
     if PAGE_LOADS.load(Ordering::SeqCst) != loads {
@@ -616,7 +724,11 @@ fn ark_browser_events(
     channel: tauri::ipc::Channel<Value>,
 ) -> Result<(), String> {
     from_own_page(&webview)?;
-    *events.0.lock().unwrap() = Some(channel);
+    events
+        .0
+        .lock()
+        .unwrap()
+        .insert(webview.label().to_string(), channel);
     Ok(())
 }
 
@@ -628,7 +740,8 @@ fn ark_browser(
     action: String,
 ) -> Result<(), String> {
     from_own_page(&webview)?;
-    let Some(view) = app.get_webview(BROWSER) else {
+    let label = browser_label(webview.label());
+    let Some(view) = app.get_webview(&label) else {
         return Ok(());
     };
     let done = match action.as_str() {
@@ -871,6 +984,7 @@ pub(crate) fn run(
         .plugin(window_plugin())
         .invoke_handler(tauri::generate_handler![
             ark_call,
+            ark_detach_chat,
             ark_subscribe,
             ark_pick_folder,
             ark_browser_show,
@@ -892,9 +1006,16 @@ pub(crate) fn run(
         // The window's page loads again (a reload, a visit to a runtime elsewhere, the way
         // back): the Browser's view belonged to the page before.
         .on_page_load(|webview, p| {
-            if webview.label() == MAIN && matches!(p.event(), PageLoadEvent::Started) {
+            if own_page(p.url())
+                && !matches!(webview.label(), COMPUTER_TARGET | COMPUTER_CONTROL)
+                && !webview.label().starts_with(BROWSER)
+                && matches!(p.event(), PageLoadEvent::Started)
+            {
                 PAGE_LOADS.fetch_add(1, Ordering::SeqCst);
-                if let Some(view) = webview.app_handle().get_webview(BROWSER) {
+                if let Some(view) = webview
+                    .app_handle()
+                    .get_webview(&browser_label(webview.label()))
+                {
                     let _ = view.close();
                 }
             }
@@ -904,7 +1025,7 @@ pub(crate) fn run(
         })
         .on_window_event(move |w, ev| {
             if let WindowEvent::CloseRequested { api, .. } = ev {
-                if keep_running {
+                if keep_running && w.label() == MAIN {
                     api.prevent_close();
                     let _ = w.hide();
                 }
@@ -1407,6 +1528,17 @@ mod tests {
         assert!(!own("http://127.0.0.1:8420/"));
         assert!(!own("http://tauri.localhost.example.com/"));
         assert!(!own(OWN_PAGE));
+    }
+
+    #[test]
+    fn detached_windows_have_one_safe_label_per_chat() {
+        assert_eq!(
+            detached_window_label("018f0f5d-4b85-7a15-a565-2f5ee81493af"),
+            Ok("chat-018f0f5d-4b85-7a15-a565-2f5ee81493af".into())
+        );
+        for invalid in ["", "chat/elsewhere", "chat elsewhere", "chat?elsewhere"] {
+            assert!(detached_window_label(invalid).is_err(), "{invalid}");
+        }
     }
 
     #[test]

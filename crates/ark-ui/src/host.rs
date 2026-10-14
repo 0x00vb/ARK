@@ -3123,6 +3123,17 @@ impl Host {
             )?),
             // Moving to another chat never waits for a turn: a running one goes on in the
             // background (see `switch`).
+            // A detached native window creates an addressed chat without changing any window's
+            // runtime-wide foreground. It immediately opens that chat through `chat_read`.
+            "window_new_session" => {
+                let project = s("project");
+                let project = if project.is_empty() {
+                    self.project()?.id.as_str().to_string()
+                } else {
+                    project
+                };
+                self.create_client_chat(&project).await
+            }
             "new_session" => {
                 let project = s("project");
                 self.switch(Target::Change, move |ix| {

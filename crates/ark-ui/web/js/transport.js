@@ -24,6 +24,14 @@ export function connect() {
         tauri.core.invoke("ark_call", { method, params }).catch((e) => {
           throw new Error(typeof e === "string" ? e : e?.message || String(e));
         }),
+      detachChat: (session, point = {}) => tauri.core.invoke("ark_detach_chat", {
+        session,
+        x: Number.isFinite(point.x) ? point.x : 0,
+        y: Number.isFinite(point.y) ? point.y : 0,
+      }).catch((e) => {
+        throw new Error(typeof e === "string" ? e : e?.message || String(e));
+      }),
+      closeWindow: () => tauri.window.getCurrentWindow().close(),
       subscribe(fn) {
         const ch = new tauri.core.Channel();
         ch.onmessage = fn;

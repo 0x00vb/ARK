@@ -2162,6 +2162,122 @@ async function chatWorkspacePolish(page) {
 }
 scenarios["chat-workspace-polish"] = chatWorkspacePolish;
 
+// ADR 0068: the tab is the object being arranged. Edge drops create a nested spatial tree,
+// dividers keep an accessible value, and the fifth visible chat is constrained without damage.
+async function spatialChatLayouts(page) {
+  const sessions = [await page.evaluate(() => window.ark.summary().session.id)];
+  for (let index = 0; index < 3; index++) {
+    await page.locator("#new-session").click();
+    await page.waitForFunction((known) => !known.includes(window.ark.summary().session.id), sessions);
+    sessions.push(await page.evaluate(() => window.ark.summary().session.id));
+  }
+  const primary = sessions[3];
+  await page.locator(`.chat-tab-item[data-session="${sessions[0]}"]`).dragTo(
+    page.locator(`.chat-tab-item[data-session="${sessions[2]}"]`), { force: true },
+  );
+  assert.deepEqual(await page.locator(".chat-tab-item").evaluateAll((tabs) => tabs.map((tab) => tab.dataset.session)),
+    [sessions[1], sessions[0], sessions[2], sessions[3]], "dropping on a tab reorders without opening it");
+  const dragToEdge = async (session, target, edge) => {
+    const tab = page.locator(`.chat-tab-item[data-session="${session}"]`);
+    const leaf = page.locator(`.chat-layout-leaf[data-session="${target}"]`);
+    await tab.dragTo(leaf.locator(`.chat-drop-target.${edge}`), { force: true });
+    await page.waitForFunction((id) => document.querySelector(`.chat-layout-leaf[data-session="${id}"]`), session);
+  };
+  await dragToEdge(sessions[0], primary, "left");
+  await dragToEdge(sessions[1], sessions[0], "bottom");
+  await dragToEdge(sessions[2], primary, "top");
+
+  const shape = await page.evaluate(() => ({
+    leaves: [...document.querySelectorAll(".chat-layout-leaf")].map((leaf) => leaf.dataset.session),
+    rows: document.querySelectorAll(".chat-layout-split.row").length,
+    columns: document.querySelectorAll(".chat-layout-split.column").length,
+    surfaces: document.querySelectorAll(".chat-surface").length,
+    active: document.querySelector('.chat-surface[data-active="true"]')?.dataset.session,
+  }));
+  assert.deepEqual(new Set(shape.leaves), new Set(sessions));
+  assert.ok(shape.rows >= 1 && shape.columns >= 1, JSON.stringify(shape));
+  assert.equal(shape.surfaces, 4);
+  assert.equal(shape.active, sessions[2]);
+
+  const divider = page.locator('.chat-divider[aria-orientation="vertical"]').first();
+  const before = Number(await divider.getAttribute("aria-valuenow"));
+  await divider.focus();
+  await divider.press("ArrowRight");
+  const resized = before + 5;
+  assert.equal(Number(await page.locator('.chat-divider[aria-orientation="vertical"]').first().getAttribute("aria-valuenow")), resized);
+
+  const leavesBeforeCancel = await page.locator(".chat-layout-leaf").count();
+  await page.evaluate((session) => {
+    const tab = document.querySelector(`.chat-tab-item[data-session="${CSS.escape(session)}"]`);
+    const transfer = new DataTransfer();
+    tab.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: transfer }));
+    tab.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: transfer }));
+  }, sessions[0]);
+  assert.equal(await page.locator(".chat-layout-leaf").count(), leavesBeforeCancel, "an outside-window cancel keeps the layout");
+  assert.equal(await page.locator("#app").getAttribute("data-arranging"), null);
+
+  await page.reload();
+  await page.locator("#input").waitFor();
+  await page.waitForFunction(() => document.querySelectorAll(".chat-layout-leaf").length === 4);
+  assert.equal(Number(await page.locator('.chat-divider[aria-orientation="vertical"]').first().getAttribute("aria-valuenow")), resized, "the divider ratio restores");
+
+  await page.locator("#new-session").click();
+  await page.waitForFunction((known) => !known.includes(window.ark.summary().session.id), sessions);
+  const fifth = await page.evaluate(() => window.ark.summary().session.id);
+  await page.locator(`.chat-tab-item[data-session="${primary}"]`).dragTo(
+    page.locator(`.chat-layout-leaf[data-session="${fifth}"] .chat-drop-target.right`), { force: true },
+  );
+  assert.equal(await page.locator(".chat-layout-leaf").count(), 4, "a fifth visible chat is constrained");
+  assert.equal(await page.locator("#toast").innerText(), "A window can show up to four chats");
+
+  await page.setViewportSize({ width: 800, height: 700 });
+  assert.equal(await page.locator(".chat-layout-leaf").evaluateAll((leaves) => leaves.filter((leaf) => getComputedStyle(leaf).display !== "none").length), 1);
+  await page.setViewportSize({ width: 1200, height: 800 });
+
+  const visibleBeforeClose = await page.locator(".chat-layout-leaf").count();
+  await page.locator(`.chat-tab-item[data-session="${sessions[0]}"] .chat-tab-close`).click();
+  assert.equal(await page.locator(".chat-layout-leaf").count(), visibleBeforeClose - 1);
+  assert.equal(await page.locator(".chat-layout-split").count(), visibleBeforeClose - 2, "an empty split collapses with its leaf");
+  const primaryBeforeClose = await page.evaluate(() => window.ark.summary().session.id);
+  await page.locator(`.chat-tab-item[data-session="${primaryBeforeClose}"] .chat-tab-close`).click();
+  await page.waitForFunction((before) => window.ark.summary().session.id !== before, primaryBeforeClose);
+  assert.equal(await page.locator(".chat-layout-leaf").count(), visibleBeforeClose - 2);
+  assert.equal(await page.locator(".chat-surface.primary").getAttribute("data-session"), await page.evaluate(() => window.ark.summary().session.id));
+  await shot(page, "spatial-chat-layouts");
+}
+scenarios["spatial-chat-layouts"] = spatialChatLayouts;
+
+// A detached page addresses its own chat. Opening another chat in that native-window mode does
+// not move the runtime-wide foreground that the original window owns, and its layout has its own
+// storage key.
+async function detachedChatWindow(page) {
+  const sessions = [await page.evaluate(() => window.ark.summary().session.id)];
+  for (let index = 0; index < 2; index++) {
+    await page.locator("#new-session").click();
+    await page.waitForFunction((known) => !known.includes(window.ark.summary().session.id), sessions);
+    sessions.push(await page.evaluate(() => window.ark.summary().session.id));
+  }
+  const originalForeground = sessions[2];
+  await page.evaluate(() => localStorage.setItem("ark-chat-layout", "main-window-value"));
+  const detached = new URL(page.url());
+  detached.searchParams.set("detached", sessions[0]);
+  detached.searchParams.set("window", "chat-page-test");
+  await page.goto(detached.href);
+  await page.waitForFunction((session) => window.ark.summary()?.session?.id === session, sessions[0]);
+  await page.locator(`.chat-surface.secondary[data-session="${sessions[0]}"]`).waitFor();
+  assert.equal(await page.locator("#app").getAttribute("data-window"), "detached");
+  assert.equal((await page.evaluate(() => window.ark.windowCall("hello"))).summary.session.id, originalForeground);
+
+  await page.evaluate((session) => window.ark.openSession(session), sessions[1]);
+  await page.waitForFunction((session) => window.ark.summary()?.session?.id === session, sessions[1]);
+  assert.equal((await page.evaluate(() => window.ark.windowCall("hello"))).summary.session.id, originalForeground,
+    "a detached window does not move the original window's foreground");
+  assert.equal(await page.evaluate(() => localStorage.getItem("ark-chat-layout")), "main-window-value");
+  assert.ok(await page.evaluate(() => localStorage.getItem("ark-chat-layout:chat-page-test")));
+  await shot(page, "detached-chat-window");
+}
+scenarios["detached-chat-window"] = detachedChatWindow;
+
 // ADR 0041: a process start asks with its command and where, then runs beside the chat: the
 // Processes panel shows its output, its page opens in the Browser once ready, Stop ends it.
 async function processes(page) {

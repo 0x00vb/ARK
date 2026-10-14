@@ -7,6 +7,14 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.23.4] - 2026-10-14
+
+### Fixed
+
+- The workspace restores one full-height chat when it finds an older incomplete spatial layout.
+  The chat transcript scrolls in that surface again. The fixed rail has a distinct surface,
+  workspace views live there, and Account and settings use the profile control at its bottom.
+
 ## [0.23.3] - 2026-10-14
 
 ### Fixed
@@ -15,12 +23,6 @@ What changed for people building on ARK, per release. Not a commit log.
   tagged but is superseded by this reproducible release.
 
 ## [0.23.2] - 2026-10-14
-
-### Fixed
-
-- The workspace restores one full-height chat when it finds an older incomplete spatial layout.
-  The chat transcript scrolls in that surface again. The fixed rail has a distinct surface,
-  workspace views live there, and Account and settings use the profile control at its bottom.
 
 ### Added
 

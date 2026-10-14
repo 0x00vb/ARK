@@ -1,14 +1,14 @@
-// The top bar's views of the current project: "Chat" (the conversation), then the app's views
-// marked `nav` as tabs. On the right, a + menu opens panels marked `nav` (Terminal, Browser,
-// Files, then the app's) in the side pane.
+// The title bar names the current work. The fixed rail owns project navigation. On the right, a
+// + menu opens panels marked `nav` (Terminal, Browser, Files, then the app's) in the side pane.
 
 import { h, icon, clear, $ } from "./dom.js";
 import { label as keyLabel } from "./keys.js";
 import { registry } from "./ext.js";
 
 export class Topbar {
-  constructor(api) {
+  constructor(api, destinations) {
     this.api = api;
+    this.destinations = destinations;
     this.tabs = $("#view-tabs");
     this.launchers = $("#panel-launchers");
     this.view = null;
@@ -18,15 +18,8 @@ export class Topbar {
     const project = this.api.project();
     const views = [...registry.views.values()].filter((v) => v.nav && (!v.when || v.when({ project })));
     clear(this.tabs);
-    // With no views there is only the conversation: no tabs.
-    this.tabs.hidden = !views.length;
-    if (views.length) {
-      const tab = (id, label) => h("button.seg.view-tab", {
-        type: "button", role: "tab", "data-view": id || "",
-        onclick: () => (id ? this.api.openView(id) : this.api.showConversation()),
-      }, label);
-      this.tabs.append(tab(null, "Chat"), ...views.map((v) => tab(v.id, v.nav === true ? v.title : v.nav)));
-    }
+    this.tabs.hidden = true;
+    this.destinations?.setWorkspaceViews(views);
     clear(this.launchers);
     if ([...registry.panels.values()].some((p) => p.nav && (!p.when || p.when({ project })))) {
       this.launchers.append(h("button.icon-btn", {
@@ -59,6 +52,6 @@ export class Topbar {
   /// Mark the view the main column shows (null: the conversation).
   mark(id) {
     this.view = id;
-    for (const t of this.tabs.children) t.setAttribute("aria-selected", String((t.dataset.view || null) === id));
+    this.destinations?.markWorkspace(id);
   }
 }

@@ -569,12 +569,12 @@ async function schedules(page) {
   await shot(page, "schedule-line");
 
   const destinations = page.getByRole("navigation", { name: "Destinations" });
-  assert.equal(await destinations.getByRole("button", { name: "Home" }).getAttribute("aria-current"), "page");
+  assert.equal(await destinations.getByRole("button", { name: "Chat" }).getAttribute("aria-current"), "page");
   await destinations.getByRole("button", { name: "Schedules" }).click();
   await page.locator('.view[data-view="schedules"] .sv-row').waitFor();
   assert.equal(await destinations.getByRole("button", { name: "Schedules" }).getAttribute("aria-current"), "page");
   assert.equal(await page.locator('.view[data-view="schedules"] .sv-row').count(), 1);
-  await destinations.getByRole("button", { name: "Home" }).click();
+  await destinations.getByRole("button", { name: "Chat" }).click();
   assert.equal(await page.locator("#stage").isHidden(), true);
 
   await line.click();
@@ -707,7 +707,7 @@ async function scheduleDestinationStates(page) {
   await view.getByRole("heading", { name: "No schedules" }).waitFor();
 
   // Home restores its last subview instead of duplicating Chat.
-  await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Home" }).click();
+  await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat" }).click();
   assert.equal(await page.locator('.view[data-view="home-proof"]').isVisible(), true);
 }
 scenarios["schedule-destination-states"] = scheduleDestinationStates;
@@ -1935,6 +1935,29 @@ scenarios["expanded-projects"] = expandedProjects;
 // Multi-chat controls use the same quiet tab grammar as artifacts. Split view has one clear
 // scope, so project views disappear while it is open and return on every exit path.
 async function chatWorkspacePolish(page) {
+  const initial = await page.evaluate(() => window.ark.summary().session.id);
+  // A person upgrading from the early spatial-tabs experiment gets one complete conversation,
+  // not a stale empty pane or an unexplained extra tab.
+  await page.evaluate((id) => {
+    localStorage.setItem("ark-chat-layout", JSON.stringify({
+      kind: "split", direction: "column", ratio: 0.5,
+      first: { kind: "chat", session: id }, second: { kind: "chat", session: "missing-chat" },
+    }));
+    localStorage.setItem("ark-open-chats", JSON.stringify([id, "missing-chat"]));
+  }, initial);
+  await page.reload();
+  await page.locator("#input").waitFor();
+  const recovery = await page.evaluate(() => {
+    const workspace = document.querySelector("#chat-workspace").getBoundingClientRect();
+    const surface = document.querySelector(".chat-surface").getBoundingClientRect();
+    return {
+      leaves: document.querySelectorAll(".chat-layout-leaf").length,
+      chatTabsHidden: document.querySelector("#chat-tabs").hidden,
+      heightDelta: Math.round(Math.abs(workspace.height - surface.height)),
+    };
+  });
+  assert.deepEqual(recovery, { leaves: 1, chatTabsHidden: true, heightDelta: 0 }, JSON.stringify(recovery));
+
   const first = await page.evaluate(() => window.ark.summary().session.id);
   await page.locator("#new-session").click();
   await page.waitForFunction((id) => window.ark.summary().session.id !== id, first);
@@ -1968,32 +1991,39 @@ async function chatWorkspacePolish(page) {
   });
   assert.ok(paneGeometry.paneWidth >= 320, JSON.stringify(paneGeometry));
   assert.deepEqual({ headerCenterDelta: paneGeometry.headerCenterDelta, tabCenterDelta: paneGeometry.tabCenterDelta }, { headerCenterDelta: 0, tabCenterDelta: 0 });
-  const topRail = await page.evaluate(() => {
+  const shell = await page.evaluate(() => {
     const app = document.querySelector("#app");
     const topbar = document.querySelector(".topbar");
     const chats = document.querySelector("#chat-tabs");
     const views = document.querySelector("#view-tabs");
-    const center = (el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+    const proof = document.querySelector('.workspace-destination[data-view="split-view-proof"]');
+    const account = document.querySelector("#open-settings");
     const browserHeight = Math.round(topbar.getBoundingClientRect().height);
     app.dataset.shell = "desktop";
     const nativeHeight = Math.round(topbar.getBoundingClientRect().height);
     app.dataset.shell = "browser";
     return {
       chatsParent: chats.parentElement.className,
-      viewsParent: views.parentElement.className,
       chatLabel: chats.getAttribute("aria-label"),
-      viewLabel: views.getAttribute("aria-label"),
       browserHeight,
       nativeHeight,
-      centerDelta: Math.round(Math.abs(center(chats) - center(views))),
       titleDisplay: getComputedStyle(document.querySelector("#session-title")).display,
+      titleBarViewsHidden: views.hidden,
+      proofParent: proof.parentElement.id,
+      proofLabel: proof.getAttribute("aria-label"),
+      accountParent: account.parentElement.id,
+      accountLabel: account.getAttribute("aria-label"),
+      railMaterial: getComputedStyle(document.querySelector(".destinations")).backgroundColor,
+      sidebarMaterial: getComputedStyle(document.querySelector(".sidebar")).backgroundColor,
     };
   });
-  assert.deepEqual(topRail, {
-    chatsParent: "topbar", viewsParent: "topbar", chatLabel: "Open chats", viewLabel: "Views",
-    browserHeight: 44, nativeHeight: 52, centerDelta: 0, titleDisplay: "none",
+  assert.deepEqual(shell, {
+    chatsParent: "topbar", chatLabel: "Open chats", browserHeight: 44, nativeHeight: 52,
+    titleDisplay: "none", titleBarViewsHidden: true, proofParent: "workspace-destinations",
+    proofLabel: "Proof", accountParent: "destinations", accountLabel: "Account and settings",
+    railMaterial: "rgb(241, 241, 239)", sidebarMaterial: "rgb(247, 247, 246)",
   });
-  await shot(page, "chat-workspace-top-rail");
+  await shot(page, "chat-workspace-shell");
   const grammar = await page.evaluate(() => {
     const pick = (selector) => {
       const s = getComputedStyle(document.querySelector(selector));
@@ -2060,6 +2090,12 @@ async function chatWorkspacePolish(page) {
     return [center("#model-chip"), center("#mode-chip"), center("#send")];
   });
   assert.ok(Math.max(...centers) - Math.min(...centers) <= 1, JSON.stringify(centers));
+  const composerOrder = await page.evaluate(() => {
+    const left = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().left);
+    return { attach: left("#attach"), mode: left("#mode-chip"), model: left("#model-chip"), send: left("#send") };
+  });
+  assert.ok(composerOrder.attach < composerOrder.mode && composerOrder.mode < composerOrder.model
+    && composerOrder.model < composerOrder.send, JSON.stringify(composerOrder));
 
   const newChat = page.locator(".project-row[aria-current='true'] .project-new-chat");
   await newChat.hover();
@@ -2074,11 +2110,11 @@ async function chatWorkspacePolish(page) {
   assert.equal(hover.opacity, "1");
 
   await page.locator("#close-pane").click();
-  const views = page.locator("#view-tabs");
-  assert.equal(await views.isVisible(), true);
+  const proofDestination = page.locator('.workspace-destination[data-view="split-view-proof"]');
+  assert.equal(await proofDestination.isVisible(), true);
   await page.locator("#chat-split").click();
   await page.waitForFunction(() => document.getElementById("app").dataset.split === "true");
-  assert.equal(await views.isVisible(), false, "project selector is out of scope during split view");
+  assert.equal(await proofDestination.isVisible(), true, "the fixed rail remains the way to the project view during split view");
   assert.equal(await page.locator('.chat-tab[aria-selected="true"]').count(), 1, "one chat owns composer focus");
   assert.equal(await page.locator(".secondary-head").count(), 0, "the chat tab is the only title for the secondary chat");
 
@@ -2126,15 +2162,15 @@ async function chatWorkspacePolish(page) {
 
   await page.locator("#chat-split").click();
   assert.equal(await page.locator("#app").getAttribute("data-split"), "false");
-  assert.equal(await views.isVisible(), true, "selector returns when split closes");
+  assert.equal(await proofDestination.isVisible(), true, "the fixed rail stays stable when split closes");
 
   await page.locator("#chat-split").click();
   await page.waitForFunction(() => document.getElementById("app").dataset.split === "true");
   await page.evaluate(() => window.ark.openView("split-view-proof"));
   assert.equal(await page.locator("#app").getAttribute("data-split"), "false");
-  assert.equal(await views.isVisible(), true, "opening a project view exits split and keeps the way back");
+  assert.equal(await proofDestination.isVisible(), true, "opening a project view exits split and keeps the way back");
 
-  await views.getByRole("tab", { name: "Chat" }).click();
+  await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat" }).click();
   for (let index = 0; index < 8; index++) {
     const before = await page.evaluate(() => window.ark.summary().session.id);
     await page.locator("#new-session").click();
@@ -2160,14 +2196,14 @@ async function chatWorkspacePolish(page) {
   });
   assert.deepEqual(overflow, { overflow: true, selectedVisible: true, splitTarget: [40, 40], paneTarget: [40, 40] });
 
-  await views.getByRole("tab", { name: "Proof" }).click();
+  await proofDestination.click();
   const projectName = await page.evaluate(() => window.ark.summary().project.name);
   assert.equal(await page.locator("#session-title").innerText(), projectName);
   assert.equal(await page.locator("#session-title").evaluate((el) => getComputedStyle(el).display), "block", "project views keep the project title");
-  const home = page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Home" });
-  await home.focus();
-  await home.press("Enter");
-  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("chat-tab")), false, "keyboard Home never targets a hidden chat tab");
+  const chat = page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat" });
+  await chat.focus();
+  await chat.press("Enter");
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("chat-tab")), false, "keyboard Chat never targets a hidden chat tab");
   assert.equal(await page.evaluate(() => !!document.activeElement && document.activeElement.getClientRects().length > 0), true, "keyboard Home focuses visible view context");
 }
 scenarios["chat-workspace-polish"] = chatWorkspacePolish;

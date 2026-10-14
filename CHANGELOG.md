@@ -16,6 +16,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [0.23.2] - 2026-10-14
 
+### Fixed
+
+- The workspace restores one full-height chat when it finds an older incomplete spatial layout.
+  The chat transcript scrolls in that surface again. The fixed rail has a distinct surface,
+  workspace views live there, and Account and settings use the profile control at its bottom.
+
 ### Added
 
 - Native consumers can opt into a separate signed page update channel. It verifies exact native

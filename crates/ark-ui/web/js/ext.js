@@ -3,9 +3,9 @@
 //   ark.panel({ id, title, icon, nav, presents, wide, fill, render(el, params, api) })
 //   ark.view({ id, title, icon, nav, render(el, params, api) })
 //                      a view of the current project in the main column, in place of the
-//                      conversation; `nav` makes it a tab in the top bar beside "Chat".
-//                      Choosing a chat brings the conversation back. A panel's `nav` lists
-//                      it in the top bar's + menu, after ARK's Terminal, Browser and Files.
+//                      conversation; `nav` makes it a destination in the fixed workspace rail.
+//                      Choosing Chat brings the conversation back. A panel's `nav` lists it in
+//                      the title bar's + menu, after ARK's Terminal, Browser and Files.
 //   ark.setting({ id, title, icon, advanced, render(el, api) })
 //                      a section of the Settings page: the app's or the account's
 //                      configuration, not one project's. `advanced` lists it under Advanced.

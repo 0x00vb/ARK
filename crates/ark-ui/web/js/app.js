@@ -36,6 +36,8 @@ const windowIdentity = pageParams.get("window") || "main";
 const detachedWindow = !!detachedSession;
 const tabStorageKey = windowIdentity === "main" ? "ark-open-chats" : `ark-open-chats:${windowIdentity}`;
 const layoutStorageKey = windowIdentity === "main" ? "ark-chat-layout" : `ark-chat-layout:${windowIdentity}`;
+const TAB_STORAGE_VERSION = 1;
+const LAYOUT_STORAGE_VERSION = 1;
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
 const appEl = $("#app");
 const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, view: null, homeView: null };
@@ -349,11 +351,15 @@ function restoreScroll(session, element) {
 }
 
 function saveTabs() {
-  try { localStorage.setItem(tabStorageKey, JSON.stringify(chatTabs.ids.slice(-12))); } catch {}
+  // Do not let the early spatial-tabs experiment reopen a stray chat on launch. Tabs written
+  // from this release carry an explicit format and restore normally.
+  try { localStorage.setItem(tabStorageKey, JSON.stringify({ version: TAB_STORAGE_VERSION, ids: chatTabs.ids.slice(-12) })); } catch {}
 }
 
 function saveLayout() {
-  try { localStorage.setItem(layoutStorageKey, JSON.stringify(chatLayout)); } catch {}
+  // The pre-release tree format could reopen an incomplete split after a chat disappeared.
+  // Start this version in one full-height chat. Layouts made from here restore normally.
+  try { localStorage.setItem(layoutStorageKey, JSON.stringify({ version: LAYOUT_STORAGE_VERSION, tree: chatLayout })); } catch {}
 }
 
 function rememberTab(summary = state.summary) {
@@ -866,10 +872,23 @@ async function endTabDrag(event, id) {
 function renderWorkspace() {
   const workspace = $("#chat-workspace");
   if (!workspace || !chatLayout) return;
+  chatLayout = pruneLayout(chatLayout) || chatLeaf(state.sessionId);
   clear(workspace).append(renderLayoutNode(chatLayout, []));
   const divided = visibleChats(chatLayout).length > 1;
   workspace.dataset.split = String(divided);
   appEl.dataset.split = String(divided);
+}
+
+/// A visible split may only contain live chat surfaces. Missing presentation state collapses
+/// instead of reserving an empty bordered region in the workspace.
+function pruneLayout(node) {
+  if (!node) return null;
+  if (node.kind === "chat") return node.session === state.sessionId || secondaryChats.has(node.session) ? node : null;
+  const first = pruneLayout(node.first);
+  const second = pruneLayout(node.second);
+  if (!first) return second;
+  if (!second) return first;
+  return { ...node, first, second };
 }
 
 function renderLayoutNode(node, path) {
@@ -947,13 +966,10 @@ function renderLayoutNode(node, path) {
 async function restoreVisibleChats(available) {
   let stored = null;
   try { stored = JSON.parse(localStorage.getItem(layoutStorageKey) || "null"); } catch {}
-  if (!stored) {
-    const legacy = windowIdentity === "main" && localStorage.getItem("ark-split-chat");
-    stored = legacy && available.includes(legacy)
-      ? splitLayoutChat(chatLeaf(state.sessionId), state.sessionId, legacy, "right")
-      : chatLeaf(state.sessionId);
-  }
-  chatLayout = restoreLayout(stored, available, state.sessionId);
+  // Do not revive a legacy split. A deliberate layout from this version is versioned and will
+  // restore, but an older experimental tree cannot surprise someone on launch.
+  const tree = stored?.version === LAYOUT_STORAGE_VERSION ? stored.tree : null;
+  chatLayout = restoreLayout(tree, available, state.sessionId);
   for (const id of visibleChats(chatLayout)) {
     if ((detachedWindow || id !== state.sessionId) && !(await loadSecondary(id))) chatLayout = removeLayoutChat(chatLayout, id);
   }
@@ -2023,8 +2039,10 @@ async function start() {
   relabel(document.body);
   if (transport.shell === "desktop") appLike();
   try {
-    const restored = JSON.parse(localStorage.getItem(tabStorageKey) || "[]");
-    if (Array.isArray(restored)) chatTabs.ids = restored.filter((id) => typeof id === "string").slice(-12);
+    const restored = JSON.parse(localStorage.getItem(tabStorageKey) || "null");
+    if (restored?.version === TAB_STORAGE_VERSION && Array.isArray(restored.ids)) {
+      chatTabs.ids = restored.ids.filter((id) => typeof id === "string").slice(-12);
+    }
   } catch {}
   if (detachedSession && !chatTabs.ids.includes(detachedSession)) chatTabs.ids.push(detachedSession);
   primarySurface = h("section.chat-surface.primary", { "data-active": "true" });
@@ -2040,9 +2058,9 @@ async function start() {
   places = new Places(api);
   acceptDrops(api, composer, $(".main"));
   sidebar = new Sidebar(api);
-  destinations = new Destinations(openDestination);
+  destinations = new Destinations(openDestination, (id) => showView(id));
   waiting = new Waiting(api, transport, () => state.sessionId);
-  topbar = new Topbar(api);
+  topbar = new Topbar(api, destinations);
   pane = new Pane(appEl, api);
   fit();
   addEventListener("resize", fit);

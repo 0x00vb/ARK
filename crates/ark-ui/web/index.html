@@ -18,13 +18,19 @@
     <div id="app" class="app" data-pane="closed" data-sidebar="open">
       <nav class="destinations" id="destinations" aria-label="Destinations">
         <div class="destination-drag" data-tauri-drag-region></div>
-        <button class="destination" type="button" data-destination="home" aria-current="page" title="Home">
+        <button class="destination" type="button" data-destination="home" aria-current="page" title="Chat">
           <span class="destination-icon" data-icon="home"></span>
-          <span class="destination-label">Home</span>
+          <span class="destination-label">Chat</span>
         </button>
+        <div class="workspace-destinations" id="workspace-destinations" aria-label="Workspace"></div>
         <button class="destination" type="button" data-destination="schedules" title="Schedules">
           <span class="destination-icon" data-icon="clock"></span>
           <span class="destination-label">Schedules</span>
+        </button>
+        <div class="destination-spacer"></div>
+        <button class="destination account-destination" type="button" id="open-settings" title="Account and settings" aria-label="Account and settings">
+          <span class="account-avatar" aria-hidden="true">V</span>
+          <span class="destination-label">Account</span>
         </button>
       </nav>
       <aside class="sidebar" aria-label="Projects">
@@ -45,10 +51,6 @@
         <div class="projects" id="projects" role="tree" aria-label="Projects"></div>
         <div class="sidebar-foot">
           <div class="status-ext" id="status-ext"></div>
-          <button class="nav-row" id="open-settings" hidden>
-            <span class="nav-icon" data-icon="settings"></span>
-            <span class="nav-label">Settings</span>
-          </button>
         </div>
       </aside>
 

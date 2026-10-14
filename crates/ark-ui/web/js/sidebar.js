@@ -248,8 +248,8 @@ export class Sidebar {
     });
   }
 
-  /// The app's rows above the projects and status items, and Settings once an app has
-  /// registered a section.
+  /// The app's rows above the projects and status items. The account entry lives in the fixed
+  /// rail, and appears once an app has registered a settings section.
   renderExtensions() {
     this.settings.hidden = !registry.settings.size;
     clear(this.top);

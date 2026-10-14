@@ -1719,6 +1719,21 @@ const NARRATION = "Reading the notes slowly, one line at a time, so that a windo
 
 // Scripts that run before the page, for scenarios that replace a browser API.
 const inits = {
+  dictation: () => {
+    const track = { stop() { window.__trackStopped = true; } };
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => ({ getTracks: () => [track] }) }, configurable: true });
+    window.AudioContext = class {
+      constructor() { this.sampleRate = 48000; }
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      createScriptProcessor() {
+        const node = { connect() {}, disconnect() {}, onaudioprocess: null };
+        window.__dictationNode = node;
+        return node;
+      }
+      close() { return Promise.resolve(); }
+      get destination() { return {}; }
+    };
+  },
   // The window on a runtime it visits (ADR 0029): Tauri defines `__TAURI__` there too.
   visit: () => {
     window.__TAURI__ = {};
@@ -1752,6 +1767,57 @@ const inits = {
       close() {}
     };
   },
+};
+
+scenarios.dictation = async (page) => {
+  const input = page.locator("#input");
+  const mic = page.locator("#dictate");
+  await mic.waitFor();
+  assert.equal(await mic.isDisabled(), true, "dictation waits for runtime availability");
+  await page.waitForFunction(() => !document.querySelector("#dictate")?.disabled);
+  assert.equal(await mic.getAttribute("aria-label"), "Start dictation");
+  await input.fill("Hola 👋 mundo");
+  await input.evaluate((el) => { el.focus(); el.setSelectionRange(7, 7); el.dispatchEvent(new Event("select")); });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => {
+    const samples = new Float32Array(9600).fill(0.15);
+    window.__dictationNode.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
+  });
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "Audio could not reach" }).waitFor();
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => {
+    const samples = new Float32Array(9600).fill(0.15);
+    window.__dictationNode.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
+  });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictation-status")?.textContent === "Dictation added");
+  assert.equal(await input.inputValue(), "Hola 👋 Texto dictado. mundo", "UTF-16 caret and every draft character are preserved");
+  assert.equal(await page.evaluate(() => window.__trackStopped), true, "the microphone is released");
+  assert.equal(await input.evaluate((el) => el === document.activeElement), true, "completion does not steal focus");
+
+  await page.evaluate(() => { window.__trackStopped = false; });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => dispatchEvent(new Event("pagehide")));
+  assert.equal(await page.evaluate(() => window.__trackStopped), true, "hiding the page releases the microphone");
+
+  await page.evaluate(() => {
+    window.__trackStopped = false;
+    const track = { stop() { window.__trackStopped = true; } };
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => ({ getTracks: () => [track] }) }, configurable: true });
+    window.AudioContext = class { constructor() { throw new Error("audio setup failed"); } };
+  });
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "could not be transcribed" }).waitFor();
+  assert.equal(await page.evaluate(() => window.__trackStopped), true, "audio setup failure releases the microphone");
+
+  await page.evaluate(() => Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); } }, configurable: true }));
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "Microphone access is off" }).waitFor();
+  assert.equal(await input.inputValue(), "Hola 👋 Texto dictado. mundo", "a permission error preserves the draft");
 };
 
 // A chat keeps working when the person opens another: its question waits in the tray with the
@@ -2572,6 +2638,37 @@ try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.on("pageerror", (e) => errors.push(e.stack || String(e)));
   if (inits[scenario]) await page.addInitScript(inits[scenario]);
+  if (scenario === "dictation") {
+    let upload = "test-upload";
+    let firstStatus = true;
+    let activeUpload = false;
+    let failChunk = true;
+    await page.route("**/rpc", async (route) => {
+      const body = JSON.parse(route.request().postData() || "{}");
+      if (body.method === "dictation_status" && firstStatus) {
+        firstStatus = false;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (body.method === "dictation_begin") {
+        if (activeUpload) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: false, error: "already active" }) });
+        activeUpload = true;
+      }
+      if (body.method === "dictation_chunk" && failChunk) {
+        failChunk = false;
+        return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: false, error: "network failed" }) });
+      }
+      if (body.method === "dictation_cancel" || body.method === "dictation_finish") activeUpload = false;
+      const replies = {
+        dictation_status: { status: "ready" },
+        dictation_begin: { id: upload, chunk_bytes: 262144, max_bytes: 16777216 },
+        dictation_chunk: { next: Number(body.params?.index || 0) + 1 },
+        dictation_finish: { text: "Texto dictado." },
+        dictation_cancel: { cancelled: true },
+      };
+      if (Object.hasOwn(replies, body.method)) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, result: replies[body.method] }) });
+      await route.continue();
+    });
+  }
   if (scenario === "ready") {
     await page.route("**/*", async (route) => {
       const body = route.request().postData() || "";

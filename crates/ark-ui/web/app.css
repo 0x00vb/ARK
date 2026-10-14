@@ -1024,6 +1024,12 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   padding: 0 4px 0 0;
 }
 .composer textarea::placeholder { color: var(--text-3); }
+.dictation-status {
+  min-height: 18px; margin: 4px 4px -2px 0;
+  color: var(--text-3); font-size: 12px; line-height: 18px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dictation-status[hidden] { display: none; }
 .composer-bar { min-height: 32px; display: flex; align-items: center; gap: 4px; margin-top: 8px; }
 .chip {
   height: 30px; min-height: 30px; display: inline-flex; align-items: center;
@@ -1075,6 +1081,16 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .composer[data-empty="true"]:not([data-running="true"]) .send { background: var(--active); color: var(--text-3); cursor: default; }
 .send-icon { position: absolute; display: grid; place-items: center; transition: opacity 200ms var(--ease), scale 200ms var(--ease), filter 200ms var(--ease); }
 .send-icon.stop { opacity: 0; scale: 0.25; filter: blur(4px); }
+.composer-bar .dictate { order: 1; width: 30px; height: 30px; flex: none; }
+.composer-bar .dictate[data-state="recording"] { color: var(--err); background: color-mix(in srgb, var(--err) 9%, transparent); }
+.composer-bar .dictate[data-state="unavailable"] { color: var(--text-3); opacity: 0.72; }
+.composer-bar .dictate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (hover: none) and (pointer: coarse) {
+  .composer-bar .dictate { width: 40px; height: 40px; margin-block: -5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-bar .dictate { transition: none; }
+}
 .composer[data-running="true"][data-empty="true"] .send-icon.go { opacity: 0; scale: 0.25; filter: blur(4px); }
 .composer[data-running="true"][data-empty="true"] .send-icon.stop { opacity: 1; scale: 1; filter: blur(0); }
 

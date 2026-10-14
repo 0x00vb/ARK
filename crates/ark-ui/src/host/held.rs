@@ -426,6 +426,11 @@ impl Host {
     ) -> Option<anyhow::Result<Value>> {
         let s = |k: &str| params[k].as_str().unwrap_or("").to_string();
         match method {
+            "dictation_status" | "dictation_begin" | "dictation_chunk" | "dictation_finish"
+            | "dictation_cancel" => match self.shown_held() {
+                Some(chat) => Some(self.on_place(&chat, method, params.clone()).await),
+                None => None,
+            },
             "resource" => {
                 let reference: crate::resource::ResourceRef =
                     match serde_json::from_value(params["ref"].clone()) {

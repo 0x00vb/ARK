@@ -86,6 +86,7 @@ const PATHS = {
   clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.1 1.3"/>',
   command: '<path d="M6 6V4.5A1.5 1.5 0 1 0 4.5 6H11.5A1.5 1.5 0 1 0 10 4.5V11.5A1.5 1.5 0 1 0 11.5 10H4.5A1.5 1.5 0 1 0 6 11.5z"/>',
   plus: '<path d="M8 3.5v9M3.5 8h9"/>',
+  mic: '<rect x="5.25" y="2" width="5.5" height="8" rx="2.75"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2M5.75 14h4.5"/>',
   "arrow-left": '<path d="M13 8H3.5M7.5 4l-4 4 4 4"/>',
   reload: '<path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 2.5v3h-3"/>',
   undo: '<path d="M5.5 3.5L2.5 6.5l3 3"/><path d="M2.5 6.5h7a3.5 3.5 0 0 1 0 7H7"/>',

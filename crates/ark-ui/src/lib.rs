@@ -44,6 +44,7 @@ pub mod remote;
 pub mod resource;
 mod serve;
 mod terminal;
+pub mod transcription;
 #[cfg(feature = "desktop-updater")]
 mod updates;
 mod upload;
@@ -83,6 +84,7 @@ pub struct ArkUi {
     computers: Option<computers::ComputerSetup>,
     keep_computers: Vec<(String, String, String)>,
     asset_version: Option<String>,
+    transcription: Option<Arc<dyn transcription::TranscriptionProvider>>,
     #[cfg(feature = "desktop-updater")]
     page_updates: Option<page_updates::Config>,
 }
@@ -131,9 +133,19 @@ impl ArkUi {
             computers: None,
             keep_computers: Vec::new(),
             asset_version: None,
+            transcription: None,
             #[cfg(feature = "desktop-updater")]
             page_updates: None,
         }
+    }
+    /// Speech-to-text used by the shared composer. Applications opt in; generic ARK apps do not
+    /// inherit a speech engine or model download (ADR 0070).
+    pub fn transcription_provider(
+        mut self,
+        provider: Arc<dyn transcription::TranscriptionProvider>,
+    ) -> Self {
+        self.transcription = Some(provider);
+        self
     }
     /// The accent colour, any CSS colour.
     pub fn accent(mut self, css: impl Into<String>) -> Self {
@@ -284,7 +296,14 @@ impl ArkUi {
             self.info.theme,
             self.asset_version,
         ));
-        let host = Host::new(opened.interaction, approvals, self.info, self.handlers).await;
+        let host = Host::new(
+            opened.interaction,
+            approvals,
+            self.info,
+            self.handlers,
+            self.transcription,
+        )
+        .await;
         if !self.links.is_empty() {
             host.links().set(self.links);
         }

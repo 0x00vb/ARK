@@ -701,6 +701,7 @@ class SecondaryChat {
   }
 
   dispose() {
+    this.composer.dispose();
     saveDraft(this.session, this.composer.input.value);
     saveScroll(this.session, this.elements.scroller);
     this.elements.surface.remove();

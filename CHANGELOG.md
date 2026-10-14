@@ -7,6 +7,14 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Added
+
+- The shared chat composer accepts reviewed voice dictation through an injected transcription
+  provider. The optional `ark-transcribe` provider runs Whisper locally at the selected runtime;
+  generic ARK applications keep no speech engine or model dependency ([ADR 0070](docs/adr/0070-dictation-is-client-capture-and-an-injected-transcriber.md)).
+
 ## [0.23.5] - 2026-10-14
 
 ### Fixed

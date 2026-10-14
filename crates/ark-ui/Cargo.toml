@@ -39,6 +39,8 @@ tar.workspace = true
 ring = "0.17"
 tracing.workspace = true
 base64 = "0.22"
+async-trait.workspace = true
+tempfile.workspace = true
 # `unstable`: a window with more than one webview (the Browser panel, ADR 0044). Semver-exempt,
 # so held to 2.12.
 tauri = { version = "~2.12", optional = true, features = ["tray-icon", "unstable"] }
@@ -49,6 +51,5 @@ tauri-plugin-updater = { version = "2.13", optional = true }
 minisign-verify = { version = ">=0.2, <0.4", optional = true }
 
 [dev-dependencies]
-tempfile.workspace = true
 async-trait.workspace = true
 url.workspace = true

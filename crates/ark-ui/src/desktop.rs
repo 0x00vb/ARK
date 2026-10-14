@@ -425,12 +425,15 @@ async fn ark_call(
     webview: tauri::Webview,
     state: tauri::State<'_, State>,
     method: String,
-    params: Value,
+    mut params: Value,
 ) -> Result<Value, String> {
     from_own_page(&webview)?;
     if method == "quit" {
         app.exit(0);
         return Ok(Value::Null);
+    }
+    if method.starts_with("dictation_") && params.is_object() {
+        params["_dictation_owner"] = serde_json::json!(format!("window:{}", webview.label()));
     }
     state
         .0

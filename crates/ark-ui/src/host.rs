@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -34,12 +35,81 @@ use ark_interact::{Effect, Interaction, Labels, PendingApproval, TurnControl};
 use ark_sdk::prelude::ark_core::Focus;
 use ark_sdk::prelude::ark_runtime::STATE_DIGEST_ITEMS;
 use ark_sdk::prelude::*;
+use base64::Engine as _;
 use serde::Serialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 mod copying;
 mod held;
+
+const DICTATION_CHUNK: usize = 256 * 1024;
+const DICTATION_MAX: usize = 16 * 1024 * 1024;
+
+struct DictationUpload {
+    owner: String,
+    file: tempfile::NamedTempFile,
+    next: u64,
+    bytes: usize,
+    chunks: HashMap<u64, (usize, [u8; 32])>,
+    touched: std::time::Instant,
+}
+
+fn begin_dictation_upload(
+    uploads: &mut HashMap<String, DictationUpload>,
+    owner: String,
+) -> anyhow::Result<String> {
+    if uploads.values().any(|upload| upload.owner == owner) {
+        anyhow::bail!("this client already has a dictation upload");
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    uploads.insert(
+        id.clone(),
+        DictationUpload {
+            owner,
+            file: tempfile::NamedTempFile::new()?,
+            next: 0,
+            bytes: 0,
+            chunks: HashMap::new(),
+            touched: std::time::Instant::now(),
+        },
+    );
+    Ok(id)
+}
+
+fn write_dictation_chunk(
+    upload: &mut DictationUpload,
+    owner: &str,
+    index: u64,
+    data: &[u8],
+) -> anyhow::Result<u64> {
+    if upload.owner != owner {
+        anyhow::bail!("dictation belongs to another client");
+    }
+    if data.is_empty() || data.len() > DICTATION_CHUNK {
+        anyhow::bail!("dictation chunk is empty or too large");
+    }
+    let digest: [u8; 32] = Sha256::digest(data).into();
+    if index < upload.next {
+        return match upload.chunks.get(&index) {
+            Some((len, hash)) if *len == data.len() && *hash == digest => Ok(upload.next),
+            _ => anyhow::bail!("dictation chunk conflicts with its earlier copy"),
+        };
+    }
+    if index != upload.next {
+        anyhow::bail!("dictation chunks must arrive in order");
+    }
+    if upload.bytes + data.len() > DICTATION_MAX {
+        anyhow::bail!("dictation is longer than eight minutes");
+    }
+    upload.file.write_all(data)?;
+    upload.bytes += data.len();
+    upload.chunks.insert(index, (data.len(), digest));
+    upload.next += 1;
+    upload.touched = std::time::Instant::now();
+    Ok(upload.next)
+}
 
 /// Pass the orchestrator's events to every window as `{kind: "orch", event, line, tone,
 /// activity}`: the line a task's timeline shows for it (none for events a timeline leaves
@@ -570,6 +640,8 @@ pub struct Host {
     next_id: AtomicU64,
     snapshot: Mutex<Snapshot>,
     handlers: HashMap<String, Handler>,
+    transcription: Option<Arc<dyn crate::transcription::TranscriptionProvider>>,
+    dictations: Mutex<HashMap<String, DictationUpload>>,
     info: UiInfo,
     commands: Value,
     /// The current project's orchestrator, and the task forwarding its events.
@@ -634,6 +706,109 @@ impl From<anyhow::Error> for ClientMutationError {
 }
 
 impl Host {
+    fn dictation_owner(params: &Value) -> anyhow::Result<String> {
+        let owner = params
+            .get("_dictation_owner")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if owner.is_empty() {
+            anyhow::bail!("dictation requires an authenticated client");
+        }
+        Ok(owner.to_string())
+    }
+
+    fn sweep_dictations(&self) {
+        let limit = std::time::Duration::from_secs(10 * 60);
+        self.dictations
+            .lock()
+            .unwrap()
+            .retain(|_, upload| upload.touched.elapsed() < limit);
+    }
+
+    fn dictation_begin(&self, params: &Value) -> anyhow::Result<Value> {
+        self.sweep_dictations();
+        let owner = Self::dictation_owner(params)?;
+        let Some(provider) = self.transcription.clone() else {
+            anyhow::bail!("Dictation is not included in this app.");
+        };
+        let mut uploads = self.dictations.lock().unwrap();
+        let id = begin_dictation_upload(&mut uploads, owner)?;
+        drop(uploads);
+        tokio::spawn(async move {
+            let _ = provider.prepare().await;
+        });
+        Ok(json!({ "id": id, "max_bytes": DICTATION_MAX, "chunk_bytes": DICTATION_CHUNK }))
+    }
+
+    fn dictation_chunk(&self, params: &Value) -> anyhow::Result<Value> {
+        let owner = Self::dictation_owner(params)?;
+        let id = params.get("id").and_then(Value::as_str).unwrap_or("");
+        let index = params
+            .get("index")
+            .and_then(Value::as_u64)
+            .unwrap_or(u64::MAX);
+        let encoded = params.get("data").and_then(Value::as_str).unwrap_or("");
+        let data = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+        let mut uploads = self.dictations.lock().unwrap();
+        let upload = uploads
+            .get_mut(id)
+            .ok_or_else(|| anyhow::anyhow!("dictation expired"))?;
+        let next = write_dictation_chunk(upload, &owner, index, &data)?;
+        Ok(json!({ "next": next }))
+    }
+
+    fn dictation_cancel(&self, params: &Value) -> anyhow::Result<Value> {
+        let owner = Self::dictation_owner(params)?;
+        let id = params.get("id").and_then(Value::as_str).unwrap_or("");
+        let mut uploads = self.dictations.lock().unwrap();
+        if let Some(upload) = uploads.get(id) {
+            if upload.owner != owner {
+                anyhow::bail!("dictation belongs to another client");
+            }
+        }
+        Ok(json!({ "cancelled": uploads.remove(id).is_some() }))
+    }
+
+    async fn dictation_finish(&self, params: &Value) -> anyhow::Result<Value> {
+        let owner = Self::dictation_owner(params)?;
+        let id = params.get("id").and_then(Value::as_str).unwrap_or("");
+        let language = params
+            .get("language")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let mut upload = self
+            .dictations
+            .lock()
+            .unwrap()
+            .remove(id)
+            .ok_or_else(|| anyhow::anyhow!("dictation expired"))?;
+        if upload.owner != owner {
+            self.dictations
+                .lock()
+                .unwrap()
+                .insert(id.to_string(), upload);
+            anyhow::bail!("dictation belongs to another client");
+        }
+        if upload.bytes < 3_200 || upload.bytes % 2 != 0 {
+            anyhow::bail!("the recording is empty or malformed");
+        }
+        upload.file.flush()?;
+        upload.file.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::with_capacity(upload.bytes);
+        upload.file.read_to_end(&mut bytes)?;
+        let pcm = bytes
+            .chunks_exact(2)
+            .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+            .collect();
+        let provider = self
+            .transcription
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Dictation is not included in this app."))?;
+        provider.prepare().await?;
+        let text = provider.transcribe(pcm, language).await?;
+        Ok(json!({ "text": text.trim() }))
+    }
+
     /// The process is about to exit (SIGTERM, a deploy, the app quitting). Every run stops at its
     /// next safe point (`Engine::stop_soon`): a change under way finishes, nothing new starts.
     /// An agent's task is saved to continue in the next process; a chat's turn ends as
@@ -667,6 +842,7 @@ impl Host {
         approvals: mpsc::UnboundedReceiver<PendingApproval>,
         info: UiInfo,
         handlers: HashMap<String, Handler>,
+        transcription: Option<Arc<dyn crate::transcription::TranscriptionProvider>>,
     ) -> Arc<Host> {
         // The workspace shows things beside the conversation; offer the model `present`.
         ix.set_presentation(true);
@@ -725,6 +901,8 @@ impl Host {
             next_id: AtomicU64::new(1),
             snapshot: Mutex::new(Snapshot::default()),
             handlers,
+            transcription,
+            dictations: Mutex::new(HashMap::new()),
             info,
         });
         host.refresh().await;
@@ -742,6 +920,15 @@ impl Host {
             Arc::downgrade(&host),
             host.feed.subscribe(),
         ));
+        let weak = Arc::downgrade(&host);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                let Some(host) = weak.upgrade() else { break };
+                host.sweep_dictations();
+            }
+        });
         // Chats held on other computers: their events, once their links are set.
         host.start_relays();
         if let Some(c) = &host.computer {
@@ -2647,6 +2834,14 @@ impl Host {
             return r;
         }
         match method {
+            "dictation_status" => Ok(match &self.transcription {
+                Some(provider) => serde_json::to_value(provider.state())?,
+                None => json!({ "status": "unavailable" }),
+            }),
+            "dictation_begin" => self.dictation_begin(&params),
+            "dictation_chunk" => self.dictation_chunk(&params),
+            "dictation_cancel" => self.dictation_cancel(&params),
+            "dictation_finish" => self.dictation_finish(&params).await,
             "hello" => {
                 // The person's zone, as their browser says it: "at 9" is their 9 also when
                 // this runtime runs elsewhere.
@@ -4392,5 +4587,42 @@ async fn forward_approvals(
                 h.emit(json!({ "kind": "approval_closed", "id": id }));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod dictation_tests {
+    use super::*;
+
+    #[test]
+    fn uploads_are_one_per_owner_and_expire() {
+        let mut uploads = HashMap::new();
+        let id = begin_dictation_upload(&mut uploads, "alice".into()).unwrap();
+        assert!(begin_dictation_upload(&mut uploads, "alice".into()).is_err());
+        begin_dictation_upload(&mut uploads, "bob".into()).unwrap();
+        uploads.get_mut(&id).unwrap().touched =
+            std::time::Instant::now() - std::time::Duration::from_secs(601);
+        uploads.retain(|_, upload| upload.touched.elapsed() < std::time::Duration::from_secs(600));
+        assert!(!uploads.contains_key(&id));
+        assert_eq!(uploads.len(), 1);
+    }
+
+    #[test]
+    fn chunks_enforce_owner_order_limits_and_idempotence() {
+        let mut uploads = HashMap::new();
+        let id = begin_dictation_upload(&mut uploads, "alice".into()).unwrap();
+        let upload = uploads.get_mut(&id).unwrap();
+        assert!(write_dictation_chunk(upload, "mallory", 0, b"one").is_err());
+        assert!(write_dictation_chunk(upload, "alice", 1, b"one").is_err());
+        assert_eq!(
+            write_dictation_chunk(upload, "alice", 0, b"one").unwrap(),
+            1
+        );
+        assert_eq!(
+            write_dictation_chunk(upload, "alice", 0, b"one").unwrap(),
+            1
+        );
+        assert!(write_dictation_chunk(upload, "alice", 0, b"two").is_err());
+        assert!(write_dictation_chunk(upload, "alice", 1, &vec![0; DICTATION_CHUNK + 1]).is_err());
     }
 }

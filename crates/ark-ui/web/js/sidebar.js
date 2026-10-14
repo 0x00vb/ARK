@@ -10,6 +10,18 @@ import { uploadFolder } from "./drop.js";
 
 // Chats listed per project before "Show more".
 const SHOWN = 8;
+const HIDDEN_PROJECTS = "ark-hidden-projects";
+
+function storedHiddenProjects() {
+  try {
+    const entries = JSON.parse(localStorage.getItem(HIDDEN_PROJECTS) || "[]");
+    return new Map(Array.isArray(entries)
+      ? entries.filter((entry) => entry && typeof entry.id === "string").map((entry) => [entry.id, entry.name || "Project"])
+      : []);
+  } catch {
+    return new Map();
+  }
+}
 
 export class Sidebar {
   constructor(api) {
@@ -24,6 +36,9 @@ export class Sidebar {
     this.folds = {};
     this.current = null;
     this.all = new Set();
+    // This is presentation state only. Hiding a project never changes the host's project,
+    // folder or chats, and can be undone from the Add project menu.
+    this.hidden = storedHiddenProjects();
     // Chats running a turn now, and their projects (`working` from the host).
     this.working = new Set();
     this.workingProjects = new Set();
@@ -51,6 +66,51 @@ export class Sidebar {
     this.refresh();
   }
 
+  saveHidden() {
+    try {
+      localStorage.setItem(HIDDEN_PROJECTS, JSON.stringify([...this.hidden].map(([id, name]) => ({ id, name }))));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  hide(p) {
+    this.hidden.set(p.id, p.name);
+    if (!this.saveHidden()) {
+      this.hidden.delete(p.id);
+      this.api.toast("Could not save the sidebar preference");
+      return;
+    }
+    this.refresh();
+    this.api.toast(`${p.name} was removed from the sidebar`);
+  }
+
+  restore(id) {
+    const name = this.hidden.get(id) || "Project";
+    this.hidden.delete(id);
+    if (!this.saveHidden()) {
+      this.hidden.set(id, name);
+      this.api.toast("Could not save the sidebar preference");
+      return;
+    }
+    this.refresh();
+    this.api.toast(`${name} was restored to the sidebar`);
+  }
+
+  async addProject(params) {
+    if (!await this.api.addProject(params)) return;
+    await this.restoreOpenedProject();
+  }
+
+  async restoreOpenedProject() {
+    try {
+      const opened = (await this.api.call("projects")).find((p) => p.current);
+      if (opened && this.hidden.has(opened.id)) return this.restore(opened.id);
+    } catch {}
+    this.refresh();
+  }
+
   async refresh(currentId) {
     if (currentId !== undefined) this.currentId = currentId;
     const gen = ++this.gen;
@@ -67,12 +127,19 @@ export class Sidebar {
       if (this.current && this.folds[this.current] === undefined) this.folds[this.current] = true;
       this.current = current;
     }
-    const chats = await Promise.all(projects.map((p) =>
+    // Keep the saved labels current while a project is hidden. Drop old entries if its host no
+    // longer lists the project, so a future project cannot inherit the old presentation state.
+    const known = new Set(projects.map((p) => p.id));
+    for (const id of this.hidden.keys()) if (!known.has(id)) this.hidden.delete(id);
+    projects.forEach((p) => { if (this.hidden.has(p.id)) this.hidden.set(p.id, p.name); });
+    this.saveHidden();
+    const visible = projects.filter((p) => !this.hidden.has(p.id));
+    const chats = await Promise.all(visible.map((p) =>
       this.unfolded(p) ? this.api.call("sessions", { project: p.id }).catch(() => []) : null));
     // A newer refresh started meanwhile; it draws.
     if (gen !== this.gen) return;
     clear(this.tree);
-    projects.forEach((p, i) => this.tree.append(this.project(p, chats[i])));
+    visible.forEach((p, i) => this.tree.append(this.project(p, chats[i])));
   }
 
   project(p, sessions) {
@@ -196,6 +263,8 @@ export class Sidebar {
           this.api.toast(e.message);
         }
       }),
+      h("div.menu-sep"),
+      item("Remove from sidebar", () => this.hide(p)),
       // The app's own actions on a project (`ark.action({ where: "project" })`).
       ...registry.actions
         .filter((a) => {
@@ -213,19 +282,28 @@ export class Sidebar {
     const item = (label, run) => h("button.menu-item", { type: "button", onclick: () => { menu.close(); run(); } }, h("span", label));
     // A folder on the runtime's computer: picked in the window, typed in a browser there. A
     // folder on this device, wherever the runtime runs: sent (a browser cannot name a path).
+    const hidden = [...this.hidden];
     const menu = this.api.popover(anchor, [
       (this.api.canPickFolder || this.api.isLocal()) && item("Choose a folder…", async () => {
         const path = await this.folder(anchor, "Open a folder as a project");
-        if (path) this.api.addProject({ path });
+        if (path) this.addProject({ path });
       }),
-      !this.api.canPickFolder && item("Upload a folder…", () => uploadFolder(this.api)),
+      !this.api.canPickFolder && item("Upload a folder…", () => uploadFolder({
+        ...this.api,
+        addProject: (params) => this.addProject(params),
+        openProject: async (id) => {
+          if (await this.api.openProject(id)) await this.restoreOpenedProject();
+        },
+      })),
       h("div.menu-sep"),
+      ...hidden.map(([id, projectName]) => item(`Restore ${projectName}`, () => this.restore(id))),
+      hidden.length ? h("div.menu-sep") : null,
       name,
     ].filter(Boolean));
     name.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && name.value.trim()) {
         menu.close();
-        this.api.addProject({ name: name.value.trim() });
+        this.addProject({ name: name.value.trim() });
       }
     });
     if (!touch()) name.focus();

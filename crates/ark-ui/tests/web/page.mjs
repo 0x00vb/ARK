@@ -1932,6 +1932,41 @@ async function expandedProjects(page) {
 }
 scenarios["expanded-projects"] = expandedProjects;
 
+// Removing a project from the sidebar changes only a local presentation preference. Its current
+// chat keeps running, the host still lists the project, the preference survives reload, and the
+// Add project menu provides the recovery path.
+async function hiddenProject(page) {
+  const before = await page.evaluate(() => ({
+    project: window.ark.summary().project,
+    session: window.ark.summary().session.id,
+  }));
+  const row = page.locator(".project-row[aria-current='true']");
+  await row.locator(".project-more").click();
+  await page.getByRole("button", { name: "Remove from sidebar", exact: true }).click();
+  await page.waitForFunction((id) => ![...document.querySelectorAll(".project")]
+    .some((project) => project.dataset.id === id), before.project.id);
+  assert.equal(await page.evaluate(() => window.ark.summary().session.id), before.session);
+  assert.equal(await page.evaluate(() => window.ark.summary().project.id), before.project.id);
+  assert.ok(await page.evaluate((id) => window.ark.call("projects").then((projects) => projects.some((project) => project.id === id)), before.project.id));
+
+  await page.reload();
+  await page.locator("#input").waitFor();
+  assert.equal(await page.locator(`.project[data-id="${before.project.id}"]`).count(), 0, "hidden project stays hidden after reload");
+  await page.locator("#add-project").click();
+  const name = page.getByRole("textbox", { name: "New project name" });
+  await name.fill(before.project.name);
+  await name.press("Enter");
+  await page.locator(`.project[data-id="${before.project.id}"]`).waitFor();
+
+  await page.locator(`.project[data-id="${before.project.id}"] .project-more`).click();
+  await page.getByRole("button", { name: "Remove from sidebar", exact: true }).click();
+  await page.locator(`.project[data-id="${before.project.id}"]`).waitFor({ state: "detached" });
+  await page.locator("#add-project").click();
+  await page.getByRole("button", { name: `Restore ${before.project.name}`, exact: true }).click();
+  await page.locator(`.project[data-id="${before.project.id}"]`).waitFor();
+}
+scenarios["hidden-project"] = hiddenProject;
+
 // Multi-chat controls use the same quiet tab grammar as artifacts. Split view has one clear
 // scope, so project views disappear while it is open and return on every exit path.
 async function chatWorkspacePolish(page) {

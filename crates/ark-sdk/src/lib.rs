@@ -885,6 +885,7 @@ pub struct ArkBuilder {
     workers: Option<WorkersChoice>,
     connections: Option<ConnectionsChoice>,
     secrets: Option<Arc<dyn ark_connect::Secrets>>,
+    sources: Vec<Arc<dyn ark_tools::ToolSource>>,
 }
 enum CodeChoice {
     Default,
@@ -947,6 +948,7 @@ impl Default for ArkBuilder {
             workers: None,
             connections: None,
             secrets: None,
+            sources: Vec::new(),
         }
     }
 }
@@ -971,6 +973,12 @@ impl ArkBuilder {
     /// Replace the whole registry (e.g. one built elsewhere).
     pub fn registry(mut self, registry: Registry) -> Self {
         self.registry = registry;
+        self
+    }
+    /// Add a consumer-owned source whose adapters can change between turns.
+    /// The engine snapshots it at the start of each turn.
+    pub fn source(mut self, source: Arc<dyn ark_tools::ToolSource>) -> Self {
+        self.sources.push(source);
         self
     }
     /// The agent's persona, capabilities, distillers and knowledge.
@@ -1232,6 +1240,9 @@ impl ArkBuilder {
                 .distillers
                 .push(Arc::new(ark_connect::services::distill));
             sources.push(Arc::new(c.clone()));
+        }
+        for source in self.sources {
+            engine.add_source(source);
         }
         if let Some(p) = &processes {
             engine.register(Arc::new(ark_proc::ProcessTool(p.clone())));

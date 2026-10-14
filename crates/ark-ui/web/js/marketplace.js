@@ -32,6 +32,7 @@ function marketplace(el, ark) {
       mark: offer.name?.slice(0, 1).toUpperCase() || "•",
       summary: offer.summary,
       category: offer.categories?.[0] || "Plugins",
+      operations: offer.operations,
       disclosure: offer.disclosure,
     })) : [];
     connections = new Map((linked?.connections || []).map((connection) => [connection.offer, connection]));
@@ -104,7 +105,7 @@ function marketplace(el, ark) {
       h("div.market-detail-head", back),
       h("section.market-detail", entryIcon(entry), h("div", h("h2", entry.name), h("p", entry.summary))),
       h("div.market-detail-actions", primary, added
-        ? h("p.market-state", connection?.state === "connected" ? "Connected for your ARK Account." : managed ? "Connect an account in your browser. Adding never gives an agent access." : "Connect requires a signed-in ARK Account and a configured managed provider.")
+        ? h("p.market-state", connection?.state === "connected" ? "Connected for your ARK Account. ARK asks before each action." : managed ? "Connect an account in your browser. Adding never gives an agent access." : "Connect requires a signed-in ARK Account and a configured managed provider.")
         : h("p.market-state", "Adding does not connect an account or give an agent access.")),
       h("dl.market-facts", h("div", h("dt", "Connection"), h("dd", "Requires an ARK Account")), h("div", h("dt", "Data"), h("dd", data)), h("div", h("dt", "Access"), h("dd", "Each action still asks for approval when needed"))),
       added ? h("button.btn.ghost.small.market-remove-detail", { type: "button", onclick: () => remove(entry) }, "Remove") : null,

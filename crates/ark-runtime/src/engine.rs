@@ -625,7 +625,8 @@ impl Engine {
         let blobs = StoreBlobs(&self.store);
         let ctx = RunCtx::new(&blobs)
             .with_workspace(self.workspace_dir(project)?)
-            .with_work(self.work.clone(), self.continues.clone());
+            .with_work(self.work.clone(), self.continues.clone())
+            .with_invocation(inv.id.as_str());
 
         match registry.run(action, input, &ctx).await {
             Ok(out) => {

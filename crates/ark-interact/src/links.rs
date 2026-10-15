@@ -123,6 +123,8 @@ const IDLE: Duration = Duration::from_secs(40);
 const CALL: Duration = Duration::from_secs(8);
 /// How long one call on a project's copy may take (a folder read, a part over a slow link).
 const COPY: Duration = Duration::from_secs(180);
+/// First dictation may download its model before transcribing up to eight minutes of audio.
+const DICTATION: Duration = Duration::from_secs(15 * 60);
 
 impl Links {
     /// From now on, these links (replacing the ones before). Each is followed in the
@@ -289,9 +291,10 @@ impl Links {
         );
         let f = self.get(runtime)?;
         // A copy reads or writes a folder there: it may take longer than a call.
-        let limit = match method.starts_with("copy_") {
-            true => COPY,
-            false => CALL,
+        let limit = match method {
+            "dictation_finish" => DICTATION,
+            name if name.starts_with("copy_") => COPY,
+            _ => CALL,
         };
         let v = call_within(&f, method, params, limit).await?;
         // A call that answered: it is there, whatever the follower last saw.

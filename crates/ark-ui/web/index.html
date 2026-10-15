@@ -85,8 +85,10 @@
           <div class="palette" id="slash" hidden></div>
           <form class="composer" id="composer" autocomplete="off">
             <textarea id="input" rows="1" placeholder="Ask anything" spellcheck="true"></textarea>
+            <div class="dictation-status" id="dictation-status" role="status" aria-live="polite" hidden></div>
             <div class="composer-bar">
               <button type="button" class="icon-btn attach" id="attach" title="Add files" aria-label="Add files" data-icon="plus"></button>
+              <button type="button" class="icon-btn dictate" id="dictate" aria-label="Start dictation" aria-describedby="dictation-status" data-icon="mic"></button>
               <button type="button" class="chip place-chip" id="place-chip" hidden></button>
               <button type="button" class="chip model-chip" id="model-chip" title="Model"></button>
               <button type="button" class="chip mode-chip" id="mode-chip" title="Execution mode (⇧Tab)" aria-haspopup="menu">Manual</button>

@@ -38,6 +38,12 @@ pub const CHAT_CALLS: &[&str] = &[
     "chat_key",
     "chat_worker_offers",
     "chat_worker_setup",
+    // Person-started uploads stay on the computer chosen for that recording.
+    "dictation_status",
+    "dictation_begin",
+    "dictation_chunk",
+    "dictation_finish",
+    "dictation_cancel",
     // The project's copy there (ADR 0052, Project copy).
     "copy_state",
     "copy_put",

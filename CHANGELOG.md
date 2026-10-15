@@ -9,6 +9,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+
+- The shared composer accepts reviewed voice dictation through an optional transcription
+  provider at the chosen computer. The optional `ark-transcribe` crate runs Whisper locally
+  ([ADR 0070](docs/adr/0070-dictation-is-client-capture-and-an-injected-transcriber.md)).
+
 ### Changed
 
 - Test builds use an unoptimized Cargo profile for faster feedback. Development and release

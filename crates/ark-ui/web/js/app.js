@@ -99,6 +99,7 @@ const api = {
   // This computer as a sentence names it ("this Mac"), once the places are read.
   hereName: () => places?.here,
   pendingPlace: () => places?.pending || null,
+  dictationRoute: () => ({ place: places?.pending || state.summary?.place?.name || "", session: state.sessionId || "", runtime: places?.pending ? undefined : state.summary?.location?.runtime }),
   pendingModel: () => composer?.pendingModel || "",
   placeChanged: (place) => composer?.placeChanged(place),
   // Resolves once the page shows chat `id`, rebuilt (a chat the host just opened).
@@ -592,6 +593,7 @@ class SecondaryChat {
     const chat = this;
     this.api = Object.create(base);
     this.api.summary = () => chat.summary;
+    this.api.dictationRoute = () => ({ place: chat.summary?.place?.name || "", session: chat.session, runtime: chat.summary?.location?.runtime });
     this.api.submit = (text) => chat.submit(text);
     this.api.send = this.api.submit;
     this.api.steer = (text) => transport.call("chat_steer", { session: chat.session, text });
@@ -714,6 +716,7 @@ class SecondaryChat {
   }
 
   dispose() {
+    this.composer.dispose();
     saveDraft(this.session, this.composer.input.value);
     saveScroll(this.session, this.elements.scroller);
     this.elements.surface.remove();
@@ -1241,6 +1244,7 @@ function applySummary(s) {
   rememberTab(s);
   if (changed) applyPrimaryChange(before, state.sessionId);
   places?.show(s, state.running);
+  composer.dictation.routeChanged();
   // A chat on a computer that does not answer reads only.
   const away = !!s.place && s.place.state !== "ok";
   $("#composer").dataset.away = String(away);

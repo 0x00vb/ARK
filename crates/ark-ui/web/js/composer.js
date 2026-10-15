@@ -8,6 +8,9 @@ import { registry } from "./ext.js";
 import { chooseFiles } from "./drop.js";
 import { label } from "./keys.js";
 import { programSheet } from "./places.js";
+import { DictationController } from "./dictation.js";
+
+let composerNumber = 0;
 
 const REMOTE_COMMANDS = new Set(["new", "resume", "project", "sessions", "help", "waiting"]);
 
@@ -22,23 +25,59 @@ export class Composer {
     this.model = elements.model || $("#model-chip");
     this.mode = elements.mode || $("#mode-chip");
     this.attach = elements.attach || $("#attach");
+    const dictationId = `dictation-status-${++composerNumber}`;
+    this.mic = elements.mic || this.form.querySelector(".dictate") || h("button.icon-btn.dictate", { type: "button", "aria-label": "Start dictation" });
+    this.dictationStatus = elements.dictationStatus || this.form.querySelector(".dictation-status") || h("div.dictation-status", { role: "status", "aria-live": "polite", hidden: true });
+    if (!this.dictationStatus.id) this.dictationStatus.id = dictationId;
+    this.mic.setAttribute("aria-describedby", this.dictationStatus.id);
+    if (!this.mic.isConnected) this.attach.after(this.mic);
+    if (!this.dictationStatus.isConnected) this.input.after(this.dictationStatus);
     this.queue = [];
     this.running = false;
     this.commands = [];
     this.slashIndex = 0;
+    this.caret = this.input.selectionEnd || 0;
 
     this.send.append(h("span.send-icon.go", icon("arrow-up")), h("span.send-icon.stop", icon("stop")));
     this.input.addEventListener("input", () => this.changed());
+    for (const event of ["input", "select", "keyup", "pointerup", "focus"]) this.input.addEventListener(event, () => { this.caret = this.input.selectionEnd ?? this.input.value.length; });
     this.input.addEventListener("keydown", (e) => this.key(e));
     this.form.addEventListener("submit", (e) => {
       e.preventDefault();
+      if (this.dictation.beforeSubmit()) return;
       if (this.running && !this.input.value.trim()) api.cancel();
       else this.submit(false);
     });
     this.model.addEventListener("click", () => this.modelMenu());
     this.mode.addEventListener("click", () => this.modeMenu());
     this.attach?.addEventListener("click", () => chooseFiles(api, this));
+    this.dictation = new DictationController({
+      api,
+      button: this.mic,
+      status: this.dictationStatus,
+      insert: (text) => this.insertDictation(text),
+    });
     this.changed();
+  }
+
+  insertDictation(text) {
+    const returnToInput = document.activeElement === this.mic || document.activeElement === document.body;
+    const at = Math.max(0, Math.min(this.caret ?? this.input.value.length, this.input.value.length));
+    const before = this.input.value.slice(0, at);
+    const after = this.input.value.slice(at);
+    const left = before && !/\s$/.test(before) ? " " : "";
+    const right = after && !/^\s/.test(after) ? " " : "";
+    const inserted = `${left}${String(text).trim()}${right}`;
+    this.input.value = before + inserted + after;
+    this.caret = at + inserted.length;
+    this.changed();
+    if (returnToInput) this.input.focus();
+    if (document.activeElement === this.input) this.input.setSelectionRange(this.caret, this.caret);
+    this.input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  dispose() {
+    this.dictation.dispose();
   }
 
   focus() {
@@ -46,6 +85,7 @@ export class Composer {
   }
 
   set(text) {
+    this.dictation.cancel();
     this.input.value = text;
     this.changed();
     this.focus();
@@ -99,6 +139,7 @@ export class Composer {
   }
 
   placeChanged(place) {
+    this.dictation.routeChanged();
     this.backends = null;
     this.backendsFor = null;
     this.pendingModel = "";
@@ -185,6 +226,7 @@ export class Composer {
     }
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
+      if (this.dictation.beforeSubmit()) return;
       this.submit(e.metaKey || e.ctrlKey);
     }
   }

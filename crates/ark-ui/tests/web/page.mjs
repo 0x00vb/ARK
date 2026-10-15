@@ -1820,6 +1820,23 @@ const NARRATION = "Reading the notes slowly, one line at a time, so that a windo
 
 // Scripts that run before the page, for scenarios that replace a browser API.
 const inits = {
+  dictation: () => {
+    const track = { stop() { window.__trackStopped = true; } };
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => ({ getTracks: () => [track] }) }, configurable: true });
+    window.AudioContext = class {
+      constructor() { this.sampleRate = 48000; }
+      createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
+      createScriptProcessor() {
+        const node = { connect() {}, disconnect() {}, onaudioprocess: null };
+        window.__dictationNode = node;
+        return node;
+      }
+      close() { return Promise.resolve(); }
+      get destination() { return {}; }
+    };
+    window.__TestAudio = window.AudioContext;
+    window.__TestMedia = navigator.mediaDevices;
+  },
   // The window on a runtime it visits (ADR 0029): Tauri defines `__TAURI__` there too.
   visit: () => {
     window.__TAURI__ = {};
@@ -1853,6 +1870,196 @@ const inits = {
       close() {}
     };
   },
+};
+
+let dictationFixture;
+scenarios.dictation = async (page) => {
+  const fixtureWait = async (predicate) => {
+    for (let i = 0; i < 200 && !predicate(); i++) await page.waitForTimeout(10);
+    assert.ok(predicate(), "dictation transport settled");
+  };
+  const chooseServer = async () => {
+    await page.locator("#place-chip").click();
+    await page.locator(".places-pop.open").getByText("vps", { exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "ready");
+  };
+  const sample = () => page.evaluate(() => window.__dictationNode.onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(9600).fill(0.15) } }));
+  const input = page.locator("#input");
+  const mic = page.locator("#dictate");
+  await mic.waitFor();
+  assert.equal(await mic.isDisabled(), true, "dictation waits for runtime availability");
+  await page.waitForFunction(() => !document.querySelector("#dictate")?.disabled);
+  assert.equal(await mic.getAttribute("aria-label"), "Start dictation");
+  await input.fill("Hola 👋 mundo");
+  await input.evaluate((el) => { el.focus(); el.setSelectionRange(7, 7); el.dispatchEvent(new Event("select")); });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => {
+    const samples = new Float32Array(9600).fill(0.15);
+    window.__dictationNode.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
+  });
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "Audio could not reach" }).waitFor();
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => {
+    const samples = new Float32Array(9600).fill(0.15);
+    window.__dictationNode.onaudioprocess({ inputBuffer: { getChannelData: () => samples } });
+  });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictation-status")?.textContent === "Dictation added");
+  assert.equal(await input.inputValue(), "Hola 👋 Texto dictado. mundo", "UTF-16 caret and every draft character are preserved");
+  assert.equal(await page.evaluate(() => window.__trackStopped), true, "the microphone is released");
+  assert.equal(await input.evaluate((el) => el === document.activeElement), true, "completion does not steal focus");
+
+  await page.evaluate(() => { window.__trackStopped = false; });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => dispatchEvent(new Event("pagehide")));
+  assert.equal(await page.evaluate(() => window.__trackStopped), true, "hiding the page releases the microphone");
+
+  await page.evaluate(() => {
+    window.__trackStopped = false;
+    const track = { stop() { window.__trackStopped = true; } };
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => ({ getTracks: () => [track] }) }, configurable: true });
+    window.AudioContext = class { constructor() { throw new Error("audio setup failed"); } };
+  });
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "could not be transcribed" }).waitFor();
+  assert.equal(await page.evaluate(() => window.__trackStopped), true, "audio setup failure releases the microphone");
+
+  await page.evaluate(() => Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); } }, configurable: true }));
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "Microphone access is off" }).waitFor();
+  assert.equal(await input.inputValue(), "Hola 👋 Texto dictado. mundo", "a permission error preserves the draft");
+
+  await page.evaluate(() => {
+    window.AudioContext = window.__TestAudio;
+    Object.defineProperty(navigator, "mediaDevices", { value: window.__TestMedia, configurable: true });
+    window.__trackStopped = false;
+  });
+  dictationFixture.failBegin = true;
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "Audio could not reach" }).waitFor();
+  assert.equal(await page.evaluate(() => window.__trackStopped), true, "Begin failure stops capture without waiting for Stop");
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => window.__dictationNode.onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(9600).fill(0.15) } }));
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "Dictation added" }).waitFor();
+  await shot(page, "dictation-complete");
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.evaluate(() => window.arkTheme.set("dark"));
+  if (await page.locator("#app").getAttribute("data-drawer") !== "open") await page.locator("#reveal-sidebar").click();
+  await page.locator("#toggle-sidebar").click();
+  await page.waitForFunction(() => document.querySelector(".sidebar").getBoundingClientRect().right <= 0);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "dictation keeps the narrow composer within the window");
+  await shot(page, "dictation-narrow-dark");
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "no-preference" });
+  await page.evaluate(() => window.arkTheme.set("light"));
+
+  // Stop before the first recording poll. First-use download progress must still appear,
+  // then change to Transcribing when preparation finishes.
+  dictationFixture.downloading = true;
+  dictationFixture.finishWait = new Promise((resolve) => { dictationFixture.releaseFinish = resolve; });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await sample();
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "Downloading 148 MB speech model" }).waitFor();
+  dictationFixture.downloading = false;
+  await page.locator("#dictation-status", { hasText: /^Transcribing$/ }).waitFor();
+  dictationFixture.releaseFinish();
+  dictationFixture.finishWait = null;
+  await page.locator("#dictation-status", { hasText: "Dictation added" }).waitFor();
+
+  // Cancel while Begin is delayed, switch chats, then release the late upload. Cleanup must
+  // still name the original computer and its result must not reach the new draft.
+  dictationFixture.localUnavailable = true;
+  await chooseServer();
+  dictationFixture.beginWait = new Promise((resolve) => { dictationFixture.releaseBegin = resolve; });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  const beforeCancel = dictationFixture.seen.filter((r) => r.method === "dictation_cancel").length;
+  await fixtureWait(() => dictationFixture.seen.at(-1)?.method === "dictation_begin");
+  const firstSession = await page.evaluate(() => window.ark.summary().session.id);
+  await page.evaluate(() => window.ark.newSession());
+  await page.waitForFunction((id) => window.ark.summary()?.session?.id !== id, firstSession);
+  const switchedDraft = await input.inputValue();
+  dictationFixture.releaseBegin();
+  dictationFixture.beginWait = null;
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "unavailable");
+  await fixtureWait(() => dictationFixture.seen.filter((r) => r.method === "dictation_cancel").length > beforeCancel && dictationFixture.active.size === 0);
+  assert.equal(await input.inputValue(), switchedDraft, "a late upload cannot alter the next chat's draft");
+  assert.equal(dictationFixture.active.size, 0, "late Begin is cancelled");
+  assert.equal(dictationFixture.seen.filter((r) => r.method === "dictation_cancel").at(-1).place, "vps", "late cleanup stays on the original computer");
+  await mic.click();
+  assert.equal(await mic.getAttribute("data-state"), "unavailable", "a missing local provider never uses the remote provider implicitly");
+  await chooseServer();
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await sample();
+  await mic.click();
+  await page.locator("#dictation-status", { hasText: "Dictation added" }).waitFor();
+  assert.equal(dictationFixture.seen.filter((r) => r.method === "dictation_finish").at(-1).place, "vps", "pending-place dictation runs there before the first message");
+
+  // A result arriving after a chat change is discarded, even when inference cannot be stopped.
+  dictationFixture.finishWait = new Promise((resolve) => { dictationFixture.releaseFinish = resolve; });
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await sample();
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "transcribing");
+  await fixtureWait(() => dictationFixture.seen.filter((r) => r.method === "dictation_finish").length >= 3 && dictationFixture.active.size === 0);
+  const secondSession = await page.evaluate(() => window.ark.summary().session.id);
+  await page.evaluate(() => window.ark.newSession());
+  await page.waitForFunction((id) => window.ark.summary()?.session?.id !== id, secondSession);
+  const laterDraft = await input.inputValue();
+  dictationFixture.releaseFinish();
+  dictationFixture.finishWait = null;
+  await page.waitForTimeout(50);
+  assert.equal(await input.inputValue(), laterDraft, "late inference never inserts into the next chat");
+  dictationFixture.localUnavailable = false;
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => dispatchEvent(new Event("pagehide")));
+
+  // Two real split composers own distinct microphone controls. A pending permission prompt
+  // reserves capture; disposing the second pane releases it without removing the first mic.
+  await page.locator("#chat-split").click();
+  await page.waitForFunction(() => document.getElementById("app").dataset.split === "true");
+  const secondary = page.locator(".chat-surface.secondary");
+  const otherMic = secondary.locator(".dictate");
+  await otherMic.waitFor();
+  await page.waitForFunction(() => !document.querySelector(".secondary .dictate")?.disabled);
+  assert.equal(await page.locator(".dictate").count(), 2);
+  const statusIds = await page.locator(".dictate").evaluateAll((buttons) => buttons.map((b) => b.getAttribute("aria-describedby")));
+  assert.equal(new Set(statusIds).size, 2, "each microphone describes its own status");
+  await page.evaluate(() => {
+    window.__permissionRequests = 0;
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: () => {
+      window.__permissionRequests++;
+      return new Promise((resolve) => { window.__allowRecording = () => resolve({ getTracks: () => [{ stop() { window.__lateTrackStopped = true; } }] }); });
+    } }, configurable: true });
+  });
+  await otherMic.click();
+  await mic.click();
+  assert.equal(await page.evaluate(() => window.__permissionRequests), 1, "one permission prompt across split composers");
+  assert.match(await page.locator("#dictation-status").innerText(), /Another chat is listening/);
+  await shot(page, "dictation-split");
+  // Focus the primary pane before closing the secondary one.
+  await input.click();
+  await page.locator("#chat-split").click();
+  await page.evaluate(() => window.__allowRecording());
+  await page.waitForFunction(() => window.__lateTrackStopped === true);
+  assert.equal(await page.locator("#dictate").count(), 1, "closing a split preserves the primary microphone");
+  assert.equal(await secondary.count(), 0);
+  await page.evaluate(() => Object.defineProperty(navigator, "mediaDevices", { value: window.__TestMedia, configurable: true }));
+  await mic.click();
+  await page.waitForFunction(() => document.querySelector("#dictate")?.dataset.state === "recording");
+  await page.evaluate(() => dispatchEvent(new Event("pagehide")));
 };
 
 // A chat keeps working when the person opens another: its question waits in the tray with the
@@ -2701,6 +2908,48 @@ try {
   page.on("pageerror", (e) => errors.push(e.stack || String(e)));
   if (scenario === 'file-viewer-consumer') page.on('console', message => { if (message.type() === 'error') console.error('consumer console:', message.text()); });
   if (inits[scenario]) await page.addInitScript(inits[scenario]);
+  if (scenario === "dictation") {
+    let firstStatus = true;
+    let nextUpload = 0;
+    dictationFixture = { active: new Map(), seen: [], failChunk: true, failBegin: false };
+    await page.route("**/rpc", async (route) => {
+      const body = JSON.parse(route.request().postData() || "{}");
+      const fixture = dictationFixture;
+      const params = body.params || {};
+      const answer = (result) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, result }) });
+      const error = (message) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: false, error: message }) });
+      if (body.method === "places") return answer({ here: "This computer", places: [{ name: "vps", state: "ok" }] });
+      if (!body.method?.startsWith("dictation_")) return route.continue();
+      fixture.seen.push({ method: body.method, ...params });
+      if (body.method === "dictation_status" && firstStatus) {
+        firstStatus = false;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (body.method === "dictation_status") return answer({ status: !params.place && fixture.localUnavailable ? "unavailable" : fixture.downloading ? "downloading" : "ready", runtime: params.runtime || params.place || "local" });
+      if (body.method === "dictation_begin") {
+        if (fixture.failBegin) { fixture.failBegin = false; return error("network failed"); }
+        await fixture.beginWait;
+        if ([...fixture.active.values()].includes(params.place)) return error("already active");
+        const id = `test-upload-${++nextUpload}`;
+        fixture.active.set(id, params.place);
+        return answer({ id, runtime: params.runtime || params.place || "local", chunk_bytes: 262144, max_bytes: 16777216 });
+      }
+      const owner = fixture.active.get(params.id);
+      if (owner !== undefined && owner !== params.place) return error("audio reached the wrong computer");
+      if (body.method === "dictation_cancel") {
+        fixture.active.delete(params.id);
+        return answer({ cancelled: true });
+      }
+      if (owner === undefined) return error("upload missing");
+      if (body.method === "dictation_chunk") {
+        if (fixture.failChunk) { fixture.failChunk = false; return error("network failed"); }
+        return answer({ next: Number(params.index || 0) + 1 });
+      }
+      fixture.active.delete(params.id);
+      await fixture.finishWait;
+      return answer({ text: "Texto dictado." });
+    });
+  }
   if (scenario === "ready") {
     await page.route("**/*", async (route) => {
       const body = route.request().postData() || "";

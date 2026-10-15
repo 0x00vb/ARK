@@ -23,6 +23,7 @@ members = [
     "crates/ark-client",
     "crates/ark-cli",
     "crates/ark-ui",
+    "crates/ark-transcribe",
     "crates/ark-bench",
     "examples/minimal-agent",
     "examples/writing-agent",
@@ -95,6 +96,7 @@ ark-client = { path = "crates/ark-client", version = "0.24.0" }
 ark-cli = { path = "crates/ark-cli", version = "0.24.0" }
 ark-ui = { path = "crates/ark-ui", version = "0.24.0", default-features = false }
 ark-bench = { path = "crates/ark-bench", version = "0.24.0" }
+ark-transcribe = { path = "crates/ark-transcribe", version = "0.24.0" }
 
 [profile.dev]
 opt-level = 1

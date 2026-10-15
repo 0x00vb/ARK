@@ -426,6 +426,32 @@ impl Host {
     ) -> Option<anyhow::Result<Value>> {
         let s = |k: &str| params[k].as_str().unwrap_or("").to_string();
         match method {
+            "dictation_status" | "dictation_begin" | "dictation_chunk" | "dictation_finish"
+            | "dictation_cancel" => {
+                // Empty means here, even if a held chat is now shown. Never follow focus.
+                let place = match params.get("place") {
+                    Some(Value::String(place)) => place,
+                    _ => return Some(Err(anyhow::anyhow!("dictation needs its chosen computer"))),
+                };
+                if let Some(expected) = params["runtime"].as_str() {
+                    let actual = if place.is_empty() {
+                        Some(ark_interact::held::runtime_id(&self.engine))
+                    } else {
+                        self.links.runtime_id(place)
+                    };
+                    if actual.as_deref() != Some(expected) {
+                        return Some(Err(anyhow::anyhow!(
+                            "the recording's computer changed; try again"
+                        )));
+                    }
+                }
+                if place.is_empty() {
+                    return None;
+                }
+                let mut forwarded = params.clone();
+                forwarded["place"] = json!("");
+                Some(self.links.chat(place, method, forwarded).await)
+            }
             "resource" => {
                 let reference: crate::resource::ResourceRef =
                     match serde_json::from_value(params["ref"].clone()) {

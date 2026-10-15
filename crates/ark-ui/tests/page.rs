@@ -745,6 +745,11 @@ async fn chat_search_keeps_the_composer_and_keyboard_focus() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn dictation_preserves_the_editable_draft_and_explains_permission_failure() {
+    drive("dictation", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn required_extension_failure_blocks_the_workspace_and_names_the_module() {
     drive("startup-extension-failure", vec![], Duration::ZERO).await;
 }

@@ -1241,6 +1241,11 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 params["_by"] = json!(by.unwrap_or_default());
                 params["_origin"] = json!(req.header("origin").unwrap_or(""));
             }
+            if method.starts_with("dictation_") && params.is_object() {
+                let credential = session.as_deref().unwrap_or_else(|| req.token());
+                params["_dictation_owner"] =
+                    json!(format!("web:{:x}", Sha256::digest(credential.as_bytes())));
+            }
             // Only the app's own window goes to another runtime's page; a browser here would
             // move that window instead of itself (it shows the item's words).
             let out = match if method == "attention_go" {

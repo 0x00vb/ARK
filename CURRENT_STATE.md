@@ -20,7 +20,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-15 (completed branch integration)
+Last updated: 2026-10-15 (dictation integration)
 
 ## Release
 
@@ -40,8 +40,9 @@ Last updated: 2026-10-15 (completed branch integration)
 
 | What | State |
 |---|---|
-| Completed branch audit | CI's unoptimized test profile is integrated. Event automation planning, the failed-call guard, project chat creation, sidebar closure, spinner and plugin actions were already present on `main`; their old branch histories are reconciled without reapplying obsolete code. Voice dictation remains outside `main`: QA found recording-route and split-composer ownership blockers. IFC transport and hosted-model efficiency work remain active in their own trees. |
+| Completed branch audit | CI's unoptimized test profile, the historical completed branches and voice dictation are integrated on `main`. IFC transport stays deferred outside `main`; hosted-model efficiency work remains in its own tree. |
 | Models and commands follow a chat's computer | Released in v0.24.0: choosing a linked computer immediately uses its subscriptions, API keys and Ollama catalog; the selected model starts the chat there; setup stays chat-bound; local-only slash commands are omitted from completion and the command palette, and typed slash words go to the remote chat as text. Focused two-runtime Rust and WebKit tests, independent QA and the full `scripts/ci.sh` gate pass. |
+| Voice dictation (ADR 0070) | Integrated on `main`: explicit computer-bound uploads, independent split controls, permission and inference leases, immediate capture cleanup and stale-result cancellation. Authenticated two-runtime and WebKit tests cover remote routing and capture races. Full page-enabled CI passes: lint, workspace tests, 56 WebKit scenarios, release build and simulated benchmark gate. Independent source and screenshot QA is GO. Optional `ark-transcribe` installs the pinned multilingual Whisper base model only after a microphone action. Native microphone and multi-minute quality validation remain release follow-ups on macOS, Windows and Linux. |
 | Signed page updates (ADR 0067) | Released in v0.23.4. An opted-in native consumer verifies a separately signed manifest, exact native versions, a monotonic sequence and a bounded exact file set. Apply reloads only the page. A seven-second readiness failure restores the previous page while the runtime keeps running. ARK Desktop provides the first consumer and release path. |
 | Plugin marketplace (ADR 0069) | Released in v0.24.0: Plugins occupies the fixed global rail, Connections is removed from Settings and every reviewed provider integration is offered without a separate Add toggle. The Desktop bridge opens server-controlled managed connections and exposes generic, approval-gated managed actions only when an ARK Account is signed in. Connections are account-wide across that person's projects. The broker holds the provider key; Desktop does not. Composio Free is the default launch adapter. Activepieces or remote MCP remains the account-optional self-hosted path. A signed catalog refresh and second-provider swap proof remain. |
 | Ambient Desktop | Released in v0.23.0. A native consumer can keep one page and runtime alive, switch it into a compact menu-bar presentation, project agent state and restore the exact chat. Computer keeps only a volatile foreground app name for this view. Window name and identifier use a separate approval each time. Accessibility content and capture remain the existing higher-permission actions. Held SSH and Cloud chats never fall back to this Mac. |

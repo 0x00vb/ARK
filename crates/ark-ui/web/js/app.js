@@ -97,6 +97,9 @@ const api = {
   },
   // This computer as a sentence names it ("this Mac"), once the places are read.
   hereName: () => places?.here,
+  pendingPlace: () => places?.pending || null,
+  pendingModel: () => composer?.pendingModel || "",
+  placeChanged: (place) => composer?.placeChanged(place),
   // Resolves once the page shows chat `id`, rebuilt (a chat the host just opened).
   shown: async (id) => {
     for (let i = 0; i < 200 && (state.sessionId !== id || feed.booting); i++) await new Promise((r) => setTimeout(r, 25));
@@ -1104,7 +1107,9 @@ function popover(anchor, children, { above = false, end = false } = {}) {
 async function submit(text) {
   text = String(text || "").trim();
   if (!text) return;
-  if (text.startsWith("/")) return runCommand(text);
+  // A slash word that is not a command in this chat is ordinary message text. In particular,
+  // selecting another computer must never make a hidden command mutate the local empty chat.
+  if (text.startsWith("/") && composer.commandAvailable(text)) return runCommand(text);
   if (state.running) return composer.enqueue(text);
   // No model chosen yet: the text waits in the composer while the person picks one.
   if (composer.missing) {
@@ -1664,7 +1669,9 @@ function palette() {
       .filter((p) => panelShown(p))
       .map((p) => ({ label: p.title, hint: "panel", run: () => api.openPanel(p.id) })),
     ...registry.actions.filter((a) => (!a.where || a.where === "palette") && shown(a)).map((a) => ({ label: a.label, hint: "action", run: () => a.run({}, window.ark) })),
-    ...(state.commands || []).map((c) => ({ label: `/${c.name}${c.usage ? " " + c.usage : ""}`, hint: c.summary, run: () => (c.usage && !c.usage.startsWith("[") ? composer.set(`/${c.name} `) : runCommand(`/${c.name}`)) })),
+    ...(state.commands || [])
+      .filter((c) => composer.commandAvailable(`/${c.name}`))
+      .map((c) => ({ label: `/${c.name}${c.usage ? " " + c.usage : ""}`, hint: c.summary, run: () => (c.usage && !c.usage.startsWith("[") ? composer.set(`/${c.name} `) : runCommand(`/${c.name}`)) })),
   ];
   let sel = 0;
   const paint = () => {

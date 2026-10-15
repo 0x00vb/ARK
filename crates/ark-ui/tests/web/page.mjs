@@ -2516,10 +2516,32 @@ scenarios.places = async (page) => {
   await shot(page, "places-menu");
   await vps.click();
   assert.equal((await chip.innerText()).trim(), "vps");
+  assert.equal((await page.locator("#model-chip").innerText()).trim(), "vps default");
+
+  // Before the chat exists, its picker already comes from the selected computer. Commands that
+  // only work here are not advertised for a chat aimed there.
+  await page.locator("#input").fill("/");
+  await page.locator("#slash").waitFor();
+  assert.equal(await page.locator("#slash .slash-item[data-name='model']").count(), 0);
+  assert.equal(await page.locator("#slash .slash-item[data-name='help']").count(), 1);
+  await page.locator("#input").fill("");
+  await page.keyboard.press("Meta+k");
+  await page.locator(".palette-input").waitFor();
+  assert.equal(await page.locator(".palette-item", { hasText: "/model" }).count(), 0);
+  await page.keyboard.press("Escape");
+  await page.locator("#model-chip").click();
+  const remoteClaude = page.locator(".models-pop .model-group", { hasText: "Claude subscription" });
+  await remoteClaude.waitFor();
+  assert.equal(await remoteClaude.locator(".model-dot").getAttribute("data-ok"), "false");
+  assert.equal(await remoteClaude.getByRole("button", { name: "Sign in" }).count(), 0);
+  await remoteClaude.getByText("Set up after this chat starts").waitFor();
+  await page.keyboard.press("Escape");
+  await finished(page, () => page.locator("#input").fill("/model").then(() => page.keyboard.press("Enter")));
+  await page.locator(".turn .answer", { hasText: "Hello from B." }).waitFor();
   await finished(page, () => page.locator("#input").fill("jot it down").then(() => page.keyboard.press("Enter")));
   await page.locator(".turn .answer", { hasText: "Done." }).waitFor();
   assert.equal(await chip.getAttribute("aria-disabled"), "true", "fixed after the first message");
-  await page.locator("#session-title .place-mark", { hasText: "vps" }).waitFor();
+  await page.locator("#session-title .place-mark", { hasText: "vps" }).waitFor({ state: "attached" });
   await page.locator(".session[aria-current='true'] .session-place").waitFor();
   const line = page.locator("#place-line");
   await line.getByText("1 file changed on vps").waitFor();

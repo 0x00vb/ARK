@@ -311,14 +311,15 @@ ARK build, Chromium build and evidence without storing its address, keys or toke
 
 | Moment | Sees |
 |---|---|
-| A new chat | Beside the model, a place chip: `This Mac` (`This computer` off macOS). Its menu: This Mac, the person's computers, Add a computer. Fixed after the first message; afterwards a chat held elsewhere has a small mark in the sidebar and the chat header |
+| A new chat | Beside the model, a place chip: `This Mac` (`This computer` off macOS). Its menu: This Mac, the person's computers, Add a computer. Choosing another computer immediately changes the model picker to that computer's catalog and labels the server default until the person chooses another model. Fixed after the first message; afterwards a chat held elsewhere has a small mark in the sidebar and the chat header |
 | Add a computer | The host names `ssh -G` resolves from `~/.ssh/config` (Include and Match honoured, no wildcards), and a field for `user@host` |
 | The first chat on a computer | One progress line in the empty chat while ARK sets it up (Reach). A failure names the step and offers Try again |
 | The first chat for a project there | The size of what goes, and a question above 500 MB or 20,000 files. The project stays one row |
 | A chat working there | The same chat as on This Mac. Closing the laptop does not stop it. Its questions wait in This Mac's tray (ADR 0043 step 4). A phone gets them only if that computer also has the public address route (ADR 0047); a computer reached only over SSH has no address a phone can reach |
 | The computer does not answer | Its held chats stay listed, read only, with "vps is not answering" and Try again. Nothing is typed into them |
 | After a turn, when the copy differs from what This Mac has | One line: "3 files changed on vps · Bring to this Mac" |
-| A program not ready there | The model menu shows it greyed with one word: Install or Sign in. Each runs that program's own step on that computer |
+| A program not ready there | The model menu shows it greyed with one word: Install or Sign in. Each runs that program's own step on that computer once the chat has started. Before then, the menu says setup is available after the chat starts |
+| Slash commands | Completion and the command palette list only commands that work while a chat is aimed at or held on another computer. A manually typed unsupported slash word is ordinary message text for that chat, never a local command |
 
 ### Layers
 

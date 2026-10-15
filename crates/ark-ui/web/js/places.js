@@ -82,6 +82,7 @@ export class Places {
       this.pending = name;
       el.close();
       this.render();
+      this.api.placeChanged?.(this.pending);
     };
     const item = (name, here, p) => {
       const down = p && p.state !== "ok";
@@ -112,7 +113,8 @@ export class Places {
     const place = this.pending;
     this.setBusy(place);
     try {
-      let r = await this.api.call("new_session", { place });
+      const model = this.api.pendingModel?.() || "";
+      let r = await this.api.call("new_session", { place, model });
       if (r.ask) {
         this.setBusy(null);
         if (!(await this.askSize(place, r.ask))) {
@@ -120,7 +122,7 @@ export class Places {
           return true;
         }
         this.setBusy(place);
-        r = await this.api.call("new_session", { place, big: true });
+        r = await this.api.call("new_session", { place, model, big: true });
       }
       // The page rebuilds for the new chat first, so the turn draws once.
       await this.api.shown(r.session?.id);
@@ -249,7 +251,7 @@ function size(bytes) {
 export function programSheet(api, backend, place, done) {
   const verb = backend.step === "install" ? "Install" : "Sign in to";
   return terminalSheet(api, `${verb} ${backend.label}`, `on ${place}`,
-    (cols, rows) => api.call("place_setup", { program: backend.provider, step: backend.step, cols, rows }), done);
+    (cols, rows) => api.call("place_setup", { place, program: backend.provider, step: backend.step, cols, rows }), done);
 }
 
 /// A terminal over the page for one program: `open(cols, rows)` starts it and answers its

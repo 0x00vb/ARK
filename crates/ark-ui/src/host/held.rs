@@ -737,6 +737,13 @@ impl Host {
                 let chat = self.shown_held()?;
                 Some(self.on_place(&chat, "chat_models", json!({})).await)
             }
+            "place_models" => {
+                let place = s("place");
+                if place.is_empty() {
+                    return Some(Err(anyhow::anyhow!("which computer?")));
+                }
+                Some(self.links.chat(&place, "chat_models", json!({})).await)
+            }
             "worker_offers" => {
                 let chat = self.shown_held()?;
                 Some(self.on_place(&chat, "chat_worker_offers", json!({})).await)
@@ -766,7 +773,14 @@ impl Host {
             // A key for the chat's computer: the one typed, or the one saved here, which goes
             // only when the person asks for it.
             "place_key" => {
-                let chat = self.shown_held()?;
+                let chat = self.shown_held();
+                let place = chat
+                    .as_ref()
+                    .map(|chat| chat.place.clone())
+                    .unwrap_or_else(|| s("place"));
+                if place.is_empty() {
+                    return Some(Err(anyhow::anyhow!("which computer?")));
+                }
                 Some(
                     async {
                         let provider = s("provider");
@@ -780,8 +794,9 @@ impl Host {
                                 })?,
                         };
                         let v = self
-                            .on_place(
-                                &chat,
+                            .links
+                            .chat(
+                                &place,
                                 "chat_key",
                                 json!({ "provider": provider, "key": key }),
                             )
@@ -790,7 +805,7 @@ impl Host {
                             use sha2::Digest;
                             format!("{:x}", sha2::Sha256::digest(key.trim().as_bytes()))
                         };
-                        held::key_sent(&self.engine, &chat.place, &provider, &hash);
+                        held::key_sent(&self.engine, &place, &provider, &hash);
                         Ok(v)
                     }
                     .await,

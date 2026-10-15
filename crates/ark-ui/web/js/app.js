@@ -1597,7 +1597,7 @@ function destinationTarget(destination) {
 function openDestination(destination, { keyboard = false } = {}) {
   if (appEl.dataset.compact === "true") appEl.dataset.drawer = "closed";
   if (destination === "schedules") showView("schedules");
-  else showHome(false);
+  else showConversation(false);
   const target = destinationTarget(destination);
   if (keyboard) {
     target?.focus({ preventScroll: true });

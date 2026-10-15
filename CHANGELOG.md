@@ -7,6 +7,16 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [0.23.6] - 2026-10-14
+
+### Fixed
+
+- A verified native update can now restart ARK from its notice. ARK first gives active work time
+  to stop safely, then relaunches the installed app. Update failures and readiness are written to
+  the normal application log.
+- The Chat control in the fixed rail always opens the conversation instead of reopening the last
+  project view.
+
 ## [0.23.5] - 2026-10-14
 
 ### Fixed

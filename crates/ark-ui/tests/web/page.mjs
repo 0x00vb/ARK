@@ -289,12 +289,12 @@ const scenarios = {
     }));
     assert.equal(rail.divider, "none", "the fixed rail has no detached partial divider");
     assert.equal(rail.height, 800, "the fixed rail reaches the full window height");
-    assert.equal(rail.sameSurface, true, "the fixed rail and project sidebar read as one navigation surface");
-    assert.deepEqual(rail.labels, [1, 1], "wide rail labels stay available to assistive technology only");
+    assert.equal(rail.sameSurface, false, "the fixed rail stays distinct from the project sidebar without a divider");
+    assert.deepEqual(rail.labels, [1, 1, 1], "wide rail labels stay available to assistive technology only");
     await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
     assert.equal(await page.locator(".destinations").evaluate((el) =>
-      getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor), true,
-    "the navigation surface stays continuous in dark mode");
+      getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor), false,
+    "the fixed rail stays distinct in dark mode");
     await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
     await page.click("#toggle-sidebar");
     await page.waitForTimeout(350);
@@ -323,7 +323,7 @@ const scenarios = {
     });
     assert.equal(open.destinations.height, 56, "compact destinations keep their own layout row");
     assert.equal(open.mainBottom, open.destinations.top, "the bar does not cover the workspace");
-    assert.equal(await page.locator(".destination").count(), 2);
+    assert.equal(await page.locator(".destination").count(), 3);
     for (const button of await page.locator(".destination").all()) {
       const box = await button.boundingBox();
       assert.ok(box.width >= 44 && box.height >= 44, JSON.stringify(box));
@@ -433,14 +433,14 @@ const scenarios = {
 // esc does not deny it.
 async function agents(page) {
   await page.evaluate(() => window.ark.view({ id: "board", title: "Board", nav: true, render: (el) => el.append("the board") }));
-  const tab = page.locator('.view-tab[data-view="board"]');
+  const tab = page.locator('.workspace-destination[data-view="board"]');
   await tab.click();
   assert.equal(await page.locator("#stage").isVisible(), true);
   assert.equal(await page.locator("#scroller").isVisible(), false);
   // The tab names the view, so the title names the project.
   const project = await page.evaluate(async () => (await window.ark.call("projects")).find((p) => p.current).name);
   assert.equal(await page.locator("#session-title").innerText(), project);
-  assert.equal(await tab.getAttribute("aria-selected"), "true");
+  assert.equal(await tab.getAttribute("aria-current"), "page");
 
   const done = page.evaluate(() => new Promise((ok) => window.ark.on("ark:orch", (m) => m.event.type === "task_finished" && ok(m.event.state))));
   await page.evaluate(async () => {
@@ -457,17 +457,17 @@ async function agents(page) {
   assert.equal(await done, "done");
   await card.waitFor({ state: "detached" });
 
-  await page.locator('.view-tab[data-view=""]').click();
+  await page.locator('.destination[data-destination="home"]').click();
   assert.equal(await page.locator("#stage").isVisible(), false);
   assert.equal(await page.locator("#scroller").isVisible(), true);
-  assert.equal(await tab.getAttribute("aria-selected"), "false");
+  assert.equal(await tab.getAttribute("aria-current"), null);
 }
 scenarios.agents = agents;
 
 // The project's board: the person adds, drags and completes cards and opens one; an agent
 // given a card moves it by itself; what waits for the person is marked; delete has an undo.
 async function board(page) {
-  await page.locator('.view-tab[data-view="board"]').click();
+  await page.locator('.workspace-destination[data-view="board"]').click();
   const server = () => page.evaluate(async () => (await window.ark.call("board")).items.map((w) => `${w.state}:${w.title}`));
   const column = (state) => page.locator(`.bd-list[data-state="${state}"] .bd-card .bd-title`).allInnerTexts();
   // An empty board offers the input at once.
@@ -706,9 +706,9 @@ async function scheduleDestinationStates(page) {
   await view.getByRole("button", { name: "Try again" }).click();
   await view.getByRole("heading", { name: "No schedules" }).waitFor();
 
-  // Home restores its last subview instead of duplicating Chat.
+  // Chat always returns to the conversation from another project destination.
   await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat" }).click();
-  assert.equal(await page.locator('.view[data-view="home-proof"]').isVisible(), true);
+  assert.equal(await page.locator("#scroller").isVisible(), true);
 }
 scenarios["schedule-destination-states"] = scheduleDestinationStates;
 
@@ -1371,13 +1371,13 @@ async function settings(page) {
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
   const rows = page.locator(".settings-list .nav-row");
   await rows.nth(2).waitFor();
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Devices", "Permissions", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Devices", "Permissions", "Plugins", "Skills", "Tool servers"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.setting({ id: "debug", title: "Debug", advanced: true, render: (el) => el.append("the debug") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Devices", "Permissions", "Debug", "Skills", "Tool servers"]);
-  assert.deepEqual(await page.locator(".settings-list > *").evaluateAll((els) => els.map((e) => e.textContent).slice(4, 6)), ["Permissions", "Advanced"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Devices", "Permissions", "Plugins", "Debug", "Skills", "Tool servers"]);
+  assert.deepEqual(await page.locator(".settings-list > *").evaluateAll((els) => els.map((e) => e.textContent).slice(5, 7)), ["Plugins", "Advanced"]);
 
   // The test page opens light (no app default, a light system); Dark is kept across a reload.
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
@@ -2165,7 +2165,7 @@ async function chatWorkspacePolish(page) {
     window.__workspaceFetch = window.fetch;
     window.fetch = async (input, init) => {
       const call = typeof init?.body === "string" ? JSON.parse(init.body) : null;
-      if (String(input).endsWith("/rpc") && call?.method === "rename_session") {
+      if (String(input).endsWith("/rpc") && call?.method === "chat_rename") {
         return new Response(JSON.stringify({ ok: false, error: "A working chat cannot be renamed" }), {
           status: 200, headers: { "content-type": "application/json" },
         });
@@ -2238,8 +2238,8 @@ async function chatWorkspacePolish(page) {
   const chat = page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat" });
   await chat.focus();
   await chat.press("Enter");
-  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("chat-tab")), false, "keyboard Chat never targets a hidden chat tab");
-  assert.equal(await page.evaluate(() => !!document.activeElement && document.activeElement.getClientRects().length > 0), true, "keyboard Home focuses visible view context");
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("chat-tab")), true, "keyboard Chat focuses the visible selected chat");
+  assert.equal(await page.evaluate(() => !!document.activeElement && document.activeElement.getClientRects().length > 0), true, "keyboard Chat focuses visible conversation context");
 }
 scenarios["chat-workspace-polish"] = chatWorkspacePolish;
 

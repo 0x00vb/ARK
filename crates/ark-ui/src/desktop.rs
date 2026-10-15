@@ -810,6 +810,41 @@ async fn ark_update_check(webview: tauri::Webview) -> Result<Option<serde_json::
     Ok(None)
 }
 
+/// Stop active work at a safe point, then let Tauri relaunch the verified installed bundle.
+/// The command is accepted only from ARK's own page and only after an update is ready.
+#[tauri::command]
+async fn ark_update_restart(
+    webview: tauri::Webview,
+    _state: tauri::State<'_, State>,
+) -> Result<(), String> {
+    from_own_page(&webview)?;
+    #[cfg(all(
+        feature = "desktop-updater",
+        not(debug_assertions),
+        not(target_os = "windows")
+    ))]
+    {
+        if !crate::updates::restart_ready() {
+            return Err("no native update is ready".into());
+        }
+        let app = webview.app_handle().clone();
+        let settled = _state
+            .0
+            .stop(ark_sdk::prelude::ark_runtime::cancel::stop_grace())
+            .await;
+        if !settled {
+            tracing::warn!("native update restart reached the stop deadline");
+        }
+        app.restart();
+    }
+    #[cfg(any(
+        not(feature = "desktop-updater"),
+        debug_assertions,
+        target_os = "windows"
+    ))]
+    Err("native restart is unavailable".into())
+}
+
 /// Update state changes for the own page. A page elsewhere in the window cannot subscribe.
 #[tauri::command]
 fn ark_update_events(
@@ -993,6 +1028,7 @@ pub(crate) fn run(
             ark_browser,
             ark_update_status,
             ark_update_check,
+            ark_update_restart,
             ark_update_events,
             ark_page_update_status,
             ark_page_update_check,

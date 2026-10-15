@@ -43,6 +43,7 @@ export function connect() {
       updates: {
         status: () => tauri.core.invoke("ark_update_status"),
         check: () => tauri.core.invoke("ark_update_check"),
+        restart: () => tauri.core.invoke("ark_update_restart"),
         listen(fn) {
           const ch = new tauri.core.Channel();
           ch.onmessage = fn;

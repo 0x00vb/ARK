@@ -29,7 +29,7 @@
 //                      depends on (an app with runtimes in several places says which here)
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
-//   ark.updates        signed native-app updates: `status()`, `check()`, `listen(fn)`. The
+//   ark.updates        signed native-app updates: `status()`, `check()`, `restart()`, `listen(fn)`. The
 //                      object is undefined in a browser; status is null in development or
 //                      when the packaged app did not opt in. A packaged but unsupported OS
 //                      returns `{ state: "unavailable", reason: "platform" }`. No release input

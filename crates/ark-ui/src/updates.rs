@@ -77,6 +77,12 @@ pub(crate) fn status() -> Status {
     STATUS.lock().unwrap().clone()
 }
 
+/// A native restart is available only after a verified update replaced the installed bundle.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+pub(crate) fn restart_ready() -> bool {
+    matches!(status(), Status::Ready { .. })
+}
+
 fn set(status: Status) {
     *STATUS.lock().unwrap() = status.clone();
     if let Ok(value) = serde_json::to_value(status) {
@@ -162,7 +168,7 @@ async fn check_and_install(app: AppHandle) {
             current: installed,
             kind: Failure::Install,
         });
-        eprintln!("native update needs a writable app location: {error}");
+        tracing::warn!(%error, "native update needs a writable app location");
         return;
     }
     set(Status::Checking {
@@ -175,7 +181,7 @@ async fn check_and_install(app: AppHandle) {
                 current: installed,
                 kind: Failure::Check,
             });
-            eprintln!("update check failed: {error}");
+            tracing::warn!(%error, "native update check failed");
             return;
         }
     };
@@ -186,7 +192,7 @@ async fn check_and_install(app: AppHandle) {
                 current: installed,
                 kind: Failure::Check,
             });
-            eprintln!("update check failed: {error}");
+            tracing::warn!(%error, "native update check failed");
             return;
         }
     };
@@ -242,7 +248,7 @@ async fn check_and_install(app: AppHandle) {
             current: installed,
             kind,
         });
-        eprintln!("update was not installed: {error}");
+        tracing::error!(%error, "native update was not installed");
         return;
     }
 
@@ -250,7 +256,7 @@ async fn check_and_install(app: AppHandle) {
         current: installed,
         version: version.clone(),
     });
-    eprintln!("ARK update {version} is ready for the next launch");
+    tracing::info!(%version, "native update is ready for restart");
     let _ = app
         .notification()
         .builder()
@@ -277,7 +283,10 @@ fn replacement_location_for(executable: &std::path::Path) -> std::io::Result<()>
         .parent()
         .ok_or_else(|| std::io::Error::other("the app bundle has no enclosing folder"))?;
     let probe = folder.join(format!(".ark-update-{}", std::process::id()));
-    let _file = OpenOptions::new().write(true).create_new(true).open(&probe)?;
+    let _file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)?;
     drop(_file);
     std::fs::remove_file(probe)
 }
@@ -288,6 +297,10 @@ mod tests {
 
     #[test]
     fn progress_is_busy_but_a_ready_update_is_not() {
+        set(Status::Current {
+            current: "1.0.0".into(),
+        });
+        assert!(!restart_ready());
         set(Status::Downloading {
             current: "1.0.0".into(),
             version: "1.1.0".into(),
@@ -302,6 +315,7 @@ mod tests {
             version: "1.1.0".into(),
         });
         assert!(!busy());
+        assert!(restart_ready());
     }
 
     #[cfg(target_os = "macos")]

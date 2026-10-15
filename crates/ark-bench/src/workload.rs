@@ -623,6 +623,7 @@ fn measure(
                     r.input_tokens += usage.prompt_tokens as u64;
                     r.cached_input_tokens += usage.cached_tokens as u64;
                     r.output_tokens += usage.completion_tokens as u64;
+                    r.cache_write_tokens += usage.cache_write_tokens as u64;
                     r.tokens_measured &= usage.measured;
                     r.model_latency_ms.push(*elapsed_ms);
                     if let Some(f) = first_token_ms {
@@ -683,7 +684,9 @@ fn measure(
         }
     }
     r.tools_used = used.len() as u32;
-    r.cache_write_tokens = recorder.cache_writes();
+    // Runtime events include managed sessions, which replace the direct provider wrapper.
+    // Do not lose their cache writes or count direct-provider writes a second time.
+    r.cache_write_tokens += recorder.simulated_cache_writes();
     r.uncached_input_tokens = r.input_tokens.saturating_sub(r.cached_input_tokens);
     r.total_tokens = r.input_tokens + r.output_tokens;
     r.cost_usd = pricing.cost(
@@ -694,6 +697,8 @@ fn measure(
     );
 
     let records = recorder.records();
+    r.request_metrics_complete = request_coverage(&records, &r.calls_by_model)
+        && (r.model_calls > 0 || turns.iter().all(|t| t.error.is_none()));
     let mut meta: BTreeMap<String, u32> = BTreeMap::new();
     let mut sum_ctx = 0u64;
     for q in &records {
@@ -712,10 +717,134 @@ fn measure(
         }
     }
     r.meta_calls = meta;
-    r.mean_context_tokens = if records.is_empty() {
+    if !r.request_metrics_complete {
+        // These sizes are available from the canonical context reports even when the
+        // subscription session bypassed the direct request meter. Never substitute a
+        // resumed delta for the model's full context.
+        r.tool_schema_tokens = r.context_sources.get("Tool schemas").copied().unwrap_or(0);
+        r.peak_context_tokens = turns
+            .iter()
+            .flat_map(|t| &t.events)
+            .filter_map(|e| {
+                if let HarnessEvent::Context { report } = e {
+                    Some(report.total + report.tool_schemas)
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0);
+        sum_ctx = turns
+            .iter()
+            .flat_map(|t| &t.events)
+            .filter_map(|e| {
+                if let HarnessEvent::Context { report } = e {
+                    Some((report.total + report.tool_schemas) as u64)
+                } else {
+                    None
+                }
+            })
+            .sum();
+    }
+    let context_count = if r.request_metrics_complete {
+        records.len()
+    } else {
+        turns
+            .iter()
+            .flat_map(|t| &t.events)
+            .filter(|e| matches!(e, HarnessEvent::Context { .. }))
+            .count()
+    };
+    r.mean_context_tokens = if context_count == 0 {
         0
     } else {
-        (sum_ctx / records.len() as u64) as u32
+        (sum_ctx / context_count as u64) as u32
     };
     r
+}
+
+fn request_coverage(
+    records: &[crate::record::RequestRecord],
+    expected: &BTreeMap<String, u32>,
+) -> bool {
+    let mut successful = BTreeMap::new();
+    for record in records.iter().filter(|r| r.error.is_none()) {
+        *successful.entry(record.model.clone()).or_insert(0) += 1;
+    }
+    &successful == expected
+}
+
+#[cfg(test)]
+mod measurement_tests {
+    use super::*;
+
+    #[test]
+    fn failed_direct_requests_cannot_hide_unrecorded_managed_calls() {
+        use crate::record::RequestRecord;
+        let records = vec![
+            RequestRecord {
+                model: "api".into(),
+                error: Some("retry".into()),
+                ..Default::default()
+            },
+            RequestRecord {
+                model: "api".into(),
+                ..Default::default()
+            },
+        ];
+        let calls = BTreeMap::from([("api".into(), 1), ("codex:test".into(), 1)]);
+        assert!(!request_coverage(&records, &calls));
+        assert!(request_coverage(
+            &records,
+            &BTreeMap::from([("api".into(), 1)])
+        ));
+    }
+
+    #[test]
+    fn managed_usage_and_context_do_not_depend_on_the_direct_provider_meter() {
+        let mut usage = ark_model::Usage::measured(100, 5);
+        usage.cache_write_tokens = 40;
+        let turns = vec![TurnResult {
+            input: "hello".into(),
+            answer: "bonjour".into(),
+            cited: 0,
+            steps: 1,
+            cancelled: false,
+            error: None,
+            ms: 1,
+            events: vec![
+                HarnessEvent::Context {
+                    report: ark_runtime::ContextReport {
+                        total: 300,
+                        tool_schemas: 200,
+                        ..Default::default()
+                    },
+                },
+                HarnessEvent::ModelCall {
+                    role: "reason".into(),
+                    model: "codex:test".into(),
+                    usage,
+                    elapsed_ms: 1,
+                    first_token_ms: None,
+                    retries: 0,
+                },
+            ],
+        }];
+        let recorder = Recorder::new();
+        recorder.add_sim_write(20);
+        let record = measure(
+            &crate::suite::simple(),
+            0,
+            &turns,
+            &recorder,
+            Verdict::pass("checked"),
+            &Pricing::reference(),
+        );
+        assert!(!record.request_metrics_complete);
+        assert_eq!(record.input_tokens, 100);
+        assert_eq!(record.cache_write_tokens, 60);
+        assert_eq!(record.tool_schema_tokens, 200);
+        assert_eq!(record.peak_context_tokens, 500);
+        assert_eq!(record.mean_context_tokens, 500);
+    }
 }

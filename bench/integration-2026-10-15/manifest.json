@@ -1,0 +1,74 @@
+{
+  "board": "35c94426",
+  "main_base": "f482160852a0d4fd1626d2b4c2d1bd3d815c7d22",
+  "owner_base": "11eee3242279e392298ce606a15d32616f0757a3",
+  "patch_chain": [
+    {
+      "file": "../efficiency-2026-10-15/final.patch",
+      "sha256": "9fc1060d8c89a1164fb91401e7684033846c7a67abeb0719cc4705e42dc01a17"
+    },
+    {
+      "file": "../catalog-startup-2026-10-15/startup.patch",
+      "sha256": "309e962d5464ef524af32296239f2f4ed50af1e5ac96f348e7bdc310bbc328d2"
+    }
+  ],
+  "evidence_trees": {
+    "efficiency-2026-10-15": {
+      "files": 240,
+      "bytes": 9853477,
+      "sha256": "fec4901b05abf1caf0ef6b47dd9353a66ae4a063eb9885dee940ea3c133fb084"
+    },
+    "catalog-startup-2026-10-15": {
+      "files": 30,
+      "bytes": 467427,
+      "sha256": "646670a173936eda9a4ff1f00fa93cd45de68c3d312fb72165c266a657940477"
+    }
+  },
+  "accepted_source_sha256": {
+    "ROADMAP.md": "15187d8bcb4651cb84b199fe29638f39e0d24d9a804331dbfb6408677e3245da",
+    "bench/RESULTS.md": "88369471407486fce9daeaa71f7cbd9fed04615f5faeef3deb45972763b5a667",
+    "bench/baseline.json": "4a8f75c93a00b1885646a05430d710b1f0b6c5bbb17ffea0bb080ea267f53441",
+    "crates/ark-bench/src/lib.rs": "393cb76046ac89da0a9e54651da2e1dd8aa57713d749d4936e3d8554b25ed14a",
+    "crates/ark-bench/src/main.rs": "b60af2e75a546148a797484dca7be1864ecca6a017a3095c6b520c7812dd05a0",
+    "crates/ark-bench/src/record.rs": "7953db02ba32de067fb4639de50d42c27c16b6bd72a2163b2848286aa6ef0436",
+    "crates/ark-bench/src/report.rs": "afc3a3dc373a4e0533a390eb88d6611c81bb9d0873510e878109f5bba4368780",
+    "crates/ark-bench/src/workload.rs": "4f193ca307214fd696ec714405280ad454612f341aff50f5b11665b447c2f1de",
+    "crates/ark-bench/tests/suite.rs": "98f6090d56fd959c5531cec869bb612395e6a1119844e616b58025680ff15dc0",
+    "crates/ark-model/src/cli.rs": "a5a5e2d4329ca0fbcbbed4a64fda48f17ff51ef1ab8cca4089d37fd8bb94adf1",
+    "crates/ark-model/src/codex_app.rs": "207a4cbe5957c7daa5e31b8d82c89c0b2b0e9dc9a976762c51c7fbf5caf992b2",
+    "crates/ark-runtime/src/harness.rs": "9d89ef3304938f04c06d366b4ed88b3c9e54bd9d7555841c58c7650cbcd419af",
+    "crates/ark-runtime/src/profile.rs": "aabd842dcf58d614c4e99bec9a6013729a4aaec23ee008a2d97483dae6ee9181",
+    "crates/ark-runtime/tests/interactive_seams.rs": "34f33566284234a71c9f811b9c0f05650ab9673cd85477df9f556e23fc22dbc6",
+    "crates/ark-runtime/tests/request_profile.rs": "0d6ced702ab220909a7e9bf8e0f814458da159070d5241742b75cd5a6cb46474",
+    "docs/BENCH.md": "19565408b4f3c23054f1e62149deceb0ebfb03d6796fcd65496ae3d950a62a2b",
+    "docs/adr/0012-vendor-cli-processes-live-with-their-session.md": "695907b495b041e5fd943f37a807a7c2dbb07cf932adaa1d797abf774c643d4c"
+  },
+  "protected_main_content_unchanged": true,
+  "tested_staged_diff_sha256": "dc9c5163140d2829225121fc245c249d25a0c8c81aa90348200ad3c1d8ddfe6b",
+  "validation": {
+    "full_page_enabled_ci": "pass, full-ci.log",
+    "model_tests": "99/99 pass",
+    "approval_and_request_profile": "18/18 pass",
+    "authenticated_remote_dictation": "pass, 10.52 seconds",
+    "remote_sign_in": "pass, 5.31 seconds",
+    "remote_provider_webkit": "pass, 4.58 seconds",
+    "split_dictation_webkit": "pass, 3.40 seconds",
+    "full_webkit_suite": "56/56 pass, 103.37 seconds",
+    "simulated_workloads": "22/22 pass",
+    "plan_and_provenance_qa": "pass",
+    "final_qa": "GO, qa.md",
+    "final_documentation_only_changes": [
+      "CURRENT_STATE.md",
+      "bench/integration-2026-10-15/README.md",
+      "bench/integration-2026-10-15/manifest.json",
+      "bench/integration-2026-10-15/full-ci.log",
+      "bench/integration-2026-10-15/qa.md"
+    ]
+  },
+  "excluded": [
+    "IFC/A5 and unneeded Core prerequisites",
+    "dirty original voice tree",
+    "unreviewed work"
+  ],
+  "scope": "Local integration only. No push, tag or release."
+}

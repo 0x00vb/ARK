@@ -1,0 +1,14 @@
+{
+  "manuscript": "/var/folders/bb/fmp0dyw1289g0tzbb2n6yhb40000gn/T/ark-catalog-writer-lmtk3ygm/manuscript",
+  "store": "/var/folders/bb/fmp0dyw1289g0tzbb2n6yhb40000gn/T/ark-catalog-writer-lmtk3ygm/store",
+  "expected_words": {
+    "chapter-01.md": 4,
+    "chapter-02.md": 3
+  },
+  "sha256": {
+    "chapter-01.md": "f49c94a10c9f0c206c13e0b0817d8ef1464497d8cbdaac1615a4f90e95e6497e",
+    "chapter-02.md": "c39f7c514eb2e2b1e089761208167df4fe883ecc23787409eecbf056390a175c"
+  },
+  "original_temporary_store_removed_after_validation": true,
+  "retained_snapshot": "dogfood-manuscript"
+}

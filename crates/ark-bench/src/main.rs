@@ -183,6 +183,13 @@ async fn main() -> anyhow::Result<()> {
                 &workloads, &models, &settings, reps, &label, progress, save,
             )
             .await?;
+            if r.workloads
+                .iter()
+                .flat_map(|w| &w.runs)
+                .any(|r| !r.request_metrics_complete)
+            {
+                eprintln!("request metrics incomplete: managed sessions bypass the direct provider recorder; metadata-call counts, prefix reuse and raw request traces are unavailable. Usage and outcomes come from runtime events; context sizes are estimates.");
+            }
             print_summary(&r);
             if let (Some(c), Some(path)) = (&cassette, &record) {
                 c.save(path)?;

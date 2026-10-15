@@ -1,0 +1,48 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":685,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":17358,"completion_tokens":53,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":11301,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_0","action":"crm.find_customer","input":{"name":"Ada Lovelace"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_0","action":"crm.find_customer","ok":true,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","invocation":"d60fbbf9-9e98-4c55-b538-25d3f4cc2edd","duration_ms":0,"error":null,"context_tokens":40,"raw_tokens":13}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":40,"model_output":23,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":748,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":17508,"completion_tokens":112,"measured":true,"cached_tokens":17152,"cache_write_tokens":0},"elapsed_ms":4879,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Ada Lovelace was found with customer ID C-1042 (gold tier)."}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_1_1","action":"crm.orders","input":{"customer_id":"C-1042"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_1_1","action":"crm.orders","ok":true,"summary":"customer_id=C-1042, orders=[{\"id\":\"O-1\",\"amount\":120.5},{\"id\":\"O-2\",\"amount\":89.99},{\"id\":\"O-3\",\"amount\":310.0},{\"id\":\"O-4\",\"amount\":45.25}]","invocation":"239eb93e-3a2a-4c7f-be6a-7b63c0d9091a","duration_ms":0,"error":null,"context_tokens":64,"raw_tokens":37}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":61,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":113,"model_output":88,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":910,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":17852,"completion_tokens":66,"measured":true,"cached_tokens":17152,"cache_write_tokens":0},"elapsed_ms":2735,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_2_0","action":"calc.eval","input":{"expr":"120.5 + 89.99 + 310.0 + 45.25"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_2_0","action":"calc.eval","ok":true,"summary":"expr=120.5 + 89.99 + 310.0 + 45.25, value=565.74","invocation":"70a3245a-633f-4b29-bc91-813b160c2a6b","duration_ms":0,"error":null,"context_tokens":41,"raw_tokens":14}}
+{"type":"event","turn":0,"event":{"type":"step","index":4}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":4,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":61,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":154,"model_output":113,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":976,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":18023,"completion_tokens":123,"measured":true,"cached_tokens":17152,"cache_write_tokens":0},"elapsed_ms":3961,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Ada Lovelace's four orders total 565.74."}}
+{"type":"event","turn":0,"event":{"type":"step","index":5}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":5,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":81,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":163,"model_output":160,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":1052,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Ada"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Lov"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"el"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ace"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" ("}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"customer"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"104"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"2"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":")"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" has"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"4"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" orders"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" totaling"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" $"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"565"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"74"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":18300,"completion_tokens":43,"measured":true,"cached_tokens":17152,"cache_write_tokens":0},"elapsed_ms":2761,"first_token_ms":2319,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 3 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Ada Lovelace (customer C-1042) has **4 orders totaling $565.74**.","streamed":true}}

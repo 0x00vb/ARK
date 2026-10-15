@@ -558,6 +558,14 @@ impl CliModel {
             Err(e) => return Some(Err(e)),
         };
         let model = (self.model != "default").then_some(self.model.as_str());
+        // No turn has been submitted. An unsupported config overlay must select the
+        // already-isolated exec path, not turn a valid model choice into a failed task.
+        if app.prepare_host().await.is_err() {
+            tracing::warn!("codex host-tool isolation unavailable; using isolated codex exec");
+            app.stop().await;
+            self.no_app.store(true, Ordering::Relaxed);
+            return None;
+        }
         let thread = match mode {
             Mode::Open(_) => app.start_thread(&dir, model, sys).await,
             Mode::Resume(id) if app.has_thread(id) => Ok(id.to_string()),
@@ -752,6 +760,7 @@ impl CliModel {
                             .arg(&dir);
                     }
                 }
+                host_codex_flags(&mut c, search);
                 c.arg("--output-schema").arg(&schema);
                 if self.model != "default" {
                     c.args(["-m", &self.model]);
@@ -1445,12 +1454,15 @@ fn load_codex_catalog() -> bool {
         .unwrap_or(false)
 }
 
-/// Ask the installed Codex app server for this account's model catalog. Failure is a picker
-/// fallback, never a reason chat cannot start.
+/// Ask the installed Codex app server for this account's model catalog. Explicit efforts
+/// remain unavailable when their advertised support cannot be verified.
 pub(crate) async fn codex_models() -> Option<Vec<crate::ModelOption>> {
-    let bin = Cli::Codex.locate()?;
-    let listed = tokio::time::timeout(Duration::from_secs(6), async {
-        let mut app = CodexApp::start(&bin, env!("CARGO_PKG_VERSION"))
+    codex_models_from(&Cli::Codex.locate()?, Duration::from_secs(6)).await
+}
+
+async fn codex_models_from(bin: &Path, wait: Duration) -> Option<Vec<crate::ModelOption>> {
+    let listed = tokio::time::timeout(wait, async {
+        let mut app = CodexApp::start_catalog(bin, env!("CARGO_PKG_VERSION"))
             .await
             .ok()?;
         let models = app.models().await.ok();
@@ -1510,6 +1522,19 @@ fn until(at: u64) -> Option<String> {
         (h, 0) => format!("{h} h"),
         (h, m) => format!("{h} h {m} min"),
     })
+}
+
+/// Host-model calls run tools in ARK. This never configures an ACP worker or writes settings.
+pub(crate) fn host_codex_flags(cmd: &mut tokio::process::Command, search: bool) {
+    cmd.args([
+        "-c",
+        "features.shell_tool=false",
+        "-c",
+        "features.apps=false",
+    ]);
+    if !search {
+        cmd.args(["-c", "web_search=\"disabled\""]);
+    }
 }
 
 fn io_err(e: std::io::Error) -> ProviderError {
@@ -2248,6 +2273,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) echo "{\"id\":$id,\"result\":{}}" ;;
     *'"method":"account/rateLimits/read"'*) echo "{\"id\":$id,\"result\":{}}" ;;
+    *'"method":"config/read"'*) echo "{\"id\":$id,\"result\":{\"config\":{\"mcp_servers\":{\"unused-server\":{\"command\":\"never-start\"}}}}}" ;;
     *'"method":"model/list"'*)
       case "$line" in
         *'"cursor":"next"'*) echo "{\"id\":$id,\"result\":{\"data\":[{\"id\":\"gpt-5.6-luna\",\"model\":\"gpt-5.6-luna\",\"displayName\":\"GPT-5.6-Luna\",\"hidden\":false,\"defaultReasoningEffort\":\"low\",\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast\"}]}],\"nextCursor\":null}}" ;;
@@ -2267,6 +2293,208 @@ done
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         (p, dir.join("log"))
+    }
+
+    #[cfg(unix)]
+    static CATALOG_FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    /// Change one RPC response without touching environment or real account configuration.
+    #[cfg(unix)]
+    fn catalog_fixture(name: &str, method: &str, body: &str) -> (PathBuf, PathBuf) {
+        let (bin, log) = codex_app(
+            name,
+            r#"{"action":"reply","text":"unused","tool_calls":[]}"#,
+        );
+        let script = std::fs::read_to_string(&bin).unwrap();
+        let target = format!("*'\"method\":\"{method}\"'*)");
+        let branch = format!("    {target} {body} ;;");
+        let script = script.replacen(
+            "  case \"$line\" in\n",
+            &format!("  case \"$line\" in\n{branch}\n"),
+            1,
+        );
+        let script = script.replace(
+            "d=$(dirname \"$0\")",
+            "d=$(dirname \"$0\")\necho $$ > \"$d/pid\"",
+        );
+        std::fs::write(&bin, script + "\n").unwrap();
+        (bin, log)
+    }
+
+    #[cfg(unix)]
+    async fn fixture_pid(bin: &Path, name: &str) -> u32 {
+        tokio::time::timeout(Duration::from_secs(8), async {
+            loop {
+                if let Ok(pid) = std::fs::read_to_string(bin.with_file_name(name)) {
+                    if let Ok(pid) = pid.trim().parse() {
+                        return pid;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("fixture wrote its process id")
+    }
+
+    #[cfg(unix)]
+    async fn fixture_stopped(pid: u32) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while ark_os::process::alive(pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("discovery stopped its process tree");
+    }
+
+    #[cfg(unix)]
+    const BLOCK_RPC: &str = r#"sleep 60 & echo $! > "$d/descendant"; wait $!"#;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn catalog_never_waits_for_optional_usage_and_has_no_execution_side_effects() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        let (bin, log) = catalog_fixture("catalog-no-usage", "account/rateLimits/read", BLOCK_RPC);
+        let models = codex_models_from(&bin, Duration::from_secs(6))
+            .await
+            .unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gpt-5.6-terra");
+        assert_eq!(models[0].efforts, ["low", "medium"]);
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(
+            log.find("\"method\":\"initialize\"").unwrap()
+                < log.find("\"method\":\"initialized\"").unwrap()
+        );
+        assert!(
+            log.find("\"method\":\"initialized\"").unwrap()
+                < log.find("\"method\":\"model/list\"").unwrap()
+        );
+        assert_eq!(log.matches("\"method\":\"model/list\"").count(), 2);
+        for forbidden in [
+            "account/rateLimits/read",
+            "config/read",
+            "thread/start",
+            "turn/start",
+        ] {
+            assert!(!log.contains(forbidden), "catalog sent {forbidden}");
+        }
+        fixture_stopped(fixture_pid(&bin, "pid").await).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn catalog_accepts_delayed_required_replies_within_its_deadline() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        let (bin, _) = codex_app("catalog-delayed-required", "unused");
+        let script = std::fs::read_to_string(&bin).unwrap().replacen(
+            "  case \"$line\" in\n",
+            "  sleep 0.1\n  case \"$line\" in\n",
+            1,
+        );
+        std::fs::write(&bin, script).unwrap();
+        let models = codex_models_from(&bin, Duration::from_secs(6))
+            .await
+            .unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].efforts, ["low", "medium"]);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn catalog_errors_do_not_become_an_unverified_model_choice() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        for method in ["initialize", "model/list"] {
+            let name = format!("catalog-error-{}", method.replace('/', "-"));
+            let (bin, log) = catalog_fixture(
+                &name,
+                method,
+                r#"echo "{\"id\":$id,\"error\":{\"code\":-32000,\"message\":\"fixture refusal\"}}""#,
+            );
+            assert!(codex_models_from(&bin, Duration::from_secs(6))
+                .await
+                .is_none());
+            let log = std::fs::read_to_string(log).unwrap();
+            assert!(!log.contains("thread/start") && !log.contains("turn/start"));
+            fixture_stopped(fixture_pid(&bin, "pid").await).await;
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn catalog_timeout_stops_handshake_and_model_list_process_trees() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        for method in ["initialize", "model/list"] {
+            let name = format!("catalog-timeout-{}", method.replace('/', "-"));
+            let (bin, _) = catalog_fixture(&name, method, BLOCK_RPC);
+            assert!(tokio::time::timeout(
+                Duration::from_secs(8),
+                codex_models_from(&bin, Duration::from_secs(6)),
+            )
+            .await
+            .expect("catalog kept its deadline")
+            .is_none());
+            fixture_stopped(fixture_pid(&bin, "pid").await).await;
+            fixture_stopped(fixture_pid(&bin, "descendant").await).await;
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_catalog_discovery_stops_its_process_and_descendant() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        let (bin, _) = catalog_fixture("catalog-cancel", "model/list", BLOCK_RPC);
+        let task_bin = bin.clone();
+        let task =
+            tokio::spawn(async move { codex_models_from(&task_bin, Duration::from_secs(6)).await });
+        let child = fixture_pid(&bin, "descendant").await;
+        let parent = fixture_pid(&bin, "pid").await;
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        fixture_stopped(parent).await;
+        fixture_stopped(child).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ordinary_start_still_collects_account_usage() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        // The account snapshot is process-global. Run this assertion alone in a child,
+        // rather than race other vendor fixtures or mutate the parent's environment.
+        const CHILD: &str = "ARK_TEST_CATALOG_USAGE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "cli::tests::ordinary_start_still_collects_account_usage",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+            return;
+        }
+        let (bin, log) = catalog_fixture(
+            "catalog-normal-usage",
+            "account/rateLimits/read",
+            r#"echo "{\"id\":$id,\"result\":{\"rateLimits\":{\"planType\":\"pro\",\"primary\":{\"usedPercent\":37,\"windowDurationMins\":300}}}}""#,
+        );
+        let app = CodexApp::start(&bin, "test").await.unwrap();
+        let usage = crate::usage::usage_of("codex").unwrap();
+        assert_eq!(usage.plan.as_deref(), Some("pro"));
+        assert_eq!(usage.windows[0].used_percent, 37);
+        app.stop().await;
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(
+            log.find("\"method\":\"initialized\"").unwrap()
+                < log.find("account/rateLimits/read").unwrap()
+        );
+        fixture_stopped(fixture_pid(&bin, "pid").await).await;
     }
 
     #[cfg(unix)]
@@ -2722,6 +2950,110 @@ done
             "{}",
             turns[1]
         );
+    }
+
+    #[tokio::test]
+    async fn host_tools_are_disabled_for_both_started_and_reloaded_threads() {
+        let (bin, log) = codex_app(
+            "host-isolation",
+            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
+        );
+        let mut app = crate::codex_app::CodexApp::start(&bin, "test")
+            .await
+            .unwrap();
+        app.start_thread(bin.parent().unwrap(), None, "host")
+            .await
+            .unwrap();
+        app.resume_thread(bin.parent().unwrap(), None, "other-thread")
+            .await
+            .unwrap();
+        app.stop().await;
+        let log = std::fs::read_to_string(log).unwrap();
+        for method in ["thread/start", "thread/resume"] {
+            let line = log
+                .lines()
+                .find(|l| l.contains(&format!("\"method\":\"{method}\"")))
+                .unwrap();
+            let sent: Value = serde_json::from_str(line).unwrap();
+            assert_eq!(
+                sent["params"]["config"]["mcp_servers.unused-server.enabled"],
+                false
+            );
+            assert_eq!(sent["params"]["config"]["features.shell_tool"], false);
+            assert_eq!(sent["params"]["config"]["features.apps"], false);
+            assert_eq!(sent["params"]["config"]["web_search"], "disabled");
+        }
+    }
+
+    #[test]
+    fn host_exec_flags_preserve_only_explicit_web_search() {
+        let mut normal = command(Path::new("codex"));
+        host_codex_flags(&mut normal, false);
+        let args: Vec<_> = normal.as_std().get_args().collect();
+        assert!(args.contains(&std::ffi::OsStr::new("features.shell_tool=false")));
+        assert!(args.contains(&std::ffi::OsStr::new("features.apps=false")));
+        assert!(args.contains(&std::ffi::OsStr::new("web_search=\"disabled\"")));
+        let mut search = command(Path::new("codex"));
+        host_codex_flags(&mut search, true);
+        assert!(!search
+            .as_std()
+            .get_args()
+            .any(|v| v == "web_search=\"disabled\""));
+    }
+
+    #[tokio::test]
+    async fn model_discovery_does_not_require_a_host_compatible_mcp_name() {
+        let (bin, log) = codex_app(
+            "catalog-with-dotted-server",
+            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
+        );
+        let script = std::fs::read_to_string(&bin)
+            .unwrap()
+            .replace("unused-server", "name.with.dot");
+        std::fs::write(&bin, script).unwrap();
+        let mut app = crate::codex_app::CodexApp::start(&bin, "test")
+            .await
+            .unwrap();
+        let models = app.models().await.unwrap();
+        remember_codex_models(&models);
+        assert!(CliModel::try_new(Cli::Codex, "gpt-5.6-terra@medium").is_ok());
+        assert!(app
+            .start_thread(bin.parent().unwrap(), None, "host")
+            .await
+            .is_err());
+        app.stop().await;
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(log.find("model/list").unwrap() < log.find("config/read").unwrap());
+        assert!(!log.contains("\"method\":\"thread/start\""));
+    }
+
+    #[tokio::test]
+    async fn incompatible_mcp_names_fall_back_before_submitting_a_vendor_turn() {
+        let (bin, log) = codex_app(
+            "isolated-exec-fallback",
+            r#"{"action":"reply","text":"unused","tool_calls":[]}"#,
+        );
+        let answer = json!({"action":"reply","text":"fallback answer","tool_calls":[]}).to_string();
+        let events = format!(
+            "{}\n{}\n{}",
+            json!({"type":"thread.started","thread_id":"fallback-thread"}),
+            json!({"type":"item.completed","item":{"type":"agent_message","text":answer}}),
+            json!({"type":"turn.completed","usage":{"input_tokens":50,"output_tokens":4}})
+        );
+        let script = std::fs::read_to_string(&bin)
+            .unwrap()
+            .replace("unused-server", "name.with.dot");
+        let branch = format!("#!/bin/sh\nif [ \"$1\" != app-server ]; then\ncat > /dev/null\ncat <<'ARK_FAKE_REPLY'\n{events}\nARK_FAKE_REPLY\nexit 0\nfi\n");
+        std::fs::write(&bin, script.replacen("#!/bin/sh\n", &branch, 1)).unwrap();
+        let model = CliModel::new(Cli::Codex, "").with_program(&bin);
+        let (_, completion) = SessionBackend::open(&model, "host", &[], &[Message::user("hello")])
+            .await
+            .unwrap();
+        assert_eq!(completion.content, "fallback answer");
+        assert!(model.no_app.load(Ordering::Relaxed));
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(!log.contains("\"method\":\"thread/start\""));
+        assert!(!log.contains("\"method\":\"turn/start\""));
     }
 
     /// A fake `codex exec` that keeps each reply schema it is given (`schema-<n>.json` next to

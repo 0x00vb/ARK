@@ -1,0 +1,38 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":258,"working_state":25,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":27,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":589,"action_schemas":89,"loaded_actions":2,"total":647,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13003,"completion_tokens":80,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":12380,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_0","action":"weather.current","input":{"city":"Paris"}}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_1","action":"weather.current","input":{"city":"Tokyo"}}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_2","action":"weather.current","input":{"city":"Lima"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_0","action":"weather.current","ok":true,"summary":"city=Paris, temp_c=14","invocation":"bff1257c-fa78-4b3d-a822-fb430da8833b","duration_ms":252,"error":null,"context_tokens":35,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_1","action":"weather.current","ok":true,"summary":"city=Tokyo, temp_c=22","invocation":"652e5c21-5c05-4406-94fc-59c2f742a6e6","duration_ms":252,"error":null,"context_tokens":35,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_2","action":"weather.current","ok":true,"summary":"city=Lima, temp_c=18","invocation":"573850b0-c7e2-40ef-9156-1d7b5a25eb4a","duration_ms":252,"error":null,"context_tokens":35,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":258,"working_state":25,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":27,"tool_rounds":105,"model_output":52,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":589,"action_schemas":89,"loaded_actions":2,"total":804,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Paris"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":":"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"14"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"°C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Tokyo"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":":"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"22"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"°C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Lima"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":":"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"18"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"°C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":18603,"completion_tokens":47,"measured":true,"cached_tokens":12032,"cache_write_tokens":0},"elapsed_ms":1314,"first_token_ms":1300,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 3 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"- Paris: **14°C**\n- Tokyo: **22°C**\n- Lima: **18°C**","streamed":true}}

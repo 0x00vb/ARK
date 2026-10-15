@@ -1,0 +1,18 @@
+{
+  "git_base": "11eee3242279e392298ce606a15d32616f0757a3",
+  "parent_evaluation": "/Users/valentino/projects/AIengineering/ark-call-efficiency/bench/efficiency-2026-10-15",
+  "parent_patch_sha256": "9fc1060d8c89a1164fb91401e7684033846c7a67abeb0719cc4705e42dc01a17",
+  "baseline_source_sha256": {
+    "crates/ark-model/src/cli.rs": "c87f3d2bc9cbfa161c70c50372555a09254eb120a85306f9b64f37727e98e20b",
+    "crates/ark-model/src/codex_app.rs": "a37602b99f7bfe7eb8de8f61580f47a212c532db44c893985ec2a429d6323552"
+  },
+  "scope": "startup only; parent evaluation source and evidence untouched; no new matrix",
+  "board": "c3ed5945",
+  "retained_parent_evidence_sha256": {
+    "catalog-diagnosis.json": "ce695502c4337792281d582444b8321754395c3b38b9c822f16ad325884f8f72",
+    "dogfood-preflight-1-result.json": "2189cd295ea86ad367067ee9f65c119586de15ddd005c0f30c4ca55d603a8171",
+    "dogfood-preflight-1-stderr.log": "d17433c17b316917698be98f4034b19f32ffe177e22fa43517728cdc2f908126",
+    "dogfood-preflight-2-result.json": "2189cd295ea86ad367067ee9f65c119586de15ddd005c0f30c4ca55d603a8171",
+    "dogfood-preflight-2-stderr.log": "d17433c17b316917698be98f4034b19f32ffe177e22fa43517728cdc2f908126"
+  }
+}

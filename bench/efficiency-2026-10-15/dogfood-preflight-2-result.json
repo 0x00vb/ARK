@@ -1,0 +1,17 @@
+{
+  "binary_sha256": "29b2e82afee54619686c5361a843dd11df53f31fb553490aaa20f51a76da36fa",
+  "model": "codex:gpt-5.6-terra@medium",
+  "returncode": 1,
+  "checks": {
+    "process_succeeded": false,
+    "result_succeeded": false,
+    "listed_both_files": false,
+    "correct_word_counts": false,
+    "read_actual_manuscript": false,
+    "no_save_call": true,
+    "manuscript_hashes_unchanged": true
+  },
+  "success": false,
+  "answer": "",
+  "model_calls": 0
+}

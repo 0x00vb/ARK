@@ -52,6 +52,22 @@ pub async fn run_suite_with(
     mut progress: impl FnMut(&RunRecord),
     mut checkpoint: impl FnMut(&Report),
 ) -> anyhow::Result<Report> {
+    if settings.harness == HarnessKind::Ark
+        && [&models.strong]
+            .into_iter()
+            .chain(models.fast.iter())
+            .any(|spec| {
+                ["codex:", "claude:"]
+                    .iter()
+                    .any(|prefix| spec.starts_with(prefix))
+            })
+        && std::env::var("ARK_SESSION_REUSE")
+            .map(|v| v.trim() != "0")
+            .unwrap_or(true)
+        && (settings.cassette.is_some() || settings.faults.is_some())
+    {
+        anyhow::bail!("managed subscription sessions bypass recording, replay and fault injection; omit those options or set ARK_SESSION_REUSE=0 for an explicitly stateless experiment");
+    }
     let pricing = match models.mode() {
         Mode::Simulated => Pricing::reference(),
         Mode::Live => Pricing::for_model(&models.priced_model()),

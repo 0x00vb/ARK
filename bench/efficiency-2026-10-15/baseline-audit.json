@@ -1,0 +1,12 @@
+[
+  {
+    "directory": "bench/efficiency-2026-10-15/baseline-live-traces",
+    "checked": {
+      "resume": 3,
+      "simple": 3,
+      "approval": 3,
+      "stale-read": 3
+    },
+    "errors": []
+  }
+]

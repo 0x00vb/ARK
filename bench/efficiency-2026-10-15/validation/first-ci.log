@@ -1,0 +1,1876 @@
+
+== format
+
+== generated protocol contract
+
+== version and release state
+version 0.24.0 ok
+
+== clippy (warnings are errors)
+   Compiling proc-macro2 v1.0.107
+   Compiling libc v0.2.189
+   Compiling quote v1.0.47
+   Compiling syn v3.0.6
+   Compiling serde_core v1.0.229
+    Checking cfg-if v1.0.5
+   Compiling serde_derive v1.0.229
+   Compiling jobserver v0.1.35
+   Compiling find-msvc-tools v0.1.14
+   Compiling shlex v2.0.1
+   Compiling cc v1.5.1
+   Compiling synstructure v0.14.0
+   Compiling syn v2.0.119
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+    Checking bitflags v2.13.2
+   Compiling zerovec-derive v0.11.6
+   Compiling displaydoc v0.2.7
+   Compiling parking_lot_core v0.9.12
+    Checking memchr v2.8.3
+   Compiling serde v1.0.229
+    Checking log v0.4.34
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_properties_data v2.3.0
+    Checking smallvec v1.16.2
+   Compiling thiserror v2.0.21
+   Compiling thiserror-impl v2.0.21
+    Checking itoa v1.0.18
+    Checking errno v0.3.14
+   Compiling version_check v0.9.5
+    Checking stable_deref_trait v1.2.1
+    Checking equivalent v1.0.2
+    Checking once_cell v1.21.4
+   Compiling num-conv v0.2.2
+    Checking hashbrown v0.17.1
+   Compiling time-core v0.1.9
+    Checking bytes v1.12.1
+    Checking indexmap v2.14.2
+    Checking scopeguard v1.2.0
+    Checking pin-project-lite v0.2.17
+    Checking signal-hook-registry v1.4.8
+    Checking rand_core v0.10.1
+   Compiling getrandom v0.4.3
+    Checking lock_api v0.4.14
+    Checking mio v1.2.3
+    Checking zerofrom v0.1.8
+    Checking parking_lot v0.12.5
+   Compiling autocfg v1.5.1
+   Compiling tokio-macros v2.7.2
+    Checking yoke v0.8.3
+    Checking socket2 v0.6.5
+    Checking zerovec v0.11.8
+    Checking core-foundation-sys v0.8.7
+   Compiling serde_json v1.0.151
+    Checking tokio v1.53.1
+    Checking zmij v1.0.23
+    Checking tinystr v0.8.4
+    Checking writeable v0.6.4
+    Checking litemap v0.8.3
+    Checking icu_locale_core v2.3.0
+    Checking potential_utf v0.1.6
+    Checking zerotrie v0.2.5
+    Checking http v1.5.0
+    Checking utf8_iter v1.0.4
+    Checking icu_collections v2.3.0
+    Checking icu_provider v2.3.1
+    Checking percent-encoding v2.3.2
+    Checking fnv v1.0.7
+    Checking futures-core v0.3.34
+    Checking icu_properties v2.3.0
+    Checking icu_normalizer v2.3.0
+    Checking form_urlencoded v1.2.2
+    Checking uuid v1.26.1
+    Checking getrandom v0.2.17
+   Compiling crc32fast v1.5.2
+    Checking idna_adapter v1.2.2
+    Checking idna v1.1.0
+    Checking core-foundation v0.10.1
+   Compiling time-macros v0.2.32
+    Checking deranged v0.5.8
+    Checking powerfmt v0.2.0
+    Checking option-ext v0.2.0
+    Checking dirs-sys v0.5.0
+    Checking url v2.5.8
+    Checking time v0.3.55
+    Checking futures-sink v0.3.34
+    Checking dunce v1.0.5
+    Checking dirs v7.0.0
+   Compiling rustversion v1.0.23
+    Checking base64 v0.23.1
+    Checking tracing-core v0.1.36
+    Checking slab v0.4.12
+    Checking futures-channel v0.3.34
+   Compiling tracing-attributes v0.1.31
+   Compiling ring v0.17.14
+   Compiling futures-macro v0.3.34
+    Checking futures-task v0.3.34
+    Checking tracing v0.1.44
+    Checking futures-io v0.3.34
+    Checking futures-util v0.3.34
+    Checking zeroize v1.9.0
+   Compiling httparse v1.10.1
+    Checking rustls-pki-types v1.15.1
+    Checking http-body v1.1.0
+   Compiling system-configuration-sys v0.6.0
+    Checking regex-syntax v0.8.11
+   Compiling crossbeam-utils v0.8.23
+    Checking untrusted v0.9.0
+    Checking mime v0.3.17
+   Compiling encoding_rs v0.8.42
+    Checking tokio-util v0.7.19
+    Checking security-framework-sys v2.17.0
+   Compiling async-trait v0.1.92
+   Compiling zerocopy v0.8.59
+    Checking try-lock v0.2.5
+    Checking atomic-waker v1.1.2
+    Checking tower-service v0.3.3
+   Compiling rustls v0.23.45
+    Checking h2 v0.4.19
+    Checking want v0.3.1
+    Checking security-framework v3.7.0
+    Checking rustls-webpki v0.103.15
+    Checking core-foundation v0.9.4
+    Checking base64 v0.22.1
+   Compiling multiversion_no_op v1.0.0
+    Checking subtle v2.6.1
+    Checking simdutf8 v0.1.5
+    Checking system-configuration v0.7.0
+    Checking hyper v1.11.1
+    Checking ark-os v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-os)
+    Checking sync_wrapper v1.0.2
+    Checking aho-corasick v1.1.5
+    Checking ipnet v2.12.2
+    Checking tower-layer v0.3.3
+    Checking tower v0.5.3
+    Checking hyper-util v0.1.21
+    Checking regex-automata v0.4.18
+    Checking tokio-rustls v0.26.6
+    Checking rustls-native-certs v0.8.4
+    Checking webpki-roots v1.0.9
+    Checking ryu v1.0.23
+   Compiling pkg-config v0.3.34
+   Compiling libm v0.2.16
+   Compiling rustix v1.1.5
+    Checking serde_urlencoded v0.7.1
+    Checking hyper-rustls v0.27.10
+    Checking tower-http v0.6.11
+    Checking http-body-util v0.1.5
+   Compiling num-traits v0.2.19
+    Checking reqwest v0.12.28
+    Checking regex v1.13.1
+    Checking crossbeam-channel v0.5.17
+    Checking ppv-lite86 v0.2.21
+   Compiling zstd-sys v2.1.0+zstd.1.5.7
+    Checking futures-executor v0.3.34
+   Compiling blake3 v1.8.7
+    Checking futures v0.3.34
+   Compiling crunchy v0.2.4
+    Checking arrayvec v0.7.8
+    Checking constant_time_eq v0.4.2
+    Checking fastrand v2.5.0
+    Checking tempfile v3.27.0
+    Checking rand_core v0.6.4
+    Checking byteorder v1.5.0
+   Compiling crossbeam-epoch v0.9.21
+   Compiling zstd-safe v7.3.0
+    Checking rand_chacha v0.3.1
+   Compiling ahash v0.8.12
+    Checking ownedbytes v0.7.0
+   Compiling crossbeam-deque v0.8.8
+   Compiling thiserror v1.0.69
+    Checking tantivy-common v0.7.0
+    Checking bitpacking v0.9.3
+    Checking rand v0.8.8
+    Checking ark-core v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-core)
+   Compiling thiserror-impl v1.0.69
+   Compiling rustix v0.38.44
+    Checking either v1.18.0
+   Compiling rayon-core v1.13.0
+   Compiling vcpkg v0.2.15
+    Checking utf8-ranges v1.0.5
+    Checking tantivy-fst v0.5.0
+   Compiling libsqlite3-sys v0.30.1
+    Checking rand_distr v0.4.3
+    Checking tantivy-bitpacker v0.6.0
+    Checking ark-model v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-model)
+    Checking downcast-rs v1.2.1
+    Checking murmurhash32 v0.3.1
+    Checking minimal-lexical v0.2.1
+    Checking foldhash v0.1.5
+    Checking allocator-api2 v0.2.21
+    Checking zstd v0.13.3
+    Checking hashbrown v0.15.5
+    Checking tantivy-sstable v0.3.0
+    Checking nom v7.1.3
+    Checking tantivy-stacker v0.3.0
+    Checking hashbrown v0.14.5
+    Checking itertools v0.12.1
+    Checking instant v0.1.13
+    Checking fastdivide v0.4.2
+    Checking tantivy-columnar v0.3.0
+    Checking measure_time v0.8.3
+    Checking fs4 v0.8.4
+    Checking tantivy-query-grammar v0.22.0
+    Checking rayon v1.12.0
+    Checking hashlink v0.9.1
+    Checking lru v0.12.5
+    Checking arc-swap v1.9.2
+    Checking sketches-ddsketch v0.2.2
+    Checking tantivy-tokenizer-api v0.3.0
+    Checking rust-stemmers v1.2.0
+    Checking memmap2 v0.9.11
+    Checking num_cpus v1.17.0
+    Checking fallible-streaming-iterator v0.1.9
+    Checking oneshot v0.1.13
+    Checking htmlescape v0.3.1
+    Checking lz4_flex v0.11.6
+    Checking rustc-hash v1.1.0
+    Checking fallible-iterator v0.3.0
+    Checking census v0.4.2
+    Checking levenshtein_automata v0.2.1
+    Checking tantivy v0.22.1
+    Checking ark-tools v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-tools)
+   Compiling generic-array v0.14.7
+    Checking typenum v1.20.1
+    Checking crypto-common v0.1.7
+    Checking simd-adler32 v0.3.10
+    Checking block-buffer v0.10.4
+    Checking adler2 v2.0.1
+    Checking digest v0.10.7
+    Checking rusqlite v0.32.1
+    Checking ark-store v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-store)
+    Checking ark-runtime v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-runtime)
+    Checking cpufeatures v0.2.17
+    Checking miniz_oxide v0.9.1
+    Checking flate2 v1.1.10
+    Checking sha2 v0.10.9
+    Checking chacha20 v0.10.2
+    Checking rand v0.10.3
+    Checking block-padding v0.3.3
+    Checking hybrid-array v0.4.15
+    Checking inout v0.1.4
+    Checking miniz_oxide v0.8.9
+    Checking fdeflate v0.3.7
+    Checking png v0.18.1
+    Checking cipher v0.4.4
+    Checking crypto-common v0.2.2
+    Checking block-buffer v0.12.1
+    Checking const-oid v0.10.2
+   Compiling siphasher v1.0.4
+    Checking digest v0.11.3
+   Compiling phf_shared v0.13.1
+    Checking keyring v3.6.3
+    Checking cpufeatures v0.3.1
+    Checking tinyvec v1.13.3
+    Checking sha1 v0.11.0
+    Checking unicode-properties v0.1.4
+    Checking unicode-normalization v0.1.25
+    Checking data-encoding v2.11.1
+    Checking unicode-bidi v0.3.18
+    Checking pom v1.1.0
+    Checking tungstenite v0.30.0
+    Checking stringprep v0.1.5
+   Compiling phf_generator v0.13.1
+    Checking ark-connect v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-connect)
+    Checking aes v0.8.4
+    Checking cbc v0.1.2
+    Checking ecb v0.1.2
+    Checking md-5 v0.10.6
+    Checking nom v8.0.0
+    Checking ttf-parser v0.25.1
+    Checking weezl v0.1.12
+    Checking rangemap v1.8.0
+    Checking bumpalo v3.20.3
+   Compiling zip v2.4.2
+    Checking zopfli v0.8.3
+    Checking lopdf v0.42.0
+    Checking tokio-tungstenite v0.30.0
+    Checking type1-encoding-parser v0.1.1
+    Checking adobe-cmap-parser v0.4.1
+    Checking ark-exec v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-exec)
+    Checking euclid v0.20.14
+    Checking cff-parser v0.2.0
+    Checking postscript v0.14.1
+    Checking ark-proc v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-proc)
+    Checking ark-computer v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-computer)
+    Checking pdf-extract v0.12.1
+    Checking ark-browser v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-browser)
+    Checking ark-files v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-files)
+    Checking ark-acp v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-acp)
+    Checking ark-sdk v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-sdk)
+   Compiling phf_macros v0.13.1
+   Compiling typeid v1.0.3
+   Compiling phf_codegen v0.13.1
+   Compiling unicode-segmentation v1.13.3
+   Compiling ident_case v1.0.1
+   Compiling strsim v0.11.1
+   Compiling erased-serde v0.4.10
+   Compiling darling_core v0.24.1
+   Compiling convert_case v0.10.0
+    Checking anyhow v1.0.104
+   Compiling objc2-exception-helper v0.1.1
+   Compiling darling_macro v0.24.1
+   Compiling derive_more-impl v2.1.1
+   Compiling new_debug_unreachable v1.0.6
+   Compiling darling v0.24.1
+   Compiling phf v0.13.1
+   Compiling string_cache_codegen v0.6.1
+   Compiling precomputed-hash v0.1.1
+   Compiling objc2 v0.6.4
+   Compiling web_atoms v0.2.6
+   Compiling serde_with_macros v3.24.0
+   Compiling semver v1.0.28
+    Checking objc2-encode v4.1.0
+   Compiling winnow v1.0.4
+   Compiling heck v0.5.0
+   Compiling toml_parser v1.1.3+spec-1.1.0
+   Compiling string_cache v0.9.0
+   Compiling serde_spanned v1.1.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling toml_writer v1.1.2+spec-1.1.0
+    Checking jiff-core v0.1.1
+   Compiling dtoa v1.0.11
+   Compiling dtoa-short v0.3.5
+    Checking jiff v0.2.37
+   Compiling toml v1.1.6+spec-1.1.0
+   Compiling tendril v0.5.1
+   Compiling selectors v0.38.0
+   Compiling indexmap v1.9.3
+   Compiling cssparser-macros v0.7.1
+   Compiling camino v1.2.6
+   Compiling alloc-no-stdlib v3.0.0
+   Compiling alloc-stdlib v0.3.0
+   Compiling cssparser v0.37.0
+   Compiling markup5ever v0.39.0
+   Compiling swift-rs v1.0.8
+   Compiling derive_more v2.1.1
+   Compiling servo_arc v0.4.3
+   Compiling serde_derive_internals v0.29.1
+   Compiling bit-vec v0.8.0
+   Compiling hashbrown v0.12.3
+   Compiling rustc-hash v2.1.3
+   Compiling schemars v0.8.22
+   Compiling web-time v1.1.0
+   Compiling cfb v0.14.0
+   Compiling schemars_derive v0.8.22
+   Compiling bit-set v0.8.0
+   Compiling html5ever v0.39.0
+   Compiling brotli-decompressor v6.0.1
+    Checking ark-orchestrate v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-orchestrate)
+    Checking block2 v0.6.2
+    Checking objc2-core-foundation v0.3.2
+   Compiling jsonptr v0.7.1
+   Compiling cargo-platform v0.1.9
+   Compiling quick-xml v0.42.0
+   Compiling base64 v0.21.7
+   Compiling foldhash v0.2.0
+   Compiling dyn-clone v1.0.20
+   Compiling same-file v1.0.6
+   Compiling plist v1.10.1
+   Compiling walkdir v2.5.0
+   Compiling dom_query v0.28.0
+   Compiling cargo_metadata v0.19.2
+   Compiling json-patch v4.2.0
+   Compiling brotli v9.0.0
+   Compiling urlpattern v0.6.0
+   Compiling serde-untagged v0.1.9
+   Compiling infer v0.22.0
+   Compiling serde_with v3.24.0
+   Compiling ctor v1.0.13
+   Compiling glob v0.3.4
+    Checking objc2-foundation v0.3.2
+   Compiling tauri-utils v2.10.1
+   Compiling ref-cast-impl v1.0.27
+   Compiling serde_derive_internals v0.30.0
+   Compiling schemars_derive v1.2.2
+    Checking ref-cast v1.0.27
+    Checking objc2-quartz-core v0.3.2
+    Checking schemars v1.2.2
+    Checking objc2-app-kit v0.3.2
+   Compiling rustc_version v0.4.1
+   Compiling embed-resource v3.0.11
+   Compiling tauri-winres v0.3.6
+    Checking ark-protocol v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-protocol)
+   Compiling cargo_toml v1.0.1
+   Compiling tauri-build v2.7.1
+    Checking dpi v0.1.2
+    Checking raw-window-handle v0.6.2
+    Checking lazy_static v1.5.0
+    Checking nu-ansi-term v0.50.3
+    Checking sharded-slab v0.1.7
+   Compiling tauri v2.12.1
+   Compiling tauri-plugin v2.7.1
+    Checking matchers v0.2.0
+    Checking tracing-log v0.2.0
+   Compiling cookie v0.18.2
+    Checking thread_local v1.1.10
+   Compiling getrandom v0.3.4
+    Checking tracing-subscriber v0.3.23
+    Checking ark-client v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-client)
+   Compiling foreign-types-macros v0.2.4
+    Checking foreign-types-shared v0.3.1
+   Compiling bitflags v1.3.2
+    Checking foreign-types v0.5.0
+   Compiling png v0.17.16
+   Compiling wry v0.57.0
+    Checking objc2-web-kit v0.3.2
+    Checking dispatch2 v0.3.1
+    Checking core-graphics-types v0.2.0
+   Compiling muda v0.20.0
+   Compiling tauri-runtime v2.12.1
+   Compiling ico v0.5.0
+    Checking core-graphics v0.25.0
+    Checking ark-interact v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-interact)
+    Checking keyboard-types v0.8.3
+   Compiling tauri-runtime-wry v2.12.1
+   Compiling tray-icon v0.25.1
+   Compiling tauri-codegen v2.7.1
+    Checking tao v0.37.1
+    Checking objc2-core-graphics v0.3.2
+   Compiling serialize-to-javascript-impl v0.1.2
+    Checking serialize-to-javascript v0.1.2
+   Compiling tauri-macros v2.7.1
+   Compiling tauri-plugin-fs v2.6.0
+    Checking window-vibrancy v0.8.1
+   Compiling serde_repr v0.1.21
+    Checking embed_plist v1.2.2
+   Compiling mac-notification-sys v0.6.15
+   Compiling cfg_aliases v0.1.1
+   Compiling nix v0.28.0
+    Checking rand_core v0.9.5
+   Compiling tauri-plugin-notification v2.5.1
+   Compiling tauri-plugin-dialog v2.8.1
+   Compiling rfd v0.16.0
+    Checking rand_chacha v0.9.0
+    Checking rand v0.9.5
+    Checking notify-rust v4.18.1
+    Checking ark-reach v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-reach)
+    Checking filedescriptor v0.8.3
+    Checking xattr v1.6.1
+    Checking filetime v0.2.29
+    Checking serial2 v0.2.38
+   Compiling ark-ui v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-ui)
+    Checking shell-words v1.1.1
+    Checking portable-pty v0.9.0
+    Checking tar v0.4.46
+    Checking tauri-plugin-single-instance v2.5.2
+    Checking utf8parse v0.2.2
+    Checking anstyle-parse v1.0.0
+    Checking is_terminal_polyfill v1.70.2
+    Checking anstyle v1.0.14
+    Checking colorchoice v1.0.5
+    Checking anstyle-query v1.1.5
+    Checking anstream v1.0.0
+    Checking clap_lex v1.1.1
+    Checking clap_builder v4.6.7
+   Compiling clap_derive v4.6.7
+    Checking clap v4.6.7
+   Compiling signal-hook v0.3.18
+   Compiling litrs v1.0.0
+   Compiling document-features v0.2.12
+    Checking signal-hook-mio v0.2.5
+   Compiling strum_macros v0.28.0
+    Checking iana-time-zone v0.1.65
+    Checking vte v0.14.1
+    Checking strip-ansi-escapes v0.2.1
+    Checking chrono v0.4.45
+    Checking crossterm v0.29.0
+    Checking strum v0.28.0
+    Checking unicode-width v0.2.2
+    Checking ark-bench v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-bench)
+    Checking reedline v0.52.0
+    Checking ark-account v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-account)
+    Checking ark-cli v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-cli)
+    Checking writing-agent v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/examples/writing-agent)
+    Checking agent-team v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/examples/agent-team)
+    Checking minimal-agent v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/examples/minimal-agent)
+    Finished `dev` profile [optimized] target(s) in 2m 12s
+
+== tests
+   Compiling libc v0.2.189
+   Compiling serde_core v1.0.229
+   Compiling cfg-if v1.0.5
+   Compiling memchr v2.8.3
+   Compiling log v0.4.34
+   Compiling bitflags v2.13.2
+   Compiling serde v1.0.229
+   Compiling smallvec v1.16.2
+   Compiling errno v0.3.14
+   Compiling equivalent v1.0.2
+   Compiling stable_deref_trait v1.2.1
+   Compiling bytes v1.12.1
+   Compiling once_cell v1.21.4
+   Compiling hashbrown v0.17.1
+   Compiling indexmap v2.14.2
+   Compiling scopeguard v1.2.0
+   Compiling pin-project-lite v0.2.17
+   Compiling signal-hook-registry v1.4.8
+   Compiling rand_core v0.10.1
+   Compiling parking_lot_core v0.9.12
+   Compiling lock_api v0.4.14
+   Compiling mio v1.2.3
+   Compiling parking_lot v0.12.5
+   Compiling getrandom v0.4.3
+   Compiling zerofrom v0.1.8
+   Compiling socket2 v0.6.5
+   Compiling yoke v0.8.3
+   Compiling tokio v1.53.1
+   Compiling serde_json v1.0.151
+   Compiling zerovec v0.11.8
+   Compiling core-foundation-sys v0.8.7
+   Compiling thiserror v2.0.21
+   Compiling tinystr v0.8.4
+   Compiling writeable v0.6.4
+   Compiling litemap v0.8.3
+   Compiling icu_locale_core v2.3.0
+   Compiling potential_utf v0.1.6
+   Compiling zerotrie v0.2.5
+   Compiling http v1.5.0
+   Compiling utf8_iter v1.0.4
+   Compiling fnv v1.0.7
+   Compiling icu_collections v2.3.0
+   Compiling icu_provider v2.3.1
+   Compiling percent-encoding v2.3.2
+   Compiling icu_properties_data v2.3.0
+   Compiling icu_normalizer_data v2.3.0
+   Compiling futures-core v0.3.34
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling uuid v1.26.1
+   Compiling getrandom v0.2.17
+   Compiling option-ext v0.2.0
+   Compiling dirs-sys v0.5.0
+   Compiling idna_adapter v1.2.2
+   Compiling form_urlencoded v1.2.2
+   Compiling dunce v1.0.5
+   Compiling idna v1.1.0
+   Compiling dirs v7.0.0
+   Compiling core-foundation v0.10.1
+   Compiling deranged v0.5.8
+   Compiling num-conv v0.2.2
+   Compiling powerfmt v0.2.0
+   Compiling time-core v0.1.9
+   Compiling time v0.3.55
+   Compiling url v2.5.8
+   Compiling futures-sink v0.3.34
+   Compiling tracing-core v0.1.36
+   Compiling base64 v0.23.1
+   Compiling slab v0.4.12
+   Compiling tracing v0.1.44
+   Compiling futures-channel v0.3.34
+   Compiling futures-io v0.3.34
+   Compiling futures-task v0.3.34
+   Compiling futures-util v0.3.34
+   Compiling zeroize v1.9.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling httparse v1.10.1
+   Compiling http-body v1.1.0
+   Compiling mime v0.3.17
+   Compiling untrusted v0.9.0
+   Compiling ring v0.17.14
+   Compiling tokio-util v0.7.19
+   Compiling ark-os v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-os)
+   Compiling security-framework-sys v2.17.0
+   Compiling base64 v0.22.1
+   Compiling atomic-waker v1.1.2
+   Compiling tower-service v0.3.3
+   Compiling try-lock v0.2.5
+   Compiling h2 v0.4.19
+   Compiling want v0.3.1
+   Compiling security-framework v3.7.0
+   Compiling rustls-webpki v0.103.15
+   Compiling system-configuration-sys v0.6.0
+   Compiling core-foundation v0.9.4
+   Compiling simdutf8 v0.1.5
+   Compiling subtle v2.6.1
+   Compiling rustls v0.23.45
+   Compiling encoding_rs v0.8.42
+   Compiling system-configuration v0.7.0
+   Compiling crc32fast v1.5.2
+   Compiling hyper v1.11.1
+   Compiling sync_wrapper v1.0.2
+   Compiling regex-syntax v0.8.11
+   Compiling ipnet v2.12.2
+   Compiling tower-layer v0.3.3
+   Compiling hyper-util v0.1.21
+   Compiling tower v0.5.3
+   Compiling tokio-rustls v0.26.6
+   Compiling rustls-native-certs v0.8.4
+   Compiling webpki-roots v1.0.9
+   Compiling ryu v1.0.23
+   Compiling serde_urlencoded v0.7.1
+   Compiling hyper-rustls v0.27.10
+   Compiling tower-http v0.6.11
+   Compiling crossbeam-utils v0.8.23
+   Compiling http-body-util v0.1.5
+   Compiling reqwest v0.12.28
+   Compiling rustix v1.1.5
+   Compiling zerocopy v0.8.59
+   Compiling aho-corasick v1.1.5
+   Compiling regex-automata v0.4.18
+   Compiling libm v0.2.16
+   Compiling num-traits v0.2.19
+   Compiling regex v1.13.1
+   Compiling crossbeam-channel v0.5.17
+   Compiling constant_time_eq v0.4.2
+   Compiling arrayvec v0.7.8
+   Compiling fastrand v2.5.0
+   Compiling tempfile v3.27.0
+   Compiling blake3 v1.8.7
+   Compiling ppv-lite86 v0.2.21
+   Compiling futures-executor v0.3.34
+   Compiling futures v0.3.34
+   Compiling ark-core v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-core)
+   Compiling rand_core v0.6.4
+   Compiling byteorder v1.5.0
+   Compiling rand_chacha v0.3.1
+   Compiling crunchy v0.2.4
+   Compiling zstd-sys v2.1.0+zstd.1.5.7
+   Compiling ownedbytes v0.7.0
+   Compiling tantivy-common v0.7.0
+   Compiling zstd-safe v7.3.0
+   Compiling bitpacking v0.9.3
+   Compiling rand v0.8.8
+   Compiling crossbeam-epoch v0.9.21
+   Compiling utf8-ranges v1.0.5
+   Compiling either v1.18.0
+   Compiling tantivy-fst v0.5.0
+   Compiling thiserror v1.0.69
+   Compiling crossbeam-deque v0.8.8
+   Compiling rand_distr v0.4.3
+   Compiling zstd v0.13.3
+   Compiling tantivy-bitpacker v0.6.0
+   Compiling ahash v0.8.12
+   Compiling ark-model v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-model)
+   Compiling allocator-api2 v0.2.21
+   Compiling murmurhash32 v0.3.1
+   Compiling minimal-lexical v0.2.1
+   Compiling foldhash v0.1.5
+   Compiling downcast-rs v1.2.1
+   Compiling hashbrown v0.15.5
+   Compiling nom v7.1.3
+   Compiling tantivy-stacker v0.3.0
+   Compiling hashbrown v0.14.5
+   Compiling tantivy-sstable v0.3.0
+   Compiling rayon-core v1.13.0
+   Compiling itertools v0.12.1
+   Compiling rustix v0.38.44
+   Compiling instant v0.1.13
+   Compiling fastdivide v0.4.2
+   Compiling tantivy-columnar v0.3.0
+   Compiling measure_time v0.8.3
+   Compiling fs4 v0.8.4
+   Compiling libsqlite3-sys v0.30.1
+   Compiling rayon v1.12.0
+   Compiling hashlink v0.9.1
+   Compiling tantivy-query-grammar v0.22.0
+   Compiling lru v0.12.5
+   Compiling ark-tools v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-tools)
+   Compiling arc-swap v1.9.2
+   Compiling rust-stemmers v1.2.0
+   Compiling tantivy-tokenizer-api v0.3.0
+   Compiling sketches-ddsketch v0.2.2
+   Compiling memmap2 v0.9.11
+   Compiling num_cpus v1.17.0
+   Compiling fallible-iterator v0.3.0
+   Compiling census v0.4.2
+   Compiling levenshtein_automata v0.2.1
+   Compiling rustc-hash v1.1.0
+   Compiling lz4_flex v0.11.6
+   Compiling htmlescape v0.3.1
+   Compiling oneshot v0.1.13
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling rusqlite v0.32.1
+   Compiling tantivy v0.22.1
+   Compiling typenum v1.20.1
+   Compiling generic-array v0.14.7
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling cpufeatures v0.2.17
+   Compiling simd-adler32 v0.3.10
+   Compiling sha2 v0.10.9
+   Compiling adler2 v2.0.1
+   Compiling miniz_oxide v0.9.1
+   Compiling flate2 v1.1.10
+   Compiling chacha20 v0.10.2
+   Compiling rand v0.10.3
+   Compiling ark-store v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-store)
+   Compiling ark-runtime v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-runtime)
+   Compiling block-padding v0.3.3
+   Compiling hybrid-array v0.4.15
+   Compiling inout v0.1.4
+   Compiling cipher v0.4.4
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling miniz_oxide v0.8.9
+   Compiling fdeflate v0.3.7
+   Compiling keyring v3.6.3
+   Compiling const-oid v0.10.2
+   Compiling digest v0.11.3
+   Compiling png v0.18.1
+   Compiling cpufeatures v0.3.1
+   Compiling tinyvec v1.13.3
+   Compiling unicode-normalization v0.1.25
+   Compiling sha1 v0.11.0
+   Compiling ark-connect v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-connect)
+   Compiling data-encoding v2.11.1
+   Compiling unicode-properties v0.1.4
+   Compiling unicode-bidi v0.3.18
+   Compiling pom v1.1.0
+   Compiling stringprep v0.1.5
+   Compiling tungstenite v0.30.0
+   Compiling ecb v0.1.2
+   Compiling aes v0.8.4
+   Compiling cbc v0.1.2
+   Compiling md-5 v0.10.6
+   Compiling nom v8.0.0
+   Compiling bumpalo v3.20.3
+   Compiling ttf-parser v0.25.1
+   Compiling rangemap v1.8.0
+   Compiling weezl v0.1.12
+   Compiling lopdf v0.42.0
+   Compiling zopfli v0.8.3
+   Compiling tokio-tungstenite v0.30.0
+   Compiling adobe-cmap-parser v0.4.1
+   Compiling type1-encoding-parser v0.1.1
+   Compiling ark-exec v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-exec)
+   Compiling euclid v0.20.14
+   Compiling postscript v0.14.1
+   Compiling cff-parser v0.2.0
+   Compiling pdf-extract v0.12.1
+   Compiling zip v2.4.2
+   Compiling ark-proc v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-proc)
+   Compiling ark-computer v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-computer)
+   Compiling ark-browser v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-browser)
+   Compiling ark-files v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-files)
+   Compiling ark-acp v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-acp)
+   Compiling ark-sdk v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-sdk)
+   Compiling jiff-core v0.1.1
+   Compiling jiff v0.2.37
+   Compiling objc2-exception-helper v0.1.1
+   Compiling objc2-encode v4.1.0
+   Compiling objc2 v0.6.4
+   Compiling ark-orchestrate v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-orchestrate)
+   Compiling objc2-core-foundation v0.3.2
+   Compiling block2 v0.6.2
+   Compiling objc2-foundation v0.3.2
+   Compiling ref-cast v1.0.27
+   Compiling schemars v1.2.2
+   Compiling objc2-quartz-core v0.3.2
+   Compiling objc2-app-kit v0.3.2
+   Compiling ark-protocol v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-protocol)
+   Compiling dpi v0.1.2
+   Compiling raw-window-handle v0.6.2
+   Compiling alloc-no-stdlib v3.0.0
+   Compiling nu-ansi-term v0.50.3
+   Compiling lazy_static v1.5.0
+   Compiling sharded-slab v0.1.7
+   Compiling alloc-stdlib v0.3.0
+   Compiling typeid v1.0.3
+   Compiling ark-client v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-client)
+   Compiling matchers v0.2.0
+   Compiling tracing-log v0.2.0
+   Compiling thread_local v1.1.10
+   Compiling siphasher v1.0.4
+   Compiling winnow v1.0.4
+   Compiling web-time v1.1.0
+   Compiling cfb v0.14.0
+   Compiling toml_parser v1.1.3+spec-1.1.0
+   Compiling phf_shared v0.13.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling erased-serde v0.4.10
+   Compiling brotli-decompressor v6.0.1
+   Compiling jsonptr v0.7.1
+   Compiling serde_spanned v1.1.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling quick-xml v0.42.0
+   Compiling foreign-types-shared v0.3.1
+   Compiling same-file v1.0.6
+   Compiling toml_writer v1.1.2+spec-1.1.0
+   Compiling toml v1.1.6+spec-1.1.0
+   Compiling walkdir v2.5.0
+   Compiling foreign-types v0.5.0
+   Compiling plist v1.10.1
+   Compiling json-patch v4.2.0
+   Compiling brotli v9.0.0
+   Compiling serde-untagged v0.1.9
+   Compiling cookie v0.18.2
+   Compiling phf v0.13.1
+   Compiling getrandom v0.3.4
+   Compiling infer v0.22.0
+   Compiling objc2-web-kit v0.3.2
+   Compiling dispatch2 v0.3.1
+   Compiling serde_with v3.24.0
+   Compiling urlpattern v0.6.0
+   Compiling core-graphics-types v0.2.0
+   Compiling ctor v1.0.13
+   Compiling glob v0.3.4
+   Compiling semver v1.0.28
+   Compiling core-graphics v0.25.0
+   Compiling tauri-utils v2.10.1
+   Compiling ark-interact v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-interact)
+   Compiling keyboard-types v0.8.3
+   Compiling muda v0.20.0
+   Compiling tauri-runtime v2.12.1
+   Compiling wry v0.57.0
+   Compiling tao v0.37.1
+   Compiling objc2-core-graphics v0.3.2
+   Compiling serialize-to-javascript v0.1.2
+   Compiling tray-icon v0.25.1
+   Compiling tauri-runtime-wry v2.12.1
+   Compiling window-vibrancy v0.8.1
+   Compiling embed_plist v1.2.2
+   Compiling heck v0.5.0
+   Compiling tauri v2.12.1
+   Compiling rand_core v0.9.5
+   Compiling rand_chacha v0.9.0
+   Compiling mac-notification-sys v0.6.15
+   Compiling ark-reach v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-reach)
+   Compiling tauri-plugin-fs v2.6.0
+   Compiling nix v0.28.0
+   Compiling notify-rust v4.18.1
+   Compiling rand v0.9.5
+   Compiling rfd v0.16.0
+   Compiling filedescriptor v0.8.3
+   Compiling xattr v1.6.1
+   Compiling serial2 v0.2.38
+   Compiling filetime v0.2.29
+   Compiling shell-words v1.1.1
+   Compiling ark-ui v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-ui)
+   Compiling portable-pty v0.9.0
+   Compiling tar v0.4.46
+   Compiling tauri-plugin-dialog v2.8.1
+   Compiling tauri-plugin-notification v2.5.1
+   Compiling tauri-plugin-single-instance v2.5.2
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstyle v1.0.14
+   Compiling anstream v1.0.0
+   Compiling strsim v0.11.1
+   Compiling clap_lex v1.1.1
+   Compiling clap_builder v4.6.7
+   Compiling clap v4.6.7
+   Compiling signal-hook v0.3.18
+   Compiling signal-hook-mio v0.2.5
+   Compiling derive_more v2.1.1
+   Compiling iana-time-zone v0.1.65
+   Compiling vte v0.14.1
+   Compiling strip-ansi-escapes v0.2.1
+   Compiling chrono v0.4.45
+   Compiling crossterm v0.29.0
+   Compiling strum v0.28.0
+   Compiling unicode-segmentation v1.13.3
+   Compiling unicode-width v0.2.2
+   Compiling reedline v0.52.0
+   Compiling ark-cli v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-cli)
+   Compiling ark-bench v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-bench)
+   Compiling ark-account v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/crates/ark-account)
+   Compiling writing-agent v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/examples/writing-agent)
+   Compiling agent-team v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/examples/agent-team)
+   Compiling minimal-agent v0.24.0 (/Users/valentino/projects/AIengineering/ark-call-efficiency/examples/minimal-agent)
+    Finished `test` profile [optimized] target(s) in 8m 52s
+     Running unittests src/main.rs (target/debug/deps/agent_team-444cfc28b152d569)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_account-a2a1d9419c161090)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/account.rs (target/debug/deps/account-ce87a1956ff2012b)
+
+running 13 tests
+test a_service_that_names_another_issuer_is_refused ... ok
+test signed_out_until_someone_signs_in ... ok
+test a_sign_in_the_service_ended_signs_this_computer_out ... ok
+test a_fresh_access_token_is_reused ... ok
+test a_service_without_names_is_asked_once_and_signing_in_still_works ... ok
+test without_a_name_nothing_is_sent ... ok
+test sign_out_revokes_this_computers_token_only ... ok
+test short_access_tokens_refresh_once_even_when_asked_together ... ok
+test entitlements_come_from_the_service ... ok
+test without_the_service_the_account_stays_known_and_sign_out_still_works ... ok
+test sign_in_through_the_browser_and_stay_signed_in ... ok
+test the_computer_names_its_sign_in_once_per_run ... ok
+test signing_in_again_revokes_the_sign_in_it_replaces ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.43s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_acp-1265fbd561f765f1)
+
+running 6 tests
+test tests::catalogs_name_worker_models_without_runtime_words ... ok
+test client::tests::grok_rejects_unknown_permission_shapes_before_approval ... ok
+test tests::grok_setup_owns_its_home_and_fixed_policy ... ok
+test tests::installed_compatibility_workers_stay_hidden_but_usable ... ok
+test client::tests::requests_name_the_file_or_the_command ... ok
+test tests::probes_do_not_receive_ark_secrets ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_bench-b3a500147d2d30b5)
+
+running 17 tests
+test report::tests::fewer_tokens_is_better_and_lower_success_is_a_regression ... ok
+test report::tests::percentile_is_nearest_rank ... ok
+test record::tests::prefix_reuse_counts_the_shared_start ... ok
+test suite::tools::tests::eval_handles_precedence_and_parens ... ok
+test suite::board::tests::items_are_read_from_cards_and_from_json ... ok
+test cassette::tests::ids_do_not_change_the_fingerprint ... ok
+test faults::tests::the_bench_wrappers_pass_the_window_on ... ok
+test workload::measurement_tests::failed_direct_requests_cannot_hide_unrecorded_managed_calls ... ok
+test workload::measurement_tests::managed_usage_and_context_do_not_depend_on_the_direct_provider_meter ... ok
+test faults::tests::plans_parse_and_describe ... ok
+test faults::tests::the_schedule_depends_only_on_the_seed ... ok
+test suite::workbooks::tests::the_program_passes_the_check_in_python ... ok
+test cassette::tests::a_recording_replays_and_counts_divergence ... ok
+test suite::analysis::tests::the_check_reads_the_saved_files_and_accepts_any_number_format ... ok
+test suite::files::tests::the_check_reads_the_saved_values ... ok
+test suite::workbooks::tests::the_data_has_the_problems_and_one_answer ... ok
+test suite::workbooks::tests::the_check_reads_the_saved_files ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.24s
+
+     Running unittests src/main.rs (target/debug/deps/ark_bench-50fa5c93db3a302a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/suite.rs (target/debug/deps/suite-c04ea0a5c0fafeae)
+
+running 5 tests
+test managed_recordings_are_rejected_before_any_model_call ... ok
+test the_team_workload_delegates_under_ark ... ok
+test record_replay_and_faults_are_reproducible ... ok
+test the_naive_baseline_is_judged_by_the_same_checks ... ok
+test simulated_runs_are_deterministic ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 34.69s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_browser-b858e2fc0b25d975)
+
+running 5 tests
+test tests::this_computer_is_localhost_loopback_and_unspecified ... ok
+test tests::an_address_is_private_by_its_host_alone ... ok
+test tests::a_missing_browser_is_unavailable_without_a_fallback ... ok
+test tests::rendered_frames_have_a_hard_transfer_limit ... ok
+test tests::a_crashed_person_page_stays_ended_until_an_explicit_open ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.77s
+
+     Running tests/browser.rs (target/debug/deps/browser-2d7403fdf26c7af5)
+
+running 4 tests
+test this_machine_is_refused_unless_allowed ... ok
+test a_person_surface_has_its_own_context_frames_navigation_and_popups ... ok
+test a_project_opens_the_pages_its_processes_serve_and_nothing_else_here ... ok
+test agents_browse_apart_and_take_turns_on_the_signed_in_browser ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.79s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_cli-f92f3ca79a7a52f9)
+
+running 32 tests
+test markdown::tests::no_color_is_passthrough ... ok
+test headless::tests::a_retried_answer_is_printed_once_after_the_withdrawn_text ... ok
+test headless::tests::an_unstreamed_or_revised_answer_is_printed ... ok
+test headless::tests::narration_then_answer_prints_the_answer_once ... ok
+test markdown::tests::fenced_code_is_dim_and_kept_verbatim ... ok
+test markdown::tests::bold_is_styled_and_reset ... ok
+test markdown::tests::markers_are_consumed_regardless_of_chunking ... ok
+test markdown::tests::unfinished_head_is_flushed ... ok
+test approval::tests::render_shows_call_and_choices ... ok
+test approval::tests::a_request_to_connect_offers_connect_or_not_now ... ok
+test driver::tests::questions_wait_their_turn_and_answered_ones_are_skipped ... ok
+test approval::tests::shortcuts_and_escape ... ok
+test approval::tests::arrows_move_and_enter_confirms ... ok
+test chat::tests::an_agents_question_outlives_the_turn_that_showed_it ... ok
+test shell::tests::backslash_continues_lines ... ok
+test shell::tests::slash_completion_matches_prefixes_only_at_start ... ok
+test term::tests::line_after_streamed_text_starts_fresh ... ok
+test term::tests::raw_mode_translates_newlines_and_status_is_erased ... ok
+test render::tests::renders_fields_tables_and_notes_without_colour ... ok
+test render::tests::last_column_is_clipped_to_the_width ... ok
+test view::tests::repeated_activity_collapses_into_a_count ... ok
+test view::tests::tool_call_and_result_read_as_activity ... ok
+test chat::tests::closing_the_terminal_refuses_nothing ... ok
+test remote::tests::a_command_that_hands_text_to_the_agent_is_followed_not_sent_again ... ok
+test remote::tests::a_turn_nobody_can_answer_refuses_instead_of_asking ... ok
+test remote::tests::a_turn_runs_there_and_its_question_is_answered_here ... ok
+test remote::tests::a_turn_stopped_before_it_was_sent_never_runs_there ... ok
+test remote::tests::help_lists_the_terminals_keys_and_bad_access_is_explained ... ok
+test remote::tests::another_request_while_a_turn_runs_there_is_refused_not_merged ... ok
+test remote::tests::a_question_answered_in_another_window_goes_away_here ... ok
+test remote::tests::the_terminal_follows_a_turn_already_running_when_it_connects ... ok
+test remote::tests::stopping_here_stops_the_turn_there ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.89s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_client-cbc7658ea69317b3)
+
+running 1 test
+test tests::events_split_across_chunks_are_put_back_together ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_computer-47cb44793a27981f)
+
+running 1 test
+test fingerprint_tests::status_changes_are_not_new_messages_but_duplicate_bubbles_are ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/computer.rs (target/debug/deps/computer-7bdf28888e070312)
+
+running 25 tests
+test a_need_names_the_computer_by_whole_words ... ok
+test a_service_without_a_switch_is_on_and_asks_nothing ... ok
+test ambient_context_has_truthful_empty_failure_and_permission_states ... ok
+test active_window_reads_only_remembered_window_metadata ... ok
+test failed_and_stopped_actions_finish_with_terminal_activity ... ok
+test an_idle_holder_gives_way_and_must_look_again ... ok
+test the_computer_is_off_until_the_person_turns_it_on_and_remembers_it ... ok
+test a_draft_tombstone_survives_restart_and_blocks_another_chat ... ok
+test the_native_screen_lists_apps_and_reads_the_front_window ... ok
+test turning_computer_off_revokes_an_in_flight_ambient_sample ... ok
+test activity_is_sequenced_and_names_the_visible_target ... ok
+test a_return_error_after_the_safety_boundary_is_unconfirmed_not_failed ... ok
+test one_agent_at_a_time_and_the_next_waits_its_turn ... ok
+test cancel_types_delete_and_clears_only_the_exact_draft ... ok
+test permission_is_asked_once_and_the_action_goes_on ... ok
+test an_agent_sees_a_window_and_points_at_a_spot ... ok
+test the_person_comes_first_and_can_take_the_computer_back ... ok
+test turning_it_on_asks_for_the_permission_and_waits_for_it ... ok
+test an_agent_reads_a_window_and_acts_on_it_by_number ... ok
+test an_unconfirmed_send_is_terminal_and_blocks_another_owner ... ok
+test a_message_is_drafted_then_sent_only_when_the_outgoing_item_is_proved ... ok
+test an_agent_uses_the_menu_bar_by_name ... ok
+test an_agent_scrolls_and_double_clicks ... ok
+test send_posts_no_return_when_another_app_keeps_the_front ... ok
+test typed_keys_go_only_to_the_approved_app_in_front ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.94s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_connect-c78a984c516ff8a6)
+
+running 11 tests
+test secrets::tests::keychain_round_trip ... ignored
+test services::google::tests::a_non_ascii_subject_is_encoded ... ok
+test services::google::tests::times_are_dates_offsets_or_zoned ... ok
+test services::google::tests::calendar_cards_list_events_and_say_who_was_invited ... ok
+test catalog::tests::the_builtin_catalog_reads_and_finds_by_id_label_and_action ... ok
+test secrets::tests::a_given_key_reads_what_it_wrote ... ok
+test secrets::tests::file_secrets_refuse_without_their_key ... ok
+test secrets::tests::file_secrets_survive_a_restart_and_stay_encrypted ... ok
+test acquire::tests::without_a_client_there_is_nothing_to_offer ... ok
+test acquire::tests::what_can_be_added_is_offered_and_found_by_name_or_words ... ok
+test api_keys::tests::a_key_is_checked_kept_found_by_the_model_layer_and_forgotten ... ok
+
+test result: ok. 10 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/connect.rs (target/debug/deps/connect-b2fdc95c2c510523)
+
+running 3 tests
+test without_a_client_id_a_capability_says_it_cannot_connect ... ok
+test a_refused_sign_in_connects_nothing ... ok
+test connect_use_refresh_and_disconnect_mail ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_core-892b39defc41a547)
+
+running 28 tests
+test capability::tests::synonyms_resolve ... ok
+test research::tests::claim_type_roundtrips_leniently ... ok
+test context::tests::empty_context_has_no_digest ... ok
+test research::tests::evidence_card_reference_line_is_compact ... ok
+test context::tests::nearby_evidence_is_capped ... ok
+test capability::tests::describe_and_enumerate ... ok
+test capability::tests::slugs_normalize_and_resolve ... ok
+test context::tests::digest_resolves_this_to_the_focused_artifact ... ok
+test capability::tests::register_replaces_by_slug ... ok
+test action::tests::auto_eligibility_is_explicit_and_old_descriptors_stay_manual ... ok
+test action::tests::a_grant_key_splits_answers_by_input_and_never_widens ... ok
+test research::tests::digest_includes_frontier ... ok
+test research::tests::graph_links_dedupe_and_surface_frontier ... ok
+test research::tests::state_digest_is_bounded_and_ordered ... ok
+test research::tests::compact_dedupes_and_keeps_decisions ... ok
+test rules::tests::digest_follows_content_not_version ... ok
+test rules::tests::parses_ids_tags_and_always ... ok
+test surface::selection_tests::named_marks_round_trip_at_the_top_level ... ok
+test surface::tests::digest_describes_surface_and_selection ... ok
+test surface::tests::domain_surface_kind_via_other ... ok
+test surface::tests::empty_focus_has_no_digest ... ok
+test surface::tests::present_directive_headline_and_roundtrip ... ok
+test tests::action_name_splits_adapter ... ok
+test tests::artifact_id_is_content_addressed ... ok
+test tests::detect_kind_classifies_text_json_binary ... ok
+test tests::invocation_roundtrips_json ... ok
+test tests::mutate_invocation_starts_pending ... ok
+test tests::risk_tier_gates_auto_run ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_exec-a8be9a62a6b696b2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/run.rs (target/debug/deps/run-8d451ff137bf55ed)
+
+running 8 tests
+test python_analysis_writes_a_chart_and_a_table ... ok
+test python_joins_a_workbook_and_a_csv_in_sql ... ok
+test the_description_names_the_runtimes_and_what_the_window_shows ... ok
+test a_run_returns_the_files_it_wrote_in_the_project ... ok
+test a_run_cannot_write_outside_the_project_or_into_its_kept_folders ... ok
+test a_run_cannot_read_outside_the_project_or_reach_the_network ... ok
+test a_run_keeps_the_version_before_of_what_it_changed_or_removed ... ok
+test a_run_past_its_timeout_is_stopped ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+     Running tests/run_windows.rs (target/debug/deps/run_windows-9c2b068b029694e0)
+     Running unittests src/lib.rs (target/debug/deps/ark_files-01d85ab5436ef153)
+
+running 50 tests
+test format::text::tests::crlf_files_stay_crlf ... ok
+test format::image::tests::an_image_reads_as_what_it_is_and_is_never_changed ... ok
+test format::text::tests::utf16_files_are_text_and_stay_utf16 ... ok
+test format::csv::tests::reads_and_edits_keeping_its_delimiter ... ok
+test format::xlsx::tests::chart_cache_wins_when_live_range_is_partial ... ok
+test format::docx::tests::named_styles_inherit_spacing ... ok
+test format::pdf::tests::a_pdf_reads_as_its_text_page_by_page_and_is_never_changed ... ok
+test format::xlsx::tests::number_formats ... ok
+test format::docx::tests::layout_creates_missing_word_defaults_and_margins ... ok
+test format::xlsx::tests::chart_sampling_preserves_bucket_spikes_and_alignment ... ok
+test formula::tests::evaluates_a_summary ... ok
+test formula::tests::formulas_across_sheets ... ok
+test formula::tests::shifting_and_renaming ... ok
+test model::tests::cell_names_and_dates ... ok
+test model::tests::document_edits_use_the_numbers_of_the_read ... ok
+test model::tests::markdown_round_trips_through_blocks ... ok
+test model::tests::typed_values_take_their_kind ... ok
+test model::tests::sheet_edits_and_errors ... ok
+test format::docx::tests::creates_from_markdown_and_reads_it_back ... ok
+test format::docx::tests::hand_made_headings_and_bullets ... ok
+test snapshot::tests::measured_snapshot_limits ... ignored, writes a near-limit temporary file; run for the artifact performance gate
+test package::tests::paths_and_parts ... ok
+test tests::a_files_kind_is_decided_once_for_paths_and_stored_copies ... ok
+test format::docx::tests::margin_only_preserves_spacing_and_mixed_sections_can_be_restored ... ok
+test format::docx::tests::document_layout_round_trips_without_erasing_direct_formatting ... ok
+test format::docx::tests::an_edit_keeps_what_it_does_not_touch ... ok
+test format::xlsx::tests::an_edit_keeps_what_it_does_not_touch ... ok
+test format::xlsx::tests::embedded_charts_use_live_cells_and_survive_edits ... ok
+test format::xlsx::tests::creates_reads_and_edits_in_place ... ok
+test tests::rewriting_a_crlf_file_keeps_crlf ... ok
+test tests::maps_keep_editable_source_and_models_refuse_text_edits ... ok
+test snapshot::tests::bounds_cancel_and_paths_fail_before_a_token_exists ... ok
+test view::tests::a_document_lists_numbered_blocks_without_spacing ... ok
+test view::tests::a_sheet_lists_with_addresses_and_formulas ... ok
+test view::tests::a_sheet_read_in_part_says_how_much_is_not_read ... ok
+test xml::tests::escapes_round_trip ... ok
+test tests::unknown_binary_files_are_not_text ... ok
+test tests::paths_stay_inside_the_folder ... ok
+test tests::an_edit_based_on_an_old_version_is_refused ... ok
+test xml::tests::tokens_carry_their_ranges ... ok
+test tool::tests::a_file_is_found_by_listing_it_or_searching_its_name ... ok
+test snapshot::tests::cancellation_stops_copying_and_verifying ... ok
+test tool::tests::a_save_over_a_file_keeps_the_version_before ... ok
+test snapshot::tests::in_place_overwrite_and_truncation_never_publish_a_mixed_copy ... ok
+test view::tests::a_workbook_read_without_a_sheet_shows_the_start_of_every_sheet ... ok
+test tool::tests::agent_and_person_work_on_one_file ... ok
+test tool::tests::documents_from_markdown_and_search_inside_files ... ok
+test snapshot::tests::chunks_keep_one_version_through_every_atomic_replacement ... ok
+test format::csv::tests::a_large_csv_reads_its_start_and_counts_the_rest ... ok
+test format::xlsx::tests::a_large_sheet_reads_its_start_and_counts_the_rest_but_an_edit_sees_all ... ok
+
+test result: ok. 49 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_interact-4a8aeaf40e50919e)
+
+running 37 tests
+test inspect::tests::pricing_counts_cached_input_separately ... ok
+test fmt::tests::formats ... ok
+test command::tests::parse_splits_name_and_args ... ok
+test approval::tests::a_change_cut_short_asks_whether_to_do_it_again_and_skipping_is_the_default ... ok
+test approval::tests::a_narrow_grant_names_what_it_covers_on_its_button ... ok
+test labels::tests::consumer_labels_win_over_defaults ... ok
+test labels::tests::a_run_asks_with_its_program_and_says_what_it_wrote ... ok
+test labels::tests::a_process_start_asks_with_its_command_and_folder ... ok
+test labels::tests::default_labels_read_naturally ... ok
+test activity::tests::calls_and_results_pair_by_id ... ok
+test command::tests::effects_serialize_compactly ... ok
+test labels::tests::runtime_tools_read_naturally ... ok
+test labels::tests::image_generation_approval_exposes_the_prompt ... ok
+test plugins::catalog::tests::authless_installed_plugin_can_be_turned_on ... ok
+test plugins::catalog::tests::expired_catalog_does_not_hide_installed_state ... ok
+test plugins::catalog::tests::precedence_and_badge_order_are_stable ... ok
+test inspect::tests::context_view_explains_every_section_and_what_was_kept_out ... ok
+test plugins::catalog::tests::project_id_is_not_part_of_plugin_identity ... ok
+test activity::tests::rules_name_the_file_they_come_from ... ok
+test plugins::catalog::tests::uninstalled_account_plugin_is_added_before_it_connects ... ok
+test plugins::catalog::tests::retrying_connect_has_connecting_state_and_cancel ... ok
+test report::tests::consecutive_fields_and_actions_group ... ok
+test approval::tests::a_question_nobody_waits_for_is_closed ... ok
+test approval::tests::answers_travel_back_and_drops_deny ... ok
+test trace::tests::a_summary_trace_keeps_activity_but_no_content ... ok
+test labels::tests::a_file_change_asks_with_what_it_writes ... ok
+test trace::tests::calls_track_approval_result_and_context_window ... ok
+test labels::tests::scheduling_and_the_computer_read_naturally ... ok
+test trace::tests::withdrawn_text_leaves_the_record ... ok
+test trace::tests::text_deltas_merge_and_unfinished_calls_did_not_run ... ok
+test plugins::tests::add_reads_name_settings_command_and_args ... ok
+test report::tests::tables_align_and_serialize ... ok
+test logging::tests::a_big_log_is_rotated_at_start ... ok
+test labels::tests::a_schedule_approval_shows_when_and_all_each_run_is_handed ... ok
+test held::tests::a_runtime_keeps_its_id ... ok
+test held::tests::held_chats_are_listed_newest_first_and_forgotten ... ok
+test held::tests::an_origin_project_is_made_once ... ok
+
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/crash.rs (target/debug/deps/crash-e898386c3e197e1b)
+
+running 1 test
+test a_killed_turn_shows_what_it_did_and_where_it_stopped ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/interaction.rs (target/debug/deps/interaction-120b5b71fdd007d1)
+
+running 16 tests
+test late_steering_comes_back_undelivered ... ok
+test commands_return_structured_reports_and_effects ... ok
+test a_turn_is_described_traced_stored_and_restored ... ok
+test an_install_that_names_an_app_is_asked_as_an_install ... ok
+test projects_are_folders_and_reopen_where_they_left_off ... ok
+test sibling_conversations_share_the_agents_and_scheduled_work_wakes_at_open ... ok
+test board_command_shows_and_changes_the_board ... ok
+test an_always_grant_lasts_until_removed_with_grants ... ok
+test a_need_reaches_the_source_that_serves_it ... ok
+test agents_command_shows_the_graph_and_a_task ... ok
+test connect_lists_capabilities_and_says_why_one_cannot_connect ... ok
+test an_agent_asks_for_mail_mid_task_and_sends_once_it_is_connected ... ok
+test the_chat_creates_agents_and_hands_them_tasks ... ok
+test a_plugin_added_by_command_serves_the_next_turn_and_the_agents_it_is_given_to ... ok
+test the_conversation_reads_a_skill_and_agents_get_the_ones_they_are_given ... ok
+test an_agent_asks_to_use_the_apps_and_the_turn_goes_on_in_the_app ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.41s
+
+     Running tests/logging.rs (target/debug/deps/logging-676e2f8e6ba08f9e)
+
+running 1 test
+test info_logs_count_the_turn_and_keep_its_content_out ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/out_of_credit.rs (target/debug/deps/out_of_credit-c6bd7838c10791c4)
+
+running 2 tests
+test out_of_credit_stops_the_turn_once_with_what_to_do ... ok
+test a_named_endpoint_model_called_claude_is_not_claude_code ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_model-20bda7523615874e)
+
+running 93 tests
+test capacity::tests::rate_limits_cool_down ... ok
+test anthropic::picture_tests::a_tool_results_picture_goes_inside_its_result ... ok
+test anthropic::tests::parallel_results_travel_in_one_user_message ... ok
+test anthropic::tests::search_results_come_from_result_blocks_with_cited_text_as_snippets ... ok
+test cli::tests::an_error_without_words_names_its_kind ... ok
+test anthropic::tests::breakpoint_sits_before_the_final_block ... ok
+test capacity::tests::limited_provider_passes_calls_through ... ok
+test cli::tests::claude_arguments_are_an_object_and_codex_arguments_are_typed ... ok
+test capacity::tests::min_interval_spaces_starts ... ok
+test capacity::tests::never_more_in_flight_than_allowed ... ok
+test anthropic::tests::body_marks_tools_and_system_and_drops_empty_text ... ok
+test cli::tests::a_claude_process_that_stops_mid_reply_is_an_error_with_its_last_words ... ok
+test cli::tests::codex_catalog_includes_live_effort_choices ... ok
+test cli::tests::host_exec_flags_preserve_only_explicit_web_search ... ok
+test cli::tests::claude_text_streams_while_the_reply_is_written ... ok
+test cli::tests::a_resumed_codex_session_gets_the_schema_of_the_tools_available_now ... ok
+test cli::tests::claude_tool_calls_become_ark_calls ... ok
+test cli::tests::overload_is_retried_and_a_usage_limit_says_when_it_resets ... ok
+test cli::tests::prompt_lists_tools_and_app_instructions ... ok
+test cli::tests::claude_sessions_open_with_an_id_and_resume_with_a_delta ... ok
+test cli::tests::status_parsing ... ok
+test cli::tests::subscription_specs_keep_model_and_effort_separate ... ok
+test cli::tests::transcript_carries_calls_and_results ... ok
+test cli::tests::bad_arguments_are_malformed_and_retryable ... ok
+test cli::tests::vendor_session_files_are_found_by_exact_id ... ok
+test codex_app::tests::host_model_configuration_keeps_credentials_and_provider_choices_out ... ok
+test codex_app::tests::usage_counts_cached_input_inside_input ... ok
+test endpoints::tests::names_are_checked ... ok
+test endpoints::tests::the_key_variable_follows_the_name ... ok
+test live::tests::an_exit_closes_the_output ... ok
+test live::tests::lines_go_in_and_come_back ... ok
+test ollama::tests::a_picture_goes_in_the_messages_images ... ok
+test openai::tests::a_tool_results_picture_follows_it_in_a_user_message ... ok
+test openai::tests::only_supported_mainline_openai_models_offer_image_generation ... ok
+test openai::tests::openai_models_have_their_family_window ... ok
+test picture_tests::base64_matches_the_standard ... ok
+test reply::tests::a_long_edit_with_quotes_newlines_and_code_reads_back_exactly ... ok
+test reply::tests::a_null_the_tool_accepts_is_passed_through ... ok
+test reply::tests::a_part_that_is_not_json_is_an_error_and_never_repaired ... ok
+test reply::tests::a_tool_whose_whole_arguments_are_open_keeps_the_string_form ... ok
+test reply::tests::deep_parts_become_strings_within_the_nesting_limit ... ok
+test reply::tests::each_tool_is_a_closed_variant_in_strict_form ... ok
+test reply::tests::enums_carry_their_type_and_const_is_an_enum ... ok
+test reply::tests::over_a_limit_the_whole_reply_uses_strings ... ok
+test reply::tests::the_open_and_legacy_shapes_read_objects_and_strings ... ok
+test reply::tests::variants_are_told_apart_by_their_keys ... ok
+test reply::tests::what_strict_mode_cannot_express_travels_as_a_json_string ... ok
+test cli::tests::a_refused_schema_switches_the_model_to_strings_and_the_call_is_retryable ... ok
+test resilience::tests::delays_grow_stay_bounded_and_respect_retry_after ... ok
+test resilience::tests::transient_and_permanent_failures ... ok
+test session::tests::a_cancelled_call_drops_the_vendor_session_and_the_next_one_opens ... ok
+test session::tests::a_crash_mid_call_never_resumes ... ok
+test session::tests::a_failed_call_rehydrates_next_time ... ok
+test session::tests::a_healthy_lane_resumes_after_a_restart ... ok
+test session::tests::a_lane_not_yet_used_shows_its_stored_state ... ok
+test session::tests::changed_instructions_travel_in_the_delta ... ok
+test session::tests::idle_sessions_are_swept ... ok
+test session::tests::lanes_never_share_a_vendor_session ... ok
+test session::tests::reuse_off_opens_every_time ... ok
+test session::tests::rotates_before_the_context_limit_from_arks_request ... ok
+test session::tests::second_call_sends_only_what_is_new ... ok
+test session::tests::the_session_limit_evicts_the_least_recently_used ... ok
+test stream::tests::a_cut_off_tool_call_is_an_error_not_empty_arguments ... ok
+test stream::tests::a_reply_field_streams_from_partial_json ... ok
+test stream::tests::anthropic_fold_streams_text_and_assembles_tool_use ... ok
+test stream::tests::anthropic_fold_surfaces_stream_errors ... ok
+test stream::tests::cached_tokens_are_part_of_the_prompt ... ok
+test stream::tests::escapes_split_across_pieces_decode_once ... ok
+test stream::tests::ollama_fold_reads_final_counts ... ok
+test stream::tests::openai_fold_merges_tool_call_fragments ... ok
+test stream::tests::sse_data_skips_done_and_non_data ... ok
+test stream::tests::the_field_name_elsewhere_is_ignored ... ok
+test tests::mock_provider_records_and_replays ... ok
+test tests::token_estimate_is_chars_over_four ... ok
+test tests::tool_name_mangling_roundtrips ... ok
+test tests::tool_result_message_links_call ... ok
+test tests::unknown_provider_errors ... ok
+test usage::tests::claude_reports_its_windows ... ok
+test usage::tests::codex_reports_its_windows_and_plan ... ok
+test usage::tests::the_latest_report_is_kept_per_account ... ok
+test cli::tests::codex_app_turns_get_the_tools_schema_and_long_calls_arrive_whole ... ok
+test resilience::tests::an_unreachable_model_is_waited_for_then_given_up ... ok
+test cli::tests::codex_exec_gets_the_tools_schema_and_returns_objects ... ok
+test cli::tests::codex_reply_is_text ... ok
+test cli::tests::codex_sessions_report_their_thread_and_resume_it ... ok
+test cli::tests::codex_sessions_run_on_one_app_server_and_stream ... ok
+test cli::tests::a_search_turns_on_the_clis_own_web_search_and_nothing_else ... ok
+test cli::tests::host_tools_are_disabled_for_both_started_and_reloaded_threads ... ok
+test cli::tests::incompatible_mcp_names_fall_back_before_submitting_a_vendor_turn ... ok
+test cli::tests::model_discovery_does_not_require_a_host_compatible_mcp_name ... ok
+test cli::tests::signed_out_error_says_how_to_sign_in ... ok
+test cli::tests::typed_arguments_that_are_not_json_where_json_is_due_are_malformed ... ok
+test cli::tests::a_model_that_gave_up_after_refused_native_calls_is_asked_once_more ... ok
+
+test result: ok. 93 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.70s
+
+     Running tests/context_window.rs (target/debug/deps/context_window-a200e4d9cd5c48c2)
+
+running 3 tests
+test a_limited_provider_passes_the_window_on ... ok
+test a_vendor_session_is_sized_by_its_rotation_limit ... ok
+test models_report_their_window ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests/endpoints.rs (target/debug/deps/endpoints-cf27de2e242131b5)
+
+running 4 tests
+test a_model_is_required_and_a_missing_key_is_named ... ok
+test a_402_is_out_of_credit_with_the_providers_words ... ok
+test an_unreachable_endpoint_shows_as_not_ready ... ok
+test a_named_endpoint_is_a_provider_with_its_own_key_and_models ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.22s
+
+     Running tests/http_resilience.rs (target/debug/deps/http_resilience-75e1550c8c7fbbc8)
+
+running 5 tests
+test the_output_cap_is_sent ... ok
+test a_rate_limit_carries_its_retry_after ... ok
+test a_bad_request_is_not_retried ... ok
+test a_stream_that_stalls_halfway_fails_after_the_text_it_sent ... ok
+test a_silent_server_times_out_instead_of_hanging ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.81s
+
+     Running tests/image_generation.rs (target/debug/deps/image_generation-d2c7eacd53be13f4)
+
+running 3 tests
+test an_unsupported_model_has_no_image_request ... ok
+test an_oversized_image_response_is_rejected_before_its_body_is_read ... ok
+test a_supported_openai_model_requests_base64_image_bytes ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/this_machine.rs (target/debug/deps/this_machine-8bbd8730acfd304f)
+
+running 1 test
+test lists_what_this_machine_offers ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_orchestrate-923f918f6c3e49a9)
+
+running 19 tests
+test cron::tests::fields_parse_with_lists_ranges_steps_and_names ... ok
+test cron::tests::either_day_field_matches_when_both_are_given ... ok
+test board::tests::the_board_is_ordered_by_column_then_place_and_done_latest_first ... ok
+test board::tests::changes_leave_a_short_history ... ok
+test board::tests::ranks_put_an_item_between_its_neighbours ... ok
+test cron::tests::common_shapes_read_as_words ... ok
+test schedule::tests::a_once_schedule_ends_after_its_run ... ok
+test brief::tests::a_brief_holds_the_task_and_nothing_else ... ok
+test brief::tests::a_brief_carries_its_board_item_and_the_last_steps_on_it ... ok
+test schedule::tests::when_is_checked_and_put_in_week_order ... ok
+test spec::tests::budgets_fall_back_field_by_field ... ok
+test spec::tests::contacts_follow_permissions_and_parent ... ok
+test orchestrator::allowed_tests::an_agent_gets_only_the_acquired_actions_its_tools_allow ... ok
+test tools::tests::a_clipped_result_says_how_to_read_the_rest ... ok
+test schedule::tests::a_new_schedule_keeps_the_persons_zone_and_old_records_still_read ... ok
+test schedule::tests::a_date_runs_once_and_cron_finds_its_days ... ok
+test schedule::tests::times_are_read_in_the_schedules_zone_across_daylight_saving ... ok
+test schedule::tests::the_next_run_is_the_next_matching_local_time ... ok
+test schedule::tests::dates_cron_and_zones_are_checked ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/board.rs (target/debug/deps/board-0c3f7f8dae024c2e)
+
+running 4 tests
+test the_person_orders_and_changes_the_board ... ok
+test two_agents_never_take_one_item ... ok
+test a_failure_blocks_the_item_a_retry_clears_it_and_a_cancel_puts_it_back ... ok
+test the_conversation_plans_on_the_board_and_the_items_follow_the_work ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/orchestration.rs (target/debug/deps/orchestration-f4f3c1c2bfc4acde)
+
+running 42 tests
+test a_failed_dependency_fails_the_task ... ok
+test a_result_that_never_reached_its_chat_is_posted_after_the_restart_once ... ok
+test a_scheduled_run_is_skipped_while_the_last_one_is_still_open ... ok
+test a_change_made_before_a_restart_is_not_made_twice ... ok
+test a_handoff_the_chat_waits_for_is_its_answer_and_is_not_posted_too ... ok
+test a_handoff_the_chat_does_not_wait_for_is_posted_in_it_once ... ok
+test a_named_profile_is_chosen_by_name_and_survives_a_restart ... ok
+test a_change_cut_short_by_a_restart_is_not_run_again_on_its_own ... ok
+test a_schedule_runs_its_task_at_its_times_and_survives_a_restart ... ok
+test a_scheduled_run_posts_its_result_in_the_chat_that_asked ... ok
+test a_stopping_process_drops_a_model_call_and_the_task_continues_after ... ok
+test a_question_survives_a_restart_and_its_answer_runs_the_call_once ... ok
+test a_parent_waiting_on_children_gives_back_its_capacity ... ok
+test a_files_version_before_is_not_a_task_output ... ok
+test cancelling_a_task_that_waits_for_an_answer_after_a_restart_ends_it ... ok
+test a_token_budget_stops_the_task_and_its_children ... ok
+test a_turn_that_continues_a_stopped_one_takes_up_its_handoff_instead_of_making_another ... ok
+test a_task_waiting_for_the_person_shows_it_and_any_client_answers ... ok
+test an_agents_own_model_is_kept_when_the_sessions_model_changes ... ok
+test a_coordinator_delegates_in_parallel_and_synthesizes ... ok
+test an_agent_gets_its_own_browser_when_its_tools_allow_it ... ok
+test cancelling_a_task_cancels_what_it_delegated ... ok
+test a_vendor_session_rotates_from_arks_request ... ok
+test dependencies_pass_results_not_conversations ... ok
+test agents_without_a_model_follow_the_sessions_model_when_it_changes ... ok
+test an_agent_asks_for_the_computer_only_when_its_tools_allow_it ... ok
+test messages_reach_a_running_task_or_wait_in_the_inbox ... ok
+test delegating_back_up_a_waiting_chain_is_refused ... ok
+test rules_are_selected_per_task_and_traced ... ok
+test terminate_closes_the_agent ... ok
+test a_stopping_process_lets_a_change_under_way_finish_and_the_task_continues_after ... ok
+test moving_off_a_subscription_releases_the_agents_vendor_session ... ok
+test suspend_and_resume_continue_the_task ... ok
+test the_conversation_schedules_work_and_stops_it ... ok
+test the_conversation_gives_a_new_agent_only_the_capabilities_its_role_needs ... ok
+test diagrams_are_artifacts_that_flow_back_to_the_delegator ... ok
+test the_harness_roles_use_the_agents_own_models ... ok
+test each_agent_searches_the_web_on_its_own_model_when_its_tools_allow_it ... ok
+test work_a_stopped_process_left_open_continues_after_a_restart ... ok
+test each_agent_gets_its_own_managed_session_and_turns_are_incremental ... ok
+test tool_permissions_are_per_agent ... ok
+test work_queues_for_provider_capacity ... ok
+
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.57s
+
+     Running tests/schedules.rs (target/debug/deps/schedules-75f7e974c96de726)
+
+running 12 tests
+test a_run_started_before_a_crash_is_not_started_again ... ok
+test an_unknown_schedule_is_refused_at_once ... ok
+test a_missed_run_runs_once_or_is_let_go_and_overlap_queues_one_more ... ok
+test a_one_time_schedule_whose_run_a_stopped_process_left_open_ends_with_that_run ... ok
+test a_one_time_schedule_stays_until_its_run_ends ... ok
+test a_date_that_passed_or_a_bad_time_is_refused_with_words_to_fix_it ... ok
+test a_schedule_pauses_resumes_changes_and_runs_now_and_a_pause_survives_a_restart ... ok
+test three_failed_runs_in_a_row_pause_the_schedule_and_the_chat_is_told ... ok
+test the_chat_schedules_without_naming_an_agent_and_manages_it_in_words ... ok
+test a_failure_that_may_pass_tries_again_and_continues_without_repeating_a_change ... ok
+test a_scheduled_run_waits_to_try_again_and_the_wait_survives_a_restart ... ok
+test a_schedule_keeps_its_newest_runs ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+     Running tests/worker.rs (target/debug/deps/worker-5c625e47f14c6104)
+
+running 8 tests
+test fake_program ... ok
+test a_command_is_asked_again_after_a_restart ... ok
+test a_restart_after_the_answer_does_not_ask_twice ... ok
+test a_cancelled_task_leaves_nothing_behind ... ok
+test a_program_asks_ark_keeps_the_question_and_another_client_answers ... ok
+test a_shell_write_is_found_in_the_folder ... ok
+test a_pause_asks_again ... ok
+test an_unchecked_connector_is_not_used ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.06s
+
+     Running tests/worker_bench.rs (target/debug/deps/worker_bench-753471bea7b68a20)
+
+running 1 test
+test ark_agent_and_claude_code_on_the_same_tasks ... ignored, live: needs Claude Code signed in
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/worker_live.rs (target/debug/deps/worker_live-26cf54c9bffefbc2)
+
+running 1 test
+test a_real_program_asks_through_ark_and_survives_a_restart ... ignored, live: needs an agent program installed and signed in (ARK_LIVE_WORKER)
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_os-033e0ce31cc2b5fd)
+
+running 13 tests
+test dirs::tests::folders_resolve ... ok
+test find::tests::windows_tries_each_extension_and_never_a_bare_name ... ok
+test process::tests::reads_what_an_npm_launcher_runs ... ok
+test fs::tests::names_every_system_accepts ... ok
+test process::tests::a_plain_program_runs_as_given ... ok
+test shell::tests::there_is_a_shell ... ok
+test dirs::tests::canonical_paths_read_plainly ... ok
+test time::tests::an_offset_is_within_a_day_and_whole_minutes ... ok
+test fs::tests::a_private_folder_is_made_0700_and_a_shared_one_refused ... ok
+test fs::tests::writes_replace_the_whole_file ... ok
+test find::tests::finds_an_executable_in_extra_folders_and_skips_one_that_is_not ... ok
+test process::tests::this_process_is_alive_and_a_finished_one_is_not ... ok
+test process::tests::killing_the_tree_stops_the_grandchildren ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_proc-728eba150467dc57)
+
+running 10 tests
+test ready::tests::colour_codes_and_carriage_returns_go ... ok
+test ready::tests::a_path_replaces_the_address_path ... ok
+test ready::tests::servers_print_their_address_in_many_ways ... ok
+test tests::a_character_cut_between_chunks_waits_for_its_end ... ok
+test shell::tests::the_program_is_the_first_word_after_settings ... ok
+test tests::elapsed_time_reads_every_form ... ok
+test shell::tests::the_environment_starts_after_the_mark ... ok
+test tool::guard_tests::common_direct_desktop_commands_use_computer_instead ... ok
+test install::tests::needs_name_a_tool_by_id_label_or_program ... ok
+test tests::a_folder_stays_inside_the_project ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/login_path.rs (target/debug/deps/login_path-7d4bcd33e2b6fb2a)
+
+running 1 test
+
+running 1 test
+test a_command_finds_cargo_through_the_login_shell_from_a_bare_path ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
+
+test a_command_finds_cargo_through_the_login_shell_from_a_bare_path ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.68s
+
+     Running tests/processes.rs (target/debug/deps/processes-700e808730f978bd)
+
+running 11 tests
+test a_missing_program_is_not_run_and_names_its_install ... ok
+test a_process_that_ends_early_says_how_with_its_output ... ok
+test a_crash_leaves_groups_that_the_next_start_ends ... ok
+test running_processes_are_recorded_until_they_stop ... ok
+test the_same_command_in_the_same_folder_is_one_process ... ok
+test a_server_is_ready_at_the_address_it_prints_and_its_page_opens ... ok
+test only_a_port_the_process_itself_listens_on_is_served ... ok
+test a_port_the_agent_names_makes_it_ready_when_nothing_is_printed ... ok
+test at_most_eight_run_at_once ... ok
+test dropping_the_service_ends_what_it_started ... ok
+test stop_ends_the_process_and_everything_it_started ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_protocol-841cb8507943e78e)
+
+running 3 tests
+test tests::counters_do_not_become_json_numbers ... ok
+test tests::bootstrap_fixture_is_stable ... ok
+test tests::terminal_fixtures_decode_and_keep_decimal_cursors ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_reach-dc9e11c27d350926)
+
+running 23 tests
+test config::tests::lines_split_like_ssh ... ok
+test config::tests::resolved_output_is_read ... ok
+test setup::tests::default_contract_readers ... ok
+test setup::tests::facts_are_read_from_the_look_output ... ok
+test config::tests::wildcards_match_names ... ok
+test setup::tests::libc_versions_are_read ... ok
+test setup::tests::names_and_stores_are_checked ... ok
+test setup::tests::the_program_runs_with_its_environment ... ok
+test ssh::tests::ssh_failures_are_sorted ... ok
+test setup::tests::the_unit_quotes_for_systemd ... ok
+test target::tests::options_quotes_and_shell_words_are_refused ... ok
+test target::tests::plain_names_pass ... ok
+test target::tests::quote_wraps_and_escapes ... ok
+test tests::a_secret_is_never_shown ... ok
+test tunnel::tests::reasons_use_the_window_words ... ok
+test ssh::tests::terminal_commands_keep_the_target_after_dashes ... ok
+test config::tests::an_include_loop_ends ... ok
+test ssh::tests::the_connection_folder_is_private ... ok
+test tunnel::tests::paths_that_cannot_be_sockets_are_refused ... ok
+test ssh::private_tests::a_folder_others_can_change_or_a_link_is_refused ... ok
+test ssh::tests::a_long_state_folder_is_refused ... ok
+test config::tests::hosts_follow_include_and_skip_patterns ... ok
+test target::tests::quote_round_trips_through_sh ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/sshd.rs (target/debug/deps/sshd-dc184a4ed78448fb)
+
+running 2 tests
+test a_systemd_user_service ... ok
+test reach_against_sshd ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/ark_runtime-3d6adf16941b9108)
+
+running 107 tests
+test budget::tests::always_keeps_latest_round_even_if_oversized ... ok
+test budget::tests::keeps_everything_under_budget ... ok
+test budget::tests::only_the_newest_picture_stays_and_it_counts ... ok
+test budget::tests::the_budget_follows_the_window ... ok
+test approval::tests::preview_is_compact ... ok
+test budget::tests::a_kept_round_does_not_send_the_note_but_the_ledger_keeps_it ... ok
+test acquire::tests::sources_send_a_need_to_the_first_that_knows_it ... ok
+test approval::tests::session_grant_stops_further_prompts_for_that_class_only ... ok
+test budget::tests::an_oversized_head_is_still_sent_with_the_newest_round ... ok
+test approval::tests::allow_once_is_not_remembered ... ok
+test budget::tests::drops_oldest_rounds_over_budget_and_notes_it ... ok
+test budget::tests::reserve_leaves_room_for_the_tail ... ok
+test budget::tests::the_ledger_says_what_dropped_rounds_did ... ok
+test capmap::tests::custom_inferrer_maps_names ... ok
+test capmap::tests::declared_capabilities_win_over_inference ... ok
+test capmap::tests::default_inferrer_infers_nothing ... ok
+test catalog::tests::optional_meta_tools_are_gated ... ok
+test capmap::tests::coverage_iterates_the_catalog ... ok
+test catalog::tests::an_adapters_summary_follows_its_names_in_the_index ... ok
+test distill::tests::call_digest_is_order_independent ... ok
+test distill::tests::consumer_distillers_win_over_the_common_one ... ok
+test catalog::tests::matching_actions_follow_the_tasks_words ... ok
+test distill::tests::a_verb_without_its_shape_falls_back_to_the_fields ... ok
+test distill::tests::a_small_unknown_result_can_go_whole ... ok
+test distill::tests::distills_failure_with_low_confidence ... ok
+test distill::tests::distills_command_run_verdict ... ok
+test distill::tests::custom_distiller_wins_over_common_and_fallback ... ok
+test cancel::tests::cancelled_resolves_after_cancel ... ok
+test distill::tests::distills_search_matches_as_file_line_pivots ... ok
+test distill::tests::unknown_action_uses_generic_summary ... ok
+test evidence::tests::a_long_string_is_paged_by_line ... ok
+test budget::tests::drops_in_chunks_so_the_prefix_stays_put ... ok
+test evidence::tests::plain_reads_keep_the_old_shape ... ok
+test evidence::tests::unknown_path_lists_the_keys ... ok
+test harness::tests::a_claim_counts_as_written_by_a_call_or_by_the_folder ... ok
+test harness::tests::an_answer_that_announces_work_is_sent_back ... ok
+test harness::tests::classify_trivial_uses_markers ... ok
+test harness::tests::normalize_action_name_restores_mangled_form ... ok
+test harness::tests::files_an_answer_says_were_saved_are_found ... ok
+test harness::tests::tool_calls_written_as_text_are_recognized ... ok
+test metrics::tests::accumulates_tokens_and_calls ... ok
+test evidence::tests::match_without_path_searches_the_whole_object ... ok
+test evidence::tests::match_finds_one_line_among_thousands_with_its_index ... ok
+test metrics::tests::estimated_usage_marks_unmeasured ... ok
+test metrics::tests::reuse_rate_and_dedup ... ok
+test plugins::catalog::tests::catalog_is_part_of_plugin_identity ... ok
+test plugins::catalog::tests::selection_pins_an_offer_without_changing_ark_identity ... ok
+test budget::tests::the_ledger_changes_only_when_more_rounds_drop ... ok
+test process::tests::a_record_without_a_start_goes_by_the_pid ... ok
+test evidence::tests::offset_pages_through_items ... ok
+test process::tests::the_start_agrees_with_proc_pidinfo ... ok
+test router::tests::single_tier_routes_all_roles_to_one_provider ... ok
+test process::tests::a_reused_pid_is_not_the_writer ... ok
+test process::tests::another_users_process_has_a_start ... ok
+test router::tests::the_current_model_is_shared_and_versioned ... ok
+test plugins::catalog::tests::provider_metadata_and_unknown_fields_round_trip ... ok
+test router::tests::two_tiers_split_by_role ... ok
+test rules::tests::no_bound_rules_means_no_block ... ok
+test rules::tests::project_instructions_come_before_bound_rules ... ok
+test budget::tests::the_ledger_is_bounded_and_keeps_the_newest_calls ... ok
+test plugins::marketplace_tests::marketplace_keeps_corrupt_choices_until_recovered ... ok
+test rules::tests::selects_always_rules_and_relevant_ones_only ... ok
+test rules::tests::a_huge_file_is_cut_when_read ... ok
+test rules::tests::the_budget_caps_relevant_rules_but_not_always_rules ... ok
+test rules::tests::sections_over_the_budget_are_named_not_shown ... ok
+test plugins::marketplace_tests::marketplace_add_is_inert_and_persists ... ok
+test rules::tests::links_are_not_followed ... ok
+test rules::tests::no_file_no_names_or_a_path_as_a_name_give_nothing ... ok
+test rules::tests::the_tool_finds_held_back_rules ... ok
+test rules::tests::the_project_file_goes_in_whole_when_it_fits ... ok
+test rules::tests::the_sections_that_fit_are_the_ones_the_task_needs ... ok
+test rules::tests::subfolders_with_their_own_file_are_named ... ok
+test rules::tests::the_list_of_sections_left_out_is_bounded ... ok
+test budget::tests::the_head_is_never_dropped ... ok
+test folder::tests::new_changed_and_removed_files_survive_a_save_and_load ... ok
+test approval::tests::an_action_that_asks_each_time_is_never_covered_or_remembered ... ok
+test engine::effect_tests::a_later_confirmation_supersedes_the_same_effect_for_orchestrated_work ... ok
+test approval::tests::an_always_grant_lasts_in_its_project_until_removed ... ok
+test session::tests::follow_ups_shown_shrink_with_the_budget ... ok
+test engine::effect_tests::model_visible_json_cannot_forge_a_trusted_effect ... ok
+test rules::tests::rule_book_versions_and_binds ... ok
+test engine::effect_tests::an_unconfirmed_effect_replaces_a_false_success_claim_after_restart ... ok
+test session::tests::a_finished_turn_ends_the_chain ... ok
+test session::tests::a_chain_keeps_the_request_and_every_instruction ... ok
+test skills::tests::front_matter_reads_crlf_files ... ok
+test skills::tests::front_matter_reads_the_format ... ok
+test skills::tests::the_catalog_stays_under_its_cap ... ok
+test session::tests::a_post_is_carried_once_by_the_next_turn_and_placed_after_the_last ... ok
+test steer::tests::push_drain_in_order_and_skip_blank ... ok
+test skills::tests::read_and_file_stay_in_the_skill ... ok
+test session::tests::a_fourth_continue_still_finds_the_first_turns_change ... ok
+test skills::tests::the_project_hides_the_store_and_bad_skills_are_left_out ... ok
+test session::tests::a_turn_that_ran_out_of_steps_is_continued ... ok
+test worker::tests::specs ... ok
+test web::tests::a_model_without_search_says_so_and_the_next_engine_is_asked ... ok
+test web::tests::the_models_own_search_goes_first ... ok
+test session::tests::execution_mode_is_revisioned_persisted_and_frozen_on_the_turn ... ok
+test session::tests::what_the_person_said_survives_a_turn_that_fails ... ok
+test session::tests::a_new_request_after_a_stop_or_the_step_limit_is_what_the_model_does ... ok
+test session::tests::rename_and_page_and_steered_input ... ok
+test session::tests::resume_restores_the_window_without_replaying ... ok
+test tests::acquisition_seam_dispatches_and_events ... ok
+test tests::harness_runs_a_tool_then_answers ... ok
+test session::tests::compact_shrinks_carry_over_and_state ... ok
+test session::tests::a_long_chain_keeps_the_request_and_counts_older_messages ... ok
+test session::tests::the_goal_survives_every_way_a_turn_is_recorded ... ok
+test session::tests::digest_is_bounded_no_matter_how_long_the_session ... ok
+
+test result: ok. 107 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.59s
+
+     Running tests/artifact_ids.rs (target/debug/deps/artifact_ids-0d8c486f0ab7097f)
+
+running 1 test
+test short_ids_and_names_reach_the_adapter_as_full_ids ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/interactive_seams.rs (target/debug/deps/interactive_seams-77d530ac50b83a38)
+
+running 15 tests
+test answer_text_streams_as_deltas_and_is_marked_streamed ... ok
+test steering_during_the_answer_continues_the_turn ... ok
+test plan_cannot_mutate_even_with_an_allowing_gate ... ok
+test steering_after_the_turn_is_returned_undelivered ... ok
+test denied_approval_does_not_run_and_tells_the_model ... ok
+test manual_without_an_approval_gate_refuses_mutation ... ok
+test profile_classifier_keys_grants ... ok
+test retrieved_context_is_reported_apart_from_tool_results ... ok
+test steering_reaches_the_model_at_the_next_step ... ok
+test approval_gate_allows_and_remembers_session_grants ... ok
+test context_reports_attribute_every_request ... ok
+test cancellation_stops_mid_stream_and_saves_state ... ok
+test auto_asks_for_ineligible_and_always_ask_mutations ... ok
+test workspace_reads_are_not_reused_across_turns ... ok
+test session_carry_over_reaches_the_model_bounded ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+     Running tests/long_task.rs (target/debug/deps/long_task-fff152f64c9ef61f)
+
+running 4 tests
+test a_turn_at_its_step_limit_says_it_ran_out ... ok
+test a_small_window_is_never_overrun ... ok
+test a_long_task_keeps_its_goal_what_the_person_said_and_what_it_did ... ok
+test a_vendor_session_that_rotates_starts_from_the_goal ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/loop_guard.rs (target/debug/deps/loop_guard-da36994bbf5170c0)
+
+running 7 tests
+test a_tool_call_written_as_text_is_not_taken_as_the_answer ... ok
+test the_text_call_correction_happens_once ... ok
+test identical_retrieval_forever_is_stopped ... ok
+test repeating_one_hypothesis_is_stopped ... ok
+test oscillating_between_two_searches_is_stopped ... ok
+test retrying_a_failing_call_forever_is_stopped ... ok
+test varied_real_work_is_not_cut_off ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/parallel_tools.rs (target/debug/deps/parallel_tools-8a20e2127e5080be)
+
+running 4 tests
+test cancelling_stops_the_whole_batch ... ok
+test identical_calls_in_one_reply_run_once ... ok
+test independent_reads_run_together_in_call_order ... ok
+test a_change_splits_the_batch ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
+
+     Running tests/plugins.rs (target/debug/deps/plugins-4f4f4dea6b6138ec)
+
+running 3 tests
+test plugins_json_is_read_at_start_and_a_broken_entry_says_why ... ok
+test a_plugin_is_added_used_and_removed_while_the_engine_runs ... ok
+test a_server_that_never_answers_is_refused_within_the_limit ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+     Running tests/request_profile.rs (target/debug/deps/request_profile-29433fe9dfedf4d3)
+
+running 3 tests
+test the_skills_catalog_is_counted_as_its_own_part ... ok
+test requests_explain_how_to_reach_the_approval_gate ... FAILED
+test every_request_is_explained_by_role ... ok
+
+failures:
+
+---- requests_explain_how_to_reach_the_approval_gate stdout ----
+
+thread 'requests_explain_how_to_reach_the_approval_gate' (13578584) panicked at crates/ark-runtime/tests/request_profile.rs:226:5:
+assertion failed: requests[0].system.contains("For an action you are allowed to propose, call it to request any required approval.")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    requests_explain_how_to_reach_the_approval_gate
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+error: test failed, to rerun pass `-p ark-runtime --test request_profile`

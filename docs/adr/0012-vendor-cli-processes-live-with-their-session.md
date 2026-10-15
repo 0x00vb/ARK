@@ -39,10 +39,40 @@ cannot be started, Codex sessions fall back to `codex exec` and `exec resume`.
   answer to an old question in the vendor's history.
 - `codex app-server` is marked experimental by Codex; a protocol change shows up as the
   `exec` fallback and a warning in the log, not as a failed turn.
-- A Codex thread still starts the MCP servers of the person's own Codex setup (about 4 s and
-  15k tokens on the machine measured); `app-server` has no `--ignore-user-config`.
+- Initially, a Codex thread started the MCP servers of the person's own Codex setup (about
+  4 s and 15k tokens on the machine measured). The 2026-10-15 correction below replaces that
+  behavior for host-model calls.
+
+## Host-tool isolation correction (2026-10-15)
+
+ARK executes host tools through its own authority boundary. Advertising the vendor's unused
+native tools adds context and an unnecessary second execution path. Host-model processes
+disable native commands and connectors. Before starting or loading a reasoning thread, the
+adapter reads configured MCP server names and disables those servers in its scoped overlay.
+It never logs raw configuration, writes user settings or changes ACP workers. Explicit web
+search remains available through its separate host capability.
+
+Model catalog discovery does not need this overlay. If the installed protocol cannot supply
+it, or a server name cannot be safely represented in its dotted-key format, the adapter stops
+that process before a vendor turn and uses the existing isolated `codex exec` fallback.
+The fallback ignores user rules/config and retains its read-only sandbox. Every host tool
+still runs in ARK, with the same approvals and recovery behavior.
+
+Evaluation and limits: `bench/efficiency-2026-10-15/README.md`.
 
 ## Check
 `crates/ark-model/src/cli.rs` tests (fake CLIs speaking each protocol: one process per
 session, streaming, a process that stops, the app server's own requests declined),
 `crates/ark-model/src/session.rs` (`a_cancelled_call_drops_the_vendor_session_and_the_next_one_opens`).
+
+
+## Catalog startup correction (2026-10-15)
+
+Model discovery needs the handshake and the advertised model/effort list. It does not need
+the account usage query. A measured 5.004-second optional usage reply plus model listing
+pushed discovery beyond its existing six-second deadline, rejecting an advertised effort
+before any model call. Catalog startup now uses the shared handshake without that optional
+query. Ordinary sessions call the same handshake, then retain their usage query and recording.
+The catalog deadline, strict effort checks, process-tree cleanup and execution settings stay
+the same. Evidence and focused cancellation/error fixtures:
+`bench/catalog-startup-2026-10-15/README.md`.

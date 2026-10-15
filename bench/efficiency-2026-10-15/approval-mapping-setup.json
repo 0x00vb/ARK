@@ -1,0 +1,20 @@
+[
+  {
+    "stage": "approval-mapping live preflight",
+    "attempt": 1,
+    "result": "catalog verification failed before any workload/model call",
+    "error": "Error: codex error: could not verify that effort for this Codex model; list models and try again"
+  },
+  {
+    "stage": "approval-mapping live preflight",
+    "attempt": 2,
+    "result": "catalog verification failed before any workload/model call",
+    "error": "Error: codex error: could not verify that effort for this Codex model; list models and try again"
+  },
+  {
+    "stage": "read-only RPC diagnosis",
+    "result": "initialize and model/list succeeded with matching startup flags; 3.26seconds total; gpt-5.6-terra advertised",
+    "model_calls": 0,
+    "settings_written": false
+  }
+]

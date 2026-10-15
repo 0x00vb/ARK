@@ -1,0 +1,55 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":28,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":29,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":667,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Looking"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" up"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Ada"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Lov"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"el"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ace"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13223,"completion_tokens":45,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":14166,"first_token_ms":14040,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_0","action":"crm.find_customer","input":{"name":"Ada Lovelace"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_0","action":"crm.find_customer","ok":true,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","invocation":"87ee903a-c38a-4f93-904b-db0b0c81fc58","duration_ms":0,"error":null,"context_tokens":40,"raw_tokens":13}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":28,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":29,"tool_rounds":40,"model_output":23,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":730,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13363,"completion_tokens":83,"measured":true,"cached_tokens":13056,"cache_write_tokens":0},"elapsed_ms":1954,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Ada Lovelace's customer ID is C-1042."}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":47,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":29,"tool_rounds":49,"model_output":66,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":801,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Ada"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Lov"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"el"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ace"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"’s"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" customer"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" ID"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" is"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"104"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"2"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13553,"completion_tokens":36,"measured":true,"cached_tokens":13056,"cache_write_tokens":0},"elapsed_ms":2040,"first_token_ms":1950,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 1 evidence item cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Ada Lovelace’s customer ID is **C-1042**.","streamed":true}}
+{"type":"event","turn":1,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":1,"event":{"type":"step","index":1}}
+{"type":"event","turn":1,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":38,"workspace":0,"rules":0,"skills":0,"task":29,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":714,"budget":16000}}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"Ada"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":" Lov"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"el"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"ace"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":" is"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":" in"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":" the"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"gold"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":" tier"}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":1,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13773,"completion_tokens":33,"measured":true,"cached_tokens":13056,"cache_write_tokens":0},"elapsed_ms":12903,"first_token_ms":12822,"retries":0}}
+{"type":"event","turn":1,"event":{"type":"self_check","passed":true,"detail":"answered; 0 evidence items cited"}}
+{"type":"event","turn":1,"event":{"type":"answer","text":"Ada Lovelace is in the **gold** tier.","streamed":true}}

@@ -1,0 +1,3937 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index f228ec9..2526d1c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -9,6 +9,19 @@ What changed for people building on ARK, per release. Not a commit log.
+ 
+ ## [Unreleased]
+ 
++### Changed
++
++- The default agent instructions reserve state updates for ongoing or later work, avoiding
++  a separate bookkeeping step just to repeat a completed result.
++
++### Fixed
++
++- Codex host-model sessions disable unused native commands, connectors and configured MCP
++  servers without changing user settings. Unsupported isolation uses the existing isolated
++  execution fallback; model discovery remains available.
++- Benchmarks preserve managed-session cache writes, mark unavailable request metrics and
++  reject managed recording, replay and fault injection that cannot intercept those calls.
++
+ ## [0.24.0] - 2026-10-15
+ 
+ ### Added
+diff --git a/CURRENT_STATE.md b/CURRENT_STATE.md
+index 886d255..7d8b116 100644
+--- a/CURRENT_STATE.md
++++ b/CURRENT_STATE.md
+@@ -1,5 +1,15 @@
+ # Current state
+ 
++## Call and token efficiency evaluation
++
++The isolated `ark-call-efficiency` tree contains scoped Codex host-tool isolation, a measured
++default-instruction experiment and honest managed-session benchmark coverage. Baseline:
++30/30 checked attempts, 104 calls and 2,012,191 tokens on `codex:gpt-5.6-terra@medium`.
++The affected 12-attempt subset passes with 36 calls and 509,854 tokens after both changes.
++The remaining live comparisons and full CI are in progress. No commit or release occurred.
++Protocol, hashes, reports and limitations: `bench/efficiency-2026-10-15/README.md`.
++Board: `958effaa`. Do not treat these directional results as a cross-product ranking.
++
+ ## Advanced artifact surfaces in development
+ 
+ `ark-advanced-artifacts` implements ADR 0071: map/model classification, route-bound immutable
+diff --git a/bench/baseline.json b/bench/baseline.json
+index a5a92ee..708e4ca 100644
+--- a/bench/baseline.json
++++ b/bench/baseline.json
+@@ -1,8 +1,8 @@
+ {
+   "schema_version": 1,
+-  "label": "v0.14-dev",
+-  "ark_version": "0.14.0",
+-  "created_at": "2026-10-07T20:37:13.276116Z",
++  "label": "final-sim",
++  "ark_version": "0.24.0",
++  "created_at": "2026-10-15T20:19:35.792071Z",
+   "mode": "simulated",
+   "model": "sim",
+   "fast_model": null,
+@@ -30,13 +30,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 1.0,
+-        "input_tokens": 1162.0,
++        "input_tokens": 1175.0,
+         "cached_input_tokens": 0.0,
+-        "uncached_input_tokens": 1162.0,
++        "uncached_input_tokens": 1175.0,
+         "output_tokens": 3.0,
+-        "total_tokens": 1165.0,
+-        "cost_usd": 0.002927,
+-        "cost_per_success_usd": 0.002927,
++        "total_tokens": 1178.0,
++        "cost_usd": 0.0029595,
++        "cost_per_success_usd": 0.0029595,
+         "tool_calls": 0.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -44,8 +44,8 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 1.0,
+-        "peak_context_tokens": 1162.0,
+-        "mean_context_tokens": 1162.0,
++        "peak_context_tokens": 1175.0,
++        "mean_context_tokens": 1175.0,
+         "tool_schema_tokens": 550.0,
+         "prefix_reuse_tokens": 0.0,
+         "median_turn_ms": 1.0,
+@@ -67,19 +67,20 @@
+             "reason": 1
+           },
+           "tokens_by_role": {
+-            "reason": 1165
++            "reason": 1178
+           },
+           "calls_by_model": {
+             "sim": 1
+           },
+-          "input_tokens": 1162,
++          "input_tokens": 1175,
+           "cached_input_tokens": 0,
+-          "uncached_input_tokens": 1162,
+-          "cache_write_tokens": 1146,
++          "uncached_input_tokens": 1175,
++          "cache_write_tokens": 1159,
+           "output_tokens": 3,
+-          "total_tokens": 1165,
++          "total_tokens": 1178,
+           "tokens_measured": false,
+-          "cost_usd": 0.002927,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0029595,
+           "wall_ms": 1,
+           "turn_ms": [
+             1
+@@ -101,13 +102,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1162,
+-          "mean_context_tokens": 1162,
++          "peak_context_tokens": 1175,
++          "mean_context_tokens": 1175,
+           "context_sources": {
+             "Capability index": 242,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 286,
++            "Instructions": 299,
+             "Model output": 0,
+             "Project": 50,
+             "Retrieved context": 0,
+@@ -140,13 +141,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 3.0,
+-        "input_tokens": 4049.0,
+-        "cached_input_tokens": 2557.0,
+-        "uncached_input_tokens": 1492.0,
++        "input_tokens": 4088.0,
++        "cached_input_tokens": 2583.0,
++        "uncached_input_tokens": 1505.0,
+         "output_tokens": 66.0,
+-        "total_tokens": 4115.0,
+-        "cost_usd": 0.0048538999999999995,
+-        "cost_per_success_usd": 0.0048538999999999995,
++        "total_tokens": 4154.0,
++        "cost_usd": 0.0048916,
++        "cost_per_success_usd": 0.0048916,
+         "tool_calls": 1.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -154,10 +155,10 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 3.0,
+-        "peak_context_tokens": 1413.0,
+-        "mean_context_tokens": 1349.0,
++        "peak_context_tokens": 1426.0,
++        "mean_context_tokens": 1362.0,
+         "tool_schema_tokens": 1893.0,
+-        "prefix_reuse_tokens": 2557.0,
++        "prefix_reuse_tokens": 2583.0,
+         "median_turn_ms": 1.0,
+         "p95_turn_ms": 1.0,
+         "median_first_token_ms": 0.0,
+@@ -169,7 +170,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "250 USD is 230.0 EUR [inv:01f3565f]",
++          "answer": "250 USD is 230.0 EUR [inv:c102f118]",
+           "turns": 1,
+           "steps": 3,
+           "model_calls": 3,
+@@ -177,19 +178,20 @@
+             "reason": 3
+           },
+           "tokens_by_role": {
+-            "reason": 4115
++            "reason": 4154
+           },
+           "calls_by_model": {
+             "sim": 3
+           },
+-          "input_tokens": 4049,
+-          "cached_input_tokens": 2557,
+-          "uncached_input_tokens": 1492,
+-          "cache_write_tokens": 1397,
++          "input_tokens": 4088,
++          "cached_input_tokens": 2583,
++          "uncached_input_tokens": 1505,
++          "cache_write_tokens": 1410,
+           "output_tokens": 66,
+-          "total_tokens": 4115,
++          "total_tokens": 4154,
+           "tokens_measured": false,
+-          "cost_usd": 0.0048538999999999995,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0048916,
+           "wall_ms": 1,
+           "turn_ms": [
+             1
+@@ -215,13 +217,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1413,
+-          "mean_context_tokens": 1349,
++          "peak_context_tokens": 1426,
++          "mean_context_tokens": 1362,
+           "context_sources": {
+             "Capability index": 786,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 858,
++            "Instructions": 897,
+             "Model output": 91,
+             "Project": 150,
+             "Retrieved context": 0,
+@@ -239,7 +241,7 @@
+           "result_context_tokens": 40,
+           "result_raw_tokens": 14,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 2557,
++          "prefix_reuse_tokens": 2583,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -254,13 +256,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 5.0,
+-        "input_tokens": 7291.0,
+-        "cached_input_tokens": 5438.0,
+-        "uncached_input_tokens": 1853.0,
++        "input_tokens": 7356.0,
++        "cached_input_tokens": 5491.0,
++        "uncached_input_tokens": 1865.0,
+         "output_tokens": 122.0,
+-        "total_tokens": 7413.0,
+-        "cost_usd": 0.006835600000000001,
+-        "cost_per_success_usd": 0.006835600000000001,
++        "total_tokens": 7478.0,
++        "cost_usd": 0.0068762,
++        "cost_per_success_usd": 0.0068762,
+         "tool_calls": 3.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -268,12 +270,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 5.0,
+-        "peak_context_tokens": 1609.0,
+-        "mean_context_tokens": 1458.0,
++        "peak_context_tokens": 1622.0,
++        "mean_context_tokens": 1471.0,
+         "tool_schema_tokens": 3150.0,
+-        "prefix_reuse_tokens": 5438.0,
+-        "median_turn_ms": 2.0,
+-        "p95_turn_ms": 2.0,
++        "prefix_reuse_tokens": 5491.0,
++        "median_turn_ms": 3.0,
++        "p95_turn_ms": 3.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -283,7 +285,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "Ada Lovelace's orders total 565.74 [inv:d1589063] [inv:c17282e1] [inv:a7ae45a9]",
++          "answer": "Ada Lovelace's orders total 565.74 [inv:af482e46] [inv:ae95535c] [inv:094eee9b]",
+           "turns": 1,
+           "steps": 5,
+           "model_calls": 5,
+@@ -291,22 +293,23 @@
+             "reason": 5
+           },
+           "tokens_by_role": {
+-            "reason": 7413
++            "reason": 7478
+           },
+           "calls_by_model": {
+             "sim": 5
+           },
+-          "input_tokens": 7291,
+-          "cached_input_tokens": 5438,
+-          "uncached_input_tokens": 1853,
+-          "cache_write_tokens": 1644,
++          "input_tokens": 7356,
++          "cached_input_tokens": 5491,
++          "uncached_input_tokens": 1865,
++          "cache_write_tokens": 1656,
+           "output_tokens": 122,
+-          "total_tokens": 7413,
++          "total_tokens": 7478,
+           "tokens_measured": false,
+-          "cost_usd": 0.006835600000000001,
+-          "wall_ms": 2,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0068762,
++          "wall_ms": 3,
+           "turn_ms": [
+-            2
++            3
+           ],
+           "first_token_ms": [
+             0
+@@ -331,13 +334,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1609,
+-          "mean_context_tokens": 1458,
++          "peak_context_tokens": 1622,
++          "mean_context_tokens": 1471,
+           "context_sources": {
+             "Capability index": 1365,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1430,
++            "Instructions": 1495,
+             "Model output": 253,
+             "Project": 250,
+             "Retrieved context": 0,
+@@ -355,7 +358,7 @@
+           "result_context_tokens": 143,
+           "result_raw_tokens": 63,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 5438,
++          "prefix_reuse_tokens": 5491,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -370,13 +373,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 4.0,
+-        "input_tokens": 5339.0,
+-        "cached_input_tokens": 3777.0,
+-        "uncached_input_tokens": 1562.0,
++        "input_tokens": 5391.0,
++        "cached_input_tokens": 3818.0,
++        "uncached_input_tokens": 1573.0,
+         "output_tokens": 96.0,
+-        "total_tokens": 5435.0,
+-        "cost_usd": 0.0055623999999999995,
+-        "cost_per_success_usd": 0.0055623999999999995,
++        "total_tokens": 5487.0,
++        "cost_usd": 0.0055981,
++        "cost_per_success_usd": 0.0055981,
+         "tool_calls": 1.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -384,10 +387,10 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 4.0,
+-        "peak_context_tokens": 1439.0,
+-        "mean_context_tokens": 1334.0,
++        "peak_context_tokens": 1452.0,
++        "mean_context_tokens": 1347.0,
+         "tool_schema_tokens": 2348.0,
+-        "prefix_reuse_tokens": 3777.0,
++        "prefix_reuse_tokens": 3818.0,
+         "median_turn_ms": 3.0,
+         "p95_turn_ms": 3.0,
+         "median_first_token_ms": 0.0,
+@@ -399,7 +402,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "The payments service logged error code E4721 [inv:bfc0b3e0]",
++          "answer": "The payments service logged error code E4721 [inv:823f7056]",
+           "turns": 1,
+           "steps": 4,
+           "model_calls": 4,
+@@ -407,19 +410,20 @@
+             "reason": 4
+           },
+           "tokens_by_role": {
+-            "reason": 5435
++            "reason": 5487
+           },
+           "calls_by_model": {
+             "sim": 4
+           },
+-          "input_tokens": 5339,
+-          "cached_input_tokens": 3777,
+-          "uncached_input_tokens": 1562,
+-          "cache_write_tokens": 1446,
++          "input_tokens": 5391,
++          "cached_input_tokens": 3818,
++          "uncached_input_tokens": 1573,
++          "cache_write_tokens": 1457,
+           "output_tokens": 96,
+-          "total_tokens": 5435,
++          "total_tokens": 5487,
+           "tokens_measured": false,
+-          "cost_usd": 0.0055623999999999995,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0055981,
+           "wall_ms": 3,
+           "turn_ms": [
+             3
+@@ -447,13 +451,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1439,
+-          "mean_context_tokens": 1334,
++          "peak_context_tokens": 1452,
++          "mean_context_tokens": 1347,
+           "context_sources": {
+             "Capability index": 1020,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1144,
++            "Instructions": 1196,
+             "Model output": 162,
+             "Project": 200,
+             "Retrieved context": 62,
+@@ -471,7 +475,7 @@
+           "result_context_tokens": 58,
+           "result_raw_tokens": 42763,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 3777,
++          "prefix_reuse_tokens": 3818,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -486,13 +490,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 1500.0,
+-        "input_tokens": 2430173.0,
+-        "cached_input_tokens": 2048489.0,
+-        "uncached_input_tokens": 381684.0,
++        "input_tokens": 2449673.0,
++        "cached_input_tokens": 2068832.0,
++        "uncached_input_tokens": 380841.0,
+         "output_tokens": 30978.0,
+-        "total_tokens": 2461151.0,
+-        "cost_usd": 1.6046838,
+-        "cost_per_success_usd": 1.6046838,
++        "total_tokens": 2480651.0,
++        "cost_usd": 1.6066448999999998,
++        "cost_per_success_usd": 1.6066448999999998,
+         "tool_calls": 500.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -500,12 +504,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 1500.0,
+-        "peak_context_tokens": 1676.0,
+-        "mean_context_tokens": 1620.0,
++        "peak_context_tokens": 1689.0,
++        "mean_context_tokens": 1633.0,
+         "tool_schema_tokens": 825000.0,
+-        "prefix_reuse_tokens": 2048489.0,
+-        "median_turn_ms": 1.0,
+-        "p95_turn_ms": 2.0,
++        "prefix_reuse_tokens": 2068832.0,
++        "median_turn_ms": 9.0,
++        "p95_turn_ms": 21.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -515,7 +519,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "It is 3503.0. [inv:b2633d85] Ready for the next one.",
++          "answer": "It is 3503.0. [inv:4e3f9bee] Ready for the next one.",
+           "turns": 500,
+           "steps": 1500,
+           "model_calls": 1500,
+@@ -523,425 +527,44 @@
+             "reason": 1500
+           },
+           "tokens_by_role": {
+-            "reason": 2461151
++            "reason": 2480651
+           },
+           "calls_by_model": {
+             "sim": 1500
+-          },
+-          "input_tokens": 2430173,
+-          "cached_input_tokens": 2048489,
+-          "uncached_input_tokens": 381684,
+-          "cache_write_tokens": 243676,
+-          "output_tokens": 30978,
+-          "total_tokens": 2461151,
+-          "tokens_measured": false,
+-          "cost_usd": 1.6046838,
+-          "wall_ms": 552,
+-          "turn_ms": [
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            10,
+-            8,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            3,
+-            6,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
++          },
++          "input_tokens": 2449673,
++          "cached_input_tokens": 2068832,
++          "uncached_input_tokens": 380841,
++          "cache_write_tokens": 242833,
++          "output_tokens": 30978,
++          "total_tokens": 2480651,
++          "tokens_measured": false,
++          "request_metrics_complete": true,
++          "cost_usd": 1.6066448999999998,
++          "wall_ms": 4879,
++          "turn_ms": [
+             1,
+-            2,
+             1,
+             1,
++            10,
++            8,
+             1,
+             1,
+             1,
+             1,
+             1,
+             1,
+-            2,
+             1,
+             1,
+             1,
+             1,
++            5,
++            16,
+             1,
+             1,
+             1,
+             1,
+             1,
+-            2,
+             1,
+             1,
+             1,
+@@ -950,94 +573,476 @@
+             1,
+             1,
+             1,
+-            2,
++            4,
++            11,
++            11,
++            4,
++            8,
++            6,
++            11,
++            5,
++            6,
+             1,
++            3,
+             1,
+             1,
+             1,
++            12,
++            16,
++            4,
++            6,
++            10,
++            9,
++            5,
++            5,
++            3,
+             1,
+             1,
+             1,
+             1,
+-            2,
++            9,
++            12,
++            12,
++            12,
++            5,
++            9,
++            6,
++            7,
++            6,
+             1,
++            6,
+             1,
+             1,
+             1,
++            9,
++            11,
++            8,
++            7,
++            12,
++            6,
++            8,
++            3,
++            7,
+             1,
+             1,
+             1,
+             1,
++            20,
++            14,
++            13,
++            9,
++            8,
++            7,
+             2,
++            3,
+             1,
+             1,
+             1,
+-            1,
+-            1,
+-            1,
+-            1,
++            16,
++            18,
++            6,
++            17,
++            10,
++            18,
++            5,
+             2,
+             1,
++            9,
++            12,
++            18,
++            9,
++            10,
++            5,
++            3,
+             1,
+             1,
+             1,
+-            1,
+-            1,
+-            1,
++            17,
++            15,
++            11,
++            14,
++            7,
++            7,
+             1,
+             2,
++            9,
++            17,
++            7,
++            12,
++            15,
++            12,
++            7,
++            6,
++            11,
++            6,
+             1,
++            23,
++            28,
++            4,
++            10,
++            19,
++            10,
++            13,
++            11,
++            7,
++            4,
+             1,
+             1,
+             1,
++            17,
++            7,
++            15,
++            7,
++            6,
++            8,
++            4,
++            5,
+             1,
+             1,
+             2,
+-            1,
++            17,
++            16,
++            11,
++            11,
++            11,
++            9,
++            6,
++            7,
+             2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+             2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+             2,
+-            1,
+-            1,
+-            1,
++            15,
++            14,
++            12,
++            6,
++            10,
++            10,
++            7,
++            5,
+             1,
+             2,
+-            1,
+-            1,
+             2,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
+-            1,
++            10,
++            12,
++            15,
++            12,
++            10,
++            7,
++            4,
++            7,
+             2,
+-            1,
+-            1,
+-            1,
+-            1,
+             2,
+-            1,
+-            1,
++            4,
++            18,
++            9,
++            10,
++            12,
++            17,
+             2,
++            7,
+             1,
+-            1
++            2,
++            13,
++            8,
++            12,
++            16,
++            10,
++            15,
++            8,
++            14,
++            10,
++            24,
++            39,
++            7,
++            14,
++            9,
++            13,
++            12,
++            9,
++            5,
++            8,
++            2,
++            2,
++            11,
++            19,
++            13,
++            6,
++            16,
++            7,
++            7,
++            2,
++            2,
++            8,
++            18,
++            13,
++            14,
++            13,
++            8,
++            6,
++            2,
++            2,
++            3,
++            17,
++            16,
++            13,
++            12,
++            7,
++            7,
++            2,
++            3,
++            10,
++            17,
++            16,
++            15,
++            13,
++            22,
++            10,
++            18,
++            6,
++            15,
++            12,
++            14,
++            9,
++            7,
++            2,
++            2,
++            2,
++            11,
++            18,
++            17,
++            16,
++            11,
++            19,
++            15,
++            7,
++            11,
++            37,
++            13,
++            12,
++            8,
++            17,
++            14,
++            14,
++            6,
++            8,
++            2,
++            2,
++            15,
++            15,
++            5,
++            11,
++            11,
++            7,
++            7,
++            7,
++            2,
++            10,
++            23,
++            8,
++            16,
++            12,
++            10,
++            2,
++            7,
++            2,
++            8,
++            23,
++            10,
++            13,
++            11,
++            9,
++            7,
++            7,
++            2,
++            2,
++            22,
++            18,
++            20,
++            17,
++            10,
++            8,
++            2,
++            2,
++            7,
++            20,
++            14,
++            19,
++            14,
++            7,
++            7,
++            2,
++            7,
++            17,
++            13,
++            18,
++            15,
++            16,
++            13,
++            15,
++            6,
++            34,
++            14,
++            8,
++            16,
++            15,
++            13,
++            7,
++            5,
++            3,
++            5,
++            21,
++            18,
++            18,
++            11,
++            9,
++            4,
++            2,
++            2,
++            19,
++            13,
++            13,
++            18,
++            7,
++            7,
++            2,
++            8,
++            13,
++            15,
++            15,
++            15,
++            7,
++            2,
++            2,
++            21,
++            13,
++            21,
++            8,
++            5,
++            6,
++            2,
++            10,
++            13,
++            15,
++            16,
++            12,
++            7,
++            8,
++            3,
++            24,
++            18,
++            13,
++            17,
++            18,
++            16,
++            13,
++            4,
++            28,
++            22,
++            18,
++            13,
++            14,
++            12,
++            4,
++            7,
++            2,
++            2,
++            28,
++            13,
++            16,
++            13,
++            7,
++            5,
++            2,
++            8,
++            19,
++            17,
++            13,
++            14,
++            8,
++            4,
++            2,
++            19,
++            20,
++            13,
++            19,
++            11,
++            9,
++            3,
++            2,
++            7,
++            26,
++            16,
++            15,
++            16,
++            8,
++            2,
++            2,
++            13,
++            19,
++            16,
++            13,
++            17,
++            9,
++            2,
++            9,
++            17,
++            22,
++            20,
++            17,
++            13,
++            24,
++            13,
++            31,
++            18,
++            12,
++            19,
++            12,
++            15,
++            8,
++            3,
++            3,
++            22,
++            18,
++            16,
++            18,
++            9,
++            4,
++            2,
++            8,
++            21,
++            17,
++            14,
++            15,
++            8,
++            2,
++            2,
++            30,
++            20,
++            18,
++            7,
++            2,
++            8,
++            25,
++            22,
++            19,
++            8,
++            2,
++            5,
++            19,
++            15,
++            17,
++            14,
++            7,
++            7,
++            6,
++            22,
++            9,
++            12,
++            12,
++            19,
++            17,
++            11,
++            27
+           ],
+           "first_token_ms": [
+             0,
+@@ -3056,13 +3061,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1676,
+-          "mean_context_tokens": 1620,
++          "peak_context_tokens": 1689,
++          "mean_context_tokens": 1633,
+           "context_sources": {
+             "Capability index": 363000,
+             "Conversation": 468105,
+             "Earlier steps": 0,
+-            "Instructions": 429000,
++            "Instructions": 448500,
+             "Model output": 38469,
+             "Project": 75000,
+             "Retrieved context": 0,
+@@ -3080,7 +3085,7 @@
+           "result_context_tokens": 17487,
+           "result_raw_tokens": 4358,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 2048489,
++          "prefix_reuse_tokens": 2068832,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -3095,13 +3100,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 4.0,
+-        "input_tokens": 5712.0,
+-        "cached_input_tokens": 4007.0,
+-        "uncached_input_tokens": 1705.0,
++        "input_tokens": 5764.0,
++        "cached_input_tokens": 4047.0,
++        "uncached_input_tokens": 1717.0,
+         "output_tokens": 73.0,
+-        "total_tokens": 5785.0,
+-        "cost_usd": 0.0057158999999999995,
+-        "cost_per_success_usd": 0.0057158999999999995,
++        "total_tokens": 5837.0,
++        "cost_usd": 0.005753899999999999,
++        "cost_per_success_usd": 0.005753899999999999,
+         "tool_calls": 3.0,
+         "tool_failed": 2.0,
+         "deduplicated": 0.0,
+@@ -3109,12 +3114,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 4.0,
+-        "peak_context_tokens": 1533.0,
+-        "mean_context_tokens": 1428.0,
++        "peak_context_tokens": 1546.0,
++        "mean_context_tokens": 1441.0,
+         "tool_schema_tokens": 2512.0,
+-        "prefix_reuse_tokens": 4007.0,
+-        "median_turn_ms": 2.0,
+-        "p95_turn_ms": 2.0,
++        "prefix_reuse_tokens": 4047.0,
++        "median_turn_ms": 6.0,
++        "p95_turn_ms": 6.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -3124,7 +3129,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "The release is version 4.2.1 [inv:93bba296] [inv:b1e1609c] [inv:4f493b3d]",
++          "answer": "The release is version 4.2.1 [inv:d7a2d4c9] [inv:3c843ddb] [inv:ba64081e]",
+           "turns": 1,
+           "steps": 4,
+           "model_calls": 4,
+@@ -3132,22 +3137,23 @@
+             "reason": 4
+           },
+           "tokens_by_role": {
+-            "reason": 5785
++            "reason": 5837
+           },
+           "calls_by_model": {
+             "sim": 4
+           },
+-          "input_tokens": 5712,
+-          "cached_input_tokens": 4007,
+-          "uncached_input_tokens": 1705,
+-          "cache_write_tokens": 1549,
++          "input_tokens": 5764,
++          "cached_input_tokens": 4047,
++          "uncached_input_tokens": 1717,
++          "cache_write_tokens": 1561,
+           "output_tokens": 73,
+-          "total_tokens": 5785,
++          "total_tokens": 5837,
+           "tokens_measured": false,
+-          "cost_usd": 0.0057158999999999995,
+-          "wall_ms": 2,
++          "request_metrics_complete": true,
++          "cost_usd": 0.005753899999999999,
++          "wall_ms": 6,
+           "turn_ms": [
+-            2
++            6
+           ],
+           "first_token_ms": [
+             0
+@@ -3169,13 +3175,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1533,
+-          "mean_context_tokens": 1428,
++          "peak_context_tokens": 1546,
++          "mean_context_tokens": 1441,
+           "context_sources": {
+             "Capability index": 1100,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1144,
++            "Instructions": 1196,
+             "Model output": 132,
+             "Project": 200,
+             "Retrieved context": 0,
+@@ -3193,7 +3199,7 @@
+           "result_context_tokens": 148,
+           "result_raw_tokens": 20,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 4007,
++          "prefix_reuse_tokens": 4047,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -3208,13 +3214,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 4.0,
+-        "input_tokens": 5517.0,
+-        "cached_input_tokens": 3925.0,
+-        "uncached_input_tokens": 1592.0,
++        "input_tokens": 5569.0,
++        "cached_input_tokens": 3966.0,
++        "uncached_input_tokens": 1603.0,
+         "output_tokens": 73.0,
+-        "total_tokens": 5590.0,
+-        "cost_usd": 0.005443,
+-        "cost_per_success_usd": 0.005443,
++        "total_tokens": 5642.0,
++        "cost_usd": 0.0054786999999999995,
++        "cost_per_success_usd": 0.0054786999999999995,
+         "tool_calls": 1.0,
+         "tool_failed": 0.0,
+         "deduplicated": 2.0,
+@@ -3222,12 +3228,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 4.0,
+-        "peak_context_tokens": 1460.0,
+-        "mean_context_tokens": 1379.0,
++        "peak_context_tokens": 1473.0,
++        "mean_context_tokens": 1392.0,
+         "tool_schema_tokens": 2520.0,
+-        "prefix_reuse_tokens": 3925.0,
+-        "median_turn_ms": 1.0,
+-        "p95_turn_ms": 1.0,
++        "prefix_reuse_tokens": 3966.0,
++        "median_turn_ms": 13.0,
++        "p95_turn_ms": 13.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -3237,7 +3243,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "Her tier is gold [inv:aac75893] [inv:aac75893] [inv:aac75893]",
++          "answer": "Her tier is gold [inv:c5b482b9] [inv:c5b482b9] [inv:c5b482b9]",
+           "turns": 1,
+           "steps": 4,
+           "model_calls": 4,
+@@ -3245,22 +3251,23 @@
+             "reason": 4
+           },
+           "tokens_by_role": {
+-            "reason": 5590
++            "reason": 5642
+           },
+           "calls_by_model": {
+             "sim": 4
+           },
+-          "input_tokens": 5517,
+-          "cached_input_tokens": 3925,
+-          "uncached_input_tokens": 1592,
+-          "cache_write_tokens": 1488,
++          "input_tokens": 5569,
++          "cached_input_tokens": 3966,
++          "uncached_input_tokens": 1603,
++          "cache_write_tokens": 1499,
+           "output_tokens": 73,
+-          "total_tokens": 5590,
++          "total_tokens": 5642,
+           "tokens_measured": false,
+-          "cost_usd": 0.005443,
+-          "wall_ms": 1,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0054786999999999995,
++          "wall_ms": 13,
+           "turn_ms": [
+-            1
++            13
+           ],
+           "first_token_ms": [
+             0
+@@ -3282,13 +3289,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1460,
+-          "mean_context_tokens": 1379,
++          "peak_context_tokens": 1473,
++          "mean_context_tokens": 1392,
+           "context_sources": {
+             "Capability index": 1092,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1144,
++            "Instructions": 1196,
+             "Model output": 138,
+             "Project": 200,
+             "Retrieved context": 0,
+@@ -3306,7 +3313,7 @@
+           "result_context_tokens": 40,
+           "result_raw_tokens": 13,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 3925,
++          "prefix_reuse_tokens": 3966,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -3321,13 +3328,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 7.0,
+-        "input_tokens": 10955.0,
+-        "cached_input_tokens": 7352.0,
+-        "uncached_input_tokens": 3603.0,
++        "input_tokens": 11046.0,
++        "cached_input_tokens": 7422.0,
++        "uncached_input_tokens": 3624.0,
+         "output_tokens": 120.0,
+-        "total_tokens": 11075.0,
+-        "cost_usd": 0.0115604,
+-        "cost_per_success_usd": 0.0115604,
++        "total_tokens": 11166.0,
++        "cost_usd": 0.011626899999999999,
++        "cost_per_success_usd": 0.011626899999999999,
+         "tool_calls": 0.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -3335,12 +3342,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 6.0,
+-        "peak_context_tokens": 1900.0,
+-        "mean_context_tokens": 1565.0,
++        "peak_context_tokens": 1913.0,
++        "mean_context_tokens": 1578.0,
+         "tool_schema_tokens": 3924.0,
+-        "prefix_reuse_tokens": 7352.0,
+-        "median_turn_ms": 1.0,
+-        "p95_turn_ms": 1.0,
++        "prefix_reuse_tokens": 7422.0,
++        "median_turn_ms": 10.0,
++        "p95_turn_ms": 10.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 1.0
+       },
+@@ -3359,23 +3366,24 @@
+             "synthesize": 1
+           },
+           "tokens_by_role": {
+-            "reason": 9653,
+-            "synthesize": 1422
++            "reason": 9731,
++            "synthesize": 1435
+           },
+           "calls_by_model": {
+             "sim": 7
+           },
+-          "input_tokens": 10955,
+-          "cached_input_tokens": 7352,
+-          "uncached_input_tokens": 3603,
+-          "cache_write_tokens": 3368,
++          "input_tokens": 11046,
++          "cached_input_tokens": 7422,
++          "uncached_input_tokens": 3624,
++          "cache_write_tokens": 3389,
+           "output_tokens": 120,
+-          "total_tokens": 11075,
++          "total_tokens": 11166,
+           "tokens_measured": false,
+-          "cost_usd": 0.0115604,
+-          "wall_ms": 1,
++          "request_metrics_complete": true,
++          "cost_usd": 0.011626899999999999,
++          "wall_ms": 10,
+           "turn_ms": [
+-            1
++            10
+           ],
+           "first_token_ms": [
+             0
+@@ -3402,13 +3410,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 1,
+           "stall_stops": 1,
+-          "peak_context_tokens": 1900,
+-          "mean_context_tokens": 1565,
++          "peak_context_tokens": 1913,
++          "mean_context_tokens": 1578,
+           "context_sources": {
+             "Capability index": 1883,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 2002,
++            "Instructions": 2093,
+             "Model output": 462,
+             "Project": 350,
+             "Retrieved context": 1659,
+@@ -3426,7 +3434,7 @@
+           "result_context_tokens": 0,
+           "result_raw_tokens": 0,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 7352,
++          "prefix_reuse_tokens": 7422,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -3441,13 +3449,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 6.0,
+-        "input_tokens": 8294.0,
+-        "cached_input_tokens": 6398.0,
+-        "uncached_input_tokens": 1896.0,
++        "input_tokens": 8372.0,
++        "cached_input_tokens": 6466.0,
++        "uncached_input_tokens": 1906.0,
+         "output_tokens": 134.0,
+-        "total_tokens": 8428.0,
+-        "cost_usd": 0.007251100000000001,
+-        "cost_per_success_usd": 0.007251100000000001,
++        "total_tokens": 8506.0,
++        "cost_usd": 0.0072897,
++        "cost_per_success_usd": 0.0072897,
+         "tool_calls": 2.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -3455,12 +3463,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 6.0,
+-        "peak_context_tokens": 1469.0,
+-        "mean_context_tokens": 1382.0,
++        "peak_context_tokens": 1482.0,
++        "mean_context_tokens": 1395.0,
+         "tool_schema_tokens": 3780.0,
+-        "prefix_reuse_tokens": 6398.0,
++        "prefix_reuse_tokens": 6466.0,
+         "median_turn_ms": 1.0,
+-        "p95_turn_ms": 1.0,
++        "p95_turn_ms": 5.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -3470,7 +3478,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "Ada Lovelace is in the gold tier [inv:2b1f310e]",
++          "answer": "Ada Lovelace is in the gold tier [inv:62d0875c]",
+           "turns": 2,
+           "steps": 6,
+           "model_calls": 6,
+@@ -3478,22 +3486,23 @@
+             "reason": 6
+           },
+           "tokens_by_role": {
+-            "reason": 8428
++            "reason": 8506
+           },
+           "calls_by_model": {
+             "sim": 6
+           },
+-          "input_tokens": 8294,
+-          "cached_input_tokens": 6398,
+-          "uncached_input_tokens": 1896,
+-          "cache_write_tokens": 1679,
++          "input_tokens": 8372,
++          "cached_input_tokens": 6466,
++          "uncached_input_tokens": 1906,
++          "cache_write_tokens": 1689,
+           "output_tokens": 134,
+-          "total_tokens": 8428,
++          "total_tokens": 8506,
+           "tokens_measured": false,
+-          "cost_usd": 0.007251100000000001,
+-          "wall_ms": 2,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0072897,
++          "wall_ms": 6,
+           "turn_ms": [
+-            1,
++            5,
+             1
+           ],
+           "first_token_ms": [
+@@ -3521,13 +3530,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1469,
+-          "mean_context_tokens": 1382,
++          "peak_context_tokens": 1482,
++          "mean_context_tokens": 1395,
+           "context_sources": {
+             "Capability index": 1638,
+             "Conversation": 114,
+             "Earlier steps": 0,
+-            "Instructions": 1716,
++            "Instructions": 1794,
+             "Model output": 174,
+             "Project": 300,
+             "Retrieved context": 0,
+@@ -3545,7 +3554,7 @@
+           "result_context_tokens": 80,
+           "result_raw_tokens": 26,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 6398,
++          "prefix_reuse_tokens": 6466,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -3560,13 +3569,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 3.0,
+-        "input_tokens": 3747.0,
+-        "cached_input_tokens": 1375.0,
+-        "uncached_input_tokens": 2372.0,
++        "input_tokens": 3787.0,
++        "cached_input_tokens": 1389.0,
++        "uncached_input_tokens": 2398.0,
+         "output_tokens": 44.0,
+-        "total_tokens": 3791.0,
+-        "cost_usd": 0.0061985,
+-        "cost_per_success_usd": 0.0061985,
++        "total_tokens": 3831.0,
++        "cost_usd": 0.0062593,
++        "cost_per_success_usd": 0.0062593,
+         "tool_calls": 0.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -3574,12 +3583,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 2.0,
+-        "peak_context_tokens": 1505.0,
+-        "mean_context_tokens": 1249.0,
++        "peak_context_tokens": 1518.0,
++        "mean_context_tokens": 1262.0,
+         "tool_schema_tokens": 1208.0,
+-        "prefix_reuse_tokens": 1375.0,
+-        "median_turn_ms": 5.0,
+-        "p95_turn_ms": 5.0,
++        "prefix_reuse_tokens": 1389.0,
++        "median_turn_ms": 1.0,
++        "p95_turn_ms": 1.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -3598,23 +3607,24 @@
+             "reason": 2
+           },
+           "tokens_by_role": {
+-            "critic": 839,
+-            "reason": 2952
++            "critic": 853,
++            "reason": 2978
+           },
+           "calls_by_model": {
+             "sim": 3
+           },
+-          "input_tokens": 3747,
+-          "cached_input_tokens": 1375,
+-          "uncached_input_tokens": 2372,
+-          "cache_write_tokens": 1479,
++          "input_tokens": 3787,
++          "cached_input_tokens": 1389,
++          "uncached_input_tokens": 2398,
++          "cache_write_tokens": 1491,
+           "output_tokens": 44,
+-          "total_tokens": 3791,
++          "total_tokens": 3831,
+           "tokens_measured": false,
+-          "cost_usd": 0.0061985,
+-          "wall_ms": 5,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0062593,
++          "wall_ms": 1,
+           "turn_ms": [
+-            5
++            1
+           ],
+           "first_token_ms": [
+             0,
+@@ -3638,19 +3648,19 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1505,
+-          "mean_context_tokens": 1249,
++          "peak_context_tokens": 1518,
++          "mean_context_tokens": 1262,
+           "context_sources": {
+             "Capability index": 520,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 858,
++            "Instructions": 897,
+             "Model output": 50,
+             "Project": 801,
+             "Retrieved context": 66,
+             "Rules": 0,
+             "Skills": 0,
+-            "Task": 152,
++            "Task": 153,
+             "Tool results": 0,
+             "Tool schemas": 1208,
+             "Working state": 90,
+@@ -3662,7 +3672,7 @@
+           "result_context_tokens": 0,
+           "result_raw_tokens": 0,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 1375,
++          "prefix_reuse_tokens": 1389,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -3677,13 +3687,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 3.0,
+-        "input_tokens": 3912.0,
+-        "cached_input_tokens": 2477.0,
+-        "uncached_input_tokens": 1435.0,
++        "input_tokens": 3951.0,
++        "cached_input_tokens": 2505.0,
++        "uncached_input_tokens": 1446.0,
+         "output_tokens": 62.0,
+-        "total_tokens": 3974.0,
+-        "cost_usd": 0.0046603999999999994,
+-        "cost_per_success_usd": 0.0046603999999999994,
++        "total_tokens": 4013.0,
++        "cost_usd": 0.0046935,
++        "cost_per_success_usd": 0.0046935,
+         "tool_calls": 1.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -3691,12 +3701,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 3.0,
+-        "peak_context_tokens": 1363.0,
+-        "mean_context_tokens": 1304.0,
++        "peak_context_tokens": 1376.0,
++        "mean_context_tokens": 1317.0,
+         "tool_schema_tokens": 1806.0,
+-        "prefix_reuse_tokens": 2477.0,
+-        "median_turn_ms": 7.0,
+-        "p95_turn_ms": 7.0,
++        "prefix_reuse_tokens": 2505.0,
++        "median_turn_ms": 1.0,
++        "p95_turn_ms": 1.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -3706,7 +3716,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "Saved the note [inv:dcd14710]",
++          "answer": "Saved the note [inv:bd7676bc]",
+           "turns": 1,
+           "steps": 3,
+           "model_calls": 3,
+@@ -3714,22 +3724,23 @@
+             "reason": 3
+           },
+           "tokens_by_role": {
+-            "reason": 3974
++            "reason": 4013
+           },
+           "calls_by_model": {
+             "sim": 3
+           },
+-          "input_tokens": 3912,
+-          "cached_input_tokens": 2477,
+-          "uncached_input_tokens": 1435,
+-          "cache_write_tokens": 1350,
++          "input_tokens": 3951,
++          "cached_input_tokens": 2505,
++          "uncached_input_tokens": 1446,
++          "cache_write_tokens": 1361,
+           "output_tokens": 62,
+-          "total_tokens": 3974,
++          "total_tokens": 4013,
+           "tokens_measured": false,
+-          "cost_usd": 0.0046603999999999994,
+-          "wall_ms": 7,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0046935,
++          "wall_ms": 1,
+           "turn_ms": [
+-            7
++            1
+           ],
+           "first_token_ms": [
+             0
+@@ -3752,13 +3763,13 @@
+           "approvals_requested": 1,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1363,
+-          "mean_context_tokens": 1304,
++          "peak_context_tokens": 1376,
++          "mean_context_tokens": 1317,
+           "context_sources": {
+             "Capability index": 768,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 858,
++            "Instructions": 897,
+             "Model output": 87,
+             "Project": 150,
+             "Retrieved context": 0,
+@@ -3776,7 +3787,7 @@
+           "result_context_tokens": 34,
+           "result_raw_tokens": 7,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 2477,
++          "prefix_reuse_tokens": 2505,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -3791,13 +3802,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 2.0,
+-        "input_tokens": 2629.0,
+-        "cached_input_tokens": 1204.0,
+-        "uncached_input_tokens": 1425.0,
++        "input_tokens": 2655.0,
++        "cached_input_tokens": 1217.0,
++        "uncached_input_tokens": 1438.0,
+         "output_tokens": 68.0,
+-        "total_tokens": 2697.0,
+-        "cost_usd": 0.0044583,
+-        "cost_per_success_usd": 0.0044583,
++        "total_tokens": 2723.0,
++        "cost_usd": 0.0044934,
++        "cost_per_success_usd": 0.0044934,
+         "tool_calls": 3.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -3805,12 +3816,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 2.0,
+-        "peak_context_tokens": 1393.0,
+-        "mean_context_tokens": 1314.0,
++        "peak_context_tokens": 1406.0,
++        "mean_context_tokens": 1327.0,
+         "tool_schema_tokens": 1178.0,
+-        "prefix_reuse_tokens": 1204.0,
+-        "median_turn_ms": 258.0,
+-        "p95_turn_ms": 258.0,
++        "prefix_reuse_tokens": 1217.0,
++        "median_turn_ms": 254.0,
++        "p95_turn_ms": 254.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -3820,7 +3831,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "Paris 14°C, Tokyo 22°C, Lima 18°C [inv:85a0f6d2] [inv:144a7879] [inv:5ccd8b1e]",
++          "answer": "Paris 14°C, Tokyo 22°C, Lima 18°C [inv:3c16c865] [inv:0637ffaa] [inv:e0937794]",
+           "turns": 1,
+           "steps": 2,
+           "model_calls": 2,
+@@ -3828,22 +3839,23 @@
+             "reason": 2
+           },
+           "tokens_by_role": {
+-            "reason": 2697
++            "reason": 2723
+           },
+           "calls_by_model": {
+             "sim": 2
+           },
+-          "input_tokens": 2629,
+-          "cached_input_tokens": 1204,
+-          "uncached_input_tokens": 1425,
+-          "cache_write_tokens": 1375,
++          "input_tokens": 2655,
++          "cached_input_tokens": 1217,
++          "uncached_input_tokens": 1438,
++          "cache_write_tokens": 1388,
+           "output_tokens": 68,
+-          "total_tokens": 2697,
++          "total_tokens": 2723,
+           "tokens_measured": false,
+-          "cost_usd": 0.0044583,
+-          "wall_ms": 258,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0044934,
++          "wall_ms": 254,
+           "turn_ms": [
+-            258
++            254
+           ],
+           "first_token_ms": [
+             0
+@@ -3863,13 +3875,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1393,
+-          "mean_context_tokens": 1314,
++          "peak_context_tokens": 1406,
++          "mean_context_tokens": 1327,
+           "context_sources": {
+             "Capability index": 516,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 572,
++            "Instructions": 598,
+             "Model output": 52,
+             "Project": 100,
+             "Retrieved context": 0,
+@@ -3887,7 +3899,7 @@
+           "result_context_tokens": 105,
+           "result_raw_tokens": 21,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 1204,
++          "prefix_reuse_tokens": 1217,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -3902,13 +3914,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 4.0,
+-        "input_tokens": 5448.0,
+-        "cached_input_tokens": 3857.0,
+-        "uncached_input_tokens": 1591.0,
++        "input_tokens": 5500.0,
++        "cached_input_tokens": 3898.0,
++        "uncached_input_tokens": 1602.0,
+         "output_tokens": 66.0,
+-        "total_tokens": 5514.0,
+-        "cost_usd": 0.005342899999999999,
+-        "cost_per_success_usd": 0.005342899999999999,
++        "total_tokens": 5566.0,
++        "cost_usd": 0.005378600000000001,
++        "cost_per_success_usd": 0.005378600000000001,
+         "tool_calls": 3.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -3916,12 +3928,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 4.0,
+-        "peak_context_tokens": 1444.0,
+-        "mean_context_tokens": 1362.0,
++        "peak_context_tokens": 1457.0,
++        "mean_context_tokens": 1375.0,
+         "tool_schema_tokens": 2472.0,
+-        "prefix_reuse_tokens": 3857.0,
+-        "median_turn_ms": 5.0,
+-        "p95_turn_ms": 5.0,
++        "prefix_reuse_tokens": 3898.0,
++        "median_turn_ms": 2.0,
++        "p95_turn_ms": 2.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -3931,7 +3943,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "The mode is now fast [inv:d9651fcb] [inv:a3049edf] [inv:b711bc14]",
++          "answer": "The mode is now fast [inv:3203ccd8] [inv:d64daafc] [inv:627cdc31]",
+           "turns": 1,
+           "steps": 4,
+           "model_calls": 4,
+@@ -3939,22 +3951,23 @@
+             "reason": 4
+           },
+           "tokens_by_role": {
+-            "reason": 5514
++            "reason": 5566
+           },
+           "calls_by_model": {
+             "sim": 4
+           },
+-          "input_tokens": 5448,
+-          "cached_input_tokens": 3857,
+-          "uncached_input_tokens": 1591,
+-          "cache_write_tokens": 1459,
++          "input_tokens": 5500,
++          "cached_input_tokens": 3898,
++          "uncached_input_tokens": 1602,
++          "cache_write_tokens": 1470,
+           "output_tokens": 66,
+-          "total_tokens": 5514,
++          "total_tokens": 5566,
+           "tokens_measured": false,
+-          "cost_usd": 0.005342899999999999,
+-          "wall_ms": 5,
++          "request_metrics_complete": true,
++          "cost_usd": 0.005378600000000001,
++          "wall_ms": 2,
+           "turn_ms": [
+-            5
++            2
+           ],
+           "first_token_ms": [
+             0
+@@ -3976,13 +3989,13 @@
+           "approvals_requested": 1,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1444,
+-          "mean_context_tokens": 1362,
++          "peak_context_tokens": 1457,
++          "mean_context_tokens": 1375,
+           "context_sources": {
+             "Capability index": 1032,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1144,
++            "Instructions": 1196,
+             "Model output": 122,
+             "Project": 200,
+             "Retrieved context": 0,
+@@ -4000,7 +4013,7 @@
+           "result_context_tokens": 103,
+           "result_raw_tokens": 24,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 3857,
++          "prefix_reuse_tokens": 3898,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4015,13 +4028,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 11.0,
+-        "input_tokens": 14955.0,
+-        "cached_input_tokens": 8426.0,
+-        "uncached_input_tokens": 6529.0,
++        "input_tokens": 15100.0,
++        "cached_input_tokens": 8520.0,
++        "uncached_input_tokens": 6580.0,
+         "output_tokens": 403.0,
+-        "total_tokens": 15358.0,
+-        "cost_usd": 0.0216297,
+-        "cost_per_success_usd": 0.0216297,
++        "total_tokens": 15503.0,
++        "cost_usd": 0.021776,
++        "cost_per_success_usd": 0.021776,
+         "tool_calls": 7.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4029,12 +4042,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 11.0,
+-        "peak_context_tokens": 1589.0,
+-        "mean_context_tokens": 1359.0,
++        "peak_context_tokens": 1603.0,
++        "mean_context_tokens": 1372.0,
+         "tool_schema_tokens": 6728.0,
+-        "prefix_reuse_tokens": 9920.0,
+-        "median_turn_ms": 528.0,
+-        "p95_turn_ms": 528.0,
++        "prefix_reuse_tokens": 10014.0,
++        "median_turn_ms": 521.0,
++        "p95_turn_ms": 521.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4044,7 +4057,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "Combined: [inv:ca5b6d41] agents.delegate: worker-a done task t-6705b6a4: Ada Lovelace is gold; her orders total 565.74. [inv:273b251a] [inv:d78d257e] [inv:1c4b10ca]\n  identifiers: t-6705b6a4\n  (get_evidence(\"inv:ca5b6d41\") reads exact rows; add match to filter) | [inv:39971587] agents.delegate: worker-b done task t-aadc70e2: Paris 14°C, Tokyo 22°C [inv:2f734573] [inv:0d5467f1]\n  identifiers: t-aad",
++          "answer": "Combined: [inv:d6acbb97] agents.delegate: worker-a done task t-4eeda45f: Ada Lovelace is gold; her orders total 565.74. [inv:8ebefbc9] [inv:599b051d] [inv:6b0c9cc3]\n  identifiers: t-4eeda45f\n  (get_evidence(\"inv:d6acbb97\") reads exact rows; add match to filter) | [inv:29699a07] agents.delegate: worker-b done task t-a034ef94: Paris 14°C, Tokyo 22°C [inv:305d0e45] [inv:9b60c038]\n  identifiers: t-a03",
+           "turns": 1,
+           "steps": 11,
+           "model_calls": 11,
+@@ -4052,22 +4065,23 @@
+             "reason": 11
+           },
+           "tokens_by_role": {
+-            "reason": 15358
++            "reason": 15503
+           },
+           "calls_by_model": {
+             "sim": 11
+           },
+-          "input_tokens": 14955,
+-          "cached_input_tokens": 8426,
+-          "uncached_input_tokens": 6529,
+-          "cache_write_tokens": 5713,
++          "input_tokens": 15100,
++          "cached_input_tokens": 8520,
++          "uncached_input_tokens": 6580,
++          "cache_write_tokens": 5764,
+           "output_tokens": 403,
+-          "total_tokens": 15358,
++          "total_tokens": 15503,
+           "tokens_measured": false,
+-          "cost_usd": 0.0216297,
+-          "wall_ms": 528,
++          "request_metrics_complete": true,
++          "cost_usd": 0.021776,
++          "wall_ms": 521,
+           "turn_ms": [
+-            528
++            521
+           ],
+           "first_token_ms": [
+             0,
+@@ -4100,13 +4114,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1589,
+-          "mean_context_tokens": 1359,
++          "peak_context_tokens": 1603,
++          "mean_context_tokens": 1372,
+           "context_sources": {
+             "Capability index": 1057,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 3698,
++            "Instructions": 3847,
+             "Model output": 475,
+             "Project": 650,
+             "Retrieved context": 0,
+@@ -4124,7 +4138,7 @@
+           "result_context_tokens": 337,
+           "result_raw_tokens": 168,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 9920,
++          "prefix_reuse_tokens": 10014,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4139,13 +4153,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 3.0,
+-        "input_tokens": 4456.0,
+-        "cached_input_tokens": 2793.0,
+-        "uncached_input_tokens": 1663.0,
++        "input_tokens": 4498.0,
++        "cached_input_tokens": 2819.0,
++        "uncached_input_tokens": 1679.0,
+         "output_tokens": 84.0,
+-        "total_tokens": 4540.0,
+-        "cost_usd": 0.005493100000000001,
+-        "cost_per_success_usd": 0.005493100000000001,
++        "total_tokens": 4582.0,
++        "cost_usd": 0.0055383,
++        "cost_per_success_usd": 0.0055383,
+         "tool_calls": 1.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4153,12 +4167,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 3.0,
+-        "peak_context_tokens": 1575.0,
+-        "mean_context_tokens": 1485.0,
++        "peak_context_tokens": 1589.0,
++        "mean_context_tokens": 1499.0,
+         "tool_schema_tokens": 1935.0,
+-        "prefix_reuse_tokens": 2793.0,
+-        "median_turn_ms": 1.0,
+-        "p95_turn_ms": 1.0,
++        "prefix_reuse_tokens": 2819.0,
++        "median_turn_ms": 2.0,
++        "p95_turn_ms": 2.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4176,22 +4190,23 @@
+             "reason": 3
+           },
+           "tokens_by_role": {
+-            "reason": 4540
++            "reason": 4582
+           },
+           "calls_by_model": {
+             "sim": 3
+           },
+-          "input_tokens": 4456,
+-          "cached_input_tokens": 2793,
+-          "uncached_input_tokens": 1663,
+-          "cache_write_tokens": 1537,
++          "input_tokens": 4498,
++          "cached_input_tokens": 2819,
++          "uncached_input_tokens": 1679,
++          "cache_write_tokens": 1553,
+           "output_tokens": 84,
+-          "total_tokens": 4540,
++          "total_tokens": 4582,
+           "tokens_measured": false,
+-          "cost_usd": 0.005493100000000001,
+-          "wall_ms": 1,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0055383,
++          "wall_ms": 2,
+           "turn_ms": [
+-            1
++            2
+           ],
+           "first_token_ms": [
+             0
+@@ -4214,13 +4229,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1575,
+-          "mean_context_tokens": 1485,
++          "peak_context_tokens": 1589,
++          "mean_context_tokens": 1499,
+           "context_sources": {
+             "Capability index": 867,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 858,
++            "Instructions": 897,
+             "Model output": 94,
+             "Project": 150,
+             "Retrieved context": 0,
+@@ -4238,7 +4253,7 @@
+           "result_context_tokens": 72,
+           "result_raw_tokens": 66,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 2793,
++          "prefix_reuse_tokens": 2819,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4253,13 +4268,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 5.0,
+-        "input_tokens": 9325.0,
+-        "cached_input_tokens": 6921.0,
+-        "uncached_input_tokens": 2404.0,
++        "input_tokens": 9395.0,
++        "cached_input_tokens": 6975.0,
++        "uncached_input_tokens": 2420.0,
+         "output_tokens": 133.0,
+-        "total_tokens": 9458.0,
+-        "cost_usd": 0.0086362,
+-        "cost_per_success_usd": 0.0086362,
++        "total_tokens": 9528.0,
++        "cost_usd": 0.008687,
++        "cost_per_success_usd": 0.008687,
+         "tool_calls": 2.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4267,12 +4282,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 5.0,
+-        "peak_context_tokens": 2189.0,
+-        "mean_context_tokens": 1865.0,
++        "peak_context_tokens": 2203.0,
++        "mean_context_tokens": 1879.0,
+         "tool_schema_tokens": 3560.0,
+-        "prefix_reuse_tokens": 6921.0,
+-        "median_turn_ms": 3.0,
+-        "p95_turn_ms": 3.0,
++        "prefix_reuse_tokens": 6975.0,
++        "median_turn_ms": 4.0,
++        "p95_turn_ms": 4.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4282,7 +4297,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "Brew green tea at 80 °C, says A tea brewing guide. [inv:e929d64b] [inv:68606e3e]",
++          "answer": "Brew green tea at 80 °C, says A tea brewing guide. [inv:4b95f487] [inv:983e915b]",
+           "turns": 1,
+           "steps": 5,
+           "model_calls": 5,
+@@ -4290,22 +4305,23 @@
+             "reason": 5
+           },
+           "tokens_by_role": {
+-            "reason": 9458
++            "reason": 9528
+           },
+           "calls_by_model": {
+             "sim": 5
+           },
+-          "input_tokens": 9325,
+-          "cached_input_tokens": 6921,
+-          "uncached_input_tokens": 2404,
+-          "cache_write_tokens": 2228,
++          "input_tokens": 9395,
++          "cached_input_tokens": 6975,
++          "uncached_input_tokens": 2420,
++          "cache_write_tokens": 2244,
+           "output_tokens": 133,
+-          "total_tokens": 9458,
++          "total_tokens": 9528,
+           "tokens_measured": false,
+-          "cost_usd": 0.0086362,
+-          "wall_ms": 3,
++          "request_metrics_complete": true,
++          "cost_usd": 0.008687,
++          "wall_ms": 4,
+           "turn_ms": [
+-            3
++            4
+           ],
+           "first_token_ms": [
+             0
+@@ -4331,13 +4347,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 2189,
+-          "mean_context_tokens": 1865,
++          "peak_context_tokens": 2203,
++          "mean_context_tokens": 1879,
+           "context_sources": {
+             "Capability index": 1510,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1430,
++            "Instructions": 1495,
+             "Model output": 285,
+             "Project": 250,
+             "Retrieved context": 56,
+@@ -4355,7 +4371,7 @@
+           "result_context_tokens": 585,
+           "result_raw_tokens": 2722,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 6921,
++          "prefix_reuse_tokens": 6975,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4370,13 +4386,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 5.0,
+-        "input_tokens": 7958.0,
+-        "cached_input_tokens": 5838.0,
+-        "uncached_input_tokens": 2120.0,
++        "input_tokens": 8023.0,
++        "cached_input_tokens": 5892.0,
++        "uncached_input_tokens": 2131.0,
+         "output_tokens": 190.0,
+-        "total_tokens": 8148.0,
+-        "cost_usd": 0.0082106,
+-        "cost_per_success_usd": 0.0082106,
++        "total_tokens": 8213.0,
++        "cost_usd": 0.0082489,
++        "cost_per_success_usd": 0.0082489,
+         "tool_calls": 2.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4384,12 +4400,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 5.0,
+-        "peak_context_tokens": 1797.0,
+-        "mean_context_tokens": 1591.0,
++        "peak_context_tokens": 1810.0,
++        "mean_context_tokens": 1604.0,
+         "tool_schema_tokens": 3350.0,
+-        "prefix_reuse_tokens": 5838.0,
+-        "median_turn_ms": 82.0,
+-        "p95_turn_ms": 82.0,
++        "prefix_reuse_tokens": 5892.0,
++        "median_turn_ms": 72.0,
++        "p95_turn_ms": 72.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4407,22 +4423,23 @@
+             "reason": 5
+           },
+           "tokens_by_role": {
+-            "reason": 8148
++            "reason": 8213
+           },
+           "calls_by_model": {
+             "sim": 5
+           },
+-          "input_tokens": 7958,
+-          "cached_input_tokens": 5838,
+-          "uncached_input_tokens": 2120,
+-          "cache_write_tokens": 1806,
++          "input_tokens": 8023,
++          "cached_input_tokens": 5892,
++          "uncached_input_tokens": 2131,
++          "cache_write_tokens": 1817,
+           "output_tokens": 190,
+-          "total_tokens": 8148,
++          "total_tokens": 8213,
+           "tokens_measured": false,
+-          "cost_usd": 0.0082106,
+-          "wall_ms": 82,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0082489,
++          "wall_ms": 72,
+           "turn_ms": [
+-            82
++            72
+           ],
+           "first_token_ms": [
+             0,
+@@ -4448,13 +4465,13 @@
+           "approvals_requested": 2,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1797,
+-          "mean_context_tokens": 1591,
++          "peak_context_tokens": 1810,
++          "mean_context_tokens": 1604,
+           "context_sources": {
+             "Capability index": 1385,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1430,
++            "Instructions": 1495,
+             "Model output": 492,
+             "Project": 250,
+             "Retrieved context": 0,
+@@ -4472,7 +4489,7 @@
+           "result_context_tokens": 137,
+           "result_raw_tokens": 121,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 5838,
++          "prefix_reuse_tokens": 5892,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4487,13 +4504,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 6.0,
+-        "input_tokens": 9110.0,
+-        "cached_input_tokens": 5739.0,
+-        "uncached_input_tokens": 3371.0,
++        "input_tokens": 9188.0,
++        "cached_input_tokens": 5794.0,
++        "uncached_input_tokens": 3394.0,
+         "output_tokens": 146.0,
+-        "total_tokens": 9256.0,
+-        "cost_usd": 0.0109108,
+-        "cost_per_success_usd": 0.0109108,
++        "total_tokens": 9334.0,
++        "cost_usd": 0.010979299999999999,
++        "cost_per_success_usd": 0.010979299999999999,
+         "tool_calls": 2.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4501,12 +4518,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 6.0,
+-        "peak_context_tokens": 1618.0,
+-        "mean_context_tokens": 1518.0,
++        "peak_context_tokens": 1631.0,
++        "mean_context_tokens": 1531.0,
+         "tool_schema_tokens": 4236.0,
+-        "prefix_reuse_tokens": 6426.0,
+-        "median_turn_ms": 2.0,
+-        "p95_turn_ms": 3.0,
++        "prefix_reuse_tokens": 6481.0,
++        "median_turn_ms": 1.0,
++        "p95_turn_ms": 2.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4516,7 +4533,7 @@
+           "rep": 0,
+           "success": true,
+           "verdict": "all checks passed",
+-          "answer": "Scheduled. [inv:045287aa]",
++          "answer": "Scheduled. [inv:38f77777]",
+           "turns": 2,
+           "steps": 6,
+           "model_calls": 6,
+@@ -4524,22 +4541,23 @@
+             "reason": 6
+           },
+           "tokens_by_role": {
+-            "reason": 9256
++            "reason": 9334
+           },
+           "calls_by_model": {
+             "sim": 6
+           },
+-          "input_tokens": 9110,
+-          "cached_input_tokens": 5739,
+-          "uncached_input_tokens": 3371,
+-          "cache_write_tokens": 3122,
++          "input_tokens": 9188,
++          "cached_input_tokens": 5794,
++          "uncached_input_tokens": 3394,
++          "cache_write_tokens": 3145,
+           "output_tokens": 146,
+-          "total_tokens": 9256,
++          "total_tokens": 9334,
+           "tokens_measured": false,
+-          "cost_usd": 0.0109108,
+-          "wall_ms": 5,
++          "request_metrics_complete": true,
++          "cost_usd": 0.010979299999999999,
++          "wall_ms": 3,
+           "turn_ms": [
+-            3,
++            1,
+             2
+           ],
+           "first_token_ms": [
+@@ -4567,13 +4585,13 @@
+           "approvals_requested": 2,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1618,
+-          "mean_context_tokens": 1518,
++          "peak_context_tokens": 1631,
++          "mean_context_tokens": 1531,
+           "context_sources": {
+             "Capability index": 1824,
+             "Conversation": 126,
+             "Earlier steps": 0,
+-            "Instructions": 1716,
++            "Instructions": 1794,
+             "Model output": 224,
+             "Project": 300,
+             "Retrieved context": 0,
+@@ -4591,7 +4609,7 @@
+           "result_context_tokens": 96,
+           "result_raw_tokens": 44,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 6426,
++          "prefix_reuse_tokens": 6481,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4606,13 +4624,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 6.0,
+-        "input_tokens": 15939.0,
+-        "cached_input_tokens": 9084.0,
+-        "uncached_input_tokens": 6855.0,
++        "input_tokens": 16017.0,
++        "cached_input_tokens": 9111.0,
++        "uncached_input_tokens": 6906.0,
+         "output_tokens": 136.0,
+-        "total_tokens": 16075.0,
+-        "cost_usd": 0.0201643,
+-        "cost_per_success_usd": 0.0201643,
++        "total_tokens": 16153.0,
++        "cost_usd": 0.0202972,
++        "cost_per_success_usd": 0.0202972,
+         "tool_calls": 4.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4620,12 +4638,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 6.0,
+-        "peak_context_tokens": 2796.0,
+-        "mean_context_tokens": 2240.0,
+-        "tool_schema_tokens": 11051.0,
+-        "prefix_reuse_tokens": 10479.0,
+-        "median_turn_ms": 7.0,
+-        "p95_turn_ms": 11.0,
++        "peak_context_tokens": 2809.0,
++        "mean_context_tokens": 2669.0,
++        "tool_schema_tokens": 10051.0,
++        "prefix_reuse_tokens": 10519.0,
++        "median_turn_ms": 6.0,
++        "p95_turn_ms": 8.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4643,23 +4661,24 @@
+             "reason": 6
+           },
+           "tokens_by_role": {
+-            "reason": 16075
++            "reason": 16153
+           },
+           "calls_by_model": {
+             "sim": 6
+           },
+-          "input_tokens": 15939,
+-          "cached_input_tokens": 9084,
+-          "uncached_input_tokens": 6855,
+-          "cache_write_tokens": 6555,
++          "input_tokens": 16017,
++          "cached_input_tokens": 9111,
++          "uncached_input_tokens": 6906,
++          "cache_write_tokens": 6606,
+           "output_tokens": 136,
+-          "total_tokens": 16075,
++          "total_tokens": 16153,
+           "tokens_measured": false,
+-          "cost_usd": 0.0201643,
+-          "wall_ms": 18,
++          "request_metrics_complete": false,
++          "cost_usd": 0.0202972,
++          "wall_ms": 14,
+           "turn_ms": [
+-            11,
+-            7
++            8,
++            6
+           ],
+           "first_token_ms": [
+             0,
+@@ -4684,13 +4703,13 @@
+           "approvals_requested": 0,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 2796,
+-          "mean_context_tokens": 2240,
++          "peak_context_tokens": 2809,
++          "mean_context_tokens": 2669,
+           "context_sources": {
+             "Capability index": 2673,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1716,
++            "Instructions": 1794,
+             "Model output": 180,
+             "Project": 300,
+             "Retrieved context": 0,
+@@ -4702,13 +4721,13 @@
+             "Working state": 300,
+             "Workspace": 0
+           },
+-          "tool_schema_tokens": 11051,
++          "tool_schema_tokens": 10051,
+           "tools_exposed_max": 12,
+           "tools_used": 3,
+           "result_context_tokens": 256,
+           "result_raw_tokens": 197,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 10479,
++          "prefix_reuse_tokens": 10519,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4723,13 +4742,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 3.0,
+-        "input_tokens": 4884.0,
+-        "cached_input_tokens": 2958.0,
+-        "uncached_input_tokens": 1926.0,
++        "input_tokens": 4926.0,
++        "cached_input_tokens": 2985.0,
++        "uncached_input_tokens": 1941.0,
+         "output_tokens": 223.0,
+-        "total_tokens": 5107.0,
+-        "cost_usd": 0.0075076000000000006,
+-        "cost_per_success_usd": 0.0075076000000000006,
++        "total_tokens": 5149.0,
++        "cost_usd": 0.0075505,
++        "cost_per_success_usd": 0.0075505,
+         "tool_calls": 1.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4737,12 +4756,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 3.0,
+-        "peak_context_tokens": 1754.0,
+-        "mean_context_tokens": 1628.0,
++        "peak_context_tokens": 1768.0,
++        "mean_context_tokens": 1642.0,
+         "tool_schema_tokens": 2043.0,
+-        "prefix_reuse_tokens": 2958.0,
+-        "median_turn_ms": 2.0,
+-        "p95_turn_ms": 2.0,
++        "prefix_reuse_tokens": 2985.0,
++        "median_turn_ms": 3.0,
++        "p95_turn_ms": 3.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4760,22 +4779,23 @@
+             "reason": 3
+           },
+           "tokens_by_role": {
+-            "reason": 5107
++            "reason": 5149
+           },
+           "calls_by_model": {
+             "sim": 3
+           },
+-          "input_tokens": 4884,
+-          "cached_input_tokens": 2958,
+-          "uncached_input_tokens": 1926,
+-          "cache_write_tokens": 1668,
++          "input_tokens": 4926,
++          "cached_input_tokens": 2985,
++          "uncached_input_tokens": 1941,
++          "cache_write_tokens": 1683,
+           "output_tokens": 223,
+-          "total_tokens": 5107,
++          "total_tokens": 5149,
+           "tokens_measured": false,
+-          "cost_usd": 0.0075076000000000006,
+-          "wall_ms": 2,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0075505,
++          "wall_ms": 3,
+           "turn_ms": [
+-            2
++            3
+           ],
+           "first_token_ms": [
+             0
+@@ -4798,13 +4818,13 @@
+           "approvals_requested": 1,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 1754,
+-          "mean_context_tokens": 1628,
++          "peak_context_tokens": 1768,
++          "mean_context_tokens": 1642,
+           "context_sources": {
+             "Capability index": 924,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 858,
++            "Instructions": 897,
+             "Model output": 354,
+             "Project": 150,
+             "Retrieved context": 0,
+@@ -4822,7 +4842,7 @@
+           "result_context_tokens": 30,
+           "result_raw_tokens": 31,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 2958,
++          "prefix_reuse_tokens": 2985,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4837,13 +4857,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 5.0,
+-        "input_tokens": 13550.0,
+-        "cached_input_tokens": 10345.0,
+-        "uncached_input_tokens": 3205.0,
++        "input_tokens": 13560.0,
++        "cached_input_tokens": 10354.0,
++        "uncached_input_tokens": 3206.0,
+         "output_tokens": 180.0,
+-        "total_tokens": 13730.0,
+-        "cost_usd": 0.0117465,
+-        "cost_per_success_usd": 0.0117465,
++        "total_tokens": 13740.0,
++        "cost_usd": 0.011750799999999999,
++        "cost_per_success_usd": 0.011750799999999999,
+         "tool_calls": 2.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4851,12 +4871,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 5.0,
+-        "peak_context_tokens": 2942.0,
+-        "mean_context_tokens": 2710.0,
+-        "tool_schema_tokens": 8180.0,
+-        "prefix_reuse_tokens": 10345.0,
+-        "median_turn_ms": 20.0,
+-        "p95_turn_ms": 20.0,
++        "peak_context_tokens": 2944.0,
++        "mean_context_tokens": 2712.0,
++        "tool_schema_tokens": 8125.0,
++        "prefix_reuse_tokens": 10354.0,
++        "median_turn_ms": 22.0,
++        "p95_turn_ms": 22.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4874,22 +4894,23 @@
+             "reason": 5
+           },
+           "tokens_by_role": {
+-            "reason": 13730
++            "reason": 13740
+           },
+           "calls_by_model": {
+             "sim": 5
+           },
+-          "input_tokens": 13550,
+-          "cached_input_tokens": 10345,
+-          "uncached_input_tokens": 3205,
+-          "cache_write_tokens": 2935,
++          "input_tokens": 13560,
++          "cached_input_tokens": 10354,
++          "uncached_input_tokens": 3206,
++          "cache_write_tokens": 2936,
+           "output_tokens": 180,
+-          "total_tokens": 13730,
++          "total_tokens": 13740,
+           "tokens_measured": false,
+-          "cost_usd": 0.0117465,
+-          "wall_ms": 20,
++          "request_metrics_complete": true,
++          "cost_usd": 0.011750799999999999,
++          "wall_ms": 22,
+           "turn_ms": [
+-            20
++            22
+           ],
+           "first_token_ms": [
+             0,
+@@ -4915,13 +4936,13 @@
+           "approvals_requested": 1,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 2942,
+-          "mean_context_tokens": 2710,
++          "peak_context_tokens": 2944,
++          "mean_context_tokens": 2712,
+           "context_sources": {
+             "Capability index": 2055,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1430,
++            "Instructions": 1495,
+             "Model output": 364,
+             "Project": 250,
+             "Retrieved context": 0,
+@@ -4929,17 +4950,17 @@
+             "Skills": 0,
+             "Task": 240,
+             "Tool results": 761,
+-            "Tool schemas": 8180,
++            "Tool schemas": 8125,
+             "Working state": 270,
+             "Workspace": 0
+           },
+-          "tool_schema_tokens": 8180,
++          "tool_schema_tokens": 8125,
+           "tools_exposed_max": 9,
+           "tools_used": 2,
+           "result_context_tokens": 187,
+           "result_raw_tokens": 137,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 10345,
++          "prefix_reuse_tokens": 10354,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -4954,13 +4975,13 @@
+         "successes": 1,
+         "success_rate": 1.0,
+         "model_calls": 4.0,
+-        "input_tokens": 21774.0,
+-        "cached_input_tokens": 14810.0,
+-        "uncached_input_tokens": 6964.0,
++        "input_tokens": 21786.0,
++        "cached_input_tokens": 14817.0,
++        "uncached_input_tokens": 6969.0,
+         "output_tokens": 773.0,
+-        "total_tokens": 22547.0,
+-        "cost_usd": 0.0278985,
+-        "cost_per_success_usd": 0.0278985,
++        "total_tokens": 22559.0,
++        "cost_usd": 0.0279124,
++        "cost_per_success_usd": 0.0279124,
+         "tool_calls": 2.0,
+         "tool_failed": 0.0,
+         "deduplicated": 0.0,
+@@ -4968,12 +4989,12 @@
+         "provider_retries": 0.0,
+         "provider_errors": 0.0,
+         "steps": 4.0,
+-        "peak_context_tokens": 6654.0,
+-        "mean_context_tokens": 5443.0,
+-        "tool_schema_tokens": 6940.0,
+-        "prefix_reuse_tokens": 14810.0,
+-        "median_turn_ms": 177.0,
+-        "p95_turn_ms": 177.0,
++        "peak_context_tokens": 6657.0,
++        "mean_context_tokens": 5446.0,
++        "tool_schema_tokens": 6896.0,
++        "prefix_reuse_tokens": 14817.0,
++        "median_turn_ms": 235.0,
++        "p95_turn_ms": 235.0,
+         "median_first_token_ms": 0.0,
+         "stall_stops": 0.0
+       },
+@@ -4991,22 +5012,23 @@
+             "reason": 4
+           },
+           "tokens_by_role": {
+-            "reason": 22547
++            "reason": 22559
+           },
+           "calls_by_model": {
+             "sim": 4
+           },
+-          "input_tokens": 21774,
+-          "cached_input_tokens": 14810,
+-          "uncached_input_tokens": 6964,
+-          "cache_write_tokens": 6557,
++          "input_tokens": 21786,
++          "cached_input_tokens": 14817,
++          "uncached_input_tokens": 6969,
++          "cache_write_tokens": 6562,
+           "output_tokens": 773,
+-          "total_tokens": 22547,
++          "total_tokens": 22559,
+           "tokens_measured": false,
+-          "cost_usd": 0.0278985,
+-          "wall_ms": 177,
++          "request_metrics_complete": true,
++          "cost_usd": 0.0279124,
++          "wall_ms": 235,
+           "turn_ms": [
+-            177
++            235
+           ],
+           "first_token_ms": [
+             0
+@@ -5030,13 +5052,13 @@
+           "approvals_requested": 1,
+           "stall_nudges": 0,
+           "stall_stops": 0,
+-          "peak_context_tokens": 6654,
+-          "mean_context_tokens": 5443,
++          "peak_context_tokens": 6657,
++          "mean_context_tokens": 5446,
+           "context_sources": {
+             "Capability index": 1848,
+             "Conversation": 0,
+             "Earlier steps": 0,
+-            "Instructions": 1144,
++            "Instructions": 1196,
+             "Model output": 1330,
+             "Project": 200,
+             "Retrieved context": 0,
+@@ -5044,17 +5066,17 @@
+             "Skills": 0,
+             "Task": 668,
+             "Tool results": 9237,
+-            "Tool schemas": 6940,
++            "Tool schemas": 6896,
+             "Working state": 407,
+             "Workspace": 0
+           },
+-          "tool_schema_tokens": 6940,
++          "tool_schema_tokens": 6896,
+           "tools_exposed_max": 11,
+           "tools_used": 2,
+           "result_context_tokens": 3086,
+           "result_raw_tokens": 3139,
+           "compressed_rounds_max": 0,
+-          "prefix_reuse_tokens": 14810,
++          "prefix_reuse_tokens": 14817,
+           "faults_injected": 0,
+           "replay_diverged": 0
+         }
+@@ -5066,13 +5088,13 @@
+     "successes": 22,
+     "success_rate": 1.0,
+     "model_calls": 72.45454545454545,
+-    "input_tokens": 118008.13636363637,
+-    "cached_input_tokens": 98080.45454545454,
+-    "uncached_input_tokens": 19927.68181818182,
++    "input_tokens": 118946.36363636363,
++    "cached_input_tokens": 99040.95454545454,
++    "uncached_input_tokens": 19905.409090909092,
+     "output_tokens": 1553.3181818181818,
+-    "total_tokens": 119561.45454545454,
+-    "cost_usd": 0.08171320454545455,
+-    "cost_per_success_usd": 0.08171320454545455,
++    "total_tokens": 120499.68181818182,
++    "cost_usd": 0.08184930454545453,
++    "cost_per_success_usd": 0.08184930454545453,
+     "tool_calls": 24.59090909090909,
+     "tool_failed": 0.09090909090909091,
+     "deduplicated": 0.09090909090909091,
+@@ -5080,12 +5102,12 @@
+     "provider_retries": 0.0,
+     "provider_errors": 0.0,
+     "steps": 72.36363636363636,
+-    "peak_context_tokens": 6654.0,
+-    "mean_context_tokens": 1715.6818181818182,
+-    "tool_schema_tokens": 40925.63636363636,
+-    "prefix_reuse_tokens": 98243.0,
+-    "median_turn_ms": 1.0,
+-    "p95_turn_ms": 2.0,
++    "peak_context_tokens": 6657.0,
++    "mean_context_tokens": 1746.7727272727273,
++    "tool_schema_tokens": 40875.681818181816,
++    "prefix_reuse_tokens": 99204.09090909091,
++    "median_turn_ms": 9.0,
++    "p95_turn_ms": 22.0,
+     "median_first_token_ms": 0.0,
+     "stall_stops": 0.045454545454545456
+   }
+diff --git a/crates/ark-bench/src/lib.rs b/crates/ark-bench/src/lib.rs
+index 1a9ad1e..12ab91f 100644
+--- a/crates/ark-bench/src/lib.rs
++++ b/crates/ark-bench/src/lib.rs
+@@ -52,6 +52,22 @@ pub async fn run_suite_with(
+     mut progress: impl FnMut(&RunRecord),
+     mut checkpoint: impl FnMut(&Report),
+ ) -> anyhow::Result<Report> {
++    if settings.harness == HarnessKind::Ark
++        && [&models.strong]
++            .into_iter()
++            .chain(models.fast.iter())
++            .any(|spec| {
++                ["codex:", "claude:"]
++                    .iter()
++                    .any(|prefix| spec.starts_with(prefix))
++            })
++        && std::env::var("ARK_SESSION_REUSE")
++            .map(|v| v.trim() != "0")
++            .unwrap_or(true)
++        && (settings.cassette.is_some() || settings.faults.is_some())
++    {
++        anyhow::bail!("managed subscription sessions bypass recording, replay and fault injection; omit those options or set ARK_SESSION_REUSE=0 for an explicitly stateless experiment");
++    }
+     let pricing = match models.mode() {
+         Mode::Simulated => Pricing::reference(),
+         Mode::Live => Pricing::for_model(&models.priced_model()),
+diff --git a/crates/ark-bench/src/main.rs b/crates/ark-bench/src/main.rs
+index 9c53907..f6bcd93 100644
+--- a/crates/ark-bench/src/main.rs
++++ b/crates/ark-bench/src/main.rs
+@@ -183,6 +183,13 @@ async fn main() -> anyhow::Result<()> {
+                 &workloads, &models, &settings, reps, &label, progress, save,
+             )
+             .await?;
++            if r.workloads
++                .iter()
++                .flat_map(|w| &w.runs)
++                .any(|r| !r.request_metrics_complete)
++            {
++                eprintln!("request metrics incomplete: managed sessions bypass the direct provider recorder; metadata-call counts, prefix reuse and raw request traces are unavailable. Usage and outcomes come from runtime events; context sizes are estimates.");
++            }
+             print_summary(&r);
+             if let (Some(c), Some(path)) = (&cassette, &record) {
+                 c.save(path)?;
+diff --git a/crates/ark-bench/src/record.rs b/crates/ark-bench/src/record.rs
+index 4edc5a8..83c72f4 100644
+--- a/crates/ark-bench/src/record.rs
++++ b/crates/ark-bench/src/record.rs
+@@ -155,6 +155,9 @@ impl Recorder {
+                 .map(|r| r.cache_write_tokens as u64)
+                 .sum::<u64>()
+     }
++    pub(crate) fn simulated_cache_writes(&self) -> u64 {
++        *self.sim_writes.lock().unwrap()
++    }
+     /// A fault was injected into one of the run's model calls.
+     pub fn add_fault(&self) {
+         *self.faults.lock().unwrap() += 1;
+diff --git a/crates/ark-bench/src/report.rs b/crates/ark-bench/src/report.rs
+index 782e2c1..8f8f0bf 100644
+--- a/crates/ark-bench/src/report.rs
++++ b/crates/ark-bench/src/report.rs
+@@ -99,6 +99,10 @@ pub struct RunRecord {
+     pub total_tokens: u64,
+     /// False when any number is an estimate or simulated rather than provider-reported.
+     pub tokens_measured: bool,
++    /// False when managed subscription sessions bypassed the direct provider recorder.
++    /// Usage/outcomes still come from runtime events; request/meta/prefix metrics are absent.
++    #[serde(default)]
++    pub request_metrics_complete: bool,
+     pub cost_usd: f64,
+     pub wall_ms: u64,
+     pub turn_ms: Vec<u64>,
+diff --git a/crates/ark-bench/src/workload.rs b/crates/ark-bench/src/workload.rs
+index 293f955..f435c5f 100644
+--- a/crates/ark-bench/src/workload.rs
++++ b/crates/ark-bench/src/workload.rs
+@@ -623,6 +623,7 @@ fn measure(
+                     r.input_tokens += usage.prompt_tokens as u64;
+                     r.cached_input_tokens += usage.cached_tokens as u64;
+                     r.output_tokens += usage.completion_tokens as u64;
++                    r.cache_write_tokens += usage.cache_write_tokens as u64;
+                     r.tokens_measured &= usage.measured;
+                     r.model_latency_ms.push(*elapsed_ms);
+                     if let Some(f) = first_token_ms {
+@@ -683,7 +684,9 @@ fn measure(
+         }
+     }
+     r.tools_used = used.len() as u32;
+-    r.cache_write_tokens = recorder.cache_writes();
++    // Runtime events include managed sessions, which replace the direct provider wrapper.
++    // Do not lose their cache writes or count direct-provider writes a second time.
++    r.cache_write_tokens += recorder.simulated_cache_writes();
+     r.uncached_input_tokens = r.input_tokens.saturating_sub(r.cached_input_tokens);
+     r.total_tokens = r.input_tokens + r.output_tokens;
+     r.cost_usd = pricing.cost(
+@@ -694,6 +697,8 @@ fn measure(
+     );
+ 
+     let records = recorder.records();
++    r.request_metrics_complete = request_coverage(&records, &r.calls_by_model)
++        && (r.model_calls > 0 || turns.iter().all(|t| t.error.is_none()));
+     let mut meta: BTreeMap<String, u32> = BTreeMap::new();
+     let mut sum_ctx = 0u64;
+     for q in &records {
+@@ -712,10 +717,134 @@ fn measure(
+         }
+     }
+     r.meta_calls = meta;
+-    r.mean_context_tokens = if records.is_empty() {
++    if !r.request_metrics_complete {
++        // These sizes are available from the canonical context reports even when the
++        // subscription session bypassed the direct request meter. Never substitute a
++        // resumed delta for the model's full context.
++        r.tool_schema_tokens = r.context_sources.get("Tool schemas").copied().unwrap_or(0);
++        r.peak_context_tokens = turns
++            .iter()
++            .flat_map(|t| &t.events)
++            .filter_map(|e| {
++                if let HarnessEvent::Context { report } = e {
++                    Some(report.total + report.tool_schemas)
++                } else {
++                    None
++                }
++            })
++            .max()
++            .unwrap_or(0);
++        sum_ctx = turns
++            .iter()
++            .flat_map(|t| &t.events)
++            .filter_map(|e| {
++                if let HarnessEvent::Context { report } = e {
++                    Some((report.total + report.tool_schemas) as u64)
++                } else {
++                    None
++                }
++            })
++            .sum();
++    }
++    let context_count = if r.request_metrics_complete {
++        records.len()
++    } else {
++        turns
++            .iter()
++            .flat_map(|t| &t.events)
++            .filter(|e| matches!(e, HarnessEvent::Context { .. }))
++            .count()
++    };
++    r.mean_context_tokens = if context_count == 0 {
+         0
+     } else {
+-        (sum_ctx / records.len() as u64) as u32
++        (sum_ctx / context_count as u64) as u32
+     };
+     r
+ }
++
++fn request_coverage(
++    records: &[crate::record::RequestRecord],
++    expected: &BTreeMap<String, u32>,
++) -> bool {
++    let mut successful = BTreeMap::new();
++    for record in records.iter().filter(|r| r.error.is_none()) {
++        *successful.entry(record.model.clone()).or_insert(0) += 1;
++    }
++    &successful == expected
++}
++
++#[cfg(test)]
++mod measurement_tests {
++    use super::*;
++
++    #[test]
++    fn failed_direct_requests_cannot_hide_unrecorded_managed_calls() {
++        use crate::record::RequestRecord;
++        let records = vec![
++            RequestRecord {
++                model: "api".into(),
++                error: Some("retry".into()),
++                ..Default::default()
++            },
++            RequestRecord {
++                model: "api".into(),
++                ..Default::default()
++            },
++        ];
++        let calls = BTreeMap::from([("api".into(), 1), ("codex:test".into(), 1)]);
++        assert!(!request_coverage(&records, &calls));
++        assert!(request_coverage(
++            &records,
++            &BTreeMap::from([("api".into(), 1)])
++        ));
++    }
++
++    #[test]
++    fn managed_usage_and_context_do_not_depend_on_the_direct_provider_meter() {
++        let mut usage = ark_model::Usage::measured(100, 5);
++        usage.cache_write_tokens = 40;
++        let turns = vec![TurnResult {
++            input: "hello".into(),
++            answer: "bonjour".into(),
++            cited: 0,
++            steps: 1,
++            cancelled: false,
++            error: None,
++            ms: 1,
++            events: vec![
++                HarnessEvent::Context {
++                    report: ark_runtime::ContextReport {
++                        total: 300,
++                        tool_schemas: 200,
++                        ..Default::default()
++                    },
++                },
++                HarnessEvent::ModelCall {
++                    role: "reason".into(),
++                    model: "codex:test".into(),
++                    usage,
++                    elapsed_ms: 1,
++                    first_token_ms: None,
++                    retries: 0,
++                },
++            ],
++        }];
++        let recorder = Recorder::new();
++        recorder.add_sim_write(20);
++        let record = measure(
++            &crate::suite::simple(),
++            0,
++            &turns,
++            &recorder,
++            Verdict::pass("checked"),
++            &Pricing::reference(),
++        );
++        assert!(!record.request_metrics_complete);
++        assert_eq!(record.input_tokens, 100);
++        assert_eq!(record.cache_write_tokens, 60);
++        assert_eq!(record.tool_schema_tokens, 200);
++        assert_eq!(record.peak_context_tokens, 500);
++        assert_eq!(record.mean_context_tokens, 500);
++    }
++}
+diff --git a/crates/ark-bench/tests/suite.rs b/crates/ark-bench/tests/suite.rs
+index 4f433cc..2a0a311 100644
+--- a/crates/ark-bench/tests/suite.rs
++++ b/crates/ark-bench/tests/suite.rs
+@@ -5,6 +5,28 @@ use ark_bench::cassette::Cassette;
+ use ark_bench::faults::FaultPlan;
+ use ark_bench::{run_suite, suite, BenchSettings, HarnessKind, ModelSpec, Report};
+ 
++#[tokio::test]
++async fn managed_recordings_are_rejected_before_any_model_call() {
++    let result = run_suite(
++        &[],
++        &ModelSpec {
++            strong: "codex:unused".into(),
++            fast: None,
++        },
++        &BenchSettings {
++            cassette: Some(Cassette::record()),
++            ..Default::default()
++        },
++        1,
++        "unsupported",
++        |_| {},
++    )
++    .await;
++    if std::env::var("ARK_SESSION_REUSE").as_deref() != Ok("0") {
++        assert!(result.unwrap_err().to_string().contains("bypass recording"));
++    }
++}
++
+ async fn run() -> Report {
+     run_suite(
+         &suite::all(40),
+diff --git a/crates/ark-model/src/cli.rs b/crates/ark-model/src/cli.rs
+index 22c1e24..8773118 100644
+--- a/crates/ark-model/src/cli.rs
++++ b/crates/ark-model/src/cli.rs
+@@ -558,6 +558,14 @@ impl CliModel {
+             Err(e) => return Some(Err(e)),
+         };
+         let model = (self.model != "default").then_some(self.model.as_str());
++        // No turn has been submitted. An unsupported config overlay must select the
++        // already-isolated exec path, not turn a valid model choice into a failed task.
++        if app.prepare_host().await.is_err() {
++            tracing::warn!("codex host-tool isolation unavailable; using isolated codex exec");
++            app.stop().await;
++            self.no_app.store(true, Ordering::Relaxed);
++            return None;
++        }
+         let thread = match mode {
+             Mode::Open(_) => app.start_thread(&dir, model, sys).await,
+             Mode::Resume(id) if app.has_thread(id) => Ok(id.to_string()),
+@@ -752,6 +760,7 @@ impl CliModel {
+                             .arg(&dir);
+                     }
+                 }
++                host_codex_flags(&mut c, search);
+                 c.arg("--output-schema").arg(&schema);
+                 if self.model != "default" {
+                     c.args(["-m", &self.model]);
+@@ -1512,6 +1521,19 @@ fn until(at: u64) -> Option<String> {
+     })
+ }
+ 
++/// Host-model calls run tools in ARK. This never configures an ACP worker or writes settings.
++pub(crate) fn host_codex_flags(cmd: &mut tokio::process::Command, search: bool) {
++    cmd.args([
++        "-c",
++        "features.shell_tool=false",
++        "-c",
++        "features.apps=false",
++    ]);
++    if !search {
++        cmd.args(["-c", "web_search=\"disabled\""]);
++    }
++}
++
+ fn io_err(e: std::io::Error) -> ProviderError {
+     ProviderError::Api {
+         provider: "cli".into(),
+@@ -2248,6 +2270,7 @@ while IFS= read -r line; do
+   case "$line" in
+     *'"method":"initialize"'*) echo "{\"id\":$id,\"result\":{}}" ;;
+     *'"method":"account/rateLimits/read"'*) echo "{\"id\":$id,\"result\":{}}" ;;
++    *'"method":"config/read"'*) echo "{\"id\":$id,\"result\":{\"config\":{\"mcp_servers\":{\"unused-server\":{\"command\":\"never-start\"}}}}}" ;;
+     *'"method":"model/list"'*)
+       case "$line" in
+         *'"cursor":"next"'*) echo "{\"id\":$id,\"result\":{\"data\":[{\"id\":\"gpt-5.6-luna\",\"model\":\"gpt-5.6-luna\",\"displayName\":\"GPT-5.6-Luna\",\"hidden\":false,\"defaultReasoningEffort\":\"low\",\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast\"}]}],\"nextCursor\":null}}" ;;
+@@ -2724,6 +2747,110 @@ done
+         );
+     }
+ 
++    #[tokio::test]
++    async fn host_tools_are_disabled_for_both_started_and_reloaded_threads() {
++        let (bin, log) = codex_app(
++            "host-isolation",
++            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
++        );
++        let mut app = crate::codex_app::CodexApp::start(&bin, "test")
++            .await
++            .unwrap();
++        app.start_thread(bin.parent().unwrap(), None, "host")
++            .await
++            .unwrap();
++        app.resume_thread(bin.parent().unwrap(), None, "other-thread")
++            .await
++            .unwrap();
++        app.stop().await;
++        let log = std::fs::read_to_string(log).unwrap();
++        for method in ["thread/start", "thread/resume"] {
++            let line = log
++                .lines()
++                .find(|l| l.contains(&format!("\"method\":\"{method}\"")))
++                .unwrap();
++            let sent: Value = serde_json::from_str(line).unwrap();
++            assert_eq!(
++                sent["params"]["config"]["mcp_servers.unused-server.enabled"],
++                false
++            );
++            assert_eq!(sent["params"]["config"]["features.shell_tool"], false);
++            assert_eq!(sent["params"]["config"]["features.apps"], false);
++            assert_eq!(sent["params"]["config"]["web_search"], "disabled");
++        }
++    }
++
++    #[test]
++    fn host_exec_flags_preserve_only_explicit_web_search() {
++        let mut normal = command(Path::new("codex"));
++        host_codex_flags(&mut normal, false);
++        let args: Vec<_> = normal.as_std().get_args().collect();
++        assert!(args.contains(&std::ffi::OsStr::new("features.shell_tool=false")));
++        assert!(args.contains(&std::ffi::OsStr::new("features.apps=false")));
++        assert!(args.contains(&std::ffi::OsStr::new("web_search=\"disabled\"")));
++        let mut search = command(Path::new("codex"));
++        host_codex_flags(&mut search, true);
++        assert!(!search
++            .as_std()
++            .get_args()
++            .any(|v| v == "web_search=\"disabled\""));
++    }
++
++    #[tokio::test]
++    async fn model_discovery_does_not_require_a_host_compatible_mcp_name() {
++        let (bin, log) = codex_app(
++            "catalog-with-dotted-server",
++            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
++        );
++        let script = std::fs::read_to_string(&bin)
++            .unwrap()
++            .replace("unused-server", "name.with.dot");
++        std::fs::write(&bin, script).unwrap();
++        let mut app = crate::codex_app::CodexApp::start(&bin, "test")
++            .await
++            .unwrap();
++        let models = app.models().await.unwrap();
++        remember_codex_models(&models);
++        assert!(CliModel::try_new(Cli::Codex, "gpt-5.6-terra@medium").is_ok());
++        assert!(app
++            .start_thread(bin.parent().unwrap(), None, "host")
++            .await
++            .is_err());
++        app.stop().await;
++        let log = std::fs::read_to_string(log).unwrap();
++        assert!(log.find("model/list").unwrap() < log.find("config/read").unwrap());
++        assert!(!log.contains("\"method\":\"thread/start\""));
++    }
++
++    #[tokio::test]
++    async fn incompatible_mcp_names_fall_back_before_submitting_a_vendor_turn() {
++        let (bin, log) = codex_app(
++            "isolated-exec-fallback",
++            r#"{"action":"reply","text":"unused","tool_calls":[]}"#,
++        );
++        let answer = json!({"action":"reply","text":"fallback answer","tool_calls":[]}).to_string();
++        let events = format!(
++            "{}\n{}\n{}",
++            json!({"type":"thread.started","thread_id":"fallback-thread"}),
++            json!({"type":"item.completed","item":{"type":"agent_message","text":answer}}),
++            json!({"type":"turn.completed","usage":{"input_tokens":50,"output_tokens":4}})
++        );
++        let script = std::fs::read_to_string(&bin)
++            .unwrap()
++            .replace("unused-server", "name.with.dot");
++        let branch = format!("#!/bin/sh\nif [ \"$1\" != app-server ]; then\ncat > /dev/null\ncat <<'ARK_FAKE_REPLY'\n{events}\nARK_FAKE_REPLY\nexit 0\nfi\n");
++        std::fs::write(&bin, script.replacen("#!/bin/sh\n", &branch, 1)).unwrap();
++        let model = CliModel::new(Cli::Codex, "").with_program(&bin);
++        let (_, completion) = SessionBackend::open(&model, "host", &[], &[Message::user("hello")])
++            .await
++            .unwrap();
++        assert_eq!(completion.content, "fallback answer");
++        assert!(model.no_app.load(Ordering::Relaxed));
++        let log = std::fs::read_to_string(log).unwrap();
++        assert!(!log.contains("\"method\":\"thread/start\""));
++        assert!(!log.contains("\"method\":\"turn/start\""));
++    }
++
+     /// A fake `codex exec` that keeps each reply schema it is given (`schema-<n>.json` next to
+     /// it) and answers with `reply`. With `refuse`, a typed schema is refused as OpenAI refuses
+     /// one it cannot check.
+diff --git a/crates/ark-model/src/codex_app.rs b/crates/ark-model/src/codex_app.rs
+index 3484f10..6027aab 100644
+--- a/crates/ark-model/src/codex_app.rs
++++ b/crates/ark-model/src/codex_app.rs
+@@ -23,6 +23,7 @@ pub(crate) struct CodexApp {
+     next_id: u64,
+     /// Threads this process has started or loaded.
+     threads: std::collections::HashSet<String>,
++    host_config: Option<Value>,
+ }
+ 
+ /// One turn's outcome.
+@@ -57,12 +58,14 @@ impl CodexApp {
+     pub(crate) async fn start(bin: &Path, version: &str) -> Result<Self, AppError> {
+         let mut cmd = crate::cli::command(bin);
+         cmd.args(["app-server", "-c", "sandbox_mode=\"read-only\""]);
++        crate::cli::host_codex_flags(&mut cmd, false);
+         let proc = LiveProcess::spawn(cmd)
+             .map_err(|e| AppError::Broken(format!("could not start: {e}")))?;
+         let mut app = CodexApp {
+             proc,
+             next_id: 0,
+             threads: Default::default(),
++            host_config: None,
+         };
+         app.request(
+             "initialize",
+@@ -90,6 +93,24 @@ impl CodexApp {
+         self.proc.stop().await;
+     }
+ 
++    /// Catalog discovery stays independent of host-model isolation and its exec fallback.
++    pub(crate) async fn prepare_host(&mut self) -> Result<Value, AppError> {
++        if let Some(config) = &self.host_config {
++            return Ok(config.clone());
++        }
++        // Only names leave this response. Never log or persist its credential values.
++        let response = self
++            .request(
++                "config/read",
++                json!({"includeLayers": false}),
++                SETUP_TIMEOUT,
++            )
++            .await?;
++        let config = host_config(&response)?;
++        self.host_config = Some(config.clone());
++        Ok(config)
++    }
++
+     /// Models and effort levels available to this signed-in Codex account.
+     pub(crate) async fn models(&mut self) -> Result<Vec<ModelOption>, AppError> {
+         let mut out = Vec::new();
+@@ -136,6 +157,7 @@ impl CodexApp {
+         instructions: &str,
+     ) -> Result<String, AppError> {
+         let mut p = thread_settings(cwd, model);
++        p["config"] = self.prepare_host().await?;
+         p["baseInstructions"] = json!(instructions);
+         p["ephemeral"] = json!(false);
+         let r = self.request("thread/start", p, SETUP_TIMEOUT).await?;
+@@ -160,6 +182,7 @@ impl CodexApp {
+         id: &str,
+     ) -> Result<(), AppError> {
+         let mut p = thread_settings(cwd, model);
++        p["config"] = self.prepare_host().await?;
+         p["threadId"] = json!(id);
+         self.request("thread/resume", p, SETUP_TIMEOUT).await?;
+         self.threads.insert(id.to_string());
+@@ -334,6 +357,40 @@ fn thread_settings(cwd: &Path, model: Option<&str>) -> Value {
+     p
+ }
+ 
++/// Disable tools that ARK neither offers nor executes through its own approval boundary.
++/// The RPC overlay splits keys on dots literally (quoted segments are not TOML here).
++fn host_config(response: &Value) -> Result<Value, AppError> {
++    let config = response
++        .get("config")
++        .and_then(Value::as_object)
++        .ok_or_else(|| {
++            AppError::Broken("config/read returned no configuration; use isolated exec".into())
++        })?;
++    let mut overrides = json!({
++        "features.shell_tool": false,
++        "features.apps": false,
++        "web_search": "disabled",
++    });
++    if let Some(servers) = config.get("mcp_servers").filter(|v| !v.is_null()) {
++        let servers = servers.as_object().ok_or_else(|| {
++            AppError::Broken("unsupported MCP configuration; use isolated exec".into())
++        })?;
++        for name in servers.keys() {
++            if name.is_empty()
++                || !name
++                    .bytes()
++                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
++            {
++                return Err(AppError::Broken(
++                    "unsupported MCP name in host-model configuration; use isolated exec".into(),
++                ));
++            }
++            overrides[format!("mcp_servers.{name}.enabled")] = json!(false);
++        }
++    }
++    Ok(overrides)
++}
++
+ fn record_limits(limits: &Value) {
+     if let Some(u) = crate::usage::from_codex(limits) {
+         crate::usage::record(u);
+@@ -360,6 +417,25 @@ fn error_text(e: &Value) -> String {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn host_model_configuration_keeps_credentials_and_provider_choices_out() {
++        let settings = host_config(&json!({"config": {
++            "model": "user-model", "model_provider": "custom",
++            "mcp_servers": {"notes-server": {"url": "https://example.test", "token": "secret"}}
++        }}))
++        .unwrap();
++        assert_eq!(settings["mcp_servers.notes-server.enabled"], false);
++        assert_eq!(settings["features.shell_tool"], false);
++        assert_eq!(settings["features.apps"], false);
++        assert_eq!(settings["web_search"], "disabled");
++        let text = settings.to_string();
++        for private in ["secret", "example.test", "user-model", "custom"] {
++            assert!(!text.contains(private));
++        }
++        assert!(host_config(&json!({})).is_err());
++        assert!(host_config(&json!({"config":{"mcp_servers":{"name.with.dot":{}}}})).is_err());
++    }
++
+     #[test]
+     fn usage_counts_cached_input_inside_input() {
+         let u = turn_usage(
+diff --git a/crates/ark-runtime/src/profile.rs b/crates/ark-runtime/src/profile.rs
+index a9523e8..261d542 100644
+--- a/crates/ark-runtime/src/profile.rs
++++ b/crates/ark-runtime/src/profile.rs
+@@ -188,9 +188,10 @@ the task needs; the capability index shows which are available and the actions t
+ each. Load an action's schema before calling it. A few common actions are already loaded.\n\
+ - Ground every claim in a tool result. Do not invent a fact — if you need one, call a tool \
+ to get it.\n\
+-- Separate what you have established from what you believe. Use record_state to add a \
+-finding (cite the evidence), state a hypothesis, or note the next step. The state persists \
+-across turns — build on it rather than repeating work.\n\
++- Separate what you have established from what you believe. Use record_state for findings, \
++decisions or next steps that ongoing or later work needs, and cite the evidence. Build on \
++saved state. Do not add a separate state update solely to restate a result when you can \
++finish the task.\n\
+ - Tool results are compact summaries with an [inv:ID] reference. To see exact rows, call \
+ get_evidence(invocation, path). Do not re-run a tool you already ran.\n\
+ - When evidence is missing, run a small experiment and read its result as evidence.\n\
+diff --git a/docs/BENCH.md b/docs/BENCH.md
+index f9da61a..7052388 100644
+--- a/docs/BENCH.md
++++ b/docs/BENCH.md
+@@ -196,6 +196,18 @@ output behind them, compressed rounds, and the prefix tokens shared with recent
+ Per workload and in total (`Summary`): means of the above, success rate, cost per successful
+ run (total cost over successes), median and p95 turn time, median time to first token.
+ 
++Managed subscription sessions replace the direct provider wrapper. Their runtime events
++still report outcome and vendor usage, and context reports estimate the canonical request.
++`RunRecord.request_metrics_complete` is false when successful per-model request coverage is
++missing. Exact metadata-call counts, prefix reuse and raw request traces are unavailable in
++that case. Do not interpret their zero fields as measured values. The CLI prints a warning.
++Managed recording, replay and fault injection are rejected before execution. To test those
++features on a subscription, explicitly select `ARK_SESSION_REUSE=0` and label the experiment
++stateless. Do not compare it as if session reuse remained enabled.
++
++The bounded 2026-10-15 evaluation and its source identities, raw reports and limits are in
++[`bench/efficiency-2026-10-15/README.md`](../bench/efficiency-2026-10-15/README.md).
++
+ Cost uses the model's list price when it is a known hosted model, otherwise the reference
+ price (Claude Sonnet 5.5: $2 in, $2.50 cache write, $0.20 cache read, $10 out per million
+ tokens). The report says which.
+diff --git a/docs/adr/0012-vendor-cli-processes-live-with-their-session.md b/docs/adr/0012-vendor-cli-processes-live-with-their-session.md
+index 763898a..5000f6f 100644
+--- a/docs/adr/0012-vendor-cli-processes-live-with-their-session.md
++++ b/docs/adr/0012-vendor-cli-processes-live-with-their-session.md
+@@ -39,8 +39,26 @@ cannot be started, Codex sessions fall back to `codex exec` and `exec resume`.
+   answer to an old question in the vendor's history.
+ - `codex app-server` is marked experimental by Codex; a protocol change shows up as the
+   `exec` fallback and a warning in the log, not as a failed turn.
+-- A Codex thread still starts the MCP servers of the person's own Codex setup (about 4 s and
+-  15k tokens on the machine measured); `app-server` has no `--ignore-user-config`.
++- Initially, a Codex thread started the MCP servers of the person's own Codex setup (about
++  4 s and 15k tokens on the machine measured). The 2026-10-15 correction below replaces that
++  behavior for host-model calls.
++
++## Host-tool isolation correction (2026-10-15)
++
++ARK executes host tools through its own authority boundary. Advertising the vendor's unused
++native tools adds context and an unnecessary second execution path. Host-model processes
++disable native commands and connectors. Before starting or loading a reasoning thread, the
++adapter reads configured MCP server names and disables those servers in its scoped overlay.
++It never logs raw configuration, writes user settings or changes ACP workers. Explicit web
++search remains available through its separate host capability.
++
++Model catalog discovery does not need this overlay. If the installed protocol cannot supply
++it, or a server name cannot be safely represented in its dotted-key format, the adapter stops
++that process before a vendor turn and uses the existing isolated `codex exec` fallback.
++The fallback ignores user rules/config and retains its read-only sandbox. Every host tool
++still runs in ARK, with the same approvals and recovery behavior.
++
++Evaluation and limits: `bench/efficiency-2026-10-15/README.md`.
+ 
+ ## Check
+ `crates/ark-model/src/cli.rs` tests (fake CLIs speaking each protocol: one process per

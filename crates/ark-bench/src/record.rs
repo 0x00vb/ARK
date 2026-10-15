@@ -155,6 +155,9 @@ impl Recorder {
                 .map(|r| r.cache_write_tokens as u64)
                 .sum::<u64>()
     }
+    pub(crate) fn simulated_cache_writes(&self) -> u64 {
+        *self.sim_writes.lock().unwrap()
+    }
     /// A fault was injected into one of the run's model calls.
     pub fn add_fault(&self) {
         *self.faults.lock().unwrap() += 1;

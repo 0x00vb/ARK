@@ -1,0 +1,95 @@
+{
+  "totals": {
+    "attempts": 12,
+    "successes": 12,
+    "model_calls": 36,
+    "input_tokens": 507730,
+    "output_tokens": 2124,
+    "cached_input_tokens": 304384,
+    "uncached_input_tokens": 203346,
+    "total_tokens": 509854,
+    "cost_usd": 0.4888088,
+    "provider_errors": 0,
+    "provider_retries": 0,
+    "approvals_requested": 0,
+    "wall_ms": 290576,
+    "reference_cost_per_success": 0.040734066666666666,
+    "state_updates": null
+  },
+  "workloads": {
+    "large-output": {
+      "attempts": 3,
+      "successes": 3,
+      "model_calls": 9,
+      "input_tokens": 119587,
+      "output_tokens": 511,
+      "cached_input_tokens": 63232,
+      "uncached_input_tokens": 56355,
+      "total_tokens": 120098,
+      "cost_usd": 0.13046639999999998,
+      "provider_errors": 0,
+      "provider_retries": 0,
+      "approvals_requested": 0,
+      "wall_ms": 71925,
+      "reference_cost_per_success": 0.043488799999999994,
+      "state_updates": null
+    },
+    "multi-step": {
+      "attempts": 3,
+      "successes": 3,
+      "model_calls": 12,
+      "input_tokens": 177501,
+      "output_tokens": 677,
+      "cached_input_tokens": 126720,
+      "uncached_input_tokens": 50781,
+      "total_tokens": 178178,
+      "cost_usd": 0.133676,
+      "provider_errors": 0,
+      "provider_retries": 0,
+      "approvals_requested": 0,
+      "wall_ms": 64208,
+      "reference_cost_per_success": 0.04455866666666666,
+      "state_updates": null
+    },
+    "parallel": {
+      "attempts": 3,
+      "successes": 3,
+      "model_calls": 6,
+      "input_tokens": 84751,
+      "output_tokens": 450,
+      "cached_input_tokens": 36096,
+      "uncached_input_tokens": 48655,
+      "total_tokens": 85201,
+      "cost_usd": 0.10902920000000002,
+      "provider_errors": 0,
+      "provider_retries": 0,
+      "approvals_requested": 0,
+      "wall_ms": 60808,
+      "reference_cost_per_success": 0.036343066666666674,
+      "state_updates": null
+    },
+    "resume": {
+      "attempts": 3,
+      "successes": 3,
+      "model_calls": 9,
+      "input_tokens": 125891,
+      "output_tokens": 486,
+      "cached_input_tokens": 78336,
+      "uncached_input_tokens": 47555,
+      "total_tokens": 126377,
+      "cost_usd": 0.1156372,
+      "provider_errors": 0,
+      "provider_retries": 0,
+      "approvals_requested": 0,
+      "wall_ms": 93635,
+      "reference_cost_per_success": 0.03854573333333333,
+      "state_updates": null
+    }
+  },
+  "trace_counts": [
+    {
+      "state_updates": 0,
+      "state_steps_without_adapter_or_retrieval": 0
+    }
+  ]
+}

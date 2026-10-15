@@ -1,0 +1,86 @@
+[
+  {
+    "isolated": false,
+    "usage": {
+      "totalTokens": 15262,
+      "inputTokens": 15246,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 16,
+      "reasoningOutputTokens": 0
+    },
+    "answer": "{\"answer\":\"Bonjour !\"}",
+    "wall_seconds": 15.35715675,
+    "configured_mcp_count": 2
+  },
+  {
+    "isolated": true,
+    "usage": {
+      "totalTokens": 11143,
+      "inputTokens": 11127,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 16,
+      "reasoningOutputTokens": 0
+    },
+    "answer": "{\"answer\":\"Bonjour !\"}",
+    "wall_seconds": 4.8706665,
+    "configured_mcp_count": 2
+  },
+  {
+    "isolated": true,
+    "usage": {
+      "totalTokens": 11141,
+      "inputTokens": 11125,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 16,
+      "reasoningOutputTokens": 0
+    },
+    "answer": "{\"answer\":\"Bonjour !\"}",
+    "wall_seconds": 11.675786000000002,
+    "configured_mcp_count": 2
+  },
+  {
+    "isolated": false,
+    "usage": {
+      "totalTokens": 15268,
+      "inputTokens": 15246,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 22,
+      "reasoningOutputTokens": 0
+    },
+    "answer": "{\"answer\":\"Bonjour ! Comment puis-je vous aider ?\"}",
+    "wall_seconds": 10.305639417000002,
+    "configured_mcp_count": 2
+  },
+  {
+    "isolated": false,
+    "usage": {
+      "totalTokens": 15262,
+      "inputTokens": 15246,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 16,
+      "reasoningOutputTokens": 0
+    },
+    "answer": "{\"answer\":\"Bonjour !\"}",
+    "wall_seconds": 10.57660225,
+    "configured_mcp_count": 2
+  },
+  {
+    "isolated": true,
+    "usage": {
+      "totalTokens": 11257,
+      "inputTokens": 11241,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 16,
+      "reasoningOutputTokens": 0
+    },
+    "answer": "{\"answer\":\"Bonjour !\"}",
+    "wall_seconds": 7.6279914170000005,
+    "configured_mcp_count": 2
+  }
+]

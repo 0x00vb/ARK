@@ -20,7 +20,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-15 (dictation integration)
+Last updated: 2026-10-15 (completed-work integration)
 
 ## Release
 
@@ -40,7 +40,8 @@ Last updated: 2026-10-15 (dictation integration)
 
 | What | State |
 |---|---|
-| Completed branch audit | CI's unoptimized test profile, the historical completed branches and voice dictation are integrated on `main`. IFC transport stays deferred outside `main`; hosted-model efficiency work remains in its own tree. |
+| Completed branch audit | CI's unoptimized test profile, historical completed branches, voice dictation and the reviewed efficiency and catalog-startup patches are integrated on local `main`. Exact combined page-enabled CI and focused remote-provider, dictation and approval checks pass. IFC transport stays deferred outside `main`. No push, tag or release. |
+| Efficiency and Codex startup | Host-model tools stay in ARK's approval path; scoped vendor overrides remove unused native tools without changing user settings. Default instructions avoid redundant bookkeeping and route permitted proposals to the existing approval gate. Catalog discovery skips optional usage telemetry while retaining its six-second deadline and strict advertised model/effort checks. Separate owner gates, 99 model tests, safety checks and synthetic writing-app checks pass. The 30/30 efficiency result is configuration-confounded, not a causal savings claim. Source chain, retained failures and remaining device/release gates: `bench/integration-2026-10-15/README.md`. |
 | Models and commands follow a chat's computer | Released in v0.24.0: choosing a linked computer immediately uses its subscriptions, API keys and Ollama catalog; the selected model starts the chat there; setup stays chat-bound; local-only slash commands are omitted from completion and the command palette, and typed slash words go to the remote chat as text. Focused two-runtime Rust and WebKit tests, independent QA and the full `scripts/ci.sh` gate pass. |
 | Voice dictation (ADR 0070) | Integrated on `main`: explicit computer-bound uploads, independent split controls, permission and inference leases, immediate capture cleanup and stale-result cancellation. Authenticated two-runtime and WebKit tests cover remote routing and capture races. Full page-enabled CI passes: lint, workspace tests, 56 WebKit scenarios, release build and simulated benchmark gate. Independent source and screenshot QA is GO. Optional `ark-transcribe` installs the pinned multilingual Whisper base model only after a microphone action. Native microphone and multi-minute quality validation remain release follow-ups on macOS, Windows and Linux. |
 | Signed page updates (ADR 0067) | Released in v0.23.4. An opted-in native consumer verifies a separately signed manifest, exact native versions, a monotonic sequence and a bounded exact file set. Apply reloads only the page. A seven-second readiness failure restores the previous page while the runtime keeps running. ARK Desktop provides the first consumer and release path. |

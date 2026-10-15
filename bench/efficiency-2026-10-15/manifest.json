@@ -1,0 +1,115 @@
+{
+  "baseline_commit": "11eee3242279e392298ce606a15d32616f0757a3",
+  "model": "codex:gpt-5.6-terra@medium",
+  "reps": 3,
+  "workloads": [
+    "simple",
+    "tool-lookup",
+    "multi-step",
+    "large-output",
+    "failure-recovery",
+    "resume",
+    "approval",
+    "parallel",
+    "stale-read",
+    "analysis"
+  ],
+  "turn_timeout_seconds": 120,
+  "budget": "runtime default, frozen baseline source",
+  "planner": false,
+  "critic": true,
+  "pricing": "unchanged common reference price, not subscription billing",
+  "delegation_claims": false,
+  "fixture_sha256": {
+    "crates/ark-bench/src/suite/analysis.rs": "7cd97143bffed8f3f46cbe3e80843a5f9674f2021ecce3ba21dc9c7e9f0a71ad",
+    "crates/ark-bench/src/suite/board.rs": "712f634f366afc7c459a244dba41e1cefc6d4a6da38eea92754641a23114f6cb",
+    "crates/ark-bench/src/suite/claims.rs": "ae34724a930a9ba7cfaa641a356c4a7502388f44bb3027acaed89222369aa06d",
+    "crates/ark-bench/src/suite/files.rs": "c7e95869c6fe6b4abfdba53196e0222c4fdf1600d2095f85488e682c8e98851e",
+    "crates/ark-bench/src/suite/mod.rs": "b9570dbc36b0929cca7f1a9bd4af4481a4b60d77bfbb693f867310b5bc6384d4",
+    "crates/ark-bench/src/suite/tools.rs": "e9ea58186d9e4cff9f379c88a3d9e822a70911549957f73d05c689b8ae8871ef",
+    "crates/ark-bench/src/suite/web.rs": "94645d5e9ed12ec456cf072f2f5c502d1805767ad33e3e2ee084df1513f533f6",
+    "crates/ark-bench/src/suite/workbooks.rs": "2adacb9393ca748598281dded54403f5331c2c7cc7f4bd604a1747c214d48f15"
+  },
+  "cli_version": "codex-cli 0.153.4",
+  "notes": [
+    "No unpaired benchmark ranking. Three reps directional. Structural auth/provider failure stops further trials.",
+    "Trace sequence review plus focused approval/refusal/stale-state/recovery tests guard beyond benchmark grades.",
+    "Preflight gpt-6.1-sol rejected before any workload/model call because live CLI catalog omits it. Selected explicitly advertised gpt-5.6-terra; live catalog also offers gpt-6-astra,gpt-5.6-sol,gpt-5.6-luna. Cached desktop catalog is not the CLI catalog.",
+    "Managed sessions bypassed the original direct provider recorder. Empty cassette removed. Baseline full Context events and ModelCall usage/outcomes remain the evidence; raw request/meta/prefix metrics are not claimed.",
+    "Native probe: first third isolated trial hit client timeout under the original buffered reader; usage unavailable. Fixed reader, then saved third completed isolated observation. Three config-overlay preflights failed before any model turn; no graded failures replaced."
+  ],
+  "vendor_config_sha256": "d137ab8ab88944f9102090f12e1e04bfd327da19f5dc1ff582992ef3dacb833f",
+  "baseline_successes": 30,
+  "baseline_attempts": 30,
+  "prompt_experiment": {
+    "first_workloads": [
+      "multi-step",
+      "large-output",
+      "parallel",
+      "resume"
+    ],
+    "reps": 3,
+    "rest_if_success": [
+      "simple",
+      "tool-lookup",
+      "failure-recovery",
+      "approval",
+      "stale-read",
+      "analysis"
+    ],
+    "decision": "Keep only with fewer dedicated bookkeeping calls/cost and unchanged checked outcomes plus full regression gates. Compare against isolation condition independently."
+  },
+  "isolation_patch_sha256": "96b02061c795ccedd6f0d4d4142b5174f3215c6b160cba24645935b0f86aa457",
+  "final_patch_sha256": "9fc1060d8c89a1164fb91401e7684033846c7a67abeb0719cc4705e42dc01a17",
+  "isolation_executable_sha256": "244c27bef0e09c3e9a8d05cc21c2d629d934d981aa72d2041efbeb4d37f0c0fd",
+  "prompt_executable_sha256": "e2441df3230c2ecc90163c5a7045c103c31c1b62561a2a100a2786876b1355eb",
+  "validation_changes_after_live_build": "Only tests, documentation, evidence scripts and explicit simulated-baseline regeneration. Evaluated production source stayed frozen for final full CI and writer build.",
+  "approval_mapping_patch_sha256": "bc260a88d71e2f8b428f293f76464e68ce21cb89b76324d1279f1d8b9dc96417",
+  "approval_mapping_executable_sha256": "3a9f2193ffa5267396835d31efc60ebee9cddc145516f93565c98b3b01a508f0",
+  "approval_mapping_experiment": {
+    "reason": "Prior prompt candidate failed approval rep0; retained all30 attempts. One scoped mapping correction, then a fresh fixed30. If checked regression remains, reject prompt changes and retain isolation only.",
+    "settings": "Same ten workloads,3 reps,120seconds,unchanged fixtures/model/default16000 budget"
+  },
+  "vendor_configuration_drift": {
+    "initial_sha256": "d137ab8ab88944f9102090f12e1e04bfd327da19f5dc1ff582992ef3dacb833f",
+    "observed_sha256": "9a89a4b46081619be653d1e05b098306afe5fbad4eb557057e6d98daabcbbc6b",
+    "observed_file_mtime_utc": "2026-10-15T20:21:21.785984+00:00",
+    "observation": "Changed outside this evaluation; no settings written by evaluator. Original content not retained because configuration can contain credentials. Baseline ended before this mtime; isolation and prompt runs span it. All cross-condition differences are observed directional results, not a controlled causal estimate. Explicit model,medium effort,fixtures,16000 ARK budget fixed.",
+    "end_sha256": "9a89a4b46081619be653d1e05b098306afe5fbad4eb557057e6d98daabcbbc6b"
+  },
+  "rejected_prompt_patch_sha256": "56efa82fc0c47d775015fbd3140ea2c16f28c0ba26fc06fa57943805d25113ac",
+  "final_results": {
+    "successes": 30,
+    "attempts": 30,
+    "model_calls": 87,
+    "total_tokens": 1290472,
+    "reference_cost_usd": 1.2120544,
+    "trace_audit_cases": 12,
+    "context_events": 87,
+    "context_budgets": [
+      16000
+    ],
+    "config_caveat": "Observed aggregate differences cannot be attributed solely to code because configuration changed outside the evaluation."
+  },
+  "dogfood": {
+    "model": "codex:gpt-5.6-terra",
+    "effort_forced": false,
+    "success": true,
+    "model_calls": 2,
+    "explicit_effort_setup_failures": 2,
+    "open_issue": "d1bb1e0c",
+    "not_a_matched_benchmark": true
+  },
+  "final_source_sha256": {
+    "crates/ark-model/src/cli.rs": "c87f3d2bc9cbfa161c70c50372555a09254eb120a85306f9b64f37727e98e20b",
+    "crates/ark-model/src/codex_app.rs": "a37602b99f7bfe7eb8de8f61580f47a212c532db44c893985ec2a429d6323552",
+    "crates/ark-runtime/src/harness.rs": "9d89ef3304938f04c06d366b4ed88b3c9e54bd9d7555841c58c7650cbcd419af",
+    "crates/ark-runtime/src/profile.rs": "aabd842dcf58d614c4e99bec9a6013729a4aaec23ee008a2d97483dae6ee9181",
+    "crates/ark-bench/src/lib.rs": "393cb76046ac89da0a9e54651da2e1dd8aa57713d749d4936e3d8554b25ed14a",
+    "crates/ark-bench/src/main.rs": "b60af2e75a546148a797484dca7be1864ecca6a017a3095c6b520c7812dd05a0",
+    "crates/ark-bench/src/record.rs": "7953db02ba32de067fb4639de50d42c27c16b6bd72a2163b2848286aa6ef0436",
+    "crates/ark-bench/src/report.rs": "afc3a3dc373a4e0533a390eb88d6611c81bb9d0873510e878109f5bba4368780",
+    "crates/ark-bench/src/workload.rs": "4f193ca307214fd696ec714405280ad454612f341aff50f5b11665b447c2f1de"
+  },
+  "rustc_version": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+}

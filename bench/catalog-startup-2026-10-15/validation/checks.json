@@ -1,0 +1,13 @@
+{
+  "model_tests": "99/99 pass",
+  "full_ci": "pass",
+  "simulated_workloads": "22/22 pass",
+  "reported_non_timing_metrics": "20/20 unchanged",
+  "consumer": "pass,explicit codex:gpt-5.6-terra@medium,2calls,4+3=7words,no save,unchangedhashes",
+  "independent_qa": "pass,artifact-reference nit corrected",
+  "source_stayed_frozen": true,
+  "own_build_output_cleaned": true,
+  "committed": false,
+  "merged": false,
+  "released": false
+}

@@ -1,0 +1,18 @@
+{
+  "binary_sha256": "29b2e82afee54619686c5361a843dd11df53f31fb553490aaa20f51a76da36fa",
+  "model": "codex:gpt-5.6-terra",
+  "effort_forced": false,
+  "returncode": 0,
+  "checks": {
+    "process_succeeded": true,
+    "result_succeeded": true,
+    "listed_both_files": true,
+    "correct_word_counts": true,
+    "read_actual_manuscript": true,
+    "no_save_call": true,
+    "manuscript_hashes_unchanged": true
+  },
+  "success": true,
+  "answer": "- `chapter-01.md` \u2014 4 words\n- `chapter-02.md` \u2014 3 words\n\n**Total: 7 words**",
+  "model_calls": 2
+}

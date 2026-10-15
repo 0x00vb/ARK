@@ -1,0 +1,36 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":258,"working_state":33,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":34,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":618,"action_schemas":118,"loaded_actions":3,"total":662,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Reading"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":","}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" updating"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":","}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" then"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" confirming"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" the"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" setting"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":17230,"completion_tokens":133,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":11680,"first_token_ms":11258,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_0","action":"settings.get","input":{"key":"mode"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_0","action":"settings.get","ok":true,"summary":"key=mode, value=slow","invocation":"f001d853-8478-449e-89e8-82ff88a07add","duration_ms":0,"error":null,"context_tokens":34,"raw_tokens":8}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_1","action":"settings.set","input":{"key":"mode","value":"fast"}}}
+{"type":"event","turn":0,"event":{"type":"approval_requested","request":{"action":"settings.set","summary":"change a setting","risk":"mutate","input":{"key":"mode","value":"fast"},"class":"settings.set","preview":"settings.set(key=\"mode\", value=\"fast\")"}}}
+{"type":"event","turn":0,"event":{"type":"approval_resolved","action":"settings.set","class":"settings.set","decision":"allow_once"}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_1","action":"settings.set","ok":true,"summary":"key=mode, updated=true","invocation":"e088598c-5f37-49dd-8df9-ef8b124ddcce","duration_ms":0,"error":null,"context_tokens":35,"raw_tokens":8}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_2","action":"settings.get","input":{"key":"mode"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_2","action":"settings.get","ok":true,"summary":"key=mode, value=fast","invocation":"8f965ba4-7294-4d5f-ab4c-c8bae5036221","duration_ms":0,"error":null,"context_tokens":34,"raw_tokens":8}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":258,"working_state":33,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":34,"tool_rounds":103,"model_output":53,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":618,"action_schemas":118,"loaded_actions":3,"total":818,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"`"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"mode"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"`"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" is"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" now"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" set"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" to"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" `"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"fast"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"`."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":22875,"completion_tokens":32,"measured":true,"cached_tokens":16128,"cache_write_tokens":0},"elapsed_ms":2044,"first_token_ms":1929,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 3 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"`mode` is now set to `fast`.","streamed":true}}

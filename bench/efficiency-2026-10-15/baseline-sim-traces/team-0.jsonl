@@ -1,0 +1,141 @@
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":711,"system_tokens":507,"message_tokens":171,"messages":2,"est_prompt_tokens":1389,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1389,"completion_tokens":72,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["agents.delegate","agents.delegate"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":5,"tool_schema_tokens":539,"system_tokens":412,"message_tokens":174,"messages":2,"est_prompt_tokens":1125,"prefix_reuse_tokens":498,"usage":{"prompt_tokens":1125,"completion_tokens":16,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["weather.current"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":433,"message_tokens":219,"messages":2,"est_prompt_tokens":1282,"prefix_reuse_tokens":498,"usage":{"prompt_tokens":1282,"completion_tokens":19,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["crm.find_customer"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":433,"message_tokens":282,"messages":4,"est_prompt_tokens":1345,"prefix_reuse_tokens":1197,"usage":{"prompt_tokens":1345,"completion_tokens":17,"measured":false,"cached_tokens":1197,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["crm.orders"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":433,"message_tokens":367,"messages":6,"est_prompt_tokens":1430,"prefix_reuse_tokens":1249,"usage":{"prompt_tokens":1430,"completion_tokens":20,"measured":false,"cached_tokens":1249,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["calc.eval"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":433,"message_tokens":430,"messages":8,"est_prompt_tokens":1493,"prefix_reuse_tokens":1324,"usage":{"prompt_tokens":1493,"completion_tokens":49,"measured":false,"cached_tokens":1324,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":433,"message_tokens":519,"messages":10,"est_prompt_tokens":1582,"prefix_reuse_tokens":1376,"usage":{"prompt_tokens":1582,"completion_tokens":23,"measured":false,"cached_tokens":1376,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":5,"tool_schema_tokens":539,"system_tokens":412,"message_tokens":229,"messages":4,"est_prompt_tokens":1180,"prefix_reuse_tokens":1048,"usage":{"prompt_tokens":1180,"completion_tokens":16,"measured":false,"cached_tokens":1048,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["weather.current"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":5,"tool_schema_tokens":539,"system_tokens":412,"message_tokens":284,"messages":6,"est_prompt_tokens":1235,"prefix_reuse_tokens":1093,"usage":{"prompt_tokens":1235,"completion_tokens":39,"measured":false,"cached_tokens":1093,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":5,"tool_schema_tokens":539,"system_tokens":412,"message_tokens":354,"messages":8,"est_prompt_tokens":1305,"prefix_reuse_tokens":1139,"usage":{"prompt_tokens":1305,"completion_tokens":13,"measured":false,"cached_tokens":1139,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":711,"system_tokens":507,"message_tokens":371,"messages":5,"est_prompt_tokens":1589,"prefix_reuse_tokens":498,"usage":{"prompt_tokens":1589,"completion_tokens":119,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":408,"project":63,"capability_index":103,"working_state":51,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":52,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":711,"action_schemas":211,"loaded_actions":2,"total":678,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1389,"completion_tokens":72,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_0","action":"agents.delegate","input":{"to":"worker-a","objective":"Find the customer Ada Lovelace: her tier, and the total of all her orders."}}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_1","action":"agents.delegate","input":{"to":"worker-b","objective":"Get the current temperature in Paris and in Tokyo."}}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":318,"project":56,"capability_index":69,"working_state":71,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":72,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":539,"action_schemas":39,"loaded_actions":1,"total":586,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":322,"project":60,"capability_index":115,"working_state":77,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":78,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":652,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1125,"completion_tokens":16,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1282,"completion_tokens":19,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_2_0","action":"weather.current","input":{"city":"Paris"}}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_3_0","action":"crm.find_customer","input":{"name":"Ada Lovelace"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_3_0","action":"crm.find_customer","ok":true,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","invocation":"dd23028c-4739-42a1-88a0-3b105e4f1de9","duration_ms":0,"error":null,"context_tokens":40,"raw_tokens":13}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":322,"project":60,"capability_index":115,"working_state":77,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":78,"tool_rounds":40,"model_output":23,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":715,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1345,"completion_tokens":17,"measured":false,"cached_tokens":1197,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_4_0","action":"crm.orders","input":{"customer_id":"C-1042"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_4_0","action":"crm.orders","ok":true,"summary":"customer_id=C-1042, orders=[{\"id\":\"O-1\",\"amount\":120.5},{\"id\":\"O-2\",\"amount\":89.99},{\"id\":\"O-3\",\"amount\":310.0},{\"id\":\"O-4\",\"amount\":45.25}]","invocation":"209f2556-be8c-4d51-9d75-78a050711d5f","duration_ms":0,"error":null,"context_tokens":64,"raw_tokens":37}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":322,"project":60,"capability_index":115,"working_state":77,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":78,"tool_rounds":104,"model_output":44,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":800,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1430,"completion_tokens":20,"measured":false,"cached_tokens":1249,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_5_0","action":"calc.eval","input":{"expr":"120.5+89.99+310.0+45.25"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_5_0","action":"calc.eval","ok":true,"summary":"expr=120.5+89.99+310.0+45.25, value=565.74","invocation":"be75d4c8-2f45-45f9-b53c-8f18c2633577","duration_ms":0,"error":null,"context_tokens":39,"raw_tokens":13}}
+{"type":"event","turn":0,"event":{"type":"step","index":4}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":4,"role":"reason","instructions":322,"project":60,"capability_index":115,"working_state":77,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":78,"tool_rounds":143,"model_output":68,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":863,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1493,"completion_tokens":49,"measured":false,"cached_tokens":1324,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Ada Lovelace is gold; her orders total 565.74."}}
+{"type":"event","turn":0,"event":{"type":"step","index":5}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":5,"role":"reason","instructions":322,"project":60,"capability_index":115,"working_state":104,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":78,"tool_rounds":152,"model_output":121,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":952,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Ada "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Lovelace "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"is "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"gold; "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"her "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"orders "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"total "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"565.74. "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:dd23028c] "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:209f2556] "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:be75d4c8]"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1582,"completion_tokens":23,"measured":false,"cached_tokens":1376,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 3 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Ada Lovelace is gold; her orders total 565.74. [inv:dd23028c] [inv:209f2556] [inv:be75d4c8]","streamed":true}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_2_0","action":"weather.current","ok":true,"summary":"city=Paris, temp_c=14","invocation":"8d59b4db-c01d-4970-8828-c3247ed0b165","duration_ms":252,"error":null,"context_tokens":35,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":318,"project":56,"capability_index":69,"working_state":71,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":72,"tool_rounds":35,"model_output":20,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":539,"action_schemas":39,"loaded_actions":1,"total":641,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1180,"completion_tokens":16,"measured":false,"cached_tokens":1048,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_8_0","action":"weather.current","input":{"city":"Tokyo"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_8_0","action":"weather.current","ok":true,"summary":"city=Tokyo, temp_c=22","invocation":"958d9b03-3c25-4372-abf8-70b3f8df0ffe","duration_ms":252,"error":null,"context_tokens":35,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":318,"project":56,"capability_index":69,"working_state":71,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":72,"tool_rounds":70,"model_output":40,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":539,"action_schemas":39,"loaded_actions":1,"total":696,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1235,"completion_tokens":39,"measured":false,"cached_tokens":1093,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Paris 14°C, Tokyo 22°C"}}
+{"type":"event","turn":0,"event":{"type":"step","index":4}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":4,"role":"reason","instructions":318,"project":56,"capability_index":69,"working_state":89,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":72,"tool_rounds":79,"model_output":83,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":539,"action_schemas":39,"loaded_actions":1,"total":766,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Paris "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"14°C, "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Tokyo "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"22°C "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:8d59b4db] "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:958d9b03]"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1305,"completion_tokens":13,"measured":false,"cached_tokens":1139,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 2 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Paris 14°C, Tokyo 22°C [inv:8d59b4db] [inv:958d9b03]","streamed":true}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_0","action":"agents.delegate","ok":true,"summary":"worker-a done task t-02ea12ae: Ada Lovelace is gold; her orders total 565.74. [inv:dd23028c] [inv:209f2556] [inv:be75d4c8]","invocation":"e323ffad-210c-4f14-953b-75d4c9f0380a","duration_ms":10,"error":null,"context_tokens":67,"raw_tokens":50}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_1","action":"agents.delegate","ok":true,"summary":"worker-b done task t-7ce78e09: Paris 14°C, Tokyo 22°C [inv:8d59b4db] [inv:958d9b03]","invocation":"a5572dfe-a0d0-4d50-bbc7-a4bb55e35e27","duration_ms":520,"error":null,"context_tokens":57,"raw_tokens":41}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":408,"project":63,"capability_index":103,"working_state":51,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":52,"tool_rounds":124,"model_output":76,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":711,"action_schemas":211,"loaded_actions":2,"total":878,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Combined: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:e323ffad] "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"agents.delegate: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"worker-a "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"done "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"task "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"t-02ea12ae: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Ada "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Lovelace "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"is "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"gold; "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"her "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"orders "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"total "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"565.74. "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:dd23028c] "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:209f2556] "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:be75d4c8]\n "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"identifiers: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"t-02ea12ae\n "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"(get_evidence(\"inv:e323ffad\") "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"reads "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"exact "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"rows; "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"add "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"match "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"to "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"filter) "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"| "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:a5572dfe] "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"agents.delegate: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"worker-b "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"done "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"task "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"t-7ce78e09: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Paris "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"14°C, "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Tokyo "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"22°C "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:8d59b4db] "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:958d9b03]\n "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"identifiers: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"t-7ce78e09\n "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"(get_evidence(\"inv:a5572dfe\") "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"reads "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"exact "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"rows; "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"add "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"match "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"to "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"filter)"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1589,"completion_tokens":119,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 2 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Combined: [inv:e323ffad] agents.delegate: worker-a done task t-02ea12ae: Ada Lovelace is gold; her orders total 565.74. [inv:dd23028c] [inv:209f2556] [inv:be75d4c8]\n  identifiers: t-02ea12ae\n  (get_evidence(\"inv:e323ffad\") reads exact rows; add match to filter) | [inv:a5572dfe] agents.delegate: worker-b done task t-7ce78e09: Paris 14°C, Tokyo 22°C [inv:8d59b4db] [inv:958d9b03]\n  identifiers: t-7ce78e09\n  (get_evidence(\"inv:a5572dfe\") reads exact rows; add match to filter)","streamed":true}}

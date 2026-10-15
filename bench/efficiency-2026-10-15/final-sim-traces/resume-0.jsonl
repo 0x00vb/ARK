@@ -1,0 +1,50 @@
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":559,"message_tokens":121,"messages":2,"est_prompt_tokens":1310,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1310,"completion_tokens":19,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["crm.find_customer"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":559,"message_tokens":184,"messages":4,"est_prompt_tokens":1373,"prefix_reuse_tokens":1275,"usage":{"prompt_tokens":1373,"completion_tokens":36,"measured":false,"cached_tokens":1275,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":559,"message_tokens":249,"messages":6,"est_prompt_tokens":1438,"prefix_reuse_tokens":1327,"usage":{"prompt_tokens":1438,"completion_tokens":10,"measured":false,"cached_tokens":1327,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":559,"message_tokens":164,"messages":2,"est_prompt_tokens":1353,"prefix_reuse_tokens":1187,"usage":{"prompt_tokens":1353,"completion_tokens":19,"measured":false,"cached_tokens":1187,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["crm.find_customer"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":559,"message_tokens":227,"messages":4,"est_prompt_tokens":1416,"prefix_reuse_tokens":1312,"usage":{"prompt_tokens":1416,"completion_tokens":38,"measured":false,"cached_tokens":1312,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":630,"system_tokens":559,"message_tokens":293,"messages":6,"est_prompt_tokens":1482,"prefix_reuse_tokens":1365,"usage":{"prompt_tokens":1482,"completion_tokens":12,"measured":false,"cached_tokens":1365,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":50,"capability_index":273,"working_state":28,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":29,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":680,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1310,"completion_tokens":19,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_0","action":"crm.find_customer","input":{"name":"Ada Lovelace"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_0","action":"crm.find_customer","ok":true,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","invocation":"eef4d240-3824-4b25-8f31-094238d76fd0","duration_ms":0,"error":null,"context_tokens":40,"raw_tokens":13}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":299,"project":50,"capability_index":273,"working_state":28,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":29,"tool_rounds":40,"model_output":23,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":743,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1373,"completion_tokens":36,"measured":false,"cached_tokens":1275,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Her customer id is C-1042"}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":299,"project":50,"capability_index":273,"working_state":44,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":29,"tool_rounds":49,"model_output":63,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":808,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Her "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"customer "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"id "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"is "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"C-1042 "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:eef4d240]"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1438,"completion_tokens":10,"measured":false,"cached_tokens":1327,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 1 evidence item cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Her customer id is C-1042 [inv:eef4d240]","streamed":true}}
+{"type":"event","turn":1,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":1,"event":{"type":"step","index":1}}
+{"type":"event","turn":1,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":50,"capability_index":273,"working_state":34,"conversation":38,"workspace":0,"rules":0,"skills":0,"task":28,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":723,"budget":6000}}}
+{"type":"event","turn":1,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1353,"completion_tokens":19,"measured":false,"cached_tokens":1187,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":1,"event":{"type":"tool_call","id":"sim_4_0","action":"crm.find_customer","input":{"name":"Ada Lovelace"}}}
+{"type":"event","turn":1,"event":{"type":"tool_result","id":"sim_4_0","action":"crm.find_customer","ok":true,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","invocation":"62d0875c-5169-4bd2-8fa7-e9f994b7d661","duration_ms":0,"error":null,"context_tokens":40,"raw_tokens":13}}
+{"type":"event","turn":1,"event":{"type":"step","index":2}}
+{"type":"event","turn":1,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":299,"project":50,"capability_index":273,"working_state":34,"conversation":38,"workspace":0,"rules":0,"skills":0,"task":28,"tool_rounds":40,"model_output":23,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":786,"budget":6000}}}
+{"type":"event","turn":1,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1416,"completion_tokens":38,"measured":false,"cached_tokens":1312,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":1,"event":{"type":"state_update","kind":"finding","text":"Ada Lovelace is in the gold tier"}}
+{"type":"event","turn":1,"event":{"type":"step","index":3}}
+{"type":"event","turn":1,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":299,"project":50,"capability_index":273,"working_state":49,"conversation":38,"workspace":0,"rules":0,"skills":0,"task":28,"tool_rounds":49,"model_output":65,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":852,"budget":6000}}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"Ada "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"Lovelace "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"is "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"in "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"gold "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"tier "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"[inv:62d0875c]"}}
+{"type":"event","turn":1,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1482,"completion_tokens":12,"measured":false,"cached_tokens":1365,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":1,"event":{"type":"self_check","passed":true,"detail":"answered; 1 evidence item cited"}}
+{"type":"event","turn":1,"event":{"type":"answer","text":"Ada Lovelace is in the gold tier [inv:62d0875c]","streamed":true}}

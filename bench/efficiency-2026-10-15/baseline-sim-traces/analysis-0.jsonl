@@ -1,0 +1,37 @@
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":681,"system_tokens":561,"message_tokens":234,"messages":2,"est_prompt_tokens":1476,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1476,"completion_tokens":144,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["code.run"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":681,"system_tokens":561,"message_tokens":412,"messages":4,"est_prompt_tokens":1654,"prefix_reuse_tokens":1395,"usage":{"prompt_tokens":1654,"completion_tokens":54,"measured":false,"cached_tokens":1395,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":681,"system_tokens":561,"message_tokens":512,"messages":6,"est_prompt_tokens":1754,"prefix_reuse_tokens":1563,"usage":{"prompt_tokens":1754,"completion_tokens":25,"measured":false,"cached_tokens":1563,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":308,"working_state":75,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":76,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":681,"action_schemas":181,"loaded_actions":2,"total":795,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1476,"completion_tokens":144,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_0","action":"code.run","input":{"code":"import pandas as pd\nimport matplotlib\nmatplotlib.use(\"Agg\")\nimport matplotlib.pyplot as plt\ndf = pd.read_csv(\"sales.csv\")\ntotals = df.groupby(\"region\")[\"revenue\"].sum().sort_values(ascending=False)\ntotals.plot(kind=\"bar\", title=\"Total revenue by region\")\nplt.tight_layout()\nplt.savefig(\"chart.png\")\ntop, value = totals.index[0], int(totals.iloc[0])\nopen(\"report.md\", \"w\").write(f\"{top} had the highest total revenue, {value}. The chart compares the three regions.\\n\")\nprint(totals.to_string())"}}}
+{"type":"event","turn":0,"event":{"type":"approval_requested","request":{"action":"code.run","summary":"run a Python program in the project folder (pandas, matplotlib, openpyxl); files it writes are kept","risk":"mutate","input":{"code":"import pandas as pd\nimport matplotlib\nmatplotlib.use(\"Agg\")\nimport matplotlib.pyplot as plt\ndf = pd.read_csv(\"sales.csv\")\ntotals = df.groupby(\"region\")[\"revenue\"].sum().sort_values(ascending=False)\ntotals.plot(kind=\"bar\", title=\"Total revenue by region\")\nplt.tight_layout()\nplt.savefig(\"chart.png\")\ntop, value = totals.index[0], int(totals.iloc[0])\nopen(\"report.md\", \"w\").write(f\"{top} had the highest total revenue, {value}. The chart compares the three regions.\\n\")\nprint(totals.to_string())"},"class":"code.run","preview":"code.run(code=\"import pandas as pd⏎import matplotlib⏎matplotlib…\")"}}}
+{"type":"event","turn":0,"event":{"type":"approval_resolved","action":"code.run","class":"code.run","decision":"allow_once"}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_0","action":"code.run","ok":true,"summary":" — ok","invocation":"61a1be28-ac8b-4859-8156-65cab2930c12","duration_ms":0,"error":null,"context_tokens":30,"raw_tokens":31}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":308,"working_state":75,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":76,"tool_rounds":30,"model_output":148,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":681,"action_schemas":181,"loaded_actions":2,"total":973,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1654,"completion_tokens":54,"measured":false,"cached_tokens":1395,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"North had the highest total revenue, 4,300. The chart is in chart.png and the report in report.md."}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":286,"project":50,"capability_index":308,"working_state":108,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":76,"tool_rounds":39,"model_output":206,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":681,"action_schemas":181,"loaded_actions":2,"total":1073,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"North "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"had "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"highest "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"total "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"revenue, "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"4,300. "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"The "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"chart "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"is "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"in "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"chart.png "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"and "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"report "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"in "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"report.md."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1754,"completion_tokens":25,"measured":false,"cached_tokens":1563,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 1 evidence item cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"North had the highest total revenue, 4,300. The chart is in chart.png and the report in report.md.","streamed":true}}

@@ -1,0 +1,25 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":275,"working_state":39,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":40,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":628,"action_schemas":128,"loaded_actions":3,"total":691,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13242,"completion_tokens":46,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":21044,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_0","action":"mirror.primary","input":{"path":"release.txt"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_0","action":"mirror.primary","ok":false,"summary":"failed: invalid input for `mirror.primary`: connection refused (primary mirror is down)","invocation":"d225dd43-7868-4869-af53-58d2ba604ab7","duration_ms":3,"error":"invalid input for `mirror.primary`: connection refused (primary mirror is down)","context_tokens":52,"raw_tokens":1}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":275,"working_state":39,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":40,"tool_rounds":52,"model_output":22,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":628,"action_schemas":128,"loaded_actions":3,"total":765,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13379,"completion_tokens":36,"measured":true,"cached_tokens":13056,"cache_write_tokens":0},"elapsed_ms":2745,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_1_0","action":"mirror.backup","input":{"path":"release.txt"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_1_0","action":"mirror.backup","ok":true,"summary":"path=release.txt, version=4.2.1, notes=fixes and speedups","invocation":"288636b5-3ec6-400d-a147-c04bc5bc34c2","duration_ms":0,"error":null,"context_tokens":44,"raw_tokens":18}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":286,"project":50,"capability_index":275,"working_state":39,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":40,"tool_rounds":96,"model_output":44,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":628,"action_schemas":128,"loaded_actions":3,"total":831,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Version"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"4"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"2"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"1"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13514,"completion_tokens":30,"measured":true,"cached_tokens":13056,"cache_write_tokens":0},"elapsed_ms":2102,"first_token_ms":1845,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 2 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Version **4.2.1**.","streamed":true}}

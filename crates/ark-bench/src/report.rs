@@ -99,6 +99,10 @@ pub struct RunRecord {
     pub total_tokens: u64,
     /// False when any number is an estimate or simulated rather than provider-reported.
     pub tokens_measured: bool,
+    /// False when managed subscription sessions bypassed the direct provider recorder.
+    /// Usage/outcomes still come from runtime events; request/meta/prefix metrics are absent.
+    #[serde(default)]
+    pub request_metrics_complete: bool,
     pub cost_usd: f64,
     pub wall_ms: u64,
     pub turn_ms: Vec<u64>,

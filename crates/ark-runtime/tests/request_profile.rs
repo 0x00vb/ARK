@@ -193,3 +193,43 @@ async fn the_skills_catalog_is_counted_as_its_own_part() {
     assert!(parts.abs_diff(r.total) <= 4, "{parts} vs {}", r.total);
     assert!(r.task < r.skills, "the catalog is not counted as the task");
 }
+
+/// Permitted actions request approval through the host, rather than an inert reply.
+#[tokio::test]
+async fn requests_explain_how_to_reach_the_approval_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+    let project = engine.create_project("t", "").unwrap();
+    let model = Arc::new(MockProvider::new(
+        "m",
+        vec![Completion {
+            content: "Done.".into(),
+            tool_calls: vec![],
+            usage: Usage::measured(10, 5),
+        }],
+    ));
+    let provider: Arc<dyn Provider> = model.clone();
+    Harness::new(ModelRouter::single(provider))
+        .planner(false)
+        .critic(false)
+        .ask(
+            &engine,
+            &AgentProfile::builder().build(),
+            &project.id,
+            "hello",
+            |_| {},
+        )
+        .await
+        .unwrap();
+    let requests = model.recorded();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].system.contains(
+        "For an action you are allowed to propose, call it to request any required approval."
+    ));
+    assert!(requests[0]
+        .system
+        .contains("The host handles approval before execution."));
+    assert!(requests[0]
+        .system
+        .contains("Do not substitute a text-only permission request."));
+}

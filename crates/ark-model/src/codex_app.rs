@@ -23,6 +23,7 @@ pub(crate) struct CodexApp {
     next_id: u64,
     /// Threads this process has started or loaded.
     threads: std::collections::HashSet<String>,
+    host_config: Option<Value>,
 }
 
 /// One turn's outcome.
@@ -53,24 +54,9 @@ pub(crate) enum AppError {
 }
 
 impl CodexApp {
-    /// Start `codex app-server` and complete the handshake.
+    /// Ordinary sessions collect account usage before their first turn.
     pub(crate) async fn start(bin: &Path, version: &str) -> Result<Self, AppError> {
-        let mut cmd = crate::cli::command(bin);
-        cmd.args(["app-server", "-c", "sandbox_mode=\"read-only\""]);
-        let proc = LiveProcess::spawn(cmd)
-            .map_err(|e| AppError::Broken(format!("could not start: {e}")))?;
-        let mut app = CodexApp {
-            proc,
-            next_id: 0,
-            threads: Default::default(),
-        };
-        app.request(
-            "initialize",
-            json!({"clientInfo": {"name": "ark", "version": version}}),
-            SETUP_TIMEOUT,
-        )
-        .await?;
-        app.notify("initialized").await?;
+        let mut app = Self::start_catalog(bin, version).await?;
         // The account's usage limits, before any turn. A sign-in without them (an API key)
         // answers with an error, which changes nothing.
         if let Ok(r) = app
@@ -82,12 +68,53 @@ impl CodexApp {
         Ok(app)
     }
 
+    /// Start only the process and handshake. Catalog discovery needs no usage query.
+    pub(crate) async fn start_catalog(bin: &Path, version: &str) -> Result<Self, AppError> {
+        let mut cmd = crate::cli::command(bin);
+        cmd.args(["app-server", "-c", "sandbox_mode=\"read-only\""]);
+        crate::cli::host_codex_flags(&mut cmd, false);
+        let proc = LiveProcess::spawn(cmd)
+            .map_err(|e| AppError::Broken(format!("could not start: {e}")))?;
+        let mut app = CodexApp {
+            proc,
+            next_id: 0,
+            threads: Default::default(),
+            host_config: None,
+        };
+        app.request(
+            "initialize",
+            json!({"clientInfo": {"name": "ark", "version": version}}),
+            SETUP_TIMEOUT,
+        )
+        .await?;
+        app.notify("initialized").await?;
+        Ok(app)
+    }
+
     pub(crate) fn running(&mut self) -> bool {
         self.proc.running()
     }
 
     pub(crate) async fn stop(self) {
         self.proc.stop().await;
+    }
+
+    /// Catalog discovery stays independent of host-model isolation and its exec fallback.
+    pub(crate) async fn prepare_host(&mut self) -> Result<Value, AppError> {
+        if let Some(config) = &self.host_config {
+            return Ok(config.clone());
+        }
+        // Only names leave this response. Never log or persist its credential values.
+        let response = self
+            .request(
+                "config/read",
+                json!({"includeLayers": false}),
+                SETUP_TIMEOUT,
+            )
+            .await?;
+        let config = host_config(&response)?;
+        self.host_config = Some(config.clone());
+        Ok(config)
     }
 
     /// Models and effort levels available to this signed-in Codex account.
@@ -136,6 +163,7 @@ impl CodexApp {
         instructions: &str,
     ) -> Result<String, AppError> {
         let mut p = thread_settings(cwd, model);
+        p["config"] = self.prepare_host().await?;
         p["baseInstructions"] = json!(instructions);
         p["ephemeral"] = json!(false);
         let r = self.request("thread/start", p, SETUP_TIMEOUT).await?;
@@ -160,6 +188,7 @@ impl CodexApp {
         id: &str,
     ) -> Result<(), AppError> {
         let mut p = thread_settings(cwd, model);
+        p["config"] = self.prepare_host().await?;
         p["threadId"] = json!(id);
         self.request("thread/resume", p, SETUP_TIMEOUT).await?;
         self.threads.insert(id.to_string());
@@ -334,6 +363,40 @@ fn thread_settings(cwd: &Path, model: Option<&str>) -> Value {
     p
 }
 
+/// Disable tools that ARK neither offers nor executes through its own approval boundary.
+/// The RPC overlay splits keys on dots literally (quoted segments are not TOML here).
+fn host_config(response: &Value) -> Result<Value, AppError> {
+    let config = response
+        .get("config")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            AppError::Broken("config/read returned no configuration; use isolated exec".into())
+        })?;
+    let mut overrides = json!({
+        "features.shell_tool": false,
+        "features.apps": false,
+        "web_search": "disabled",
+    });
+    if let Some(servers) = config.get("mcp_servers").filter(|v| !v.is_null()) {
+        let servers = servers.as_object().ok_or_else(|| {
+            AppError::Broken("unsupported MCP configuration; use isolated exec".into())
+        })?;
+        for name in servers.keys() {
+            if name.is_empty()
+                || !name
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+            {
+                return Err(AppError::Broken(
+                    "unsupported MCP name in host-model configuration; use isolated exec".into(),
+                ));
+            }
+            overrides[format!("mcp_servers.{name}.enabled")] = json!(false);
+        }
+    }
+    Ok(overrides)
+}
+
 fn record_limits(limits: &Value) {
     if let Some(u) = crate::usage::from_codex(limits) {
         crate::usage::record(u);
@@ -359,6 +422,25 @@ fn error_text(e: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_model_configuration_keeps_credentials_and_provider_choices_out() {
+        let settings = host_config(&json!({"config": {
+            "model": "user-model", "model_provider": "custom",
+            "mcp_servers": {"notes-server": {"url": "https://example.test", "token": "secret"}}
+        }}))
+        .unwrap();
+        assert_eq!(settings["mcp_servers.notes-server.enabled"], false);
+        assert_eq!(settings["features.shell_tool"], false);
+        assert_eq!(settings["features.apps"], false);
+        assert_eq!(settings["web_search"], "disabled");
+        let text = settings.to_string();
+        for private in ["secret", "example.test", "user-model", "custom"] {
+            assert!(!text.contains(private));
+        }
+        assert!(host_config(&json!({})).is_err());
+        assert!(host_config(&json!({"config":{"mcp_servers":{"name.with.dot":{}}}})).is_err());
+    }
 
     #[test]
     fn usage_counts_cached_input_inside_input() {

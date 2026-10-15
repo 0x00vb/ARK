@@ -1,0 +1,332 @@
+diff --git a/crates/ark-model/src/cli.rs b/crates/ark-model/src/cli.rs
+index 22c1e24..8773118 100644
+--- a/crates/ark-model/src/cli.rs
++++ b/crates/ark-model/src/cli.rs
+@@ -558,6 +558,14 @@ impl CliModel {
+             Err(e) => return Some(Err(e)),
+         };
+         let model = (self.model != "default").then_some(self.model.as_str());
++        // No turn has been submitted. An unsupported config overlay must select the
++        // already-isolated exec path, not turn a valid model choice into a failed task.
++        if app.prepare_host().await.is_err() {
++            tracing::warn!("codex host-tool isolation unavailable; using isolated codex exec");
++            app.stop().await;
++            self.no_app.store(true, Ordering::Relaxed);
++            return None;
++        }
+         let thread = match mode {
+             Mode::Open(_) => app.start_thread(&dir, model, sys).await,
+             Mode::Resume(id) if app.has_thread(id) => Ok(id.to_string()),
+@@ -752,6 +760,7 @@ impl CliModel {
+                             .arg(&dir);
+                     }
+                 }
++                host_codex_flags(&mut c, search);
+                 c.arg("--output-schema").arg(&schema);
+                 if self.model != "default" {
+                     c.args(["-m", &self.model]);
+@@ -1512,6 +1521,19 @@ fn until(at: u64) -> Option<String> {
+     })
+ }
+ 
++/// Host-model calls run tools in ARK. This never configures an ACP worker or writes settings.
++pub(crate) fn host_codex_flags(cmd: &mut tokio::process::Command, search: bool) {
++    cmd.args([
++        "-c",
++        "features.shell_tool=false",
++        "-c",
++        "features.apps=false",
++    ]);
++    if !search {
++        cmd.args(["-c", "web_search=\"disabled\""]);
++    }
++}
++
+ fn io_err(e: std::io::Error) -> ProviderError {
+     ProviderError::Api {
+         provider: "cli".into(),
+@@ -2248,6 +2270,7 @@ while IFS= read -r line; do
+   case "$line" in
+     *'"method":"initialize"'*) echo "{\"id\":$id,\"result\":{}}" ;;
+     *'"method":"account/rateLimits/read"'*) echo "{\"id\":$id,\"result\":{}}" ;;
++    *'"method":"config/read"'*) echo "{\"id\":$id,\"result\":{\"config\":{\"mcp_servers\":{\"unused-server\":{\"command\":\"never-start\"}}}}}" ;;
+     *'"method":"model/list"'*)
+       case "$line" in
+         *'"cursor":"next"'*) echo "{\"id\":$id,\"result\":{\"data\":[{\"id\":\"gpt-5.6-luna\",\"model\":\"gpt-5.6-luna\",\"displayName\":\"GPT-5.6-Luna\",\"hidden\":false,\"defaultReasoningEffort\":\"low\",\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast\"}]}],\"nextCursor\":null}}" ;;
+@@ -2724,6 +2747,110 @@ done
+         );
+     }
+ 
++    #[tokio::test]
++    async fn host_tools_are_disabled_for_both_started_and_reloaded_threads() {
++        let (bin, log) = codex_app(
++            "host-isolation",
++            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
++        );
++        let mut app = crate::codex_app::CodexApp::start(&bin, "test")
++            .await
++            .unwrap();
++        app.start_thread(bin.parent().unwrap(), None, "host")
++            .await
++            .unwrap();
++        app.resume_thread(bin.parent().unwrap(), None, "other-thread")
++            .await
++            .unwrap();
++        app.stop().await;
++        let log = std::fs::read_to_string(log).unwrap();
++        for method in ["thread/start", "thread/resume"] {
++            let line = log
++                .lines()
++                .find(|l| l.contains(&format!("\"method\":\"{method}\"")))
++                .unwrap();
++            let sent: Value = serde_json::from_str(line).unwrap();
++            assert_eq!(
++                sent["params"]["config"]["mcp_servers.unused-server.enabled"],
++                false
++            );
++            assert_eq!(sent["params"]["config"]["features.shell_tool"], false);
++            assert_eq!(sent["params"]["config"]["features.apps"], false);
++            assert_eq!(sent["params"]["config"]["web_search"], "disabled");
++        }
++    }
++
++    #[test]
++    fn host_exec_flags_preserve_only_explicit_web_search() {
++        let mut normal = command(Path::new("codex"));
++        host_codex_flags(&mut normal, false);
++        let args: Vec<_> = normal.as_std().get_args().collect();
++        assert!(args.contains(&std::ffi::OsStr::new("features.shell_tool=false")));
++        assert!(args.contains(&std::ffi::OsStr::new("features.apps=false")));
++        assert!(args.contains(&std::ffi::OsStr::new("web_search=\"disabled\"")));
++        let mut search = command(Path::new("codex"));
++        host_codex_flags(&mut search, true);
++        assert!(!search
++            .as_std()
++            .get_args()
++            .any(|v| v == "web_search=\"disabled\""));
++    }
++
++    #[tokio::test]
++    async fn model_discovery_does_not_require_a_host_compatible_mcp_name() {
++        let (bin, log) = codex_app(
++            "catalog-with-dotted-server",
++            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
++        );
++        let script = std::fs::read_to_string(&bin)
++            .unwrap()
++            .replace("unused-server", "name.with.dot");
++        std::fs::write(&bin, script).unwrap();
++        let mut app = crate::codex_app::CodexApp::start(&bin, "test")
++            .await
++            .unwrap();
++        let models = app.models().await.unwrap();
++        remember_codex_models(&models);
++        assert!(CliModel::try_new(Cli::Codex, "gpt-5.6-terra@medium").is_ok());
++        assert!(app
++            .start_thread(bin.parent().unwrap(), None, "host")
++            .await
++            .is_err());
++        app.stop().await;
++        let log = std::fs::read_to_string(log).unwrap();
++        assert!(log.find("model/list").unwrap() < log.find("config/read").unwrap());
++        assert!(!log.contains("\"method\":\"thread/start\""));
++    }
++
++    #[tokio::test]
++    async fn incompatible_mcp_names_fall_back_before_submitting_a_vendor_turn() {
++        let (bin, log) = codex_app(
++            "isolated-exec-fallback",
++            r#"{"action":"reply","text":"unused","tool_calls":[]}"#,
++        );
++        let answer = json!({"action":"reply","text":"fallback answer","tool_calls":[]}).to_string();
++        let events = format!(
++            "{}\n{}\n{}",
++            json!({"type":"thread.started","thread_id":"fallback-thread"}),
++            json!({"type":"item.completed","item":{"type":"agent_message","text":answer}}),
++            json!({"type":"turn.completed","usage":{"input_tokens":50,"output_tokens":4}})
++        );
++        let script = std::fs::read_to_string(&bin)
++            .unwrap()
++            .replace("unused-server", "name.with.dot");
++        let branch = format!("#!/bin/sh\nif [ \"$1\" != app-server ]; then\ncat > /dev/null\ncat <<'ARK_FAKE_REPLY'\n{events}\nARK_FAKE_REPLY\nexit 0\nfi\n");
++        std::fs::write(&bin, script.replacen("#!/bin/sh\n", &branch, 1)).unwrap();
++        let model = CliModel::new(Cli::Codex, "").with_program(&bin);
++        let (_, completion) = SessionBackend::open(&model, "host", &[], &[Message::user("hello")])
++            .await
++            .unwrap();
++        assert_eq!(completion.content, "fallback answer");
++        assert!(model.no_app.load(Ordering::Relaxed));
++        let log = std::fs::read_to_string(log).unwrap();
++        assert!(!log.contains("\"method\":\"thread/start\""));
++        assert!(!log.contains("\"method\":\"turn/start\""));
++    }
++
+     /// A fake `codex exec` that keeps each reply schema it is given (`schema-<n>.json` next to
+     /// it) and answers with `reply`. With `refuse`, a typed schema is refused as OpenAI refuses
+     /// one it cannot check.
+diff --git a/crates/ark-model/src/codex_app.rs b/crates/ark-model/src/codex_app.rs
+index 3484f10..6027aab 100644
+--- a/crates/ark-model/src/codex_app.rs
++++ b/crates/ark-model/src/codex_app.rs
+@@ -23,6 +23,7 @@ pub(crate) struct CodexApp {
+     next_id: u64,
+     /// Threads this process has started or loaded.
+     threads: std::collections::HashSet<String>,
++    host_config: Option<Value>,
+ }
+ 
+ /// One turn's outcome.
+@@ -57,12 +58,14 @@ impl CodexApp {
+     pub(crate) async fn start(bin: &Path, version: &str) -> Result<Self, AppError> {
+         let mut cmd = crate::cli::command(bin);
+         cmd.args(["app-server", "-c", "sandbox_mode=\"read-only\""]);
++        crate::cli::host_codex_flags(&mut cmd, false);
+         let proc = LiveProcess::spawn(cmd)
+             .map_err(|e| AppError::Broken(format!("could not start: {e}")))?;
+         let mut app = CodexApp {
+             proc,
+             next_id: 0,
+             threads: Default::default(),
++            host_config: None,
+         };
+         app.request(
+             "initialize",
+@@ -90,6 +93,24 @@ impl CodexApp {
+         self.proc.stop().await;
+     }
+ 
++    /// Catalog discovery stays independent of host-model isolation and its exec fallback.
++    pub(crate) async fn prepare_host(&mut self) -> Result<Value, AppError> {
++        if let Some(config) = &self.host_config {
++            return Ok(config.clone());
++        }
++        // Only names leave this response. Never log or persist its credential values.
++        let response = self
++            .request(
++                "config/read",
++                json!({"includeLayers": false}),
++                SETUP_TIMEOUT,
++            )
++            .await?;
++        let config = host_config(&response)?;
++        self.host_config = Some(config.clone());
++        Ok(config)
++    }
++
+     /// Models and effort levels available to this signed-in Codex account.
+     pub(crate) async fn models(&mut self) -> Result<Vec<ModelOption>, AppError> {
+         let mut out = Vec::new();
+@@ -136,6 +157,7 @@ impl CodexApp {
+         instructions: &str,
+     ) -> Result<String, AppError> {
+         let mut p = thread_settings(cwd, model);
++        p["config"] = self.prepare_host().await?;
+         p["baseInstructions"] = json!(instructions);
+         p["ephemeral"] = json!(false);
+         let r = self.request("thread/start", p, SETUP_TIMEOUT).await?;
+@@ -160,6 +182,7 @@ impl CodexApp {
+         id: &str,
+     ) -> Result<(), AppError> {
+         let mut p = thread_settings(cwd, model);
++        p["config"] = self.prepare_host().await?;
+         p["threadId"] = json!(id);
+         self.request("thread/resume", p, SETUP_TIMEOUT).await?;
+         self.threads.insert(id.to_string());
+@@ -334,6 +357,40 @@ fn thread_settings(cwd: &Path, model: Option<&str>) -> Value {
+     p
+ }
+ 
++/// Disable tools that ARK neither offers nor executes through its own approval boundary.
++/// The RPC overlay splits keys on dots literally (quoted segments are not TOML here).
++fn host_config(response: &Value) -> Result<Value, AppError> {
++    let config = response
++        .get("config")
++        .and_then(Value::as_object)
++        .ok_or_else(|| {
++            AppError::Broken("config/read returned no configuration; use isolated exec".into())
++        })?;
++    let mut overrides = json!({
++        "features.shell_tool": false,
++        "features.apps": false,
++        "web_search": "disabled",
++    });
++    if let Some(servers) = config.get("mcp_servers").filter(|v| !v.is_null()) {
++        let servers = servers.as_object().ok_or_else(|| {
++            AppError::Broken("unsupported MCP configuration; use isolated exec".into())
++        })?;
++        for name in servers.keys() {
++            if name.is_empty()
++                || !name
++                    .bytes()
++                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
++            {
++                return Err(AppError::Broken(
++                    "unsupported MCP name in host-model configuration; use isolated exec".into(),
++                ));
++            }
++            overrides[format!("mcp_servers.{name}.enabled")] = json!(false);
++        }
++    }
++    Ok(overrides)
++}
++
+ fn record_limits(limits: &Value) {
+     if let Some(u) = crate::usage::from_codex(limits) {
+         crate::usage::record(u);
+@@ -360,6 +417,25 @@ fn error_text(e: &Value) -> String {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn host_model_configuration_keeps_credentials_and_provider_choices_out() {
++        let settings = host_config(&json!({"config": {
++            "model": "user-model", "model_provider": "custom",
++            "mcp_servers": {"notes-server": {"url": "https://example.test", "token": "secret"}}
++        }}))
++        .unwrap();
++        assert_eq!(settings["mcp_servers.notes-server.enabled"], false);
++        assert_eq!(settings["features.shell_tool"], false);
++        assert_eq!(settings["features.apps"], false);
++        assert_eq!(settings["web_search"], "disabled");
++        let text = settings.to_string();
++        for private in ["secret", "example.test", "user-model", "custom"] {
++            assert!(!text.contains(private));
++        }
++        assert!(host_config(&json!({})).is_err());
++        assert!(host_config(&json!({"config":{"mcp_servers":{"name.with.dot":{}}}})).is_err());
++    }
++
+     #[test]
+     fn usage_counts_cached_input_inside_input() {
+         let u = turn_usage(
+diff --git a/crates/ark-runtime/src/harness.rs b/crates/ark-runtime/src/harness.rs
+index d6705ae..8864246 100644
+--- a/crates/ark-runtime/src/harness.rs
++++ b/crates/ark-runtime/src/harness.rs
+@@ -2411,7 +2411,7 @@ impl Harness {
+             .ok_or_else(|| AgentError::ProjectNotFound(project.to_string()))?;
+         let artifacts = engine.store.list_artifacts(project)?;
+         let rules = format!(
+-            "{}\n\nActions that change state need explicit human approval; observation and analysis are free — reason from what tools return.",
++            "{}\n\nActions that change state need explicit human approval; observation and analysis are free. Reason from what tools return. For an action you are allowed to propose, call it to request any required approval. The host handles approval before execution. Do not substitute a text-only permission request.",
+             profile.prompts.instructions
+         );
+         let index = crate::capmap::capability_index(
+diff --git a/crates/ark-runtime/src/profile.rs b/crates/ark-runtime/src/profile.rs
+index a9523e8..261d542 100644
+--- a/crates/ark-runtime/src/profile.rs
++++ b/crates/ark-runtime/src/profile.rs
+@@ -188,9 +188,10 @@ the task needs; the capability index shows which are available and the actions t
+ each. Load an action's schema before calling it. A few common actions are already loaded.\n\
+ - Ground every claim in a tool result. Do not invent a fact — if you need one, call a tool \
+ to get it.\n\
+-- Separate what you have established from what you believe. Use record_state to add a \
+-finding (cite the evidence), state a hypothesis, or note the next step. The state persists \
+-across turns — build on it rather than repeating work.\n\
++- Separate what you have established from what you believe. Use record_state for findings, \
++decisions or next steps that ongoing or later work needs, and cite the evidence. Build on \
++saved state. Do not add a separate state update solely to restate a result when you can \
++finish the task.\n\
+ - Tool results are compact summaries with an [inv:ID] reference. To see exact rows, call \
+ get_evidence(invocation, path). Do not re-run a tool you already ran.\n\
+ - When evidence is missing, run a small experiment and read its result as evidence.\n\

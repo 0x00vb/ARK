@@ -1,0 +1,69 @@
+{"type":"request","request":{"model":"sim","tools":9,"tool_schema_tokens":1625,"system_tokens":553,"message_tokens":289,"messages":2,"est_prompt_tokens":2467,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":2467,"completion_tokens":17,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["files.read"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":9,"tool_schema_tokens":1625,"system_tokens":553,"message_tokens":409,"messages":4,"est_prompt_tokens":2587,"prefix_reuse_tokens":2414,"usage":{"prompt_tokens":2587,"completion_tokens":32,"measured":false,"cached_tokens":2414,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":9,"tool_schema_tokens":1625,"system_tokens":553,"message_tokens":505,"messages":6,"est_prompt_tokens":2683,"prefix_reuse_tokens":2523,"usage":{"prompt_tokens":2683,"completion_tokens":52,"measured":false,"cached_tokens":2523,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["files.edit"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":9,"tool_schema_tokens":1625,"system_tokens":553,"message_tokens":649,"messages":8,"est_prompt_tokens":2827,"prefix_reuse_tokens":2615,"usage":{"prompt_tokens":2827,"completion_tokens":56,"measured":false,"cached_tokens":2615,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":9,"tool_schema_tokens":1625,"system_tokens":553,"message_tokens":753,"messages":10,"est_prompt_tokens":2931,"prefix_reuse_tokens":2749,"usage":{"prompt_tokens":2931,"completion_tokens":23,"measured":false,"cached_tokens":2749,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":411,"working_state":47,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":48,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1625,"action_schemas":1125,"loaded_actions":5,"total":842,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2467,"completion_tokens":17,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_0","action":"files.read","input":{"path":"sales.xlsx"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_0","action":"files.read","ok":true,"summary":"sales.xlsx: spreadsheet, 2 sheets: Sales (A1:C4), Notes (A1:A1)\n\nSales!A1:C4\n  | A | B | C\n1 | Month | Units | Price\n2 | January | 120 | 10\n3 | February | 135 | 10\n4 | March | 150 | 12\n\nNotes!A1:A1\n  | A\n1 | Prices from the Q1 list\nversion 96c08ca523b85a71","invocation":"0417c555-fce7-43c6-8c75-4a0cba4ec813","duration_ms":0,"error":null,"context_tokens":99,"raw_tokens":83}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":411,"working_state":47,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":48,"tool_rounds":99,"model_output":21,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1625,"action_schemas":1125,"loaded_actions":5,"total":962,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"sales.xlsx "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"has "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Month, "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Units "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"and "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Price "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"for "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"three "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"months.\n\nI "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"will "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"now "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"call "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"files.edit "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"to "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"add "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Revenue "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"column "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"and "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Total "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"row."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2587,"completion_tokens":32,"measured":false,"cached_tokens":2414,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":286,"project":50,"capability_index":411,"working_state":47,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":48,"tool_rounds":159,"model_output":57,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1625,"action_schemas":1125,"loaded_actions":5,"total":1058,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2683,"completion_tokens":52,"measured":false,"cached_tokens":2523,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_3_0","action":"files.edit","input":{"path":"sales.xlsx","edits":[{"cell":"D1","rows":[["Revenue"],["=B2*C2"],["=B3*C3"],["=B4*C4"]]},{"cell":"A5","rows":[["Total","=SUM(B2:B4)","","=SUM(D2:D4)"]]}]}}}
+{"type":"event","turn":0,"event":{"type":"approval_requested","request":{"action":"files.edit","summary":"change part of a file and keep the rest (its look, formulas, other sheets): set cells or add a sheet in a spreadsheet (.xlsx, .csv), replace or insert blocks in a document (.docx), find and replace text in any file","risk":"mutate","input":{"path":"sales.xlsx","edits":[{"cell":"D1","rows":[["Revenue"],["=B2*C2"],["=B3*C3"],["=B4*C4"]]},{"cell":"A5","rows":[["Total","=SUM(B2:B4)","","=SUM(D2:D4)"]]}]},"class":"files.edit","preview":"files.edit(path=\"sales.xlsx\", edits=[{\"cell\":\"D1\",\"rows\":[[\"Revenue\"],[\"=B2*C2\"],[\"=…)"}}}
+{"type":"event","turn":0,"event":{"type":"approval_resolved","action":"files.edit","class":"files.edit","decision":"allow_once"}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_3_0","action":"files.edit","ok":true,"summary":"saved sales.xlsx: 4 cells from D1; 4 cells from A5. Now Sales!D2 = 1200, Sales!D3 = 1350, Sales!D4 = 1800, Sales!B5 = 405, Sales!D5 = 4350 (version 234e49470a7cd63b)","invocation":"9641ec88-b30b-4863-b095-be7d07feb539","duration_ms":13,"error":null,"context_tokens":88,"raw_tokens":54,"files":["sales.xlsx"],"before":[{"path":"sales.xlsx","artifact":"96c08ca523b85a71b5ed90074165a2f31e76b6dcbfba00c4a6bcc274bd604aeb"}]}}
+{"type":"event","turn":0,"event":{"type":"step","index":4}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":4,"role":"reason","instructions":286,"project":50,"capability_index":411,"working_state":47,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":48,"tool_rounds":247,"model_output":113,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1625,"action_schemas":1125,"loaded_actions":5,"total":1202,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2827,"completion_tokens":56,"measured":false,"cached_tokens":2615,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Added a Revenue column (D) and a Total row (row 5) to sales.xlsx. Total revenue is 4,350."}}
+{"type":"event","turn":0,"event":{"type":"step","index":5}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":5,"role":"reason","instructions":286,"project":50,"capability_index":411,"working_state":82,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":48,"tool_rounds":256,"model_output":173,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1625,"action_schemas":1125,"loaded_actions":5,"total":1306,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Added "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"a "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Revenue "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"column "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"(D) "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"and "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"a "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Total "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"row "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"(row "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"5) "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"to "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"sales.xlsx. "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Total "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"revenue "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"is "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"4,350."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2931,"completion_tokens":23,"measured":false,"cached_tokens":2749,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 2 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Added a Revenue column (D) and a Total row (row 5) to sales.xlsx. Total revenue is 4,350.","streamed":true}}

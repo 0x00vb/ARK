@@ -1,0 +1,4448 @@
+{
+  "schema_version": 1,
+  "baseline": "v0.14-dev",
+  "candidate": "final-sim",
+  "mode": "simulated",
+  "totals": [
+    {
+      "metric": "success_rate",
+      "before": 1.0,
+      "after": 1.0,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    },
+    {
+      "metric": "cost_per_success_usd",
+      "before": 0.08171320454545455,
+      "after": 0.08184930454545453,
+      "delta": 0.00013609999999997235,
+      "pct": 0.1665581478012701,
+      "verdict": "same"
+    },
+    {
+      "metric": "cost_usd",
+      "before": 0.08171320454545455,
+      "after": 0.08184930454545453,
+      "delta": 0.00013609999999997235,
+      "pct": 0.1665581478012701,
+      "verdict": "same"
+    },
+    {
+      "metric": "model_calls",
+      "before": 72.45454545454545,
+      "after": 72.45454545454545,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    },
+    {
+      "metric": "input_tokens",
+      "before": 118008.13636363635,
+      "after": 118946.36363636365,
+      "delta": 938.2272727272939,
+      "pct": 0.795053037560217,
+      "verdict": "worse"
+    },
+    {
+      "metric": "uncached_input_tokens",
+      "before": 19927.68181818182,
+      "after": 19905.409090909092,
+      "delta": -22.272727272727934,
+      "pct": -0.1117677784899522,
+      "verdict": "same"
+    },
+    {
+      "metric": "cached_input_tokens",
+      "before": 98080.45454545454,
+      "after": 99040.95454545454,
+      "delta": 960.5,
+      "pct": 0.9792980716202375,
+      "verdict": "better"
+    },
+    {
+      "metric": "output_tokens",
+      "before": 1553.3181818181818,
+      "after": 1553.3181818181818,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    },
+    {
+      "metric": "total_tokens",
+      "before": 119561.45454545454,
+      "after": 120499.68181818182,
+      "delta": 938.2272727272793,
+      "pct": 0.7847238696569944,
+      "verdict": "worse"
+    },
+    {
+      "metric": "tool_calls",
+      "before": 24.59090909090909,
+      "after": 24.59090909090909,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    },
+    {
+      "metric": "tool_failed",
+      "before": 0.09090909090909093,
+      "after": 0.09090909090909093,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    },
+    {
+      "metric": "deduplicated",
+      "before": 0.09090909090909093,
+      "after": 0.09090909090909093,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    },
+    {
+      "metric": "repeated_executions",
+      "before": 0.09090909090909093,
+      "after": 0.09090909090909093,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    },
+    {
+      "metric": "provider_retries",
+      "before": 0.0,
+      "after": 0.0,
+      "delta": 0.0,
+      "pct": null,
+      "verdict": "same"
+    },
+    {
+      "metric": "steps",
+      "before": 72.36363636363636,
+      "after": 72.36363636363636,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    },
+    {
+      "metric": "peak_context_tokens",
+      "before": 6654.0,
+      "after": 6657.0,
+      "delta": 3.0,
+      "pct": 0.045085662759242556,
+      "verdict": "same"
+    },
+    {
+      "metric": "mean_context_tokens",
+      "before": 1715.6818181818182,
+      "after": 1746.7727272727273,
+      "delta": 31.09090909090901,
+      "pct": 1.8121605510663614,
+      "verdict": "worse"
+    },
+    {
+      "metric": "tool_schema_tokens",
+      "before": 40925.63636363636,
+      "after": 40875.681818181816,
+      "delta": -49.95454545454413,
+      "pct": -0.1220617439169015,
+      "verdict": "same"
+    },
+    {
+      "metric": "prefix_reuse_tokens",
+      "before": 98243.0,
+      "after": 99204.09090909093,
+      "delta": 961.0909090909263,
+      "pct": 0.9782792759697142,
+      "verdict": "better"
+    },
+    {
+      "metric": "median_turn_ms",
+      "before": 1.0,
+      "after": 9.0,
+      "delta": 8.0,
+      "pct": 800.0,
+      "verdict": "worse"
+    },
+    {
+      "metric": "p95_turn_ms",
+      "before": 2.0,
+      "after": 22.0,
+      "delta": 20.0,
+      "pct": 1000.0,
+      "verdict": "worse"
+    },
+    {
+      "metric": "median_first_token_ms",
+      "before": 0.0,
+      "after": 0.0,
+      "delta": 0.0,
+      "pct": null,
+      "verdict": "same"
+    },
+    {
+      "metric": "stall_stops",
+      "before": 0.045454545454545456,
+      "after": 0.045454545454545456,
+      "delta": 0.0,
+      "pct": 0.0,
+      "verdict": "same"
+    }
+  ],
+  "workloads": [
+    {
+      "name": "simple",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.002927,
+          "after": 0.0029595,
+          "delta": 0.00003249999999999998,
+          "pct": 1.110351896139391,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.002927,
+          "after": 0.0029595,
+          "delta": 0.00003249999999999998,
+          "pct": 1.110351896139391,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 1162.0,
+          "after": 1175.0,
+          "delta": 13.0,
+          "pct": 1.1187607573149743,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1162.0,
+          "after": 1175.0,
+          "delta": 13.0,
+          "pct": 1.1187607573149743,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 1165.0,
+          "after": 1178.0,
+          "delta": 13.0,
+          "pct": 1.1158798283261802,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1162.0,
+          "after": 1175.0,
+          "delta": 13.0,
+          "pct": 1.1187607573149743,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1162.0,
+          "after": 1175.0,
+          "delta": 13.0,
+          "pct": 1.1187607573149743,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 550.0,
+          "after": 550.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "tool-lookup",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0048538999999999995,
+          "after": 0.0048916,
+          "delta": 0.000037700000000000754,
+          "pct": 0.7766950287397919,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0048538999999999995,
+          "after": 0.0048916,
+          "delta": 0.000037700000000000754,
+          "pct": 0.7766950287397919,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 4049.0,
+          "after": 4088.0,
+          "delta": 39.0,
+          "pct": 0.9632007903185972,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1492.0,
+          "after": 1505.0,
+          "delta": 13.0,
+          "pct": 0.871313672922252,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 2557.0,
+          "after": 2583.0,
+          "delta": 26.0,
+          "pct": 1.0168165819319515,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 66.0,
+          "after": 66.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 4115.0,
+          "after": 4154.0,
+          "delta": 39.0,
+          "pct": 0.9477521263669502,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1413.0,
+          "after": 1426.0,
+          "delta": 13.0,
+          "pct": 0.9200283085633405,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1349.0,
+          "after": 1362.0,
+          "delta": 13.0,
+          "pct": 0.9636767976278725,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 1893.0,
+          "after": 1893.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 2557.0,
+          "after": 2583.0,
+          "delta": 26.0,
+          "pct": 1.0168165819319515,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "multi-step",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.006835600000000001,
+          "after": 0.0068762,
+          "delta": 0.000040599999999999144,
+          "pct": 0.5939493241266186,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.006835600000000001,
+          "after": 0.0068762,
+          "delta": 0.000040599999999999144,
+          "pct": 0.5939493241266186,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 5.0,
+          "after": 5.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 7291.0,
+          "after": 7356.0,
+          "delta": 65.0,
+          "pct": 0.8915100809216844,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1853.0,
+          "after": 1865.0,
+          "delta": 12.0,
+          "pct": 0.6475984889368591,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 5438.0,
+          "after": 5491.0,
+          "delta": 53.0,
+          "pct": 0.9746230231702833,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 122.0,
+          "after": 122.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 7413.0,
+          "after": 7478.0,
+          "delta": 65.0,
+          "pct": 0.8768379873195737,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 5.0,
+          "after": 5.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1609.0,
+          "after": 1622.0,
+          "delta": 13.0,
+          "pct": 0.8079552517091362,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1458.0,
+          "after": 1471.0,
+          "delta": 13.0,
+          "pct": 0.8916323731138546,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 3150.0,
+          "after": 3150.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 5438.0,
+          "after": 5491.0,
+          "delta": 53.0,
+          "pct": 0.9746230231702833,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 2.0,
+          "after": 3.0,
+          "delta": 1.0,
+          "pct": 50.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 2.0,
+          "after": 3.0,
+          "delta": 1.0,
+          "pct": 50.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "large-output",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0055623999999999995,
+          "after": 0.0055981,
+          "delta": 0.00003570000000000049,
+          "pct": 0.6418092909535541,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0055623999999999995,
+          "after": 0.0055981,
+          "delta": 0.00003570000000000049,
+          "pct": 0.6418092909535541,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 5339.0,
+          "after": 5391.0,
+          "delta": 52.0,
+          "pct": 0.9739651620153587,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1562.0,
+          "after": 1573.0,
+          "delta": 11.0,
+          "pct": 0.7042253521126761,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 3777.0,
+          "after": 3818.0,
+          "delta": 41.0,
+          "pct": 1.0855176065660577,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 96.0,
+          "after": 96.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 5435.0,
+          "after": 5487.0,
+          "delta": 52.0,
+          "pct": 0.9567617295308188,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1439.0,
+          "after": 1452.0,
+          "delta": 13.0,
+          "pct": 0.9034051424600417,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1334.0,
+          "after": 1347.0,
+          "delta": 13.0,
+          "pct": 0.9745127436281859,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 2348.0,
+          "after": 2348.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 3777.0,
+          "after": 3818.0,
+          "delta": 41.0,
+          "pct": 1.0855176065660577,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "long-session",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 1.6046838,
+          "after": 1.6066448999999998,
+          "delta": 0.001961099999999716,
+          "pct": 0.12221099259553288,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 1.6046838,
+          "after": 1.6066448999999998,
+          "delta": 0.001961099999999716,
+          "pct": 0.12221099259553288,
+          "verdict": "same"
+        },
+        {
+          "metric": "model_calls",
+          "before": 1500.0,
+          "after": 1500.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 2430173.0,
+          "after": 2449673.0,
+          "delta": 19500.0,
+          "pct": 0.8024120093507746,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 381684.0,
+          "after": 380841.0,
+          "delta": -843.0,
+          "pct": -0.2208633319709498,
+          "verdict": "same"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 2048489.0,
+          "after": 2068832.0,
+          "delta": 20343.0,
+          "pct": 0.9930734311973363,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 30978.0,
+          "after": 30978.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 2461151.0,
+          "after": 2480651.0,
+          "delta": 19500.0,
+          "pct": 0.7923122148945758,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 500.0,
+          "after": 500.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 1500.0,
+          "after": 1500.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1676.0,
+          "after": 1689.0,
+          "delta": 13.0,
+          "pct": 0.7756563245823389,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1620.0,
+          "after": 1633.0,
+          "delta": 13.0,
+          "pct": 0.8024691358024691,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 825000.0,
+          "after": 825000.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 2048489.0,
+          "after": 2068832.0,
+          "delta": 20343.0,
+          "pct": 0.9930734311973363,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 1.0,
+          "after": 9.0,
+          "delta": 8.0,
+          "pct": 800.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 2.0,
+          "after": 21.0,
+          "delta": 19.0,
+          "pct": 950.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "failure-recovery",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0057158999999999995,
+          "after": 0.005753899999999999,
+          "delta": 0.00003799999999999984,
+          "pct": 0.6648121905561651,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0057158999999999995,
+          "after": 0.005753899999999999,
+          "delta": 0.00003799999999999984,
+          "pct": 0.6648121905561651,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 5712.0,
+          "after": 5764.0,
+          "delta": 52.0,
+          "pct": 0.9103641456582634,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1705.0,
+          "after": 1717.0,
+          "delta": 12.0,
+          "pct": 0.7038123167155426,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 4007.0,
+          "after": 4047.0,
+          "delta": 40.0,
+          "pct": 0.9982530571499875,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 73.0,
+          "after": 73.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 5785.0,
+          "after": 5837.0,
+          "delta": 52.0,
+          "pct": 0.8988764044943821,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1533.0,
+          "after": 1546.0,
+          "delta": 13.0,
+          "pct": 0.8480104370515329,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1428.0,
+          "after": 1441.0,
+          "delta": 13.0,
+          "pct": 0.9103641456582634,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 2512.0,
+          "after": 2512.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 4007.0,
+          "after": 4047.0,
+          "delta": 40.0,
+          "pct": 0.9982530571499875,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 2.0,
+          "after": 6.0,
+          "delta": 4.0,
+          "pct": 200.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 2.0,
+          "after": 6.0,
+          "delta": 4.0,
+          "pct": 200.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "duplicate",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.005443,
+          "after": 0.0054786999999999995,
+          "delta": 0.00003569999999999962,
+          "pct": 0.6558882968950877,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.005443,
+          "after": 0.0054786999999999995,
+          "delta": 0.00003569999999999962,
+          "pct": 0.6558882968950877,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 5517.0,
+          "after": 5569.0,
+          "delta": 52.0,
+          "pct": 0.9425412361790828,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1592.0,
+          "after": 1603.0,
+          "delta": 11.0,
+          "pct": 0.6909547738693468,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 3925.0,
+          "after": 3966.0,
+          "delta": 41.0,
+          "pct": 1.0445859872611465,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 73.0,
+          "after": 73.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 5590.0,
+          "after": 5642.0,
+          "delta": 52.0,
+          "pct": 0.9302325581395349,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1460.0,
+          "after": 1473.0,
+          "delta": 13.0,
+          "pct": 0.8904109589041096,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1379.0,
+          "after": 1392.0,
+          "delta": 13.0,
+          "pct": 0.9427121102248005,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 2520.0,
+          "after": 2520.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 3925.0,
+          "after": 3966.0,
+          "delta": 41.0,
+          "pct": 1.0445859872611465,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 1.0,
+          "after": 13.0,
+          "delta": 12.0,
+          "pct": 1200.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 1.0,
+          "after": 13.0,
+          "delta": 12.0,
+          "pct": 1200.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "runaway",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0115604,
+          "after": 0.0116269,
+          "delta": 0.00006650000000000059,
+          "pct": 0.5752396110861266,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0115604,
+          "after": 0.0116269,
+          "delta": 0.00006650000000000059,
+          "pct": 0.5752396110861266,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 7.0,
+          "after": 7.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 10955.0,
+          "after": 11046.0,
+          "delta": 91.0,
+          "pct": 0.8306709265175719,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 3603.0,
+          "after": 3624.0,
+          "delta": 21.0,
+          "pct": 0.5828476269775187,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 7352.0,
+          "after": 7422.0,
+          "delta": 70.0,
+          "pct": 0.9521218715995647,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 120.0,
+          "after": 120.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 11075.0,
+          "after": 11166.0,
+          "delta": 91.0,
+          "pct": 0.8216704288939052,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 6.0,
+          "after": 6.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1900.0,
+          "after": 1913.0,
+          "delta": 13.0,
+          "pct": 0.6842105263157895,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1565.0,
+          "after": 1578.0,
+          "delta": 13.0,
+          "pct": 0.8306709265175719,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 3924.0,
+          "after": 3924.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 7352.0,
+          "after": 7422.0,
+          "delta": 70.0,
+          "pct": 0.9521218715995647,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 1.0,
+          "after": 10.0,
+          "delta": 9.0,
+          "pct": 900.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 1.0,
+          "after": 10.0,
+          "delta": 9.0,
+          "pct": 900.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "resume",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.007251100000000001,
+          "after": 0.0072897,
+          "delta": 0.00003859999999999888,
+          "pct": 0.5323330253340718,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.007251100000000001,
+          "after": 0.0072897,
+          "delta": 0.00003859999999999888,
+          "pct": 0.5323330253340718,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 6.0,
+          "after": 6.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 8294.0,
+          "after": 8372.0,
+          "delta": 78.0,
+          "pct": 0.9404388714733543,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1896.0,
+          "after": 1906.0,
+          "delta": 10.0,
+          "pct": 0.5274261603375527,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 6398.0,
+          "after": 6466.0,
+          "delta": 68.0,
+          "pct": 1.0628321350422008,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 134.0,
+          "after": 134.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 8428.0,
+          "after": 8506.0,
+          "delta": 78.0,
+          "pct": 0.9254864736592311,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 6.0,
+          "after": 6.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1469.0,
+          "after": 1482.0,
+          "delta": 13.0,
+          "pct": 0.8849557522123894,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1382.0,
+          "after": 1395.0,
+          "delta": 13.0,
+          "pct": 0.9406657018813315,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 3780.0,
+          "after": 3780.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 6398.0,
+          "after": 6466.0,
+          "delta": 68.0,
+          "pct": 1.0628321350422008,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 1.0,
+          "after": 5.0,
+          "delta": 4.0,
+          "pct": 400.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "retrieval",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0061985,
+          "after": 0.0062593,
+          "delta": 0.00006079999999999974,
+          "pct": 0.9808824715656972,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0061985,
+          "after": 0.0062593,
+          "delta": 0.00006079999999999974,
+          "pct": 0.9808824715656972,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 3747.0,
+          "after": 3787.0,
+          "delta": 40.0,
+          "pct": 1.0675206832132373,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 2372.0,
+          "after": 2398.0,
+          "delta": 26.0,
+          "pct": 1.0961214165261384,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 1375.0,
+          "after": 1389.0,
+          "delta": 14.0,
+          "pct": 1.0181818181818183,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 44.0,
+          "after": 44.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 3791.0,
+          "after": 3831.0,
+          "delta": 40.0,
+          "pct": 1.0551305724083355,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1505.0,
+          "after": 1518.0,
+          "delta": 13.0,
+          "pct": 0.8637873754152824,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1249.0,
+          "after": 1262.0,
+          "delta": 13.0,
+          "pct": 1.0408326661329064,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 1208.0,
+          "after": 1208.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 1375.0,
+          "after": 1389.0,
+          "delta": 14.0,
+          "pct": 1.0181818181818183,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 5.0,
+          "after": 1.0,
+          "delta": -4.0,
+          "pct": -80.0,
+          "verdict": "better"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 5.0,
+          "after": 1.0,
+          "delta": -4.0,
+          "pct": -80.0,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "approval",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0046603999999999994,
+          "after": 0.0046935,
+          "delta": 0.00003310000000000032,
+          "pct": 0.7102394644236615,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0046603999999999994,
+          "after": 0.0046935,
+          "delta": 0.00003310000000000032,
+          "pct": 0.7102394644236615,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 3912.0,
+          "after": 3951.0,
+          "delta": 39.0,
+          "pct": 0.9969325153374233,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1435.0,
+          "after": 1446.0,
+          "delta": 11.0,
+          "pct": 0.7665505226480837,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 2477.0,
+          "after": 2505.0,
+          "delta": 28.0,
+          "pct": 1.1303996770286637,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 62.0,
+          "after": 62.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 3974.0,
+          "after": 4013.0,
+          "delta": 39.0,
+          "pct": 0.9813789632611978,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1363.0,
+          "after": 1376.0,
+          "delta": 13.0,
+          "pct": 0.9537784299339692,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1304.0,
+          "after": 1317.0,
+          "delta": 13.0,
+          "pct": 0.9969325153374233,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 1806.0,
+          "after": 1806.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 2477.0,
+          "after": 2505.0,
+          "delta": 28.0,
+          "pct": 1.1303996770286637,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 7.0,
+          "after": 1.0,
+          "delta": -6.0,
+          "pct": -85.71428571428571,
+          "verdict": "better"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 7.0,
+          "after": 1.0,
+          "delta": -6.0,
+          "pct": -85.71428571428571,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "parallel",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0044583,
+          "after": 0.0044934,
+          "delta": 0.000035099999999999715,
+          "pct": 0.7872956059484493,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0044583,
+          "after": 0.0044934,
+          "delta": 0.000035099999999999715,
+          "pct": 0.7872956059484493,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 2629.0,
+          "after": 2655.0,
+          "delta": 26.0,
+          "pct": 0.9889691898060099,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1425.0,
+          "after": 1438.0,
+          "delta": 13.0,
+          "pct": 0.9122807017543859,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 1204.0,
+          "after": 1217.0,
+          "delta": 13.0,
+          "pct": 1.0797342192691028,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 68.0,
+          "after": 68.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 2697.0,
+          "after": 2723.0,
+          "delta": 26.0,
+          "pct": 0.96403411197627,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1393.0,
+          "after": 1406.0,
+          "delta": 13.0,
+          "pct": 0.9332376166547021,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1314.0,
+          "after": 1327.0,
+          "delta": 13.0,
+          "pct": 0.989345509893455,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 1178.0,
+          "after": 1178.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 1204.0,
+          "after": 1217.0,
+          "delta": 13.0,
+          "pct": 1.0797342192691028,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 258.0,
+          "after": 254.0,
+          "delta": -4.0,
+          "pct": -1.550387596899225,
+          "verdict": "better"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 258.0,
+          "after": 254.0,
+          "delta": -4.0,
+          "pct": -1.550387596899225,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "stale-read",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.005342899999999999,
+          "after": 0.005378600000000001,
+          "delta": 0.000035700000000001356,
+          "pct": 0.6681764584776312,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.005342899999999999,
+          "after": 0.005378600000000001,
+          "delta": 0.000035700000000001356,
+          "pct": 0.6681764584776312,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 5448.0,
+          "after": 5500.0,
+          "delta": 52.0,
+          "pct": 0.9544787077826725,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1591.0,
+          "after": 1602.0,
+          "delta": 11.0,
+          "pct": 0.6913890634820867,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 3857.0,
+          "after": 3898.0,
+          "delta": 41.0,
+          "pct": 1.0630023334197563,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 66.0,
+          "after": 66.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 5514.0,
+          "after": 5566.0,
+          "delta": 52.0,
+          "pct": 0.9430540442509974,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1444.0,
+          "after": 1457.0,
+          "delta": 13.0,
+          "pct": 0.9002770083102494,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1362.0,
+          "after": 1375.0,
+          "delta": 13.0,
+          "pct": 0.9544787077826725,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 2472.0,
+          "after": 2472.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 3857.0,
+          "after": 3898.0,
+          "delta": 41.0,
+          "pct": 1.0630023334197563,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 5.0,
+          "after": 2.0,
+          "delta": -3.0,
+          "pct": -60.0,
+          "verdict": "better"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 5.0,
+          "after": 2.0,
+          "delta": -3.0,
+          "pct": -60.0,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "team",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0216297,
+          "after": 0.021776,
+          "delta": 0.00014629999999999851,
+          "pct": 0.6763847857344231,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0216297,
+          "after": 0.021776,
+          "delta": 0.00014629999999999851,
+          "pct": 0.6763847857344231,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 11.0,
+          "after": 11.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 14955.0,
+          "after": 15100.0,
+          "delta": 145.0,
+          "pct": 0.9695753928452023,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 6529.0,
+          "after": 6580.0,
+          "delta": 51.0,
+          "pct": 0.7811303415530709,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 8426.0,
+          "after": 8520.0,
+          "delta": 94.0,
+          "pct": 1.1155945881794445,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 403.0,
+          "after": 403.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 15358.0,
+          "after": 15503.0,
+          "delta": 145.0,
+          "pct": 0.9441333506967053,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 7.0,
+          "after": 7.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 11.0,
+          "after": 11.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1589.0,
+          "after": 1603.0,
+          "delta": 14.0,
+          "pct": 0.881057268722467,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1359.0,
+          "after": 1372.0,
+          "delta": 13.0,
+          "pct": 0.9565857247976454,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 6728.0,
+          "after": 6728.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 9920.0,
+          "after": 10014.0,
+          "delta": 94.0,
+          "pct": 0.9475806451612903,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 528.0,
+          "after": 521.0,
+          "delta": -7.0,
+          "pct": -1.3257575757575757,
+          "verdict": "better"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 528.0,
+          "after": 521.0,
+          "delta": -7.0,
+          "pct": -1.3257575757575757,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "skill",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.005493100000000001,
+          "after": 0.0055383,
+          "delta": 0.00004519999999999958,
+          "pct": 0.8228504851540946,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.005493100000000001,
+          "after": 0.0055383,
+          "delta": 0.00004519999999999958,
+          "pct": 0.8228504851540946,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 4456.0,
+          "after": 4498.0,
+          "delta": 42.0,
+          "pct": 0.9425493716337522,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1663.0,
+          "after": 1679.0,
+          "delta": 16.0,
+          "pct": 0.9621166566446182,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 2793.0,
+          "after": 2819.0,
+          "delta": 26.0,
+          "pct": 0.9308986752595776,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 84.0,
+          "after": 84.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 4540.0,
+          "after": 4582.0,
+          "delta": 42.0,
+          "pct": 0.9251101321585903,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1575.0,
+          "after": 1589.0,
+          "delta": 14.0,
+          "pct": 0.8888888888888888,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1485.0,
+          "after": 1499.0,
+          "delta": 14.0,
+          "pct": 0.9427609427609427,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 1935.0,
+          "after": 1935.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 2793.0,
+          "after": 2819.0,
+          "delta": 26.0,
+          "pct": 0.9308986752595776,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 1.0,
+          "after": 2.0,
+          "delta": 1.0,
+          "pct": 100.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 1.0,
+          "after": 2.0,
+          "delta": 1.0,
+          "pct": 100.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "web",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0086362,
+          "after": 0.008687,
+          "delta": 0.00005080000000000015,
+          "pct": 0.5882216715685157,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0086362,
+          "after": 0.008687,
+          "delta": 0.00005080000000000015,
+          "pct": 0.5882216715685157,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 5.0,
+          "after": 5.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 9325.0,
+          "after": 9395.0,
+          "delta": 70.0,
+          "pct": 0.7506702412868633,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 2404.0,
+          "after": 2420.0,
+          "delta": 16.0,
+          "pct": 0.6655574043261231,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 6921.0,
+          "after": 6975.0,
+          "delta": 54.0,
+          "pct": 0.7802340702210664,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 133.0,
+          "after": 133.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 9458.0,
+          "after": 9528.0,
+          "delta": 70.0,
+          "pct": 0.74011418904631,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 5.0,
+          "after": 5.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 2189.0,
+          "after": 2203.0,
+          "delta": 14.0,
+          "pct": 0.6395614435815441,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1865.0,
+          "after": 1879.0,
+          "delta": 14.0,
+          "pct": 0.7506702412868633,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 3560.0,
+          "after": 3560.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 6921.0,
+          "after": 6975.0,
+          "delta": 54.0,
+          "pct": 0.7802340702210664,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 3.0,
+          "after": 4.0,
+          "delta": 1.0,
+          "pct": 33.33333333333333,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 3.0,
+          "after": 4.0,
+          "delta": 1.0,
+          "pct": 33.33333333333333,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "claimed-files",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0082106,
+          "after": 0.0082489,
+          "delta": 0.00003829999999999979,
+          "pct": 0.4664701727035757,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0082106,
+          "after": 0.0082489,
+          "delta": 0.00003829999999999979,
+          "pct": 0.4664701727035757,
+          "verdict": "same"
+        },
+        {
+          "metric": "model_calls",
+          "before": 5.0,
+          "after": 5.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 7958.0,
+          "after": 8023.0,
+          "delta": 65.0,
+          "pct": 0.816788137723046,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 2120.0,
+          "after": 2131.0,
+          "delta": 11.0,
+          "pct": 0.5188679245283019,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 5838.0,
+          "after": 5892.0,
+          "delta": 54.0,
+          "pct": 0.9249743062692704,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 190.0,
+          "after": 190.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 8148.0,
+          "after": 8213.0,
+          "delta": 65.0,
+          "pct": 0.7977417771232204,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 5.0,
+          "after": 5.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1797.0,
+          "after": 1810.0,
+          "delta": 13.0,
+          "pct": 0.7234279354479688,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1591.0,
+          "after": 1604.0,
+          "delta": 13.0,
+          "pct": 0.8170961659333752,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 3350.0,
+          "after": 3350.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 5838.0,
+          "after": 5892.0,
+          "delta": 54.0,
+          "pct": 0.9249743062692704,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 82.0,
+          "after": 72.0,
+          "delta": -10.0,
+          "pct": -12.195121951219512,
+          "verdict": "better"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 82.0,
+          "after": 72.0,
+          "delta": -10.0,
+          "pct": -12.195121951219512,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "claimed-schedule",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0109108,
+          "after": 0.0109793,
+          "delta": 0.00006850000000000085,
+          "pct": 0.627818308465015,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0109108,
+          "after": 0.0109793,
+          "delta": 0.00006850000000000085,
+          "pct": 0.627818308465015,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 6.0,
+          "after": 6.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 9110.0,
+          "after": 9188.0,
+          "delta": 78.0,
+          "pct": 0.8562019758507134,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 3371.0,
+          "after": 3394.0,
+          "delta": 23.0,
+          "pct": 0.6822901216256304,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 5739.0,
+          "after": 5794.0,
+          "delta": 55.0,
+          "pct": 0.9583551141313817,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 146.0,
+          "after": 146.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 9256.0,
+          "after": 9334.0,
+          "delta": 78.0,
+          "pct": 0.8426966292134831,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 6.0,
+          "after": 6.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1618.0,
+          "after": 1631.0,
+          "delta": 13.0,
+          "pct": 0.8034610630407911,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1518.0,
+          "after": 1531.0,
+          "delta": 13.0,
+          "pct": 0.8563899868247694,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 4236.0,
+          "after": 4236.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 6426.0,
+          "after": 6481.0,
+          "delta": 55.0,
+          "pct": 0.8558979147214442,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 2.0,
+          "after": 1.0,
+          "delta": -1.0,
+          "pct": -50.0,
+          "verdict": "better"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 3.0,
+          "after": 2.0,
+          "delta": -1.0,
+          "pct": -33.33333333333333,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "board",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0201643,
+          "after": 0.0202972,
+          "delta": 0.00013290000000000177,
+          "pct": 0.6590856116998942,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0201643,
+          "after": 0.0202972,
+          "delta": 0.00013290000000000177,
+          "pct": 0.6590856116998942,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 6.0,
+          "after": 6.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 15939.0,
+          "after": 16017.0,
+          "delta": 78.0,
+          "pct": 0.4893657067570111,
+          "verdict": "same"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 6855.0,
+          "after": 6906.0,
+          "delta": 51.0,
+          "pct": 0.7439824945295405,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 9084.0,
+          "after": 9111.0,
+          "delta": 27.0,
+          "pct": 0.297225891677675,
+          "verdict": "same"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 136.0,
+          "after": 136.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 16075.0,
+          "after": 16153.0,
+          "delta": 78.0,
+          "pct": 0.48522550544323484,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 6.0,
+          "after": 6.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 2796.0,
+          "after": 2809.0,
+          "delta": 13.0,
+          "pct": 0.46494992846924177,
+          "verdict": "same"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 2240.0,
+          "after": 2669.0,
+          "delta": 429.0,
+          "pct": 19.151785714285715,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 11051.0,
+          "after": 10051.0,
+          "delta": -1000.0,
+          "pct": -9.04895484571532,
+          "verdict": "better"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 10479.0,
+          "after": 10519.0,
+          "delta": 40.0,
+          "pct": 0.38171581257753606,
+          "verdict": "same"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 7.0,
+          "after": 6.0,
+          "delta": -1.0,
+          "pct": -14.285714285714285,
+          "verdict": "better"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 11.0,
+          "after": 8.0,
+          "delta": -3.0,
+          "pct": -27.27272727272727,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "analysis",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0075076,
+          "after": 0.0075505,
+          "delta": 0.00004290000000000023,
+          "pct": 0.5714209600937747,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0075076,
+          "after": 0.0075505,
+          "delta": 0.00004290000000000023,
+          "pct": 0.5714209600937747,
+          "verdict": "worse"
+        },
+        {
+          "metric": "model_calls",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 4884.0,
+          "after": 4926.0,
+          "delta": 42.0,
+          "pct": 0.85995085995086,
+          "verdict": "worse"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 1926.0,
+          "after": 1941.0,
+          "delta": 15.0,
+          "pct": 0.778816199376947,
+          "verdict": "worse"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 2958.0,
+          "after": 2985.0,
+          "delta": 27.0,
+          "pct": 0.9127789046653144,
+          "verdict": "better"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 223.0,
+          "after": 223.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 5107.0,
+          "after": 5149.0,
+          "delta": 42.0,
+          "pct": 0.8224006265909536,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 3.0,
+          "after": 3.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 1754.0,
+          "after": 1768.0,
+          "delta": 14.0,
+          "pct": 0.798175598631699,
+          "verdict": "worse"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 1628.0,
+          "after": 1642.0,
+          "delta": 14.0,
+          "pct": 0.85995085995086,
+          "verdict": "worse"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 2043.0,
+          "after": 2043.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 2958.0,
+          "after": 2985.0,
+          "delta": 27.0,
+          "pct": 0.9127789046653144,
+          "verdict": "better"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 2.0,
+          "after": 3.0,
+          "delta": 1.0,
+          "pct": 50.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 2.0,
+          "after": 3.0,
+          "delta": 1.0,
+          "pct": 50.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "files-edit",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0117465,
+          "after": 0.0117508,
+          "delta": 4.300000000000484e-6,
+          "pct": 0.0366066487890051,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0117465,
+          "after": 0.0117508,
+          "delta": 4.300000000000484e-6,
+          "pct": 0.0366066487890051,
+          "verdict": "same"
+        },
+        {
+          "metric": "model_calls",
+          "before": 5.0,
+          "after": 5.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 13550.0,
+          "after": 13560.0,
+          "delta": 10.0,
+          "pct": 0.07380073800738007,
+          "verdict": "same"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 3205.0,
+          "after": 3206.0,
+          "delta": 1.0,
+          "pct": 0.031201248049921998,
+          "verdict": "same"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 10345.0,
+          "after": 10354.0,
+          "delta": 9.0,
+          "pct": 0.08699855002416626,
+          "verdict": "same"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 180.0,
+          "after": 180.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 13730.0,
+          "after": 13740.0,
+          "delta": 10.0,
+          "pct": 0.07283321194464676,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 5.0,
+          "after": 5.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 2942.0,
+          "after": 2944.0,
+          "delta": 2.0,
+          "pct": 0.06798096532970768,
+          "verdict": "same"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 2710.0,
+          "after": 2712.0,
+          "delta": 2.0,
+          "pct": 0.07380073800738007,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 8180.0,
+          "after": 8125.0,
+          "delta": -55.0,
+          "pct": -0.6723716381418092,
+          "verdict": "better"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 10345.0,
+          "after": 10354.0,
+          "delta": 9.0,
+          "pct": 0.08699855002416626,
+          "verdict": "same"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 20.0,
+          "after": 22.0,
+          "delta": 2.0,
+          "pct": 10.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 20.0,
+          "after": 22.0,
+          "delta": 2.0,
+          "pct": 10.0,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    },
+    {
+      "name": "workbooks",
+      "metrics": [
+        {
+          "metric": "success_rate",
+          "before": 1.0,
+          "after": 1.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_per_success_usd",
+          "before": 0.0278985,
+          "after": 0.0279124,
+          "delta": 0.000013900000000000717,
+          "pct": 0.049823467211501396,
+          "verdict": "same"
+        },
+        {
+          "metric": "cost_usd",
+          "before": 0.0278985,
+          "after": 0.0279124,
+          "delta": 0.000013900000000000717,
+          "pct": 0.049823467211501396,
+          "verdict": "same"
+        },
+        {
+          "metric": "model_calls",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "input_tokens",
+          "before": 21774.0,
+          "after": 21786.0,
+          "delta": 12.0,
+          "pct": 0.055111600992008826,
+          "verdict": "same"
+        },
+        {
+          "metric": "uncached_input_tokens",
+          "before": 6964.0,
+          "after": 6969.0,
+          "delta": 5.0,
+          "pct": 0.07179781734635267,
+          "verdict": "same"
+        },
+        {
+          "metric": "cached_input_tokens",
+          "before": 14810.0,
+          "after": 14817.0,
+          "delta": 7.0,
+          "pct": 0.04726536124240378,
+          "verdict": "same"
+        },
+        {
+          "metric": "output_tokens",
+          "before": 773.0,
+          "after": 773.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "total_tokens",
+          "before": 22547.0,
+          "after": 22559.0,
+          "delta": 12.0,
+          "pct": 0.053222158158513326,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_calls",
+          "before": 2.0,
+          "after": 2.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_failed",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "deduplicated",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "repeated_executions",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "provider_retries",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "steps",
+          "before": 4.0,
+          "after": 4.0,
+          "delta": 0.0,
+          "pct": 0.0,
+          "verdict": "same"
+        },
+        {
+          "metric": "peak_context_tokens",
+          "before": 6654.0,
+          "after": 6657.0,
+          "delta": 3.0,
+          "pct": 0.045085662759242556,
+          "verdict": "same"
+        },
+        {
+          "metric": "mean_context_tokens",
+          "before": 5443.0,
+          "after": 5446.0,
+          "delta": 3.0,
+          "pct": 0.055116663604629794,
+          "verdict": "same"
+        },
+        {
+          "metric": "tool_schema_tokens",
+          "before": 6940.0,
+          "after": 6896.0,
+          "delta": -44.0,
+          "pct": -0.6340057636887608,
+          "verdict": "better"
+        },
+        {
+          "metric": "prefix_reuse_tokens",
+          "before": 14810.0,
+          "after": 14817.0,
+          "delta": 7.0,
+          "pct": 0.04726536124240378,
+          "verdict": "same"
+        },
+        {
+          "metric": "median_turn_ms",
+          "before": 177.0,
+          "after": 235.0,
+          "delta": 58.0,
+          "pct": 32.7683615819209,
+          "verdict": "worse"
+        },
+        {
+          "metric": "p95_turn_ms",
+          "before": 177.0,
+          "after": 235.0,
+          "delta": 58.0,
+          "pct": 32.7683615819209,
+          "verdict": "worse"
+        },
+        {
+          "metric": "median_first_token_ms",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        },
+        {
+          "metric": "stall_stops",
+          "before": 0.0,
+          "after": 0.0,
+          "delta": 0.0,
+          "pct": null,
+          "verdict": "same"
+        }
+      ]
+    }
+  ],
+  "regressions": [
+    "simple: cost_per_success_usd 0.002927 -> 0.002959",
+    "simple: input_tokens 1162 -> 1175",
+    "simple: uncached_input_tokens 1162 -> 1175",
+    "simple: total_tokens 1165 -> 1178",
+    "simple: peak_context_tokens 1162 -> 1175",
+    "tool-lookup: cost_per_success_usd 0.004854 -> 0.004892",
+    "tool-lookup: input_tokens 4049 -> 4088",
+    "tool-lookup: uncached_input_tokens 1492 -> 1505",
+    "tool-lookup: total_tokens 4115 -> 4154",
+    "tool-lookup: peak_context_tokens 1413 -> 1426",
+    "multi-step: cost_per_success_usd 0.006836 -> 0.006876",
+    "multi-step: input_tokens 7291 -> 7356",
+    "multi-step: uncached_input_tokens 1853 -> 1865",
+    "multi-step: total_tokens 7413 -> 7478",
+    "multi-step: peak_context_tokens 1609 -> 1622",
+    "large-output: cost_per_success_usd 0.005562 -> 0.005598",
+    "large-output: input_tokens 5339 -> 5391",
+    "large-output: uncached_input_tokens 1562 -> 1573",
+    "large-output: total_tokens 5435 -> 5487",
+    "large-output: peak_context_tokens 1439 -> 1452",
+    "long-session: input_tokens 2430173 -> 2449673",
+    "long-session: total_tokens 2461151 -> 2480651",
+    "long-session: peak_context_tokens 1676 -> 1689",
+    "failure-recovery: cost_per_success_usd 0.005716 -> 0.005754",
+    "failure-recovery: input_tokens 5712 -> 5764",
+    "failure-recovery: uncached_input_tokens 1705 -> 1717",
+    "failure-recovery: total_tokens 5785 -> 5837",
+    "failure-recovery: peak_context_tokens 1533 -> 1546",
+    "duplicate: cost_per_success_usd 0.005443 -> 0.005479",
+    "duplicate: input_tokens 5517 -> 5569",
+    "duplicate: uncached_input_tokens 1592 -> 1603",
+    "duplicate: total_tokens 5590 -> 5642",
+    "duplicate: peak_context_tokens 1460 -> 1473",
+    "runaway: cost_per_success_usd 0.011560 -> 0.011627",
+    "runaway: input_tokens 10955 -> 11046",
+    "runaway: uncached_input_tokens 3603 -> 3624",
+    "runaway: total_tokens 11075 -> 11166",
+    "runaway: peak_context_tokens 1900 -> 1913",
+    "resume: cost_per_success_usd 0.007251 -> 0.007290",
+    "resume: input_tokens 8294 -> 8372",
+    "resume: uncached_input_tokens 1896 -> 1906",
+    "resume: total_tokens 8428 -> 8506",
+    "resume: peak_context_tokens 1469 -> 1482",
+    "retrieval: cost_per_success_usd 0.006199 -> 0.006259",
+    "retrieval: input_tokens 3747 -> 3787",
+    "retrieval: uncached_input_tokens 2372 -> 2398",
+    "retrieval: total_tokens 3791 -> 3831",
+    "retrieval: peak_context_tokens 1505 -> 1518",
+    "approval: cost_per_success_usd 0.004660 -> 0.004693",
+    "approval: input_tokens 3912 -> 3951",
+    "approval: uncached_input_tokens 1435 -> 1446",
+    "approval: total_tokens 3974 -> 4013",
+    "approval: peak_context_tokens 1363 -> 1376",
+    "parallel: cost_per_success_usd 0.004458 -> 0.004493",
+    "parallel: input_tokens 2629 -> 2655",
+    "parallel: uncached_input_tokens 1425 -> 1438",
+    "parallel: total_tokens 2697 -> 2723",
+    "parallel: peak_context_tokens 1393 -> 1406",
+    "stale-read: cost_per_success_usd 0.005343 -> 0.005379",
+    "stale-read: input_tokens 5448 -> 5500",
+    "stale-read: uncached_input_tokens 1591 -> 1602",
+    "stale-read: total_tokens 5514 -> 5566",
+    "stale-read: peak_context_tokens 1444 -> 1457",
+    "team: cost_per_success_usd 0.021630 -> 0.021776",
+    "team: input_tokens 14955 -> 15100",
+    "team: uncached_input_tokens 6529 -> 6580",
+    "team: total_tokens 15358 -> 15503",
+    "team: peak_context_tokens 1589 -> 1603",
+    "skill: cost_per_success_usd 0.005493 -> 0.005538",
+    "skill: input_tokens 4456 -> 4498",
+    "skill: uncached_input_tokens 1663 -> 1679",
+    "skill: total_tokens 4540 -> 4582",
+    "skill: peak_context_tokens 1575 -> 1589",
+    "web: cost_per_success_usd 0.008636 -> 0.008687",
+    "web: input_tokens 9325 -> 9395",
+    "web: uncached_input_tokens 2404 -> 2420",
+    "web: total_tokens 9458 -> 9528",
+    "web: peak_context_tokens 2189 -> 2203",
+    "claimed-files: input_tokens 7958 -> 8023",
+    "claimed-files: uncached_input_tokens 2120 -> 2131",
+    "claimed-files: total_tokens 8148 -> 8213",
+    "claimed-files: peak_context_tokens 1797 -> 1810",
+    "claimed-schedule: cost_per_success_usd 0.010911 -> 0.010979",
+    "claimed-schedule: input_tokens 9110 -> 9188",
+    "claimed-schedule: uncached_input_tokens 3371 -> 3394",
+    "claimed-schedule: total_tokens 9256 -> 9334",
+    "claimed-schedule: peak_context_tokens 1618 -> 1631",
+    "board: cost_per_success_usd 0.020164 -> 0.020297",
+    "board: uncached_input_tokens 6855 -> 6906",
+    "analysis: cost_per_success_usd 0.007508 -> 0.007550",
+    "analysis: input_tokens 4884 -> 4926",
+    "analysis: uncached_input_tokens 1926 -> 1941",
+    "analysis: total_tokens 5107 -> 5149",
+    "analysis: peak_context_tokens 1754 -> 1768"
+  ]
+}

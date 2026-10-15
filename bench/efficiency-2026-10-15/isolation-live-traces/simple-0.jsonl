@@ -1,0 +1,8 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":242,"working_state":16,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":17,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":550,"action_schemas":50,"loaded_actions":1,"total":612,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Bonjour"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" !"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":12901,"completion_tokens":24,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":16721,"first_token_ms":16641,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 0 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Bonjour !","streamed":true}}

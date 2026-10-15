@@ -1,0 +1,47 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":50,"capability_index":258,"working_state":25,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":27,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":589,"action_schemas":89,"loaded_actions":2,"total":660,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Checking"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" current"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" temperatures"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13128,"completion_tokens":84,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":13204,"first_token_ms":12969,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_0","action":"weather.current","input":{"city":"Paris"}}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_1","action":"weather.current","input":{"city":"Tokyo"}}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_2","action":"weather.current","input":{"city":"Lima"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_0","action":"weather.current","ok":true,"summary":"city=Paris, temp_c=14","invocation":"f42c6c5f-9d02-4384-98b8-bf3d7735dac3","duration_ms":251,"error":null,"context_tokens":35,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_1","action":"weather.current","ok":true,"summary":"city=Tokyo, temp_c=22","invocation":"f7b57af6-8dd9-4e25-9f6c-10f27632c3d3","duration_ms":251,"error":null,"context_tokens":35,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_2","action":"weather.current","ok":true,"summary":"city=Lima, temp_c=18","invocation":"1c4b314f-baa2-49f9-8fa9-a39a9e18e575","duration_ms":251,"error":null,"context_tokens":35,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":299,"project":50,"capability_index":258,"working_state":25,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":27,"tool_rounds":105,"model_output":52,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":589,"action_schemas":89,"loaded_actions":2,"total":817,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Current"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" temperatures"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":":"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Paris"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":":"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"14"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"°C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Tokyo"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":":"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"22"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"°C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"\n"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Lima"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":":"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"18"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"°C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13433,"completion_tokens":52,"measured":true,"cached_tokens":12032,"cache_write_tokens":0},"elapsed_ms":1824,"first_token_ms":1636,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 3 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Current temperatures:\n\n- Paris: **14°C**\n- Tokyo: **22°C**\n- Lima: **18°C**","streamed":true}}

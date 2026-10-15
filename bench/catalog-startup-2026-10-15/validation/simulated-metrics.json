@@ -1,0 +1,106 @@
+{
+  "reported_non_timing_metrics": {
+    "success_rate": {
+      "baseline": "1",
+      "candidate": "1",
+      "unchanged": true
+    },
+    "cost_per_success_usd": {
+      "baseline": "0.082701",
+      "candidate": "0.082701",
+      "unchanged": true
+    },
+    "cost_usd": {
+      "baseline": "0.082701",
+      "candidate": "0.082701",
+      "unchanged": true
+    },
+    "model_calls": {
+      "baseline": "72.455",
+      "candidate": "72.455",
+      "unchanged": true
+    },
+    "input_tokens": {
+      "baseline": "122135.1",
+      "candidate": "122135.1",
+      "unchanged": true
+    },
+    "uncached_input_tokens": {
+      "baseline": "19959.4",
+      "candidate": "19959.4",
+      "unchanged": true
+    },
+    "cached_input_tokens": {
+      "baseline": "102175.7",
+      "candidate": "102175.7",
+      "unchanged": true
+    },
+    "output_tokens": {
+      "baseline": "1553.3",
+      "candidate": "1553.3",
+      "unchanged": true
+    },
+    "total_tokens": {
+      "baseline": "123688.5",
+      "candidate": "123688.5",
+      "unchanged": true
+    },
+    "tool_calls": {
+      "baseline": "24.591",
+      "candidate": "24.591",
+      "unchanged": true
+    },
+    "tool_failed": {
+      "baseline": "0.090909",
+      "candidate": "0.090909",
+      "unchanged": true
+    },
+    "deduplicated": {
+      "baseline": "0.090909",
+      "candidate": "0.090909",
+      "unchanged": true
+    },
+    "repeated_executions": {
+      "baseline": "0.090909",
+      "candidate": "0.090909",
+      "unchanged": true
+    },
+    "provider_retries": {
+      "baseline": "0",
+      "candidate": "0",
+      "unchanged": true
+    },
+    "steps": {
+      "baseline": "72.364",
+      "candidate": "72.364",
+      "unchanged": true
+    },
+    "peak_context_tokens": {
+      "baseline": "6701",
+      "candidate": "6701",
+      "unchanged": true
+    },
+    "mean_context_tokens": {
+      "baseline": "1791.0",
+      "candidate": "1791.0",
+      "unchanged": true
+    },
+    "tool_schema_tokens": {
+      "baseline": "40875.7",
+      "candidate": "40875.7",
+      "unchanged": true
+    },
+    "prefix_reuse_tokens": {
+      "baseline": "102340.9",
+      "candidate": "102340.9",
+      "unchanged": true
+    },
+    "stall_stops": {
+      "baseline": "0.045455",
+      "candidate": "0.045455",
+      "unchanged": true
+    }
+  },
+  "all_unchanged": true,
+  "timing_claims": false
+}

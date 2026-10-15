@@ -1,0 +1,46 @@
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":654,"system_tokens":559,"message_tokens":121,"messages":2,"est_prompt_tokens":1334,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1334,"completion_tokens":18,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["search_evidence"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":654,"system_tokens":559,"message_tokens":202,"messages":4,"est_prompt_tokens":1415,"prefix_reuse_tokens":1299,"usage":{"prompt_tokens":1415,"completion_tokens":18,"measured":false,"cached_tokens":1299,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["search_evidence"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":654,"system_tokens":559,"message_tokens":311,"messages":6,"est_prompt_tokens":1524,"prefix_reuse_tokens":1369,"usage":{"prompt_tokens":1524,"completion_tokens":18,"measured":false,"cached_tokens":1369,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["search_evidence"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":654,"system_tokens":559,"message_tokens":420,"messages":8,"est_prompt_tokens":1633,"prefix_reuse_tokens":1467,"usage":{"prompt_tokens":1633,"completion_tokens":18,"measured":false,"cached_tokens":1467,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["search_evidence"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":654,"system_tokens":559,"message_tokens":591,"messages":11,"est_prompt_tokens":1804,"prefix_reuse_tokens":1565,"usage":{"prompt_tokens":1804,"completion_tokens":18,"measured":false,"cached_tokens":1565,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["search_evidence"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":654,"system_tokens":559,"message_tokens":700,"messages":13,"est_prompt_tokens":1913,"prefix_reuse_tokens":1722,"usage":{"prompt_tokens":1913,"completion_tokens":18,"measured":false,"cached_tokens":1722,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["search_evidence"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":0,"tool_schema_tokens":0,"system_tokens":559,"message_tokens":864,"messages":16,"est_prompt_tokens":1423,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1423,"completion_tokens":12,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":50,"capability_index":269,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":654,"action_schemas":154,"loaded_actions":3,"total":680,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1334,"completion_tokens":18,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"retrieval","what":"search_evidence \"Q3 budget\""}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":299,"project":50,"capability_index":269,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":0,"model_output":22,"retrieved":59,"ledger":0,"compressed_rounds":0,"tool_schemas":654,"action_schemas":154,"loaded_actions":3,"total":761,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1415,"completion_tokens":18,"measured":false,"cached_tokens":1299,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"retrieval","what":"search_evidence \"Q3 budget\""}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":299,"project":50,"capability_index":269,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":0,"model_output":44,"retrieved":146,"ledger":0,"compressed_rounds":0,"tool_schemas":654,"action_schemas":154,"loaded_actions":3,"total":870,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1524,"completion_tokens":18,"measured":false,"cached_tokens":1369,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"retrieval","what":"search_evidence \"Q3 budget\""}}
+{"type":"event","turn":0,"event":{"type":"step","index":4}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":4,"role":"reason","instructions":299,"project":50,"capability_index":269,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":0,"model_output":66,"retrieved":233,"ledger":0,"compressed_rounds":0,"tool_schemas":654,"action_schemas":154,"loaded_actions":3,"total":979,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1633,"completion_tokens":18,"measured":false,"cached_tokens":1467,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"retrieval","what":"search_evidence \"Q3 budget\""}}
+{"type":"event","turn":0,"event":{"type":"stall","idle_steps":3,"stopped":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":5}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":5,"role":"reason","instructions":299,"project":50,"capability_index":269,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":62,"model_output":88,"retrieved":320,"ledger":0,"compressed_rounds":0,"tool_schemas":654,"action_schemas":154,"loaded_actions":3,"total":1150,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1804,"completion_tokens":18,"measured":false,"cached_tokens":1565,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"retrieval","what":"search_evidence \"Q3 budget\""}}
+{"type":"event","turn":0,"event":{"type":"step","index":6}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":6,"role":"reason","instructions":299,"project":50,"capability_index":269,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":62,"model_output":110,"retrieved":407,"ledger":0,"compressed_rounds":0,"tool_schemas":654,"action_schemas":154,"loaded_actions":3,"total":1259,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1913,"completion_tokens":18,"measured":false,"cached_tokens":1722,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"retrieval","what":"search_evidence \"Q3 budget\""}}
+{"type":"event","turn":0,"event":{"type":"stall","idle_steps":5,"stopped":true}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":6,"role":"synthesize","instructions":299,"project":50,"capability_index":269,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":86,"tool_rounds":62,"model_output":132,"retrieved":494,"ledger":0,"compressed_rounds":0,"tool_schemas":0,"action_schemas":0,"loaded_actions":3,"total":1423,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Nothing "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"about "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Q3 "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"budget "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"is "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"stored; "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"unknown."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"synthesize","model":"sim","usage":{"prompt_tokens":1423,"completion_tokens":12,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 0 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Nothing about the Q3 budget is stored; unknown.","streamed":true}}

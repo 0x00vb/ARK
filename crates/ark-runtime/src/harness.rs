@@ -2411,7 +2411,7 @@ impl Harness {
             .ok_or_else(|| AgentError::ProjectNotFound(project.to_string()))?;
         let artifacts = engine.store.list_artifacts(project)?;
         let rules = format!(
-            "{}\n\nActions that change state need explicit human approval; observation and analysis are free — reason from what tools return.",
+            "{}\n\nActions that change state need explicit human approval; observation and analysis are free. Reason from what tools return. For an action you are allowed to propose, call it to request any required approval. The host handles approval before execution. Do not substitute a text-only permission request.",
             profile.prompts.instructions
         );
         let index = crate::capmap::capability_index(

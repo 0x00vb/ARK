@@ -1,0 +1,31 @@
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":587,"system_tokens":559,"message_tokens":95,"messages":2,"est_prompt_tokens":1241,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1241,"completion_tokens":17,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["logs.fetch"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":587,"system_tokens":559,"message_tokens":174,"messages":4,"est_prompt_tokens":1320,"prefix_reuse_tokens":1211,"usage":{"prompt_tokens":1320,"completion_tokens":23,"measured":false,"cached_tokens":1211,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["get_evidence"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":587,"system_tokens":559,"message_tokens":232,"messages":6,"est_prompt_tokens":1378,"prefix_reuse_tokens":1280,"usage":{"prompt_tokens":1378,"completion_tokens":41,"measured":false,"cached_tokens":1280,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":587,"system_tokens":559,"message_tokens":306,"messages":8,"est_prompt_tokens":1452,"prefix_reuse_tokens":1327,"usage":{"prompt_tokens":1452,"completion_tokens":15,"measured":false,"cached_tokens":1327,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":50,"capability_index":255,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":25,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":587,"action_schemas":87,"loaded_actions":2,"total":654,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1241,"completion_tokens":17,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_0","action":"logs.fetch","input":{"service":"payments"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_0","action":"logs.fetch","ok":true,"summary":"service=payments, count=3000, lines=3000 items (rows not shown: get_evidence on this result, with `match`, reads them)","invocation":"823f7056-8d9e-4f39-a60f-d4c0b8ea9c79","duration_ms":0,"error":null,"context_tokens":58,"raw_tokens":42763}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":299,"project":50,"capability_index":255,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":25,"tool_rounds":58,"model_output":21,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":587,"action_schemas":87,"loaded_actions":2,"total":733,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1320,"completion_tokens":23,"measured":false,"cached_tokens":1211,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"retrieval","what":"get_evidence inv:823f7056 match \"ERROR\""}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":299,"project":50,"capability_index":255,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":25,"tool_rounds":58,"model_output":48,"retrieved":31,"ledger":0,"compressed_rounds":0,"tool_schemas":587,"action_schemas":87,"loaded_actions":2,"total":791,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1378,"completion_tokens":41,"measured":false,"cached_tokens":1280,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"The payments service logged error code E4721"}}
+{"type":"event","turn":0,"event":{"type":"step","index":4}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":4,"role":"reason","instructions":299,"project":50,"capability_index":255,"working_state":44,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":25,"tool_rounds":67,"model_output":93,"retrieved":31,"ledger":0,"compressed_rounds":0,"tool_schemas":587,"action_schemas":87,"loaded_actions":2,"total":865,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"The "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"payments "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"service "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"logged "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"error "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"code "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"E4721 "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:823f7056]"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1452,"completion_tokens":15,"measured":false,"cached_tokens":1327,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 1 evidence item cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"The payments service logged error code E4721 [inv:823f7056]","streamed":true}}

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ark_core::{ActionDescriptor, RiskTier};
+use ark_core::{ActionDescriptor, ExecutionMode, RiskTier};
 use ark_model::{Completion, MockProvider, Provider, ToolCall, Usage};
 use ark_runtime::{
     AgentProfile, ApprovalDecision, ApprovalGate, ApprovalRequest, Approver, CancelToken, Engine,
@@ -565,4 +565,117 @@ async fn retrieved_context_is_reported_apart_from_tool_results() {
         parts.abs_diff(reports[2].total) <= 16,
         "rows still cover the total"
     );
+}
+
+#[tokio::test]
+async fn plan_cannot_mutate_even_with_an_allowing_gate() {
+    let saves = Arc::new(AtomicUsize::new(0));
+    let (_d, engine, project) = setup(saves.clone());
+    let asked = Arc::new(AtomicUsize::new(0));
+    let mock = Arc::new(MockProvider::new(
+        "m",
+        tools_then(vec![call("c1", "notes.save")], "Here is the plan."),
+    ));
+    let provider: Arc<dyn Provider> = mock.clone();
+    Harness::new(ModelRouter::single(provider))
+        .planner(false)
+        .critic(false)
+        .execution_mode(ExecutionMode::Plan)
+        .approvals(Some(Arc::new(ApprovalGate::new(Arc::new(Always(
+            ApprovalDecision::AllowOnce,
+            asked.clone(),
+        ))))))
+        .ask(&engine, &profile(), &project, "save the notes", |_| {})
+        .await
+        .unwrap();
+    assert_eq!(saves.load(Ordering::SeqCst), 0);
+    assert_eq!(asked.load(Ordering::SeqCst), 0);
+    assert!(mock.recorded()[1]
+        .messages
+        .iter()
+        .any(|message| message.content.contains("unavailable in Plan")));
+}
+
+#[tokio::test]
+async fn manual_without_an_approval_gate_refuses_mutation() {
+    let saves = Arc::new(AtomicUsize::new(0));
+    let (_d, engine, project) = setup(saves.clone());
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(
+        "m",
+        tools_then(vec![call("c1", "notes.save")], "Approval is needed."),
+    ));
+    let mut needs_approval = 0;
+    Harness::new(ModelRouter::single(provider))
+        .planner(false)
+        .critic(false)
+        .execution_mode(ExecutionMode::Manual)
+        .ask(&engine, &profile(), &project, "save the notes", |event| {
+            if matches!(event, HarnessEvent::NeedsApproval { .. }) {
+                needs_approval += 1;
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(saves.load(Ordering::SeqCst), 0);
+    assert_eq!(needs_approval, 1);
+}
+
+struct AlwaysAskNotes(Notes);
+
+#[async_trait::async_trait]
+impl Adapter for AlwaysAskNotes {
+    fn name(&self) -> &str {
+        "notes"
+    }
+    fn actions(&self) -> Vec<ActionDescriptor> {
+        vec![
+            ActionDescriptor::new("notes.save", "save", RiskTier::Mutate)
+                .auto_eligible()
+                .ask_each_time(),
+        ]
+    }
+    async fn run(
+        &self,
+        action: &str,
+        input: serde_json::Value,
+        ctx: &RunCtx<'_>,
+    ) -> ark_tools::Result<ActionOutput> {
+        self.0.run(action, input, ctx).await
+    }
+}
+
+#[tokio::test]
+async fn auto_asks_for_ineligible_and_always_ask_mutations() {
+    for always_ask in [false, true] {
+        let saves = Arc::new(AtomicUsize::new(0));
+        let dir = tempfile::tempdir().unwrap();
+        let notes = Notes {
+            saves: saves.clone(),
+        };
+        let adapter: Arc<dyn Adapter> = if always_ask {
+            Arc::new(AlwaysAskNotes(notes))
+        } else {
+            Arc::new(notes)
+        };
+        let engine = Engine::open_with(dir.path(), Registry::new().with(adapter)).unwrap();
+        let project = engine.create_project("t", "").unwrap();
+        let asked = Arc::new(AtomicUsize::new(0));
+        let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(
+            "m",
+            tools_then(vec![call("c1", "notes.save")], "Declined."),
+        ));
+        Harness::new(ModelRouter::single(provider))
+            .planner(false)
+            .critic(false)
+            .execution_mode(ExecutionMode::Auto)
+            .approvals(Some(Arc::new(ApprovalGate::new(Arc::new(Always(
+                ApprovalDecision::Deny,
+                asked.clone(),
+            ))))))
+            .ask(&engine, &profile(), &project.id, "save the notes", |_| {})
+            .await
+            .unwrap();
+        assert_eq!(asked.load(Ordering::SeqCst), 1, "always_ask={always_ask}");
+        assert_eq!(saves.load(Ordering::SeqCst), 0, "always_ask={always_ask}");
+    }
 }

@@ -1,0 +1,59 @@
+{"type":"request","request":{"model":"sim","tools":12,"tool_schema_tokens":1671,"system_tokens":453,"message_tokens":525,"messages":2,"est_prompt_tokens":2649,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":2649,"completion_tokens":35,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["board.add"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":12,"tool_schema_tokens":1676,"system_tokens":453,"message_tokens":637,"messages":4,"est_prompt_tokens":2766,"prefix_reuse_tokens":1412,"usage":{"prompt_tokens":2766,"completion_tokens":31,"measured":false,"cached_tokens":1412,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["agents.delegate"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":4,"tool_schema_tokens":500,"system_tokens":455,"message_tokens":65,"messages":2,"est_prompt_tokens":1020,"prefix_reuse_tokens":498,"usage":{"prompt_tokens":1020,"completion_tokens":8,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":12,"tool_schema_tokens":1676,"system_tokens":453,"message_tokens":724,"messages":6,"est_prompt_tokens":2853,"prefix_reuse_tokens":1414,"usage":{"prompt_tokens":2853,"completion_tokens":18,"measured":false,"cached_tokens":1414,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":12,"tool_schema_tokens":1676,"system_tokens":453,"message_tokens":450,"messages":2,"est_prompt_tokens":2579,"prefix_reuse_tokens":2418,"usage":{"prompt_tokens":2579,"completion_tokens":12,"measured":false,"cached_tokens":2418,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["board.list"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":12,"tool_schema_tokens":1676,"system_tokens":453,"message_tokens":544,"messages":4,"est_prompt_tokens":2673,"prefix_reuse_tokens":2541,"usage":{"prompt_tokens":2673,"completion_tokens":31,"measured":false,"cached_tokens":2541,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["agents.delegate"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":4,"tool_schema_tokens":500,"system_tokens":455,"message_tokens":122,"messages":2,"est_prompt_tokens":1077,"prefix_reuse_tokens":954,"usage":{"prompt_tokens":1077,"completion_tokens":10,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":12,"tool_schema_tokens":1676,"system_tokens":453,"message_tokens":632,"messages":6,"est_prompt_tokens":2761,"prefix_reuse_tokens":1414,"usage":{"prompt_tokens":2761,"completion_tokens":9,"measured":false,"cached_tokens":1414,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":95,"capability_index":443,"working_state":70,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":71,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1671,"action_schemas":1171,"loaded_actions":8,"total":978,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2649,"completion_tokens":35,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_0","action":"board.add","input":{"items":[{"title":"Welcome page"},{"title":"Watering schedule"},{"title":"Composting page"}]}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_0","action":"board.add","ok":true,"summary":"added 3 items to the board:\nw-39330545 [todo] Welcome page\nw-4c17fbde [todo] Watering schedule\nw-ba696d2f [todo] Composting page","invocation":"0b8165fd-dbc0-4516-a349-d4b080032237","duration_ms":0,"error":null,"context_tokens":73,"raw_tokens":50}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":299,"project":95,"capability_index":443,"working_state":70,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":71,"tool_rounds":73,"model_output":39,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1676,"action_schemas":1176,"loaded_actions":8,"total":1090,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2766,"completion_tokens":31,"measured":false,"cached_tokens":1412,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_2_0","action":"agents.delegate","input":{"to":"writer","objective":"Draft the the next part","item":"w-39330545"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_2_0","action":"agents.delegate","ok":true,"summary":"writer done task t-ade939aa: Drafted: w-39330545 Welcome page","invocation":"db48350a-b11d-4bfb-a756-a098a79a5f72","duration_ms":2,"error":null,"context_tokens":52,"raw_tokens":35}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":299,"project":95,"capability_index":443,"working_state":70,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":71,"tool_rounds":125,"model_output":74,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1676,"action_schemas":1176,"loaded_actions":8,"total":1177,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"The "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"three "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"parts "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"are "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"on "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"board; "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"writer "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"drafted "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"welcome "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"page."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2853,"completion_tokens":18,"measured":false,"cached_tokens":1414,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 2 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"The three parts are on the board; the writer drafted the welcome page.","streamed":true}}
+{"type":"event","turn":1,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":1,"event":{"type":"step","index":1}}
+{"type":"event","turn":1,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":95,"capability_index":448,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1676,"action_schemas":1176,"loaded_actions":8,"total":903,"budget":6000}}}
+{"type":"event","turn":1,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2579,"completion_tokens":12,"measured":false,"cached_tokens":2418,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":1,"event":{"type":"tool_call","id":"sim_5_0","action":"board.list","input":{}}}
+{"type":"event","turn":1,"event":{"type":"tool_result","id":"sim_5_0","action":"board.list","ok":true,"summary":"Board: 2 to do, 0 in progress, 1 done.\nw-4c17fbde [todo] Watering schedule\nw-ba696d2f [todo] Composting page\nw-39330545 [done, writer] Welcome page","invocation":"04b6f253-4a92-442e-ae8c-a7c257867632","duration_ms":0,"error":null,"context_tokens":78,"raw_tokens":76}}
+{"type":"event","turn":1,"event":{"type":"step","index":2}}
+{"type":"event","turn":1,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":299,"project":95,"capability_index":448,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":78,"model_output":16,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1676,"action_schemas":1176,"loaded_actions":8,"total":997,"budget":6000}}}
+{"type":"event","turn":1,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2673,"completion_tokens":31,"measured":false,"cached_tokens":2541,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":1,"event":{"type":"tool_call","id":"sim_6_0","action":"agents.delegate","input":{"to":"writer","objective":"Draft the the next part","item":"w-4c17fbde"}}}
+{"type":"event","turn":1,"event":{"type":"tool_result","id":"sim_6_0","action":"agents.delegate","ok":true,"summary":"writer done task t-bb509bcb: Drafted: w-4c17fbde Watering schedule","invocation":"9f734f4a-7b43-486b-93f2-4cde46877156","duration_ms":3,"error":null,"context_tokens":53,"raw_tokens":36}}
+{"type":"event","turn":1,"event":{"type":"step","index":3}}
+{"type":"event","turn":1,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":299,"project":95,"capability_index":448,"working_state":30,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":31,"tool_rounds":131,"model_output":51,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":1676,"action_schemas":1176,"loaded_actions":8,"total":1085,"budget":6000}}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"The "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"writer "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"drafted "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"next "}}
+{"type":"event","turn":1,"event":{"type":"text_delta","text":"part."}}
+{"type":"event","turn":1,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":2761,"completion_tokens":9,"measured":false,"cached_tokens":1414,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":1,"event":{"type":"self_check","passed":true,"detail":"answered; 2 evidence items cited"}}
+{"type":"event","turn":1,"event":{"type":"answer","text":"The writer drafted the next part.","streamed":true}}

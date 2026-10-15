@@ -1,0 +1,27 @@
+   Compiling ark-model v0.24.0 (/Users/valentino/projects/AIengineering/ark-codex-catalog/crates/ark-model)
+    Finished `test` profile [optimized] target(s) in 12.41s
+     Running unittests src/lib.rs (target/debug/deps/ark_model-54879d169763e0a0)
+
+running 6 tests
+test cli::tests::cancelling_catalog_discovery_stops_its_process_and_descendant ... ok
+test cli::tests::codex_catalog_includes_live_effort_choices ... ok
+test cli::tests::catalog_accepts_delayed_required_replies_within_its_deadline ... ok
+test cli::tests::catalog_errors_do_not_become_an_unverified_model_choice ... ok
+test cli::tests::catalog_never_waits_for_optional_usage_and_has_no_execution_side_effects ... FAILED
+test cli::tests::catalog_timeout_stops_handshake_and_model_list_process_trees ... ok
+
+failures:
+
+---- cli::tests::catalog_never_waits_for_optional_usage_and_has_no_execution_side_effects stdout ----
+
+thread 'cli::tests::catalog_never_waits_for_optional_usage_and_has_no_execution_side_effects' (13823849) panicked at crates/ark-model/src/cli.rs:2355:14:
+called `Option::unwrap()` on a `None` value
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    cli::tests::catalog_never_waits_for_optional_usage_and_has_no_execution_side_effects
+
+test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 93 filtered out; finished in 4.04s
+
+error: test failed, to rerun pass `-p ark-model --lib`

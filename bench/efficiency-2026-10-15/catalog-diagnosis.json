@@ -1,0 +1,30 @@
+{
+  "observations": [
+    {
+      "method": "initialize",
+      "seconds": 0.116,
+      "ok": true
+    },
+    {
+      "method": "account/rateLimits/read",
+      "seconds": 5.004,
+      "ok": true
+    },
+    {
+      "method": "model/list",
+      "seconds": 2.214,
+      "ok": true
+    }
+  ],
+  "total_seconds": 7.334,
+  "target_advertised": true,
+  "efforts": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra"
+  ],
+  "model_calls": 0
+}

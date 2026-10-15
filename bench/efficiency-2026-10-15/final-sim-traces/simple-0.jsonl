@@ -1,0 +1,9 @@
+{"type":"request","request":{"model":"sim","tools":5,"tool_schema_tokens":550,"system_tokens":559,"message_tokens":66,"messages":2,"est_prompt_tokens":1175,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1175,"completion_tokens":3,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":50,"capability_index":242,"working_state":16,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":17,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":550,"action_schemas":50,"loaded_actions":1,"total":625,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Bonjour "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"!"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1175,"completion_tokens":3,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 0 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Bonjour !","streamed":true}}

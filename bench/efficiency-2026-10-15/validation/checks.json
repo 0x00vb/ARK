@@ -1,0 +1,13 @@
+{
+  "full_ci": "pass",
+  "full_ci_log": "validation/accepted-ci.log",
+  "focused_safety": "18/18 pass",
+  "live": "30/30 pass",
+  "trace_audit": "12/12 pass",
+  "simulated": "22/22 pass, unchanged calls,3.5% more tokens,1.2% higher reference estimate",
+  "consumer": "pass, codex:gpt-5.6-terra with unforced effort",
+  "startup_limitation": "explicit-effort constructor failed twice before model call; separate d1bb1e0c",
+  "committed": false,
+  "released": false,
+  "own_build_output_cleaned": true
+}

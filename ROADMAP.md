@@ -36,7 +36,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Every live benchmark uses one 4B local model (qwen3:4b-instruct through Ollama) | `bench/RESULTS.md` |
 | With qwen3:4b, `tool-lookup` and `approval` fail 3 of 3: the model picks a plausible neighbor tool, or files the note in its own working state | `bench/RESULTS.md` |
 | Time to first token rose 137 to 259 ms (median) with the working state last in the request; cause not proven | `bench/RESULTS.md` |
-| A subscription session's first call still pays the CLI's start-up; a Codex thread also starts the MCP servers of the person's Codex setup (about 4 s and 15k tokens measured), since `codex app-server` has no `--ignore-user-config` | `ark-model`, ADR 0012 |
+| A subscription session's first call still pays the CLI's start-up and native context. The unreleased host path disables unused native tools and configured MCP servers through scoped overrides, with isolated exec fallback. Catalog discovery now skips optional usage telemetry while keeping its six-second deadline and strict advertised-effort checks. The bounded efficiency evaluation remains model-specific and configuration-confounded | `ark-model`, ADR 0012 |
 | `codex app-server` is experimental in Codex; a protocol change falls back to `codex exec` (a process per call, no streaming) | `ark-model` |
 | `claude:haiku` sometimes tries host tools natively; it recovered in 6 of 6 tasks in the last runs, and a check asks again when it gives up, but that check has only a scripted test | `bench/RESULTS.md` |
 | Orchestration is measured on one program, three runs per setting; managed sessions cut uncached input but not wall time | `bench/RESULTS.md` |

@@ -1,0 +1,560 @@
+diff --git a/crates/ark-bench/src/lib.rs b/crates/ark-bench/src/lib.rs
+index 1a9ad1e..12ab91f 100644
+--- a/crates/ark-bench/src/lib.rs
++++ b/crates/ark-bench/src/lib.rs
+@@ -52,6 +52,22 @@ pub async fn run_suite_with(
+     mut progress: impl FnMut(&RunRecord),
+     mut checkpoint: impl FnMut(&Report),
+ ) -> anyhow::Result<Report> {
++    if settings.harness == HarnessKind::Ark
++        && [&models.strong]
++            .into_iter()
++            .chain(models.fast.iter())
++            .any(|spec| {
++                ["codex:", "claude:"]
++                    .iter()
++                    .any(|prefix| spec.starts_with(prefix))
++            })
++        && std::env::var("ARK_SESSION_REUSE")
++            .map(|v| v.trim() != "0")
++            .unwrap_or(true)
++        && (settings.cassette.is_some() || settings.faults.is_some())
++    {
++        anyhow::bail!("managed subscription sessions bypass recording, replay and fault injection; omit those options or set ARK_SESSION_REUSE=0 for an explicitly stateless experiment");
++    }
+     let pricing = match models.mode() {
+         Mode::Simulated => Pricing::reference(),
+         Mode::Live => Pricing::for_model(&models.priced_model()),
+diff --git a/crates/ark-bench/src/main.rs b/crates/ark-bench/src/main.rs
+index 9c53907..f6bcd93 100644
+--- a/crates/ark-bench/src/main.rs
++++ b/crates/ark-bench/src/main.rs
+@@ -183,6 +183,13 @@ async fn main() -> anyhow::Result<()> {
+                 &workloads, &models, &settings, reps, &label, progress, save,
+             )
+             .await?;
++            if r.workloads
++                .iter()
++                .flat_map(|w| &w.runs)
++                .any(|r| !r.request_metrics_complete)
++            {
++                eprintln!("request metrics incomplete: managed sessions bypass the direct provider recorder; metadata-call counts, prefix reuse and raw request traces are unavailable. Usage and outcomes come from runtime events; context sizes are estimates.");
++            }
+             print_summary(&r);
+             if let (Some(c), Some(path)) = (&cassette, &record) {
+                 c.save(path)?;
+diff --git a/crates/ark-bench/src/report.rs b/crates/ark-bench/src/report.rs
+index 782e2c1..8f8f0bf 100644
+--- a/crates/ark-bench/src/report.rs
++++ b/crates/ark-bench/src/report.rs
+@@ -99,6 +99,10 @@ pub struct RunRecord {
+     pub total_tokens: u64,
+     /// False when any number is an estimate or simulated rather than provider-reported.
+     pub tokens_measured: bool,
++    /// False when managed subscription sessions bypassed the direct provider recorder.
++    /// Usage/outcomes still come from runtime events; request/meta/prefix metrics are absent.
++    #[serde(default)]
++    pub request_metrics_complete: bool,
+     pub cost_usd: f64,
+     pub wall_ms: u64,
+     pub turn_ms: Vec<u64>,
+diff --git a/crates/ark-bench/src/workload.rs b/crates/ark-bench/src/workload.rs
+index 293f955..e857d11 100644
+--- a/crates/ark-bench/src/workload.rs
++++ b/crates/ark-bench/src/workload.rs
+@@ -623,6 +623,7 @@ fn measure(
+                     r.input_tokens += usage.prompt_tokens as u64;
+                     r.cached_input_tokens += usage.cached_tokens as u64;
+                     r.output_tokens += usage.completion_tokens as u64;
++                    r.cache_write_tokens += usage.cache_write_tokens as u64;
+                     r.tokens_measured &= usage.measured;
+                     r.model_latency_ms.push(*elapsed_ms);
+                     if let Some(f) = first_token_ms {
+@@ -683,7 +684,9 @@ fn measure(
+         }
+     }
+     r.tools_used = used.len() as u32;
+-    r.cache_write_tokens = recorder.cache_writes();
++    // Runtime events include managed sessions, which replace the direct provider wrapper.
++    // Do not lose their cache writes or count direct-provider writes a second time.
++    r.cache_write_tokens = r.cache_write_tokens.max(recorder.cache_writes());
+     r.uncached_input_tokens = r.input_tokens.saturating_sub(r.cached_input_tokens);
+     r.total_tokens = r.input_tokens + r.output_tokens;
+     r.cost_usd = pricing.cost(
+@@ -694,6 +697,8 @@ fn measure(
+     );
+ 
+     let records = recorder.records();
++    r.request_metrics_complete = request_coverage(&records, &r.calls_by_model)
++        && (r.model_calls > 0 || turns.iter().all(|t| t.error.is_none()));
+     let mut meta: BTreeMap<String, u32> = BTreeMap::new();
+     let mut sum_ctx = 0u64;
+     for q in &records {
+@@ -712,10 +717,132 @@ fn measure(
+         }
+     }
+     r.meta_calls = meta;
+-    r.mean_context_tokens = if records.is_empty() {
++    if !r.request_metrics_complete {
++        // These sizes are available from the canonical context reports even when the
++        // subscription session bypassed the direct request meter. Never substitute a
++        // resumed delta for the model's full context.
++        r.tool_schema_tokens = r.context_sources.get("Tool schemas").copied().unwrap_or(0);
++        r.peak_context_tokens = turns
++            .iter()
++            .flat_map(|t| &t.events)
++            .filter_map(|e| {
++                if let HarnessEvent::Context { report } = e {
++                    Some(report.total + report.tool_schemas)
++                } else {
++                    None
++                }
++            })
++            .max()
++            .unwrap_or(0);
++        sum_ctx = turns
++            .iter()
++            .flat_map(|t| &t.events)
++            .filter_map(|e| {
++                if let HarnessEvent::Context { report } = e {
++                    Some((report.total + report.tool_schemas) as u64)
++                } else {
++                    None
++                }
++            })
++            .sum();
++    }
++    let context_count = if r.request_metrics_complete {
++        records.len()
++    } else {
++        turns
++            .iter()
++            .flat_map(|t| &t.events)
++            .filter(|e| matches!(e, HarnessEvent::Context { .. }))
++            .count()
++    };
++    r.mean_context_tokens = if context_count == 0 {
+         0
+     } else {
+-        (sum_ctx / records.len() as u64) as u32
++        (sum_ctx / context_count as u64) as u32
+     };
+     r
+ }
++
++fn request_coverage(
++    records: &[crate::record::RequestRecord],
++    expected: &BTreeMap<String, u32>,
++) -> bool {
++    let mut successful = BTreeMap::new();
++    for record in records.iter().filter(|r| r.error.is_none()) {
++        *successful.entry(record.model.clone()).or_insert(0) += 1;
++    }
++    &successful == expected
++}
++
++#[cfg(test)]
++mod measurement_tests {
++    use super::*;
++
++    #[test]
++    fn failed_direct_requests_cannot_hide_unrecorded_managed_calls() {
++        use crate::record::RequestRecord;
++        let records = vec![
++            RequestRecord {
++                model: "api".into(),
++                error: Some("retry".into()),
++                ..Default::default()
++            },
++            RequestRecord {
++                model: "api".into(),
++                ..Default::default()
++            },
++        ];
++        let calls = BTreeMap::from([("api".into(), 1), ("codex:test".into(), 1)]);
++        assert!(!request_coverage(&records, &calls));
++        assert!(request_coverage(
++            &records,
++            &BTreeMap::from([("api".into(), 1)])
++        ));
++    }
++
++    #[test]
++    fn managed_usage_and_context_do_not_depend_on_the_direct_provider_meter() {
++        let mut usage = ark_model::Usage::measured(100, 5);
++        usage.cache_write_tokens = 40;
++        let turns = vec![TurnResult {
++            input: "hello".into(),
++            answer: "bonjour".into(),
++            cited: 0,
++            steps: 1,
++            cancelled: false,
++            error: None,
++            ms: 1,
++            events: vec![
++                HarnessEvent::Context {
++                    report: ark_runtime::ContextReport {
++                        total: 300,
++                        tool_schemas: 200,
++                        ..Default::default()
++                    },
++                },
++                HarnessEvent::ModelCall {
++                    role: "reason".into(),
++                    model: "codex:test".into(),
++                    usage,
++                    elapsed_ms: 1,
++                    first_token_ms: None,
++                    retries: 0,
++                },
++            ],
++        }];
++        let record = measure(
++            &crate::suite::simple(),
++            0,
++            &turns,
++            &Recorder::new(),
++            Verdict::pass("checked"),
++            &Pricing::reference(),
++        );
++        assert!(!record.request_metrics_complete);
++        assert_eq!(record.input_tokens, 100);
++        assert_eq!(record.cache_write_tokens, 40);
++        assert_eq!(record.tool_schema_tokens, 200);
++        assert_eq!(record.peak_context_tokens, 500);
++        assert_eq!(record.mean_context_tokens, 500);
++    }
++}
+diff --git a/crates/ark-bench/tests/suite.rs b/crates/ark-bench/tests/suite.rs
+index 4f433cc..2a0a311 100644
+--- a/crates/ark-bench/tests/suite.rs
++++ b/crates/ark-bench/tests/suite.rs
+@@ -5,6 +5,28 @@ use ark_bench::cassette::Cassette;
+ use ark_bench::faults::FaultPlan;
+ use ark_bench::{run_suite, suite, BenchSettings, HarnessKind, ModelSpec, Report};
+ 
++#[tokio::test]
++async fn managed_recordings_are_rejected_before_any_model_call() {
++    let result = run_suite(
++        &[],
++        &ModelSpec {
++            strong: "codex:unused".into(),
++            fast: None,
++        },
++        &BenchSettings {
++            cassette: Some(Cassette::record()),
++            ..Default::default()
++        },
++        1,
++        "unsupported",
++        |_| {},
++    )
++    .await;
++    if std::env::var("ARK_SESSION_REUSE").as_deref() != Ok("0") {
++        assert!(result.unwrap_err().to_string().contains("bypass recording"));
++    }
++}
++
+ async fn run() -> Report {
+     run_suite(
+         &suite::all(40),
+diff --git a/crates/ark-model/src/cli.rs b/crates/ark-model/src/cli.rs
+index 22c1e24..4dfa7bb 100644
+--- a/crates/ark-model/src/cli.rs
++++ b/crates/ark-model/src/cli.rs
+@@ -558,6 +558,14 @@ impl CliModel {
+             Err(e) => return Some(Err(e)),
+         };
+         let model = (self.model != "default").then_some(self.model.as_str());
++        // No turn has been submitted. An unsupported config overlay must select the
++        // already-isolated exec path, not turn a valid model choice into a failed task.
++        if app.prepare_host().await.is_err() {
++            tracing::warn!("codex host-tool isolation unavailable; using isolated codex exec");
++            app.stop().await;
++            self.no_app.store(true, Ordering::Relaxed);
++            return None;
++        }
+         let thread = match mode {
+             Mode::Open(_) => app.start_thread(&dir, model, sys).await,
+             Mode::Resume(id) if app.has_thread(id) => Ok(id.to_string()),
+@@ -752,6 +760,7 @@ impl CliModel {
+                             .arg(&dir);
+                     }
+                 }
++                host_codex_flags(&mut c, search);
+                 c.arg("--output-schema").arg(&schema);
+                 if self.model != "default" {
+                     c.args(["-m", &self.model]);
+@@ -1512,6 +1521,19 @@ fn until(at: u64) -> Option<String> {
+     })
+ }
+ 
++/// Host-model calls run tools in ARK. This never configures an ACP worker or writes settings.
++pub(crate) fn host_codex_flags(cmd: &mut tokio::process::Command, search: bool) {
++    cmd.args([
++        "-c",
++        "features.shell_tool=false",
++        "-c",
++        "features.apps=false",
++    ]);
++    if !search {
++        cmd.args(["-c", "web_search=\"disabled\""]);
++    }
++}
++
+ fn io_err(e: std::io::Error) -> ProviderError {
+     ProviderError::Api {
+         provider: "cli".into(),
+@@ -2248,6 +2270,7 @@ while IFS= read -r line; do
+   case "$line" in
+     *'"method":"initialize"'*) echo "{\"id\":$id,\"result\":{}}" ;;
+     *'"method":"account/rateLimits/read"'*) echo "{\"id\":$id,\"result\":{}}" ;;
++    *'"method":"config/read"'*) echo "{\"id\":$id,\"result\":{\"config\":{\"mcp_servers\":{\"unused-server\":{\"command\":\"never-start\"}}}}}" ;;
+     *'"method":"model/list"'*)
+       case "$line" in
+         *'"cursor":"next"'*) echo "{\"id\":$id,\"result\":{\"data\":[{\"id\":\"gpt-5.6-luna\",\"model\":\"gpt-5.6-luna\",\"displayName\":\"GPT-5.6-Luna\",\"hidden\":false,\"defaultReasoningEffort\":\"low\",\"supportedReasoningEfforts\":[{\"reasoningEffort\":\"low\",\"description\":\"Fast\"}]}],\"nextCursor\":null}}" ;;
+@@ -2724,6 +2747,109 @@ done
+         );
+     }
+ 
++    #[tokio::test]
++    async fn host_tools_are_disabled_for_both_started_and_reloaded_threads() {
++        let (bin, log) = codex_app(
++            "host-isolation",
++            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
++        );
++        let mut app = crate::codex_app::CodexApp::start(&bin, "test")
++            .await
++            .unwrap();
++        app.start_thread(bin.parent().unwrap(), None, "host")
++            .await
++            .unwrap();
++        app.resume_thread(bin.parent().unwrap(), None, "other-thread")
++            .await
++            .unwrap();
++        app.stop().await;
++        let log = std::fs::read_to_string(log).unwrap();
++        for method in ["thread/start", "thread/resume"] {
++            let line = log
++                .lines()
++                .find(|l| l.contains(&format!("\"method\":\"{method}\"")))
++                .unwrap();
++            let sent: Value = serde_json::from_str(line).unwrap();
++            assert_eq!(
++                sent["params"]["config"]["mcp_servers.unused-server.enabled"],
++                false
++            );
++            assert_eq!(sent["params"]["config"]["features.shell_tool"], false);
++            assert_eq!(sent["params"]["config"]["features.apps"], false);
++            assert_eq!(sent["params"]["config"]["web_search"], "disabled");
++        }
++    }
++
++    #[test]
++    fn host_exec_flags_preserve_only_explicit_web_search() {
++        let mut normal = command(Path::new("codex"));
++        host_codex_flags(&mut normal, false);
++        let args: Vec<_> = normal.as_std().get_args().collect();
++        assert!(args.contains(&std::ffi::OsStr::new("features.shell_tool=false")));
++        assert!(args.contains(&std::ffi::OsStr::new("features.apps=false")));
++        assert!(args.contains(&std::ffi::OsStr::new("web_search=\"disabled\"")));
++        let mut search = command(Path::new("codex"));
++        host_codex_flags(&mut search, true);
++        assert!(!search
++            .as_std()
++            .get_args()
++            .any(|v| v == "web_search=\"disabled\""));
++    }
++
++    #[tokio::test]
++    async fn model_discovery_does_not_require_a_host_compatible_mcp_name() {
++        let (bin, log) = codex_app(
++            "catalog-with-dotted-server",
++            r#"{"action":"reply","text":"ok","tool_calls":[]}"#,
++        );
++        let script = std::fs::read_to_string(&bin)
++            .unwrap()
++            .replace("unused-server", "name.with.dot");
++        std::fs::write(&bin, script).unwrap();
++        let mut app = crate::codex_app::CodexApp::start(&bin, "test")
++            .await
++            .unwrap();
++        let models = app.models().await.unwrap();
++        remember_codex_models(&models);
++        assert!(CliModel::try_new(Cli::Codex, "gpt-5.6-terra@medium").is_ok());
++        assert!(app
++            .start_thread(bin.parent().unwrap(), None, "host")
++            .await
++            .is_err());
++        app.stop().await;
++        let log = std::fs::read_to_string(log).unwrap();
++        assert!(log.find("model/list").unwrap() < log.find("config/read").unwrap());
++        assert!(!log.contains("\"method\":\"thread/start\""));
++    }
++
++    #[tokio::test]
++    async fn incompatible_mcp_names_fall_back_before_submitting_a_vendor_turn() {
++        let (bin, log) = codex_app(
++            "isolated-exec-fallback",
++            r#"{"action":"reply","text":"unused","tool_calls":[]}"#,
++        );
++        let answer = json!({"action":"reply","text":"fallback answer","tool_calls":[]}).to_string();
++        let events = format!(
++            "{}\n{}",
++            json!({"type":"item.completed","item":{"type":"agent_message","text":answer}}),
++            json!({"type":"turn.completed","usage":{"input_tokens":50,"output_tokens":4}})
++        );
++        let script = std::fs::read_to_string(&bin)
++            .unwrap()
++            .replace("unused-server", "name.with.dot");
++        let branch = format!("#!/bin/sh\nif [ \"$1\" != app-server ]; then\ncat > /dev/null\ncat <<'ARK_FAKE_REPLY'\n{events}\nARK_FAKE_REPLY\nexit 0\nfi\n");
++        std::fs::write(&bin, script.replacen("#!/bin/sh\n", &branch, 1)).unwrap();
++        let model = CliModel::new(Cli::Codex, "").with_program(&bin);
++        let (_, completion) = SessionBackend::open(&model, "host", &[], &[Message::user("hello")])
++            .await
++            .unwrap();
++        assert_eq!(completion.content, "fallback answer");
++        assert!(model.no_app.load(Ordering::Relaxed));
++        let log = std::fs::read_to_string(log).unwrap();
++        assert!(!log.contains("\"method\":\"thread/start\""));
++        assert!(!log.contains("\"method\":\"turn/start\""));
++    }
++
+     /// A fake `codex exec` that keeps each reply schema it is given (`schema-<n>.json` next to
+     /// it) and answers with `reply`. With `refuse`, a typed schema is refused as OpenAI refuses
+     /// one it cannot check.
+diff --git a/crates/ark-model/src/codex_app.rs b/crates/ark-model/src/codex_app.rs
+index 3484f10..6027aab 100644
+--- a/crates/ark-model/src/codex_app.rs
++++ b/crates/ark-model/src/codex_app.rs
+@@ -23,6 +23,7 @@ pub(crate) struct CodexApp {
+     next_id: u64,
+     /// Threads this process has started or loaded.
+     threads: std::collections::HashSet<String>,
++    host_config: Option<Value>,
+ }
+ 
+ /// One turn's outcome.
+@@ -57,12 +58,14 @@ impl CodexApp {
+     pub(crate) async fn start(bin: &Path, version: &str) -> Result<Self, AppError> {
+         let mut cmd = crate::cli::command(bin);
+         cmd.args(["app-server", "-c", "sandbox_mode=\"read-only\""]);
++        crate::cli::host_codex_flags(&mut cmd, false);
+         let proc = LiveProcess::spawn(cmd)
+             .map_err(|e| AppError::Broken(format!("could not start: {e}")))?;
+         let mut app = CodexApp {
+             proc,
+             next_id: 0,
+             threads: Default::default(),
++            host_config: None,
+         };
+         app.request(
+             "initialize",
+@@ -90,6 +93,24 @@ impl CodexApp {
+         self.proc.stop().await;
+     }
+ 
++    /// Catalog discovery stays independent of host-model isolation and its exec fallback.
++    pub(crate) async fn prepare_host(&mut self) -> Result<Value, AppError> {
++        if let Some(config) = &self.host_config {
++            return Ok(config.clone());
++        }
++        // Only names leave this response. Never log or persist its credential values.
++        let response = self
++            .request(
++                "config/read",
++                json!({"includeLayers": false}),
++                SETUP_TIMEOUT,
++            )
++            .await?;
++        let config = host_config(&response)?;
++        self.host_config = Some(config.clone());
++        Ok(config)
++    }
++
+     /// Models and effort levels available to this signed-in Codex account.
+     pub(crate) async fn models(&mut self) -> Result<Vec<ModelOption>, AppError> {
+         let mut out = Vec::new();
+@@ -136,6 +157,7 @@ impl CodexApp {
+         instructions: &str,
+     ) -> Result<String, AppError> {
+         let mut p = thread_settings(cwd, model);
++        p["config"] = self.prepare_host().await?;
+         p["baseInstructions"] = json!(instructions);
+         p["ephemeral"] = json!(false);
+         let r = self.request("thread/start", p, SETUP_TIMEOUT).await?;
+@@ -160,6 +182,7 @@ impl CodexApp {
+         id: &str,
+     ) -> Result<(), AppError> {
+         let mut p = thread_settings(cwd, model);
++        p["config"] = self.prepare_host().await?;
+         p["threadId"] = json!(id);
+         self.request("thread/resume", p, SETUP_TIMEOUT).await?;
+         self.threads.insert(id.to_string());
+@@ -334,6 +357,40 @@ fn thread_settings(cwd: &Path, model: Option<&str>) -> Value {
+     p
+ }
+ 
++/// Disable tools that ARK neither offers nor executes through its own approval boundary.
++/// The RPC overlay splits keys on dots literally (quoted segments are not TOML here).
++fn host_config(response: &Value) -> Result<Value, AppError> {
++    let config = response
++        .get("config")
++        .and_then(Value::as_object)
++        .ok_or_else(|| {
++            AppError::Broken("config/read returned no configuration; use isolated exec".into())
++        })?;
++    let mut overrides = json!({
++        "features.shell_tool": false,
++        "features.apps": false,
++        "web_search": "disabled",
++    });
++    if let Some(servers) = config.get("mcp_servers").filter(|v| !v.is_null()) {
++        let servers = servers.as_object().ok_or_else(|| {
++            AppError::Broken("unsupported MCP configuration; use isolated exec".into())
++        })?;
++        for name in servers.keys() {
++            if name.is_empty()
++                || !name
++                    .bytes()
++                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
++            {
++                return Err(AppError::Broken(
++                    "unsupported MCP name in host-model configuration; use isolated exec".into(),
++                ));
++            }
++            overrides[format!("mcp_servers.{name}.enabled")] = json!(false);
++        }
++    }
++    Ok(overrides)
++}
++
+ fn record_limits(limits: &Value) {
+     if let Some(u) = crate::usage::from_codex(limits) {
+         crate::usage::record(u);
+@@ -360,6 +417,25 @@ fn error_text(e: &Value) -> String {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn host_model_configuration_keeps_credentials_and_provider_choices_out() {
++        let settings = host_config(&json!({"config": {
++            "model": "user-model", "model_provider": "custom",
++            "mcp_servers": {"notes-server": {"url": "https://example.test", "token": "secret"}}
++        }}))
++        .unwrap();
++        assert_eq!(settings["mcp_servers.notes-server.enabled"], false);
++        assert_eq!(settings["features.shell_tool"], false);
++        assert_eq!(settings["features.apps"], false);
++        assert_eq!(settings["web_search"], "disabled");
++        let text = settings.to_string();
++        for private in ["secret", "example.test", "user-model", "custom"] {
++            assert!(!text.contains(private));
++        }
++        assert!(host_config(&json!({})).is_err());
++        assert!(host_config(&json!({"config":{"mcp_servers":{"name.with.dot":{}}}})).is_err());
++    }
++
+     #[test]
+     fn usage_counts_cached_input_inside_input() {
+         let u = turn_usage(

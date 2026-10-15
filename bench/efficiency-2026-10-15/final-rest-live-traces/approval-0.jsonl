@@ -1,0 +1,21 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":50,"capability_index":256,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":26,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":602,"action_schemas":102,"loaded_actions":3,"total":656,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"I"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" need"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" your"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" approval"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" before"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" saving"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" this"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" note"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":","}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" because"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" it"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" changes"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" stored"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" state"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13185,"completion_tokens":37,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":19827,"first_token_ms":19673,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 0 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"I need your approval before saving this note, because it changes stored state.","streamed":true}}

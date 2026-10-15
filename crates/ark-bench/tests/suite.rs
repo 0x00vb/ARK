@@ -5,6 +5,31 @@ use ark_bench::cassette::Cassette;
 use ark_bench::faults::FaultPlan;
 use ark_bench::{run_suite, suite, BenchSettings, HarnessKind, ModelSpec, Report};
 
+#[tokio::test]
+async fn managed_recordings_are_rejected_before_any_model_call() {
+    let result = run_suite(
+        &[],
+        &ModelSpec {
+            strong: "codex:unused".into(),
+            fast: None,
+        },
+        &BenchSettings {
+            cassette: Some(Cassette::record()),
+            ..Default::default()
+        },
+        1,
+        "unsupported",
+        |_| {},
+    )
+    .await;
+    if std::env::var("ARK_SESSION_REUSE")
+        .map(|v| v.trim() != "0")
+        .unwrap_or(true)
+    {
+        assert!(result.unwrap_err().to_string().contains("bypass recording"));
+    }
+}
+
 async fn run() -> Report {
     run_suite(
         &suite::all(40),

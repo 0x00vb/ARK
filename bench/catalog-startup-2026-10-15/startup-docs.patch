@@ -1,0 +1,186 @@
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -8,6 +8,24 @@
+ - One line per change where possible. Link to a doc instead of explaining it here.
+ 
+ ## [Unreleased]
++
++### Changed
++
++- The default agent instructions reserve state updates for ongoing or later work, avoiding
++  a separate bookkeeping step just to repeat a completed result.
++
++### Fixed
++
++- Codex model and effort discovery no longer waits for optional usage-limit telemetry.
++  Required model validation keeps its existing deadline; ordinary sessions still collect usage.
++
++- The default approval instructions tell models to propose permitted actions through the
++  existing approval gate instead of ending with a text-only permission request.
++- Codex host-model sessions disable unused native commands, connectors and configured MCP
++  servers without changing user settings. Unsupported isolation uses the existing isolated
++  execution fallback; model discovery remains available.
++- Benchmarks preserve managed-session cache writes, mark unavailable request metrics and
++  reject managed recording, replay and fault injection that cannot intercept those calls.
+ 
+ ## [0.24.0] - 2026-10-15
+ 
+--- a/CURRENT_STATE.md
++++ b/CURRENT_STATE.md
+@@ -1,4 +1,40 @@
+ # Current state
++
++## Codex catalog startup
++
++The isolated `ark-codex-catalog` tree builds on the frozen reviewed efficiency patch.
++Catalog discovery now skips the optional usage query while ordinary sessions retain it.
++The production six-second deadline and strict advertised model/effort validation remain.
++Deterministic fixtures cover delayed replies, errors, timeout, cancellation and descendant
++cleanup. Focused model tests pass 99/99, including in the workspace gate. The actual writer
++passes once on explicit `codex:gpt-5.6-terra@medium`: two calls, 4 and 3 words, total 7,
++no save and unchanged manuscript. The exact-source `scripts/ci.sh` gate passes, including
++release build and all 22 simulated workloads. All 20 reported non-timing metrics are unchanged.
++Independent final QA passes. Own debug and release output have been cleaned. Integration
++remains on `35c94426`; this closes only the recorded optional-telemetry deadline failure.
++Evidence and baseline source identities: `bench/catalog-startup-2026-10-15/README.md`.
++Board: `c3ed5945`. No commit, merge or release.
++
++## Call and token efficiency evaluation
++
++The isolated `ark-call-efficiency` tree contains scoped Codex host-tool isolation, a measured
++default-instruction experiment and honest managed-session benchmark coverage. Baseline:
++30/30 checked attempts, 104 calls and 2,012,191 tokens on `codex:gpt-5.6-terra@medium`.
++Isolation-only: 30/30, 102 calls and 1,526,988 tokens. The first prompt candidate is rejected
++after one approval task stopped at a text-only permission request (29/30 overall). A scoped
++approval mapping correction passes a fresh 30/30 with 87 calls and 1,290,472 tokens. All
++18 focused safety and prompt-capture checks and workspace tests pass. The exact-source
++`scripts/ci.sh` gate passes. Real writing-app dogfood passes on the same named Codex model
++with unforced effort (4 and 3 words, total 7, manuscript unchanged). Explicit-effort writer
++startup failed twice before a model call: the optional usage-limit query and model listing
++exceeded the existing catalog deadline. That separate reliability fix is `c3ed5945`; the
++unforced-effort check does not establish explicit-effort startup reliability. Integration
++of the uncommitted changes is `35c94426`. The startup follow-up above closes that recorded
++explicit-effort deadline failure in this tree; the original evaluation remains preserved. All own build output has been cleaned.
++Vendor configuration changed outside the evaluation. Model, effort, fixtures and ARK budgets
++are fixed, but observed cross-condition differences are not strict causal savings. No commit
++or release occurred. Protocol, hashes, all failures and limitations:
++`bench/efficiency-2026-10-15/README.md`. Board: `958effaa`.
+ 
+ ## Advanced artifact surfaces in development
+ 
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -36,7 +36,7 @@
+ | Every live benchmark uses one 4B local model (qwen3:4b-instruct through Ollama) | `bench/RESULTS.md` |
+ | With qwen3:4b, `tool-lookup` and `approval` fail 3 of 3: the model picks a plausible neighbor tool, or files the note in its own working state | `bench/RESULTS.md` |
+ | Time to first token rose 137 to 259 ms (median) with the working state last in the request; cause not proven | `bench/RESULTS.md` |
+-| A subscription session's first call still pays the CLI's start-up; a Codex thread also starts the MCP servers of the person's Codex setup (about 4 s and 15k tokens measured), since `codex app-server` has no `--ignore-user-config` | `ark-model`, ADR 0012 |
++| A subscription session's first call still pays the CLI's start-up and native context. The unreleased host path disables unused native tools and configured MCP servers through scoped overrides, with isolated exec fallback. Catalog discovery now skips optional usage telemetry while keeping its six-second deadline and strict advertised-effort checks. The bounded efficiency evaluation remains model-specific and configuration-confounded | `ark-model`, ADR 0012 |
+ | `codex app-server` is experimental in Codex; a protocol change falls back to `codex exec` (a process per call, no streaming) | `ark-model` |
+ | `claude:haiku` sometimes tries host tools natively; it recovered in 6 of 6 tasks in the last runs, and a check asks again when it gives up, but that check has only a scripted test | `bench/RESULTS.md` |
+ | Orchestration is measured on one program, three runs per setting; managed sessions cut uncached input but not wall time | `bench/RESULTS.md` |
+--- a/bench/RESULTS.md
++++ b/bench/RESULTS.md
+@@ -2,6 +2,57 @@
+ 
+ Every number here comes from a recorded report in this directory (`README.md` lists them).
+ `bench/results.py` prints the before/after tables from two reports.
++
++## Codex catalog startup (2026-10-15)
++
++A read-only diagnosis of failed explicit-effort starts measured initialize, optional usage
++and model listing at 7.334 s total against the existing six-second catalog deadline.
++Catalog discovery now skips optional usage telemetry; ordinary sessions retain it.
++Required model/effort validation and the production deadline stay the same.
++
++The complete model suite passes 99/99, including stalled queries, errors, process-tree
++timeout/cancellation and ordinary account-usage recording. The exact-source full gate passes.
++All 20 reported non-timing metrics are unchanged across the 22 simulated workloads. One
++actual writing-app task on explicit `codex:gpt-5.6-terra@medium` passes with two calls,
++4 and 3 words, total 7, and unchanged manuscript. This is behavior validation, not a new
++matched live benchmark or latency claim.
++
++The preceding efficiency source/evidence remains frozen and separately identified.
++Protocol, retained failures, source snapshots and startup-only patch:
++[`catalog-startup-2026-10-15/README.md`](catalog-startup-2026-10-15/README.md).
++Board: `c3ed5945`. Integration remains separate.
++
++## Bounded call and token evaluation (2026-10-15)
++
++On `codex:gpt-5.6-terra@medium`, ten fixed workloads with three attempts each:
++
++| Condition | Checked success | Calls | Total tokens | Common reference estimate |
++|---|---:|---:|---:|---:|
++| Baseline `11eee32` | 30/30 | 104 | 2,012,191 | $1.8234412 |
++| Native host-tool isolation | 30/30 | 102 | 1,526,988 | $1.4472496 |
++| First bookkeeping prompt, rejected | 29/30 | 91 | 1,382,148 | $1.3137264 |
++| Corrected approval mapping | 30/30 | 87 | 1,290,472 | $1.2120544 |
++
++The local vendor configuration hash changed outside this evaluation. The observed 16.3%
++fewer calls and 35.9% fewer tokens cannot be attributed solely to the patches. Model, effort,
++workload hashes and the 16,000-token ARK budgets stayed fixed. Reference estimates are not
++subscription bills. Three attempts are directional, with no controlled latency claim.
++
++A fixed synthetic probe independently supports the unused-native-tool context mechanism.
++The rejected prompt stopped at a text-only approval request. The correction routes permitted
++proposals through the existing host gate. Twelve event audits pass for approvals, fresh reads,
++greetings and restart retention. Stale-read uses more calls overall; approvals rise from 10
++to 11. The simulated 22-workload suite retains all successes and call counts, with 3.5% more
++tokens and a 1.2% higher reference estimate from the longer instructions. Its baseline was
++explicitly regenerated. The exact-source full gate passes. A real writing-app check passes
++on the same named Codex model with unforced effort. Two explicit-effort startup failures
++stopped before any model call and were recorded separately. The catalog follow-up above
++(`c3ed5945`) now passes that explicit-effort path; this original unforced-effort check alone
++did not establish it reliable.
++
++Protocol, hashes, every condition, rejected attempts, per-task results and limits:
++[`efficiency-2026-10-15/README.md`](efficiency-2026-10-15/README.md). This is not a
++Reason comparison, delegation efficiency claim or proof of launch readiness.
+ 
+ ## Repeated failed calls stop after one retry (2026-10-11)
+ 
+--- a/docs/adr/0012-vendor-cli-processes-live-with-their-session.md
++++ b/docs/adr/0012-vendor-cli-processes-live-with-their-session.md
+@@ -39,10 +39,40 @@
+   answer to an old question in the vendor's history.
+ - `codex app-server` is marked experimental by Codex; a protocol change shows up as the
+   `exec` fallback and a warning in the log, not as a failed turn.
+-- A Codex thread still starts the MCP servers of the person's own Codex setup (about 4 s and
+-  15k tokens on the machine measured); `app-server` has no `--ignore-user-config`.
++- Initially, a Codex thread started the MCP servers of the person's own Codex setup (about
++  4 s and 15k tokens on the machine measured). The 2026-10-15 correction below replaces that
++  behavior for host-model calls.
++
++## Host-tool isolation correction (2026-10-15)
++
++ARK executes host tools through its own authority boundary. Advertising the vendor's unused
++native tools adds context and an unnecessary second execution path. Host-model processes
++disable native commands and connectors. Before starting or loading a reasoning thread, the
++adapter reads configured MCP server names and disables those servers in its scoped overlay.
++It never logs raw configuration, writes user settings or changes ACP workers. Explicit web
++search remains available through its separate host capability.
++
++Model catalog discovery does not need this overlay. If the installed protocol cannot supply
++it, or a server name cannot be safely represented in its dotted-key format, the adapter stops
++that process before a vendor turn and uses the existing isolated `codex exec` fallback.
++The fallback ignores user rules/config and retains its read-only sandbox. Every host tool
++still runs in ARK, with the same approvals and recovery behavior.
++
++Evaluation and limits: `bench/efficiency-2026-10-15/README.md`.
+ 
+ ## Check
+ `crates/ark-model/src/cli.rs` tests (fake CLIs speaking each protocol: one process per
+ session, streaming, a process that stops, the app server's own requests declined),
+ `crates/ark-model/src/session.rs` (`a_cancelled_call_drops_the_vendor_session_and_the_next_one_opens`).
++
++
++## Catalog startup correction (2026-10-15)
++
++Model discovery needs the handshake and the advertised model/effort list. It does not need
++the account usage query. A measured 5.004-second optional usage reply plus model listing
++pushed discovery beyond its existing six-second deadline, rejecting an advertised effort
++before any model call. Catalog startup now uses the shared handshake without that optional
++query. Ordinary sessions call the same handshake, then retain their usage query and recording.
++The catalog deadline, strict effort checks, process-tree cleanup and execution settings stay
++the same. Evidence and focused cancellation/error fixtures:
++`bench/catalog-startup-2026-10-15/README.md`.

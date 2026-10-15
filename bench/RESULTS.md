@@ -3,6 +3,57 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Codex catalog startup (2026-10-15)
+
+A read-only diagnosis of failed explicit-effort starts measured initialize, optional usage
+and model listing at 7.334 s total against the existing six-second catalog deadline.
+Catalog discovery now skips optional usage telemetry; ordinary sessions retain it.
+Required model/effort validation and the production deadline stay the same.
+
+The complete model suite passes 99/99, including stalled queries, errors, process-tree
+timeout/cancellation and ordinary account-usage recording. The exact-source full gate passes.
+All 20 reported non-timing metrics are unchanged across the 22 simulated workloads. One
+actual writing-app task on explicit `codex:gpt-5.6-terra@medium` passes with two calls,
+4 and 3 words, total 7, and unchanged manuscript. This is behavior validation, not a new
+matched live benchmark or latency claim.
+
+The preceding efficiency source/evidence remains frozen and separately identified.
+Protocol, retained failures, source snapshots and startup-only patch:
+[`catalog-startup-2026-10-15/README.md`](catalog-startup-2026-10-15/README.md).
+Board: `c3ed5945`. Integration remains separate.
+
+## Bounded call and token evaluation (2026-10-15)
+
+On `codex:gpt-5.6-terra@medium`, ten fixed workloads with three attempts each:
+
+| Condition | Checked success | Calls | Total tokens | Common reference estimate |
+|---|---:|---:|---:|---:|
+| Baseline `11eee32` | 30/30 | 104 | 2,012,191 | $1.8234412 |
+| Native host-tool isolation | 30/30 | 102 | 1,526,988 | $1.4472496 |
+| First bookkeeping prompt, rejected | 29/30 | 91 | 1,382,148 | $1.3137264 |
+| Corrected approval mapping | 30/30 | 87 | 1,290,472 | $1.2120544 |
+
+The local vendor configuration hash changed outside this evaluation. The observed 16.3%
+fewer calls and 35.9% fewer tokens cannot be attributed solely to the patches. Model, effort,
+workload hashes and the 16,000-token ARK budgets stayed fixed. Reference estimates are not
+subscription bills. Three attempts are directional, with no controlled latency claim.
+
+A fixed synthetic probe independently supports the unused-native-tool context mechanism.
+The rejected prompt stopped at a text-only approval request. The correction routes permitted
+proposals through the existing host gate. Twelve event audits pass for approvals, fresh reads,
+greetings and restart retention. Stale-read uses more calls overall; approvals rise from 10
+to 11. The simulated 22-workload suite retains all successes and call counts, with 3.5% more
+tokens and a 1.2% higher reference estimate from the longer instructions. Its baseline was
+explicitly regenerated. The exact-source full gate passes. A real writing-app check passes
+on the same named Codex model with unforced effort. Two explicit-effort startup failures
+stopped before any model call and were recorded separately. The catalog follow-up above
+(`c3ed5945`) now passes that explicit-effort path; this original unforced-effort check alone
+did not establish it reliable.
+
+Protocol, hashes, every condition, rejected attempts, per-task results and limits:
+[`efficiency-2026-10-15/README.md`](efficiency-2026-10-15/README.md). This is not a
+Reason comparison, delegation efficiency claim or proof of launch readiness.
+
 ## Repeated failed calls stop after one retry (2026-10-11)
 
 An identical failed read or observation now runs once and gets one retry in a turn. Later

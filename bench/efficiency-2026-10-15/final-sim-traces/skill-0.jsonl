@@ -1,0 +1,28 @@
+{"type":"request","request":{"model":"sim","tools":8,"tool_schema_tokens":645,"system_tokens":571,"message_tokens":192,"messages":2,"est_prompt_tokens":1408,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1408,"completion_tokens":17,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["skills.read"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":8,"tool_schema_tokens":645,"system_tokens":571,"message_tokens":285,"messages":4,"est_prompt_tokens":1501,"prefix_reuse_tokens":1368,"usage":{"prompt_tokens":1501,"completion_tokens":48,"measured":false,"cached_tokens":1368,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":8,"tool_schema_tokens":645,"system_tokens":571,"message_tokens":373,"messages":6,"est_prompt_tokens":1589,"prefix_reuse_tokens":1451,"usage":{"prompt_tokens":1589,"completion_tokens":19,"measured":false,"cached_tokens":1451,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":299,"project":50,"capability_index":289,"working_state":33,"conversation":0,"workspace":0,"rules":0,"skills":53,"task":38,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":645,"action_schemas":145,"loaded_actions":4,"total":763,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1408,"completion_tokens":17,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_0","action":"skills.read","input":{"name":"release-notes"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_0","action":"skills.read","ok":true,"summary":"skill release-notes:\nBegin with the line `Release notes, format R7`.\nThen one line per change, starting with `Added:`, `Fixed:` or `Changed:`.","invocation":"863b7c91-d9f6-41c6-b7e5-40a0428039bf","duration_ms":0,"error":null,"context_tokens":72,"raw_tokens":66}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":299,"project":50,"capability_index":289,"working_state":33,"conversation":0,"workspace":0,"rules":0,"skills":53,"task":38,"tool_rounds":72,"model_output":21,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":645,"action_schemas":145,"loaded_actions":4,"total":856,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1501,"completion_tokens":48,"measured":false,"cached_tokens":1368,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Release notes, format R7\nAdded: an export button\nFixed: the login timeout"}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":299,"project":50,"capability_index":289,"working_state":60,"conversation":0,"workspace":0,"rules":0,"skills":53,"task":38,"tool_rounds":81,"model_output":73,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":645,"action_schemas":145,"loaded_actions":4,"total":944,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Release "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"notes, "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"format "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"R7\nAdded: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"an "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"export "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"button\nFixed: "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"login "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"timeout"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1589,"completion_tokens":19,"measured":false,"cached_tokens":1451,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 1 evidence item cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Release notes, format R7\nAdded: an export button\nFixed: the login timeout","streamed":true}}

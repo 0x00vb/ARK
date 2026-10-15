@@ -1,0 +1,17 @@
+{
+  "attempts": 30,
+  "successes": 30,
+  "model_calls": 102,
+  "input_tokens": 1518568,
+  "output_tokens": 8420,
+  "cached_input_tokens": 930048,
+  "uncached_input_tokens": 588520,
+  "total_tokens": 1526988,
+  "cost_usd": 1.4472496000000001,
+  "provider_errors": 0,
+  "provider_retries": 0,
+  "approvals_requested": 9,
+  "wall_ms": 743312,
+  "reference_cost_per_success": 0.048241653333333336,
+  "state_updates": null
+}

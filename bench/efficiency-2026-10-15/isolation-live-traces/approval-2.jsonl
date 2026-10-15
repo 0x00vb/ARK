@@ -1,0 +1,24 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":256,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":26,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":602,"action_schemas":102,"loaded_actions":3,"total":643,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":13060,"completion_tokens":67,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":14214,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_0","action":"notes.write","input":{"text":"ship the release on Thursday."}}}
+{"type":"event","turn":0,"event":{"type":"approval_requested","request":{"action":"notes.write","summary":"save a note","risk":"mutate","input":{"text":"ship the release on Thursday."},"class":"notes.write","preview":"notes.write(text=\"ship the release on Thursday.\")"}}}
+{"type":"event","turn":0,"event":{"type":"approval_resolved","action":"notes.write","class":"notes.write","decision":"allow_once"}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_0","action":"notes.write","ok":true,"summary":"saved=true, chars=29","invocation":"5cfcd952-e42b-4493-993c-4f21461f87f2","duration_ms":0,"error":null,"context_tokens":34,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":256,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":26,"tool_rounds":34,"model_output":25,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":602,"action_schemas":102,"loaded_actions":3,"total":702,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Saved"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" the"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" note"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":":"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" “"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ship"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" the"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" release"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" on"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Thursday"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":".”"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":18517,"completion_tokens":81,"measured":true,"cached_tokens":12032,"cache_write_tokens":0},"elapsed_ms":3608,"first_token_ms":3288,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 1 evidence item cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Saved the note: “ship the release on Thursday.”","streamed":true}}

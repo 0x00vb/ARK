@@ -196,6 +196,18 @@ output behind them, compressed rounds, and the prefix tokens shared with recent 
 Per workload and in total (`Summary`): means of the above, success rate, cost per successful
 run (total cost over successes), median and p95 turn time, median time to first token.
 
+Managed subscription sessions replace the direct provider wrapper. Their runtime events
+still report outcome and vendor usage, and context reports estimate the canonical request.
+`RunRecord.request_metrics_complete` is false when successful per-model request coverage is
+missing. Exact metadata-call counts, prefix reuse and raw request traces are unavailable in
+that case. Do not interpret their zero fields as measured values. The CLI prints a warning.
+Managed recording, replay and fault injection are rejected before execution. To test those
+features on a subscription, explicitly select `ARK_SESSION_REUSE=0` and label the experiment
+stateless. Do not compare it as if session reuse remained enabled.
+
+The bounded 2026-10-15 evaluation and its source identities, raw reports and limits are in
+[`bench/efficiency-2026-10-15/README.md`](../bench/efficiency-2026-10-15/README.md).
+
 Cost uses the model's list price when it is a known hosted model, otherwise the reference
 price (Claude Sonnet 5.5: $2 in, $2.50 cache write, $0.20 cache read, $10 out per million
 tokens). The report says which.

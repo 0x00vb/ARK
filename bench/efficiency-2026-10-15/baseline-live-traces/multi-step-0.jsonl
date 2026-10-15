@@ -1,0 +1,92 @@
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":685,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"I"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"’ll"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" look"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" up"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Ada"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Lov"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"el"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ace"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":","}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" then"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" total"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" her"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" orders"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":17358,"completion_tokens":73,"measured":true,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":25236,"first_token_ms":24244,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_0_0","action":"crm.find_customer","input":{"name":"Ada Lovelace"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_0_0","action":"crm.find_customer","ok":true,"summary":"id=C-1042, name=Ada Lovelace, tier=gold","invocation":"3da72d97-8322-4adb-9aba-3b3dc0443513","duration_ms":0,"error":null,"context_tokens":40,"raw_tokens":13}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":40,"model_output":23,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":748,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Ada"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Lov"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"el"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ace"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"’s"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" customer"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" ID"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" is"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" C"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"-"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"104"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"2"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" I"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"’ll"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" retrieve"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" her"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" orders"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":17528,"completion_tokens":149,"measured":true,"cached_tokens":17152,"cache_write_tokens":0},"elapsed_ms":9715,"first_token_ms":7641,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Ada Lovelace is customer C-1042 (gold tier)."}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_1_1","action":"crm.orders","input":{"customer_id":"C-1042"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_1_1","action":"crm.orders","ok":true,"summary":"customer_id=C-1042, orders=[{\"id\":\"O-1\",\"amount\":120.5},{\"id\":\"O-2\",\"amount\":89.99},{\"id\":\"O-3\",\"amount\":310.0},{\"id\":\"O-4\",\"amount\":45.25}]","invocation":"8c7c0503-78ef-4657-a4d2-2c11eca93b81","duration_ms":0,"error":null,"context_tokens":64,"raw_tokens":37}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":57,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":113,"model_output":85,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":903,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"I"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"’ll"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" calculate"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" the"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" sum"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" of"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" the"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" four"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" order"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" amounts"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":17910,"completion_tokens":78,"measured":true,"cached_tokens":17152,"cache_write_tokens":0},"elapsed_ms":14015,"first_token_ms":13365,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"codex_2_0","action":"calc.eval","input":{"expr":"120.5 + 89.99 + 310.0 + 45.25"}}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"codex_2_0","action":"calc.eval","ok":true,"summary":"expr=120.5 + 89.99 + 310.0 + 45.25, value=565.74","invocation":"2a480027-13f6-44ca-8cd8-a5605944cd11","duration_ms":0,"error":null,"context_tokens":41,"raw_tokens":14}}
+{"type":"event","turn":0,"event":{"type":"step","index":4}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":4,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":57,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":154,"model_output":110,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":969,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"I"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"’ll"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" save"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" the"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" verified"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" total"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":18091,"completion_tokens":119,"measured":true,"cached_tokens":17152,"cache_write_tokens":0},"elapsed_ms":12995,"first_token_ms":11583,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Ada Lovelace’s four orders total 565.74."}}
+{"type":"event","turn":0,"event":{"type":"step","index":5}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":5,"role":"reason","instructions":286,"project":50,"capability_index":273,"working_state":77,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":38,"tool_rounds":163,"model_output":157,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":630,"action_schemas":130,"loaded_actions":3,"total":1045,"budget":16000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Ada"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" Lov"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"el"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"ace"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"’s"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" order"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" total"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" is"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":" **"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"$"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"565"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"74"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"**"}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"."}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"codex:gpt-5.6-terra@medium","usage":{"prompt_tokens":18362,"completion_tokens":36,"measured":true,"cached_tokens":17152,"cache_write_tokens":0},"elapsed_ms":4396,"first_token_ms":3781,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 3 evidence items cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Ada Lovelace’s order total is **$565.74**.","streamed":true}}

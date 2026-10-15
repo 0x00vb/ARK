@@ -1,0 +1,24 @@
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":604,"system_tokens":693,"message_tokens":118,"messages":2,"est_prompt_tokens":1415,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1415,"completion_tokens":20,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["search_evidence"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":6,"tool_schema_tokens":604,"system_tokens":693,"message_tokens":208,"messages":4,"est_prompt_tokens":1505,"prefix_reuse_tokens":1375,"usage":{"prompt_tokens":1505,"completion_tokens":12,"measured":false,"cached_tokens":1375,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":0,"tool_schema_tokens":0,"system_tokens":777,"message_tokens":50,"messages":1,"est_prompt_tokens":827,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":827,"completion_tokens":12,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":false}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":197,"capability_index":260,"working_state":33,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":34,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":604,"action_schemas":104,"loaded_actions":2,"total":811,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1415,"completion_tokens":20,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"retrieval","what":"search_evidence \"K7 kettle warranty\""}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":197,"capability_index":260,"working_state":33,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":34,"tool_rounds":0,"model_output":24,"retrieved":66,"ledger":0,"compressed_rounds":0,"tool_schemas":604,"action_schemas":104,"loaded_actions":2,"total":901,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"The "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Model "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"K7 "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"kettle "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"has "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"an "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"18 "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"months "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"warranty "}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1505,"completion_tokens":12,"measured":false,"cached_tokens":1375,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":false,"detail":"answer is ungrounded: no evidence cited and no uncertainty acknowledged"}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":0,"role":"critic","instructions":286,"project":407,"capability_index":0,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":84,"tool_rounds":0,"model_output":26,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":0,"action_schemas":0,"loaded_actions":0,"total":827,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"critic","model":"sim","usage":{"prompt_tokens":827,"completion_tokens":12,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"The Model K7 kettle has an 18 months warranty","streamed":false}}

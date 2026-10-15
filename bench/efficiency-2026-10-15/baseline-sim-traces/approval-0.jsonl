@@ -1,0 +1,24 @@
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":602,"system_tokens":546,"message_tokens":97,"messages":2,"est_prompt_tokens":1245,"prefix_reuse_tokens":0,"usage":{"prompt_tokens":1245,"completion_tokens":21,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["notes.write"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":602,"system_tokens":546,"message_tokens":156,"messages":4,"est_prompt_tokens":1304,"prefix_reuse_tokens":1214,"usage":{"prompt_tokens":1304,"completion_tokens":33,"measured":false,"cached_tokens":1214,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":null,"error":null,"calls":["record_state"],"cache_write_tokens":0}}
+{"type":"request","request":{"model":"sim","tools":7,"tool_schema_tokens":602,"system_tokens":546,"message_tokens":215,"messages":6,"est_prompt_tokens":1363,"prefix_reuse_tokens":1263,"usage":{"prompt_tokens":1363,"completion_tokens":8,"measured":false,"cached_tokens":1263,"cache_write_tokens":0},"latency_ms":0,"first_token_ms":0,"error":null,"calls":[],"cache_write_tokens":0}}
+{"type":"event","turn":0,"event":{"type":"classified","trivial":true}}
+{"type":"event","turn":0,"event":{"type":"step","index":1}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":1,"role":"reason","instructions":286,"project":50,"capability_index":256,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":26,"tool_rounds":0,"model_output":0,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":602,"action_schemas":102,"loaded_actions":3,"total":643,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1245,"completion_tokens":21,"measured":false,"cached_tokens":0,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"tool_call","id":"sim_1_0","action":"notes.write","input":{"text":"ship the release on Thursday"}}}
+{"type":"event","turn":0,"event":{"type":"approval_requested","request":{"action":"notes.write","summary":"save a note","risk":"mutate","input":{"text":"ship the release on Thursday"},"class":"notes.write","preview":"notes.write(text=\"ship the release on Thursday\")"}}}
+{"type":"event","turn":0,"event":{"type":"approval_resolved","action":"notes.write","class":"notes.write","decision":"allow_once"}}
+{"type":"event","turn":0,"event":{"type":"tool_result","id":"sim_1_0","action":"notes.write","ok":true,"summary":"saved=true, chars=28","invocation":"eab09153-6295-4b80-aa9a-a8da8af079a2","duration_ms":0,"error":null,"context_tokens":34,"raw_tokens":7}}
+{"type":"event","turn":0,"event":{"type":"step","index":2}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":2,"role":"reason","instructions":286,"project":50,"capability_index":256,"working_state":24,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":26,"tool_rounds":34,"model_output":25,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":602,"action_schemas":102,"loaded_actions":3,"total":702,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1304,"completion_tokens":33,"measured":false,"cached_tokens":1214,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":null,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"state_update","kind":"finding","text":"Saved the note"}}
+{"type":"event","turn":0,"event":{"type":"step","index":3}}
+{"type":"event","turn":0,"event":{"type":"context","report":{"step":3,"role":"reason","instructions":286,"project":50,"capability_index":256,"working_state":37,"conversation":0,"workspace":0,"rules":0,"skills":0,"task":26,"tool_rounds":43,"model_output":62,"retrieved":0,"ledger":0,"compressed_rounds":0,"tool_schemas":602,"action_schemas":102,"loaded_actions":3,"total":761,"budget":6000}}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"Saved "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"the "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"note "}}
+{"type":"event","turn":0,"event":{"type":"text_delta","text":"[inv:eab09153]"}}
+{"type":"event","turn":0,"event":{"type":"model_call","role":"reason","model":"sim","usage":{"prompt_tokens":1363,"completion_tokens":8,"measured":false,"cached_tokens":1263,"cache_write_tokens":0},"elapsed_ms":0,"first_token_ms":0,"retries":0}}
+{"type":"event","turn":0,"event":{"type":"self_check","passed":true,"detail":"answered; 1 evidence item cited"}}
+{"type":"event","turn":0,"event":{"type":"answer","text":"Saved the note [inv:eab09153]","streamed":true}}

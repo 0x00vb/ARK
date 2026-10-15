@@ -17,8 +17,22 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Changed
 
+- The default agent instructions reserve state updates for ongoing or later work, avoiding
+  a separate bookkeeping step just to repeat a completed result.
 - Test builds use an unoptimized Cargo profile for faster feedback. Development and release
   builds keep their existing optimization settings.
+
+### Fixed
+
+- Codex model and effort discovery no longer waits for optional usage-limit telemetry.
+  Required model validation keeps its existing deadline; ordinary sessions still collect usage.
+- The default approval instructions tell models to propose permitted actions through the
+  existing approval gate instead of ending with a text-only permission request.
+- Codex host-model sessions disable unused native commands, connectors and configured MCP
+  servers without changing user settings. Unsupported isolation uses the existing isolated
+  execution fallback; model discovery remains available.
+- Benchmarks preserve managed-session cache writes, mark unavailable request metrics and
+  reject managed recording, replay and fault injection that cannot intercept those calls.
 
 ## [0.24.0] - 2026-10-15
 

@@ -1,0 +1,23 @@
+{
+  "source_sha256": {
+    "crates/ark-model/src/cli.rs": "a5a5e2d4329ca0fbcbbed4a64fda48f17ff51ef1ab8cca4089d37fd8bb94adf1",
+    "crates/ark-model/src/codex_app.rs": "207a4cbe5957c7daa5e31b8d82c89c0b2b0e9dc9a976762c51c7fbf5caf992b2"
+  },
+  "startup_patch_sha256": "309e962d5464ef524af32296239f2f4ed50af1e5ac96f348e7bdc310bbc328d2",
+  "six_second_catalog_deadline_preserved": true,
+  "new_model_calls": 2,
+  "parent_baseline": "baseline-manifest.json",
+  "consumer_model": "codex:gpt-5.6-terra@medium",
+  "consumer_binary_profile": "dev, exact frozen full workspace test build",
+  "consumer_success": true,
+  "full_ci": "passed",
+  "simulated_non_timing_metrics": "20/20 unchanged",
+  "simulated_workloads": "22/22 pass",
+  "no_new_live_matrix": true,
+  "production_source_stayed_frozen": true,
+  "startup_docs_patch_sha256": "2646625ebe6e1137f7c517aa533813fe12ac3b64a4d39475df8512e7b14d7218",
+  "independent_qa": "pass",
+  "committed": false,
+  "merged": false,
+  "released": false
+}

@@ -15,7 +15,6 @@ import { Pane, invocationView, artifactView } from "./pane.js";
 import { registry, installApi, dispatchExt, presenterFor, onExt, waitForExtension, loadedExtensions } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
 import { fileView, kindOf, KIND_ICON, setFileKinds } from "./file.js";
-import { registerCapabilities } from "./capabilities.js";
 import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
 import { registerMarketplace } from "./marketplace.js";
@@ -365,8 +364,7 @@ function saveLayout() {
 function rememberTab(summary = state.summary) {
   const session = summary?.session;
   if (!session?.id) return;
-  chatTabs.ids = chatTabs.ids.filter((id) => id !== session.id);
-  chatTabs.ids.push(session.id);
+  if (!chatTabs.ids.includes(session.id)) chatTabs.ids.push(session.id);
   chatTabs.titles.set(session.id, session.title || "Untitled chat");
   saveTabs();
   renderChatTabs();
@@ -1550,7 +1548,7 @@ function showView(id, params) {
   showTitle();
   sidebar.markView(id);
   topbar.mark(id);
-  destinations?.mark(id === "schedules" ? "schedules" : id === SETTINGS ? null : "home");
+  destinations?.mark(id === "schedules" ? "schedules" : null);
   reportFocus();
 }
 
@@ -1978,7 +1976,6 @@ async function bootOnce(again) {
     topbar.render();
     // ARK's own Settings sections.
     registerAppearance(window.ark);
-    registerCapabilities(window.ark);
     registerGrants(window.ark);
     registerMarketplace(window.ark);
     registerPlugins(window.ark);

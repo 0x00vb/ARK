@@ -1,7 +1,12 @@
 # 0069. Plugins are reviewed capabilities from independent providers
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-14
+
+Amended: 2026-10-15. Reviewed provider integrations are global ARK capabilities and appear in
+the fixed Plugins destination by default. They do not need a separate local Add record. Connect,
+disconnect and per-action approval remain separate. Package and manually configured MCP installs
+keep their explicit installation lifecycle.
 
 ## Context
 
@@ -22,7 +27,7 @@ ARK has a provider-neutral plugin catalog. A catalog entry says what becomes ava
 provider supplies it. The runtime knows portable packages, local MCP servers and remote MCP
 servers. It does not name Activepieces or another catalog provider.
 
-Only a person can add, update, remove, connect or enable a plugin. An agent can ask for a missing
+Only a person can add a package, update, remove, connect or enable a plugin. An agent can ask for a missing
 capability through the existing approval path, but cannot perform those operations itself.
 
 ### Kinds and state
@@ -34,16 +39,16 @@ capability through the existing approval path, but cannot perform those operatio
 | Provider integration | A provider binding and integration id for one ARK Account | The provider's already deployed runtime |
 | Personal | The same kind-specific record from a person's private source | The selected package or server |
 
-An Activepieces Gmail row is a provider integration. Add does not claim to download Gmail code.
-Its detail says that Activepieces supplies it and states the endpoint, auth path, provider catalog
-or server revision, schema digest and update policy. Activepieces Cloud is marked
-provider-managed. A self-hosted deployment shows an image digest only when ARK verified that pin.
+An Activepieces Gmail row is a provider integration. It is available without installation because
+its code runs at the provider. Its detail states the endpoint, auth path, provider catalog or
+server revision, schema digest and update policy. Activepieces Cloud is marked provider-managed.
+A self-hosted deployment shows an image digest only when ARK verified that pin.
 
 Four states stay separate:
 
 | State | Meaning |
 |---|---|
-| Added | The computer knows the package or provider binding |
+| Added | The computer knows an installed package. Reviewed provider offers are catalog capabilities and do not use this state |
 | Connected | An account credential exists for the integration |
 | Enabled | One project may offer its tools on its next turn |
 | Approved | One invocation passed ARK's existing approval gate |

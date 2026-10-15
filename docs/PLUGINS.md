@@ -2,13 +2,13 @@
 
 The decision and security boundary are in
 [ADR 0069](adr/0069-plugins-are-reviewed-capabilities-from-independent-providers.md). This file
-specifies the provider-neutral contract and the Settings interface.
+specifies the provider-neutral contract and the Plugins destination.
 
 ## Status, 2026-10-14
 
-The marketplace supplies a typed, vendor-neutral catalog and provider boundary, persistent inert
-Add records, shared host calls, and the Settings › Plugins catalog. Add is deliberately harmless.
-It does not start code, connect an account or let an agent call a service.
+The marketplace supplies a typed, vendor-neutral catalog and provider boundary, shared host calls,
+and a global Plugins destination in the fixed rail. Every reviewed provider offer is available by
+default. Connect does not let an agent call a service without the normal per-action approval.
 
 The managed broker lives in `ark-cloud/api`. ARK Desktop bridges its signed-in Account to that
 broker, where configured. Connections belong to the person's ARK Account and are available across
@@ -25,9 +25,9 @@ the server. No unsigned local fallback catalog is shown when the broker has no r
 | `ark-tools::mcp` | Local and remote MCP transport, endpoint policy and safe risk defaults |
 | `ark-connect` | Opaque account references, OAuth, secrets and stable non-secret provider-boundary identities |
 | `ark-interact::plugins` | Person-only operations and the view model shared by terminal and window |
-| `ark-ui` | The Settings screen, focus and feedback |
+| `ark-ui` | The global Plugins destination, focus and feedback |
 
-Adding, connecting and disconnecting are person-only host calls. The two generic managed actions
+Package installation, connecting and disconnecting are person-only host calls. The two generic managed actions
 above are ordinary agent tools: listing is Observe; every execution is Mutate and asks for approval.
 
 ## Public contract
@@ -525,9 +525,34 @@ over catalog freshness. Badges accumulate in the fixed order `Revoked`, `Catalog
 row exposes only the primary action. Detail may expose other safe actions named by the transition
 table.
 
-## Screen specification
+## Current managed-integration screen
 
-The wide screen follows the supplied Codex structure.
+The fixed destination rail contains Plugins beside the other global ARK destinations. It remains
+present when the person switches project, computer or runtime. The page combines reviewed managed
+offers with existing first-party account capabilities such as Mail and Calendar. Settings has no
+Plugins or Connections section.
+
+| State | Visible result | Action |
+|---|---|---|
+| Loading | `Loading plugins…` | None |
+| Signed out | Local capabilities remain visible. Managed area asks for the ARK Account | Open Account |
+| Catalog unavailable | Local capabilities remain visible. Managed failure is named | Retry |
+| Connection status unavailable | Catalog stays visible. Managed Connect is disabled | Retry |
+| Unconnected | Plugin name, outcome and connection location | Connect |
+| Connected | Account state is visible | Disconnect in detail |
+| Search has no match | `No plugins match that search` while focus remains in search | Clear or edit search |
+
+Reviewed provider offers do not have Add, Installed, Enable or Remove states. They are available
+by default because their code runs at the provider. Connecting supplies an account binding.
+Invocations still pass through the normal approval gate. Manually configured Tool servers remain
+in Settings > Advanced.
+
+## Future package-manager screen
+
+The following specification applies when ARK ships installable packages and personal catalogs. It
+does not describe the current managed-integration destination.
+
+The future package manager extends ARK's fixed-rail model.
 
 | Area | Content and behavior |
 |---|---|

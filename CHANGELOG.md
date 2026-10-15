@@ -7,6 +7,19 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Changed
+
+- Plugins is a global fixed-rail destination. Reviewed provider integrations are available by
+  default and connect directly, without a separate local Add choice. Settings no longer duplicates
+  them under Connections.
+
+### Fixed
+
+- Selecting an open chat no longer moves its tab to the end of the tab list.
+- A failed plugin catalog request now shows a useful account state instead of an empty catalog.
+
 ## [0.23.6] - 2026-10-14
 
 ### Fixed

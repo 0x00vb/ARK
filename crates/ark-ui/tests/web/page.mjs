@@ -1586,40 +1586,69 @@ async function plugins(page) {
 }
 scenarios.plugins = plugins;
 
-// Settings › Plugins is unavailable rather than inventing an unsigned catalog when the broker
-// has not supplied a reviewed offer list.
+// Plugins is a global destination. An unavailable broker is a visible account state, never an
+// empty search result, and Settings has no duplicate Plugins or Connections sections.
 async function marketplace(page) {
-  await page.locator("#open-settings:not([hidden])").waitFor();
-  await page.evaluate(() => window.ark.openSettings("marketplace"));
-  await page.locator(".settings-title", { hasText: "Plugins" }).waitFor();
-  assert.match(await page.locator(".marketplace").innerText(), /No plugins match that search/);
+  const destination = page.locator('.workspace-destination[data-view="marketplace"]');
+  await destination.waitFor();
+  assert.equal(await destination.getAttribute("aria-label"), "Plugins");
+  await destination.click();
+  assert.equal(await destination.getAttribute("aria-current"), "page");
+  assert.equal(await page.locator('.destination[data-destination="home"]').getAttribute("aria-current"), null);
+  await page.locator('.market-row[data-id="capability:mail"]').waitFor();
+  assert.deepEqual(await page.locator(".market-row .market-copy strong").allInnerTexts(), ["Mail", "Calendar"]);
+  assert.equal(await page.locator('.market-row[data-id="capability:mail"] .market-add').innerText(), "Connect");
+  const search = page.locator(".market-search");
+  await search.pressSequentially("Calendar");
+  assert.equal(await search.inputValue(), "Calendar");
+  assert.equal(await search.evaluate((input) => input === document.activeElement), true, "search keeps focus while filtering");
+  assert.deepEqual(await page.locator(".market-row .market-copy strong").allInnerTexts(), ["Calendar"]);
+  await search.fill("");
+  const mail = page.locator('.market-row[data-id="capability:mail"]');
+  await page.evaluate(() => {
+    const call = window.ark.call;
+    let release;
+    window.__pluginConnect = { calls: 0, release: () => release?.() };
+    window.ark.call = (name, params) => {
+      if (name !== "capability_connect") return call(name, params);
+      window.__pluginConnect.calls += 1;
+      return new Promise((resolve, reject) => {
+        release = () => call(name, params).then(resolve, reject);
+      });
+    };
+    window.__restoreArkCall = () => { window.ark.call = call; };
+  });
+  await mail.getByRole("button", { name: "Connect Mail" }).click();
+  await mail.getByRole("button", { name: "Connect Mail" }).click({ force: true });
+  assert.equal(await page.evaluate(() => window.__pluginConnect.calls), 1, "one connection starts while authorization is pending");
+  assert.equal(await mail.locator(".market-add").innerText(), "Connecting…");
+  assert.equal(await mail.locator(".market-add").isDisabled(), true);
+  await page.evaluate(() => { window.__restoreArkCall(); window.__pluginConnect.release(); });
+  await page.waitForFunction(() => document.querySelector('.market-row[data-id="capability:mail"]')?.textContent.includes("Connected"), null, { timeout: 15000 });
+  await mail.getByRole("button", { name: "View Mail" }).click();
+  await page.evaluate(() => {
+    const call = window.ark.call;
+    window.ark.call = (name, params) => name === "capabilities" ? Promise.reject(new Error("offline")) : call(name, params);
+    window.__restoreArkCall = () => { window.ark.call = call; };
+  });
+  await destination.click();
+  await page.getByText("Plugins on this computer could not be loaded.").waitFor();
+  assert.equal(await page.getByRole("button", { name: "Retry" }).count() > 0, true);
+  await page.evaluate(() => window.__restoreArkCall());
+  await page.getByRole("button", { name: "Disconnect" }).click();
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.locator('.market-row[data-id="capability:mail"] .market-add').waitFor();
+  await page.evaluate(() => window.ark.openSettings());
+  assert.equal(await page.locator('.settings-list .nav-row', { hasText: /^Plugins$/ }).count(), 0);
+  assert.equal(await page.locator('.settings-list .nav-row', { hasText: /^Connections$/ }).count(), 0);
 }
 scenarios.marketplace = marketplace;
 
-// Settings › Connections omits built-in Web. Mail and Calendar are one sign-in away. Connect opens
-// the provider's page (here it approves at once), the row turns ready with the account, and
-// Disconnect (two clicks) makes it connectable again. `tools` then lists the web too.
+// Built-in capabilities remain enabled even though Connections is no longer a Settings page.
 async function capabilities(page) {
   await page.locator("#open-settings:not([hidden])").waitFor();
-  await page.evaluate(() => window.ark.openSettings("connections"));
-  await page.locator(".settings-title", { hasText: "Connections" }).waitFor();
-  await page.getByRole("button", { name: "Browse" }).click();
-  const row = (id) => page.locator(`.capability-row[data-id="${id}"]`);
-  await row("mail").waitFor();
-  assert.deepEqual(await page.locator(".capability-row .plugin-name").allInnerTexts(), ["Mail", "Calendar"]);
-  assert.match(await row("mail").getAttribute("class"), /off/);
-
-  await row("mail").locator(".btn.primary").click();
-  await page.waitForFunction(() => !document.querySelector('.capability-row[data-id="mail"]')?.classList.contains("off"), null, { timeout: 15000 });
-  assert.match(await row("mail").locator(".plugin-detail").innerText(), /ada@example\.com/);
-  assert.match(await row("calendar").getAttribute("class"), /off/, "Calendar needs its own scope");
-
-  const off = row("mail").locator(".plugin-remove");
-  await off.click();
-  assert.equal(await off.innerText(), "Disconnect Google?");
-  await off.click();
-  await page.waitForFunction(() => document.querySelector('.capability-row[data-id="mail"]')?.classList.contains("off"));
-
+  await page.evaluate(() => window.ark.openSettings());
+  assert.equal(await page.locator('.settings-list .nav-row', { hasText: /^Connections$/ }).count(), 0);
   const tools = await page.evaluate(async () => (await window.ark.call("tools")).map((t) => t.name));
   assert.ok(tools.includes("web.search"), tools.join(","));
 }
@@ -2155,12 +2184,15 @@ async function chatWorkspacePolish(page) {
 
   const primaryTab = page.locator(`.chat-tab-item[data-session="${primary}"] .chat-tab`);
   const secondaryTab = page.locator(`.chat-tab-item[data-session="${first}"] .chat-tab`);
+  const orderBeforeSelection = await page.locator(".chat-tab-item").evaluateAll((tabs) => tabs.map((tab) => tab.dataset.session));
   await primaryTab.click();
   assert.equal(await primaryTab.getAttribute("aria-selected"), "true");
   assert.equal(await page.locator(".chat-surface.primary").getAttribute("data-active"), "true");
   await secondaryTab.click();
   assert.equal(await secondaryTab.getAttribute("aria-selected"), "true");
   assert.equal(await page.locator(".chat-surface.secondary").getAttribute("data-active"), "true");
+  assert.deepEqual(await page.locator(".chat-tab-item").evaluateAll((tabs) => tabs.map((tab) => tab.dataset.session)),
+    orderBeforeSelection, "selecting a chat never reorders its tab");
   await page.evaluate(() => {
     window.__workspaceFetch = window.fetch;
     window.fetch = async (input, init) => {

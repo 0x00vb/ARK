@@ -1,10 +1,18 @@
 # Current state
 
+## Proposed advanced artifact surfaces
+
+`docs/ADVANCED_ARTIFACTS.md` and proposed ADR 0071 define one file-viewer seam for maps, 3D
+models and later professional formats. The first proofs are an offline GeoJSON map, a GLB/STL
+viewer and ARK Desktop's contained CadQuery bracket workflow. No implementation or released
+capability is claimed. Independent plan QA returned GO after the snapshot, renderer trust,
+resource limits, CadQuery feasibility and first-use evidence blockers were resolved.
+
 What is happening in ARK right now. Read this at the start of a session. Update it at the end
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-14 (v0.23.6 release)
+Last updated: 2026-10-15 (v0.23.6 release)
 
 ## Release
 

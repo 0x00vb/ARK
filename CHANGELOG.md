@@ -9,6 +9,11 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Changed
+
+- Test builds use an unoptimized Cargo profile for faster feedback. Development and release
+  builds keep their existing optimization settings.
+
 ## [0.24.0] - 2026-10-15
 
 ### Added

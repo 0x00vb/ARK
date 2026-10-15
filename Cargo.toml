@@ -98,3 +98,8 @@ ark-bench = { path = "crates/ark-bench", version = "0.24.0" }
 
 [profile.dev]
 opt-level = 1
+
+# Tests favor edit-to-feedback time. The suite's slow cases wait on real timing and WebKit, so
+# optimizing every test dependency adds substantial compile time without shortening the run.
+[profile.test]
+opt-level = 0

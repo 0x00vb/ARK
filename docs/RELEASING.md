@@ -49,7 +49,11 @@ flowchart LR
 `scripts/ci.sh` runs, in order: `cargo fmt --check`, the fast version and release-state check,
 clippy with `-D warnings`, normal tests with Cargo's available parallelism, WebKit tests serially, a release build, and the simulated benchmark compared with
 `bench/baseline.json`. A regression fails the run. Do not cap `CARGO_BUILD_JOBS` on a normal
-developer machine. `scripts/verify-release.sh` uses a clean checkout at a stable path and a
+developer machine. The test profile is intentionally unoptimized. Development and release
+profiles keep their existing optimization settings. The completed `ark-ci-speed` experiment
+measured a cold page-test build at 58 seconds instead of 99 seconds on the release Mac;
+its 49 WebKit cases still took 92 seconds.
+`scripts/verify-release.sh` uses a clean checkout at a stable path and a
 persistent target cache, so the first verification is cold and later releases reuse it.
 
 If step 9 fails, the tag stays. Fix on `main` and release the next patch version. v0.4.1

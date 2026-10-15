@@ -9,6 +9,8 @@ import { chooseFiles } from "./drop.js";
 import { label } from "./keys.js";
 import { programSheet } from "./places.js";
 
+const REMOTE_COMMANDS = new Set(["new", "resume", "project", "sessions", "help", "waiting"]);
+
 export class Composer {
   constructor(api, elements = {}) {
     this.api = api;
@@ -94,6 +96,18 @@ export class Composer {
     this.model.textContent = label;
     this.model.dataset.missing = String(missing);
     this.missing = missing;
+  }
+
+  placeChanged(place) {
+    this.backends = null;
+    this.backendsFor = null;
+    this.pendingModel = "";
+    if (place) {
+      this.setModel(`${place} default`);
+    } else {
+      this.setModel(this.api.summary()?.model);
+    }
+    this.updateSlash();
   }
 
   setExecutionMode(mode, revision = 0) {
@@ -248,7 +262,9 @@ export class Composer {
       return;
     }
     const q = m[1].toLowerCase();
-    const items = this.commands.filter((c) => c.name.startsWith(q) || c.aliases.some((a) => a.startsWith(q)));
+    const remote = this.api.summary()?.place || this.api.pendingPlace?.();
+    const items = this.commands.filter((c) => (!remote || REMOTE_COMMANDS.has(c.name))
+      && (c.name.startsWith(q) || c.aliases.some((a) => a.startsWith(q))));
     if (!items.length) {
       this.slash.hidden = true;
       return;
@@ -267,6 +283,13 @@ export class Composer {
     this.slashIndex = Math.min(this.slashIndex, items.length - 1);
     this.slash.hidden = false;
     this.paintSlash();
+  }
+
+  commandAvailable(text) {
+    if (!this.api.summary()?.place && !this.api.pendingPlace?.()) return true;
+    const word = text.trim().slice(1).split(/\s+/, 1)[0].toLowerCase();
+    const command = this.commands.find((c) => c.name === word || c.aliases.includes(word));
+    return !!command && REMOTE_COMMANDS.has(command.name);
   }
 
   paintSlash() {
@@ -308,6 +331,13 @@ export class Composer {
     const pick = async (spec) => {
       inlineError = null;
       try {
+        if (this.api.pendingPlace?.() && !this.api.summary()?.place) {
+          this.pendingModel = spec;
+          this.setModel(spec.replace(":", " "));
+          menu.close();
+          this.focus();
+          return;
+        }
         await this.api.call("model", { spec });
         menu.close();
         this.focus();
@@ -320,7 +350,10 @@ export class Composer {
       if (e.key === "Enter" && input.value.trim()) pick(input.value.trim());
     });
     // A chat on another computer: its models, keys and programs are that computer's.
-    const place = this.api.summary()?.place?.name || null;
+    const place = this.api.summary()?.place?.name || this.api.pendingPlace?.() || null;
+    const loadBackends = () => place && !this.api.summary()?.place
+      ? this.api.call("place_models", { place })
+      : this.api.call("models");
     if (this.backendsFor !== place) this.backends = null;
     this.backendsFor = place;
     const paint = (backends) => {
@@ -371,9 +404,9 @@ export class Composer {
             key.disabled = true;
             why.textContent = "Checking the key…";
             try {
-              if (place) await this.api.call("place_key", { provider: b.provider, key: key.value.trim() });
+              if (place) await this.api.call("place_key", { place, provider: b.provider, key: key.value.trim() });
               else await this.api.call("api_key_save", { provider: b.provider, key: key.value.trim() });
-              this.backends = await this.api.call("models");
+              this.backends = await loadBackends();
               paint(this.backends);
             } catch (err) {
               key.disabled = false;
@@ -388,8 +421,8 @@ export class Composer {
               e.target.disabled = true;
               why.textContent = "Checking the key…";
               try {
-                await this.api.call("place_key", { provider: b.provider });
-                this.backends = await this.api.call("models");
+                await this.api.call("place_key", { place, provider: b.provider });
+                this.backends = await loadBackends();
                 paint(this.backends);
               } catch (err) {
                 e.target.disabled = false;
@@ -397,12 +430,14 @@ export class Composer {
               }
             } }, `Use ${this.api.hereName?.() || "this computer"}'s key`)));
           }
-        } else if (place && b.step) {
+        } else if (place && b.step && this.api.summary()?.place) {
           // The program's own step, run there in a terminal shown here.
           group.append(h("div.model-fix", h("button.btn.small.primary", { type: "button", onclick: () => {
             menu.close();
             programSheet(this.api, b, place, () => { this.backends = null; });
           } }, b.step === "install" ? "Install" : "Sign in")));
+        } else if (place && b.step) {
+          group.append(h("div.model-fix", h("span.menu-sub", "Set up after this chat starts")));
         } else if (b.fix) {
           group.append(h("div.model-fix",
             h("code", b.fix),
@@ -417,7 +452,7 @@ export class Composer {
     try {
       let keys;
       [this.backends, keys] = await Promise.all([
-        this.api.call("models"),
+        loadBackends(),
         this.api.call("api_keys").catch(() => ({})),
       ]);
       this.canSaveKeys = !!keys.can_save;

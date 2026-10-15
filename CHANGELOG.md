@@ -7,6 +7,14 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Fixed
+
+- An empty chat assigned to another computer now uses that computer's subscriptions, API keys
+  and Ollama catalog before its first message. Its chosen model is kept, setup runs there, and
+  slash completion omits commands that cannot run for the remote chat.
+
 ## [0.23.6] - 2026-10-14
 
 ### Fixed

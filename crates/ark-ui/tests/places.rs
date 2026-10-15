@@ -878,6 +878,16 @@ async fn a_program_signs_in_on_the_server_from_here() {
     let (b, port, token) = server(dir_b.path(), Arc::new(AtomicUsize::new(0))).await;
     let a = linked(dir_a.path(), port, &token, Arc::new(AtomicUsize::new(0))).await;
     let seen = record(&a);
+    let before_chat = a
+        .call("place_models", json!({ "place": "vps" }))
+        .await
+        .unwrap();
+    assert!(
+        before_chat
+            .as_array()
+            .is_some_and(|backends| backends.iter().any(|b| b["provider"] == "claude")),
+        "the selected computer supplies the pre-chat catalog: {before_chat}"
+    );
     let remote_chat = a
         .call("new_session", json!({ "place": "vps" }))
         .await
@@ -923,7 +933,7 @@ async fn a_program_signs_in_on_the_server_from_here() {
     let opened = a
         .call(
             "place_setup",
-            json!({ "program": "claude", "step": "sign_in" }),
+            json!({ "place": "vps", "program": "claude", "step": "sign_in" }),
         )
         .await
         .unwrap();
@@ -980,7 +990,10 @@ async fn a_program_signs_in_on_the_server_from_here() {
     // Only the catalog's programs and steps; never another terminal there.
     for (program, step) in [("rm", "install"), ("claude", "shell")] {
         assert!(a
-            .call("place_setup", json!({ "program": program, "step": step }))
+            .call(
+                "place_setup",
+                json!({ "place": "vps", "program": program, "step": step })
+            )
             .await
             .is_err());
     }

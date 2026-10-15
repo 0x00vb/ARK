@@ -16,6 +16,44 @@ use sha2::{Digest, Sha256};
 
 struct Notes;
 
+#[tokio::test]
+async fn only_registered_frame_assets_receive_the_same_origin_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, served) = ArkUi::new(app(dir.path()))
+        .frame_asset("viewer.html", b"<p>viewer</p>".as_slice())
+        .asset("sibling.html", b"<p>sibling</p>".as_slice())
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    for (path, framed) in [
+        ("/", false),
+        ("/ext/viewer.html", true),
+        ("/ext/sibling.html", false),
+        ("/ext/viewer.html.js", false),
+        ("/ext/%76iewer.html", false),
+    ] {
+        let response = raw(
+            served.port,
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n",
+                served.port
+            ),
+        )
+        .await;
+        assert!(
+            response.contains(if framed {
+                "frame-ancestors 'self'"
+            } else {
+                "frame-ancestors 'none'"
+            }),
+            "{path}: {response}"
+        );
+        assert_eq!(response.matches("Content-Security-Policy:").count(), 1);
+        assert!(response.contains("X-Content-Type-Options: nosniff"));
+        assert!(response.contains("Cache-Control: no-store"));
+    }
+}
+
 #[async_trait::async_trait]
 impl Adapter for Notes {
     fn name(&self) -> &str {

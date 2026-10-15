@@ -76,6 +76,7 @@ export class Pane {
       key, title, icon: ic, make, view, ctl: null, built: false, params: null,
       wide: !!opts.wide, api: opts.api || this.api,
       projectScoped: !!opts.projectScoped, project: opts.project || null,
+      onShow: opts.onShow, onClose: opts.onClose,
     };
     this.tabs.set(key, tab);
     this.body.append(view);
@@ -116,6 +117,7 @@ export class Pane {
     const t = this.tabs.get(key);
     if (!t) return;
     this.active = key;
+    t.onShow?.();
     for (const x of this.tabs.values()) x.view.hidden = x.key !== key;
     if (!t.built) {
       t.built = true;
@@ -161,6 +163,7 @@ export class Pane {
   remove(key) {
     const t = this.tabs.get(key);
     if (!t) return;
+    t.onClose?.();
     try { t.ctl?.dispose?.(); } catch {}
     t.view.remove();
     this.tabs.delete(key);
@@ -173,6 +176,7 @@ export class Pane {
   close() {
     const t = this.active ? this.tabs.get(this.active) : null;
     this.app.dataset.pane = "closed";
+    t?.onClose?.();
     (t?.api || this.api).setFocus(null);
   }
 

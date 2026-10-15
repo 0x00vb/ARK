@@ -65,6 +65,16 @@ frame-src 'self' blob: data: https: http:; worker-src 'self' blob:; object-src '
 base-uri 'none'; form-action 'self'; frame-ancestors 'none'\r\n\
 Referrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n";
 
+// Only explicitly registered trusted consumer HTML permits this same origin to frame it.
+// This replaces the complete policy, never intersects it with a second CSP header.
+const FRAME_ASSET_HEADERS: &str =
+    "Content-Security-Policy: default-src 'self'; script-src 'self'; \
+style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' data: blob:; \
+font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; \
+frame-src 'self' blob: data: https: http:; worker-src 'self' blob:; object-src 'none'; \
+base-uri 'none'; form-action 'self'; frame-ancestors 'self'\r\n\
+Referrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n";
+
 /// How long a typed device code is good for, and how long the session it becomes lasts: a
 /// phone stays signed in for a season; revoking its name ends it (ADR 0047).
 const PAIR_VALID_SECS: u64 = 10 * 60;
@@ -363,8 +373,19 @@ async fn respond_with<S: AsyncWrite + Unpin>(
     extra: &str,
     body: &[u8],
 ) -> anyhow::Result<()> {
+    respond_with_policy(sock, status, mime, extra, body, PAGE_HEADERS).await
+}
+
+async fn respond_with_policy<S: AsyncWrite + Unpin>(
+    sock: &mut S,
+    status: &str,
+    mime: &str,
+    extra: &str,
+    body: &[u8],
+    policy: &str,
+) -> anyhow::Result<()> {
     let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{PAGE_HEADERS}{extra}Connection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{policy}{extra}Connection: close\r\n\r\n",
         body.len()
     );
     sock.write_all(head.as_bytes()).await?;
@@ -1303,6 +1324,9 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
             .await
         }
         ("GET", path) => match assets.get(path) {
+            Some((body, mime)) if assets.is_frame_asset(path) => {
+                respond_with_policy(&mut sock, "200 OK", mime, "", &body, FRAME_ASSET_HEADERS).await
+            }
             Some((body, mime)) => respond(&mut sock, "200 OK", mime, &body).await,
             None => respond(&mut sock, "404 Not Found", "text/plain", b"not found").await,
         },

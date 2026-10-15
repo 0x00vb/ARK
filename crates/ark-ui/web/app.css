@@ -1595,6 +1595,11 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .file-restore:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
 
 .fv-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fv-scene { position: relative; flex: 1; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+.fv-opening { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; background: var(--bg); color: var(--fg); }
+.fv-opening[hidden] { display: none; }
+.fv-opening progress { max-width: 120px; height: 6px; }
+.fv-opening button { color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
 .fv-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
 .fv-status { min-width: 0; height: 24px; display: inline-flex; align-items: center; gap: 5px; color: var(--text-3); font-size: 11.5px; white-space: nowrap; }
 .fv-status::after {

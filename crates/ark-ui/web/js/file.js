@@ -12,12 +12,14 @@ import { markdown } from "./md.js";
 import { sheetView } from "./sheet.js";
 import { documentView } from "./document.js";
 import { highlight, languageOf, MAX_CHARS } from "./highlight.js";
+import { registry } from './ext.js';
+import { extensionFileView } from './file-viewer.js';
 
 /// The view for each kind of file (`ark_files::Kind`). A new kind is one more entry; a new
 /// format of an existing kind needs none.
 const VIEWS = { text: textView, markdown: markdownView, sheet: sheetView, document: documentView, pdf: pdfView, image: imageView };
 
-export const KIND_ICON = { text: "file", markdown: "doc", sheet: "sheet", document: "doc", pdf: "doc", image: "image" };
+export const KIND_ICON = { text: "file", markdown: "doc", sheet: "sheet", document: "doc", pdf: "doc", image: "image", map: "file", model: "box" };
 
 /// Extensions and the kind each reads as, and each kind's name, from the host
 /// (`hello.file_kinds`, `hello.kind_nouns`).
@@ -42,9 +44,37 @@ export function kindOf(path) {
   return (ext && KINDS.get(ext)) || "text";
 }
 
+// A navigation bookmark, never file content or permission. The host still authorizes Retry.
+const RECOVERY_KEY = 'ark-file-recovery';
+export function fileRecovery(location, path, action) {
+  try {
+    const raw = sessionStorage.getItem(RECOVERY_KEY);
+    const saved = raw && raw.length <= 8192 ? JSON.parse(raw) : null;
+    const same = saved?.version === 1 && ['runtime', 'project', 'session'].every(k =>
+      typeof location?.[k] === 'string' && saved.location?.[k] === location[k]);
+    if (action === 'remember') {
+      if (typeof path !== 'string' || path.length > 4096 || !['map', 'model'].includes(kindOf(path)) ||
+          !['runtime', 'project', 'session'].every(k => typeof location?.[k] === 'string' && location[k].length > 0 && location[k].length <= 512)) {
+        sessionStorage.removeItem(RECOVERY_KEY);
+        return;
+      }
+      const route = Object.fromEntries(['runtime', 'project', 'session'].map(k => [k, location[k]]));
+      const bookmark = JSON.stringify({ version: 1, location: route, path });
+      if (bookmark.length <= 8192) sessionStorage.setItem(RECOVERY_KEY, bookmark);
+      else sessionStorage.removeItem(RECOVERY_KEY);
+    } else if (action === 'clear') {
+      if (same && saved.path === path) sessionStorage.removeItem(RECOVERY_KEY);
+    } else {
+      if (same && typeof saved.path === 'string' && saved.path.length <= 4096 && ['map', 'model'].includes(kindOf(saved.path))) return saved.path;
+      sessionStorage.removeItem(RECOVERY_KEY);
+    }
+  } catch { try { sessionStorage.removeItem(RECOVERY_KEY); } catch {} }
+  return null;
+}
+
 export function fileView(el, path, ark, params) {
   el.classList.add("fv");
-  const s = { path, file: null, view: null, version: null, busy: 0, offs: [], alive: true, ctl: null };
+  const s = { path, file: null, view: null, version: null, busy: 0, offs: [], alive: true, ctl: null, change: null, source: false, loading: 0, recovering: !!params?.recover };
   const status = h("span.fv-status", { "aria-live": "polite", role: "status" });
   const show = (state) => {
     status.dataset.state = state || "";
@@ -56,15 +86,22 @@ export function fileView(el, path, ark, params) {
     }
   };
   const tools = h("div.fv-tools", status,
+    kindOf(path) === 'map' ? h('button', { type: 'button', onclick: async (event) => {
+      if (s.ctl?.dirty?.()) await s.ctl.flush?.();
+      if (s.ctl?.dirty?.()) return;
+      s.source = !s.source; event.currentTarget.textContent = s.source ? 'Map' : 'Source'; await load(true);
+    } }, 'Source') : null,
     ark.isLocal() && kindOf(path) !== "text"
       ? h("button.icon-btn", { type: "button", title: "Open in its app", "aria-label": "Open in its app", onclick: () => ark.call("file_open", { path: s.path }).catch((e) => ark.toast(e.message)) }, icon("external"))
       : null);
   const body = h("div.fv-body");
-  el.append(body);
+  el.append(tools, body);
 
   const ctx = {
     ark,
     tools,
+    accept: async (meta) => (await ark.call('file_probe', { path: s.path })).change === meta.change,
+    loaded: (meta) => { s.version = meta.version; s.change = meta.change; queueMicrotask(check); },
     status: show,
     // A view that saves on its own path (text) tells which version it wrote.
     saved: (version) => (s.version = version),
@@ -94,13 +131,18 @@ export function fileView(el, path, ark, params) {
   };
 
   async function load(force) {
+    s.recovering = false;
+    const request = ++s.loading;
     let file;
     try {
-      file = await ark.call("file_read", { path: s.path });
+      file = await ark.call("file_read", { path: s.path, ...(s.source ? { source: true } : {}) });
     } catch (e) {
-      return clear(body).append(h("div.wb-empty", e.message));
+      if (!s.alive || request !== s.loading) return;
+      if (s.ctl) { status.textContent = e.message; status.dataset.state = 'error'; return; }
+      return clear(body).append(h("div.wb-empty", e.message,
+        h('button', { type: 'button', onclick: () => load(true) }, 'Retry')));
     }
-    if (!s.alive) return;
+    if (!s.alive || request !== s.loading) return;
     if (!force && file.version && file.version === s.version) return;
     s.version = file.version;
     s.file = file;
@@ -113,16 +155,30 @@ export function fileView(el, path, ark, params) {
     if (s.ctl && s.kind === kind && s.ctl.update) return s.ctl.update(file);
     s.ctl?.dispose?.();
     s.kind = kind;
+    el.prepend(tools);
     clear(body);
-    s.ctl = VIEWS[kind](body, file, ctx, params) || {};
+    const viewer = !s.source && [...registry.fileViewers.values()].find(v => v.kinds.includes(kind));
+    const supported = file.snapshot_supported ?? ark.fileSnapshots?.();
+    if (viewer && supported) s.ctl = extensionFileView(body, file, ctx, viewer);
+    else if (VIEWS[kind]) s.ctl = VIEWS[kind](body, file, ctx, params) || {};
+    else if (kind === 'map' && file.text != null) { s.kind = 'text'; s.ctl = textView(body, file, ctx, params); }
+    else {
+      clear(body).append(h('div.wb-empty', supported ? 'No viewer is available for this file' : 'This file cannot be shown on this computer'));
+      s.ctl = {};
+    }
     ark.reportFocus();
   }
 
   /// Someone else may have changed the file: read it again unless the person has unsaved
   /// changes (their save then meets the new version and reloads).
   async function check() {
-    if (!s.alive || s.busy || s.ctl?.dirty?.()) return;
+    if (!s.alive || s.recovering || s.busy || s.ctl?.dirty?.()) return;
     try {
+      if (!s.source && ['map', 'model'].includes(s.kind) && (s.file?.snapshot_supported ?? ark.fileSnapshots?.())) {
+        const probe = await ark.call('file_probe', { path: s.path });
+        if (s.change && probe.change !== s.change) await load(true);
+        return;
+      }
       const { version } = await ark.call("file_version", { path: s.path });
       if (version !== s.version) await load(false);
     } catch {}
@@ -133,7 +189,9 @@ export function fileView(el, path, ark, params) {
   s.offs.push(ark.on("ark:files_changed", (m) => wrote(m.paths)));
   const onFocus = () => check();
   addEventListener("focus", onFocus);
-  load(true);
+  if (s.recovering) body.append(h('div.wb-empty', 'The file view was interrupted',
+    h('button', { type: 'button', onclick: () => load(true) }, 'Retry')));
+  else load(true);
 
   return {
     focus: () => {
@@ -148,6 +206,7 @@ export function fileView(el, path, ark, params) {
     refresh: () => check(),
     dispose() {
       s.alive = false;
+      s.loading++;
       s.ctl?.flush?.();
       s.ctl?.dispose?.();
       removeEventListener("focus", onFocus);

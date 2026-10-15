@@ -20,16 +20,20 @@ pub enum Kind {
     Document,
     Pdf,
     Image,
+    Map,
+    Model,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 6] = [
+    pub const ALL: [Kind; 8] = [
         Kind::Text,
         Kind::Markdown,
         Kind::Sheet,
         Kind::Document,
         Kind::Pdf,
         Kind::Image,
+        Kind::Map,
+        Kind::Model,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -40,6 +44,8 @@ impl Kind {
             Kind::Document => "document",
             Kind::Pdf => "pdf",
             Kind::Image => "image",
+            Kind::Map => "map",
+            Kind::Model => "model",
         }
     }
     /// The word a person reads.
@@ -51,11 +57,13 @@ impl Kind {
             Kind::Document => "document",
             Kind::Pdf => "PDF",
             Kind::Image => "image",
+            Kind::Map => "map",
+            Kind::Model => "3D model",
         }
     }
     /// Whether it is plain text the window saves whole.
     pub fn is_text(self) -> bool {
-        matches!(self, Kind::Text | Kind::Markdown)
+        matches!(self, Kind::Text | Kind::Markdown | Kind::Map)
     }
 }
 
@@ -1066,10 +1074,11 @@ fn wrong(kind: Kind, e: &Edit) -> Error {
     let hint = match kind {
         Kind::Sheet => "a spreadsheet takes {cell, value}, {cell, rows}, {clear}, {add_sheet}, {delete_sheet}, {rename_sheet} and {find, replace}",
         Kind::Document => "a document takes {block, text}, {after, text}, {delete}, {layout} and {find, replace}",
-        Kind::Text | Kind::Markdown => {
+        Kind::Text | Kind::Markdown | Kind::Map => {
             "a text file takes {find, replace}, or files.write with the whole text"
         }
         Kind::Pdf | Kind::Image => "ARK does not change a PDF or an image; write a new file",
+        Kind::Model => "ARK does not edit model bytes; regenerate the file from its source",
     };
     Error::Input(format!("`{}` does not apply here: {hint}", e.describe()))
 }

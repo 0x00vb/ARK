@@ -29,6 +29,7 @@ pub struct Assets {
     release: RwLock<Option<ReleasedAssets>>,
     web_dir: Option<PathBuf>,
     asset_dir: Option<PathBuf>,
+    frame_assets: std::collections::HashSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -67,11 +68,24 @@ impl Assets {
             release: RwLock::new(None),
             web_dir: std::env::var_os("ARK_UI_WEB").map(PathBuf::from),
             asset_dir: std::env::var_os("ARK_UI_ASSETS").map(PathBuf::from),
+            frame_assets: std::collections::HashSet::new(),
         }
     }
 
     pub(crate) fn versioned(&self, path: &str) -> String {
         format!("{VERSIONED_ROOT}/{}/{path}", self.current_namespace())
+    }
+
+    pub(crate) fn with_frame_assets(mut self, paths: std::collections::HashSet<String>) -> Self {
+        self.frame_assets = paths;
+        self
+    }
+
+    pub(crate) fn is_frame_asset(&self, path: &str) -> bool {
+        let path = path.trim_start_matches('/');
+        let prefix = format!("{VERSIONED_ROOT}/{}/", self.current_namespace());
+        let path = path.strip_prefix(&prefix).unwrap_or(path);
+        confined_asset_path(path) && self.frame_assets.contains(path)
     }
 
     fn current_namespace(&self) -> String {
@@ -290,6 +304,20 @@ fn escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+pub(crate) fn valid_frame_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains(['\\', '%', ':', '?', '#'])
+        && path.ends_with(".html")
+        && confined_asset_path(path)
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+        && std::path::Path::new(path)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
 fn mime(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "html" => "text/html; charset=utf-8",
@@ -308,6 +336,84 @@ fn mime(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_exact_registered_consumer_html_can_be_framed() {
+        let mut assets = Assets::new(
+            "Test".into(),
+            HashMap::from([
+                (
+                    "viewer.html".into(),
+                    Cow::Borrowed(b"<p>viewer</p>".as_slice()),
+                ),
+                (
+                    "sibling.html".into(),
+                    Cow::Borrowed(b"<p>sibling</p>".as_slice()),
+                ),
+            ]),
+            vec![],
+            vec![],
+            vec![],
+            Theme::Light,
+            None,
+        )
+        .with_frame_assets(std::collections::HashSet::from(["ext/viewer.html".into()]));
+        for path in [
+            "ext/viewer.html".into(),
+            format!(
+                "/{VERSIONED_ROOT}/{}/ext/viewer.html",
+                assets.current_namespace()
+            ),
+        ] {
+            assert!(assets.get(&path).is_some());
+            assert!(assets.is_frame_asset(&path));
+        }
+        for path in [
+            "",
+            "/",
+            "index.html",
+            "ext/sibling.html",
+            "ext/viewer.html.js",
+            "ext/viewer.html/other.html",
+            "ext/%76iewer.html",
+            "ext/../ext/viewer.html",
+            "ext/./viewer.html",
+        ] {
+            assert!(!assets.is_frame_asset(path), "{path}");
+        }
+        for path in [
+            "",
+            "/viewer.html",
+            "../viewer.html",
+            "a/../viewer.html",
+            "a\\viewer.html",
+            "viewer.js",
+            "%2e.html",
+        ] {
+            assert!(!valid_frame_path(path), "{path}");
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("viewer.html"), "development").unwrap();
+        assets.asset_dir = Some(root.path().into());
+        assert!(assets.is_frame_asset("ext/viewer.html"));
+        assert_eq!(
+            assets.get("ext/viewer.html").unwrap().0.as_ref(),
+            b"development"
+        );
+        std::fs::create_dir(root.path().join("consumer")).unwrap();
+        std::fs::write(root.path().join("consumer/viewer.html"), "release").unwrap();
+        *assets.release.write().unwrap() = Some(ReleasedAssets {
+            root: root.path().into(),
+            revision: "proof".into(),
+        });
+        let versioned = format!(
+            "/{VERSIONED_ROOT}/{}/ext/viewer.html",
+            assets.current_namespace()
+        );
+        assert!(assets.is_frame_asset(&versioned));
+        assert_eq!(assets.get(&versioned).unwrap().0.as_ref(), b"release");
+        assert!(!assets.is_frame_asset("ext/sibling.html"));
+    }
 
     #[test]
     fn index_loads_consumer_files_after_ark() {

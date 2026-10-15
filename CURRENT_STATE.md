@@ -1,25 +1,33 @@
 # Current state
 
-## Proposed advanced artifact surfaces
+## Advanced artifact surfaces in development
 
-`docs/ADVANCED_ARTIFACTS.md` and proposed ADR 0071 define one file-viewer seam for maps, 3D
-models and later professional formats. The first proofs are an offline GeoJSON map, a GLB/STL
-viewer and ARK Desktop's contained CadQuery bracket workflow. No implementation or released
-capability is claimed. Independent plan QA returned GO after the snapshot, renderer trust,
-resource limits, CadQuery feasibility and first-use evidence blockers were resolved.
+`ark-advanced-artifacts` implements ADR 0071: map/model classification, route-bound immutable
+snapshots, cancellation/progress, large-file metadata probes, bounded Focus and `ark.fileViewer`.
+A0 and A1 to A3 independent code QA are GO. Focused tests pass: 49 file, 36 UI unit and nine HTTP.
+Real WebKit covers Source recovery, a 30 MB model and the shipped Desktop frame through ARK's
+snapshot transport, including selection and Source switching. Desktop has offline map and
+worker-decoded GLB/STL surfaces, with real WebKit interaction and hostile-input proofs. Evidence:
+`docs/ADVANCED_ARTIFACTS_A0.md`. The complete v0.24.0 CI passes, including all 55 WebKit
+scenarios, the release build and benchmark gate. Desktop's full checks pass: 22 Rust and 64
+JavaScript tests. Native local rendering, renderer-kill Retry and Linux ARM64-to-Mac map/model
+dogfood pass. The consumer must pin the immutable v0.24.0 tag, not this development tree.
+The owner deferred five-person observation and physical
+trackpad testing on 2026-10-15; do not claim observed 10/10 usability. A4 has a contained CAD
+feasibility proof, not a product runtime. A5 remains gated on a real architecture user.
 
 What is happening in ARK right now. Read this at the start of a session. Update it at the end
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-15 (v0.23.6 release)
+Last updated: 2026-10-15 (v0.24.0 file-viewer contract)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.23.6 (2026-10-14), a verified native update offers a safe app restart. |
-| `main` | v0.23.6 is the native-update restart release. |
+| Latest tag | v0.24.0 (2026-10-15), route-bound map/model snapshots and consumer file viewers. |
+| `main` | v0.24.0 adds the advanced-file transport and consumer viewer API. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |

@@ -33,6 +33,7 @@ pub mod computers;
 pub mod copy;
 #[cfg(feature = "desktop")]
 mod desktop;
+mod file_snapshots;
 mod files;
 mod frame;
 pub mod host;
@@ -73,6 +74,7 @@ pub struct ArkUi {
     info: UiInfo,
     files: HashMap<String, Cow<'static, [u8]>>,
     required_scripts: Vec<String>,
+    frame_assets: std::collections::HashSet<String>,
     handlers: HashMap<String, Handler>,
     start: Start,
     access: Access,
@@ -121,6 +123,7 @@ impl ArkUi {
             info: UiInfo::default(),
             files: HashMap::new(),
             required_scripts: Vec::new(),
+            frame_assets: std::collections::HashSet::new(),
             handlers: HashMap::new(),
             start: Start::default(),
             access: Access::default(),
@@ -185,6 +188,22 @@ impl ArkUi {
     /// Load one of the app's assets as a script module after ARK's own.
     pub fn script(mut self, asset: impl Into<String>) -> Self {
         self.info.scripts.push(asset.into());
+        self
+    }
+    /// Embed trusted consumer HTML that may be framed by this same origin. Other assets and
+    /// the workspace retain `frame-ancestors 'none'`. The HTML supplies its own restrictive CSP.
+    pub fn frame_asset(
+        mut self,
+        path: impl Into<String>,
+        bytes: impl Into<Cow<'static, [u8]>>,
+    ) -> Self {
+        let path = path.into();
+        assert!(
+            assets::valid_frame_path(&path),
+            "a frame asset needs a confined relative .html path"
+        );
+        self.frame_assets.insert(format!("ext/{path}"));
+        self.files.insert(path, bytes.into());
         self
     }
     /// Load a consumer entry module and require its `ark.extensionReady(id)` handshake before
@@ -275,15 +294,18 @@ impl ArkUi {
         ark_interact::logging::init(ark_interact::logging::LogTarget::File(
             ark_interact::logging::file_in(&opened.interaction.ark().settings().store_root),
         ));
-        let assets = Arc::new(Assets::new(
-            title,
-            self.files,
-            self.info.scripts.clone(),
-            self.required_scripts,
-            self.info.styles.clone(),
-            self.info.theme,
-            self.asset_version,
-        ));
+        let assets = Arc::new(
+            Assets::new(
+                title,
+                self.files,
+                self.info.scripts.clone(),
+                self.required_scripts,
+                self.info.styles.clone(),
+                self.info.theme,
+                self.asset_version,
+            )
+            .with_frame_assets(self.frame_assets),
+        );
         let host = Host::new(opened.interaction, approvals, self.info, self.handlers).await;
         if !self.links.is_empty() {
             host.links().set(self.links);

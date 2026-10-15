@@ -580,6 +580,7 @@ pub struct Host {
     terminals: crate::terminal::Terminals,
     /// Session-bound pane aliases for shared terminal and process resources.
     resource_subscribers: Arc<ResourceSubscribers>,
+    file_snapshots: Arc<crate::file_snapshots::Snapshots>,
     /// Server-issued project resource capabilities. They intentionally vanish on restart.
     project_resource_routes: Mutex<HashMap<String, ProjectResourceRoute>>,
     /// One reconciliation at a time per project replica. Chats share replicas, so epoch checks,
@@ -694,6 +695,7 @@ impl Host {
             orchs: ix.orchestrators(),
             terminals: crate::terminal::Terminals::new(resource_subscribers.clone()),
             resource_subscribers,
+            file_snapshots: crate::file_snapshots::Snapshots::new(),
             project_resource_routes: Mutex::new(HashMap::new()),
             engine: ix.ark().shared_engine(),
             chat_skills: ix.ark().skill_names().to_vec(),
@@ -1803,6 +1805,9 @@ impl Host {
             }
             O::Unsubscribe => {
                 self.resource_subscribers.unsubscribe(&r);
+                if r.kind == ResourceKind::File {
+                    self.file_snapshots.close_resource(&r);
+                }
                 Ok(json!({}))
             }
             O::TerminalOpen => {
@@ -1964,7 +1969,16 @@ impl Host {
                     &r.id,
                     r.clone(),
                 );
-                crate::files::read(&workspace, self.resource_path(&r, &input))
+                let path = self.resource_path(&r, &input).to_string();
+                let source = input["source"].as_bool().unwrap_or(false);
+                tokio::task::spawn_blocking(move || {
+                    if source {
+                        Ok(ark_files::source(&workspace, &path)?.page())
+                    } else {
+                        crate::files::read(&workspace, &path)
+                    }
+                })
+                .await?
             }
             O::FileWrite => {
                 let base = Some(s("base")).filter(|b| !b.is_empty());
@@ -1989,6 +2003,35 @@ impl Host {
                 Ok(value)
             }
             O::FileMedia => crate::files::media(&workspace, self.resource_path(&r, &input)),
+            O::FileSnapshotOpen => self.file_snapshots.begin(workspace, r),
+            O::FileSnapshotStatus => {
+                let snapshots = self.file_snapshots.clone();
+                let request = s("request");
+                tokio::task::spawn_blocking(move || snapshots.status(&r, &request)).await?
+            }
+            O::FileSnapshotCancel | O::FileSnapshotClose => {
+                let id = s(if operation.kind == O::FileSnapshotCancel {
+                    "request"
+                } else {
+                    "snapshot"
+                });
+                self.file_snapshots.close(&r, &id)
+            }
+            O::FileSnapshotChunk => {
+                let snapshots = self.file_snapshots.clone();
+                let id = s("snapshot");
+                let offset =
+                    n("offset").ok_or_else(|| anyhow::anyhow!("a chunk needs an offset"))?;
+                tokio::task::spawn_blocking(move || snapshots.chunk(&r, &id, offset)).await?
+            }
+            O::FileProbe => {
+                let path = r.id;
+                tokio::task::spawn_blocking(move || {
+                    let (size, change) = ark_files::snapshot::probe(&workspace, &path)?;
+                    Ok(json!({ "size": size, "change": change }))
+                })
+                .await?
+            }
             O::FileVersion => crate::files::version(&workspace, self.resource_path(&r, &input)),
             O::FileRestore => {
                 let restored = self
@@ -2384,6 +2427,9 @@ impl Host {
             O::Focus => {
                 let conv = self.chat_conv(&r.location.session, "", true).await?;
                 let focus: Option<Focus> = serde_json::from_value(input["focus"].clone()).ok();
+                if let Some(focus) = &focus {
+                    crate::files::validate_focus(focus)?;
+                }
                 *conv.focus.lock().unwrap() = Some(focus);
                 Ok(json!({}))
             }
@@ -2698,6 +2744,7 @@ impl Host {
                         .collect::<serde_json::Map<_, _>>(),
                     "version": env!("CARGO_PKG_VERSION"),
                     "project_terminal": true,
+                    "file_snapshots": cfg!(unix),
                     // This runtime's store id: another runtime knows it by this (ADR 0052).
                     "runtime": ark_interact::held::runtime_id(&self.engine),
                 }))

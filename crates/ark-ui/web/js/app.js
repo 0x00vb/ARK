@@ -14,7 +14,7 @@ import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
 import { registry, installApi, dispatchExt, presenterFor, onExt, waitForExtension, loadedExtensions } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
-import { fileView, kindOf, KIND_ICON, setFileKinds } from "./file.js";
+import { fileView, fileRecovery, kindOf, KIND_ICON, setFileKinds } from "./file.js";
 import { registerGrants } from "./grants.js";
 import { registerPlugins } from "./plugins.js";
 import { registerMarketplace } from "./marketplace.js";
@@ -55,6 +55,7 @@ const views = new Map();
 
 const api = {
   h, icon, markdown,
+  fileSnapshots: () => !!state.fileSnapshots,
   on: onExt,
   call: (method, params = {}) => RESOURCE_METHODS[method]
     ? scopedApi(currentLocation()).call(method, params)
@@ -158,7 +159,7 @@ const api = {
     path = String(path).replace(/^\.\//, "");
     const location = currentLocation();
     const ark = scopedApi(location);
-    pane.openTab(resourceKey("file", location, path), path.split("/").pop(), KIND_ICON[kindOf(path)], (el, p) => fileView(el, path, ark, p), params, { wide: true, fill: true, api: ark });
+    openFileTab(path, params, location, ark);
   },
   openPanel(id, params) {
     const p = registry.panels.get(id);
@@ -227,6 +228,9 @@ const RESOURCE_METHODS = {
   procs: ["process", "processes"], proc_output: ["process", "process_output"], proc_stop: ["process", "process_stop"],
   files: ["file", "files"], file_read: ["file", "file_read"], file_write: ["file", "file_write"], file_edit: ["file", "file_edit"],
   file_media: ["file", "file_media"], file_version: ["file", "file_version"], file_restore: ["file", "file_restore"],
+  file_snapshot_open: ["file", "file_snapshot_open"], file_snapshot_status: ["file", "file_snapshot_status"],
+  file_snapshot_cancel: ["file", "file_snapshot_cancel"], file_snapshot_chunk: ["file", "file_snapshot_chunk"],
+  file_snapshot_close: ["file", "file_snapshot_close"], file_probe: ["file", "file_probe"],
   upload_parts: ["file", "upload_parts"], upload_add: ["file", "upload_add"], upload_cancel: ["file", "upload_cancel"], file_open: ["file", "file_open"],
   workspace: ["project", "workspace"], state: ["project", "state"],
   graph: ["project", "graph"], task_trace: ["project", "task_trace"], task: ["project", "task"], orch_events: ["project", "orch_events"],
@@ -255,6 +259,14 @@ function currentLocation() {
 
 function resourceKey(prefix, location, id) {
   return `${prefix}:${location.runtime}:${location.project}:${location.session}:${id}`;
+}
+
+function openFileTab(path, params, location, ark) {
+  pane.openTab(resourceKey('file', location, path), path.split('/').pop(), KIND_ICON[kindOf(path)],
+    (el, p) => fileView(el, path, ark, p), params, { wide: true, fill: true, api: ark,
+      onShow: () => fileRecovery(location, path, 'remember'),
+      onClose: () => fileRecovery(location, path, 'clear'),
+    });
 }
 
 function scopedApi(location) {
@@ -287,7 +299,7 @@ function scopedApi(location) {
   scoped.setFocus = (focus) => api.resource(api.resourceRef("project", "", location), "focus", { focus }).catch(() => {});
   scoped.openFile = (path, params) => {
     path = String(path).replace(/^\.\//, "");
-    pane.openTab(resourceKey("file", location, path), path.split("/").pop(), KIND_ICON[kindOf(path)], (el, p) => fileView(el, path, scoped, p), params, { wide: true, fill: true, api: scoped });
+    openFileTab(path, params, location, scoped);
   };
   scoped.openInvocation = (id) => {
     const key = resourceKey("inv", location, id);
@@ -1971,6 +1983,7 @@ async function bootOnce(again) {
   feed.seq = Math.max(hello.seq || 0, detachedRead?.seq || 0);
   state.ui = hello.ui || {};
   state.runtime = hello.runtime;
+  state.fileSnapshots = !!hello.file_snapshots;
   setFileKinds(hello.file_kinds, hello.kind_nouns);
   state.commands = hello.commands || [];
   composer.commands = state.commands;
@@ -2114,6 +2127,10 @@ async function start() {
     }
     await restoreVisibleChats([...available]);
     renderChatTabs();
+  } catch {}
+  try {
+    const path = fileRecovery(currentLocation());
+    if (path) api.openFile(path, { recover: true });
   } catch {}
   composer.input.addEventListener("input", () => saveDraft());
   const primaryScroller = primarySurface.querySelector("#scroller");

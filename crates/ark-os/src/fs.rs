@@ -3,6 +3,105 @@
 use std::io;
 use std::path::Path;
 
+/// Open a regular file below a canonical root without following replacement symlinks.
+/// Descriptor-relative traversal prevents a renamed ancestor from redirecting the read.
+pub fn open_within(root: &Path, path: &Path) -> io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::ffi::CString;
+        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::OpenOptionsExt;
+        let relative = path.strip_prefix(root).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "file is outside the project",
+            )
+        })?;
+        let mut dir = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(root)?;
+        let parts: Vec<_> = relative.components().collect();
+        for (i, part) in parts.iter().enumerate() {
+            let std::path::Component::Normal(name) = part else {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "invalid file path",
+                ));
+            };
+            let name = CString::new(name.as_bytes()).map_err(io::Error::other)?;
+            let flags = libc::O_RDONLY
+                | libc::O_NOFOLLOW
+                | libc::O_CLOEXEC
+                | libc::O_NONBLOCK
+                | if i + 1 < parts.len() {
+                    libc::O_DIRECTORY
+                } else {
+                    0
+                };
+            // SAFETY: the directory fd and nul-terminated name remain alive for openat.
+            let fd = unsafe { libc::openat(dir.as_raw_fd(), name.as_ptr(), flags) };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: openat returned a new owned descriptor.
+            dir = unsafe { std::fs::File::from_raw_fd(fd) };
+        }
+        if !dir.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a regular file",
+            ));
+        }
+        Ok(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (root, path);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "stable file snapshots are unavailable on this system",
+        ))
+    }
+}
+
+/// Identity and change metadata captured from an open file handle, never a later path lookup.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileStamp {
+    pub size: u64,
+    identity: (u64, u64),
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+
+impl FileStamp {
+    pub fn read(file: &std::fs::File) -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let m = file.metadata()?;
+            if !m.is_file() {
+                return Err(io::Error::other("not a regular file"));
+            }
+            Ok(Self {
+                size: m.len(),
+                identity: (m.dev(), m.ino()),
+                modified: (m.mtime(), m.mtime_nsec()),
+                changed: (m.ctime(), m.ctime_nsec()),
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = file;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "stable file change metadata is unavailable on this system",
+            ))
+        }
+    }
+}
+
 /// Put `tmp` in place of `dest` in one step, so a reader sees the old file or the new one,
 /// never half of it. Windows refuses the swap for a moment while another program holds
 /// `dest` (an editor saving, Excel, a virus scanner reading it), so it is retried for about

@@ -1,6 +1,6 @@
 # 0071. Advanced files use one viewer seam
 
-Status: Proposed
+Status: Accepted. A1 to A3 are implemented and technically verified. CAD integration and IFC remain follow-up work.
 Date: 2026-10-15
 
 ## Context
@@ -13,13 +13,31 @@ media reply.
 
 ## Decision
 
-Add one file-viewer extension selected by the kind that `ark-files` decides. Under a per-path
-read lease, the host copies one authorized file handle into an immutable, hashed, expiring
+Add one file-viewer extension selected by the kind that `ark-files` decides. The host copies
+one authorized file handle into an immutable, hashed, expiring
 snapshot and verifies a second pass plus source identity and change metadata before it returns a
 token. An unstable copy is retried, then refused. Bounded chunks come only from the snapshot. The
 viewer reports a bounded visible selection through `Focus`. It does not receive a filesystem path
 or mutation authority. Registered viewer code is trusted page code; untrusted file parsing runs
 in a worker or stronger sandbox under decoded-resource and network limits.
+
+Implementation review on 2026-10-15 removed the proposed global path lease. Typed ARK writes
+and Restore already replace atomically. Run code writes directly, so double-pass verification
+also handles it. A Host-owned request registry provides immediate begin, progress, cancellation,
+quota reservations and expiry. Blocking copies retain independent worker permits after cancellation
+until they actually exit. A metadata probe detects external changes without hashing on every chunk.
+
+Consumers may register trusted shipped HTML with `ArkUi::frame_asset`. Only a successful HTTP
+GET of that exact asset receives `frame-ancestors 'self'` instead of `frame-ancestors 'none'`.
+The current versioned asset prefix resolves by the same rules as other assets. Root pages,
+ordinary assets, errors and path lookalikes retain the existing policy. Each response contains
+one complete CSP. The consumer's frame also denies network connections in its own CSP.
+This enables trusted renderer modules; it is not an authority sandbox for untrusted code.
+
+After a page interruption, a bounded session-storage bookmark restores the last map/model tab
+with one Retry. It stores only a version, file name and runtime/project/chat route. No file
+contents, snapshot tokens or authority persist. A route mismatch discards it. Explicit close
+clears it. Retry reads through the normal routed file API and obtains a new snapshot.
 
 Prove the seam with two different kinds: an offline GeoJSON map and a GLB/STL 3D model. CAD
 generation stays in a consuming app's contained runtime and writes standard files. IFC becomes a
@@ -40,7 +58,7 @@ later lens on the model kind. No profession, renderer or CAD package enters ARK 
 
 ## Check
 
-The plan and acceptance gates are in `docs/ADVANCED_ARTIFACTS.md`. Before acceptance, tests prove
+The plan and acceptance gates are in `docs/ADVANCED_ARTIFACTS.md`. Tests prove
 local and remote resource routing, no mixed-version snapshot, stale-version cancellation, no
 renderer network request, hostile input and Focus bounds, keyboard and small-window recovery,
 page and worker crash recovery, and cleanup after a viewer closes.

@@ -142,7 +142,10 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         .provider(model)
         .planner(false)
         .critic(false);
-    if scenario == "capabilities" || scenario == "connect-mid-task" {
+    if matches!(
+        scenario,
+        "capabilities" | "connect-mid-task" | "marketplace"
+    ) {
         // Sign-in against a provider on loopback that approves at once; tokens in memory.
         let provider = fake_provider().await;
         let mut catalog = ark_connect::Catalog::builtin();
@@ -229,6 +232,37 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         });
     }
     let mut ui = ArkUi::new(app);
+    if scenario == "file-viewer-consumer" {
+        let Some(root) = std::env::var_os("ARK_UI_FILE_VIEWER_FIXTURE").map(PathBuf::from) else {
+            eprintln!("skipped: ARK_UI_FILE_VIEWER_FIXTURE must name the consumer's ui folder");
+            return;
+        };
+        let mut pending = vec![root.clone()];
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    if path.file_name().unwrap() != "tests" {
+                        pending.push(path);
+                    }
+                } else {
+                    let name = path.strip_prefix(&root).unwrap().to_str().unwrap();
+                    ui = if name == "file-frame.html" {
+                        ui.frame_asset(name, std::fs::read(&path).unwrap())
+                    } else {
+                        ui.asset(name, std::fs::read(&path).unwrap())
+                    };
+                }
+            }
+        }
+        ui = ui
+            .asset(
+                "file-proof-entry.js",
+                br#"import './file-renderers.js'; window.ark.extensionReady('file-proof-entry');"#
+                    .as_slice(),
+            )
+            .extension_script("file-proof-entry.js");
+    }
     if scenario == "ready" {
         ui = ui
             .asset(
@@ -272,9 +306,33 @@ window.ark.extensionReady("late");"#
     if scenario == "interrupted" {
         seed_interrupted(&host, dir.path()).await;
     }
-    if matches!(scenario, "project-terminal" | "workbench" | "skills") {
+    if matches!(
+        scenario,
+        "project-terminal" | "workbench" | "skills" | "advanced-files" | "file-viewer-consumer"
+    ) {
         let workspace = dir.path().join("terminal-project");
         std::fs::create_dir_all(&workspace).unwrap();
+        if scenario == "advanced-files" || scenario == "file-viewer-consumer" {
+            std::fs::write(
+                workspace.join("sites.geojson"),
+                r#"{"type":"FeatureCollection","features":[{"type":"Feature","id":"site","properties":{"name":"Site one"},"geometry":{"type":"Point","coordinates":[1,2]}}]}"#,
+            )
+            .unwrap();
+            std::fs::write(workspace.join("bad.geojson"), "{broken").unwrap();
+            // Above the old 25 MiB version limit, with a valid binary STL header.
+            let mut bytes = vec![0u8; 84 + 600_000 * 50];
+            bytes[80..84].copy_from_slice(&600_000u32.to_le_bytes());
+            std::fs::write(workspace.join("large.stl"), bytes).unwrap();
+            let mut small = vec![0u8; 134];
+            small[80..84].copy_from_slice(&1u32.to_le_bytes());
+            for (i, coordinate) in [0f32, 0., 0., 1., 0., 0., 0., 1., 0.]
+                .into_iter()
+                .enumerate()
+            {
+                small[96 + i * 4..100 + i * 4].copy_from_slice(&coordinate.to_le_bytes());
+            }
+            std::fs::write(workspace.join("part.stl"), small).unwrap();
+        }
         let summary = host.call("summary", json!({})).await.unwrap();
         host.call(
             "project_folder",
@@ -315,6 +373,16 @@ window.ark.extensionReady("late");"#
             "{log:?}"
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn advanced_file_viewers_use_snapshots_and_keep_source_recovery() {
+    drive("advanced-files", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_consumer_file_viewer_reads_real_snapshots_in_its_frame() {
+    drive("file-viewer-consumer", vec![], Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

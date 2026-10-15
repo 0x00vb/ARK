@@ -391,10 +391,10 @@ fn created(rel: &str, edits: &[Edit]) -> std::result::Result<Content, Error> {
             apply_sheet(&mut book, edits)?;
             Ok(Content::Sheet(book))
         }
-        Kind::Text | Kind::Markdown => Err(Error::Input(format!(
+        Kind::Text | Kind::Markdown | Kind::Map => Err(Error::Input(format!(
             "there is no file {rel} yet; files.write creates it with its whole text"
         ))),
-        Kind::Pdf | Kind::Image => Err(not_written(rel)),
+        Kind::Pdf | Kind::Image | Kind::Model => Err(not_written(rel)),
     }
 }
 
@@ -408,8 +408,8 @@ fn not_written(rel: &str) -> Error {
 fn content_from(rel: &str, input: &Json) -> std::result::Result<Content, Error> {
     let text = input.get("text").and_then(Json::as_str);
     match crate::kind_of(rel) {
-        Kind::Pdf | Kind::Image => Err(not_written(rel)),
-        Kind::Text | Kind::Markdown => Ok(Content::Text(
+        Kind::Pdf | Kind::Image | Kind::Model => Err(not_written(rel)),
+        Kind::Text | Kind::Markdown | Kind::Map => Ok(Content::Text(
             text.ok_or_else(|| Error::Input("files.write needs `text` for this file".into()))?
                 .to_string(),
         )),

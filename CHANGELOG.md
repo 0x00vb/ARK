@@ -9,6 +9,22 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-15
+
+### Added
+
+- Live file-viewer registration for maps and 3D models, with cancellable, route-bound immutable
+  snapshots, bounded chunks and selection, and editable GeoJSON source (ADR 0071).
+- Explicit trusted-frame asset registration for consumer renderers. Ordinary pages still
+  refuse embedding.
+- Interrupted map/model tabs restore one Retry after a page reload. The bookmark holds no
+  file content or permission and is discarded on a different runtime, project or chat.
+
+### Breaking
+
+- `ark_files::Kind` adds `Map` and `Model`. Exhaustive matches must handle both. Map source is
+  text; model descriptors are read-only.
+
 ### Changed
 
 - Plugins is a global fixed-rail destination. Reviewed provider integrations are available by
@@ -19,9 +35,6 @@ What changed for people building on ARK, per release. Not a commit log.
 
 - Selecting an open chat no longer moves its tab to the end of the tab list.
 - A failed plugin catalog request now shows a useful account state instead of an empty catalog.
-
-### Fixed
-
 - An empty chat assigned to another computer now uses that computer's subscriptions, API keys
   and Ollama catalog before its first message. Its chosen model is kept, setup runs there, and
   slash completion omits commands that cannot run for the remote chat.

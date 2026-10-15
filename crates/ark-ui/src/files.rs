@@ -63,8 +63,20 @@ pub(crate) fn read(root: &Path, rel: &str) -> anyhow::Result<Value> {
         anyhow::bail!("`{rel}` is a folder");
     }
     let shown = ark_files::relative(root, &path);
+    if let Some(view) = ark_files::view_only(rel) {
+        return Ok(
+            json!({ "path": shown, "kind": view.kind.as_str(), "format": view.extension,
+            "media_type": view.media_type, "size": meta.len(), "view_only": true, "snapshot_supported": cfg!(unix) }),
+        );
+    }
     match ark_files::open(root, rel) {
-        Ok(file) => Ok(file.page()),
+        Ok(file) => {
+            let mut page = file.page();
+            if file.kind() == ark_files::Kind::Map {
+                page["snapshot_supported"] = json!(cfg!(unix));
+            }
+            Ok(page)
+        }
         Err(ark_files::Error::Format(why)) => {
             let why = if meta.len() > ark_files::MAX_BYTES {
                 "too large to show".to_string()
@@ -73,7 +85,10 @@ pub(crate) fn read(root: &Path, rel: &str) -> anyhow::Result<Value> {
             } else {
                 "not text".to_string()
             };
-            Ok(json!({ "path": shown, "size": meta.len(), "text": null, "why": why }))
+            Ok(
+                json!({ "path": shown, "size": meta.len(), "text": null, "why": why,
+                "kind": (ark_files::kind_of(rel) == ark_files::Kind::Map).then_some("map"), "snapshot_supported": cfg!(unix) }),
+            )
         }
         Err(e) => Err(e.into()),
     }
@@ -129,7 +144,9 @@ pub(crate) fn media(root: &Path, rel: &str) -> anyhow::Result<Value> {
 /// click never runs a script or a program from the folder.
 pub(crate) fn open_in_app(root: &Path, rel: &str) -> anyhow::Result<()> {
     let path = ark_files::inside(root, rel)?;
-    if ark_files::kind_of(rel) == ark_files::Kind::Text || ark_files::format_for(rel).is_none() {
+    if ark_files::kind_of(rel) == ark_files::Kind::Text
+        || (ark_files::format_for(rel).is_none() && ark_files::view_only(rel).is_none())
+    {
         anyhow::bail!("only files ARK has a format for open in their app");
     }
     if !path.is_file() {
@@ -143,9 +160,98 @@ pub(crate) fn version(root: &Path, rel: &str) -> anyhow::Result<Value> {
     Ok(json!({ "version": ark_files::version(root, rel)? }))
 }
 
+/// The extension's selection is model input, not an unbounded document transport.
+pub(crate) fn validate_focus(focus: &ark_sdk::prelude::ark_core::Focus) -> anyhow::Result<()> {
+    if !matches!(
+        focus.surface.as_ref().map(|s| s.kind_tag.as_str()),
+        Some("map" | "model")
+    ) {
+        return Ok(());
+    }
+    let Some(selection) = &focus.selection else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        serde_json::to_vec(selection)?.len() <= 2048,
+        "file selection exceeds 2 KiB"
+    );
+    for (key, value) in &selection.marks {
+        match key.as_str() {
+            "id" | "label" | "geometry_type" | "units" | "measured_from" => {
+                anyhow::ensure!(
+                    value.as_str().is_some_and(|v| v.chars().count() <= 120),
+                    "invalid file selection label"
+                );
+            }
+            "properties" => {
+                let properties = value
+                    .as_object()
+                    .ok_or_else(|| anyhow::anyhow!("invalid selection properties"))?;
+                anyhow::ensure!(
+                    properties.len() <= 16,
+                    "file selection exceeds 16 properties"
+                );
+                for (k, v) in properties {
+                    anyhow::ensure!(
+                        k.chars().count() <= 64
+                            && !v.is_object()
+                            && !v.is_array()
+                            && v.as_str().is_none_or(|s| s.chars().count() <= 256),
+                        "invalid selection property"
+                    );
+                }
+            }
+            "bounds" | "points" => {
+                let values = value
+                    .as_array()
+                    .ok_or_else(|| anyhow::anyhow!("invalid selection coordinates"))?;
+                anyhow::ensure!(
+                    values.len() <= 6
+                        && values
+                            .iter()
+                            .all(|v| v.as_f64().is_some_and(f64::is_finite)),
+                    "invalid selection coordinates"
+                );
+            }
+            "count" | "distance" | "triangle" => anyhow::ensure!(
+                value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0),
+                "invalid selection number"
+            ),
+            _ => anyhow::bail!("unsupported file selection field"),
+        }
+    }
+    anyhow::ensure!(
+        selection.text.is_none() && selection.line.is_none(),
+        "file selection must use bounded fields"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewer_focus_refuses_property_blobs_and_long_values() {
+        let focus = |selection: Value| {
+            serde_json::from_value(json!({
+                "surface": { "kind_tag": "map", "path": "sites.geojson" }, "selection": selection
+            }))
+            .unwrap()
+        };
+        assert!(validate_focus(&focus(
+            json!({ "id": "one", "properties": { "name": "Site" }, "bounds": [1,2,3,4] })
+        ))
+        .is_ok());
+        for selection in [
+            json!({ "properties": { "nested": { "x": 1 } } }),
+            json!({ "label": "x".repeat(121) }),
+            json!({ "geometry": [1,2,3] }),
+            json!({ "properties": { "name": "x".repeat(3000) } }),
+        ] {
+            assert!(validate_focus(&focus(selection)).is_err());
+        }
+    }
 
     #[test]
     fn paths_stay_inside_the_folder() {

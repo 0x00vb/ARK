@@ -68,6 +68,7 @@ write it, and each sees the other's changes.
 | Text | The editor, saved with ⌘S |
 | Markdown | A page, with the project's images it links to (`![chart](chart.png)`); Edit shows the text, saved with ⌘S |
 | PDF, image | The file itself (`file_media`): a PDF in the browser's own viewer. Read only |
+| Map, 3D model | A consumer's registered `ark.fileViewer` uses an immutable snapshot in the same tab. Map source stays editable through Source. Missing viewers and unsupported platforms keep the file and external-app recovery. In development under ADR 0071 |
 | Someone else's change | The tab reads the file again when the agent (or another agent) writes it, or the window comes back to the front, unless the person has unsaved typing. A document edit based on an old version is refused and the tab reloads |
 | What the agent is told | While the tab is visible: the file, the cell or block selected, and what the person changed since their last message (`edited`) |
 | Open in its app | When the runtime is local (`ark.isLocal()`), for any file ARK has a format for |
@@ -151,6 +152,7 @@ let ui = ArkUi::new(app(root, secrets)?)
 | `.theme(Theme::Light)` | The theme until the person picks one in Settings › Appearance (default `Theme::System`) |
 | `.welcome(title, line)`, `.suggestion(label, prompt)` | The empty-session screen; an empty `line` shows no line (without `.welcome`, the tagline) |
 | `.asset(path, bytes)` | A file the page can load, served at `ext/<path>` |
+| `.frame_asset(path, bytes)` | Trusted shipped HTML at an exact `ext/<path>`. Its HTTP response permits same-origin embedding. Root pages, ordinary assets and error responses still refuse embedding. Use a restrictive frame CSP and a worker for untrusted bytes; this does not create an authority sandbox |
 | `.script(asset)`, `.stylesheet(asset)` | Load an asset as a module or stylesheet after ARK's own |
 | `.handler(name, f)` | A backend method the app's scripts call with `ark.ext(name, params)` |
 | `.keep_running(true)` | The native window: closing it hides it and the app keeps running (schedules, agents' work), with Open and Quit in the menu bar (macOS) or the tray (Windows, Linux); the Dock icon opens it again. Default: closing quits |
@@ -172,6 +174,7 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 | `ark.modelPicker({ label(model), render(el, { close }) })` | The app draws the composer's model menu. `label` gets the host's model ("claude sonnet") and returns the button's text, or `{ text, missing: true }` while nothing is chosen. `ark.refreshModel()` asks again after the app's state changed |
 | `ark.onSubmit(fn)` | `fn(text)` sees each message before it is sent (typed, queued or a suggestion; not `/commands`). Returning true (or a promise of true) means the app took it and nothing is sent |
 | `ark.artifactViewer({ id, label, match, primary, presents, wide, render })` | A view of an artifact; when several match, the artifact header switches between them (plus Raw) |
+| `ark.fileViewer({ id, kinds, render })` | A trusted consumer viewer for `map` or `model`. `render(el, file, api)` may return a promise of `{update, dispose}`. It must resolve only after parsing and rendering succeed. `api.read(offset)` reads one immutable chunk, `signal` cancels, `changed()` retries, `setFocus(selection)` reports bounded fields, and `h` creates DOM. No path to the native filesystem is supplied |
 | `ark.toolRenderer({ match, render })` | How a tool call's full output renders when its row is opened |
 | `ark.action({ id, label, icon, where, when, run })` | A button on an artifact, or an entry in the ⌘K palette |
 | `ark.status({ id, render })` | A line at the bottom of the sidebar |

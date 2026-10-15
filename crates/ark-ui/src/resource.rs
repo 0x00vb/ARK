@@ -82,6 +82,12 @@ pub enum ResourceOperationKind {
     FileWrite,
     FileEdit,
     FileMedia,
+    FileSnapshotOpen,
+    FileSnapshotStatus,
+    FileSnapshotCancel,
+    FileSnapshotChunk,
+    FileSnapshotClose,
+    FileProbe,
     FileVersion,
     FileRestore,
     UploadParts,
@@ -160,6 +166,12 @@ impl ResourceOperationKind {
             | O::FileWrite
             | O::FileEdit
             | O::FileMedia
+            | O::FileSnapshotOpen
+            | O::FileSnapshotStatus
+            | O::FileSnapshotCancel
+            | O::FileSnapshotChunk
+            | O::FileSnapshotClose
+            | O::FileProbe
             | O::FileVersion
             | O::FileRestore
             | O::UploadParts

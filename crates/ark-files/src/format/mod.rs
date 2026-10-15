@@ -2,6 +2,7 @@
 
 mod csv;
 mod docx;
+mod geojson;
 mod image;
 mod pdf;
 mod text;
@@ -9,6 +10,7 @@ mod xlsx;
 
 pub use csv::Csv;
 pub use docx::Docx;
+pub use geojson::GeoJson;
 pub use image::Image;
 pub use pdf::Pdf;
 pub(crate) use text::rewrite;

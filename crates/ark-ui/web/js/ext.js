@@ -15,6 +15,9 @@
 //                      the text, or `{ text, missing: true }` while nothing is chosen: then
 //                      sending opens the menu instead. `ark.refreshModel()` asks again.
 //   ark.artifactViewer({ id, label, match(artifact), primary, presents, wide, render(el, artifact, api, params) })
+//   ark.fileViewer({ id, kinds, render(el, file, api) })
+//                      trusted shipped code over immutable file bytes. `api.read(offset)`
+//                      returns one bounded Uint8Array; parse untrusted bytes in a worker.
 //   ark.toolRenderer({ match(action), render(el, call, api) })
 //   ark.action({ id, label, icon, where: "artifact" | "palette" | "project", when(ctx), run(ctx, api) })
 //                      `project`: an item in a project's menu in the projects list; `ctx` is
@@ -64,6 +67,7 @@ export const registry = {
   views: new Map(),
   settings: new Map(),
   viewers: [],
+  fileViewers: new Map(),
   toolRenderers: [],
   actions: [],
   statuses: [],
@@ -145,6 +149,12 @@ export function installApi(api) {
     artifactViewer(v) {
       need(v, ["id", "label", "match", "render"], "artifactViewer");
       registry.viewers.push(v);
+    },
+    fileViewer(v) {
+      need(v, ["id", "kinds", "render"], "fileViewer");
+      if (!Array.isArray(v.kinds) || !v.kinds.length || v.kinds.some(k => !["map", "model"].includes(k))
+        || typeof v.render !== "function" || registry.fileViewers.has(v.id)) throw new Error("Invalid or duplicate file viewer");
+      registry.fileViewers.set(v.id, v);
     },
     toolRenderer(r) {
       need(r, ["match", "render"], "toolRenderer");

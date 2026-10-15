@@ -25,6 +25,7 @@ mod format;
 pub mod formula;
 pub mod model;
 mod package;
+pub mod snapshot;
 mod tool;
 mod view;
 mod xml;
@@ -75,6 +76,7 @@ pub static FORMATS: &[&dyn Format] = &[
     &format::Markdown,
     &format::Pdf,
     &format::Image,
+    &format::GeoJson,
 ];
 
 /// Largest file ARK opens.
@@ -100,12 +102,70 @@ pub fn extensions() -> Vec<(&'static str, Kind)> {
     FORMATS
         .iter()
         .flat_map(|f| f.extensions().iter().map(move |e| (*e, f.kind())))
+        .chain(VIEW_ONLY.iter().map(|v| (v.extension, v.kind)))
         .collect()
+}
+
+/// Opaque file families. A descriptor never decodes a model or grants editing authority.
+pub struct ViewOnly {
+    pub extension: &'static str,
+    pub kind: Kind,
+    pub media_type: &'static str,
+}
+
+impl ViewOnly {
+    /// Only the header is inspected here. The consumer's worker validates decoded geometry.
+    pub fn preflight(&self, head: &[u8], size: u64) -> Result<(), Error> {
+        let valid = match self.extension {
+            "glb" => {
+                head.len() >= 12
+                    && &head[..4] == b"glTF"
+                    && u32::from_le_bytes(head[4..8].try_into().unwrap()) == 2
+                    && u32::from_le_bytes(head[8..12].try_into().unwrap()) as u64 == size
+            }
+            "stl" => {
+                (head.len() >= 84
+                    && 84 + u32::from_le_bytes(head[80..84].try_into().unwrap()) as u64 * 50
+                        == size)
+                    || head.starts_with(b"solid")
+            }
+            _ => false,
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(Error::Format(format!(
+                "This {} file has an invalid header",
+                self.extension.to_uppercase()
+            )))
+        }
+    }
+}
+
+pub static VIEW_ONLY: &[ViewOnly] = &[
+    ViewOnly {
+        extension: "glb",
+        kind: Kind::Model,
+        media_type: "model/gltf-binary",
+    },
+    ViewOnly {
+        extension: "stl",
+        kind: Kind::Model,
+        media_type: "model/stl",
+    },
+];
+
+pub fn view_only(path: &str) -> Option<&'static ViewOnly> {
+    let ext = Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
+    VIEW_ONLY.iter().find(|v| v.extension == ext)
 }
 
 /// What a path's extension says it holds; text when ARK has no format for it.
 pub fn kind_of(path: &str) -> Kind {
-    format_for(path).map_or(Kind::Text, |f| f.kind())
+    view_only(path).map_or_else(
+        || format_for(path).map_or(Kind::Text, |f| f.kind()),
+        |v| v.kind,
+    )
 }
 
 /// The artifact kind a stored copy of a file of this kind has.
@@ -126,6 +186,12 @@ pub fn shown() -> String {
             .iter()
             .filter(|f| f.kind() == kind)
             .flat_map(|f| f.extensions().iter().copied())
+            .chain(
+                VIEW_ONLY
+                    .iter()
+                    .filter(|v| v.kind == kind)
+                    .map(|v| v.extension),
+            )
             .collect();
         if !exts.is_empty() {
             parts.push(format!("{}s ({})", kind.noun(), exts.join(", ")));
@@ -142,7 +208,9 @@ pub struct Kinds;
 
 impl ark_core::Sniffer for Kinds {
     fn sniff(&self, name: &str, _bytes: &[u8]) -> Option<ark_core::ArtifactKind> {
-        format_for(name).map(|f| artifact_kind(f.kind()))
+        view_only(name)
+            .map(|v| artifact_kind(v.kind))
+            .or_else(|| format_for(name).map(|f| artifact_kind(f.kind())))
     }
 }
 
@@ -290,6 +358,23 @@ pub fn open(root: &Path, rel: &str) -> Result<File, Error> {
     })
 }
 
+/// The editable source of a text-based format, even when the format is currently invalid.
+pub fn source(root: &Path, rel: &str) -> Result<File, Error> {
+    if !kind_of(rel).is_text() {
+        return Err(Error::Input("this file has no editable text source".into()));
+    }
+    let path = inside(root, rel)?;
+    let bytes = read_bytes(&path, rel)?;
+    let content = format::Text.read(&bytes)?;
+    Ok(File {
+        path: relative(root, &path),
+        format: "text",
+        version: version_of(&bytes),
+        size: bytes.len() as u64,
+        content,
+    })
+}
+
 /// A file the window shows as itself (a PDF, an image): its bytes, its media type and version.
 /// Other kinds are drawn from what they read as ([`File::page`]) and are refused here.
 pub fn media(root: &Path, rel: &str) -> Result<(Vec<u8>, String, String), Error> {
@@ -324,6 +409,11 @@ pub fn version(root: &Path, rel: &str) -> Result<String, Error> {
 /// Apply edits to a file and save it. With `base`, the edit is refused when the file is no
 /// longer that version (someone else changed it since). Returns the file as saved.
 pub fn edit(root: &Path, rel: &str, edits: &[Edit], base: Option<&str>) -> Result<File, Error> {
+    if view_only(rel).is_some() {
+        return Err(Error::Input(
+            "Regenerate this model from its source to change it".into(),
+        ));
+    }
     if edits.is_empty() {
         return Err(Error::Input("there are no edits".into()));
     }
@@ -362,6 +452,11 @@ pub fn edit(root: &Path, rel: &str, edits: &[Edit], base: Option<&str>) -> Resul
 /// Create a file, or replace one, with this content. With `base`, replacing is refused when
 /// the file is no longer that version.
 pub fn write(root: &Path, rel: &str, content: &Content, base: Option<&str>) -> Result<File, Error> {
+    if view_only(rel).is_some() {
+        return Err(Error::Input(
+            "Generate model files with a program, not text edits".into(),
+        ));
+    }
     let path = inside(root, rel)?;
     let shown = relative(root, &path);
     if path.is_dir() {
@@ -389,8 +484,8 @@ pub fn write(root: &Path, rel: &str, content: &Content, base: Option<&str>) -> R
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    save(&path, &bytes)?;
     let (format, content) = decode(rel, &bytes)?;
+    save(&path, &bytes)?;
     Ok(File {
         path: shown,
         format,
@@ -419,6 +514,44 @@ fn save(path: &Path, bytes: &[u8]) -> Result<(), Error> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn maps_keep_editable_source_and_models_refuse_text_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let raw = "{\"type\":\"FeatureCollection\",\"features\":[]}";
+        let first = write(
+            dir.path(),
+            "sites.geojson",
+            &Content::Text(raw.into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(first.kind(), Kind::Map);
+        assert!(write(
+            dir.path(),
+            "sites.geojson",
+            &Content::Text("{broken".into()),
+            Some(&first.version)
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("sites.geojson")).unwrap(),
+            raw
+        );
+        assert_eq!(
+            source(dir.path(), "sites.geojson").unwrap().content,
+            Content::Text(raw.into())
+        );
+        assert_eq!(kind_of("part.GLB"), Kind::Model);
+        assert!(write(dir.path(), "part.stl", &Content::Text("bad".into()), None).is_err());
+        std::fs::write(dir.path().join("bad.geojson"), "{broken").unwrap();
+        assert!(open(dir.path(), "bad.geojson").is_err());
+        assert_eq!(
+            source(dir.path(), "bad.geojson").unwrap().content,
+            Content::Text("{broken".into())
+        );
+        assert!(view_only("part.glb").unwrap().preflight(b"bad", 3).is_err());
+    }
 
     /// The page's editor saves the whole text: a CRLF file stays CRLF.
     #[test]
@@ -519,7 +652,7 @@ mod tests {
         );
         assert_eq!(
             shown(),
-            "Markdown documents (md, markdown), spreadsheets (xlsx, xlsm, csv, tsv), documents (docx), PDFs (pdf), images (png, jpg, jpeg, gif, webp, svg), other text files"
+            "Markdown documents (md, markdown), spreadsheets (xlsx, xlsm, csv, tsv), documents (docx), PDFs (pdf), images (png, jpg, jpeg, gif, webp, svg), maps (geojson), 3D models (glb, stl), other text files"
         );
     }
 

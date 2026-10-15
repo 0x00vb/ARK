@@ -45,6 +45,78 @@ async function finished(page, send) {
 }
 
 const scenarios = {
+  async "file-viewer-consumer"(page) {
+    await page.evaluate(() => window.ark.openFile('sites.geojson'));
+    const frame = page.frameLocator('iframe[title="Map"]');
+    await frame.getByRole('button', { name: 'Fit', exact: true }).waitFor({ timeout: 5000 });
+    await frame.getByText('Features', { exact: true }).click();
+    await frame.getByRole('button', { name: 'Site one', exact: true }).click();
+    await frame.locator('#selection').filter({ hasText: 'Site one' }).waitFor();
+    await page.getByRole('button', { name: 'Source', exact: true }).click();
+    await page.locator('textarea.wb-editor').waitFor();
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
+    await frame.getByRole('button', { name: 'Fit', exact: true }).waitFor();
+    await page.evaluate(() => window.ark.openFile('part.stl'));
+    const model = page.frameLocator('iframe[title="3D model"]');
+    await model.getByRole('button', { name: 'Fit', exact: true }).waitFor();
+    await model.getByRole('button', { name: 'Wireframe', exact: true }).click();
+    await shot(page, 'consumer-file-viewer');
+    await page.reload();
+    await page.getByRole('button', { name: 'Retry', exact: true }).waitFor();
+    await page.bringToFront();
+    await page.waitForTimeout(200);
+    assert.equal(await page.locator('iframe[title="3D model"]').count(), 0, 'recovery must wait for Retry');
+    const bookmark = await page.evaluate(() => JSON.parse(sessionStorage.getItem('ark-file-recovery')));
+    assert.deepEqual(Object.keys(bookmark).sort(), ['location', 'path', 'version']);
+    assert.equal(bookmark.path, 'part.stl');
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await model.getByRole('button', { name: 'Fit', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Close part.stl', exact: true }).click();
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('ark-file-recovery')), null);
+    await page.reload();
+    await page.locator('#input').waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Retry', exact: true }).count(), 0);
+    assert.equal(await page.evaluate(async () => {
+      const { fileRecovery } = await import('/js/file.js');
+      const here = window.ark.summary().location;
+      for (const key of ['runtime', 'project', 'session']) {
+        fileRecovery(here, 'sites.geojson', 'remember');
+        if (fileRecovery({ ...here, [key]: 'another' }) !== null || sessionStorage.getItem('ark-file-recovery') !== null) return false;
+        fileRecovery({ ...here, [key]: 'x'.repeat(513) }, 'sites.geojson', 'remember');
+        if (sessionStorage.getItem('ark-file-recovery') !== null) return false;
+      }
+      sessionStorage.setItem('ark-file-recovery', '{broken');
+      return fileRecovery(here) === null && sessionStorage.getItem('ark-file-recovery') === null;
+    }), true);
+  },
+  async "advanced-files"(page) {
+    await page.evaluate(() => {
+      window.__viewerCalls = 0;
+      window.ark.fileViewer({ id: 'proof', kinds: ['map', 'model'], async render(el, file, api) {
+        window.__viewerCalls++;
+        const bytes = await api.read(0);
+        el.append(api.h('button', { type: 'button', onclick: () => api.setFocus({ id: 'site-1', label: 'Site one', properties: { name: 'Site one' } }) }, 'Select site'));
+        el.append(api.h('span.proof-model', `${file.kind}:${file.size}:${bytes.length}`));
+        return { dispose() { window.__viewerDisposed = (window.__viewerDisposed || 0) + 1; } };
+      } });
+      window.ark.openFile('sites.geojson');
+    });
+    await page.getByRole('button', { name: 'Select site', exact: true }).click();
+    await page.getByRole('button', { name: 'Source', exact: true }).click();
+    await page.locator('textarea.wb-editor').waitFor();
+    assert.match(await page.locator('textarea.wb-editor').inputValue(), /FeatureCollection/);
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
+    await page.getByRole('button', { name: 'Select site', exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.__viewerDisposed), 1);
+    await page.evaluate(() => window.ark.openFile('bad.geojson'));
+    await page.getByRole('button', { name: 'Source', exact: true }).click();
+    assert.equal(await page.locator('textarea.wb-editor').inputValue(), '{broken');
+    await page.evaluate(() => window.ark.openFile('large.stl'));
+    await page.waitForFunction(() => [...document.querySelectorAll('.proof-model')].some(el => el.textContent === 'model:30000084:1048576'));
+    await page.setViewportSize({ width: 420, height: 780 });
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    await shot(page, 'advanced-files');
+  },
   // Closing while the target runtime is still opening leaves no sheet or terminal behind. If
   // the late reply contains a terminal, the UI closes it immediately.
   async "terminal-close-race"(page) {
@@ -290,7 +362,7 @@ const scenarios = {
     assert.equal(rail.divider, "none", "the fixed rail has no detached partial divider");
     assert.equal(rail.height, 800, "the fixed rail reaches the full window height");
     assert.equal(rail.sameSurface, false, "the fixed rail stays distinct from the project sidebar without a divider");
-    assert.deepEqual(rail.labels, [1, 1, 1], "wide rail labels stay available to assistive technology only");
+    assert.deepEqual(rail.labels, [1, 1, 1, 1], "wide rail labels stay available to assistive technology only");
     await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
     assert.equal(await page.locator(".destinations").evaluate((el) =>
       getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor), false,
@@ -323,7 +395,7 @@ const scenarios = {
     });
     assert.equal(open.destinations.height, 56, "compact destinations keep their own layout row");
     assert.equal(open.mainBottom, open.destinations.top, "the bar does not cover the workspace");
-    assert.equal(await page.locator(".destination").count(), 3);
+    assert.equal(await page.locator(".destination").count(), 4);
     for (const button of await page.locator(".destination").all()) {
       const box = await button.boundingBox();
       assert.ok(box.width >= 44 && box.height >= 44, JSON.stringify(box));
@@ -1371,13 +1443,13 @@ async function settings(page) {
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
   const rows = page.locator(".settings-list .nav-row");
   await rows.nth(2).waitFor();
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Devices", "Permissions", "Plugins", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Devices", "Permissions", "Skills", "Tool servers"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.setting({ id: "debug", title: "Debug", advanced: true, render: (el) => el.append("the debug") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Devices", "Permissions", "Plugins", "Debug", "Skills", "Tool servers"]);
-  assert.deepEqual(await page.locator(".settings-list > *").evaluateAll((els) => els.map((e) => e.textContent).slice(5, 7)), ["Plugins", "Advanced"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Devices", "Permissions", "Debug", "Skills", "Tool servers"]);
+  assert.deepEqual(await page.locator(".settings-list > *").evaluateAll((els) => els.map((e) => e.textContent).slice(5, 7)), ["Advanced", "Debug"]);
 
   // The test page opens light (no app default, a light system); Dark is kept across a reload.
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "light");
@@ -1955,6 +2027,8 @@ async function expandedProjects(page) {
 
   await third.click();
   await page.waitForFunction(() => window.ark.summary().project.name === "Third project");
+  await page.waitForFunction(() => [...document.querySelectorAll('.project-row')]
+    .some(row => row.textContent.includes('Third project') && row.getAttribute('aria-expanded') === 'true'));
   for (const name of [original.name, "Second project", "Third project"]) {
     assert.equal(await page.locator(".project-row", { hasText: name }).getAttribute("aria-expanded"), "true", `${name} stays expanded`);
   }
@@ -2625,6 +2699,7 @@ const errors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.on("pageerror", (e) => errors.push(e.stack || String(e)));
+  if (scenario === 'file-viewer-consumer') page.on('console', message => { if (message.type() === 'error') console.error('consumer console:', message.text()); });
   if (inits[scenario]) await page.addInitScript(inits[scenario]);
   if (scenario === "ready") {
     await page.route("**/*", async (route) => {
@@ -2640,6 +2715,11 @@ try {
   console.log(`${scenario}: ok`);
 } catch (e) {
   console.error(`${scenario}: ${e.stack || e}`);
+  if (scenario === 'file-viewer-consumer') {
+    const page = browser.contexts()[0]?.pages()[0];
+    if (page) console.error('File view state:', await page.locator('.fv').innerText().catch(() => 'unavailable'));
+    if (page) console.error('Frame states:', await Promise.all(page.frames().map(async frame => [frame.url(), await frame.locator('body').innerText().catch(() => '')])));
+  }
   // What the page threw before it failed, if anything.
   for (const err of errors) console.error(`page error: ${err}`);
   process.exitCode = 1;

@@ -1,7 +1,15 @@
 # Advanced artifact surfaces
 
 Plan for maps, 3D models, CAD and later domain files to open in ARK without adding a mode,
-destination or setup flow. This is a proposal. It does not describe released behavior.
+destination or setup flow. A1 to A3 are implemented. The later CAD and IFC sections are plans,
+not released product capabilities.
+
+Development evidence is in [`ADVANCED_ARTIFACTS_A0.md`](ADVANCED_ARTIFACTS_A0.md). A0 passed
+independent QA. A1 to A3 pass full repository checks, real WebKit interaction and code QA.
+The packaged Mac app covers local files and renderer-crash Retry. A Linux ARM64 runtime serves
+maps and models to that window; a source edit saves on Linux and renders the new name. The owner
+deferred unfamiliar-user observation and physical trackpad testing. A4 has a contained feasibility
+proof, not a registered product runtime. A5 has not started.
 
 ## Product contract
 
@@ -40,6 +48,10 @@ The current advanced-file experience scores 4/10 under the workspace design diag
 
 The release target is an observed 10/10. Written acceptance checks are necessary but do not earn
 that score. Five unfamiliar people must complete the first-use test below without instruction.
+On 2026-10-15 the owner deferred that observation and the physical trackpad check. They are
+follow-up work, not blockers to merging the technically verified map/model slice. Do not claim
+observed 10/10 usability or physical trackpad verification without those results. Native and
+remote technical checks, resource bounds and release verification remain required.
 
 ## One generic seam
 
@@ -74,14 +86,15 @@ file and it does not implement `Edit`. `kind_of` and the file listing use this d
 reading the bytes. `file_read` returns the kind, size and `view_only: true`; it does not try to
 map the binary file into `Content`.
 
-Do not hash the live file again for every chunk. Snapshot creation takes ARK's per-path shared
-read lease, opens the authorized source, captures its platform file identity, size and change
+Do not hash the live file again for every chunk. Snapshot creation opens the authorized source
+with descriptor-relative, no-follow traversal and captures its platform file identity, size and change
 metadata, then streams it into an ARK-owned temporary file while computing BLAKE3. It rewinds the
 same handle and hashes the source a second time. It accepts the snapshot only when both hashes,
 byte counts, identity, size and change metadata agree before, between and after the passes.
 
-The lease blocks ARK's own edit, restore and run-output publication during the copy. Opening the
-source handle keeps an atomic replacement on its original inode or file id. The second pass
+ARK's typed edits and Restore replace files atomically. Run code writes directly to the project;
+it has no separate output-publication step. Its writes use the same detection as external writes.
+Opening the source handle keeps an atomic replacement on its original inode or file id. The second pass
 detects an external in-place overwrite or truncation. On a mismatch, the host deletes the partial
 snapshot and retries from a new handle up to three times. It then refuses with `The file is
 changing; try again when it is saved`. A platform that cannot provide a stable identity and
@@ -92,13 +105,17 @@ Initial additive calls:
 
 | Call | Result |
 |---|---|
-| `file_snapshot_open {path}` | `{snapshot, kind, format, media_type, version, size, chunk_size, expires_ms}` |
-| `file_snapshot_chunk {snapshot, offset}` | `{snapshot, offset, data, eof}` with at most `chunk_size` bytes as base64 |
-| `file_snapshot_close {snapshot}` | Closes the token and removes its temporary file |
+| `file_snapshot_open {path}` | Immediately returns `{request, state: "opening"}` with a host-generated random id |
+| `file_snapshot_status {path, request}` | `opening`, `copying`, `verifying`, `retrying`, `refused` or `ready`. Progress includes `bytes` and `size`. Ready includes `snapshot`, `kind`, `format`, `media_type`, `version`, `change`, `size`, `chunk_size`, `expires_ms` |
+| `file_snapshot_chunk {path, snapshot, offset}` | `{snapshot, offset, data, eof}` with at most `chunk_size` bytes as base64 |
+| `file_snapshot_cancel {path, request}` | Cancels pending work and releases its reservation when the copy exits |
+| `file_snapshot_close {path, snapshot}` | Closes a ready token and its private temporary file |
+| `file_probe {path}` | Bounded source identity/change fingerprint, including models above 25 MiB |
 
 The random snapshot token is scoped to the current resource route, project and opening chat. It
 cannot be used from another runtime, project or chat. Initial prove-or-change limits are 256 MiB
-per model, 1 MiB per chunk, two in-flight chunk reads per viewer, eight open snapshots and 512
+per model in the transport proof. The initial product cap is lowered to 64 MiB. There is 1 MiB
+per chunk, two in-flight chunk reads per viewer, eight open snapshots and 512
 MiB of snapshot files per runtime. An idle token expires after two minutes and no token lives
 past ten minutes. Closing the tab, switching its resource or cancelling loading closes it. The A0
 measurements may lower these constants. Raising them requires new memory, disk and latency
@@ -110,7 +127,11 @@ that the assembled bytes equal either the complete old version or the complete n
 never a mixture. Another test overwrites and truncates the same inode during
 `file_snapshot_open`: the host retries or refuses, returns no token for the unstable copy and
 removes every partial file. Interrupted copies leave no token and their temporary files are swept
-at start.
+at start. The implementation uses unnamed private temporary files, removed by the OS on a crash.
+Independent job permits remain held until cancelled copies exit, so cancel/reopen cannot bypass
+the eight-worker bound. A source-size reservation is taken before copying. Registry locks never
+cover file I/O. On loss of the client, idle expiry ends the request. Resource unsubscribe cancels
+it immediately. Unsupported systems expose `snapshot_supported: false` and keep the normal fallback.
 
 The protocol later exposes these calls as optional capabilities for native clients. This work
 does not overload `file_media` or increase its 25 MB base64 reply.
@@ -216,8 +237,12 @@ Acceptance:
 Bundle a pinned Three.js build and only the loaders needed for binary GLB and binary or ASCII
 STL. Both are treated as single-file formats. Parse them in a worker after a header preflight.
 For GLB, reject external buffer or image URIs, decoder extensions that are not bundled (including
-Draco, Meshopt and KTX paths in the first release), oversized embedded images and decoded data
-above the vertex, triangle, texture and memory caps measured in A0.
+Draco, Meshopt and KTX paths in the first release), and decoded data above the caps measured in A0.
+The first implementation accepts one static scene with triangle meshes and no textures, animations
+or extensions. It caps source bytes at 64 MiB, vertices and triangles at 1,000,000 each, mesh
+primitives at 256, nodes at 2,048 and decoded accessor data at 128 MiB. Unsupported files keep their
+source and external-app recovery. The actual decoder stays in a disposable worker and validates
+finite positions, transforms and index ranges before returning geometry.
 
 The first view has Orbit, Pan, Fit, Reset, Orthographic/Perspective, Wireframe and Measure. Orbit,
 Pan and Measure are visible modes with one selected state. `Escape` leaves Measure or cancels the
@@ -375,7 +400,7 @@ These are engineering targets, not public dates or launch commitments.
 | Target | Scope | Gate |
 |---|---|---|
 | First 48 hours | Prove-or-stop A0 and A1 spike, one GeoJSON and one STL fixture in a registered test viewer | Stop before product UI if immutable snapshot routing, worker isolation or bounded parsing is unresolved. Plan and design QA must pass |
-| First useful slice | A1 and A2 | Full ARK checks, Desktop checks, real offline map dogfood, 10/10 design diagnostic |
+| First useful slice | A1 and A2 | Full ARK checks, Desktop checks, real offline map dogfood, technical UX audit. Observed first use deferred by the owner on 2026-10-15 |
 | First visible 3D slice | A3 | Real GLB and STL dogfood, memory and hostile-file evidence |
 | First generated CAD proof | A4 bracket workflow | Clean-machine setup, contained run, dimensions checked on outputs, source revised once |
 | First professional expansion | A5 IFC | Real architect or BIM operator observes the task. Do not infer need from the demo alone |

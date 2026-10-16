@@ -3,6 +3,209 @@
 use std::io;
 use std::path::Path;
 
+/// Make one new private folder. Refuse an existing path rather than reusing it.
+pub fn create_private_dir(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().mode(0o700).create(path)
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir(path)
+}
+
+/// Open a regular project file for bounded capture. Unix uses descriptor-relative traversal.
+/// Windows verifies the opened handle's resolved path before reading any bytes.
+pub fn open_capture(root: &Path, path: &Path) -> io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        open_within(root, path)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFinalPathNameByHandleW, FILE_FLAG_OPEN_REPARSE_POINT,
+        };
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        let mut name = vec![0u16; 32768];
+        // SAFETY: file owns the handle, and name has the capacity passed to Windows.
+        let n = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle(),
+                name.as_mut_ptr(),
+                name.len() as u32,
+                0,
+            )
+        } as usize;
+        if n == 0 || n >= name.len() {
+            return Err(io::Error::last_os_error());
+        }
+        let resolved = std::path::PathBuf::from(String::from_utf16_lossy(&name[..n]));
+        let root = std::fs::canonicalize(root)?;
+        if !file.metadata()?.is_file() || !resolved.starts_with(root) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "capture is outside its folder or not a regular file",
+            ));
+        }
+        Ok(file)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (root, path);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "file capture is unavailable",
+        ))
+    }
+}
+
+/// Read at most max bytes from an opened regular file. A growing file never causes an
+/// unbounded allocation; one extra byte detects an overrun and the partial result is rejected.
+pub fn read_bounded(mut file: std::fs::File, max: u64) -> io::Result<Vec<u8>> {
+    let size = file.metadata()?.len();
+    if size > max {
+        return Err(io::Error::other("file exceeds the capture limit"));
+    }
+    read_limited(&mut file, size, max)
+}
+
+fn read_limited(source: &mut impl io::Read, size: u64, max: u64) -> io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::with_capacity(size.min(max).min(1024 * 1024) as usize);
+    source.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
+        return Err(io::Error::other("file grew past the capture limit"));
+    }
+    Ok(bytes)
+}
+
+/// Snapshot an already-open file, retaining native copy-on-write clones where available.
+/// Clones are checked before admission to the byte budget. Fallback copying is byte-bounded.
+/// A rejected partial copy or clone is removed.
+pub fn copy_bounded(mut source: std::fs::File, dest: &Path, max: u64) -> io::Result<u64> {
+    let before = source.metadata()?;
+    if !before.is_file() || before.len() > max {
+        return Err(io::Error::other("file exceeds the snapshot limit"));
+    }
+    copy_checked(&mut source, dest, max, &before)
+}
+
+fn copy_checked(
+    source: &mut std::fs::File,
+    dest: &Path,
+    max: u64,
+    before: &std::fs::Metadata,
+) -> io::Result<u64> {
+    use std::io::Write;
+    let cloned = clone_capture(source, dest)?;
+    let mut output = if cloned {
+        None
+    } else {
+        Some(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(dest)?,
+        )
+    };
+    let result = (|| {
+        if let Some(output) = &mut output {
+            output.set_permissions(before.permissions())?;
+            let copied = copy_limited(source, output, max)?;
+            output.flush()?;
+            if copied != before.len() {
+                return Err(io::Error::other("file changed during snapshot"));
+            }
+        }
+        let after = source.metadata()?;
+        let size = std::fs::metadata(dest)?.len();
+        if size > max
+            || size != before.len()
+            || after.len() != before.len()
+            || after.modified()? != before.modified()?
+        {
+            return Err(io::Error::other("file changed during snapshot"));
+        }
+        Ok(size)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(dest);
+    }
+    result
+}
+
+fn copy_limited(
+    source: &mut impl io::Read,
+    dest: &mut impl io::Write,
+    max: u64,
+) -> io::Result<u64> {
+    use std::io::Read;
+    let copied = io::copy(&mut source.by_ref().take(max), dest)?;
+    let mut extra = [0];
+    if source.read(&mut extra)? != 0 {
+        return Err(io::Error::other("file grew past the snapshot limit"));
+    }
+    Ok(copied)
+}
+
+#[cfg(target_os = "macos")]
+fn clone_capture(source: &std::fs::File, dest: &Path) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let dest = std::ffi::CString::new(dest.as_os_str().as_bytes()).map_err(io::Error::other)?;
+    // SAFETY: source owns the fd and dest is a live nul-terminated path. No file is replaced.
+    let result =
+        unsafe { libc::fclonefileat(source.as_raw_fd(), libc::AT_FDCWD, dest.as_ptr(), 0) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    if matches!(
+        error.raw_os_error(),
+        Some(libc::ENOTSUP | libc::EXDEV | libc::ENOSYS)
+    ) {
+        Ok(false)
+    } else {
+        Err(error)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn clone_capture(source: &std::fs::File, dest: &Path) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    let output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dest)?;
+    // SAFETY: both file descriptors are owned for this ioctl.
+    let result = unsafe { libc::ioctl(output.as_raw_fd(), libc::FICLONE, source.as_raw_fd()) };
+    if result == 0 {
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    drop(output);
+    std::fs::remove_file(dest)?;
+    if matches!(
+        error.raw_os_error(),
+        Some(libc::EOPNOTSUPP | libc::EXDEV | libc::ENOTTY | libc::EINVAL)
+    ) {
+        Ok(false)
+    } else {
+        Err(error)
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn clone_capture(_: &std::fs::File, _: &Path) -> io::Result<bool> {
+    Ok(false)
+}
+
 /// Open a regular file below a canonical root without following replacement symlinks.
 /// Descriptor-relative traversal prevents a renamed ancestor from redirecting the read.
 pub fn open_within(root: &Path, path: &Path) -> io::Result<std::fs::File> {
@@ -258,6 +461,96 @@ pub fn private_dir(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readers_and_copy_fallback_stop_growth_after_the_metadata_check() {
+        // The previously observed length is one. The stream has grown before its first read.
+        let mut source = io::Cursor::new(vec![b'x'; 4096]);
+        assert!(read_limited(&mut source, 1, 8).is_err());
+        assert_eq!(source.position(), 9);
+        let mut source = io::Cursor::new(vec![b'x'; 4096]);
+        let mut output = Vec::new();
+        assert!(copy_limited(&mut source, &mut output, 8).is_err());
+        assert_eq!(output.len(), 8);
+        assert_eq!(source.position(), 9);
+    }
+
+    #[test]
+    fn a_snapshot_grown_after_metadata_is_rejected_and_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("source");
+        let dest = root.path().join("copy");
+        std::fs::write(&path, b"a").unwrap();
+        let mut source = std::fs::File::open(&path).unwrap();
+        let before = source.metadata().unwrap();
+        std::fs::write(&path, vec![b'x'; 4096]).unwrap();
+        assert!(copy_checked(&mut source, &dest, 8, &before).is_err());
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn capture_respects_exact_byte_limits_and_never_replaces_a_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        let source = root.join("source");
+        let dest = root.join("snapshot");
+        std::fs::write(&source, b"four").unwrap();
+        assert!(read_bounded(open_capture(&root, &source).unwrap(), 3).is_err());
+        assert_eq!(
+            read_bounded(open_capture(&root, &source).unwrap(), 4).unwrap(),
+            b"four"
+        );
+        assert!(copy_bounded(open_capture(&root, &source).unwrap(), &dest, 3).is_err());
+        assert!(!dest.exists());
+        assert_eq!(
+            copy_bounded(open_capture(&root, &source).unwrap(), &dest, 4).unwrap(),
+            4
+        );
+        std::fs::write(&source, b"next").unwrap();
+        assert!(copy_bounded(open_capture(&root, &source).unwrap(), &dest, 4).is_err());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"four");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_refuses_replaced_files_and_ancestor_links() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        std::fs::write(outside.path().join("secret"), "outside").unwrap();
+        symlink(outside.path(), root.join("dir")).unwrap();
+        assert!(open_capture(&root, &root.join("dir/secret")).is_err());
+        symlink(outside.path().join("secret"), root.join("leaf")).unwrap();
+        assert!(open_capture(&root, &root.join("leaf")).is_err());
+    }
+
+    #[test]
+    fn an_open_capture_is_bounded_even_if_the_file_grows_after_opening() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let path = root.join("growing");
+        std::fs::write(&path, b"a").unwrap();
+        let file = open_capture(&root, &path).unwrap();
+        std::fs::write(&path, vec![1; 4096]).unwrap();
+        assert!(read_bounded(file, 2).is_err());
+        assert!(!root.join("copy").exists());
+        assert!(copy_bounded(open_capture(&root, &path).unwrap(), &root.join("copy"), 2).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_scratch_folder_is_private_and_cannot_be_reused() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("run");
+        create_private_dir(&path).unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert!(create_private_dir(&path).is_err());
+    }
 
     #[cfg(unix)]
     #[test]

@@ -126,6 +126,43 @@ impl Spec {
 /// blocks on a full pipe. A cancelled call (the future dropped) or a timeout stops the program
 /// and everything it started. A non-zero exit is not an error.
 pub async fn run_spec(spec: &Spec) -> Result<Run, AdapterError> {
+    run_managed(spec, std::future::pending(), false)
+        .await
+        .map_err(|e| e.error)
+}
+
+/// Distinguishes a launch error from an incomplete teardown. Only the latter prevents safe
+/// replacement work from using the same resource slot.
+#[derive(Debug)]
+pub struct ContainedError {
+    pub error: AdapterError,
+    pub cleanup_incomplete: bool,
+}
+
+impl From<AdapterError> for ContainedError {
+    fn from(error: AdapterError) -> Self {
+        Self {
+            error,
+            cleanup_incomplete: false,
+        }
+    }
+}
+
+/// Run finite contained work. Cancellation is observed without dropping the owner: the
+/// child is reaped, its group is stopped even on success, and output readers are joined.
+/// No CPU priority or rate limit is installed.
+pub async fn run_contained(
+    spec: &Spec,
+    cancel: impl std::future::Future<Output = ()>,
+) -> Result<Run, ContainedError> {
+    run_managed(spec, cancel, true).await
+}
+
+async fn run_managed(
+    spec: &Spec,
+    cancel: impl std::future::Future<Output = ()>,
+    contained: bool,
+) -> Result<Run, ContainedError> {
     let mut command = vec![spec.program.display().to_string()];
     command.extend(spec.args.iter().cloned());
     let mut c = tool_command(&spec.program, &spec.args);
@@ -140,35 +177,48 @@ pub async fn run_spec(spec: &Spec) -> Result<Run, AdapterError> {
         detail: e.to_string(),
     })?;
     let mut group = Tree::of(child.id());
-    let out = tokio::spawn(drain(child.stdout.take(), spec.keep));
-    let err = tokio::spawn(drain(child.stderr.take(), spec.keep));
+    if contained && !group.attached() {
+        let _ = child.kill().await;
+        return Err(ContainedError {
+            error: AdapterError::Tool("could not attach contained process cleanup".into()),
+            cleanup_incomplete: true,
+        });
+    }
+    let mut out = Reader(tokio::spawn(drain(child.stdout.take(), spec.keep)));
+    let mut err = Reader(tokio::spawn(drain(child.stderr.take(), spec.keep)));
 
-    let (status, timed_out) = match spec.timeout {
-        Some(t) => match tokio::time::timeout(t, child.wait()).await {
-            Ok(s) => (s.ok().and_then(|s| s.code()), false),
-            Err(_) => {
-                group.kill();
-                let _ = child.kill().await;
-                (None, true)
-            }
-        },
-        None => (child.wait().await.ok().and_then(|s| s.code()), false),
+    let wait = async {
+        match spec.timeout {
+            Some(t) => tokio::time::timeout(t, child.wait()).await.map_err(|_| ()),
+            None => Ok(child.wait().await),
+        }
     };
-    if !timed_out {
+    let (status, timed_out, cancelled) = tokio::select! {
+        biased;
+        _ = cancel => (None, false, true),
+        result = wait => match result {
+            Ok(status) => (status.ok().and_then(|s| s.code()), false, false),
+            Err(()) => (None, true, false),
+        }
+    };
+    if timed_out || cancelled {
+        if !contained {
+            group.kill();
+        }
+        let _ = child.kill().await;
+    }
+    if contained {
+        group.stop().await.map_err(|e| ContainedError {
+            error: AdapterError::Tool(format!("contained process cleanup failed: {e}")),
+            cleanup_incomplete: true,
+        })?;
+    } else if !timed_out {
         group.disarm();
     }
     // A process that left a child holding the pipes open must not hold the caller too.
     let grace = std::time::Duration::from_secs(2);
-    let stdout = tokio::time::timeout(grace, out)
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or_default();
-    let mut stderr = tokio::time::timeout(grace, err)
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .unwrap_or_default();
+    let stdout = out.finish(grace).await;
+    let mut stderr = err.finish(grace).await;
     if timed_out {
         if let Some(t) = spec.timeout {
             if !stderr.is_empty() && !stderr.ends_with('\n') {
@@ -181,8 +231,33 @@ pub async fn run_spec(spec: &Spec) -> Result<Run, AdapterError> {
         command,
         stdout,
         stderr,
-        code: status.unwrap_or(if timed_out { 124 } else { -1 }),
+        code: status.unwrap_or(if timed_out {
+            124
+        } else if cancelled {
+            130
+        } else {
+            -1
+        }),
     })
+}
+
+struct Reader(tokio::task::JoinHandle<String>);
+impl Reader {
+    async fn finish(&mut self, grace: std::time::Duration) -> String {
+        match tokio::time::timeout(grace, &mut self.0).await {
+            Ok(result) => result.unwrap_or_default(),
+            Err(_) => {
+                self.0.abort();
+                let _ = (&mut self.0).await;
+                String::new()
+            }
+        }
+    }
+}
+impl Drop for Reader {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// The last line of a run's stderr when [`Spec::timeout`] stopped it.
@@ -238,6 +313,97 @@ pub async fn run_ok(tool: &str, args: &[String]) -> Result<Run, AdapterError> {
 #[cfg(test)]
 mod rt_tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn contained_success_stops_background_children_but_ordinary_runs_keep_them() {
+        let dir = tempfile::tempdir().unwrap();
+        for contained in [false, true] {
+            let path = dir
+                .path()
+                .join(if contained { "contained" } else { "ordinary" });
+            let mut spec = Spec::new("/bin/sh");
+            spec.args = vec![
+                "-c".into(),
+                "sleep 30 </dev/null >/dev/null 2>&1 & echo $! > \"$1\"".into(),
+                "sh".into(),
+                path.display().to_string(),
+            ];
+            spec.keep = Some(100);
+            let result = if contained {
+                run_contained(&spec, std::future::pending())
+                    .await
+                    .map_err(|e| e.error)
+            } else {
+                run_spec(&spec).await
+            };
+            let pid: u32 = std::fs::read_to_string(path)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            let was_alive = ark_os::process::alive(pid);
+            // Always clean this test's ordinary background child, including on assertion failure.
+            if was_alive {
+                let mut kill = Spec::new("/bin/kill");
+                kill.args = vec!["-KILL".into(), pid.to_string()];
+                let _ = run_spec(&kill).await;
+            }
+            assert!(
+                result.is_ok(),
+                "{}",
+                result.err().map(|e| e.to_string()).unwrap_or_default()
+            );
+            assert_eq!(was_alive, !contained);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_missing_program_is_not_an_incomplete_teardown() {
+        let result = run_contained(
+            &Spec::new("/does-not-exist/ark-run"),
+            std::future::pending(),
+        )
+        .await;
+        let error = result.err().expect("a launch error");
+        assert!(!error.cleanup_incomplete);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn contained_cancellation_joins_child_and_readers() {
+        let (cancel, receiver) = tokio::sync::oneshot::channel::<()>();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pid");
+        let mut spec = Spec::new("/bin/sh");
+        spec.args = vec![
+            "-c".into(),
+            "echo $$ > \"$1\"; exec sleep 30".into(),
+            "sh".into(),
+            path.display().to_string(),
+        ];
+        spec.keep = Some(100);
+        let job = tokio::spawn(async move {
+            run_contained(&spec, async {
+                let _ = receiver.await;
+            })
+            .await
+        });
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !path.exists() {
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let pid = std::fs::read_to_string(path)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        cancel.send(()).unwrap();
+        let result = job.await.unwrap().unwrap();
+        assert_eq!(result.code, 130);
+        assert!(!ark_os::process::alive(pid));
+    }
 
     /// A cancelled call (its future dropped) takes the shell's children down with it.
     #[cfg(unix)]

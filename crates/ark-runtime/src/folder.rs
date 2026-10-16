@@ -1,6 +1,6 @@
 //! What a piece of work changed in a project folder, found from the folder itself (ADR 0034,
 //! ADR 0043 › A worker's results). Before the work: a listing of the files and a copy of each
-//! (`std::fs::copy` clones where the disk can: APFS, btrfs, XFS). After: each file that is new
+//! (bounded clones where the disk can: APFS, btrfs, XFS). After: each file that is new
 //! or changed is written by the work; each file changed or removed keeps its copy as the
 //! version before.
 //!
@@ -24,6 +24,12 @@ const BEFORE_FILE: u64 = 256 * 1024 * 1024;
 const BEFORE_TOTAL: u64 = 512 * 1024 * 1024;
 /// Versions before kept from one comparison; past it, changes are listed as not kept.
 pub const MAX_VERSIONS: usize = 50;
+
+/// Capture a regular project file with a byte limit enforced on its opened handle.
+pub fn read_capture(root: &Path, relative: &str, max: u64) -> std::io::Result<Vec<u8>> {
+    ark_os::fs::open_capture(root, &root.join(relative))
+        .and_then(|file| ark_os::fs::read_bounded(file, max))
+}
 
 /// A file as a listing saw it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +137,7 @@ pub struct Kept {
 impl Before {
     /// List `root` and copy its files into `copies`.
     pub fn take(root: &Path, copies: &Path) -> Before {
+        let root = &canonical(root);
         let files = files(root);
         let mut copied = HashSet::new();
         let mut total = 0u64;
@@ -142,9 +149,12 @@ impl Before {
             let made = to
                 .parent()
                 .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|_| std::fs::copy(root.join(rel), &to));
-            if made.is_ok() {
-                total += f.len;
+                .and_then(|_| ark_os::fs::open_capture(root, &root.join(rel)))
+                .and_then(|source| {
+                    ark_os::fs::copy_bounded(source, &to, BEFORE_FILE.min(BEFORE_TOTAL - total))
+                });
+            if let Ok(size) = made {
+                total += size;
                 copied.insert(rel.clone());
             }
         }
@@ -167,9 +177,11 @@ impl Before {
 
     /// Compare with the folder now.
     pub fn changed(&self, root: &Path) -> Kept {
+        let (root, copies) = (&canonical(root), &canonical(&self.copies));
         let now: HashMap<String, Seen> = files(root).into_iter().collect();
         let was: HashMap<&str, &Seen> = self.files.iter().map(|(r, s)| (r.as_str(), s)).collect();
         let mut kept = Kept::default();
+        let mut retained = 0u64;
         for (rel, f) in &now {
             if was.get(rel.as_str()).is_none_or(|w| *w != f) {
                 kept.written.push(rel.clone());
@@ -185,18 +197,28 @@ impl Before {
             if gone {
                 kept.removed.push(rel.clone());
             }
-            let copy = self.copies.join(rel);
+            let copy = copies.join(rel);
+            if self.copied.contains(rel)
+                && !gone
+                && same_files(copies, &copy, root, &root.join(rel))
+            {
+                kept.written.retain(|w| w != rel);
+                continue;
+            }
             let bytes = self
                 .copied
                 .contains(rel)
-                .then(|| std::fs::read(&copy).ok())
+                .then(|| {
+                    ark_os::fs::open_capture(copies, &copy)
+                        .and_then(|file| {
+                            ark_os::fs::read_bounded(file, BEFORE_FILE.min(BEFORE_TOTAL - retained))
+                        })
+                        .ok()
+                })
                 .flatten();
             match bytes {
-                // Written again with the same bytes: nothing to put back.
-                Some(b) if !gone && std::fs::read(root.join(rel)).is_ok_and(|n| n == b) => {
-                    kept.written.retain(|w| w != rel);
-                }
                 Some(b) if kept.versions.len() < MAX_VERSIONS => {
+                    retained += b.len() as u64;
                     kept.versions.push(ProducedArtifact::before(
                         ArtifactKind::Blob,
                         rel.as_str(),
@@ -210,9 +232,85 @@ impl Before {
     }
 }
 
+/// Captures open files below a root without following links, so a root given through a link
+/// (a project opened by a linked path) is resolved first. A missing root stays as given.
+fn canonical(root: &Path) -> PathBuf {
+    root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
+}
+
+/// Compare opened handles with fixed buffers. A file that grew is different without reading
+/// its additional bytes, including when a concurrent editor changes it after the listing.
+fn same_files(a_root: &Path, a: &Path, b_root: &Path, b: &Path) -> bool {
+    use std::io::Read;
+    let compare = || -> std::io::Result<bool> {
+        let mut a = ark_os::fs::open_capture(a_root, a)?;
+        let mut b = ark_os::fs::open_capture(b_root, b)?;
+        let size = a.metadata()?.len();
+        if size > BEFORE_FILE || size != b.metadata()?.len() {
+            return Ok(false);
+        }
+        let mut left = size;
+        let (mut ab, mut bb) = ([0; 8192], [0; 8192]);
+        while left > 0 {
+            let n = left.min(ab.len() as u64) as usize;
+            a.read_exact(&mut ab[..n])?;
+            b.read_exact(&mut bb[..n])?;
+            if ab[..n] != bb[..n] {
+                return Ok(false);
+            }
+            left -= n as u64;
+        }
+        Ok(a.read(&mut ab[..1])? == 0 && b.read(&mut bb[..1])? == 0)
+    };
+    compare().unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_grown_file_keeps_its_small_original_without_loading_the_grown_contents() {
+        let root = tempfile::tempdir().unwrap();
+        let copies = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        std::fs::write(root.join("file"), b"original").unwrap();
+        let before = Before::take(&root, copies.path());
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(root.join("file"))
+            .unwrap();
+        file.set_len(BEFORE_FILE + 1).unwrap();
+        let changed = before.changed(&root);
+        assert_eq!(changed.versions.len(), 1);
+        assert_eq!(changed.versions[0].bytes, b"original");
+        assert_eq!(changed.written, ["file"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_opened_through_a_link_keeps_its_versions_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("file"), b"original").unwrap();
+        let linked = dir.path().join("linked");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let before = Before::take(&linked, &dir.path().join("copies"));
+        std::fs::write(real.join("file"), b"changed").unwrap();
+        let changed = before.changed(&linked);
+        assert_eq!(changed.no_copy, Vec::<String>::new());
+        assert_eq!(changed.versions.len(), 1);
+        assert_eq!(changed.versions[0].bytes, b"original");
+    }
+
+    #[test]
+    fn capture_rejects_an_over_limit_file_instead_of_returning_partial_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("file"), b"abc").unwrap();
+        assert!(read_capture(root.path(), "file", 2).is_err());
+        assert_eq!(read_capture(root.path(), "file", 3).unwrap(), b"abc");
+    }
 
     #[test]
     fn new_changed_and_removed_files_survive_a_save_and_load() {

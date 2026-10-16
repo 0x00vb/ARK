@@ -26,6 +26,11 @@ transport and the normal no-downgrade version comparison. Windows stays disabled
 Tauri updater must exit the running process to launch its installer; it needs a separate design
 before ARK releases a Windows updater.
 
+Notification page setup is restricted to the own main window and main webview (ADR 0029).
+Its adapter forwards every hook of the original plugin: setup, command dispatch, window,
+webview, navigation, page load and app events. The Rust service remains initialized for native
+questions and updater notifications. The updater registration and permissions do not change.
+
 The own page gets three native commands for state, a manual check and state events. The
 commands use the same origin guard as the rest of the window IPC. `transport.js` exposes them
 as `window.ark.updates`; it is absent in a browser and reports no updater in development. They

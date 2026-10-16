@@ -33,6 +33,8 @@ pub mod computers;
 pub mod copy;
 #[cfg(feature = "desktop")]
 mod desktop;
+#[cfg(feature = "desktop")]
+mod desktop_notification;
 mod file_snapshots;
 mod files;
 mod frame;

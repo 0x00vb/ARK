@@ -94,6 +94,19 @@ fn web_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/web")
 }
 
+/// VM eligibility tests, separate from the real WebKit scenarios below.
+#[test]
+fn notification_bootstrap_contexts() {
+    if std::env::var_os("ARK_UI_PAGE_TESTS").is_none() {
+        return;
+    }
+    assert!(std::process::Command::new("node")
+        .arg(web_dir().join("notification.mjs"))
+        .status()
+        .expect("node is on PATH")
+        .success());
+}
+
 /// Serve an app whose model follows `script`, then drive `scenario` in the page.
 async fn drive(scenario: &str, script: Vec<Completion>, chunk: Duration) {
     drive_app(scenario, script, chunk, false).await

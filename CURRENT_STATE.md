@@ -1,5 +1,12 @@
 # Current state
 
+## Dictation follow-through
+
+Branch `codex/draft-isolation`: each chat keeps its own draft, dictation uploads stop at exactly
+eight minutes, Whisper and GGML native logs are silenced, Devices skips `/session` in native
+windows, and notification page setup runs only in the app's own main window (ADR 0029). Not
+merged yet. Open: a native check of detached and remote windows at the screen. Board `26025811`.
+
 ## Advanced artifact surfaces in development
 
 `ark-advanced-artifacts` implements ADR 0071: map/model classification, route-bound immutable
@@ -20,7 +27,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-15 (completed-work integration)
+Last updated: 2026-10-16 (draft isolation and notification setup)
 
 ## Release
 

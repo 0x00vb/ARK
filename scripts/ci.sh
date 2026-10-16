@@ -32,6 +32,7 @@ fi
 if [ -n "$page_tests" ]; then
   step "WebKit page tests"
   ARK_UI_PAGE_TESTS="$page_tests" cargo test -p ark-ui --test page --locked -- --test-threads 1
+  ARK_UI_PAGE_TESTS="$page_tests" cargo test -p ark-ui --lib --locked desktop_notification
 fi
 
 step "release build"

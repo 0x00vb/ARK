@@ -24,6 +24,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Fixed
 
+- Run native notification page setup only in the app's own main page. Detached windows and
+  remote pages no longer make an automatic native permission query they cannot use.
 - Settings › Devices no longer asks for a browser session in native windows. A failed or
   malformed session reply keeps the section, without a pairing code.
 - Keep each chat's draft separate when changing chats or promoting a split pane. A new chat

@@ -1018,7 +1018,7 @@ pub(crate) fn run(
         .manage(BrowserEvents::default())
         .manage(AmbientWindow::new(ambient_window, configured_minimum))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(crate::desktop_notification::init())
         .plugin(window_plugin())
         .invoke_handler(tauri::generate_handler![
             ark_call,
@@ -1397,7 +1397,8 @@ fn tray(app: &tauri::App, name: &str, ambient_window: bool, computer: bool) -> t
 }
 
 /// A native shell for a page served by another ARK runtime. The page keeps HTTP authority and
-/// receives no Tauri global; only the outside window shell can change its presentation.
+/// receives no local runtime command handler. A compiled Tauri global can still be present;
+/// it grants no native permission. Only the outside shell can change its presentation.
 pub(crate) fn run_remote(
     target: tauri::Url,
     mut context: tauri::Context<Wry>,
@@ -1460,7 +1461,7 @@ pub(crate) fn run_remote(
         });
     #[cfg(feature = "desktop-updater")]
     let builder = builder
-        .plugin(tauri_plugin_notification::init())
+        .plugin(crate::desktop_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
     let built = builder.build(context);
     let app = match built {

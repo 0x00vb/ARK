@@ -52,7 +52,15 @@ IPC (which drives this computer's runtime) away from a page that some other mach
   and without a permission check. One queued for the own page just before the window leaves it
   could be fetched by the page elsewhere. The page elsewhere is the person's own runtime;
   revisit if the window ever opens pages nobody vouches for.
-- `run_window` (launch-time, no own runtime) is unchanged: no `__TAURI__`, no way back.
+- `run_window` (launch-time, no own runtime) has no own runtime handler or way back.
+  A consumer's generated context can still carry a compiled `__TAURI__` bundle even after
+  the builder disables the config flag. Its presence does not grant native permissions.
+  The page selects HTTP by origin; Tauri capabilities still refuse foreign origins.
+- The notification plugin keeps its real Rust service and lifecycle in both builders. Its
+  page bootstrap runs only in the top frame of the own main window and main webview.
+  Detached windows and remote pages keep their browser notification API and do not issue
+  an automatic native permission query. This is eligibility, not an authorization check.
+  No detached-window, remote-origin, send or permission-request capability is added.
 
 ## Check
 `crates/ark-ui/src/desktop.rs` tests: only the app's own origins count as its page.
@@ -61,3 +69,8 @@ back, the row above the projects) and `workbench` (a browser has no way back). A
 ARK Desktop (2026-10-05, its ADR 0009): the window opened a runtime elsewhere and came back,
 and a page elsewhere was refused `ark_call`, `ark_subscribe`, `ark_pick_folder` and the dialog
 plugin (Tauri's own permissions refuse remote origins first; the own-page check is the second).
+
+2026-10-15: a detached window and a remote shell each made an automatic notification
+permission query that the local-main capability refused. `desktop_notification` tests bind the
+adapter to the real plugin script and both builders. `tests/web/notification.mjs` covers which
+pages run the setup and fails on the unguarded script.

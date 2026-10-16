@@ -8,7 +8,15 @@ use std::time::Duration;
 
 /// The built-in provider names a model spec may start with (`claude:sonnet`, `ollama qwen3:4b`).
 /// Named endpoints add theirs ([`crate::endpoints::is_provider`]).
-pub const PROVIDERS: &[&str] = &["ollama", "openai", "anthropic", "claude", "codex", "mock"];
+pub const PROVIDERS: &[&str] = &[
+    "ollama",
+    "openai",
+    "anthropic",
+    "claude",
+    "codex",
+    "mock",
+    "inference",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

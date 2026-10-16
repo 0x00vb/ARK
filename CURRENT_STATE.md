@@ -38,6 +38,12 @@ Last updated: 2026-10-15 (completed-work integration)
 
 ## In progress
 
+Local inference (ADR 0073) is on branch `codex/inference-bridge` (worktree `ark-inference-bridge`), not on `main`.
+It adds `ark_model::Inference`, a text-only provider over the ARK Inference engine's process bridge.
+Focused checks, the fake-worker suite and the installed Qwen3 4B consumer test (CPU and Metal) pass.
+It is a transport proof: tools are refused, Metal prefill is about 32 tokens/s, every call re-runs prefill.
+Merging waits on the owner: the new public API has no app consumer yet. See `docs/LOCAL_INFERENCE.md`.
+
 | What | State |
 |---|---|
 | Completed branch audit | CI's unoptimized test profile, historical completed branches, voice dictation and the reviewed efficiency and catalog-startup patches are integrated on local `main`. Exact combined page-enabled CI and focused remote-provider, dictation and approval checks pass. IFC transport stays deferred outside `main`. No push, tag or release. |

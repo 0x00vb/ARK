@@ -18,6 +18,7 @@ mod catalog;
 pub mod cli;
 mod codex_app;
 pub mod endpoints;
+mod inference;
 pub mod keys;
 mod live;
 pub mod mock;
@@ -34,6 +35,7 @@ pub use capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
 pub use catalog::{catalog, Backend, BackendKind, ModelOption, PROVIDERS};
 pub use cli::{Cli, CliModel, CliStatus};
 pub use endpoints::{is_provider, Endpoint};
+pub use inference::{Inference, InferenceConfig};
 pub use mock::MockProvider;
 pub use ollama::Ollama;
 pub use openai::OpenAi;
@@ -454,8 +456,10 @@ pub trait Provider: Send + Sync {
 }
 
 /// Build a provider from the environment:
-/// - `ARK_PROVIDER` = ollama (default) | openai | anthropic | claude | codex, or a named
-///   endpoint ([`endpoints`])
+/// - `ARK_PROVIDER` = ollama (default) | openai | anthropic | claude | codex | inference, or a
+///   named endpoint ([`endpoints`]). `inference` runs a local ARK Inference bridge
+///   executable from `ARK_INFERENCE_EXECUTABLE` and needs `ARK_MODEL` as an absolute GGUF path
+///   (`docs/LOCAL_INFERENCE.md`)
 /// - `ARK_MODEL` overrides the model
 /// - API keys from `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`, else a saved key ([`keys`])
 pub fn from_env() -> Result<Box<dyn Provider>> {
@@ -466,6 +470,7 @@ pub fn from_env() -> Result<Box<dyn Provider>> {
 
 fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
     match which {
+        "inference" => Ok(Box::new(Inference::from_env(model)?)),
         "ollama" => Ok(Box::new(Ollama::new(
             model.unwrap_or_else(|| "qwen3:4b-instruct".into()),
         ))),
@@ -509,7 +514,7 @@ fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
             }
             None => Err(ProviderError::Api {
                 provider: other.into(),
-                detail: "unknown provider (use ollama|openai|anthropic|claude|codex|mock, or a named endpoint)"
+                detail: "unknown provider (use ollama|openai|anthropic|claude|codex|inference|mock, or a named endpoint)"
                     .into(),
             }),
         },

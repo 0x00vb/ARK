@@ -9,6 +9,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-16
+
 ### Added
 
 - The shared composer accepts reviewed voice dictation through an optional transcription

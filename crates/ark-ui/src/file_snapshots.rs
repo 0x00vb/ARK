@@ -155,7 +155,7 @@ impl Snapshots {
                 let limit = if ark_files::kind_of(path) == ark_files::Kind::Map {
                     ark_files::MAX_BYTES
                 } else {
-                    MODEL_BYTES
+                    ark_files::view_only(path).map_or(MODEL_BYTES, |view| view.max_bytes())
                 };
                 anyhow::ensure!(
                     size <= limit,
@@ -359,6 +359,32 @@ mod tests {
         snapshots.close(&owner, id).unwrap();
         assert_eq!(snapshots.total.load(Ordering::SeqCst), 0);
         assert!(snapshots.chunk(&owner, id, 0).is_err());
+    }
+
+    #[tokio::test]
+    async fn oversized_ifc_is_refused_before_copy_or_reservation() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::File::create(root.path().join("large.ifc"))
+            .unwrap()
+            .set_len(2 * 1024 * 1024 + 1)
+            .unwrap();
+        let snapshots = Snapshots::new();
+        let mut owner = owner();
+        owner.id = "large.ifc".into();
+        let start = snapshots.begin(root.path().into(), owner.clone()).unwrap();
+        let id = start["request"].as_str().unwrap();
+        let mut status = Value::Null;
+        for _ in 0..100 {
+            status = snapshots.status(&owner, id).unwrap();
+            if status["state"] == "refused" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(status["why"], "File exceeds the 2 MiB view limit");
+        assert!(snapshots.chunk(&owner, id, 0).is_err());
+        assert_eq!(snapshots.total.load(Ordering::SeqCst), 0);
+        snapshots.close(&owner, id).unwrap();
     }
 
     #[tokio::test]

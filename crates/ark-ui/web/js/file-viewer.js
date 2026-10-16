@@ -46,12 +46,29 @@ export function extensionFileView(el, file, ctx, viewer) {
         if (meta.size) { progress.max = meta.size; progress.value = meta.bytes; }
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      let reading = 0, readBytes = 0;
+      let reading = 0, readBytes = 0, confirming = false;
       const api = {
         h,
         signal: p.abort.signal,
         changed: () => open(),
         cancel,
+        confirm(label) {
+          if (!current()) return Promise.reject(new Error('Opening cancelled'));
+          if (confirming || typeof label !== 'string' || !label.trim() || label.length > 80) return Promise.reject(new Error('Invalid file view confirmation'));
+          confirming = true;
+          return new Promise((resolve, reject) => {
+            const abort = () => { confirming = false; reject(new Error('Opening cancelled')); };
+            const allow = h('button', { type: 'button', onclick: () => {
+              if (!current() || !confirming) return;
+              confirming = false; p.abort.signal.removeEventListener('abort', abort);
+              title.textContent = 'Opening';
+              clear(state).append(title, progress, h('button', { type: 'button', onclick: cancel }, 'Cancel'));
+              resolve();
+            } }, label);
+            clear(state).append(allow, h('button', { type: 'button', onclick: cancel }, 'Cancel'));
+            state.hidden = false; p.abort.signal.addEventListener('abort', abort, { once: true });
+          });
+        },
         async read(offset) {
           if (!current()) throw new Error('Opening cancelled');
           if (reading >= 2) throw new Error('Only two file chunks may be read at once');

@@ -2162,7 +2162,11 @@ impl Host {
                 let source = input["source"].as_bool().unwrap_or(false);
                 tokio::task::spawn_blocking(move || {
                     if source {
-                        Ok(ark_files::source(&workspace, &path)?.page())
+                        let mut page = ark_files::source(&workspace, &path)?.page();
+                        if ark_files::view_only(&path).is_some() {
+                            page["read_only"] = json!(true);
+                        }
+                        Ok(page)
                     } else {
                         crate::files::read(&workspace, &path)
                     }

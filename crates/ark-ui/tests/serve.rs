@@ -17,6 +17,51 @@ use sha2::{Digest, Sha256};
 struct Notes;
 
 #[tokio::test]
+async fn wasm_compilation_is_scoped_to_an_exact_trusted_worker() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, served) = ArkUi::new(app(dir.path()))
+        .wasm_worker_asset("reader.js", b"export {};".as_slice())
+        .asset("plain.js", b"export {};".as_slice())
+        .asset("reader.wasm", b"bytes".as_slice())
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    for (path, wasm) in [
+        ("/".to_string(), false),
+        ("/ext/reader.js".into(), true),
+        (format!("/_ark/{}/ext/reader.js", ark_ui::VERSION), true),
+        ("/ext/plain.js".into(), false),
+        ("/ext/reader.js.js".into(), false),
+        ("/ext/%72eader.js".into(), false),
+        ("/ext/reader.wasm".into(), false),
+    ] {
+        let response = raw(
+            served.port,
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\r\n",
+                served.port
+            ),
+        )
+        .await;
+        assert_eq!(
+            response.contains("'wasm-unsafe-eval'"),
+            wasm,
+            "{path}: {response}"
+        );
+        assert!(!response.contains("'unsafe-eval'"));
+        assert!(response.contains("frame-ancestors 'none'"));
+        if wasm {
+            assert!(response.contains("connect-src 'none'"));
+            assert!(response.contains("text/javascript"));
+        }
+        if path.ends_with(".wasm") {
+            assert!(response.contains("application/wasm"));
+        }
+        assert_eq!(response.matches("Content-Security-Policy:").count(), 1);
+    }
+}
+
+#[tokio::test]
 async fn only_registered_frame_assets_receive_the_same_origin_policy() {
     let dir = tempfile::tempdir().unwrap();
     let (_, served) = ArkUi::new(app(dir.path()))

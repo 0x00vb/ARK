@@ -78,6 +78,7 @@ pub struct ArkUi {
     files: HashMap<String, Cow<'static, [u8]>>,
     required_scripts: Vec<String>,
     frame_assets: std::collections::HashSet<String>,
+    wasm_workers: std::collections::HashSet<String>,
     handlers: HashMap<String, Handler>,
     start: Start,
     access: Access,
@@ -128,6 +129,7 @@ impl ArkUi {
             files: HashMap::new(),
             required_scripts: Vec::new(),
             frame_assets: std::collections::HashSet::new(),
+            wasm_workers: std::collections::HashSet::new(),
             handlers: HashMap::new(),
             start: Start::default(),
             access: Access::default(),
@@ -228,6 +230,23 @@ impl ArkUi {
         self.info.scripts.push(asset);
         self
     }
+    /// Embed a trusted JavaScript worker with WebAssembly compilation permission. HTTP serves
+    /// only this exact entry with `wasm-unsafe-eval`, no connections and no framing. Other
+    /// assets and the root keep their original policy. This does not permit JavaScript eval.
+    pub fn wasm_worker_asset(
+        mut self,
+        path: impl Into<String>,
+        bytes: impl Into<Cow<'static, [u8]>>,
+    ) -> Self {
+        let path = path.into();
+        assert!(
+            assets::valid_worker_path(&path),
+            "a WASM worker needs a confined relative .js path"
+        );
+        self.wasm_workers.insert(format!("ext/{path}"));
+        self.files.insert(path, bytes.into());
+        self
+    }
     /// Load one of the app's assets as a stylesheet after ARK's own.
     pub fn stylesheet(mut self, asset: impl Into<String>) -> Self {
         self.info.styles.push(asset.into());
@@ -318,7 +337,8 @@ impl ArkUi {
                 self.info.theme,
                 self.asset_version,
             )
-            .with_frame_assets(self.frame_assets),
+            .with_frame_assets(self.frame_assets)
+            .with_wasm_workers(self.wasm_workers),
         );
         let host = Host::new(
             opened.interaction,

@@ -16,6 +16,7 @@
 //                      sending opens the menu instead. `ark.refreshModel()` asks again.
 //   ark.artifactViewer({ id, label, match(artifact), primary, presents, wide, render(el, artifact, api, params) })
 //   ark.fileViewer({ id, kinds, render(el, file, api) })
+//     api.confirm(label): one local opening choice beside Cancel, abort-safe, no saved grant.
 //                      trusted shipped code over immutable file bytes. `api.read(offset)`
 //                      returns one bounded Uint8Array; parse untrusted bytes in a worker.
 //   ark.toolRenderer({ match(action), render(el, call, api) })

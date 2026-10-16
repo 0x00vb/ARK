@@ -58,6 +58,34 @@ later lens on the model kind. No profession, renderer or CAD package enters ARK 
 
 ## Check
 
+### IFC extension, 2026-10-15
+
+The owner deferred the A5 architect/BIM observation gate explicitly. This permits implementation,
+not a professional validation claim. `ark-files` classifies IFC as a read-only model with a
+STEP header check and a 2 MiB source limit enforced before snapshot copying. It does not parse IFC.
+`ViewOnly::max_bytes()` exposes source limits without adding a renderer to Core.
+`has_text_source()` permits bounded read-only text recovery for opaque textual models. The
+page exposes Source from metadata, without guessing a format. It never offers Save on that
+source, and file writes remain refused by the host.
+
+`ArkUi::wasm_worker_asset` registers one confined JavaScript worker entry. Only successful HTTP
+GETs for that exact asset, including its current versioned path, receive `wasm-unsafe-eval`.
+The worker policy denies connections. Same-origin worker imports remain permitted for WebKit.
+The consumer disables nested worker creation before parsing. Root pages, siblings, errors and lookalikes
+keep their original policy. JavaScript eval remains forbidden. Development and released asset
+roots retain this exact registration. Only the HTTP serve path sends this policy. A native
+window serves assets through the app's own protocol and CSP, which this method does not change.
+Desktop ships the parser and supplies verified WASM bytes
+after the person chooses Open IFC model. The worker never fetches bytes. No format-specific
+parser, model tree or architecture vocabulary enters Core.
+
+The file viewer's `api.confirm(label)` displays one text-only label of up to 80 characters in
+the host-owned opening area beside Cancel. It resolves only after the person clicks. Abort,
+replacement and generation checks prevent late clicks from starting stale work. It is local
+viewer interaction, not an agent action, saved grant or filesystem authority. Consumers use it
+before loading an optional parser. The pending replacement remains hidden until fully validated;
+an existing good view is not overwritten by an unparsed preview.
+
 The plan and acceptance gates are in `docs/ADVANCED_ARTIFACTS.md`. Tests prove
 local and remote resource routing, no mixed-version snapshot, stale-version cancellation, no
 renderer network request, hostile input and Focus bounds, keyboard and small-window recovery,

@@ -114,9 +114,22 @@ pub struct ViewOnly {
 }
 
 impl ViewOnly {
+    /// Whether the opaque format also has readable, not editable, UTF-8 source.
+    pub fn has_text_source(&self) -> bool {
+        self.extension == "ifc"
+    }
+    /// Maximum source bytes before a host copies a snapshot. Decoded limits belong to viewers.
+    pub fn max_bytes(&self) -> u64 {
+        if self.extension == "ifc" {
+            2 * 1024 * 1024
+        } else {
+            64 * 1024 * 1024
+        }
+    }
     /// Only the header is inspected here. The consumer's worker validates decoded geometry.
     pub fn preflight(&self, head: &[u8], size: u64) -> Result<(), Error> {
         let valid = match self.extension {
+            "ifc" => head.starts_with(b"ISO-10303-21;"),
             "glb" => {
                 head.len() >= 12
                     && &head[..4] == b"glTF"
@@ -143,6 +156,11 @@ impl ViewOnly {
 }
 
 pub static VIEW_ONLY: &[ViewOnly] = &[
+    ViewOnly {
+        extension: "ifc",
+        kind: Kind::Model,
+        media_type: "application/x-step",
+    },
     ViewOnly {
         extension: "glb",
         kind: Kind::Model,
@@ -360,11 +378,24 @@ pub fn open(root: &Path, rel: &str) -> Result<File, Error> {
 
 /// The editable source of a text-based format, even when the format is currently invalid.
 pub fn source(root: &Path, rel: &str) -> Result<File, Error> {
-    if !kind_of(rel).is_text() {
+    let view = view_only(rel).filter(|view| view.has_text_source());
+    if !kind_of(rel).is_text() && view.is_none() {
         return Err(Error::Input("this file has no editable text source".into()));
     }
     let path = inside(root, rel)?;
-    let bytes = read_bytes(&path, rel)?;
+    let bytes = if let Some(view) = view {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        ark_os::fs::open_within(&root.canonicalize()?, &path)?
+            .take(view.max_bytes() + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > view.max_bytes() {
+            return Err(Error::Format("Source exceeds the 2 MiB view limit".into()));
+        }
+        bytes
+    } else {
+        read_bytes(&path, rel)?
+    };
     let content = format::Text.read(&bytes)?;
     Ok(File {
         path: relative(root, &path),
@@ -543,6 +574,18 @@ mod tests {
             Content::Text(raw.into())
         );
         assert_eq!(kind_of("part.GLB"), Kind::Model);
+        assert_eq!(kind_of("building.IFC"), Kind::Model);
+        let ifc = view_only("building.ifc").unwrap();
+        assert_eq!(ifc.max_bytes(), 2 * 1024 * 1024);
+        assert!(ifc.preflight(b"ISO-10303-21;", 100).is_ok());
+        assert!(ifc.preflight(b"not STEP", 8).is_err());
+        assert!(write(
+            dir.path(),
+            "building.ifc",
+            &Content::Text("bad".into()),
+            None
+        )
+        .is_err());
         assert!(write(dir.path(), "part.stl", &Content::Text("bad".into()), None).is_err());
         std::fs::write(dir.path().join("bad.geojson"), "{broken").unwrap();
         assert!(open(dir.path(), "bad.geojson").is_err());
@@ -551,6 +594,17 @@ mod tests {
             Content::Text("{broken".into())
         );
         assert!(view_only("part.glb").unwrap().preflight(b"bad", 3).is_err());
+        std::fs::write(dir.path().join("building.ifc"), "invalid IFC source").unwrap();
+        assert_eq!(
+            source(dir.path(), "building.ifc").unwrap().content,
+            Content::Text("invalid IFC source".into())
+        );
+        assert!(edit(dir.path(), "building.ifc", &[], None).is_err());
+        std::fs::File::create(dir.path().join("building.ifc"))
+            .unwrap()
+            .set_len(2 * 1024 * 1024 + 1)
+            .unwrap();
+        assert!(source(dir.path(), "building.ifc").is_err());
     }
 
     /// The page's editor saves the whole text: a CRLF file stays CRLF.
@@ -652,7 +706,7 @@ mod tests {
         );
         assert_eq!(
             shown(),
-            "Markdown documents (md, markdown), spreadsheets (xlsx, xlsm, csv, tsv), documents (docx), PDFs (pdf), images (png, jpg, jpeg, gif, webp, svg), maps (geojson), 3D models (glb, stl), other text files"
+            "Markdown documents (md, markdown), spreadsheets (xlsx, xlsm, csv, tsv), documents (docx), PDFs (pdf), images (png, jpg, jpeg, gif, webp, svg), maps (geojson), 3D models (ifc, glb, stl), other text files"
         );
     }
 

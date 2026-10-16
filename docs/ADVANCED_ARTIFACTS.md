@@ -1,15 +1,20 @@
 # Advanced artifact surfaces
 
 Plan for maps, 3D models, CAD and later domain files to open in ARK without adding a mode,
-destination or setup flow. A1 to A3 are implemented. The later CAD and IFC sections are plans,
-not released product capabilities.
+destination or setup flow. A1 to A3 and Desktop A4 are implemented, not a new signed Desktop
+release. A5 (IFC) is implemented on branch `codex/ifc-files`, with the Desktop viewer on its own
+branch; neither is released.
 
 Development evidence is in [`ADVANCED_ARTIFACTS_A0.md`](ADVANCED_ARTIFACTS_A0.md). A0 passed
 independent QA. A1 to A3 pass full repository checks, real WebKit interaction and code QA.
 The packaged Mac app covers local files and renderer-crash Retry. A Linux ARM64 runtime serves
 maps and models to that window; a source edit saves on Linux and renders the new name. The owner
-deferred unfamiliar-user observation and physical trackpad testing. A4 has a contained feasibility
-proof, not a registered product runtime. A5 has not started.
+deferred unfamiliar-user observation and physical trackpad testing. Desktop A4 has approved lazy
+setup and contained solid generation; its evidence is in `../../ark-desktop/docs/CAD.md`.
+For A5, Core adds the IFC descriptor (STEP header check, 2 MiB limit before any copy), read-only
+Source, `api.confirm(label)` and `ArkUi::wasm_worker_asset`; Desktop owns the parser and lens
+(`../../ark-desktop/docs/IFC.md`). Architect/BIM observation is owner-deferred; no professional
+validation is claimed.
 
 ## Product contract
 
@@ -403,7 +408,7 @@ These are engineering targets, not public dates or launch commitments.
 | First useful slice | A1 and A2 | Full ARK checks, Desktop checks, real offline map dogfood, technical UX audit. Observed first use deferred by the owner on 2026-10-15 |
 | First visible 3D slice | A3 | Real GLB and STL dogfood, memory and hostile-file evidence |
 | First generated CAD proof | A4 bracket workflow | Clean-machine setup, contained run, dimensions checked on outputs, source revised once |
-| First professional expansion | A5 IFC | Real architect or BIM operator observes the task. Do not infer need from the demo alone |
+| First professional expansion | A5 IFC | Architect/BIM observation explicitly deferred by the owner on 2026-10-15. Technical implementation may proceed. Do not claim professional validation or infer need from the demo alone |
 
 Do not hold the existing launch for A5. A2 or A3 may become a launch proof only if the released
 build, clean-machine run and truth pass finish before launch authority. Otherwise ship them as
@@ -424,7 +429,8 @@ For each proof, record:
 - whether they returned with another task in the same workflow.
 
 Two useful demonstrations are enough for the architecture gate: an offline operations map and a
-dimensioned bracket. Expansion to another format requires a real task and a person who needs it.
+dimensioned bracket. Expansion to another format requires a real task and a person who needs it,
+unless the owner explicitly defers that observation gate. A5 has that deferral, not validation.
 
 ## Dependency evidence reviewed 2026-10-15
 

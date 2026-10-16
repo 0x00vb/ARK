@@ -332,6 +332,7 @@ window.ark.extensionReady("late");"#
             )
             .unwrap();
             std::fs::write(workspace.join("bad.geojson"), "{broken").unwrap();
+            std::fs::write(workspace.join("bad.ifc"), "invalid IFC source").unwrap();
             // Above the old 25 MiB version limit, with a valid binary STL header.
             let mut bytes = vec![0u8; 84 + 600_000 * 50];
             bytes[80..84].copy_from_slice(&600_000u32.to_le_bytes());

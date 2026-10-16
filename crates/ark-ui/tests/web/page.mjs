@@ -172,8 +172,11 @@ const scenarios = {
   async "advanced-files"(page) {
     await page.evaluate(() => {
       window.__viewerCalls = 0;
+      window.__viewerReads = 0;
       window.ark.fileViewer({ id: 'proof', kinds: ['map', 'model'], async render(el, file, api) {
         window.__viewerCalls++;
+        if (file.format === 'stl') await api.confirm('Open model');
+        window.__viewerReads++;
         const bytes = await api.read(0);
         el.append(api.h('button', { type: 'button', onclick: () => api.setFocus({ id: 'site-1', label: 'Site one', properties: { name: 'Site one' } }) }, 'Select site'));
         el.append(api.h('span.proof-model', `${file.kind}:${file.size}:${bytes.length}`));
@@ -191,7 +194,26 @@ const scenarios = {
     await page.evaluate(() => window.ark.openFile('bad.geojson'));
     await page.getByRole('button', { name: 'Source', exact: true }).click();
     assert.equal(await page.locator('textarea.wb-editor').inputValue(), '{broken');
+    await page.evaluate(() => window.ark.openFile('bad.ifc'));
+    await page.getByText('This IFC file has an invalid header', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Source', exact: true }).click();
+    const source = page.getByRole('textbox', { name: 'bad.ifc', exact: true });
+    await source.waitFor();
+    assert.equal(await source.inputValue(), 'invalid IFC source');
+    assert.equal(await source.evaluate(el => el.readOnly), true);
+    assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Model', exact: true }).click();
+    await page.getByRole('button', { name: 'Source', exact: true }).waitFor();
     await page.evaluate(() => window.ark.openFile('large.stl'));
+    const open = page.getByRole('button', { name: 'Open model', exact: true });
+    await open.waitFor();
+    const reads = await page.evaluate(() => window.__viewerReads);
+    await open.evaluate(el => { window.__oldFileAllow = el; });
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.evaluate(() => window.__oldFileAllow.click());
+    assert.equal(await page.evaluate(() => window.__viewerReads), reads);
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await open.click();
     await page.waitForFunction(() => [...document.querySelectorAll('.proof-model')].some(el => el.textContent === 'model:30000084:1048576'));
     await page.setViewportSize({ width: 420, height: 780 });
     await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });

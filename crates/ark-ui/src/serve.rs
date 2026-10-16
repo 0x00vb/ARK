@@ -75,6 +75,9 @@ frame-src 'self' blob: data: https: http:; worker-src 'self' blob:; object-src '
 base-uri 'none'; form-action 'self'; frame-ancestors 'self'\r\n\
 Referrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n";
 
+// An explicit trusted worker entry, never a page-wide permission or JavaScript eval grant.
+const WASM_WORKER_HEADERS: &str = "Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n";
+
 /// How long a typed device code is good for, and how long the session it becomes lasts: a
 /// phone stays signed in for a season; revoking its name ends it (ADR 0047).
 const PAIR_VALID_SECS: u64 = 10 * 60;
@@ -1329,6 +1332,9 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
             .await
         }
         ("GET", path) => match assets.get(path) {
+            Some((body, mime)) if assets.is_wasm_worker(path) => {
+                respond_with_policy(&mut sock, "200 OK", mime, "", &body, WASM_WORKER_HEADERS).await
+            }
             Some((body, mime)) if assets.is_frame_asset(path) => {
                 respond_with_policy(&mut sock, "200 OK", mime, "", &body, FRAME_ASSET_HEADERS).await
             }

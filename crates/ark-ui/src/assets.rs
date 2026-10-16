@@ -30,6 +30,7 @@ pub struct Assets {
     web_dir: Option<PathBuf>,
     asset_dir: Option<PathBuf>,
     frame_assets: std::collections::HashSet<String>,
+    wasm_workers: std::collections::HashSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +70,7 @@ impl Assets {
             web_dir: std::env::var_os("ARK_UI_WEB").map(PathBuf::from),
             asset_dir: std::env::var_os("ARK_UI_ASSETS").map(PathBuf::from),
             frame_assets: std::collections::HashSet::new(),
+            wasm_workers: std::collections::HashSet::new(),
         }
     }
 
@@ -86,6 +88,18 @@ impl Assets {
         let prefix = format!("{VERSIONED_ROOT}/{}/", self.current_namespace());
         let path = path.strip_prefix(&prefix).unwrap_or(path);
         confined_asset_path(path) && self.frame_assets.contains(path)
+    }
+
+    pub(crate) fn with_wasm_workers(mut self, paths: std::collections::HashSet<String>) -> Self {
+        self.wasm_workers = paths;
+        self
+    }
+
+    pub(crate) fn is_wasm_worker(&self, path: &str) -> bool {
+        let path = path.trim_start_matches('/');
+        let prefix = format!("{VERSIONED_ROOT}/{}/", self.current_namespace());
+        let path = path.strip_prefix(&prefix).unwrap_or(path);
+        confined_asset_path(path) && self.wasm_workers.contains(path)
     }
 
     fn current_namespace(&self) -> String {
@@ -304,6 +318,11 @@ fn escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
+pub(crate) fn valid_worker_path(path: &str) -> bool {
+    path.strip_suffix(".js")
+        .is_some_and(|stem| valid_frame_path(&format!("{stem}.html")))
+}
+
 pub(crate) fn valid_frame_path(path: &str) -> bool {
     !path.is_empty()
         && !path.starts_with('/')
@@ -324,6 +343,7 @@ fn mime(path: &str) -> &'static str {
         "css" => "text/css; charset=utf-8",
         "js" | "mjs" => "text/javascript; charset=utf-8",
         "json" => "application/json",
+        "wasm" => "application/wasm",
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
@@ -336,6 +356,70 @@ fn mime(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wasm_worker_registration_is_exact_across_asset_roots() {
+        let mut assets = Assets::new(
+            "Test".into(),
+            HashMap::from([("reader.js".into(), Cow::Borrowed(b"embedded".as_slice()))]),
+            vec![],
+            vec![],
+            vec![],
+            Theme::Light,
+            None,
+        )
+        .with_wasm_workers(std::collections::HashSet::from(["ext/reader.js".into()]));
+        for path in [
+            "ext/reader.js".to_string(),
+            assets.versioned("ext/reader.js"),
+        ] {
+            assert!(assets.is_wasm_worker(&path));
+            assert_eq!(
+                assets.get(&path).unwrap().1,
+                "text/javascript; charset=utf-8"
+            );
+        }
+        for path in [
+            "/",
+            "index.html",
+            "ext/reader.js.js",
+            "ext/%72eader.js",
+            "ext/../ext/reader.js",
+            "ext/./reader.js",
+            "ext/other.js",
+        ] {
+            assert!(!assets.is_wasm_worker(path), "{path}");
+        }
+        for path in [
+            "../reader.js",
+            "/reader.js",
+            "a/../reader.js",
+            "a\\reader.js",
+            "reader.html",
+            "reader.js?x",
+            "%72eader.js",
+        ] {
+            assert!(!valid_worker_path(path), "{path}");
+        }
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("reader.js"), "development").unwrap();
+        assets.asset_dir = Some(root.path().into());
+        assert!(assets.is_wasm_worker("ext/reader.js"));
+        assert_eq!(
+            assets.get("ext/reader.js").unwrap().0.as_ref(),
+            b"development"
+        );
+        std::fs::create_dir(root.path().join("consumer")).unwrap();
+        std::fs::write(root.path().join("consumer/reader.js"), "release").unwrap();
+        *assets.release.write().unwrap() = Some(ReleasedAssets {
+            root: root.path().into(),
+            revision: "proof".into(),
+        });
+        let path = assets.versioned("ext/reader.js");
+        assert!(assets.is_wasm_worker(&path));
+        assert_eq!(assets.get(&path).unwrap().0.as_ref(), b"release");
+        assert!(!assets.is_wasm_worker("ext/reader.wasm"));
+    }
 
     #[test]
     fn only_exact_registered_consumer_html_can_be_framed() {

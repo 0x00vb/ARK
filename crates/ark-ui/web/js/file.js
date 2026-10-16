@@ -85,12 +85,12 @@ export function fileView(el, path, ark, params) {
       s.statusTimer = setTimeout(() => { status.dataset.state = ""; status.textContent = ""; }, 1400);
     }
   };
-  const tools = h("div.fv-tools", status,
-    kindOf(path) === 'map' ? h('button', { type: 'button', onclick: async (event) => {
+  const sourceButton = h('button', { type: 'button', hidden: kindOf(path) !== 'map', onclick: async (event) => {
       if (s.ctl?.dirty?.()) await s.ctl.flush?.();
       if (s.ctl?.dirty?.()) return;
-      s.source = !s.source; event.currentTarget.textContent = s.source ? 'Map' : 'Source'; await load(true);
-    } }, 'Source') : null,
+      s.source = !s.source; event.currentTarget.textContent = s.source ? kindOf(path) === 'map' ? 'Map' : 'Model' : 'Source'; await load(true);
+    } }, 'Source');
+  const tools = h("div.fv-tools", status, sourceButton,
     ark.isLocal() && kindOf(path) !== "text"
       ? h("button.icon-btn", { type: "button", title: "Open in its app", "aria-label": "Open in its app", onclick: () => ark.call("file_open", { path: s.path }).catch((e) => ark.toast(e.message)) }, icon("external"))
       : null);
@@ -146,6 +146,7 @@ export function fileView(el, path, ark, params) {
     if (!force && file.version && file.version === s.version) return;
     s.version = file.version;
     s.file = file;
+    sourceButton.hidden = !(s.source || kindOf(path) === 'map' || file.source_available);
     const kind = file.text == null && !file.kind ? null : file.kind || "text";
     if (!kind || (kind === "text" && file.text == null)) {
       s.ctl?.dispose?.();
@@ -228,6 +229,7 @@ function textView(el, file, ctx, params) {
   // Any other file is the plain editor, wrapping as before.
   const code = languageOf(file.path) != null;
   const area = h("textarea.wb-editor", { spellcheck: "false", "aria-label": name, ...(code ? { wrap: "off" } : {}) });
+  area.readOnly = !!file.read_only;
   const text = h("code");
   const body = code ? h("div.wb-code", h("pre.wb-hl", { "aria-hidden": "true" }, text), area) : area;
   // The layer moves by the textarea's scroll offsets instead of scrolling itself, so it cannot
@@ -264,7 +266,7 @@ function textView(el, file, ctx, params) {
     ctx.focusChanged();
   };
   async function store() {
-    if (!s.dirty) return;
+    if (file.read_only || !s.dirty) return;
     try {
       const r = await ark.call("file_write", { path: s.path, text: area.value, base: s.version });
       s.version = r.version;
@@ -288,7 +290,7 @@ function textView(el, file, ctx, params) {
   area.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); e.stopPropagation(); store(); }
   });
-  el.append(h("div.wb-bar", h("span.wb-file-name", file.path), h("span.spacer"), state, save, ctx.tools), body);
+  el.append(h("div.wb-bar", h("span.wb-file-name", file.path), h("span.spacer"), state, file.read_only ? null : save, ctx.tools), body);
   if (params?.locator && /^\d+$/.test(params.locator)) goToLine(area, Number(params.locator));
   return {
     focus: () => ({ selection: { line: s.line } }),

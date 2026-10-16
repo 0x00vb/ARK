@@ -21,7 +21,8 @@ JavaScript tests. Native local rendering, renderer-kill Retry and Linux ARM64-to
 dogfood pass. The consumer must pin the immutable v0.24.0 tag, not this development tree.
 The owner deferred five-person observation and physical
 trackpad testing on 2026-10-15; do not claim observed 10/10 usability. A4 has a contained CAD
-feasibility proof, not a product runtime. A5 remains gated on a real architecture user.
+feasibility proof, not a product runtime. A5 (IFC) is on branch `codex/ifc-files`; the owner
+deferred architect/BIM observation on 2026-10-15, so no professional validation is claimed.
 
 What is happening in ARK right now. Read this at the start of a session. Update it at the end
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
@@ -47,7 +48,8 @@ Last updated: 2026-10-16 (draft isolation and notification setup)
 
 | What | State |
 |---|---|
-| Completed branch audit | CI's unoptimized test profile, historical completed branches, voice dictation and the reviewed efficiency and catalog-startup patches are integrated on local `main`. Exact combined page-enabled CI and focused remote-provider, dictation and approval checks pass. IFC transport stays deferred outside `main`. No push, tag or release. |
+| Completed branch audit | CI's unoptimized test profile, historical completed branches, voice dictation and the reviewed efficiency and catalog-startup patches are integrated on local `main`. Exact combined page-enabled CI and focused remote-provider, dictation and approval checks pass. No push, tag or release. |
+| IFC model files (A5) | Branch `codex/ifc-files`: `.ifc` is a read-only model (STEP header check, 2 MiB limit before any copy), Source opens read-only, `api.confirm(label)` for viewers, and `ArkUi::wasm_worker_asset` (HTTP serve path only). ARK Desktop's consumer is on `codex/ifc-integration` and needs an ARK tag with this before it can pin. |
 | Efficiency and Codex startup | Host-model tools stay in ARK's approval path; scoped vendor overrides remove unused native tools without changing user settings. Default instructions avoid redundant bookkeeping and route permitted proposals to the existing approval gate. Catalog discovery skips optional usage telemetry while retaining its six-second deadline and strict advertised model/effort checks. Separate owner gates, 99 model tests, safety checks and synthetic writing-app checks pass. The 30/30 efficiency result is configuration-confounded, not a causal savings claim. Source chain, retained failures and remaining device/release gates: `bench/integration-2026-10-15/README.md`. |
 | Models and commands follow a chat's computer | Released in v0.24.0: choosing a linked computer immediately uses its subscriptions, API keys and Ollama catalog; the selected model starts the chat there; setup stays chat-bound; local-only slash commands are omitted from completion and the command palette, and typed slash words go to the remote chat as text. Focused two-runtime Rust and WebKit tests, independent QA and the full `scripts/ci.sh` gate pass. |
 | Voice dictation (ADR 0070) | Integrated on `main`: explicit computer-bound uploads, independent split controls, permission and inference leases, immediate capture cleanup and stale-result cancellation. Authenticated two-runtime and WebKit tests cover remote routing and capture races. Full page-enabled CI passes: lint, workspace tests, 56 WebKit scenarios, release build and simulated benchmark gate. Independent source and screenshot QA is GO. Optional `ark-transcribe` installs the pinned multilingual Whisper base model only after a microphone action. Native microphone and multi-minute quality validation remain release follow-ups on macOS, Windows and Linux. |

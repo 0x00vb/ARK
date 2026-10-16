@@ -66,7 +66,7 @@ pub(crate) fn read(root: &Path, rel: &str) -> anyhow::Result<Value> {
     if let Some(view) = ark_files::view_only(rel) {
         return Ok(
             json!({ "path": shown, "kind": view.kind.as_str(), "format": view.extension,
-            "media_type": view.media_type, "size": meta.len(), "view_only": true, "snapshot_supported": cfg!(unix) }),
+            "media_type": view.media_type, "size": meta.len(), "view_only": true, "source_available": view.has_text_source(), "snapshot_supported": cfg!(unix) }),
         );
     }
     match ark_files::open(root, rel) {

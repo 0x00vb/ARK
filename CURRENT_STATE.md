@@ -1,5 +1,11 @@
 # Current state
 
+## Bounded code runs ready to merge
+
+Branch `codex/bounded-exec` (ADR 0072): two active code runs, eight waiting, one per project,
+owned cleanup on cancel, background children stopped, bounded capture. Focused tests and clippy
+pass; native Windows and Linux runs and the owner's call on the 2/8 limits remain.
+
 ## Advanced artifact surfaces in development
 
 `ark-advanced-artifacts` implements ADR 0071: map/model classification, route-bound immutable

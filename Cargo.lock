@@ -323,6 +323,7 @@ name = "ark-exec"
 version = "0.24.0"
 dependencies = [
  "ark-core",
+ "ark-os",
  "ark-runtime",
  "ark-tools",
  "async-trait",

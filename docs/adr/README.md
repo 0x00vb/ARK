@@ -78,6 +78,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0069](0069-plugins-are-reviewed-capabilities-from-independent-providers.md) | Plugins are reviewed capabilities from independent providers; packages, servers, provider integrations, accounts, account activation and action approval stay distinct | Proposed |
 | [0070](0070-dictation-is-client-capture-and-an-injected-transcriber.md) | Dictation captures in the client and transcribes through an optional provider at the selected runtime | Accepted |
 | [0071](0071-advanced-files-use-one-viewer-seam.md) | Maps, 3D models and later professional files use one file-viewer seam with versioned bounded bytes and focus; CAD generation stays in a consuming app's contained runtime | Accepted for implementation |
+| [0072](0072-code-runs-have-bounded-admission-and-owned-cleanup.md) | Code runs share finite admission, own cancellation cleanup and capture through bounded handles | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

@@ -17,6 +17,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Changed
 
+- Code runs have a shared active-run limit and finite waiting queue. Each project runs one
+  program at a time. CPU throttling stays off ([ADR 0072](docs/adr/0072-code-runs-have-bounded-admission-and-owned-cleanup.md)).
 - The default agent instructions reserve state updates for ongoing or later work, avoiding
   a separate bookkeeping step just to repeat a completed result.
 - Test builds use an unoptimized Cargo profile for faster feedback. Development and release
@@ -24,6 +26,9 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Fixed
 
+- Code runs retain cleanup ownership after cancellation, stop ordinary background children
+  on completion, and keep Restore copies outside the child's writable scratch. File capture
+  enforces byte limits on opened files and compares contents with bounded buffers.
 - Codex model and effort discovery no longer waits for optional usage-limit telemetry.
   Required model validation keeps its existing deadline; ordinary sessions still collect usage.
 - The default approval instructions tell models to propose permitted actions through the

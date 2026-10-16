@@ -54,7 +54,7 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, ResumeThread, UpdateProcThreadAttribute,
+    InitializeProcThreadAttributeList, ResumeThread, TerminateProcess, UpdateProcThreadAttribute,
     WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT,
     EXTENDED_STARTUPINFO_PRESENT, INFINITE, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
     PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
@@ -432,7 +432,12 @@ fn launch(rest: &[OsString]) -> Result<u32, String> {
     // SAFETY: plain calls on handles this function owns.
     let job = Handle(unsafe { CreateJobObjectW(null(), null()) });
     if job.0.is_null() {
-        return Err(last_error("CreateJobObjectW"));
+        let error = last_error("CreateJobObjectW");
+        unsafe {
+            TerminateProcess(process.0, 1);
+            WaitForSingleObject(process.0, INFINITE);
+        }
+        return Err(error);
     }
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -445,9 +450,17 @@ fn launch(rest: &[OsString]) -> Result<u32, String> {
         ) == 0
             || AssignProcessToJobObject(job.0, process.0) == 0
         {
-            return Err(last_error("the job object"));
+            let error = last_error("the job object");
+            TerminateProcess(process.0, 1);
+            WaitForSingleObject(process.0, INFINITE);
+            return Err(error);
         }
-        ResumeThread(thread.0);
+        if ResumeThread(thread.0) == u32::MAX {
+            let error = last_error("ResumeThread");
+            TerminateProcess(process.0, 1);
+            WaitForSingleObject(process.0, INFINITE);
+            return Err(error);
+        }
         WaitForSingleObject(process.0, INFINITE);
         let mut code = 0u32;
         GetExitCodeProcess(process.0, &mut code);

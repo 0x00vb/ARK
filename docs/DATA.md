@@ -30,6 +30,11 @@ reads `no copy of the version before`.
 
 ## Turning it on
 
+The execution adapter admits two runs at once, with at most eight waiting calls. Runs in the
+same project are exclusive. Waiting happens before setup and file copies; a full queue returns
+a busy error. CPU usage and each program's memory remain unlimited. These limits are local to
+the shared adapter, not the whole machine (ADR 0072).
+
 ```rust
 let ark = Ark::builder()
     .files(true)   // Files

@@ -227,6 +227,12 @@ Last updated: 2026-10-21 (combined release source, checks and remaining gates)
 
 ## In progress
 
+Local inference (ADR 0073) is on branch `codex/inference-bridge` (worktree `ark-inference-bridge`), not on `main`.
+It adds `ark_model::Inference`, a text-only provider over the ARK Inference engine's process bridge.
+Focused checks, the fake-worker suite and the installed Qwen3 4B consumer test (CPU and Metal) pass.
+It is a transport proof: tools are refused, Metal prefill is about 32 tokens/s, every call re-runs prefill.
+Merging waits on the owner: the new public API has no app consumer yet. See `docs/LOCAL_INFERENCE.md`.
+
 | What | State |
 |---|---|
 | Project section hook (ADR 0077) | On `main`, card e11c3c73: generic app rows inside the current unfolded project, with owned cleanup. WebKit passes nine component cases and one actual frontend boot case against intercepted RPCs. The real Rust-host scenario and full page-enabled Core CI pass on `3f14696`; independent final QA is GO. Desktop-kept source/browser migration is prepared separately; its full checks, release and repin remain open. |

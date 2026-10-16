@@ -14,6 +14,22 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Added
+
+- `ark_model::Inference`, a local text provider over the separately built ARK Inference
+  engine. ARK runs the engine's `ark-inference-bridge` executable as a child process and
+  talks to it over stdin and stdout. Select it with `ARK_PROVIDER=inference`,
+  `ARK_INFERENCE_EXECUTABLE` and an absolute GGUF path in `ARK_MODEL`. It streams UTF-8, kills
+  the child on cancellation and bounds file, array, input, output and token sizes separately.
+  This is a text-only transport proof, not an agent backend: tool definitions, tool history
+  and images are refused before the child starts, prefill runs at about 32 to 36 tokens/s on
+  an M4 Pro with Metal, and every call re-runs the full prefill. Deadlines for startup, prefill,
+  each later frame and the whole call are set with `ARK_INFERENCE_*_SECONDS`. `inference` is now a reserved
+  provider name, so a named endpoint called `inference` is rejected
+  ([ADR 0073](docs/adr/0073-local-inference-process-bridge.md), `docs/LOCAL_INFERENCE.md`).
+
 ## [0.25.1] - 2026-10-23
 
 ### Changed

@@ -414,3 +414,10 @@ per version: the `Breaking` sections of [`CHANGELOG.md`](CHANGELOG.md).
 | 0.3 | 0.4 | `ActionDescriptor::reusable: bool` becomes `reuse: Reuse`; `Selection` marks; new event variants `Retry`, `Stall` |
 | 0.2 | 0.3 | `ArkCli::new(app)` with an `ark_interact::App`; `Command::run` returns `Reply`; `ToolRenderer` becomes `ToolLabeler` |
 | 0.1 | 0.2 | `HarnessEvent` owned and serializable with new variants |
+
+## Local inference bridge development
+
+Branch `codex/inference-bridge` adds `ark_model::Inference`, a local text provider over the ARK Inference process bridge ([ADR 0073](docs/adr/0073-local-inference-process-bridge.md)).
+It is a text-only transport proof. Tools and images are refused. Metal prefill is about 32 tokens/s, more than 10 times behind llama.cpp, and every call re-runs the full prefill.
+Before it is useful for agent work: engine prefill speed, prompt reuse across calls, and tool calls.
+Merging to `main` waits on the owner, since the public API has no app consumer yet. See `docs/LOCAL_INFERENCE.md`.

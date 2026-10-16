@@ -514,3 +514,47 @@ async fn a_refused_schema_is_retried_without_telling_the_model() {
         "sent again as it was"
     );
 }
+
+#[tokio::test]
+async fn local_text_inference_refuses_agent_tools_without_retry_or_spawn() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open_with(
+        dir.path(),
+        Registry::new().with(Arc::new(Saver(Arc::new(AtomicUsize::new(0))))),
+    )
+    .unwrap();
+    let project = engine
+        .create_project("local text capability", "")
+        .unwrap()
+        .id;
+    // Neither path exists. Tool refusal must happen before executable lookup or model access.
+    let config = ark_model::InferenceConfig::new(
+        dir.path().join("missing-worker"),
+        dir.path().join("missing.gguf"),
+    );
+    let provider: Arc<dyn Provider> = Arc::new(ark_model::Inference::new(config).unwrap());
+    let mut retries = 0;
+    let result = Harness::new(ModelRouter::single(provider))
+        .planner(false)
+        .critic(false)
+        .allow_mutate(true)
+        .retry_policy(fast_policy(3))
+        .ask(
+            &engine,
+            &AgentProfile::builder().core_actions(["notes.save"]).build(),
+            &project,
+            "save it",
+            |event| {
+                if matches!(event, HarnessEvent::Retry { .. }) {
+                    retries += 1;
+                }
+            },
+        )
+        .await;
+    let error = match result {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("tool request unexpectedly succeeded"),
+    };
+    assert!(error.contains("without tools or images"), "{error}");
+    assert_eq!(retries, 0);
+}

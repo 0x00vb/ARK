@@ -83,6 +83,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0077](0077-an-app-can-add-rows-inside-the-current-project.md) | An app can add rows inside the current unfolded project through `ark.projectSection` | Accepted for implementation |
 | [0078](0078-chat-participants-come-from-durable-assignments.md) | Chat participants come from durable assignments | Accepted |
 | [0079](0079-project-memory-is-reviewed-and-project-scoped.md) | Project memory is reviewed and project scoped | Accepted |
+| [0073](0073-local-inference-process-bridge.md) | Local text inference runs the ARK Inference engine as an owned child process over a bounded stdio protocol; tools and images are refused | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

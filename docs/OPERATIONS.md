@@ -9,6 +9,7 @@ any application on ARK.
 | Variable | Default | Meaning |
 |---|---:|---|
 | `ARK_PROVIDER`, `ARK_MODEL` | `ollama`, per provider | the model; two tiers with `ARK_PROVIDER_FAST` / `ARK_MODEL_FAST` and `ARK_PROVIDER_STRONG` / `ARK_MODEL_STRONG` |
+| `ARK_INFERENCE_EXECUTABLE`, `ARK_INFERENCE_*` | none | with `ARK_PROVIDER=inference`: the local engine executable, backend, limits and deadlines ([`LOCAL_INFERENCE.md`](LOCAL_INFERENCE.md)) |
 | `ARK_CTX_BUDGET` | by model | prompt-token budget per request (tool schemas not counted). Unset: a quarter of the reasoning model's input window, 6,000 to 48,000 and at most half the window; 6,000 when the window is unknown (ADR 0050) |
 | `ARK_MODEL_RETRIES` | 4 | retries of a model call after a temporary failure |
 | `ARK_MODEL_OFFLINE_S` | 60 | how long a model that cannot be reached (no connection, a timeout) is waited for, past the retries |

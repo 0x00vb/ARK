@@ -259,6 +259,7 @@ mod tests {
     #[test]
     fn names_are_checked() {
         assert!(register(Endpoint::new("claude", "http://x/v1")).is_err());
+        assert!(register(Endpoint::new("inference", "http://x/v1")).is_err());
         assert!(register(Endpoint::new("Bad Name", "http://x/v1")).is_err());
         assert!(register(Endpoint::new("t-names", "ftp://x")).is_err());
         assert!(register(Endpoint::new("t-names", "http://x/v1/")).is_ok());

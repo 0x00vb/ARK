@@ -28,6 +28,9 @@ use ark_tools::{ActionOutput, Adapter, AdapterError, AdapterHealth, ProducedArti
 use async_trait::async_trait;
 use serde_json::{json, Value as Json};
 
+mod admission;
+#[cfg(all(test, unix))]
+mod lifecycle_tests;
 pub mod python;
 mod sandbox;
 
@@ -88,10 +91,13 @@ pub struct Launch {
 pub struct Exec {
     runtimes: Vec<Arc<dyn Runtime>>,
     sandbox: Sandbox,
+    admission: Arc<admission::Admission>,
     /// Where each run gets its own folder (its program file and temporary files).
     scratch: PathBuf,
     /// What the window shows when a run writes it, for the agent ("charts as png, ...").
     shows: String,
+    #[cfg(all(test, unix))]
+    hook: Option<Arc<lifecycle_tests::Hook>>,
 }
 
 impl Exec {
@@ -108,8 +114,11 @@ impl Exec {
         Exec {
             runtimes,
             sandbox,
+            admission: admission::Admission::new(2, 8),
             scratch: scratch.into(),
             shows: String::new(),
+            #[cfg(all(test, unix))]
+            hook: None,
         }
     }
 
@@ -152,128 +161,290 @@ impl Exec {
     }
 
     async fn run(&self, input: &Json, project: &Path) -> Result<ActionOutput, AdapterError> {
+        // Validate before queueing. No install, copies or child process exists while waiting.
         let code = input
             .get("code")
             .and_then(Json::as_str)
-            .filter(|c| !c.trim().is_empty())
+            .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| bad("`code` is the program to run".into()))?;
-        let runtime = self.runtime(input.get("runtime").and_then(Json::as_str))?;
+        let runtime = self
+            .runtime(input.get("runtime").and_then(Json::as_str))?
+            .clone();
         let secs = input
             .get("timeout")
             .and_then(Json::as_u64)
             .unwrap_or(TIMEOUT)
             .clamp(1, MAX_TIMEOUT);
+        let project = ark_os::dirs::canonicalize(project).map_err(io)?;
+        let permit = self
+            .admission
+            .acquire(project.clone())
+            .await
+            .map_err(|detail| AdapterError::ToolUnavailable {
+                tool: RUN.into(),
+                detail: detail.into(),
+            })?;
+        let owner = Self {
+            runtimes: self.runtimes.clone(),
+            sandbox: self.sandbox.clone(),
+            scratch: self.scratch.clone(),
+            shows: String::new(),
+            admission: self.admission.clone(),
+            #[cfg(all(test, unix))]
+            hook: self.hook.clone(),
+        };
+        let code = code.to_owned();
+        let cancel = ark_runtime::CancelToken::new();
+        let _cancel_on_drop = CancelOnDrop(cancel.clone());
+        // The owner outlives a dropped call. In particular, spawn_blocking work is joined
+        // before scratch and the permit are released. There is no task while Exec is idle.
+        tokio::spawn(async move {
+            let _permit = permit;
+            owner
+                .run_owned(code, runtime, secs, &project, &cancel)
+                .await
+        })
+        .await
+        .map_err(|e| AdapterError::Tool(e.to_string()))?
+    }
+
+    async fn run_owned(
+        &self,
+        code: String,
+        runtime: Arc<dyn Runtime>,
+        secs: u64,
+        project: &Path,
+        cancel: &ark_runtime::CancelToken,
+    ) -> Result<ActionOutput, AdapterError> {
+        let runtime_name = runtime.name();
+        // Runtime::ready is a shared setup operation. If cancellation arrives during setup,
+        // join it and do not launch the program. The permit remains held until it returns.
         let launch = runtime
             .ready()
             .await
-            .map_err(|e| AdapterError::ToolUnavailable {
-                tool: runtime.name().into(),
-                detail: e,
+            .map_err(|detail| AdapterError::ToolUnavailable {
+                tool: runtime_name.into(),
+                detail,
             })?;
-
-        let dir = self.scratch.join(uuid::Uuid::new_v4().simple().to_string());
-        let tmp = dir.join("tmp");
-        std::fs::create_dir_all(&tmp).map_err(io)?;
-        for (from, name) in &launch.home {
-            copy_dir(from, &tmp.join(name)).map_err(io)?;
-        }
-        let file = dir.join(launch.file);
-        std::fs::write(&file, code).map_err(io)?;
-        let bounds = Bounds {
-            project: project.to_path_buf(),
-            scratch: dir.clone(),
-            reads: launch.reads.clone(),
-        };
-        let mut args = launch.args.clone();
-        args.push(file.display().to_string());
-        let (sandbox, program) = (self.sandbox.clone(), launch.program.clone());
-        let wrapped =
-            tokio::task::spawn_blocking(move || sandbox.wrap(&bounds, &program, &args)).await;
-        let (program, args) = match wrapped {
-            Ok(Ok(w)) => w,
-            Ok(Err(e)) => {
-                let _ = std::fs::remove_dir_all(&dir);
-                return Err(AdapterError::ToolUnavailable {
-                    tool: self.sandbox.name().into(),
-                    detail: e,
-                });
+        check_cancel(cancel)?;
+        let (sandbox, scratch, project, token) = (
+            self.sandbox.clone(),
+            self.scratch.clone(),
+            project.to_path_buf(),
+            cancel.clone(),
+        );
+        #[cfg(all(test, unix))]
+        let hook = self.hook.clone();
+        let prepared = tokio::task::spawn_blocking(move || {
+            let prepared = prepare(sandbox, scratch, project, code, launch, &token)?;
+            #[cfg(all(test, unix))]
+            if let Some(hook) = hook {
+                hook.pause(lifecycle_tests::Phase::Prepare);
             }
-            Err(e) => {
-                let _ = std::fs::remove_dir_all(&dir);
-                return Err(AdapterError::Tool(e.to_string()));
-            }
-        };
-        let mut env = sandbox::base_env(&tmp, launch.program.parent());
-        env.extend(launch.env.iter().cloned());
-        let absent = sandbox::absent_kept(project);
-        let (root, copies) = (project.to_path_buf(), dir.join("before"));
-        let before = match tokio::task::spawn_blocking(move || Before::take(&root, &copies)).await {
-            Ok(b) => b,
-            Err(e) => {
-                let _ = std::fs::remove_dir_all(&dir);
-                return Err(AdapterError::Tool(e.to_string()));
-            }
-        };
-
-        let started = SystemTime::now();
-        let ran = subprocess::run_spec(&Spec {
-            program,
-            args,
-            cwd: Some(project.to_path_buf()),
-            env: Some(env),
-            timeout: Some(Duration::from_secs(secs)),
-            keep: Some(KEEP),
+            Ok::<_, AdapterError>(prepared)
         })
-        .await;
-        let removed = sandbox::remove_created(&absent);
-        // Reads the copies of what changed (up to `BEFORE_TOTAL`): off the async threads.
-        let root = project.to_path_buf();
-        let kept = tokio::task::spawn_blocking(move || before.changed(&root)).await;
-        let _ = std::fs::remove_dir_all(&dir);
-        let kept = kept.map_err(|e| AdapterError::Tool(e.to_string()))?;
-        let mut ran = ran?;
-        if !removed.is_empty() {
-            ran.stderr.push_str(&format!(
-                "\nRemoved {}: a run may not create these folders in the project.",
-                removed.join(", ")
-            ));
+        .await
+        .map_err(|e| AdapterError::Tool(e.to_string()))??;
+        let started = SystemTime::now();
+        let ran = if cancel.is_cancelled() {
+            Err(subprocess::ContainedError {
+                error: AdapterError::Tool("code run cancelled".into()),
+                cleanup_incomplete: false,
+            })
+        } else {
+            subprocess::run_contained(
+                &Spec {
+                    program: prepared.program.clone(),
+                    args: prepared.args.clone(),
+                    cwd: Some(prepared.project.clone()),
+                    env: Some(prepared.env.clone()),
+                    timeout: Some(Duration::from_secs(secs)),
+                    keep: Some(KEEP),
+                },
+                cancel.cancelled(),
+            )
+            .await
+        };
+        if ran.as_ref().is_err_and(|error| error.cleanup_incomplete) {
+            self.admission.close();
         }
-
-        let written = written_since(project, started);
-        let mut produced = Vec::new();
-        let mut not_kept = Vec::new();
-        for (rel, size) in written.iter().take(MAX_LISTED) {
-            if produced.len() < MAX_FILES && *size <= MAX_FILE_BYTES {
-                if let Ok(bytes) = std::fs::read(project.join(rel)) {
-                    produced.push(snapshot(rel, bytes));
-                    continue;
-                }
+        let token = cancel.clone();
+        #[cfg(all(test, unix))]
+        let hook = self.hook.clone();
+        tokio::task::spawn_blocking(move || {
+            #[cfg(all(test, unix))]
+            if let Some(hook) = hook {
+                hook.pause(lifecycle_tests::Phase::Capture);
             }
-            not_kept.push(rel.clone());
-        }
-        produced.extend(kept.versions);
-        let files: Vec<&String> = written.iter().take(MAX_LISTED).map(|(p, _)| p).collect();
-        let timed_out = ran.code == 124
-            && ran
-                .stderr
-                .ends_with(&subprocess::timeout_note(Duration::from_secs(secs)));
-        let output = json!({
-            "runtime": runtime.name(),
-            "exit_code": ran.code,
-            "timed_out": timed_out,
-            "stdout": ran.stdout,
-            "stderr": ran.stderr,
-            "files": files,
-            "more_files": written.len().saturating_sub(MAX_LISTED),
-            "not_kept": not_kept,
-            "removed": kept.removed,
-            "no_copy": kept.no_copy,
-        });
-        let mut out = ActionOutput::json(output)
-            .with_command(vec![runtime.name().to_string(), launch.file.to_string()]);
-        out.produced = produced;
-        Ok(out)
+            finish(prepared, ran, started, secs, runtime_name, &token)
+        })
+        .await
+        .map_err(|e| AdapterError::Tool(e.to_string()))?
     }
+}
+
+struct CancelOnDrop(ark_runtime::CancelToken);
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+/// A run's own folder, removed when the run ends. A folder the program locked (`chmod 000`)
+/// is opened again and removed; one that still cannot be removed is logged and left.
+struct Scratch(PathBuf);
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let mut removed = std::fs::remove_dir_all(&self.0);
+        if removed
+            .as_ref()
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
+        {
+            unlock(&self.0);
+            removed = std::fs::remove_dir_all(&self.0);
+        }
+        if let Err(error) = removed {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!("code run scratch cleanup failed: {error}");
+            }
+        }
+    }
+}
+
+/// Give the owner back access to every folder below `dir`. Only real folders are walked.
+#[cfg(unix)]
+fn unlock(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            unlock(&entry.path());
+        }
+    }
+}
+#[cfg(not(unix))]
+fn unlock(_: &Path) {}
+
+struct Prepared {
+    _scratch: Scratch,
+    project: PathBuf,
+    program: PathBuf,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    absent: Vec<PathBuf>,
+    before: Before,
+    file: &'static str,
+}
+
+fn check_cancel(cancel: &ark_runtime::CancelToken) -> Result<(), AdapterError> {
+    if cancel.is_cancelled() {
+        Err(AdapterError::Tool("code run cancelled".into()))
+    } else {
+        Ok(())
+    }
+}
+
+fn prepare(
+    sandbox: Sandbox,
+    scratch: PathBuf,
+    project: PathBuf,
+    code: String,
+    launch: Launch,
+    cancel: &ark_runtime::CancelToken,
+) -> Result<Prepared, AdapterError> {
+    check_cancel(cancel)?;
+    std::fs::create_dir_all(&scratch).map_err(io)?;
+    let dir = scratch.join(uuid::Uuid::new_v4().simple().to_string());
+    ark_os::fs::create_private_dir(&dir).map_err(io)?;
+    let scratch = Scratch(dir.clone());
+    // Before versions live outside the child's writable scratch tree.
+    let work = dir.join("work");
+    let tmp = work.join("tmp");
+    std::fs::create_dir_all(&tmp).map_err(io)?;
+    for (from, name) in &launch.home {
+        check_cancel(cancel)?;
+        copy_dir(from, &tmp.join(name)).map_err(io)?;
+    }
+    let file = work.join(launch.file);
+    std::fs::write(&file, code).map_err(io)?;
+    let bounds = Bounds {
+        project: project.clone(),
+        scratch: work,
+        reads: launch.reads.clone(),
+    };
+    let mut args = launch.args;
+    args.push(file.display().to_string());
+    check_cancel(cancel)?;
+    let (program, args) = sandbox
+        .wrap(&bounds, &launch.program, &args)
+        .map_err(|detail| AdapterError::ToolUnavailable {
+            tool: sandbox.name().into(),
+            detail,
+        })?;
+    let mut env = sandbox::base_env(&tmp, launch.program.parent());
+    env.extend(launch.env);
+    let absent = sandbox::absent_kept(&project);
+    let before = Before::take(&project, &dir.join("before"));
+    check_cancel(cancel)?;
+    Ok(Prepared {
+        _scratch: scratch,
+        project,
+        program,
+        args,
+        env,
+        absent,
+        before,
+        file: launch.file,
+    })
+}
+
+fn finish(
+    prepared: Prepared,
+    ran: Result<subprocess::Run, subprocess::ContainedError>,
+    started: SystemTime,
+    secs: u64,
+    runtime: &str,
+    cancel: &ark_runtime::CancelToken,
+) -> Result<ActionOutput, AdapterError> {
+    let removed = sandbox::remove_created(&prepared.absent);
+    check_cancel(cancel)?;
+    let mut ran = ran.map_err(|e| e.error)?;
+    let kept = prepared.before.changed(&prepared.project);
+    if !removed.is_empty() {
+        ran.stderr.push_str(&format!(
+            "\nRemoved {}: a run may not create these folders in the project.",
+            removed.join(", ")
+        ));
+    }
+    let written = written_since(&prepared.project, started);
+    let mut produced = Vec::new();
+    let mut not_kept = Vec::new();
+    for (rel, size) in written.iter().take(MAX_LISTED) {
+        check_cancel(cancel)?;
+        if produced.len() < MAX_FILES && *size <= MAX_FILE_BYTES {
+            if let Ok(bytes) =
+                ark_runtime::folder::read_capture(&prepared.project, rel, MAX_FILE_BYTES)
+            {
+                produced.push(snapshot(rel, bytes));
+                continue;
+            }
+        }
+        not_kept.push(rel.clone());
+    }
+    produced.extend(kept.versions);
+    let files: Vec<&String> = written.iter().take(MAX_LISTED).map(|(p, _)| p).collect();
+    let timed_out = ran.code == 124
+        && ran
+            .stderr
+            .ends_with(&subprocess::timeout_note(Duration::from_secs(secs)));
+    let output = json!({ "runtime": runtime, "exit_code": ran.code, "timed_out": timed_out,
+        "stdout": ran.stdout, "stderr": ran.stderr, "files": files,
+        "more_files": written.len().saturating_sub(MAX_LISTED), "not_kept": not_kept,
+        "removed": kept.removed, "no_copy": kept.no_copy });
+    let mut out = ActionOutput::json(output)
+        .with_command(vec![runtime.to_string(), prepared.file.to_string()]);
+    out.produced = produced;
+    Ok(out)
 }
 
 /// A file the run wrote, as a stored copy that names the file. Its kind is left to the engine's
@@ -357,6 +528,12 @@ impl Adapter for Exec {
     }
 
     async fn health(&self) -> AdapterHealth {
+        if self.admission.is_closed() {
+            return AdapterHealth {
+                available: false,
+                detail: "code cleanup did not finish; restart the app".into(),
+            };
+        }
         let why: Vec<String> = self
             .runtimes
             .iter()

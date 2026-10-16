@@ -46,7 +46,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | The Computer is macOS only. Apps that expose little to accessibility (Spotify, canvases, games) need a model that reads images (`computer.see`). A message app needs enough accessibility evidence to prove its recipient, composer and outgoing direction; otherwise a send stays unconfirmed. Every action asks each time, so nothing on the screen runs unattended | `ark-computer`, ADR 0018, 0042, 0056 |
 | `/context` token numbers are estimates; provider numbers are in `/trace` | `ark-interact` |
 | On `workbooks`, `claude:haiku` (0/2) and qwen3.5:27b (0/2) keep orders exported twice even when told each order counts once, and Haiku does not read the `data-analysis` skill there; Sonnet and Codex pass | `bench/RESULTS.md` |
-| A run's memory and CPU are not limited: a program that reads a very large file can use most of the machine's memory | `ark-exec`, ADR 0032, 0033 |
+| A program's memory and CPU are not limited: a large file can use most of the machine's memory. Code runs limit how many run at once and how much capture reads (ADR 0072), not program RAM or CPU | `ark-exec`, ADR 0032, 0033, 0072 |
 | Run code on Linux and Windows is checked by lint and unit tests here, not yet run on a machine of each | `ark-exec`, ADR 0032 |
 | ARK has never run on Windows. `ark-os` (ADR 0022) is on `ci/windows` only; on `main`, other processes look dead to the runtime, links open through `cmd`, and stops other than Ctrl+C get no grace | `ark-desktop/docs/WINDOWS.md` |
 | Not on crates.io; consumers pin a git tag | release |

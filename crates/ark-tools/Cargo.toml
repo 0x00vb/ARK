@@ -16,3 +16,6 @@ async-trait.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+

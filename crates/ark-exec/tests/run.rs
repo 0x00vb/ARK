@@ -78,6 +78,200 @@ async fn run(exec: &Exec, project: &Path, code: &str) -> ActionOutput {
         .unwrap()
 }
 
+async fn until(mut ready: impl FnMut() -> bool) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !ready() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "run did not reach the expected state"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+}
+
+struct HeldSetup {
+    entered: std::sync::atomic::AtomicUsize,
+    release: tokio::sync::Semaphore,
+}
+
+#[async_trait::async_trait]
+impl Runtime for HeldSetup {
+    fn name(&self) -> &'static str {
+        "sh"
+    }
+    fn says(&self) -> String {
+        "held setup".into()
+    }
+    fn available(&self) -> Result<(), String> {
+        Ok(())
+    }
+    async fn ready(&self) -> Result<Launch, String> {
+        self.entered
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.release.acquire().await.unwrap().forget();
+        Sh.ready().await
+    }
+}
+
+#[tokio::test]
+async fn queued_calls_do_no_setup_and_a_cancelled_setup_retains_its_project_slot() {
+    use std::sync::atomic::Ordering;
+    let held = Arc::new(HeldSetup {
+        entered: 0.into(),
+        release: tokio::sync::Semaphore::new(0),
+    });
+    let s = setup(held.clone());
+    let exec = Arc::new(s.exec);
+    let (e, p) = (exec.clone(), s.project.clone());
+    let first = tokio::spawn(async move { run(&e, &p, "echo first > first").await });
+    until(|| held.entered.load(Ordering::SeqCst) == 1).await;
+    first.abort();
+    let _ = first.await;
+    let (e, p) = (exec.clone(), s.project.clone());
+    let second = tokio::spawn(async move { run(&e, &p, "echo second > second").await });
+    tokio::task::yield_now().await;
+    assert_eq!(held.entered.load(Ordering::SeqCst), 1);
+    held.release.add_permits(1);
+    until(|| held.entered.load(Ordering::SeqCst) == 2).await;
+    assert!(!s.project.join("first").exists());
+    held.release.add_permits(1);
+    assert_eq!(second.await.unwrap().output["exit_code"], 0);
+    assert_eq!(std::fs::read_dir(&s.scratch).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn two_active_calls_and_eight_waiters_are_shared_across_projects() {
+    use std::sync::atomic::Ordering;
+    let held = Arc::new(HeldSetup {
+        entered: 0.into(),
+        release: tokio::sync::Semaphore::new(0),
+    });
+    let s = setup(held.clone());
+    let exec = Arc::new(s.exec);
+    let mut projects = Vec::new();
+    let mut tasks = Vec::new();
+    for _ in 0..10 {
+        let project = tempfile::tempdir().unwrap();
+        let (e, p) = (exec.clone(), project.path().canonicalize().unwrap());
+        tasks.push(tokio::spawn(async move { run(&e, &p, "echo ok").await }));
+        projects.push(project);
+        tokio::task::yield_now().await;
+    }
+    until(|| held.entered.load(Ordering::SeqCst) == 2).await;
+    let blobs = NoBlobs;
+    let extra = tempfile::tempdir().unwrap();
+    let ctx = RunCtx::new(&blobs).with_workspace(extra.path().to_path_buf());
+    let result = exec.run(RUN, json!({"code":"echo extra"}), &ctx).await;
+    assert!(
+        matches!(&result, Err(ark_tools::AdapterError::ToolUnavailable { detail, .. })
+            if detail.contains("too many code runs")),
+        "{:?}",
+        result.err()
+    );
+    assert_eq!(held.entered.load(Ordering::SeqCst), 2);
+    held.release.add_permits(10);
+    for task in tasks {
+        assert_eq!(task.await.unwrap().output["exit_code"], 0);
+    }
+    assert_eq!(std::fs::read_dir(&s.scratch).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn cancellation_stops_the_child_before_scratch_is_removed() {
+    let s = setup(Arc::new(Sh));
+    let exec = Arc::new(s.exec);
+    let (e, p) = (exec.clone(), s.project.clone());
+    let job = tokio::spawn(async move {
+        run(
+            &e,
+            &p,
+            "echo $$ > pid; while :; do echo tick >> heartbeat; sleep 0.02; done",
+        )
+        .await
+    });
+    until(|| s.project.join("heartbeat").exists()).await;
+    // bubblewrap gives the shell a PID inside its own namespace. Only macOS's value
+    // identifies a host process. The heartbeat check below applies to both platforms.
+    #[cfg(target_os = "macos")]
+    let pid = std::fs::read_to_string(s.project.join("pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    job.abort();
+    let _ = job.await;
+    until(|| std::fs::read_dir(&s.scratch).unwrap().count() == 0).await;
+    #[cfg(target_os = "macos")]
+    assert!(!ark_os::process::alive(pid));
+    let stopped = std::fs::metadata(s.project.join("heartbeat"))
+        .unwrap()
+        .len();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(
+        std::fs::metadata(s.project.join("heartbeat"))
+            .unwrap()
+            .len(),
+        stopped
+    );
+    assert_eq!(
+        run(&exec, &s.project, "echo recovered").await.output["exit_code"],
+        0
+    );
+}
+
+#[tokio::test]
+async fn before_versions_are_outside_the_programs_writable_scratch() {
+    let s = setup(Arc::new(Sh));
+    std::fs::write(s.project.join("source"), b"original").unwrap();
+    let out = run(
+        &s.exec,
+        &s.project,
+        // Try both the copies' old place (beside the program) and the new one (beside its
+        // writable folder): neither may change what Restore gets back.
+        "d=$(dirname \"$0\"); for b in \"$d/before\" \"$d/../before\"; do \
+         [ -f \"$b/source\" ] && echo poisoned > \"$b/source\"; done; echo changed > source",
+    )
+    .await;
+    let original = out
+        .produced
+        .iter()
+        .find(|p| p.before && p.path.as_deref() == Some("source"))
+        .unwrap();
+    assert_eq!(original.bytes, b"original");
+    assert_eq!(std::fs::read_dir(&s.scratch).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn a_scratch_folder_the_program_locks_is_removed_and_later_runs_work() {
+    let s = setup(Arc::new(Sh));
+    let locked = "d=$(dirname \"$0\")/locked; mkdir \"$d\"; touch \"$d/f\"; chmod 000 \"$d\"";
+    assert_eq!(
+        run(&s.exec, &s.project, locked).await.output["exit_code"],
+        0
+    );
+    assert_eq!(std::fs::read_dir(&s.scratch).unwrap().count(), 0);
+    assert!(s.exec.health().await.available);
+    assert_eq!(
+        run(&s.exec, &s.project, "echo next").await.output["exit_code"],
+        0
+    );
+}
+
+#[tokio::test]
+async fn a_completed_run_leaves_no_async_owner_or_output_readers() {
+    let s = setup(Arc::new(Sh));
+    let metrics = tokio::runtime::Handle::current().metrics();
+    let before = metrics.num_alive_tasks();
+    assert_eq!(
+        run(&s.exec, &s.project, "echo complete").await.output["exit_code"],
+        0
+    );
+    // An aborted reader can take a scheduler pass to be counted as gone; a leaked owner or a
+    // reader held by the pipe would stay past this wait.
+    until(|| metrics.num_alive_tasks() <= before).await;
+    assert_eq!(std::fs::read_dir(&s.scratch).unwrap().count(), 0);
+}
+
 #[tokio::test]
 async fn a_run_returns_the_files_it_wrote_in_the_project() {
     let s = setup(Arc::new(Sh));

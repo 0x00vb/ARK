@@ -100,6 +100,40 @@ impl Tree {
     pub fn disarm(&mut self) {
         self.0.disarm()
     }
+
+    /// Signal the attached group to stop without waiting. Contained work calls this before it
+    /// reaps the direct child, so the group id is not released before the group is signalled.
+    pub fn terminate(&self) {
+        self.0.terminate();
+    }
+
+    /// Whether this guard attached to a process group or Job Object.
+    pub fn attached(&self) -> bool {
+        self.0.attached()
+    }
+
+    /// Terminate the attached group and wait for it to become empty. Used by contained,
+    /// finite work only. Programs intentionally left running use the existing disarm path.
+    pub async fn stop(&mut self) -> std::io::Result<()> {
+        // An empty group is not signalled: its id may already be free for reuse.
+        if !self.0.empty()? {
+            self.0.terminate();
+        }
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if self.0.empty()? {
+                self.0.disarm();
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "the process group did not stop",
+                ));
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    }
 }
 
 impl Drop for Tree {
@@ -173,6 +207,30 @@ mod sys {
         pub fn disarm(&mut self) {
             self.0 = None;
         }
+        pub fn attached(&self) -> bool {
+            self.0.is_some()
+        }
+        pub fn terminate(&self) {
+            if let Some(pid) = self.0 {
+                // SAFETY: the child was started in its own process group.
+                unsafe {
+                    libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+                }
+            }
+        }
+        pub fn empty(&self) -> std::io::Result<bool> {
+            let Some(pid) = self.0 else { return Ok(true) };
+            // SAFETY: signal zero only checks group existence.
+            if unsafe { libc::killpg(pid as libc::pid_t, 0) } == 0 {
+                return Ok(false);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                Ok(true)
+            } else {
+                Err(error)
+            }
+        }
     }
 
     pub fn attach_console() {}
@@ -190,9 +248,10 @@ mod sys {
     use std::os::windows::process::CommandExt;
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ACCESS_DENIED, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
+        JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+        TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW,
@@ -266,6 +325,37 @@ mod sys {
                 }
                 self.0 = 0;
             }
+        }
+        pub fn attached(&self) -> bool {
+            self.0 != 0
+        }
+        pub fn terminate(&self) {
+            if self.0 != 0 {
+                // SAFETY: the job handle belongs to this guard.
+                unsafe {
+                    TerminateJobObject(self.0 as HANDLE, 1);
+                }
+            }
+        }
+        pub fn empty(&self) -> std::io::Result<bool> {
+            if self.0 == 0 {
+                return Ok(true);
+            }
+            let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+            // SAFETY: info is sized for this information class; the job is owned.
+            if unsafe {
+                QueryInformationJobObject(
+                    self.0 as HANDLE,
+                    JobObjectBasicAccountingInformation,
+                    &mut info as *mut _ as *mut std::ffi::c_void,
+                    std::mem::size_of_val(&info) as u32,
+                    std::ptr::null_mut(),
+                )
+            } == 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(info.ActiveProcesses == 0)
         }
     }
 

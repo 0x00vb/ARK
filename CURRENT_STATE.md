@@ -2,10 +2,16 @@
 
 ## Dictation follow-through
 
-Branch `codex/draft-isolation`: each chat keeps its own draft, dictation uploads stop at exactly
-eight minutes, Whisper and GGML native logs are silenced, Devices skips `/session` in native
-windows, and notification page setup runs only in the app's own main window (ADR 0029). Not
-merged yet. Open: a native check of detached and remote windows at the screen. Board `26025811`.
+On `main`: each chat keeps its own draft, dictation uploads stop at exactly eight minutes,
+Whisper and GGML native logs are silenced, Devices skips `/session` in native windows, and
+notification page setup runs only in the app's own main window (ADR 0029). Open: a native check
+of detached and remote windows at the screen. Board `26025811`.
+
+## Bounded code runs
+
+On `main` (ADR 0072): two active code runs, eight waiting, one per project, owned cleanup on
+cancel, background children stopped, bounded capture. Left: native Windows and Linux runs and
+the owner's call on the 2/8 limits (board `17de65d1`).
 
 ## Advanced artifact surfaces in development
 
@@ -28,7 +34,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-16 (draft isolation and notification setup)
+Last updated: 2026-10-16 (dictation follow-through, IFC files and bounded code runs on main)
 
 ## Release
 

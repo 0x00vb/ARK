@@ -70,8 +70,9 @@ source, and file writes remain refused by the host.
 
 `ArkUi::wasm_worker_asset` registers one confined JavaScript worker entry. Only successful HTTP
 GETs for that exact asset, including its current versioned path, receive `wasm-unsafe-eval`.
-The worker policy denies connections. Same-origin worker imports remain permitted for WebKit.
-The consumer disables nested worker creation before parsing. Root pages, siblings, errors and lookalikes
+The worker policy denies connections. It keeps `worker-src 'self'` because WebKit refuses a
+module worker's own static imports under `'none'`; the consumer disables nested worker creation
+before parsing. Root pages, siblings, errors and lookalikes
 keep their original policy. JavaScript eval remains forbidden. Development and released asset
 roots retain this exact registration. Only the HTTP serve path sends this policy. A native
 window serves assets through the app's own protocol and CSP, which this method does not change.

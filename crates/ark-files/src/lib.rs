@@ -386,11 +386,17 @@ pub fn source(root: &Path, rel: &str) -> Result<File, Error> {
     let bytes = if let Some(view) = view {
         use std::io::Read;
         let mut bytes = Vec::new();
-        ark_os::fs::open_within(&root.canonicalize()?, &path)?
-            .take(view.max_bytes() + 1)
-            .read_to_end(&mut bytes)?;
+        // Unix opens without following links; elsewhere `inside` already confined the path.
+        #[cfg(unix)]
+        let file = ark_os::fs::open_within(&root.canonicalize()?, &path)?;
+        #[cfg(not(unix))]
+        let file = std::fs::File::open(&path)?;
+        file.take(view.max_bytes() + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > view.max_bytes() {
-            return Err(Error::Format("Source exceeds the 2 MiB view limit".into()));
+            return Err(Error::Format(format!(
+                "Source exceeds the {} MiB view limit",
+                view.max_bytes() / 1024 / 1024
+            )));
         }
         bytes
     } else {

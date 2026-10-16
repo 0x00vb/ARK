@@ -16,9 +16,10 @@
 //                      sending opens the menu instead. `ark.refreshModel()` asks again.
 //   ark.artifactViewer({ id, label, match(artifact), primary, presents, wide, render(el, artifact, api, params) })
 //   ark.fileViewer({ id, kinds, render(el, file, api) })
-//     api.confirm(label): one local opening choice beside Cancel, abort-safe, no saved grant.
 //                      trusted shipped code over immutable file bytes. `api.read(offset)`
 //                      returns one bounded Uint8Array; parse untrusted bytes in a worker.
+//                      `api.confirm(label)`: one local opening choice beside Cancel,
+//                      abort-safe, no saved grant.
 //   ark.toolRenderer({ match(action), render(el, call, api) })
 //   ark.action({ id, label, icon, where: "artifact" | "palette" | "project", when(ctx), run(ctx, api) })
 //                      `project`: an item in a project's menu in the projects list; `ctx` is

@@ -276,6 +276,16 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             )
             .extension_script("file-proof-entry.js");
     }
+    if scenario == "advanced-files" {
+        // The same worker as a registered WASM worker and as an ordinary asset.
+        const PROBE: &[u8] = br#"let compiled = false, fetched = false;
+try { await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])); compiled = true; } catch {}
+try { await fetch('/ext/plain-probe.js'); fetched = true; } catch {}
+postMessage({ compiled, fetched });"#;
+        ui = ui
+            .wasm_worker_asset("wasm-probe.js", PROBE)
+            .asset("plain-probe.js", PROBE);
+    }
     if scenario == "ready" {
         ui = ui
             .asset(

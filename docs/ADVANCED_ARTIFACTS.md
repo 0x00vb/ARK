@@ -1,19 +1,18 @@
 # Advanced artifact surfaces
 
 Plan for maps, 3D models, CAD and later domain files to open in ARK without adding a mode,
-destination or setup flow. A1 to A3 and Desktop A4 are implemented, not a new signed Desktop
-release. A5 (IFC) is implemented on branch `codex/ifc-files`, with the Desktop viewer on its own
-branch; neither is released.
+destination or setup flow. A1 to A3 are released in v0.24.0. ARK Desktop implements A4 (CAD)
+and A5 (IFC) as its own capabilities; no signed Desktop release includes them yet.
 
 Development evidence is in [`ADVANCED_ARTIFACTS_A0.md`](ADVANCED_ARTIFACTS_A0.md). A0 passed
 independent QA. A1 to A3 pass full repository checks, real WebKit interaction and code QA.
 The packaged Mac app covers local files and renderer-crash Retry. A Linux ARM64 runtime serves
 maps and models to that window; a source edit saves on Linux and renders the new name. The owner
 deferred unfamiliar-user observation and physical trackpad testing. Desktop A4 has approved lazy
-setup and contained solid generation; its evidence is in `../../ark-desktop/docs/CAD.md`.
+setup and contained solid generation (ARK Desktop `docs/CAD.md`).
 For A5, Core adds the IFC descriptor (STEP header check, 2 MiB limit before any copy), read-only
 Source, `api.confirm(label)` and `ArkUi::wasm_worker_asset`; Desktop owns the parser and lens
-(`../../ark-desktop/docs/IFC.md`). Architect/BIM observation is owner-deferred; no professional
+(ARK Desktop `docs/IFC.md`). Architect/BIM observation is owner-deferred; no professional
 validation is claimed.
 
 ## Product contract

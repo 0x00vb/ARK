@@ -170,12 +170,27 @@ const scenarios = {
     }), true);
   },
   async "advanced-files"(page) {
+    const probe = await page.evaluate(async () => {
+      const run = path => new Promise(resolve => {
+        const worker = new Worker(path, { type: 'module' });
+        worker.onmessage = ({ data }) => { worker.terminate(); resolve(data); };
+        worker.onerror = () => { worker.terminate(); resolve('error'); };
+      });
+      return { wasm: await run('/ext/wasm-probe.js'), plain: await run('/ext/plain-probe.js') };
+    });
+    assert.deepEqual(probe, { wasm: { compiled: true, fetched: false }, plain: { compiled: false, fetched: true } });
     await page.evaluate(() => {
       window.__viewerCalls = 0;
       window.__viewerReads = 0;
       window.ark.fileViewer({ id: 'proof', kinds: ['map', 'model'], async render(el, file, api) {
         window.__viewerCalls++;
-        if (file.format === 'stl') await api.confirm('Open model');
+        if (file.format === 'stl') {
+          const refused = label => api.confirm(label).then(() => 'opened', error => error.message);
+          window.__confirmRefusals = await Promise.all(['', '  ', 'x'.repeat(81), 5].map(refused));
+          const opening = api.confirm('Open model');
+          window.__confirmRefusals.push(await refused('Again'));
+          await opening;
+        }
         window.__viewerReads++;
         const bytes = await api.read(0);
         el.append(api.h('button', { type: 'button', onclick: () => api.setFocus({ id: 'site-1', label: 'Site one', properties: { name: 'Site one' } }) }, 'Select site'));
@@ -214,6 +229,7 @@ const scenarios = {
     assert.equal(await page.evaluate(() => window.__viewerReads), reads);
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await open.click();
+    assert.deepEqual(await page.evaluate(() => window.__confirmRefusals), Array(5).fill('Invalid file view confirmation'));
     await page.waitForFunction(() => [...document.querySelectorAll('.proof-model')].some(el => el.textContent === 'model:30000084:1048576'));
     await page.setViewportSize({ width: 420, height: 780 });
     await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });

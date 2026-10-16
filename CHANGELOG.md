@@ -14,10 +14,13 @@ What changed for people building on ARK, per release. Not a commit log.
 - The shared composer accepts reviewed voice dictation through an optional transcription
   provider at the chosen computer. The optional `ark-transcribe` crate runs Whisper locally
   ([ADR 0070](docs/adr/0070-dictation-is-client-capture-and-an-injected-transcriber.md)).
-- Read-only IFC model descriptors, a 2 MiB pre-copy source limit, and bounded read-only Source
-  recovery. Consumers still own parsing and inspection (ADR 0071).
-- Exact trusted WebAssembly worker asset registration with no network access. Root and ordinary
-  asset policies remain unchanged; JavaScript eval stays forbidden.
+- `.ifc` opens as a read-only model: STEP header check, a 2 MiB limit before any snapshot copy,
+  and read-only Source (file reads carry `source_available` and `read_only`). Consumers parse
+  and draw it ([ADR 0071](docs/adr/0071-advanced-files-use-one-viewer-seam.md)).
+- `api.confirm(label)` for file viewers: one local opening choice beside Cancel, no saved grant.
+- `ArkUi::wasm_worker_asset(path, bytes)`: over HTTP (`--serve`), only that exact worker entry may
+  compile WebAssembly, with `connect-src 'none'`. Other assets keep their
+  policy and JavaScript eval stays forbidden. A native window keeps the app's own CSP.
 
 ### Changed
 

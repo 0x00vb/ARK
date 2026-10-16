@@ -20,8 +20,8 @@ scenarios, the release build and benchmark gate. Desktop's full checks pass: 22 
 JavaScript tests. Native local rendering, renderer-kill Retry and Linux ARM64-to-Mac map/model
 dogfood pass. The consumer must pin the immutable v0.24.0 tag, not this development tree.
 The owner deferred five-person observation and physical
-trackpad testing on 2026-10-15; do not claim observed 10/10 usability. A4 has a contained CAD
-feasibility proof, not a product runtime. A5 (IFC) is on branch `codex/ifc-files`; the owner
+trackpad testing on 2026-10-15; do not claim observed 10/10 usability. ARK Desktop implements A4
+(CAD) as its own capability. A5 (IFC) is on branch `codex/ifc-files`; the owner
 deferred architect/BIM observation on 2026-10-15, so no professional validation is claimed.
 
 What is happening in ARK right now. Read this at the start of a session. Update it at the end

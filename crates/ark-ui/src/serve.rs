@@ -76,6 +76,8 @@ base-uri 'none'; form-action 'self'; frame-ancestors 'self'\r\n\
 Referrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n";
 
 // An explicit trusted worker entry, never a page-wide permission or JavaScript eval grant.
+// `worker-src 'self'`, not 'none': WebKit refuses a module worker's own static imports under
+// 'none' (seen with ARK Desktop's IFC worker). Consumers stub `Worker` inside the worker.
 const WASM_WORKER_HEADERS: &str = "Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'none'; worker-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n";
 
 /// How long a typed device code is good for, and how long the session it becomes lasts: a

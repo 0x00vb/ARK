@@ -202,7 +202,9 @@ async fn run_managed(
         }
     };
     if timed_out || cancelled {
-        if !contained {
+        if contained {
+            group.terminate();
+        } else {
             group.kill();
         }
         let _ = child.kill().await;

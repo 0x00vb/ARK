@@ -162,7 +162,12 @@ async fn two_active_calls_and_eight_waiters_are_shared_across_projects() {
     let extra = tempfile::tempdir().unwrap();
     let ctx = RunCtx::new(&blobs).with_workspace(extra.path().to_path_buf());
     let result = exec.run(RUN, json!({"code":"echo extra"}), &ctx).await;
-    assert!(result.is_err());
+    assert!(
+        matches!(&result, Err(ark_tools::AdapterError::ToolUnavailable { detail, .. })
+            if detail.contains("too many code runs")),
+        "{:?}",
+        result.err()
+    );
     assert_eq!(held.entered.load(Ordering::SeqCst), 2);
     held.release.add_permits(10);
     for task in tasks {
@@ -237,24 +242,19 @@ async fn before_versions_are_outside_the_programs_writable_scratch() {
 }
 
 #[tokio::test]
-async fn a_scratch_folder_the_program_locks_does_not_stop_later_runs() {
-    use std::os::unix::fs::PermissionsExt;
+async fn a_scratch_folder_the_program_locks_is_removed_and_later_runs_work() {
     let s = setup(Arc::new(Sh));
     let locked = "d=$(dirname \"$0\")/locked; mkdir \"$d\"; touch \"$d/f\"; chmod 000 \"$d\"";
     assert_eq!(
         run(&s.exec, &s.project, locked).await.output["exit_code"],
         0
     );
-    let left: Vec<_> = std::fs::read_dir(&s.scratch).unwrap().flatten().collect();
-    assert_eq!(left.len(), 1, "the locked folder stays behind");
+    assert_eq!(std::fs::read_dir(&s.scratch).unwrap().count(), 0);
     assert!(s.exec.health().await.available);
     assert_eq!(
         run(&s.exec, &s.project, "echo next").await.output["exit_code"],
         0
     );
-    // Let the temporary folder be removed.
-    let dir = left[0].path().join("work/locked");
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
 #[tokio::test]

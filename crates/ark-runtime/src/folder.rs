@@ -27,7 +27,8 @@ pub const MAX_VERSIONS: usize = 50;
 
 /// Capture a regular project file with a byte limit enforced on its opened handle.
 pub fn read_capture(root: &Path, relative: &str, max: u64) -> std::io::Result<Vec<u8>> {
-    ark_os::fs::open_capture(root, &root.join(relative))
+    let root = canonical(root);
+    ark_os::fs::open_capture(&root, &root.join(relative))
         .and_then(|file| ark_os::fs::read_bounded(file, max))
 }
 
@@ -135,9 +136,24 @@ pub struct Kept {
 }
 
 impl Before {
-    /// List `root` and copy its files into `copies`.
+    /// List `root` and copy its files into `copies`, a folder of their own that is emptied
+    /// first (copies never replace a file, so a take repeated after a crash starts empty).
+    /// A `copies` inside `root`, or containing it, is refused and nothing is copied.
     pub fn take(root: &Path, copies: &Path) -> Before {
         let root = &canonical(root);
+        // `copies` may not exist yet: resolve its parent then.
+        let held = match (copies.exists(), copies.parent(), copies.file_name()) {
+            (false, Some(parent), Some(name)) => canonical(parent).join(name),
+            _ => canonical(copies),
+        };
+        if held.starts_with(root) || root.starts_with(&held) {
+            return Before {
+                files: files(root),
+                copies: copies.to_path_buf(),
+                copied: HashSet::new(),
+            };
+        }
+        let _ = std::fs::remove_dir_all(copies);
         let files = files(root);
         let mut copied = HashSet::new();
         let mut total = 0u64;
@@ -235,7 +251,7 @@ impl Before {
 /// Captures open files below a root without following links, so a root given through a link
 /// (a project opened by a linked path) is resolved first. A missing root stays as given.
 fn canonical(root: &Path) -> PathBuf {
-    root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
+    ark_os::dirs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
 }
 
 /// Compare opened handles with fixed buffers. A file that grew is different without reading
@@ -285,6 +301,42 @@ mod tests {
         assert_eq!(changed.versions.len(), 1);
         assert_eq!(changed.versions[0].bytes, b"original");
         assert_eq!(changed.written, ["file"]);
+    }
+
+    #[test]
+    fn copies_inside_the_project_are_refused_without_touching_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir_all(root.join("copies")).unwrap();
+        std::fs::write(root.join("copies/keep"), b"mine").unwrap();
+        std::fs::write(root.join("file"), b"original").unwrap();
+        for copies in [
+            root.join("copies"),
+            root.join("new"),
+            dir.path().to_path_buf(),
+        ] {
+            let before = Before::take(&root, &copies);
+            std::fs::write(root.join("file"), b"changed").unwrap();
+            assert_eq!(before.changed(&root).no_copy, ["file"]);
+            std::fs::write(root.join("file"), b"original").unwrap();
+        }
+        assert_eq!(std::fs::read(root.join("copies/keep")).unwrap(), b"mine");
+        assert!(!root.join("new").exists());
+    }
+
+    #[test]
+    fn a_take_repeated_into_the_same_copies_keeps_its_versions_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("file"), b"original").unwrap();
+        let copies = dir.path().join("copies");
+        drop(Before::take(&root, &copies));
+        let before = Before::take(&root, &copies);
+        std::fs::write(root.join("file"), b"changed").unwrap();
+        let changed = before.changed(&root);
+        assert_eq!(changed.versions.len(), 1);
+        assert_eq!(changed.versions[0].bytes, b"original");
     }
 
     #[cfg(unix)]

@@ -1,10 +1,10 @@
 # Current state
 
-## Bounded code runs ready to merge
+## Bounded code runs in review
 
 Branch `codex/bounded-exec` (ADR 0072): two active code runs, eight waiting, one per project,
 owned cleanup on cancel, background children stopped, bounded capture. Focused tests and clippy
-pass; native Windows and Linux runs and the owner's call on the 2/8 limits remain.
+pass. Left: full CI and a dogfood (lead), native Windows and Linux runs, the owner's 2/8 call.
 
 ## Advanced artifact surfaces in development
 
@@ -26,7 +26,7 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-15 (completed-work integration)
+Last updated: 2026-10-16 (bounded code runs)
 
 ## Release
 

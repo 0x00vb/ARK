@@ -101,6 +101,12 @@ impl Tree {
         self.0.disarm()
     }
 
+    /// Signal the attached group to stop without waiting. Contained work calls this before it
+    /// reaps the direct child, so the group id is not released before the group is signalled.
+    pub fn terminate(&self) {
+        self.0.terminate();
+    }
+
     /// Whether this guard attached to a process group or Job Object.
     pub fn attached(&self) -> bool {
         self.0.attached()
@@ -109,7 +115,10 @@ impl Tree {
     /// Terminate the attached group and wait for it to become empty. Used by contained,
     /// finite work only. Programs intentionally left running use the existing disarm path.
     pub async fn stop(&mut self) -> std::io::Result<()> {
-        self.0.terminate();
+        // An empty group is not signalled: its id may already be free for reuse.
+        if !self.0.empty()? {
+            self.0.terminate();
+        }
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
             if self.0.empty()? {

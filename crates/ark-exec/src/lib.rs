@@ -175,7 +175,7 @@ impl Exec {
             .and_then(Json::as_u64)
             .unwrap_or(TIMEOUT)
             .clamp(1, MAX_TIMEOUT);
-        let project = project.canonicalize().map_err(io)?;
+        let project = ark_os::dirs::canonicalize(project).map_err(io)?;
         let permit = self
             .admission
             .acquire(project.clone())
@@ -290,18 +290,40 @@ impl Drop for CancelOnDrop {
     }
 }
 
-/// A run's own folder, removed when the run ends. A program can make it unremovable (for
-/// example with `chmod 000`); that leaves a folder behind but stops nothing else.
+/// A run's own folder, removed when the run ends. A folder the program locked (`chmod 000`)
+/// is opened again and removed; one that still cannot be removed is logged and left.
 struct Scratch(PathBuf);
 impl Drop for Scratch {
     fn drop(&mut self) {
-        if let Err(error) = std::fs::remove_dir_all(&self.0) {
+        let mut removed = std::fs::remove_dir_all(&self.0);
+        if removed
+            .as_ref()
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
+        {
+            unlock(&self.0);
+            removed = std::fs::remove_dir_all(&self.0);
+        }
+        if let Err(error) = removed {
             if error.kind() != std::io::ErrorKind::NotFound {
                 tracing::warn!("code run scratch cleanup failed: {error}");
             }
         }
     }
 }
+
+/// Give the owner back access to every folder below `dir`. Only real folders are walked.
+#[cfg(unix)]
+fn unlock(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            unlock(&entry.path());
+        }
+    }
+}
+#[cfg(not(unix))]
+fn unlock(_: &Path) {}
 
 struct Prepared {
     _scratch: Scratch,

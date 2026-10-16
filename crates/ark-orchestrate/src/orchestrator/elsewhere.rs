@@ -257,15 +257,12 @@ impl Inner {
             let kept = before.changed(&root);
             let mut produced: Vec<ProducedArtifact> = Vec::new();
             for rel in kept.written.iter().take(MAX_OUTPUTS) {
-                let p = root.join(rel);
-                if p.metadata().is_ok_and(|m| m.len() <= MAX_OUTPUT_BYTES) {
-                    if let Ok(bytes) = std::fs::read(&p) {
-                        let name = rel.rsplit('/').next().unwrap_or(rel);
-                        produced.push(
-                            ProducedArtifact::bytes(ark_core::ArtifactKind::Blob, name, bytes)
-                                .at(rel.as_str()),
-                        );
-                    }
+                if let Ok(bytes) = ark_runtime::folder::read_capture(&root, rel, MAX_OUTPUT_BYTES) {
+                    let name = rel.rsplit('/').next().unwrap_or(rel);
+                    produced.push(
+                        ProducedArtifact::bytes(ark_core::ArtifactKind::Blob, name, bytes)
+                            .at(rel.as_str()),
+                    );
                 }
             }
             (kept, produced)

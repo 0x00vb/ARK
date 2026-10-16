@@ -27,13 +27,16 @@ several chats can run code at once.
 | Waiting | Input is validated before queueing. No environment setup, copies or child process exists while a call waits. A dropped call leaves the queue. Nothing polls. |
 | Ownership | An admitted run is owned by its own task. A dropped caller cancels it, and the task still joins setup, the program and capture before it removes scratch and frees the slot. Cancellation during shared environment setup waits for setup, then skips the launch. |
 | Child lifetime | `run_contained` reaps the direct child and stops its process group or Job Object even on success. Other `run_spec` callers keep background processes as before. |
-| Incomplete cleanup | Only a process group or Job Object that cannot be stopped closes admission until restart. A launch failure does not. A scratch folder the program made unremovable (for example `chmod 000`) is logged and left. |
-| Files | Capture opens regular files through checked handles (descriptor-relative on Unix, a resolved-handle check on Windows), enforces byte limits on the open handle, compares with fixed buffers and keeps native clones. `Before` resolves its root first, so a project opened through a link keeps its copies. Restore copies live in `scratch/<id>/before`, outside the program's writable `scratch/<id>/work`. |
+| Incomplete cleanup | Only a process group or Job Object that cannot be stopped, or one that could not be attached, closes admission until restart. A launch failure does not. A scratch folder the program locked (`chmod 000`) is opened again and removed; one that still cannot be removed is logged and left. |
+| Files | Capture opens regular files through checked handles (descriptor-relative on Unix, a resolved-handle check on Windows), enforces byte limits on the open handle, compares with fixed buffers and keeps native clones. `Before` resolves its root first, so a project opened through a link keeps its copies. Restore copies live in `scratch/<id>/before`, outside the program's writable `scratch/<id>/work`. A repeated `Before::take` starts from an empty copies folder. Agents' folder work (`ark-orchestrate`) captures its outputs the same bounded way. |
 | CPU | No rate cap, priority change or numerical-library thread limit. |
 
 ## Consequences
 
-Excess work waits, so latency under load grows. There is no limit on a program's RAM, the
+Excess work waits, so latency under load grows. A waiting call is not shown as waiting: it
+looks like a run that has started. Its wait has no fixed bound other than the queue size
+times the run timeout (600 s at most). Project
+exclusion compares exact canonical paths, so nested projects (`/a` and `/a/b`) can run at once. There is no limit on a program's RAM, the
 host's total RAM or concurrency across processes. A cancelled run can leave project changes
 without Restore versions, as before. Unix process groups are not a security boundary against
 code that leaves its group. Abrupt process death can still leave scratch. Windows and Linux
@@ -46,9 +49,9 @@ across chats.
 
 | Check | Result (2026-10-16, macOS arm64) |
 |---|---|
-| New `tests/run.rs` tests on base | 4 of 5 fail: queued setup, the 2/8 limit, cancellation cleanup, Restore copies outside scratch. `a_completed_run_leaves_no_async_owner_or_output_readers` passes on base; it guards the owner task |
+| New `tests/run.rs` tests on base | 6 new tests. 5 fail on base: queued setup, the 2/8 limit, cancellation cleanup, Restore copies outside scratch, a locked scratch folder removed. `a_completed_run_leaves_no_async_owner_or_output_readers` passes on base; it guards the owner task. The 2 `lifecycle_tests` (cancel during preparation and capture) use test-only hooks that base does not have |
 | Focused tests | `ark-os`, `ark-tools`, `ark-runtime`, `ark-exec`, `ark-orchestrate` pass; `ark-exec` and `ark-tools` 8 times in a row |
-| Linked project root | `folder::tests::a_project_opened_through_a_link_keeps_its_versions_before` fails without the canonical root |
+| `Before` | `a_project_opened_through_a_link_keeps_its_versions_before` fails without the canonical root; `a_take_repeated_into_the_same_copies_keeps_its_versions_before` fails without emptying the copies first; `copies_inside_the_project_are_refused_without_touching_it` guards that emptying |
 | Lint | clippy `-D warnings` on the four crates (host and `x86_64-pc-windows-gnu`), `ark-os` on `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`. The full Linux and MSVC checks stop in C build scripts (`ring`, `zstd-sys`) without a cross toolchain |
 
 Timing: the `run_benchmark` example (`crates/ark-exec/examples/run_benchmark.rs`), same driver

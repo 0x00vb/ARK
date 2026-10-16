@@ -16,6 +16,7 @@ reqwest.workspace = true
 sha2 = "0.10"
 tokio.workspace = true
 whisper-rs = "0.16"
+whisper-rs-sys = "0.15"
 
 [dev-dependencies]
 tempfile.workspace = true

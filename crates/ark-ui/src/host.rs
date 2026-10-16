@@ -45,7 +45,7 @@ mod copying;
 mod held;
 
 const DICTATION_CHUNK: usize = 256 * 1024;
-const DICTATION_MAX: usize = 16 * 1024 * 1024;
+const DICTATION_MAX: usize = 8 * 60 * 16_000 * 2;
 
 struct DictationUpload {
     owner: String,
@@ -4646,6 +4646,25 @@ async fn forward_approvals(
 #[cfg(test)]
 mod dictation_tests {
     use super::*;
+
+    #[test]
+    fn chunks_stop_at_exactly_eight_minutes_without_advancing_on_rejection() {
+        let mut uploads = HashMap::new();
+        let id = begin_dictation_upload(&mut uploads, "alice".into()).unwrap();
+        let upload = uploads.get_mut(&id).unwrap();
+        upload.bytes = 8 * 60 * 16_000 * 2 - 2;
+        assert_eq!(
+            write_dictation_chunk(upload, "alice", 0, &[0, 0]).unwrap(),
+            1
+        );
+        assert_eq!(upload.bytes, 15_360_000);
+        let file_len = upload.file.as_file().metadata().unwrap().len();
+        assert!(write_dictation_chunk(upload, "alice", 1, &[0, 0]).is_err());
+        assert_eq!(upload.bytes, 15_360_000);
+        assert_eq!(upload.next, 1);
+        assert_eq!(upload.chunks.len(), 1);
+        assert_eq!(upload.file.as_file().metadata().unwrap().len(), file_len);
+    }
 
     #[test]
     fn uploads_are_one_per_owner_and_expire() {

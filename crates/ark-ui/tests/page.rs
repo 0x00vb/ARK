@@ -750,6 +750,16 @@ async fn dictation_preserves_the_editable_draft_and_explains_permission_failure(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn chat_switches_and_split_promotion_keep_each_draft_separate() {
+    drive("draft-isolation", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn devices_startup_skips_native_session_fetch_and_handles_bad_browser_json() {
+    drive("devices-startup", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn required_extension_failure_blocks_the_workspace_and_names_the_module() {
     drive("startup-extension-failure", vec![], Duration::ZERO).await;
 }

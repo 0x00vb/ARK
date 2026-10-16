@@ -24,6 +24,14 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Fixed
 
+- Settings › Devices no longer asks for a browser session in native windows. A failed or
+  malformed session reply keeps the section, without a pairing code.
+- Keep each chat's draft separate when changing chats or promoting a split pane. A new chat
+  starts empty.
+- Stop accepting dictation audio at the exact eight-minute limit, matching the page and speech
+  provider, instead of accepting extra audio that would fail only after upload.
+- Whisper and GGML no longer write model load and timing lines to the app's stderr. Speech
+  errors still return through the normal result path.
 - Codex model and effort discovery no longer waits for optional usage-limit telemetry.
   Required model validation keeps its existing deadline; ordinary sessions still collect usage.
 - The default approval instructions tell models to propose permitted actions through the

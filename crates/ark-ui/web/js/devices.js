@@ -186,8 +186,16 @@ function section(el, ark, pairing) {
 
 /// Offer the section where a device can be notified or another one added.
 export async function registerDevices(ark) {
-  const s = await fetch("/session", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null), () => null);
-  const pairing = !!s?.pairing && !window.__TAURI__;
+  // The native window notifies itself and has no browser session endpoint.
+  if (window.__TAURI__) return;
+  let pairing = false;
+  try {
+    const r = await fetch("/session", { cache: "no-store" });
+    pairing = r.ok && (await r.json())?.pairing === true;
+  } catch {
+    // Offline or not JSON: the section still works without offering a pairing code.
+    pairing = false;
+  }
   if (blocked() === "hidden" && !pairing) return;
   ark.setting({ id: "devices", title: "Devices", icon: "phone", builtin: true, render: (el) => section(el, ark, pairing) });
 }

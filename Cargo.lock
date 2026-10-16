@@ -557,6 +557,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "whisper-rs",
+ "whisper-rs-sys",
 ]
 
 [[package]]

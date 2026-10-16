@@ -53,9 +53,9 @@ has a bounded 15-minute limit for first-use preparation and inference, rather th
 eight-second call limit. The model download itself has a five-minute timeout.
 
 Each upload has a server-made random id bound to its client. Chunks are at most 256 KiB, ordered
-and capped at 16 MiB (about eight minutes). Identical retries are accepted; conflicting retries
-are refused. Ownership comes from the authenticated session or native window observed by the
-server, never a page-supplied identity. Web tabs sharing one credential deliberately share one
+and capped at 15,360,000 bytes (exactly eight minutes). Identical retries are accepted;
+conflicting retries are refused. Ownership comes from the authenticated session or native
+window observed by the server, never a page-supplied identity. Web tabs sharing one credential deliberately share one
 server-side upload allowance; the page lease is narrower and prevents two composers in one page.
 Cancel and completion remove the audio. An unfinished upload expires after ten minutes and is
 swept by the runtime once a minute. Only one unfinished upload is allowed per owner. Inference
@@ -124,6 +124,10 @@ until its blocking call ends, even if its async waiter is cancelled.
 - Windows and Linux remain explicitly unverified until their native hardware smoke tests run.
 
 ## Check
+
+The upload cap is the exact PCM limit the page and provider use (2026-10-15). The last sample
+is accepted; the next one is refused without advancing the upload. Draft checks cover empty and
+cleared drafts, chat round trips, same-chat selection and promotion of a split composer.
 
 - The automated WebKit page test covers a delayed availability response, text-preserving
   insertion at a UTF-16 caret, microphone release on Stop and page hide, permission denial,

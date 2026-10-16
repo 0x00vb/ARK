@@ -1242,7 +1242,15 @@ function applySummary(s) {
   composer.setModel(s.model);
   composer.setExecutionMode(s.execution_mode || "manual", s.execution_mode_revision || 0);
   rememberTab(s);
-  if (changed) applyPrimaryChange(before, state.sessionId);
+  if (changed) {
+    // Promotion disposes the secondary composer and saves its latest draft first.
+    applyPrimaryChange(before, state.sessionId);
+    const draft = savedDraft(state.sessionId);
+    composer.input.value = draft;
+    composer.caret = draft.length;
+    composer.input.setSelectionRange(draft.length, draft.length);
+    composer.changed();
+  }
   places?.show(s, state.running);
   composer.dictation.routeChanged();
   // A chat on a computer that does not answer reads only.
@@ -1268,11 +1276,6 @@ async function loadSession() {
   sidebar.refresh(state.sessionId);
   refreshRing();
   schedulesFollow();
-  const draft = savedDraft(state.sessionId);
-  if (draft && !composer.input.value) {
-    composer.input.value = draft;
-    composer.changed();
-  }
   restoreScroll(state.sessionId, $("#scroller"));
 }
 

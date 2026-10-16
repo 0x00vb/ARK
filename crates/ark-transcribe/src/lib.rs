@@ -1,7 +1,7 @@
 //! Optional, local speech-to-text for ARK's injected dictation boundary (ADR 0070).
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 
 use anyhow::Context as _;
 use ark_ui::transcription::{State, Status, TranscriptionProvider};
@@ -15,6 +15,23 @@ const MODEL_NAME: &str = "ggml-base.bin";
 const MODEL_BYTES: u64 = 147_951_465;
 const MODEL_SHA256: &str = "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe";
 const MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin";
+
+unsafe extern "C" fn discard_native_log(
+    _level: whisper_rs_sys::ggml_log_level,
+    _text: *const std::ffi::c_char,
+    _user_data: *mut std::ffi::c_void,
+) {
+}
+
+fn quiet_native_logs() {
+    static LOGS: Once = Once::new();
+    LOGS.call_once(|| {
+        // SAFETY: whisper.cpp keeps this static C callback with null user data and also hands
+        // it to GGML. It never dereferences a pointer, allocates or panics. Every constructor
+        // completes this Once before its native inference can start.
+        unsafe { whisper_rs::set_log_callback(Some(discard_native_log), std::ptr::null_mut()) };
+    });
+}
 
 /// The multilingual whisper.cpp base model. Construction creates no files or downloads.
 pub struct LocalWhisper {
@@ -31,6 +48,9 @@ impl LocalWhisper {
     }
 
     pub fn new(model_dir: impl Into<PathBuf>) -> Self {
+        // Native load and timing lines would otherwise go to the app's stderr. Errors still
+        // return through Result. The callback is process-wide; another library can replace it.
+        quiet_native_logs();
         let dir = model_dir.into();
         let status = if Self::installed(&dir.join(MODEL_NAME)) {
             Status::Ready
@@ -208,5 +228,41 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("unsupported dictation language"));
         assert!(!dir.exists());
+    }
+
+    #[tokio::test]
+    async fn native_model_errors_still_return_without_creating_files() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("speech");
+        let provider = LocalWhisper::new(&dir);
+        let error = provider.transcribe(vec![0; 1600], None).await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("speech model could not be loaded"));
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn native_loading_writes_nothing_to_stderr() {
+        if std::env::var_os("ARK_TRANSCRIBE_STDERR_CHILD").is_some() {
+            let root = tempfile::tempdir().unwrap();
+            let provider = LocalWhisper::new(root.path().join("speech"));
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            assert!(runtime
+                .block_on(provider.transcribe(vec![0; 1600], None))
+                .is_err());
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::native_loading_writes_nothing_to_stderr"])
+            .env("ARK_TRANSCRIBE_STDERR_CHILD", "1")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("whisper_") && !stderr.contains("ggml_"),
+            "{stderr}"
+        );
     }
 }

@@ -45,6 +45,86 @@ async function finished(page, send) {
 }
 
 const scenarios = {
+  async "devices-startup"(page) {
+    const result = await page.evaluate(async () => {
+      const { registerDevices } = await import('./js/devices.js');
+      const originalFetch = window.fetch, originalTauri = window.__TAURI__;
+      const originalSecure = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
+      const sections = [], ark = { setting: section => sections.push(section.id) };
+      let requests = 0;
+      try {
+        // An insecure page cannot subscribe, but Devices still lists and signs out devices,
+        // so a bad session reply keeps the section without pairing. No native bridge is used.
+        Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
+        window.fetch = async () => { requests++; throw Error('Unexpected native session request'); };
+        window.__TAURI__ = { core: {} };
+        await registerDevices(ark);
+        const native = { requests, sections: sections.splice(0) };
+        delete window.__TAURI__;
+        window.fetch = async () => new Response('<!doctype html>', { status: 200, headers: { 'content-type': 'text/html' } });
+        let malformedError = null;
+        try { await registerDevices(ark); } catch (error) { malformedError = error.message; }
+        const malformed = { error: malformedError, sections: sections.splice(0) };
+        window.fetch = async () => { throw Error('Offline'); };
+        let networkError = null;
+        try { await registerDevices(ark); } catch (error) { networkError = error.message; }
+        const network = { error: networkError, sections: sections.splice(0) };
+        window.fetch = async () => new Response(JSON.stringify({ pairing: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+        await registerDevices(ark);
+        return { native, malformed, network, pairing: sections.splice(0) };
+      } finally {
+        window.fetch = originalFetch;
+        if (originalTauri === undefined) delete window.__TAURI__; else window.__TAURI__ = originalTauri;
+        if (originalSecure) Object.defineProperty(window, 'isSecureContext', originalSecure); else delete window.isSecureContext;
+      }
+    });
+    assert.deepEqual(result, { native: { requests: 0, sections: [] }, malformed: { error: null, sections: ['devices'] },
+      network: { error: null, sections: ['devices'] }, pairing: ['devices'] });
+  },
+  async "draft-isolation"(page) {
+    const input = page.locator("#input");
+    const a = await page.evaluate(() => window.ark.summary().session.id);
+    const first = "Earlier draft 👋 reunión.";
+    const second = "Separate draft 🐈.";
+    const open = async (id) => {
+      await page.evaluate(id => window.ark.openSession(id), id);
+      await page.evaluate(id => window.ark.shown(id), id);
+    };
+    await input.fill(first);
+    await page.evaluate(() => window.ark.newSession());
+    await page.waitForFunction(a => window.ark.summary().session.id !== a, a);
+    const b = await page.evaluate(() => window.ark.summary().session.id);
+    await page.evaluate(id => window.ark.shown(id), b);
+    assert.equal(await input.inputValue(), "", "a new chat starts with its own empty draft");
+    await input.fill(second);
+    await open(a);
+    assert.equal(await input.inputValue(), first);
+    await open(b);
+    assert.equal(await input.inputValue(), second);
+    await input.fill("");
+    await open(a);
+    await open(b);
+    assert.equal(await input.inputValue(), "", "an intentionally cleared draft stays empty");
+    await input.fill(second);
+    await input.evaluate(el => { el.focus(); el.setSelectionRange(2, 2); });
+    await page.evaluate(() => window.ark.call("rename_session", { title: "Draft B" }));
+    await page.waitForFunction(() => window.ark.summary().session.title === "Draft B");
+    assert.equal(await input.inputValue(), second, "same-chat summaries preserve text");
+    assert.equal(await input.evaluate(el => el.selectionStart), 2, "same-chat summaries preserve selection");
+    await page.locator("#chat-split").click();
+    const secondary = page.locator(".secondary textarea");
+    await secondary.waitFor();
+    const promoted = "Latest split draft 👋.";
+    await secondary.fill(promoted);
+    await input.click();
+    await page.locator(`.chat-tab-item[data-session="${b}"] .chat-tab-close`).click();
+    await page.waitForFunction(a => window.ark.summary().session.id === a, a);
+    await page.evaluate(id => window.ark.shown(id), a);
+    assert.equal(await input.inputValue(), promoted, "promotion restores the secondary's latest draft");
+    assert.equal(await page.locator(".secondary").count(), 0);
+    assert.equal((await page.evaluate(() => window.ark.call("transcript"))).length, 0);
+    await shot(page, "draft-isolation");
+  },
   async "file-viewer-consumer"(page) {
     await page.evaluate(() => window.ark.openFile('sites.geojson'));
     const frame = page.frameLocator('iframe[title="Map"]');

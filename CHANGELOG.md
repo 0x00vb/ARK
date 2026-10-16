@@ -19,11 +19,13 @@ What changed for people building on ARK, per release. Not a commit log.
   and draw it ([ADR 0071](docs/adr/0071-advanced-files-use-one-viewer-seam.md)).
 - `api.confirm(label)` for file viewers: one local opening choice beside Cancel, no saved grant.
 - `ArkUi::wasm_worker_asset(path, bytes)`: over HTTP (`--serve`), only that exact worker entry may
-  compile WebAssembly, with `connect-src 'none'`. Other assets keep their
-  policy and JavaScript eval stays forbidden. A native window keeps the app's own CSP.
+  compile WebAssembly, with `connect-src 'none'`. Other assets keep their policy and JavaScript
+  eval stays forbidden. A native window keeps the app's own CSP.
 
 ### Changed
 
+- While a file view has nothing to show yet, its opening state, choice or error sits in the
+  middle of the pane instead of at the bottom edge.
 - The default agent instructions reserve state updates for ongoing or later work, avoiding
   a separate bookkeeping step just to repeat a completed result.
 - Test builds use an unoptimized Cargo profile for faster feedback. Development and release

@@ -8,6 +8,8 @@ export function extensionFileView(el, file, ctx, viewer) {
   const scene = h('div.fv-scene');
   const state = h('div.fv-opening', { role: 'status', 'aria-live': 'polite', hidden: true });
   el.append(scene, state);
+  // With no view yet the state is the pane's only content, so it sits in the middle.
+  const show = () => { state.classList.toggle('fv-center', !controller); state.hidden = false; };
 
   const close = p => p?.id && ark.call('file_snapshot_cancel', { path: file.path, request: p.id }).catch(() => {});
   const cancel = () => {
@@ -15,7 +17,7 @@ export function extensionFileView(el, file, ctx, viewer) {
     if (pending) { pending.abort.abort(); close(pending); }
     pending = null;
     clear(state).append(h('span', 'Opening cancelled'), h('button', { type: 'button', onclick: open }, 'Retry'));
-    state.hidden = false;
+    show();
   };
 
   async function open() {
@@ -27,7 +29,7 @@ export function extensionFileView(el, file, ctx, viewer) {
     const title = h('span', controller ? 'File changed, loading the new version' : 'Opening');
     const progress = h('progress');
     clear(state).append(title, progress, h('button', { type: 'button', onclick: cancel }, 'Cancel'));
-    const timer = setTimeout(() => { if (current()) state.hidden = false; }, 1000);
+    const timer = setTimeout(() => { if (current()) show(); }, 1000);
     const next = h('div.fv-scene');
     next.style.cssText = 'position:absolute;inset:0;visibility:hidden';
     scene.append(next);
@@ -65,8 +67,9 @@ export function extensionFileView(el, file, ctx, viewer) {
               clear(state).append(title, progress, h('button', { type: 'button', onclick: cancel }, 'Cancel'));
               resolve();
             } }, label);
+            allow.className = 'primary';
             clear(state).append(allow, h('button', { type: 'button', onclick: cancel }, 'Cancel'));
-            state.hidden = false; p.abort.signal.addEventListener('abort', abort, { once: true });
+            show(); p.abort.signal.addEventListener('abort', abort, { once: true });
           });
         },
         async read(offset) {
@@ -113,7 +116,7 @@ export function extensionFileView(el, file, ctx, viewer) {
       if (current()) {
         clear(state).append(h('span', String(error.message || 'This file could not be shown').slice(0, 240)),
           h('button', { type: 'button', onclick: open }, 'Retry'));
-        state.hidden = false;
+        show();
       }
     } finally {
       if (controller !== replacement) next.remove();

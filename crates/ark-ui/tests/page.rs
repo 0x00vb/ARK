@@ -278,9 +278,10 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     }
     if scenario == "advanced-files" {
         // The same worker as a registered WASM worker and as an ordinary asset.
-        const PROBE: &[u8] = br#"let compiled = false, fetched = false;
-try { await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])); compiled = true; } catch {}
-try { await fetch('/ext/plain-probe.js'); fetched = true; } catch {}
+        const PROBE: &[u8] = br#"// Each result is true or the name of the error that refused it.
+const attempt = action => action().then(() => true, error => error.name);
+const compiled = await attempt(() => WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])));
+const fetched = await attempt(() => fetch('/ext/plain-probe.js'));
 postMessage({ compiled, fetched });"#;
         ui = ui
             .wasm_worker_asset("wasm-probe.js", PROBE)

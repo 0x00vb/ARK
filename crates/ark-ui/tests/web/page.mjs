@@ -178,7 +178,10 @@ const scenarios = {
       });
       return { wasm: await run('/ext/wasm-probe.js'), plain: await run('/ext/plain-probe.js') };
     });
-    assert.deepEqual(probe, { wasm: { compiled: true, fetched: false }, plain: { compiled: false, fetched: true } });
+    assert.equal(probe.wasm.compiled, true);
+    assert.equal(probe.plain.fetched, true);
+    assert.equal(typeof probe.wasm.fetched, 'string', 'the registered worker cannot fetch');
+    assert.equal(typeof probe.plain.compiled, 'string', 'an ordinary asset worker cannot compile WASM');
     await page.evaluate(() => {
       window.__viewerCalls = 0;
       window.__viewerReads = 0;

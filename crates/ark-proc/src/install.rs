@@ -103,6 +103,14 @@ impl Installs {
             installed,
         })
     }
+
+    /// What installing the program `command` runs would do, when ARK installs that program.
+    /// A path (`./bin/server`, `/opt/bun/bin/bun`) is not one: ARK installs into the PATH.
+    pub async fn plan_for_command(&self, command: &str) -> Option<Plan> {
+        let program = crate::shell::program_of(command).filter(|p| !p.contains('/'))?;
+        let id = self.processes.installs().for_program(&program)?.id.clone();
+        self.plan(&id).await
+    }
 }
 
 fn home() -> PathBuf {

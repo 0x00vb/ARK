@@ -19,6 +19,8 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ArkUi::accent` sets the accent of ARK's light palette and a lighter mix of it in the dark one;
   the classic palettes and a consumer's styles keep their own accents. Text on the accent
   (primary buttons) is chosen to reach 4.5:1 in every palette.
+- A process start whose program is missing and installable asks Install first, then the start
+  once ([ADR 0041](docs/adr/0041-project-processes-asked-seen-and-stopped.md)).
 
 ### Fixed
 

@@ -13,7 +13,7 @@ pub use docx::Docx;
 pub use geojson::GeoJson;
 pub use image::Image;
 pub use pdf::Pdf;
-pub(crate) use text::rewrite;
+pub(crate) use text::{rewrite, Charset};
 pub use text::{Markdown, Text};
 pub use xlsx::Xlsx;
 

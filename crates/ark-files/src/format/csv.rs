@@ -2,6 +2,7 @@
 //! tab); numbers become numbers so formulas over them work, and the text of every other cell
 //! is kept as it was.
 
+use crate::format::Charset;
 use crate::model::{apply_sheet, plain_number, Cell, Content, Edit, Kind, Sheet, Value, Workbook};
 use crate::{Error, Format};
 
@@ -18,7 +19,7 @@ impl Format for Csv {
         Kind::Sheet
     }
     fn read(&self, bytes: &[u8]) -> Result<Content, Error> {
-        let text = decode(bytes);
+        let (text, _) = Charset::decode(bytes);
         Ok(Content::Sheet(Workbook {
             sheets: vec![parse_upto(&text, delimiter(&text), Some(crate::READ_CELLS))],
             ..Workbook::default()
@@ -35,7 +36,7 @@ impl Format for Csv {
                 "a CSV file has one sheet; write the workbook as .xlsx to have several".into(),
             ));
         }
-        let text = decode(bytes);
+        let (text, charset) = Charset::decode(bytes);
         let d = delimiter(&text);
         let mut book = Workbook {
             sheets: vec![parse(&text, d)],
@@ -43,7 +44,7 @@ impl Format for Csv {
         };
         apply_sheet(&mut book, edits)?;
         let crlf = text.contains("\r\n");
-        Ok(write(&book.sheets[0], d, crlf).into_bytes())
+        Ok(charset.encode(&write(&book.sheets[0], d, crlf)))
     }
     fn create(&self, content: &Content) -> Result<Vec<u8>, Error> {
         match content {
@@ -58,11 +59,6 @@ impl Format for Csv {
             _ => Err(Error::Input("a CSV file takes rows".into())),
         }
     }
-}
-
-fn decode(bytes: &[u8]) -> String {
-    let b = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
-    String::from_utf8_lossy(b).into_owned()
 }
 
 /// The delimiter that splits the first lines most evenly.
@@ -294,5 +290,38 @@ mod tests {
                 &Edit::parse_all(&json!([{"add_sheet": "X"}])).unwrap()
             )
             .is_err());
+    }
+
+    fn cell_edit(cell: &str, value: &str) -> Vec<Edit> {
+        Edit::parse_all(&json!([{ "cell": cell, "value": value }])).unwrap()
+    }
+
+    /// An export from Excel in Western Windows: Windows-1252 bytes, `;` and CRLF.
+    #[test]
+    fn a_windows_1252_csv_keeps_its_accents_when_edited() {
+        let src = b"nombre;ciudad\r\nJos\xE9;C\xF3rdoba\r\n";
+        let Content::Sheet(b) = Csv.read(src).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            b.sheets[0].get(1, 1).unwrap().value,
+            Value::Text("C\u{f3}rdoba".into())
+        );
+        let out = Csv.edit(src, &cell_edit("A3", "Mu\u{f1}oz")).unwrap();
+        assert_eq!(out, b"nombre;ciudad\r\nJos\xE9;C\xF3rdoba\r\nMu\xF1oz;\r\n");
+    }
+
+    #[test]
+    fn a_csv_byte_order_mark_is_kept_when_edited() {
+        let src = b"\xEF\xBB\xBFa,b\n1,2\n";
+        let out = Csv.edit(src, &cell_edit("B2", "3")).unwrap();
+        assert_eq!(out, b"\xEF\xBB\xBFa,b\n1,3\n");
+        let Content::Sheet(b) = Csv.read(src).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            b.sheets[0].get(0, 0).unwrap().value,
+            Value::Text("a".into())
+        );
     }
 }

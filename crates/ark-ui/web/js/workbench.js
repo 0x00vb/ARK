@@ -711,7 +711,7 @@ function size(n) {
 export const BUILTINS = [
   { id: "terminal", title: "Terminal", icon: "terminal", presents: ["terminal"], projectScoped: true, wide: true, fill: true, keys: "⌃`", key: (e) => e.ctrlKey && !e.metaKey && e.key === "`", render: terminal },
   { id: "browser", title: "Browser", icon: "globe", presents: ["browser"], closesWithProject: true, wide: true, fill: true, keys: "⌘T", key: (e) => mod(e) && !e.shiftKey && e.key.toLowerCase() === "t", render: browser },
-  { id: "files", title: "Files", icon: "folder", presents: ["file", "folder"], wide: true, fill: true, keys: "⌘P", key: (e) => (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "p", render: files },
+  { id: "files", title: "Files", icon: "folder", presents: ["file", "folder"], closesWithProject: true, wide: true, fill: true, keys: "⌘P", key: (e) => (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "p", render: files },
 ];
 
 export function registerBuiltins(ark) {

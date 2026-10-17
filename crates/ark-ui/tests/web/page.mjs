@@ -1056,6 +1056,15 @@ async function files(page) {
   await page.keyboard.type("- South fell");
   // The agent's next read is the person's version.
   await until("report.docx", (f) => f.blocks.map((b) => `${b.kind}:${b.text}`).join("|") === "heading:Sales|paragraph:North led.|bullet:South fell|bullet:Check the south");
+
+  // The Files tab belongs to the project it opened in: moving to another project closes it.
+  await page.evaluate(() => window.ark.openPanel("files"));
+  const files = page.locator(".pane-tab", { hasText: /^Files/ });
+  await files.waitFor();
+  const first = await page.evaluate(() => window.ark.summary().project.id);
+  await page.evaluate(() => window.ark.call("add_project", { name: "Other project" }));
+  await page.waitForFunction((first) => window.ark.summary().project.id !== first, first);
+  await files.waitFor({ state: "detached" });
 }
 scenarios.files = files;
 

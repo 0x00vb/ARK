@@ -137,7 +137,7 @@ impl std::fmt::Display for Refused {
         match self {
             Refused::Missing { program, failed: Some(why), .. } => write!(
                 f,
-                "`{program}` is not installed on this computer. ARK tried to install it and it failed: {why} Do not ask to install it again. Tell the person what failed and what is missing."
+                "`{program}` is not installed on this computer. ARK tried to install it and it failed: {why} Do not retry it on your own: tell the person what failed and what is missing. Call acquire_capability again only if the person says the cause is fixed."
             ),
             Refused::Missing { program, install: Some(id), .. } => write!(
                 f,

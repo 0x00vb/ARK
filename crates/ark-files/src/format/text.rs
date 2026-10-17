@@ -61,6 +61,14 @@ impl Charset {
         }
         match std::str::from_utf8(bytes) {
             Ok(t) => (t.to_string(), Charset::Utf8),
+            Err(_)
+                if bytes
+                    .iter()
+                    .any(|b| matches!(b, 0x81 | 0x8D | 0x8F | 0x90 | 0x9D)) =>
+            {
+                // Bytes Windows-1252 leaves undefined: some other code page. Not guessed.
+                (String::from_utf8_lossy(bytes).into_owned(), Charset::Utf8)
+            }
             Err(_) => {
                 let text = bytes
                     .iter()
@@ -243,6 +251,14 @@ mod tests {
         assert_eq!(t, "caf\u{e9} \u{20ac} \u{2013} se\u{f1}or\n");
         let out = Text.edit(bytes, &[replace("caf", "bar")]).unwrap();
         assert_eq!(out, b"bar\xE9 \x80 \x96 se\xF1or\r\n");
+    }
+
+    #[test]
+    fn bytes_windows_1252_leaves_undefined_are_not_taken_for_it() {
+        let Content::Text(t) = Text.read(b"a\x81b").unwrap() else {
+            panic!()
+        };
+        assert_eq!(t, "a\u{FFFD}b");
     }
 
     #[test]

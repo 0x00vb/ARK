@@ -24,6 +24,13 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Fixed
 
+- A failed install of a program a process needs keeps its reason (exit code, end of its output)
+  and a later start says it instead of asking to install again.
+- The Files tab closes with its project, as the Browser tab does.
+- A project panel's focus (Terminal, Changes) reaches the chat the window shows.
+- The Plugins page keeps a gutter from the sidebar; its Connect buttons and search box fit.
+- A text or CSV file saved in Windows-1252 keeps its accents when ARK edits it, and a CSV keeps
+  its UTF-8 byte order mark.
 - Plugins lists the Computer again with Turn on and Turn off ([ADR 0045](docs/adr/0045-a-capability-the-person-turns-on-mid-task.md)).
 - At 760 px and below, what opens in the side pane shows (it was 0 wide) and closing it brings the
   chat back.

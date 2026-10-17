@@ -179,6 +179,8 @@ impl AcquisitionProvider for Installs {
                 "ARK has no way to install {label} on this computer (it needs Homebrew or curl). Tell the person what is missing."
             ));
         };
+        // A new attempt the person allowed replaces what the last one left.
+        self.processes.clear_install_failure(&plan.tool.id);
         let start = Start {
             command,
             ..Start::default()
@@ -193,8 +195,8 @@ impl AcquisitionProvider for Installs {
             Some(now) if now.installed => {
                 self.processes.clear_install_failure(&now.tool.id);
                 AcquisitionResult::changed(format!(
-                "{label} is installed. Start the process again."
-            ))
+                    "{label} is installed. Start the process again."
+                ))
             }
             _ => {
                 let how = match ended {

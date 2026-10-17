@@ -514,7 +514,13 @@ pub fn write(root: &Path, rel: &str, content: &Content, base: Option<&str>) -> R
         // Rewriting a text file keeps how it is stored (CRLF lines, UTF-16).
         (Content::Text(t), Some(old)) if text_file => format::rewrite(old, t),
         _ => match format_for(rel) {
-            Some(f) => f.create(content)?,
+            Some(f) => {
+                let bytes = f.create(content)?;
+                match &old {
+                    Some(old) if f.name() == "csv" => format::keep_charset(old, bytes),
+                    _ => bytes,
+                }
+            }
             None => format::Text.create(content)?,
         },
     };
@@ -611,6 +617,19 @@ mod tests {
             .set_len(2 * 1024 * 1024 + 1)
             .unwrap();
         assert!(source(dir.path(), "building.ifc").is_err());
+    }
+
+    /// An agent that writes the whole sheet over an Excel CSV keeps its Windows-1252 bytes.
+    #[test]
+    fn rewriting_a_windows_1252_csv_as_a_sheet_keeps_its_encoding() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.csv"), b"name,city\nJos\xE9,C\xF3rdoba\n").unwrap();
+        let book = open(dir.path(), "a.csv").unwrap().content;
+        write(dir.path(), "a.csv", &book, None).unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("a.csv")).unwrap(),
+            b"name,city\nJos\xE9,C\xF3rdoba\n"
+        );
     }
 
     /// The page's editor saves the whole text: a CRLF file stays CRLF.

@@ -197,7 +197,9 @@ async fn a_missing_program_is_not_run_and_names_its_install() {
     )
     .unwrap();
     match p.start(dir.path(), &start("npm run dev")).await {
-        Err(Refused::Missing { program, install, .. }) => {
+        Err(Refused::Missing {
+            program, install, ..
+        }) => {
             assert_eq!(program, "npm");
             assert_eq!(install.as_deref(), Some("node"));
         }
@@ -223,11 +225,23 @@ async fn a_failed_install_is_reported_instead_of_asked_again() {
         Shell::fixed("/bin/sh", env_with("/usr/bin:/bin")),
     )
     .unwrap();
-    p.record_install_failure("node", "it ended with exit 7. The end of its output:\nno disk".into());
-    let e = p.start(dir.path(), &start("npm run dev")).await.unwrap_err();
+    p.record_install_failure(
+        "node",
+        "it ended with exit 7. The end of its output:\nno disk".into(),
+    );
+    let e = p
+        .start(dir.path(), &start("npm run dev"))
+        .await
+        .unwrap_err();
     let text = e.to_string();
-    assert!(text.contains("exit 7") && text.contains("no disk"), "{text}");
-    assert!(!text.contains("Call acquire_capability"), "{text}");
+    assert!(
+        text.contains("exit 7") && text.contains("no disk"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("Call acquire_capability with need"),
+        "{text}"
+    );
 }
 
 #[tokio::test]

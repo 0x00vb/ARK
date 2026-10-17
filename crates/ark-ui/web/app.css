@@ -20,7 +20,7 @@
   --hover: rgba(0, 0, 0, 0.042);
   --active: rgba(0, 0, 0, 0.07);
   --hair: rgba(0, 0, 0, 0.075);
-  --accent: #2563eb;
+  --accent: var(--app-accent, #2563eb);
   --accent-fg: #ffffff;
   --ok: #2f855a;
   --warn: #b7791f;
@@ -80,7 +80,7 @@
   --hover: rgba(255, 255, 255, 0.05);
   --active: rgba(255, 255, 255, 0.085);
   --hair: rgba(255, 255, 255, 0.08);
-  --accent: #5b8def;
+  --accent: var(--app-accent-dark, #5b8def);
   --ok: #5fb383;
   --warn: #d6a24e;
   --err: #e5736f;
@@ -281,7 +281,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .btn:hover { background: var(--active); }
 .btn:active { scale: 0.96; }
 .btn.primary { background: var(--accent); color: var(--accent-fg); }
-.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, black); }
+.btn.primary:hover { background: var(--accent-hover, color-mix(in srgb, var(--accent) 88%, black)); }
 .btn.primary kbd { color: color-mix(in srgb, var(--accent-fg) 70%, transparent); }
 .btn.ghost { background: transparent; color: var(--text-2); }
 .btn.ghost:hover { background: var(--hover); }

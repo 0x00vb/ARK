@@ -245,6 +245,10 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         });
     }
     let mut ui = ArkUi::new(app);
+    if scenario == "accent" {
+        // ARK Desktop's accent.
+        ui = ui.accent("#335eb7");
+    }
     if scenario == "file-viewer-consumer" {
         let Some(root) = std::env::var_os("ARK_UI_FILE_VIEWER_FIXTURE").map(PathBuf::from) else {
             eprintln!("skipped: ARK_UI_FILE_VIEWER_FIXTURE must name the consumer's ui folder");
@@ -1065,6 +1069,12 @@ async fn a_narrow_window_keeps_the_sidebar_reachable() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_narrow_window_shows_what_opens_in_the_side_pane_and_comes_back() {
     drive("narrow-pane", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn primary_buttons_read_in_light_and_dark_with_any_accent() {
+    let script = vec![call("notes.save", json!({})), say("Saved.", false)];
+    drive("accent", script, Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

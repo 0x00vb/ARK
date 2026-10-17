@@ -43,6 +43,37 @@
     }
   };
 
+  // Text on the accent (primary buttons) reads in every palette, whatever accent the app set:
+  // the palette's own `--accent-fg` when it reaches 4.5:1 on the accent, else white, ink or
+  // black, the first that does (black always does when white does not). Hover moves the accent
+  // away from the text. Runs after a palette or accent change, once the styles are in.
+  const rgb = (color) => {
+    const probe = document.createElement("i");
+    probe.style.color = color;
+    root.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return color.trim() && value.startsWith("rgb") ? value.match(/[\d.]+/g).slice(0, 3).map(Number) : null;
+  };
+  const luminance = (c) => c.map((v) => v / 255).map((v) => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const contrast = (a, b) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  function fitAccent() {
+    root.style.removeProperty("--accent-fg");
+    root.style.removeProperty("--accent-hover");
+    const css = getComputedStyle(root);
+    const accent = rgb(css.getPropertyValue("--accent"));
+    if (!accent) return;
+    const own = css.getPropertyValue("--accent-fg");
+    const fg = [own, "#ffffff", "#111214", "#000000"].find((c) => rgb(c) && contrast(accent, rgb(c)) >= 4.5) || "#000000";
+    if (fg !== own) root.style.setProperty("--accent-fg", fg);
+    const away = luminance(rgb(fg)) < 0.5 ? "white" : "black";
+    root.style.setProperty("--accent-hover", `color-mix(in srgb, var(--accent) 88%, ${away})`);
+  }
+
   function apply(force = false) {
     const selectedMode = mode();
     const selectedScheme = scheme();
@@ -53,6 +84,7 @@
     root.dataset.themeChoice = selectedMode;
     root.dataset.material = materialChoice();
     root.dataset.reducedTransparency = reducedTransparency.matches ? "true" : "false";
+    fitAccent();
     if (!changed && !force) return;
     dispatchEvent(new CustomEvent("ark:theme", { detail: theme }));
   }
@@ -60,6 +92,16 @@
   dark.addEventListener("change", apply);
   reducedTransparency.addEventListener("change", apply);
   window.arkTheme = {
+    /// The app's accent (`ArkUi::accent`) in ARK's own light palette, and a lighter mix of it in
+    /// ARK's dark one. The classic palettes and a consumer's own styles keep their accents.
+    accent(color) {
+      const c = rgb(color);
+      if (!c) return;
+      root.style.setProperty("--app-accent", `rgb(${c.join(", ")})`);
+      root.style.setProperty("--app-accent-dark", `rgb(${c.map((v) => Math.round(v + (255 - v) * 0.3)).join(", ")})`);
+      fitAccent();
+    },
+    fitAccent,
     choice,
     mode,
     palette,

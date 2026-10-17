@@ -3016,6 +3016,58 @@ scenarios.computers = async (page) => {
   await shot(page, "computers-address");
 };
 
+// Text on the accent reads, light and dark: with the app's accent (`ArkUi::accent`), with a
+// consumer palette that sets its own text for its own accent (ARK Desktop's dark), and with any
+// other accent an app may set.
+async function accent(page) {
+  // Text on the button, and the button on the page behind it.
+  const contrast = (selector, against = "text") => page.locator(selector).first().evaluate((el, against) => {
+    // `color-mix()` reads back as `color(srgb r g b)` with 0 to 1 channels.
+    const rgb = (c) => c.match(/[\d.]+/g).slice(0, 3).map(Number).map((v) => c.startsWith("color(") ? v * 255 : v);
+    const lum = (c) => rgb(c).map((v) => v / 255).map((v) => v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const s = getComputedStyle(el);
+    const other = against === "text" ? s.color : getComputedStyle(document.body).backgroundColor;
+    const [hi, lo] = [lum(s.backgroundColor), lum(other)].sort((a, b) => b - a);
+    return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+  }, against);
+  // Colours are read once the button's transition has ended.
+  const mode = (m) => page.evaluate((m) => window.arkTheme.setMode(m), m).then(() => page.waitForTimeout(250));
+  assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue("--app-accent")), "rgb(51, 94, 183)");
+  await page.locator("#input").fill("Save the notes");
+  await page.keyboard.press("Enter");
+  const allow = ".approval:not(.decided) .btn.primary";
+  await page.locator(allow).waitFor();
+  for (const m of ["light", "dark"]) {
+    await mode(m);
+    assert.ok(await contrast(allow) >= 4.5, `${m}: ${await contrast(allow)}`);
+    assert.ok(await contrast(allow, "page") >= 3, `${m} button on the page: ${await contrast(allow, "page")}`);
+    await shot(page, `accent-${m}`);
+  }
+  // ARK Desktop's dark palette: its own dark text for its own lighter accent.
+  await page.addStyleTag({ content: ':root[data-theme="dark"] { --accent-fg: #0e0f12; }' });
+  await mode("light");
+  await mode("dark");
+  assert.ok(await contrast(allow) >= 4.5, `consumer dark: ${await contrast(allow)}`);
+  await shot(page, "accent-consumer-dark");
+  for (const color of ["#ffd60a", "#1e3a8a", "#5b8def", "#787878", "rgb(16, 185, 129)"]) {
+    await page.evaluate((c) => window.arkTheme.accent(c), color);
+    await page.waitForTimeout(250);
+    for (const m of ["light", "dark"]) {
+      await mode(m);
+      assert.ok(await contrast(allow) >= 4.5, `${color} ${m}: ${await contrast(allow)}`);
+      await page.locator(allow).hover();
+      await page.waitForTimeout(200);
+      assert.ok(await contrast(allow) >= 4.5, `${color} ${m} hovered: ${await contrast(allow)}`);
+      await page.mouse.move(0, 0);
+    }
+  }
+  await mode("light");
+  await page.locator(allow).click();
+  await page.locator(".agent", { hasText: "Saved." }).waitFor();
+}
+scenarios.accent = accent;
+
 // At 760 px and below the destinations sit at the bottom and the side pane takes the whole
 // window: what opens in it shows, and closing it brings the chat back.
 async function narrowPane(page) {

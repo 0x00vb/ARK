@@ -1947,7 +1947,7 @@ async function boot(again = false) {
 function signInScreen() {
   appEl.dataset.signedOut = "true";
   fetch("/session", { cache: "no-store" }).then((r) => r.json()).then((s) => {
-    if (s?.accent) document.documentElement.style.setProperty("--accent", s.accent);
+    if (s?.accent) window.arkTheme.accent(s.accent);
   }, () => {});
   const input = h("input.pair-input", {
     type: "text", inputmode: "text", autocomplete: "one-time-code", autocapitalize: "characters",
@@ -1994,7 +1994,8 @@ async function bootOnce(again) {
   setFileKinds(hello.file_kinds, hello.kind_nouns);
   state.commands = hello.commands || [];
   composer.commands = state.commands;
-  if (state.ui.accent) document.documentElement.style.setProperty("--accent", state.ui.accent);
+  if (state.ui.accent) window.arkTheme.accent(state.ui.accent);
+  else window.arkTheme.fitAccent();
   applySummary(detachedRead?.summary || hello.summary);
   places.load();
   composer.placeholder = `Ask ${hello.summary.name} anything`;

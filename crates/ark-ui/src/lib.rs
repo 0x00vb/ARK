@@ -154,7 +154,9 @@ impl ArkUi {
         self.transcription = Some(provider);
         self
     }
-    /// The accent colour, any CSS colour.
+    /// The accent colour, any CSS colour, in ARK's light palette. ARK's dark palette uses it
+    /// mixed 30% toward white; the classic palettes and a consumer's own styles keep their own.
+    /// Text on it is chosen to read (4.5:1).
     pub fn accent(mut self, css: impl Into<String>) -> Self {
         self.info.accent = Some(css.into());
         self

@@ -151,6 +151,7 @@ impl Drop for Tree {
 }
 
 /// The most a started program, with everything it starts, may use (ADR 0075). `None`: no limit.
+/// A processor limit of 0 stops a run at once.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Limits {
     pub memory_bytes: Option<u64>,
@@ -214,7 +215,8 @@ pub fn stopped_by_cpu_limit(status: &std::process::ExitStatus) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
-        status.signal() == Some(libc::SIGXCPU)
+        // Itself, or a shell whose busy child it was (exit 128 + the signal).
+        status.signal() == Some(libc::SIGXCPU) || status.code() == Some(128 + libc::SIGXCPU)
     }
     #[cfg(not(unix))]
     {

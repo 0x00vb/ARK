@@ -215,7 +215,7 @@ async fn run_managed(
         if limits == Default::default() {
             return std::future::pending().await;
         }
-        let mut every = tokio::time::interval(std::time::Duration::from_millis(100));
+        let mut every = tokio::time::interval(std::time::Duration::from_millis(250));
         loop {
             every.tick().await;
             if let Some(stop) = group.usage().over(&limits) {

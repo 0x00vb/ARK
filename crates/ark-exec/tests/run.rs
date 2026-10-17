@@ -568,6 +568,14 @@ async fn a_run_past_its_processor_time_is_stopped_and_says_why() {
         text.starts_with("stopped: it used more than 1 s of processor time"),
         "{text}"
     );
+    // A shell's busy child: the shell reports it (exit 128 + SIGXCPU).
+    let out = run(&s.exec, &s.project, "sh -c 'while :; do :; done'; exit $?").await;
+    assert_eq!(
+        out.output["stopped"],
+        json!({ "limit": "cpu", "seconds": 1 }),
+        "{}",
+        out.output
+    );
     // Without limits the same kind of run is not stopped for them.
     let out = run(&setup(Arc::new(Sh)).exec, &s.project, "echo fine").await;
     assert_eq!(out.output["stopped"], json!(null));

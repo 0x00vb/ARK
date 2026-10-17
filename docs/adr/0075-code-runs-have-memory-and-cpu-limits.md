@@ -20,9 +20,9 @@ stopped it.
 
 | System | Memory | Processor time |
 |---|---|---|
-| macOS | the group's physical footprint (`proc_pid_rusage`), measured every 100 ms; past the limit the group is stopped | `RLIMIT_CPU` per process, set before the program runs; `SIGXCPU` is the reason |
-| Linux | the group's resident memory from `/proc`, every 100 ms | `RLIMIT_CPU`, as macOS |
-| Windows | the job's peak memory, every 100 ms | the job's user and kernel time, every 100 ms |
+| macOS | the group's physical footprint (`proc_pid_rusage`), measured every 250 ms; past the limit the group is stopped | `RLIMIT_CPU` per process, set before the program runs; `SIGXCPU` is the reason |
+| Linux | the group's resident memory from `/proc`, every 250 ms | `RLIMIT_CPU`, as macOS |
+| Windows | the job's peak memory, every 250 ms | the job's user and kernel time, every 250 ms |
 
 `subprocess::Run::stopped` is `Stop::Memory(limit)` or `Stop::Cpu(limit)`. `code.run` returns
 `stopped: {limit, bytes|seconds}`, its card and the person's line read "stopped: it used more
@@ -30,8 +30,13 @@ than 512 MB of memory" or "stopped: it used more than 60 s of processor time", a
 with the same words in parentheses.
 
 ## Consequences
-- Memory is checked, not reserved: a program can pass the limit for up to 100 ms before it is
-  stopped.
+- Memory is checked, not reserved: a program can pass the limit for up to 250 ms before it is
+  stopped. Linux counts shared pages in each process's resident memory, so it can stop early.
+  A process that leaves the group (`setsid`) is not counted.
+- The processor reason is given when the started process, or a shell's direct child, takes
+  `SIGXCPU`. A program that catches it is killed a second later, and the reason is lost.
+- Windows uses the job's peak memory and whole seconds of processor time; not yet run on a
+  Windows machine.
 - On Unix the processor limit is per process: a run that starts several busy processes can use
   more in all.
 - Only `code.run` has limits. Agent programs (ADR 0074) and `process.start` do not.

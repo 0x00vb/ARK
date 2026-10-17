@@ -15,6 +15,9 @@ MCP servers in `~/.claude.json` put back after each run). Codex and `process.sta
 contained; Linux and Windows workers not yet. Left: a signed-in prompt on Claude Code and Grok
 contained (the owner's OK), the owner accepting the ADR. Board `ae203480`.
 
+ADR 0075 (Proposed): `Exec::limits` stops a code run past its memory or processor limit and says
+which. Run on macOS; Linux and Windows not yet run on a machine. Board `15a66bdb`.
+
 ## Bounded code runs
 
 On `main` (ADR 0072): two active code runs, eight waiting, one per project, owned cleanup on

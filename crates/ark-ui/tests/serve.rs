@@ -1399,3 +1399,121 @@ async fn a_second_runtime_on_the_store_is_refused_while_clients_still_work() {
     let hello = client.hello().await.unwrap();
     assert_eq!(hello["version"], env!("CARGO_PKG_VERSION"));
 }
+
+/// HMAC-SHA256 as Meta signs webhooks, in hex.
+fn hmac_hex(key: &[u8], msg: &[u8]) -> String {
+    let mut k = [0u8; 64];
+    k[..key.len()].copy_from_slice(key);
+    let pad = |b: u8| k.iter().map(|x| x ^ b).collect::<Vec<u8>>();
+    let inner = Sha256::new()
+        .chain_update(pad(0x36))
+        .chain_update(msg)
+        .finalize();
+    let outer = Sha256::new()
+        .chain_update(pad(0x5c))
+        .chain_update(inner)
+        .finalize();
+    outer.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// ADR 0062: `/hooks/<source>/<route>` answers only a connected account's route, without an
+/// ARK token and behind a proxy's host. The challenge needs the verify token; a body is
+/// verified over its raw bytes and saved before the 200; a re-delivery is kept once.
+#[tokio::test]
+async fn a_webhook_route_answers_only_a_connected_account_and_saves_before_it_acknowledges() {
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(ark_connect::MemorySecrets::default());
+    std::fs::write(
+        dir.path().join("connections.json"),
+        json!({ "accounts": [{
+            "id": "whatsapp:waba-111/phone-222", "provider": "whatsapp",
+            "name": "+34900000000", "scopes": [], "connected_at": 0
+        }] })
+        .to_string(),
+    )
+    .unwrap();
+    let route = "0123456789abcdef0123456789abcdef";
+    ark_connect::Secrets::set(
+        secrets.as_ref(),
+        "account:whatsapp:waba-111/phone-222",
+        &json!({
+            "waba_id": "waba-111", "phone_id": "phone-222", "app_secret": "app-secret",
+            "verify_token": "verify me", "token": "t", "route": route
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let conns =
+        ark_connect::Connections::open(dir.path(), ark_connect::Catalog::builtin(), secrets);
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Arc::new(MockProvider::new("m", vec![])) as Arc<dyn ark_model::Provider>)
+        .connections_with(conns)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let store = ark.engine().store.clone();
+    let (_host, served) = ArkUi::new(App::new("Test").ark(ark))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: shop.example.com\r\n\r\n");
+    let post = |path: &str, sig: &str, body: &str| {
+        format!(
+            "POST {path} HTTP/1.1\r\nHost: shop.example.com\r\nX-Hub-Signature-256: {sig}\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+    };
+    let hook = format!("/hooks/whatsapp/{route}");
+    let ok = raw(
+        served.port,
+        get(&format!(
+            "{hook}?hub.mode=subscribe&hub.verify_token=verify+me&hub.challenge=1158201444"
+        )),
+    )
+    .await;
+    assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
+    assert!(ok.ends_with("\r\n\r\n1158201444"), "{ok}");
+    let wrong = raw(
+        served.port,
+        get(&format!(
+            "{hook}?hub.mode=subscribe&hub.verify_token=guess&hub.challenge=1"
+        )),
+    )
+    .await;
+    assert!(wrong.starts_with("HTTP/1.1 403"), "{wrong}");
+    let unknown = raw(
+        served.port,
+        get("/hooks/whatsapp/not-a-route?hub.mode=subscribe"),
+    )
+    .await;
+    assert!(unknown.starts_with("HTTP/1.1 404"), "{unknown}");
+
+    let body = json!({
+        "object": "whatsapp_business_account",
+        "entry": [{ "id": "waba-111", "changes": [{ "field": "messages", "value": {
+            "metadata": { "phone_number_id": "phone-222" },
+            "messages": [{ "from": "34600000001", "id": "wamid.IN1", "timestamp": "1791100800", "type": "text", "text": { "body": "How much?" } }]
+        } }] }]
+    })
+    .to_string();
+    let sig = format!("sha256={}", hmac_hex(b"app-secret", body.as_bytes()));
+    let log = ark_interact::ark_orchestrate::EventLog::of(&store);
+    let unsigned = raw(served.port, post(&hook, "sha256=00", &body)).await;
+    assert!(unsigned.starts_with("HTTP/1.1 401"), "{unsigned}");
+    assert_eq!(log.current_seq(), 0);
+    let saved = raw(served.port, post(&hook, &sig, &body)).await;
+    assert!(saved.starts_with("HTTP/1.1 200"), "{saved}");
+    assert_eq!(log.current_seq(), 1, "saved before the 200");
+    let again = raw(served.port, post(&hook, &sig, &body)).await;
+    assert!(again.starts_with("HTTP/1.1 200"), "{again}");
+    assert_eq!(log.current_seq(), 1, "a re-delivery is kept once");
+
+    let big = format!(
+        "POST {hook} HTTP/1.1\r\nHost: shop.example.com\r\nX-Hub-Signature-256: {sig}\r\nContent-Length: {}\r\n\r\n",
+        (1 << 20) + 1
+    );
+    let refused = raw(served.port, big).await;
+    assert!(refused.starts_with("HTTP/1.1 413"), "{refused}");
+}

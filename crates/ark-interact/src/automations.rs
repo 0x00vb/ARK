@@ -280,3 +280,19 @@ pub fn automations_report(o: &Orchestrator) -> Report {
     r.table(t)
         .note("/automations pause|resume|stop|discard <id>, or ask in words.")
 }
+
+/// Where a webhook at `/hooks/<source>/<route>` goes: the connected account's verifier and
+/// the store's event log, which saves its events before the provider is answered. `None`: no
+/// such route.
+pub fn webhook(
+    conns: &ark_sdk::prelude::ark_connect::Connections,
+    engine: &ark_sdk::prelude::ark_runtime::Engine,
+    source: &str,
+    route: &str,
+) -> Option<(
+    std::sync::Arc<dyn ark_sdk::prelude::ark_tools::events::WebhookSource>,
+    std::sync::Arc<dyn ark_sdk::prelude::ark_tools::events::EventSink>,
+)> {
+    let hook = conns.webhook(source, route)?;
+    Some((hook, ark_orchestrate::EventLog::of(&engine.store)))
+}

@@ -183,6 +183,10 @@ impl Connections {
                         }
                         (State::Ready, None)
                     }
+                    (Some(p), None) if services::by_credentials(p) => match self.account_for(c) {
+                        Some(a) => (State::Ready, Some(a.name)),
+                        None => (State::Connect, None),
+                    },
                     (Some(p), None) => {
                         (State::Unavailable(format!("unknown provider `{p}`")), None)
                     }
@@ -221,6 +225,12 @@ impl Connections {
             .provider
             .as_deref()
             .ok_or_else(|| ConnectError::NotSetUp(format!("{} needs no account", cap.label)))?;
+        if services::by_credentials(pid) {
+            return Err(ConnectError::NotSetUp(format!(
+                "{} connects with its ids and tokens, not a sign-in",
+                cap.label
+            )));
+        }
         let provider = cat
             .provider(pid)
             .ok_or_else(|| ConnectError::NotSetUp(format!("unknown provider `{pid}`")))?
@@ -367,6 +377,10 @@ impl Connections {
                 );
                 let (source, name) = match &poll {
                     Some(p) => (p.source().to_string(), p.account().to_string()),
+                    None if services::pushes(service) => (
+                        services::whatsapp::SOURCE.to_string(),
+                        services::whatsapp::event_account(&account.id)?.to_string(),
+                    ),
                     None => return None,
                 };
                 let actions = self
@@ -382,6 +396,43 @@ impl Connections {
                 })
             })
             .collect()
+    }
+
+    /// The webhook a connected account receives at `/hooks/<source>/<route>`. `None`: no such
+    /// route, which the caller answers like any unknown path.
+    pub fn webhook(
+        &self,
+        source: &str,
+        route: &str,
+    ) -> Option<Arc<dyn ark_tools::events::WebhookSource>> {
+        match source {
+            services::whatsapp::SOURCE => services::whatsapp::hook(self, route)
+                .map(|h| Arc::new(h) as Arc<dyn ark_tools::events::WebhookSource>),
+            _ => None,
+        }
+    }
+
+    /// Connect a WhatsApp Business number after Graph confirms its setup, or update its
+    /// secrets. The result says the webhook path to give Meta.
+    pub async fn connect_whatsapp(
+        &self,
+        setup: services::whatsapp::Setup,
+    ) -> Result<(Account, services::whatsapp::Hookup), ConnectError> {
+        services::whatsapp::connect(self, setup).await
+    }
+
+    pub(crate) fn secrets(&self) -> &Arc<dyn Secrets> {
+        &self.inner.secrets
+    }
+
+    /// Save an account, replacing one with the same id.
+    pub(crate) fn add_account(&self, account: Account) -> Result<(), ConnectError> {
+        {
+            let mut all = self.inner.accounts.write().unwrap();
+            all.retain(|a| a.id != account.id);
+            all.push(account);
+        }
+        self.save()
     }
 
     /// Moves each time an account is connected or disconnected, so whoever keeps its events
@@ -484,6 +535,6 @@ impl ToolSource for Connections {
     }
 }
 
-fn secret_key(account: &str) -> String {
+pub(crate) fn secret_key(account: &str) -> String {
     format!("account:{account}")
 }

@@ -1651,6 +1651,19 @@ impl Host {
         ark_interact::orchestration::control(orchestrator, control).await
     }
 
+    /// The verifier and event log of a webhook route of a connected account (ADR 0062).
+    pub(crate) fn webhook(
+        &self,
+        source: &str,
+        route: &str,
+    ) -> Option<(
+        Arc<dyn ark_interact::ark_sdk::prelude::ark_tools::events::WebhookSource>,
+        Arc<dyn ark_interact::ark_sdk::prelude::ark_tools::events::EventSink>,
+    )> {
+        let conns = self.caps.connections.as_ref()?;
+        ark_interact::automations::webhook(conns, &self.engine, source, route)
+    }
+
     /// The app's saved API keys, when it keeps connections.
     fn api_keys(&self) -> Option<ark_interact::ark_sdk::prelude::ark_connect::ApiKeys> {
         self.caps.connections.as_ref().map(|c| c.api_keys().clone())

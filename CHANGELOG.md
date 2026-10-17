@@ -43,7 +43,21 @@ What changed for people building on ARK, per release. Not a commit log.
   first, the cursor saved after its events, gaps recovered by `Orchestrator::recover_feed`
   (check since then, or start from now and keep the gap). `EventSource::reconcile` (default:
   cannot) and `Connections::event_sources`. Feed states show in `/automations` and the pane;
-  resource ops `automation_reconcile`, `automation_from_now`.
+  resource ops `automation_reconcile`, `automation_from_now`. Accounts connected or
+  disconnected while the app runs are followed (`Connections::changes`, `EventLog::sync`,
+  `EventLog::follow`): a disconnected account's feed shows Needs connection and resumes from
+  its cursor when connected again. Rate limits in a row back off like other failures, a
+  reconcile that cannot list everything keeps the gap, and spam or draft mail never makes its
+  sender someone to reply to.
+- Event automations, WhatsApp Business (`docs/AUTOMATIONS.md` A3): a `whatsapp` capability on
+  Meta's Business Platform Cloud API. `Connections::connect_whatsapp` saves a number only after
+  Graph confirms the token, the phone number in the WABA and the WABA's app subscription, and
+  keeps its webhook path when secrets rotate. `ark-ui` answers `GET/POST /hooks/<source>/<route>`
+  only for a connected account: the verify token challenge, at most 1 MiB in 5 seconds, the
+  signature over the raw body before parsing, the WABA and phone bound, events saved before
+  the 200 (503 when the store is full). `whatsapp.reply` sends a text only inside the 24-hour
+  window, checked at each send, and a send without an answer is unconfirmed.
+  `Connections::event_sources` lists pushed accounts with no poller (`EventFeed::poll`).
 
 ### Changed
 

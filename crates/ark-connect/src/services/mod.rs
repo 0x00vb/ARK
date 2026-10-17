@@ -10,6 +10,7 @@ use crate::Connections;
 
 pub mod gmail;
 pub mod google;
+pub mod whatsapp;
 
 /// The adapter for `service`, acting as `account`. `None`: no such service.
 pub fn adapter(service: &str, conns: Connections, account: String) -> Option<Arc<dyn Adapter>> {
@@ -22,8 +23,19 @@ pub fn adapter(service: &str, conns: Connections, account: String) -> Option<Arc
         "google.mail" => Some(Arc::new(google::Mail(ctx))),
         "google.calendar" => Some(Arc::new(google::Calendar(ctx))),
         "google.inbox" => Some(Arc::new(gmail::Inbox(ctx))),
+        whatsapp::SERVICE => Some(Arc::new(whatsapp::Reply(ctx))),
         _ => None,
     }
+}
+
+/// The service delivers its events to a webhook ([`crate::Connections::webhook`]).
+pub fn pushes(service: &str) -> bool {
+    service == whatsapp::SERVICE
+}
+
+/// The provider connects with ids and tokens the person enters, not a sign-in.
+pub fn by_credentials(provider: &str) -> bool {
+    provider == whatsapp::PROVIDER
 }
 
 /// The poller of `service`'s events for `account` (`address`: who it is, as events name the
@@ -48,7 +60,9 @@ pub fn feed(
 /// The evidence card of a service's result (the runtime's distiller shape). `None` for an
 /// action no service here offers.
 pub fn distill(action: &str, out: &serde_json::Value) -> Option<(String, Vec<String>)> {
-    google::distill(action, out).or_else(|| gmail::distill(action, out))
+    google::distill(action, out)
+        .or_else(|| gmail::distill(action, out))
+        .or_else(|| whatsapp::distill(action, out))
 }
 
 /// What a service needs to call its API as an account.

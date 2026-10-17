@@ -258,7 +258,17 @@ struct Request {
     query: String,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
+    /// A webhook body over [`HOOK_BODY_MAX`] or slower than [`HOOK_READ_TIMEOUT`]: the status
+    /// to answer with; the body was not read.
+    refused: Option<&'static str>,
 }
+
+/// A webhook body, at most (`ark_tools::events::Limits::raw_body`).
+const HOOK_BODY_MAX: usize = 1 << 20;
+/// How long a webhook may take to send its body.
+const HOOK_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// Webhook answers are plain text for a provider, never a page.
+const HOOK_HEADERS: &str = "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\nX-Content-Type-Options: nosniff\r\n";
 
 impl Request {
     /// A native client's credential. Native protocol routes accept only an Authorization header,
@@ -343,22 +353,41 @@ async fn read_request<S: AsyncRead + Unpin>(sock: &mut S) -> anyhow::Result<Requ
     if len > 32 * 1024 * 1024 {
         anyhow::bail!("body too large");
     }
-    let mut body = buf[head_end + 4..].to_vec();
-    while body.len() < len {
-        let n = sock.read(&mut chunk).await?;
-        if n == 0 {
-            break;
-        }
-        body.extend_from_slice(&chunk[..n]);
-    }
-    body.truncate(len);
-    Ok(Request {
+    let hook = path.starts_with("/hooks/");
+    let mut request = Request {
         method,
         path,
         query,
         headers,
-        body,
-    })
+        body: Vec::new(),
+        refused: None,
+    };
+    if hook && len > HOOK_BODY_MAX {
+        request.refused = Some("413 Payload Too Large");
+        return Ok(request);
+    }
+    let mut body = buf[head_end + 4..].to_vec();
+    let read = async {
+        while body.len() < len {
+            let n = sock.read(&mut chunk).await?;
+            if n == 0 {
+                break;
+            }
+            body.extend_from_slice(&chunk[..n]);
+        }
+        anyhow::Ok(())
+    };
+    if hook {
+        if tokio::time::timeout(HOOK_READ_TIMEOUT, read).await.is_err() {
+            request.refused = Some("408 Request Timeout");
+            return Ok(request);
+        }
+    } else {
+        read.await?;
+    }
+    body.truncate(len);
+    request.body = body;
+    Ok(request)
 }
 
 async fn respond<S: AsyncWrite + Unpin>(
@@ -441,6 +470,97 @@ impl Cookie {
     }
 }
 
+/// `GET/POST /hooks/<source>/<route>` (ADR 0062): only a route of a connected account answers.
+/// GET is the provider's subscription check. POST verifies the raw body before parsing it,
+/// saves every event, then answers 200; a full or failing store answers 503 so the provider
+/// sends it again.
+async fn webhook<S: AsyncWrite + Unpin>(
+    sock: &mut S,
+    host: &Host,
+    req: &Request,
+    rest: &str,
+) -> anyhow::Result<()> {
+    use ark_interact::ark_sdk::prelude::ark_tools::events::HookError;
+    let found = rest
+        .split_once('/')
+        .filter(|(_, route)| !route.is_empty() && !route.contains('/'))
+        .and_then(|(source, route)| host.webhook(source, route));
+    let (status, body) = match (found, req.refused) {
+        (None, _) => ("404 Not Found", "not found".to_string()),
+        (Some(_), Some(status)) => (status, "refused".to_string()),
+        (Some((hook, sink)), None) => match req.method.as_str() {
+            "GET" => {
+                let query = req
+                    .query
+                    .split('&')
+                    .filter_map(|kv| kv.split_once('='))
+                    .map(|(k, v)| (form_decode(k), form_decode(v)))
+                    .collect();
+                match hook.challenge(&query) {
+                    Ok(answer) => ("200 OK", answer),
+                    Err(e) => ("403 Forbidden", e.to_string()),
+                }
+            }
+            "POST" => {
+                let headers = req
+                    .headers
+                    .iter()
+                    .map(|(k, v)| (k.to_ascii_lowercase(), v.clone()))
+                    .collect();
+                match hook.decode(&headers, &req.body) {
+                    Ok(events) => match sink.ingest(events) {
+                        Ok(_) => ("200 OK", "ok".to_string()),
+                        Err(e) if e.retryable() => {
+                            tracing::warn!(source = hook.source(), "webhook not saved: {e}");
+                            ("503 Service Unavailable", "try again".to_string())
+                        }
+                        Err(e) => ("400 Bad Request", e.to_string()),
+                    },
+                    Err(e @ HookError::Unverified(_)) => ("401 Unauthorized", e.to_string()),
+                    Err(e @ HookError::Unbound(_)) => ("403 Forbidden", e.to_string()),
+                    Err(e @ HookError::Malformed(_)) => ("400 Bad Request", e.to_string()),
+                }
+            }
+            _ => ("405 Method Not Allowed", "GET or POST".to_string()),
+        },
+    };
+    respond_with_policy(
+        sock,
+        status,
+        "text/plain",
+        "",
+        body.as_bytes(),
+        HOOK_HEADERS,
+    )
+    .await
+}
+
+/// A query value as a form sends it: `+` is a space, `%XX` a byte.
+fn form_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => out.push(b' '),
+            b'%' => match s
+                .get(i + 1..i + 3)
+                .filter(|h| h.bytes().all(|c| c.is_ascii_hexdigit()))
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
+            {
+                Some(v) => {
+                    out.push(v);
+                    i += 2;
+                }
+                None => out.push(b'%'),
+            },
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
     mut sock: S,
     host: Arc<Host>,
@@ -450,6 +570,10 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
     entry: &Option<String>,
 ) -> anyhow::Result<()> {
     let req = tokio::time::timeout(READ_TIMEOUT, read_request(&mut sock)).await??;
+    // A provider's webhook carries no ARK token: its signature is checked instead.
+    if let Some(rest) = req.path.strip_prefix("/hooks/") {
+        return webhook(&mut sock, &host, &req, rest).await;
+    }
     let token_authed = match check {
         Check::OneTime(token) => {
             let host_ok = matches!(

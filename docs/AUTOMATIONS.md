@@ -269,6 +269,10 @@ expiry, ARK asks for an approved template or fails closed; it never turns free t
 template. A send timeout is a durable uncertain effect and is not retried automatically. Source:
 [Meta status and customer support window](https://www.postman.com/meta/whatsapp-business-platform/folder/fuaee8l/statuses-object).
 
+An approved authority binds `whatsapp.reply`'s `to` to the event's `actor` and its
+`reply_until_ms` to `fields.reply_until_ms`. The action also refuses a deadline more than 24
+hours ahead, so a free-form reply outside the window fails closed even without that binding.
+
 Personal WhatsApp remains available only through the visible Computer workflow in ADR 0056. It
 is not an unattended event source.
 
@@ -335,9 +339,11 @@ review and a first-use dogfood.
 | A4 | Load and recovery | 1,000 mixed fake events, 100 queued runs, slow model, full inbox, full then drain, full then discard, another automation sharing the account, reply loop, quota race, disconnect, SIGKILL and disk full. No duplicate task or effect attempt; preserved capacity input is not pruned; manual pause and explicit discard have terminal audit reasons; ingest-to-task p95 under 2 seconds excluding model and provider poll; retained event storage stays within the configured 256 MiB cap |
 | A5 | Optional transports | Gmail Pub/Sub or an ARK relay only if polling latency or public webhook setup blocks real use |
 
-Status: A0, A1 and A2 (Mail, against a fake Gmail) are built on the `event-automations` branch. A1 shows Listening, Running, Paused
-and stopped in both front-ends; the provider states (Needs connection, Recovery
-gap, Degraded, Reply window ended, Send uncertain) arrive with A2 and A3, which produce them.
+Status: A0, A1, A2 (Mail, against a fake Gmail) and A3 (WhatsApp Business, against a fake Graph
+API) are built on the `event-automations` branch. No real Google or Meta account was used. A3 has
+no setup form yet: a number connects through `Connections::connect_whatsapp`. Its runs show a
+closed reply window and an uncertain send as the run's failure and effect, not as their own
+automation states.
 
 Each gate gets plan, design and implementation review. A0 starts only after a workload has exact
 acceptance fixtures for Mail and WhatsApp. A4 records memory, SQLite growth and model cost as well

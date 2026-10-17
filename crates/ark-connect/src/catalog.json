@@ -32,6 +32,10 @@
       "scopes": ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"]
     },
     {
+      "id": "whatsapp", "label": "WhatsApp Business", "says": "answer customers who message your business number", "tools": ["whatsapp"],
+      "provider": "whatsapp", "service": "whatsapp.business"
+    },
+    {
       "id": "calendar", "label": "Calendar", "says": "see your events and add new ones", "tools": ["calendar"],
       "provider": "google", "service": "google.calendar",
       "scopes": ["https://www.googleapis.com/auth/calendar.events"]

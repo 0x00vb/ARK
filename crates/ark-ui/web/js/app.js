@@ -175,7 +175,7 @@ const api = {
     const where = place || api.hereName() || "This computer";
     const title = p.projectScoped ? `${p.title} · ${project?.name || "Project"} · ${where}` : p.title;
     pane.openTab(resourceKey("panel", location, id), title, p.icon || "box", (el, prm) => p.render(el, prm, ark) || {}, params, {
-      wide: !!p.wide, fill: !!p.fill, api: ark, projectScoped: !!p.projectScoped, project: project?.id,
+      wide: !!p.wide, fill: !!p.fill, api: ark, projectScoped: !!p.projectScoped, closesWithProject: !!p.closesWithProject, project: project?.id,
     });
   },
   setPanelTitle: (id, title) => {
@@ -319,7 +319,9 @@ function scopedApi(location) {
     const panel = registry.panels.get(id);
     if (!panel) return toast(`No panel named ${id}`);
     if (panel.projectScoped) return api.openPanel(id, params);
-    pane.openTab(resourceKey("panel", location, id), panel.title, panel.icon || "box", (el, prm) => panel.render(el, prm, scoped) || {}, params, { wide: !!panel.wide, fill: !!panel.fill, api: scoped });
+    pane.openTab(resourceKey("panel", location, id), panel.title, panel.icon || "box", (el, prm) => panel.render(el, prm, scoped) || {}, params, {
+      wide: !!panel.wide, fill: !!panel.fill, api: scoped, closesWithProject: !!panel.closesWithProject, project: location.project,
+    });
   };
   scoped.setPanelTitle = (id, title) => retitle(resourceKey("panel", location, id), title);
   scoped.closePanel = (id) => pane.remove(resourceKey("panel", location, id));

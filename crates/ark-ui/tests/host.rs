@@ -832,3 +832,50 @@ async fn a_failed_turn_offers_to_continue_live_and_after() {
         .unwrap()
         .starts_with("Did not finish: "));
 }
+
+/// A Browser tab the person had open in one project is not what they look at in the next: after
+/// a project switch the agent is not told about the other project's page, neither from the
+/// turn before nor from a report that arrived just before the switch.
+#[tokio::test]
+async fn another_projects_browser_tab_does_not_follow_a_project_switch() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = Arc::new(
+        MockProvider::new("m", vec![]).with_fallback(|_| Completion {
+            content: "Done.".into(),
+            tool_calls: vec![],
+            usage: Usage::default(),
+        }),
+    );
+    let host = ArkUi::new(app(dir.path(), model.clone(), Arc::default()))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let shop = json!({ "focus": { "surface": {
+        "kind_tag": "browser", "title": "localhost", "locator": "http://localhost:3000/shop"
+    } } });
+    let sees_shop = || {
+        let last = model.recorded().last().cloned().unwrap();
+        format!("{} {:?}", last.system, last.messages).contains("localhost:3000/shop")
+    };
+    let mut rx = host.subscribe();
+    project_call(&host, "focus", shop.clone()).await.unwrap();
+    host.call("send", json!({ "text": "is the shop running?" }))
+        .await
+        .unwrap();
+    next(&mut rx, "turn_finished").await;
+    assert!(sees_shop(), "the project's own turn is told about its tab");
+
+    project_call(&host, "focus", shop).await.unwrap();
+    host.call("add_project", json!({ "name": "bun" }))
+        .await
+        .unwrap();
+    host.call("send", json!({ "text": "is the app running?" }))
+        .await
+        .unwrap();
+    next(&mut rx, "turn_finished").await;
+    assert!(
+        !sees_shop(),
+        "the other project's tab reached this project's turn"
+    );
+}

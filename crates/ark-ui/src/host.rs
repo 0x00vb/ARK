@@ -3735,6 +3735,10 @@ impl Host {
             drop(ix);
             cur.clone()
         };
+            if cur.about.lock().unwrap().project != before {
+                // A report of what the person saw in the other project is not about this one.
+                *cur.focus.lock().unwrap() = None;
+            }
         // The change landed on a chat that is live in the background: that one comes forward.
         if let Some(live) = self.take_background(&conv.session()) {
             if cur.is_running() {

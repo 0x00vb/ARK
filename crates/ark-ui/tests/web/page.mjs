@@ -1425,6 +1425,16 @@ async function browserview(page) {
   // Closing the tab ends the view.
   await page.locator(".pane-tab-item", { hasText: "localhost" }).locator(".pane-tab-close").click();
   await until("close");
+
+  // A Browser tab belongs to the project it opened in: moving to another project closes it.
+  await page.evaluate(() => window.ark.openPanel("browser", { locator: "localhost:3000" }));
+  await page.locator(".pane-tab", { hasText: "localhost" }).waitFor();
+  const first = await page.evaluate(() => window.ark.summary().project.id);
+  const seen = await page.evaluate(() => window.calls.length);
+  await page.evaluate(() => window.ark.call("add_project", { name: "Bun project" }));
+  await page.waitForFunction((first) => window.ark.summary().project.id !== first, first);
+  await page.locator(".pane-tab", { hasText: "localhost" }).waitFor({ state: "detached" });
+  assert.ok((await page.evaluate((seen) => window.calls.slice(seen), seen)).some((c) => c[0] === "close"), "the view ends with its tab");
 }
 scenarios.browserview = browserview;
 

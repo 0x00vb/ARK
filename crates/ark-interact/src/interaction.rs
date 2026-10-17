@@ -1074,6 +1074,7 @@ impl Interaction {
         if s.project() != &self.project.id {
             if let Some(p) = self.engine().store.get_project(s.project())? {
                 self.project = p;
+                self.focus = None;
                 self.follow_project()?;
                 self.project_changed();
             }
@@ -1251,6 +1252,8 @@ impl Interaction {
         }
         let latest = self.ark.latest_session(&project.id)?;
         self.project = project;
+        // What the person looked at belonged to the other project (its Browser page).
+        self.focus = None;
         self.follow_project()?;
         match latest {
             Some(s) => {

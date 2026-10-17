@@ -75,7 +75,7 @@ export class Pane {
     const tab = {
       key, title, icon: ic, make, view, ctl: null, built: false, params: null,
       wide: !!opts.wide, api: opts.api || this.api,
-      projectScoped: !!opts.projectScoped, project: opts.project || null,
+      projectScoped: !!opts.projectScoped, closesWithProject: !!opts.closesWithProject, project: opts.project || null,
       onShow: opts.onShow, onClose: opts.onClose,
     };
     this.tabs.set(key, tab);
@@ -186,10 +186,11 @@ export class Pane {
   }
 
   /// A new session does not rebind or discard open resources. Each tab retains the location it
-  /// captured when it opened and can keep operating after the window changes chats.
+  /// captured when it opened and can keep operating after the window changes chats. A tab bound
+  /// to its project (a Terminal, a Browser page) closes when the window moves to another one.
   reset(project) {
     for (const [key, tab] of [...this.tabs]) {
-      if (tab.projectScoped && tab.project !== project) this.remove(key);
+      if ((tab.projectScoped || tab.closesWithProject) && tab.project !== project) this.remove(key);
     }
     this.project = project;
   }

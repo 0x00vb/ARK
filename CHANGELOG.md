@@ -20,6 +20,8 @@ What changed for people building on ARK, per release. Not a commit log.
 - Plugins lists the Computer again with Turn on and Turn off ([ADR 0045](docs/adr/0045-a-capability-the-person-turns-on-mid-task.md)).
 - At 760 px and below, what opens in the side pane shows (it was 0 wide) and closing it brings the
   chat back.
+- A Browser tab closes when the window moves to another project, and the agent there is no longer
+  told about the other project's page.
 
 ## [0.25.0] - 2026-10-16
 

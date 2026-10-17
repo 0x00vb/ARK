@@ -2078,6 +2078,7 @@ scenarios.dictation = async (page) => {
   const mic = page.locator("#dictate");
   await mic.waitFor();
   assert.equal(await mic.isDisabled(), true, "dictation waits for runtime availability");
+  dictationFixture.releaseStatus();
   await page.waitForFunction(() => !document.querySelector("#dictate")?.disabled);
   assert.equal(await mic.getAttribute("aria-label"), "Start dictation");
   await input.fill("Hola 👋 mundo");
@@ -2846,6 +2847,7 @@ async function detachedChatWindow(page) {
   const detached = new URL(page.url());
   detached.searchParams.set("detached", sessions[0]);
   detached.searchParams.set("window", "chat-page-test");
+  await rpcIdle();
   await page.goto(detached.href);
   await page.waitForFunction((session) => window.ark.summary()?.session?.id === session, sessions[0]);
   await page.locator(`.chat-surface.secondary[data-session="${sessions[0]}"]`).waitFor();
@@ -3227,12 +3229,25 @@ const errors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
   page.on("pageerror", (e) => errors.push(e.stack || String(e)));
+  let rpcInFlight = 0;
+  const isRpc = (r) => r.url().endsWith("/rpc");
+  page.on("request", (r) => { if (isRpc(r)) rpcInFlight++; });
+  page.on("requestfinished", (r) => { if (isRpc(r)) rpcInFlight--; });
+  page.on("requestfailed", (r) => { if (isRpc(r)) rpcInFlight--; });
+  // Leaving a page while a call is in flight makes that call fail in the page being left.
+  globalThis.rpcIdle = async () => {
+    for (let quiet = 0; quiet < 3;) {
+      await page.waitForTimeout(30);
+      quiet = rpcInFlight === 0 ? quiet + 1 : 0;
+    }
+  };
   if (scenario === 'file-viewer-consumer') page.on('console', message => { if (message.type() === 'error') console.error('consumer console:', message.text()); });
   if (inits[scenario]) await page.addInitScript(inits[scenario]);
   if (scenario === "dictation") {
     let firstStatus = true;
     let nextUpload = 0;
     dictationFixture = { active: new Map(), seen: [], failChunk: true, failBegin: false };
+    dictationFixture.statusGate = new Promise((release) => { dictationFixture.releaseStatus = release; });
     await page.route("**/rpc", async (route) => {
       const body = JSON.parse(route.request().postData() || "{}");
       const fixture = dictationFixture;
@@ -3244,7 +3259,7 @@ try {
       fixture.seen.push({ method: body.method, ...params });
       if (body.method === "dictation_status" && firstStatus) {
         firstStatus = false;
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await fixture.statusGate;
       }
       if (body.method === "dictation_status") return answer({ status: !params.place && fixture.localUnavailable ? "unavailable" : fixture.downloading ? "downloading" : "ready", runtime: params.runtime || params.place || "local" });
       if (body.method === "dictation_begin") {

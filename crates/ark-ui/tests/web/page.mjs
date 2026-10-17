@@ -308,6 +308,15 @@ const scenarios = {
     assert.match(await page.locator(".pane-tab[aria-selected='true']").getAttribute("title"), new RegExp(`Terminal · ${before.project.name}`));
     await page.evaluate(() => window.ark.openPanel("terminal"));
     assert.equal(await page.locator(".wb-terminal").count(), 1, "one Terminal pane per project");
+    // A project panel reports its focus to the chat the window shows.
+    const focused = [];
+    page.on("request", (r) => {
+      const body = r.url().endsWith("/rpc") ? r.postData() || "" : "";
+      if (body.includes('"kind":"focus"')) focused.push(JSON.parse(body).params.ref.location.session);
+    });
+    await page.evaluate(() => window.ark.reportFocus());
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual(focused, [before.session]);
 
     const textarea = view.locator(".xterm-helper-textarea");
     const answer = view.locator(".xterm-rows", { hasText: "CHATLESS_42" });

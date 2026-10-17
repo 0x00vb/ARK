@@ -297,7 +297,14 @@ function scopedApi(location) {
   });
   scoped.ext = (name, params = {}) => api.resource(api.resourceRef("extension", name, location), "extension", { name, params });
   scoped.runAction = (action, input = {}, approved = false) => api.resource(api.resourceRef("project", "", location), "run_action", { action, input, approved });
-  scoped.setFocus = (focus) => api.resource(api.resourceRef("project", "", location), "focus", { focus }).catch(() => {});
+  // A project panel has no chat of its own: its focus goes to the chat the window shows, when
+  // that chat is in the panel's project.
+  scoped.setFocus = (focus) => {
+    const chat = activeSummary()?.location;
+    const at = location.session ? location : chat?.project === location.project ? chat : null;
+    if (!at?.session) return Promise.resolve();
+    return api.resource(api.resourceRef("project", "", at), "focus", { focus }).catch(() => {});
+  };
   scoped.openFile = (path, params) => {
     path = String(path).replace(/^\.\//, "");
     openFileTab(path, params, location, scoped);

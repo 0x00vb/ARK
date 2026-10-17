@@ -9,6 +9,11 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+
+- On macOS the window's File menu has New Chat (⌘N) and Commands… (⌘K), so both work while the
+  Browser panel's view has the keyboard ([ADR 0044](docs/adr/0044-the-browser-panel-is-a-view-of-its-own-in-the-window.md)).
+
 ### Changed
 
 - `ArkUi::accent` sets the accent of ARK's light palette and a lighter mix of it in the dark one;

@@ -54,8 +54,13 @@ body, and answers `framable: true` when it cannot tell.
 ## Consequences
 - In the window any page shows, including the processes agents start and sites that refuse
   frames. The view keeps its page while the tab is hidden.
-- While the person types in the view, the app's keys (⌘K, ⌘N, Esc) go to the page, not to ARK.
-  Clicking anywhere in ARK gives them back. Menu accelerators for these keys are a later change.
+- While the person types in the view, keys go to the page in it. On macOS the window's File menu
+  has New Chat (⌘N) and Commands… (⌘K): a page in the view that does not handle the key itself
+  passes it to the menu, and the menu gives the key and the keyboard back to ARK's page
+  (`ark:menu-key`, 2026-10-16). A site that uses ⌘K itself (GitHub) keeps it. Esc is not a menu
+  key: a menu key without a modifier would take Esc from every page, the site's dialogs and
+  ARK's own included. Clicking anywhere in ARK gives the keys back. Windows and Linux have no
+  menu bar yet.
 - During a live window resize the view can trail the panel by a frame.
 - A toast over the pane hides the view for a moment.
 - An address in a single-page app that changes without a load (`history.pushState`) does not

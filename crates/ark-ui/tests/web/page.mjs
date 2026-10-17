@@ -1405,6 +1405,22 @@ async function browserview(page) {
   assert.deepEqual((await last())[1], r);
   assert.equal((await last())[2], null, "coming back does not load the page again");
 
+  // While the view has the keyboard, ⌘K and ⌘N reach ARK through the window's menu.
+  const menu = (key) => page.evaluate((key) => window.dispatchEvent(new CustomEvent("ark:menu-key", { detail: key })), key);
+  await menu("k");
+  await until("hide");
+  assert.equal(await page.locator("#overlay").isVisible(), true, "the menu's ⌘K opens the palette");
+  await page.keyboard.press("Escape");
+  await until("show");
+  // The page's own ⌘K acted already: the menu's echo of the same key does not close it again.
+  await page.keyboard.press("Meta+k");
+  await menu("k");
+  await until("hide");
+  await page.waitForTimeout(100);
+  assert.equal(await page.locator("#overlay").isVisible(), true, "one key press, one palette");
+  await page.keyboard.press("Escape");
+  await until("show");
+
   // Another tab in front, then the Browser again.
   await page.evaluate(() => window.ark.openPanel("files"));
   await until("hide");
@@ -1435,6 +1451,11 @@ async function browserview(page) {
   await page.waitForFunction((first) => window.ark.summary().project.id !== first, first);
   await page.locator(".pane-tab", { hasText: "localhost" }).waitFor({ state: "detached" });
   assert.ok((await page.evaluate((seen) => window.calls.slice(seen), seen)).some((c) => c[0] === "close"), "the view ends with its tab");
+
+  // The menu's ⌘N starts a new chat.
+  const before = await page.evaluate(() => window.ark.summary().session.id);
+  await menu("n");
+  await page.waitForFunction((before) => window.ark.summary().session.id !== before, before);
 }
 scenarios.browserview = browserview;
 

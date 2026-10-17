@@ -1013,6 +1013,8 @@ pub(crate) fn run(
         }));
     #[cfg(feature = "desktop-updater")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(app_menu);
     let built = builder
         .manage(State(host))
         .manage(BrowserEvents::default())
@@ -1062,6 +1064,7 @@ pub(crate) fn run(
                 apply_ambient_page(webview.app_handle());
             }
         })
+        .on_menu_event(|app, ev| menu_key_to_page(app, ev.id().as_ref()))
         .on_window_event(move |w, ev| {
             if let WindowEvent::CloseRequested { api, .. } = ev {
                 if keep_running && w.label() == MAIN {
@@ -1136,6 +1139,61 @@ pub(crate) fn run(
         let _ = app;
     });
     std::process::ExitCode::SUCCESS
+}
+
+/// ARK's keys as items of the window's menu, so they reach the page while the Browser panel's
+/// own view has the keyboard (ADR 0044): the item, its label, its accelerator, the key the page
+/// acts on. Esc is not one: a menu key without a modifier would take it from every page.
+const MENU_KEYS: [(&str, &str, &str, &str); 2] = [
+    ("ark-key-n", "New Chat", "CmdOrCtrl+N", "n"),
+    ("ark-key-k", "Commands…", "CmdOrCtrl+K", "k"),
+];
+
+fn menu_key(id: &str) -> Option<&'static str> {
+    MENU_KEYS
+        .iter()
+        .find(|(item, ..)| *item == id)
+        .map(|(.., key)| *key)
+}
+
+/// macOS's usual menu (the app, Edit, View, Window), with ARK's keys at the top of File.
+#[cfg(target_os = "macos")]
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<Wry>> {
+    use tauri::menu::{MenuItemKind, PredefinedMenuItem};
+    let menu = Menu::default(app)?;
+    let file = menu.items()?.into_iter().find_map(|item| match item {
+        MenuItemKind::Submenu(s) if s.text().is_ok_and(|t| t == "File") => Some(s),
+        _ => None,
+    });
+    if let Some(file) = file {
+        for (at, (id, label, keys, _)) in MENU_KEYS.iter().enumerate() {
+            file.insert(&MenuItem::with_id(app, *id, *label, true, Some(*keys))?, at)?;
+        }
+        file.insert(&PredefinedMenuItem::separator(app)?, MENU_KEYS.len())?;
+    }
+    Ok(menu)
+}
+
+/// A menu key goes to the page of the window in front, which takes the keyboard back from the
+/// Browser's view first.
+fn menu_key_to_page(app: &tauri::AppHandle, id: &str) {
+    let Some(key) = menu_key(id) else {
+        return;
+    };
+    let Some(window) = app
+        .windows()
+        .into_values()
+        .find(|w| w.is_focused().unwrap_or(false))
+    else {
+        return;
+    };
+    let Some(page) = app.get_webview(window.label()) else {
+        return;
+    };
+    let _ = page.set_focus();
+    let _ = page.eval(format!(
+        "dispatchEvent(new CustomEvent('ark:menu-key', {{ detail: '{key}' }}))"
+    ));
 }
 
 #[tauri::command]
@@ -1557,6 +1615,18 @@ impl tauri::Assets<Wry> for EmptyAssets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_menu_gives_the_page_new_chat_and_commands_only() {
+        assert_eq!(menu_key("ark-key-n"), Some("n"));
+        assert_eq!(menu_key("ark-key-k"), Some("k"));
+        assert_eq!(menu_key("quit"), None);
+        assert_eq!(menu_key("computer-stop"), None);
+        // A key without a modifier in the menu would take it from every page.
+        assert!(MENU_KEYS
+            .iter()
+            .all(|(.., keys, _)| keys.starts_with("CmdOrCtrl+")));
+    }
 
     #[test]
     fn only_the_apps_own_page_is_its_own() {

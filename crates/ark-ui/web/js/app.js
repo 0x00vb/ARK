@@ -1846,11 +1846,30 @@ function appLike() {
   });
 }
 
+// ⌘K and ⌘N are also items of the window's menu (`desktop.rs`), so they work while the Browser
+// panel's own view has the keyboard (ADR 0044). When the page had the keyboard it acted on the
+// key already: a menu key right after the page's own press of it, with no key between, is not
+// acted on twice.
+const MENU_KEYS = { k: () => palette(), n: () => api.newSession() };
+const pressed = { key: "", at: 0 };
+addEventListener("keydown", (e) => {
+  Object.assign(pressed, { key: e.metaKey || e.ctrlKey ? e.key.toLowerCase() : e.key, at: performance.now() });
+}, true);
+
+function menuKey(e) {
+  const run = Object.hasOwn(MENU_KEYS, e.detail) && MENU_KEYS[e.detail];
+  if (!run || (pressed.key === e.detail && performance.now() - pressed.at < 500)) return;
+  run();
+}
+
 function keys(e) {
   const mod = e.metaKey || e.ctrlKey;
-  if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); return palette(); }
+  const key = e.key.toLowerCase();
+  if (mod && Object.hasOwn(MENU_KEYS, key)) {
+    e.preventDefault();
+    return MENU_KEYS[key]();
+  }
   if (mod && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); return searchChats(); }
-  if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); return api.newSession(); }
   if (mod && e.key === "," && registry.settings.size) { e.preventDefault(); return api.openSettings(); }
   // The built-in panels' keys, unless an app replaced the panel.
   for (const b of BUILTINS) {
@@ -2112,6 +2131,7 @@ async function start() {
   $("#ctx-ring").addEventListener("click", () => runCommand("/context"));
   $("#session-title").addEventListener("dblclick", renameInline);
   document.addEventListener("keydown", keys);
+  addEventListener("ark:menu-key", menuKey);
   transport.subscribe(receive);
   // Prove the page graph and first usable shell before waiting on runtime or store data. A slow
   // runtime is not evidence that a downloaded interface is broken.

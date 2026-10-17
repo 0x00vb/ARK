@@ -92,3 +92,15 @@ async fn a_vendor_session_is_sized_by_its_rotation_limit() {
     let s = rt.session_with("d", Arc::new(Backend(Some(272_000)))).await;
     assert_eq!(s.context_window(), Some(272_000));
 }
+
+#[test]
+fn a_stateless_call_on_a_vendor_backend_passes_the_window_on() {
+    // A provider name `build` does not know, so `stateless` falls back to a one-shot session.
+    let rt = SubscriptionRuntime::builder()
+        .backends(Arc::new(|_: &str, _: &str| {
+            Some(Arc::new(Backend(Some(200_000))) as Arc<dyn SessionBackend>)
+        }))
+        .build();
+    let one_shot = rt.stateless("ark-test-one-shot:m").unwrap();
+    assert_eq!(one_shot.context_window(), Some(200_000));
+}

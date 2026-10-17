@@ -832,3 +832,135 @@ async fn a_failed_turn_offers_to_continue_live_and_after() {
         .unwrap()
         .starts_with("Did not finish: "));
 }
+
+/// A model that reads one page of the notes per call and answers only at every `answer_at`-th
+/// call it gets. Each path (CLI, GUI) gets its own, so both see the same sequence.
+fn mock_chain(answer_at: usize) -> Arc<MockProvider> {
+    let calls = AtomicUsize::new(0);
+    Arc::new(MockProvider::new("m", vec![]).with_fallback(move |_| {
+        let n = calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if n.is_multiple_of(answer_at) {
+            return Completion {
+                content: "The notes are about a locket, a key and a door.".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            };
+        }
+        Completion {
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: format!("c{n}"),
+                name: "notes.read".into(),
+                arguments: json!({ "page": n }),
+            }],
+            usage: Usage::default(),
+        }
+    }))
+}
+
+fn app_with_steps(dir: &std::path::Path, model: Arc<MockProvider>, max_steps: usize) -> App {
+    let provider: Arc<dyn ark_model::Provider> = model;
+    let ark = Ark::builder()
+        .store_root(dir)
+        .tool(Arc::new(Notes {
+            saves: Arc::default(),
+        }))
+        .profile(
+            AgentProfile::builder()
+                .core_actions(["notes.read", "notes.save"])
+                .build(),
+        )
+        .provider(provider)
+        .planner(false)
+        .critic(false)
+        .max_steps(max_steps)
+        // Small, so a long turn drops rounds behind the ledger.
+        .context_budget(700)
+        .build()
+        .unwrap();
+    App::new("Test").ark(ark)
+}
+
+/// ADR 0050: a task that runs past the step limit is continued by "continue" (a chain of
+/// turns), and its long turns drop rounds behind a ledger. The GUI host sends the model the
+/// same requests as the CLI path, byte for byte, through the chain and the dropped rounds.
+#[tokio::test]
+async fn gui_and_cli_send_the_same_context_with_a_chain_and_dropped_rounds() {
+    const STEPS: usize = 12;
+    const ANSWER_AT: usize = 30;
+    let says = [
+        "read every page of the notes and tell me what they are about",
+        "continue",
+        "continue",
+        "now read them again and tell me if anything changed",
+        "continue",
+        "continue",
+    ];
+
+    let cli_dir = tempfile::tempdir().unwrap();
+    let cli_model = mock_chain(ANSWER_AT);
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = app_with_steps(cli_dir.path(), cli_model.clone(), STEPS)
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    for q in says {
+        // A turn stopped by the step limit is an outcome here, not a failure of the test.
+        let _ = ix.run_turn(q, &TurnControl::new(), |_, _| {}).await;
+    }
+
+    let gui_dir = tempfile::tempdir().unwrap();
+    let gui_model = mock_chain(ANSWER_AT);
+    let host = ArkUi::new(app_with_steps(gui_dir.path(), gui_model.clone(), STEPS))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let mut rx = host.subscribe();
+    for q in says {
+        host.call("send", json!({ "text": q })).await.unwrap();
+        next(&mut rx, "turn_finished").await;
+        // What a window does between turns. None of it may reach the model.
+        host.call("transcript", json!({})).await.unwrap();
+        host.call("context", json!({})).await.unwrap();
+        host.call("trace", json!({})).await.unwrap();
+    }
+
+    let (cli, gui) = (cli_model.recorded(), gui_model.recorded());
+    assert_eq!(cli.len(), gui.len(), "same number of model calls");
+    // A turn's line in the conversation lists all its invocation ids: random per run too.
+    let ids = |t: &str| {
+        let mut out = String::new();
+        let mut rest = t;
+        while let Some(i) = rest.find("[inv:_,") {
+            out.push_str(&rest[..i + 6]);
+            rest = &rest[i + 6..];
+            rest = &rest[rest.find(']').unwrap_or(0)..];
+        }
+        out.push_str(rest);
+        out
+    };
+    let text = |r: &ark_model::mock::Recorded| {
+        r.messages
+            .iter()
+            .map(|m| ids(&without_ids(&m.content)))
+            .collect::<Vec<_>>()
+    };
+    for (i, (c, g)) in cli.iter().zip(gui.iter()).enumerate() {
+        assert_eq!(c.system, g.system, "system prompt of call {i}");
+        assert_eq!(text(c), text(g), "messages of call {i}");
+    }
+    let all = |needle: &str| {
+        gui.iter()
+            .filter(|r| r.messages.iter().any(|m| m.content.contains(needle)))
+            .count()
+    };
+    assert!(
+        all("[Earlier steps of this task") > 0,
+        "rounds were dropped behind the ledger"
+    );
+    assert!(
+        all("Your last turn stopped before it finished") > 0,
+        "a continued turn carries the stopped one over"
+    );
+}

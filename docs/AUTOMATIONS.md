@@ -181,11 +181,13 @@ model, the event body or a changed tool call. Its constraints are data, not prov
 - equality to a trusted event field, such as recipient equals the matched actor;
 - equality to the matched subject, such as the same mail thread;
 - named project paths that may be read;
-- a count and time window.
+- a count and time window. Windows are fixed and start at midnight UTC for a day, so up to
+  twice the count can run across midnight.
 
 Literal constraints compare canonical values. Event-bound constraints are substituted from the
 trusted stored envelope, never from model JSON. Project paths are resolved beneath the project,
-with symlinks and aliases checked before the call. Run code, processes, network and any unnamed
+with symlinks and aliases checked before the call. Known limit: the tool gets the path the model wrote after that check,
+so a link swapped in between could redirect a read inside the run's project. Run code, processes, network and any unnamed
 action are absent unless the approval names them. A call outside the authority is refused. A
 mutation inside it asks unless its mutation mode is `unattended`; that mode atomically consumes
 its durable quota before dispatch. Event text cannot create, resume or widen an automation,

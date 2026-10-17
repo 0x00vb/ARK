@@ -380,9 +380,10 @@ fn can_do_words(item: &Value) -> String {
             }
             _ => v.get("literal").unwrap_or(v).to_string(),
         };
-        bound.push(format!("{k} = {says}"));
+        bound.push(format!("{k}: {says}"));
     }
-    let mut out = action.to_string();
+    bound.sort();
+    let mut out = humanize(action);
     if !bound.is_empty() {
         out.push_str(&format!(" ({})", bound.join(", ")));
     }
@@ -1346,7 +1347,7 @@ mod automation_words {
         let text = automation_approval(ark_orchestrate::AUTOMATE, &input).unwrap();
         assert_eq!(
             text,
-            "Start work each time a message arrives from lara@example.com on office@example.com (gmail)\n  Each run: reply in the same thread using budget.csv\n  Can read: the message and budget.csv\n  Can change: mail.reply (to = the sender, thread = the same thread), at most 10 a day, asking each time\n  Limit: one run at a time; nothing else is allowed"
+            "Start work each time a message arrives from lara@example.com on office@example.com (gmail)\n  Each run: reply in the same thread using budget.csv\n  Can read: the message and budget.csv\n  Can change: Mail reply (thread: the same thread, to: the sender), at most 10 a day, asking each time\n  Limit: one run at a time; nothing else is allowed"
         );
         let stop = serde_json::json!({ "automation": "a-1", "stop": true });
         assert!(automation_approval(ark_orchestrate::AUTOMATE, &stop)

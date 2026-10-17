@@ -372,6 +372,77 @@ async fn board_command_shows_and_changes_the_board() {
     assert!(orch.board().is_empty());
 }
 
+/// `/automations` in the terminal: an event automation is listed with what starts it and where
+/// it is; pause, resume and stop go through the same controls the window uses.
+#[tokio::test]
+async fn automations_command_shows_pauses_resumes_and_stops_an_event_automation() {
+    use ark_interact::ark_orchestrate::{
+        AgentSpec, AutomationAuthority, AutomationState, EventPattern, Orchestrator, TaskSpec,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let worker: Arc<dyn ark_model::Provider> = Arc::new(MockProvider::new("w", vec![]));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(worker.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("office", "").unwrap();
+    let orch = Orchestrator::builder(&ark, &project)
+        .configure_models(|b| b.provider("w", worker))
+        .build()
+        .unwrap();
+    orch.spawn(AgentSpec::new("writer").model("w"))
+        .await
+        .unwrap();
+    let (approver, _rx) = ChannelApprover::channel();
+    let mut ix = App::new("Office")
+        .ark(ark)
+        .orchestrator(orch.clone())
+        .open(&Start::default(), Arc::new(approver))
+        .unwrap()
+        .interaction;
+    assert!(ix.commands().iter().any(|c| c.name == "automations"));
+    let empty = ix.execute("/automations").await.report.plain_text();
+    assert!(empty.contains("Nothing runs on its own"), "{empty}");
+
+    let a = orch
+        .automate(
+            "writer",
+            TaskSpec::new("reply in the same thread using budget.csv"),
+            EventPattern::new("gmail", "office@example.com")
+                .kind("message")
+                .from("lara@example.com"),
+            AutomationAuthority::default(),
+        )
+        .unwrap();
+    let text = ix.execute("/automations").await.report.plain_text();
+    assert!(
+        text.contains(&a.id) && text.contains("lara@example.com") && text.contains("listening"),
+        "{text}"
+    );
+
+    ix.execute(&format!("/automations pause {}", a.id)).await;
+    assert_eq!(
+        orch.automation(&a.id).unwrap().state,
+        AutomationState::Paused
+    );
+    let text = ix.execute("/automations").await.report.plain_text();
+    assert!(text.contains("paused"), "{text}");
+    ix.execute(&format!("/automations resume {}", a.id)).await;
+    assert_eq!(
+        orch.automation(&a.id).unwrap().state,
+        AutomationState::Listening
+    );
+    let bad = ix.execute("/automations pause").await.report.plain_text();
+    assert!(bad.contains("usage: /automations"), "{bad}");
+    ix.execute(&format!("/automations stop {}", a.id)).await;
+    assert!(orch.automation(&a.id).is_none());
+    let gone = ix.execute("/automations").await.report.plain_text();
+    assert!(gone.contains("Nothing runs on its own"), "{gone}");
+}
+
 /// With several agents, the person asks in words: the chat creates an agent and hands it a
 /// task, and the task is in the graph like any other.
 #[tokio::test]

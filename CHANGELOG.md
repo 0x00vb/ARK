@@ -28,6 +28,14 @@ What changed for people building on ARK, per release. Not a commit log.
   `EventPattern`, `EventAutomationRecord` and `Orchestrator::{automate, pause_automation,
   resume_automation, change_automation, discard_pending, unautomate, stop_automation,
   evaluate_events}`. One run per event across re-delivery and restarts; Full keeps the queue.
+- Event automations, authority and views (`docs/AUTOMATIONS.md` A1): an event run carries an
+  `AutomationAuthority` (exact actions, inputs bound to a literal or the stored event, readable
+  project paths, durable quotas) that a `CallGuard` checks before the approval gate; grants,
+  `--yes` and changed arguments cannot widen it. `ActionDescriptor::person_only` asks a person
+  every time. The owner chat gets `agents.automate` and `agents.pause_automation`. Both
+  front-ends show automations beside schedules: `/automations` in the terminal, the chat line
+  and an automation pane in the window, with resource ops `automations`, `automation`,
+  `automation_pause`, `automation_resume`, `automation_stop` and `automation_discard`.
 
 ### Changed
 
@@ -36,9 +44,6 @@ What changed for people building on ARK, per release. Not a commit log.
   (primary buttons) is chosen to reach 4.5:1 in every palette.
 - A process start whose program is missing and installable asks Install first, then the start
   once ([ADR 0041](docs/adr/0041-project-processes-asked-seen-and-stopped.md)).
-- One runtime process writes a store: `Store::open` holds an OS lock on `runtime.lock`, shared
-  by every handle in the process. A second process gets `StoreError::Busy` naming the first;
-  clients use the first one's protocol.
 
 ### Fixed
 
@@ -62,7 +67,11 @@ What changed for people building on ARK, per release. Not a commit log.
 
 - `TaskRecord` has `automation`, `revision` and `event`; struct literals add them (`None`).
 - `EventKind::{AutomationChanged, Unautomated}` are new; exhaustive matches add arms.
-- `StoreError::Busy` is new.
+- `ActionDescriptor` has `person_only`; struct literals add it (`false`).
+- One runtime process writes a store: `Store::open` holds an OS lock on `runtime.lock`, shared
+  by every handle in the process. A second process gets the new `StoreError::Busy` naming the
+  first; an app that opened a store from two processes talks to the first one's protocol
+  instead.
 
 ## [0.25.0] - 2026-10-16
 

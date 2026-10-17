@@ -981,7 +981,7 @@ async function automations(page) {
   const asked = await card.innerText();
   assert.match(asked, /Start work each time a message arrives from lara@example.com on office@example.com/);
   assert.match(asked, /Can read: the message and budget.csv/);
-  assert.match(asked, /Can change: mail.reply \(to = the sender, thread = the same thread\), at most 10 a day, asking each time/);
+  assert.match(asked, /Can change: Mail reply \(thread: the same thread, to: the sender\), at most 10 a day, asking each time/);
   assert.equal(await card.locator("button", { hasText: /Always/ }).count(), 0, "no always for standing work");
   await page.waitForTimeout(300);
   await shot(page, "automation-approval");
@@ -996,9 +996,10 @@ async function automations(page) {
   await line.click();
   const pane = page.locator(".sc-panel");
   await pane.locator(".sc-may dd", { hasText: "budget.csv" }).waitFor();
-  assert.match(await pane.locator(".sc-may").innerText(), /Changes\s+mail.reply \(to = the sender, thread = the same thread\)/);
+  await pane.locator(".sc-may dd", { hasText: /^Mail reply \(thread: the same thread, to: the sender\), at most 10 a day, asking each time$/ }).waitFor();
   await pane.locator(".sc-said", { hasText: "Replied to Lara with the Q4 totals." }).waitFor();
-  assert.match(await pane.locator(".sc-last").innerText(), /Mail from lara@example.com/);
+  await pane.locator(".sc-last", { hasText: /^Mail from lara@example.com/ }).waitFor();
+  await page.waitForTimeout(400);
   await shot(page, "automation-pane-light");
 
   // Paused: the one recovery is first, and Pause is gone.
@@ -1014,6 +1015,7 @@ async function automations(page) {
   await page.keyboard.press("Enter");
   await pane.locator(".sc-state", { hasText: /listening/ }).waitFor();
   await page.setViewportSize({ width: 390, height: 760 });
+  await page.waitForTimeout(400);
   await shot(page, "automation-pane-narrow");
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.emulateMedia({ colorScheme: "light" });

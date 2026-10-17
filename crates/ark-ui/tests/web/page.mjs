@@ -1422,6 +1422,14 @@ async function browserview(page) {
   assert.equal(await page.locator("#overlay").isVisible(), true, "the menu's ⌘K opens the palette");
   await page.keyboard.press("Escape");
   await until("show");
+  // A plain k typed just before is not a ⌘K: the menu's key still opens the palette.
+  await page.locator("#input").focus();
+  await page.keyboard.press("k");
+  await menu("k");
+  await until("hide");
+  assert.equal(await page.locator("#overlay").isVisible(), true, "a typed k does not swallow the menu's ⌘K");
+  await page.keyboard.press("Escape");
+  await until("show");
   // The page's own ⌘K acted already: the menu's echo of the same key does not close it again.
   await page.keyboard.press("Meta+k");
   await menu("k");

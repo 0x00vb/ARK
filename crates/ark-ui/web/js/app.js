@@ -1853,7 +1853,7 @@ function appLike() {
 const MENU_KEYS = { k: () => palette(), n: () => api.newSession() };
 const pressed = { key: "", at: 0 };
 addEventListener("keydown", (e) => {
-  Object.assign(pressed, { key: e.metaKey || e.ctrlKey ? e.key.toLowerCase() : e.key, at: performance.now() });
+  Object.assign(pressed, e.metaKey || e.ctrlKey ? { key: e.key.toLowerCase(), at: performance.now() } : { key: "", at: 0 });
 }, true);
 
 function menuKey(e) {

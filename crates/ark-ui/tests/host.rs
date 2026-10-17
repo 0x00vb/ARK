@@ -965,6 +965,60 @@ async fn gui_and_cli_send_the_same_context_with_a_chain_and_dropped_rounds() {
     );
 }
 
+/// ADR 0052: removing this computer from another forgets there only the keys it sent. A key
+/// saved there since (here put straight into the store, without the provider check) stays.
+#[tokio::test]
+async fn forgetting_sent_keys_removes_only_the_key_that_was_sent() {
+    use sha2::Digest;
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(ark_connect::MemorySecrets::default());
+    let conns = ark_connect::Connections::open(
+        dir.path(),
+        ark_connect::Catalog::builtin(),
+        secrets.clone(),
+    );
+    let keys = conns.api_keys().clone();
+    let put = |provider: &str, key: &str| {
+        ark_connect::Secrets::set(secrets.as_ref(), &format!("api-key:{provider}"), key).unwrap();
+    };
+    put("anthropic", "sk-ant-sent");
+    put("openai", "sk-openai-saved-there");
+    std::fs::write(
+        dir.path().join("api-keys.json"),
+        r#"["anthropic","openai"]"#,
+    )
+    .unwrap();
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Arc::new(MockProvider::new("m", vec![])) as Arc<dyn ark_model::Provider>)
+        .connections_with(conns)
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let host = ArkUi::new(App::new("Test").ark(ark))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let hash = |k: &str| format!("{:x}", sha2::Sha256::digest(k.as_bytes()));
+
+    let out = host
+        .call(
+            "chat_key",
+            json!({ "forget": { "anthropic": hash("sk-ant-sent"), "openai": hash("sk-openai-sent") } }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(out["saved"], json!(["openai"]), "{out}");
+    assert_eq!(keys.saved_key("anthropic"), None);
+    assert_eq!(
+        keys.saved_key("openai").as_deref(),
+        Some("sk-openai-saved-there")
+    );
+}
+
 /// A Browser tab the person had open in one project is not what they look at in the next: after
 /// a project switch the agent is not told about the other project's page, neither from the
 /// turn before nor from a report that arrived just before the switch.

@@ -3102,6 +3102,51 @@ async function narrowPane(page) {
 }
 scenarios["narrow-pane"] = narrowPane;
 
+// ADR 0045: the Computer is off until the person turns it on, in Plugins (Turn on, Turn off),
+// or by Allow when an agent asks mid-task; the turn then goes on in the app.
+async function computerSwitch(page) {
+  const destination = page.locator('.workspace-destination[data-view="marketplace"]');
+  const row = page.locator('.market-row[data-id="capability:computer"]');
+  const state = () => page.evaluate(async () => (await window.ark.call("capabilities")).find((c) => c.id === "computer")?.state);
+  await destination.click();
+  await row.waitFor();
+  assert.equal(await row.locator(".market-copy strong").innerText(), "Computer");
+  assert.equal(await state(), "off");
+  await row.getByRole("button", { name: "Turn on" }).click();
+  await row.getByRole("button", { name: "Turn off" }).waitFor();
+  assert.equal(await state(), "ready");
+  await page.waitForTimeout(300);
+  await shot(page, "computer-row-on-light");
+  await page.evaluate(() => window.arkTheme.setMode("dark"));
+  await shot(page, "computer-row-on-dark");
+  await page.evaluate(() => window.arkTheme.setMode("light"));
+  await row.getByRole("button", { name: "Turn off" }).click();
+  await row.getByRole("button", { name: "Turn on" }).waitFor();
+  assert.equal(await state(), "off");
+  await shot(page, "computer-row-off");
+
+  await page.locator('.destination[data-destination="home"]').click();
+  await page.locator("#input").fill("Open Notes");
+  await page.keyboard.press("Enter");
+  const card = page.locator(".approval:not(.decided)");
+  await card.waitFor();
+  assert.equal(await card.locator(".approval-title").innerText(), "ARK needs this to finish:");
+  assert.match(await card.innerText(), /Allow ARK to use the apps on this computer/);
+  assert.match(await card.innerText(), /It still asks before each step\./);
+  const buttons = (await card.locator(".approval-actions button").allInnerTexts()).map((t) => t.split("\n")[0]);
+  assert.deepEqual(buttons, ["Allow", "Not now"]);
+  await shot(page, "computer-allow-light");
+  await page.evaluate(() => window.arkTheme.setMode("dark"));
+  await shot(page, "computer-allow-dark");
+  await page.evaluate(() => window.arkTheme.setMode("light"));
+  await card.locator('button[data-decision="allow_once"]').click();
+  await page.locator(".agent", { hasText: "Notes is open." }).waitFor({ timeout: 15000 });
+  assert.equal(await state(), "ready");
+  await destination.click();
+  await row.getByRole("button", { name: "Turn off" }).waitFor();
+}
+scenarios["computer-switch"] = computerSwitch;
+
 const run = scenarios[scenario];
 if (!run) {
   console.error(`unknown scenario ${scenario}`);

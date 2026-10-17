@@ -33,7 +33,7 @@ mid-task, as it asks to connect Mail (0013). The Computer is the first.
 | No grant covers it | Every `acquire_capability` asks each time: no "for this session" or "always" answer covers a later request. A capability turned off is asked for again |
 | Nobody unattended turns it on | `AcquisitionProvider::asks_a_person`: the Computer's request waits for a person also when the agent may change things without asking (`allow_mutate`) |
 | An agent's allow-list | An orchestrated agent can ask only when its `tools` allow a `computer.*` action, and gets only the actions they allow |
-| Turning it off | Settings › Capabilities (`Turn on`, `Turn off`, the list state `off`), `/connect computer`, `/disconnect computer`. Off takes the screen back from whoever holds it, and every computer action refuses from then on, also in a turn that still holds the tools |
+| Turning it off | Plugins › On this computer (`Turn on`, `Turn off`, the list state `off`; Settings › Capabilities until ADR 0069 moved connections out of Settings), `/connect computer`, `/disconnect computer`. Off takes the screen back from whoever holds it, and every computer action refuses from then on, also in a turn that still holds the tools |
 | Each action | Unchanged from 0018 and 0042: every action but `apps` asks each time |
 
 ## Consequences

@@ -185,7 +185,12 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     // A screen in memory for the `computer` scenario: what was pressed is checked after.
     let screen = ark_sdk::prelude::ark_computer::fake::FakeScreen::new()
         .app("Notes", &[("text field", "Title"), ("button", "Save")]);
-    if scenario.starts_with("computer") {
+    if scenario == "computer-switch" {
+        builder = builder.computer_with(
+            ark_sdk::prelude::ark_computer::ComputerService::with_screen(Arc::new(screen.clone()))
+                .switched(dir.path().join("computer.json")),
+        );
+    } else if scenario.starts_with("computer") {
         builder = builder.computer_with(
             ark_sdk::prelude::ark_computer::ComputerService::with_screen(Arc::new(screen.clone())),
         );
@@ -1075,6 +1080,22 @@ async fn a_narrow_window_shows_what_opens_in_the_side_pane_and_comes_back() {
 async fn primary_buttons_read_in_light_and_dark_with_any_accent() {
     let script = vec![call("notes.save", json!({})), say("Saved.", false)];
     drive("accent", script, Duration::ZERO).await;
+}
+
+/// ADR 0045: the Computer row in Plugins turns it on and off, and an agent that needs it while
+/// it is off asks "Allow ARK to use the apps on this computer"; Allow turns it on and the turn
+/// goes on in the app.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_computer_turns_on_and_off_in_plugins_and_an_agent_asks_to_use_the_apps() {
+    let script = vec![
+        call(
+            "acquire_capability",
+            json!({ "need": "use the apps on this computer" }),
+        ),
+        call("computer.apps", json!({})),
+        say("Notes is open.", false),
+    ];
+    drive("computer-switch", script, Duration::ZERO).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

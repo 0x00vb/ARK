@@ -529,8 +529,9 @@ table.
 
 The fixed destination rail contains Plugins beside the other global ARK destinations. It remains
 present when the person switches project, computer or runtime. The page combines reviewed managed
-offers with existing first-party account capabilities such as Mail and Calendar. Settings has no
-Plugins or Connections section.
+offers with existing first-party account capabilities such as Mail and Calendar, and the
+capabilities the app offers with a switch (the Computer, ADR 0045). Settings has no Plugins or
+Connections section.
 
 | State | Visible result | Action |
 |---|---|---|
@@ -540,6 +541,8 @@ Plugins or Connections section.
 | Connection status unavailable | Catalog stays visible. Managed Connect is disabled | Retry |
 | Unconnected | Plugin name, outcome and connection location | Connect |
 | Connected | Account state is visible | Disconnect in detail |
+| Switch off | The Computer under On this computer | Turn on |
+| Switch on | The same row | Turn off (takes the screen back) |
 | Search has no match | `No plugins match that search` while focus remains in search | Clear or edit search |
 
 Reviewed provider offers do not have Add, Installed, Enable or Remove states. They are available

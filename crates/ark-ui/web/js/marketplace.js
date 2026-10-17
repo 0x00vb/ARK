@@ -1,6 +1,7 @@
 // Plugins are a global destination. Reviewed provider offers and the runtime's connectable
-// capabilities are available by default. Connecting an account is the only enabling action and
-// never grants an agent silent access.
+// capabilities are available by default. Connecting an account, or turning on a capability the
+// app offers with a switch (the Computer, ADR 0045), is the only enabling action and never grants
+// an agent silent access.
 
 import { h, clear } from "./dom.js";
 
@@ -49,7 +50,7 @@ function marketplace(el, ark) {
       connection: connections.get(offer.id),
     })) : [];
     const local = Array.isArray(capabilityResult.value) ? capabilityResult.value
-      .filter((capability) => !capability.added && !capability.switch && (capability.account || capability.state === "connect" || (capability.state === "unavailable" && capability.provider)))
+      .filter((capability) => !capability.added && (capability.switch || capability.account || capability.state === "connect" || (capability.state === "unavailable" && capability.provider)))
       .map((capability) => ({
         id: `capability:${capability.id}`,
         capabilityId: capability.id,
@@ -58,7 +59,9 @@ function marketplace(el, ark) {
         mark: capability.label?.slice(0, 1).toUpperCase() || "•",
         summary: capability.says.charAt(0).toUpperCase() + capability.says.slice(1),
         category: "On this computer",
-        connection: capability.state === "ready" ? { id: capability.id, state: "connected", accountLabel: capability.account } : null,
+        switch: !!capability.switch,
+        on: capability.state === "ready",
+        connection: !capability.switch && capability.state === "ready" ? { id: capability.id, state: "connected", accountLabel: capability.account } : null,
         unavailable: capability.state === "unavailable",
         unavailableReason: capability.why,
       })) : [];
@@ -107,7 +110,28 @@ function marketplace(el, ark) {
     } catch (error) { notice.textContent = error.message || String(error); }
   };
 
+  const turn = async (entry) => {
+    if (connecting.has(entry.id)) return;
+    connecting.add(entry.id);
+    notice.textContent = "";
+    draw();
+    try { await ark.call("capability_turn", { id: entry.capabilityId, on: !entry.on }); }
+    catch (error) { notice.textContent = error.message || String(error); }
+    finally {
+      connecting.delete(entry.id);
+      await load();
+    }
+  };
+
+  const switchButton = (entry, size = ".small") => {
+    const label = entry.on ? "Turn off" : "Turn on";
+    return h(`button.btn${entry.on ? ".ghost" : ".primary"}${size}.market-switch`, {
+      type: "button", "aria-label": `${label} ${entry.name}`, disabled: connecting.has(entry.id), onclick: () => turn(entry),
+    }, label);
+  };
+
   const action = (entry) => {
+    if (entry.switch) return switchButton(entry);
     if (entry.connection?.state === "connected") return h("button.btn.ghost.small", { type: "button", disabled: true }, "Connected");
     const pending = connecting.has(entry.id);
     const button = h("button.btn.primary.small.market-add", { type: "button", "aria-label": `Connect ${entry.name}` }, pending ? "Connecting…" : "Connect");
@@ -180,6 +204,16 @@ function marketplace(el, ark) {
     const connection = entry.connection;
     const pending = connecting.has(entry.id);
     const back = h("button.btn.ghost.small", { type: "button", onclick: () => { selected = null; draw(); } }, "Back");
+    if (entry.switch) {
+      clear(body).append(
+        h("div.market-detail-head", back),
+        h("section.market-detail", entryIcon(entry), h("div", h("h2", entry.name), h("p", entry.summary))),
+        h("div.market-detail-actions", switchButton(entry, ""), h("p.market-state", "ARK asks before each step.")),
+        ...catalogStatus(),
+        notice,
+      );
+      return;
+    }
     const primary = connection?.state === "connected"
       ? h("button.btn.primary", { type: "button", disabled: true }, "Connected")
       : h("button.btn.primary", { type: "button", disabled: pending || entry.unavailable || (entry.source === "managed" && !!connectionsError), onclick: () => connect(entry) }, pending ? "Connecting…" : "Connect");

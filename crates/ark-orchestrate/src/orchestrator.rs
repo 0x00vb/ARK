@@ -46,7 +46,10 @@ use crate::spec::{AgentSpec, TaskSpec};
 use crate::tools::{self, AgentTools};
 use crate::OrchError;
 
+mod automations;
 mod elsewhere;
+
+pub use automations::AutomationChange;
 
 const AGENT: &str = "orch_agent";
 pub(crate) const TASK: &str = "orch_task";
@@ -139,6 +142,7 @@ impl<'a> OrchestratorBuilder<'a> {
         };
         let settings = self.ark.settings();
         let (events, _) = broadcast::channel(1024);
+        let log = crate::automation::EventLog::of(&engine.store);
         let project = self.project;
         let inner = Arc::new_cyclic(|me| Inner {
             me: me.clone(),
@@ -164,14 +168,18 @@ impl<'a> OrchestratorBuilder<'a> {
             state: Mutex::new(State::default()),
             events,
             ticks: Mutex::new(()),
+            log,
+            evals: Mutex::new(()),
+            claim: Arc::new(()),
         });
         let recover = inner.load()?;
         let orch = Orchestrator { inner };
         // Schedules fire whether or not anything else runs: no window needs to be open. Work a
-        // stopped process left open continues the same way.
+        // stopped process left open continues the same way, and so do event automations.
         if tokio::runtime::Handle::try_current().is_ok() {
             orch.spawn_schedule_timer(SCHEDULE_TICK);
             orch.inner.recover(&recover);
+            orch.spawn_event_evaluator();
         }
         Ok(orch)
     }
@@ -186,8 +194,20 @@ const MAX_OPEN_RUNS: usize = 2;
 /// Finished runs kept per schedule.
 const RUNS_KEPT: usize = 50;
 
-/// Runs in a row that did not finish before a schedule pauses itself.
+/// Runs in a row that did not finish before a schedule or an automation pauses itself.
 const MAX_FAILURES: u32 = 3;
+
+/// What a run is made for, saved with its task in one write.
+pub(crate) enum RunOf<'a> {
+    /// A schedule's run for the time `slot`.
+    Schedule { id: &'a str, slot: u64 },
+    /// An automation's run for a saved event; its task id is derived from both.
+    Event {
+        automation: &'a str,
+        revision: u32,
+        event: &'a str,
+    },
+}
 
 impl Orchestrator {
     /// An orchestrator over `ark`'s store, tools and settings, working in `project`. Agents
@@ -866,6 +886,9 @@ pub(crate) struct State {
     pub tasks: HashMap<String, TaskRt>,
     pub messages: Vec<crate::graph::MessageEdge>,
     pub schedules: HashMap<String, ScheduleRecord>,
+    pub automations: HashMap<String, crate::automation::EventAutomationRecord>,
+    /// Matched events of this project's automations and what became of them.
+    pub evaluations: HashMap<String, crate::automation::EventEvaluation>,
     /// The project's board.
     pub work: HashMap<String, WorkItem>,
 }
@@ -899,6 +922,12 @@ pub(crate) struct Inner {
     stream: String,
     /// Held while schedules are ticked: one tick at a time.
     ticks: Mutex<()>,
+    /// The store's external events (ADR 0062).
+    log: Arc<crate::automation::EventLog>,
+    /// Held while automations are evaluated or changed: one at a time.
+    evals: Mutex<()>,
+    /// This orchestrator's claim on evaluating its automations in this process.
+    claim: Arc<()>,
     /// (task, chat): a turn of that chat waits for the task in this process and takes its
     /// result as its call's answer, so it is not posted too. Lost with the process, as the
     /// turn is: then the result is posted ([`ChatWait`]).
@@ -1355,7 +1384,8 @@ impl Inner {
         };
         spec.max_attempts = Some(1 + s.retries);
         spec.retry_delay_ms = Some(crate::schedule::RETRY_DELAY_MS);
-        let id = self.create_run(&s.agent, spec, Origin::External, None, Some((&s.id, slot)))?;
+        let run = RunOf::Schedule { id: &s.id, slot };
+        let id = self.create_run(&s.agent, spec, Origin::External, None, Some(run))?;
         self.start(&id);
         s.runs += 1;
         s.last_ms = Some(now);
@@ -1724,6 +1754,7 @@ impl Inner {
                     st.work.insert(w.id.clone(), w);
                 }
             }
+            self.load_automations(&mut st)?;
         }
         for id in &recover {
             let st = self.state.lock().unwrap();
@@ -2006,15 +2037,16 @@ impl Inner {
         self.create_run(owner, spec, origin, parent, None)
     }
 
-    /// [`create_task`](Self::create_task), and for a schedule's run its schedule and the time
-    /// it is for, in the same save: a crash can never leave a run its schedule does not know.
+    /// [`create_task`](Self::create_task), and for a schedule's or an automation's run what it
+    /// is for, in the same save: a crash can never leave a run its schedule or automation does
+    /// not know.
     fn create_run(
         &self,
         owner: &str,
         spec: TaskSpec,
         origin: Origin,
         parent: Option<&str>,
-        run: Option<(&str, u64)>,
+        run: Option<RunOf<'_>>,
     ) -> Result<String, OrchError> {
         let (agent_budget, state) = {
             let st = self.state.lock().unwrap();
@@ -2022,6 +2054,12 @@ impl Inner {
                 .agents
                 .get(owner)
                 .ok_or_else(|| OrchError::UnknownAgent(owner.into()))?;
+            // Event content stays out of every other task: an automation's agent runs only it.
+            if !matches!(run, Some(RunOf::Event { .. })) && self.runs_an_automation(&st, owner) {
+                return Err(OrchError::NotAllowed(format!(
+                    "`{owner}` runs an automation and takes no other work"
+                )));
+            }
             for d in &spec.after {
                 if !st.tasks.contains_key(d) {
                     return Err(OrchError::UnknownTask(d.clone()));
@@ -2039,7 +2077,32 @@ impl Inner {
             let st = self.state.lock().unwrap();
             claimable(&st, item, owner)?;
         }
-        let id = format!("t-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        let id = match &run {
+            Some(RunOf::Event {
+                automation, event, ..
+            }) => crate::automation::run_task_id(automation, event),
+            _ => format!("t-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
+        };
+        if self.state.lock().unwrap().tasks.contains_key(&id) {
+            return Err(OrchError::NotAllowed(format!("task {id} exists already")));
+        }
+        let (schedule, slot, automation, revision, event) = match &run {
+            Some(RunOf::Schedule { id, slot }) => {
+                (Some(id.to_string()), Some(*slot), None, None, None)
+            }
+            Some(RunOf::Event {
+                automation,
+                revision,
+                event,
+            }) => (
+                None,
+                None,
+                Some(automation.to_string()),
+                Some(*revision),
+                Some(event.to_string()),
+            ),
+            None => (None, None, None, None, None),
+        };
         let source = match &origin {
             Origin::Agent { agent, .. } => self.scope_of(agent).unwrap_or(self.project.id.clone()),
             Origin::External => self.project.id.clone(),
@@ -2091,8 +2154,11 @@ impl Inner {
             run_ms: 0,
             pid: None,
             pid_start: None,
-            schedule: run.map(|(s, _)| s.to_string()),
-            slot: run.map(|(_, at)| at),
+            schedule,
+            slot,
+            automation,
+            revision,
+            event,
             retry_delay_ms: spec.retry_delay_ms,
             retry_at_ms: None,
             item: spec.item.clone(),
@@ -2871,7 +2937,12 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 })
                 .collect();
             let a = st.agents.get_mut(owner).expect("the owner exists");
-            let inbox = std::mem::take(&mut a.record.inbox);
+            // An event run reads nothing addressed to its agent: each run sees its event only.
+            let inbox = if task.automation.is_some() {
+                Vec::new()
+            } else {
+                std::mem::take(&mut a.record.inbox)
+            };
             worker = a.worker.clone();
             (
                 task,
@@ -2885,6 +2956,12 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             )
         };
         let spec = &agent.spec;
+        let event_run = task.automation.is_some();
+        if event_run && worker.is_some() {
+            return Attempt::Fatal(
+                "an automation runs on ARK's own agent, not on another agent program".into(),
+            );
+        }
         let mut delegates: Vec<(String, String)> = roster
             .iter()
             .filter(|(n, _, s)| spec.may_delegate(n) && *s != AgentState::Terminated)
@@ -2980,7 +3057,12 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         if !skills.is_empty() {
             registry.register(Arc::new(skills::SkillsTool::new(skills)));
         }
-        let engine = self.engine.scoped(registry);
+        // An event run's calls are its own work, so what it reads back is only its own.
+        let engine = if event_run {
+            self.engine.scoped(registry).for_work(id)
+        } else {
+            self.engine.scoped(registry)
+        };
         let mut profile = self.agent_profile(spec, &delegates);
         if !turn_on.is_empty() {
             // The app's sources first (accounts, installs), then the agent's own.
@@ -3026,11 +3108,10 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         .render();
         let brief_tokens = estimate_tokens(&brief);
 
-        // Its conversation: carry-over between its own tasks, never anyone else's.
-        let mut session = match agent
-            .session
-            .as_deref()
-            .and_then(|s| Session::open(&self.engine, s).ok().flatten())
+        // Its conversation: carry-over between its own tasks, never anyone else's. An event run
+        // starts a conversation of its own, so one event's content never reaches another run.
+        let carried = agent.session.as_deref().filter(|_| !event_run);
+        let mut session = match carried.and_then(|s| Session::open(&self.engine, s).ok().flatten())
         {
             Some(s) => s,
             None => match Session::start(&self.engine, &scope) {
@@ -3091,7 +3172,9 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         }
         self.update_agent(owner, |a| {
             a.current_task = Some(id.to_string());
-            a.session = Some(session_id.clone());
+            if !event_run {
+                a.session = Some(session_id.clone());
+            }
         });
         self.set_agent_state(owner, AgentState::Running);
         self.emit(EventKind::TaskStarted {
@@ -3491,6 +3574,9 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         self.report_back(&rec);
         if rec.schedule.is_some() {
             self.run_ended(&rec);
+        }
+        if rec.automation.is_some() {
+            self.event_run_ended(&rec);
         }
         let st = self.state.lock().unwrap();
         if let Some(t) = st.tasks.get(id) {

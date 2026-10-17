@@ -168,6 +168,19 @@ pub enum EventKind {
         #[serde(default)]
         says: String,
     },
+    /// An event automation was made, paused, resumed, changed, filled up or drained (`says`:
+    /// which events start it, in words).
+    AutomationChanged {
+        automation: String,
+        agent: String,
+        says: String,
+        state: crate::automation::AutomationState,
+    },
+    /// An event automation stopped.
+    Unautomated {
+        automation: String,
+        agent: String,
+    },
 }
 
 impl EventKind {
@@ -210,6 +223,8 @@ impl EventKind {
             | EventKind::ArtifactProduced { agent, .. }
             | EventKind::Scheduled { agent, .. }
             | EventKind::ScheduleChanged { agent, .. }
+            | EventKind::AutomationChanged { agent, .. }
+            | EventKind::Unautomated { agent, .. }
             | EventKind::Asked { agent, .. }
             | EventKind::TaskStarted { agent, .. } => Some(agent),
             EventKind::TaskCreated { owner, .. } => Some(owner),

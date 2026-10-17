@@ -1348,3 +1348,51 @@ async fn a_typed_code_signs_a_phone_in_and_its_notifications_end_with_its_sessio
         "signed out with what paired it"
     );
 }
+
+/// The child's part of [`a_second_runtime_on_the_store_is_refused_while_clients_still_work`]:
+/// build a runtime over the store the parent serves, and say how that went.
+#[test]
+fn child_opens_a_second_runtime() {
+    let Ok(dir) = std::env::var("ARK_UI_SECOND_RUNTIME") else {
+        return;
+    };
+    match Ark::builder()
+        .store_root(&dir)
+        .provider(Arc::new(MockProvider::new("m", vec![])))
+        .build()
+    {
+        Ok(_) => println!("OPENED"),
+        Err(e) => println!("REFUSED {e}"),
+    }
+}
+
+/// ADR 0062: one runtime process writes a store. A second one is refused with words that name
+/// the first; clients keep using the first one's protocol.
+#[tokio::test]
+async fn a_second_runtime_on_the_store_is_refused_while_clients_still_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let token = tokens.create("script").unwrap();
+    let (_host, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "child_opens_a_second_runtime",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("ARK_UI_SECOND_RUNTIME", dir.path())
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("REFUSED"), "{said}");
+    assert!(said.contains(&format!("pid {}", std::process::id())), "{said}");
+    assert!(said.contains("connect to it"), "{said}");
+    let client = Client::new(&format!("http://127.0.0.1:{}", served.port), &token);
+    let hello = client.hello().await.unwrap();
+    assert_eq!(hello["version"], env!("CARGO_PKG_VERSION"));
+}

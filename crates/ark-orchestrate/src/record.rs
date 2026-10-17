@@ -330,6 +330,15 @@ pub struct TaskRecord {
     /// time, also across a crash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<u64>,
+    /// The event automation that started it (ADR 0062).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automation: Option<String>,
+    /// The automation's revision it was matched under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u32>,
+    /// The saved event it runs for (its id in the event log).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
     /// The wait before another try after a failure that may pass, doubling at each one
     /// ([`crate::TaskSpec::retry_after`]). `None`: half a second, doubling.
     #[serde(default, skip_serializing_if = "Option::is_none")]

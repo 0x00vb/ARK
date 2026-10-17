@@ -21,6 +21,13 @@ What changed for people building on ARK, per release. Not a commit log.
   `feed`, and `task_call {task, call}` returns one call's detail (ADR 0076).
 - On macOS the window's File menu has New Chat (⌘N) and Commands… (⌘K), so both work while the
   Browser panel's view has the keyboard ([ADR 0044](docs/adr/0044-the-browser-panel-is-a-view-of-its-own-in-the-window.md)).
+- Event automations, foundation (ADR 0062, proposed; `docs/AUTOMATIONS.md` A0):
+  `ark_tools::events` (provider-neutral `ExternalEvent`, `EventSink`, `EventSource`,
+  `WebhookSource`, size `Limits`, a scripted `FakeSource`), and in `ark-orchestrate` a
+  store-wide `EventLog` (each event saved once, in arrival order, before it is acknowledged),
+  `EventPattern`, `EventAutomationRecord` and `Orchestrator::{automate, pause_automation,
+  resume_automation, change_automation, discard_pending, unautomate, stop_automation,
+  evaluate_events}`. One run per event across re-delivery and restarts; Full keeps the queue.
 
 ### Changed
 
@@ -29,6 +36,9 @@ What changed for people building on ARK, per release. Not a commit log.
   (primary buttons) is chosen to reach 4.5:1 in every palette.
 - A process start whose program is missing and installable asks Install first, then the start
   once ([ADR 0041](docs/adr/0041-project-processes-asked-seen-and-stopped.md)).
+- One runtime process writes a store: `Store::open` holds an OS lock on `runtime.lock`, shared
+  by every handle in the process. A second process gets `StoreError::Busy` naming the first;
+  clients use the first one's protocol.
 
 ### Fixed
 
@@ -47,6 +57,12 @@ What changed for people building on ARK, per release. Not a commit log.
 - The sign-in callback waits for the browser's whole request and is not held up by a connection
   the browser opened and never used. A window that loads its state while a question is asked no
   longer misses the question.
+
+### Breaking
+
+- `TaskRecord` has `automation`, `revision` and `event`; struct literals add them (`None`).
+- `EventKind::{AutomationChanged, Unautomated}` are new; exhaustive matches add arms.
+- `StoreError::Busy` is new.
 
 ## [0.25.0] - 2026-10-16
 

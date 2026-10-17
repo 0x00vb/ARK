@@ -28,8 +28,10 @@ use time::OffsetDateTime;
 
 mod error;
 mod index;
+mod writer;
 pub use error::StoreError;
 pub use index::Hit;
+pub use writer::LOCK_FILE;
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 /// What a project holds, counted (see [`Store::project_stats`]).
@@ -49,13 +51,18 @@ pub struct Store {
     db: Mutex<Connection>,
     /// Full-text index. `None` if it failed to open (search then unavailable).
     search: Option<index::SearchIndex>,
+    /// This process is the store's one writer while any handle holds this.
+    _writer: std::sync::Arc<writer::WriterLock>,
 }
 
 impl Store {
-    /// Open (creating if needed) a workspace store rooted at `root`.
+    /// Open (creating if needed) a workspace store rooted at `root`. One process writes a
+    /// store: while another has it open this is [`StoreError::Busy`]; handles in this process
+    /// share it.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(root.join("objects"))?;
+        let writer = writer::acquire(&root)?;
         sweep_temp_blobs(&root.join("objects"));
         let db = Connection::open(root.join("meta.db"))?;
         db.execute_batch(
@@ -126,6 +133,7 @@ impl Store {
             root,
             db: Mutex::new(db),
             search,
+            _writer: writer,
         })
     }
 

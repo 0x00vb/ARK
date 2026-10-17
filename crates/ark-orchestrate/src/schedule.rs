@@ -683,9 +683,11 @@ pub fn tasks_where(
 }
 
 /// Projects whose orchestrators should open when an app starts, so their work goes on with no
-/// window: schedules that still run, and tasks a stopped process left open (ADR 0036).
+/// window: schedules that still run, event automations (ADR 0062), and tasks a stopped process
+/// left open (ADR 0036).
 pub fn projects_with_work(store: &ark_store::Store) -> Vec<String> {
     let mut out = scheduled_projects(store);
+    out.extend(crate::automation::automated_projects(store));
     out.extend(
         all_tasks(store)
             .into_iter()

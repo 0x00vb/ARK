@@ -19,6 +19,7 @@ use ark_core::{ActionDescriptor, ArtifactId, ArtifactKind};
 use async_trait::async_trait;
 
 pub mod diagram;
+pub mod events;
 pub mod mcp;
 pub mod subprocess;
 pub mod web;

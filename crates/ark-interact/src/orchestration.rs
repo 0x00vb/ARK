@@ -619,6 +619,20 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
         EventKind::Unscheduled { agent, says, .. } => {
             (format!("{agent} no longer runs {says}"), Tone::Muted)
         }
+        EventKind::AutomationChanged {
+            agent, says, state, ..
+        } => {
+            use ark_orchestrate::AutomationState as A;
+            let tone = match state {
+                A::Listening => Tone::Muted,
+                A::Paused => Tone::Muted,
+                A::Full | A::PausedFailing => Tone::Warning,
+            };
+            (format!("{agent} on {says}: {}", state.as_str()), tone)
+        }
+        EventKind::Unautomated { agent, .. } => {
+            (format!("{agent} no longer runs on events"), Tone::Muted)
+        }
         EventKind::ScheduleChanged {
             agent,
             says,

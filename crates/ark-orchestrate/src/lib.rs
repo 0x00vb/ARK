@@ -33,6 +33,7 @@
 //! println!("{}", orch.graph().to_mermaid());
 //! ```
 
+pub mod automation;
 pub mod board;
 mod brief;
 mod cron;
@@ -45,13 +46,18 @@ pub mod schedule;
 mod spec;
 mod tools;
 
+pub use automation::{
+    automated_projects, AutomationState, EventAutomationRecord, EventEvaluation, EventLog,
+    EventPattern, LogLimits, Outcome, StoredEvent,
+};
 pub use board::{WorkChange, WorkItem, WorkState, WorkStep};
 pub use brief::Brief;
 pub use event::{EventKind, OrchEvent};
 pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskNode};
 pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
 pub use orchestrator::{
-    NamedProfile, Orchestrator, OrchestratorBuilder, INTERRUPTED, RESTARTED, WAITING_PERSON,
+    AutomationChange, NamedProfile, Orchestrator, OrchestratorBuilder, INTERRUPTED, RESTARTED,
+    WAITING_PERSON,
 };
 pub use record::{
     AgentRecord, AgentState, ArtifactRef, Mail, Origin, Question, Step, TaskRecord, TaskState,

@@ -72,3 +72,14 @@ The first implementation follows A0 to A4 in `docs/AUTOMATIONS.md`. Required che
 duplicate and out-of-order delivery, activation cutovers, cursor expiry, every crash boundary,
 authority escape attempts, prompt injection, reply loops, overflow, disconnect and disk full.
 Mail and WhatsApp fixtures must pass through the same event and automation APIs.
+
+## Implementation notes (proposed with the decision)
+
+| Point | Choice |
+|---|---|
+| Writer lock | `Store::open` takes an exclusive OS file lock on `<root>/runtime.lock` (`std::fs::File::try_lock`). The kernel drops it when the process ends, so a crash never leaves a stale lock and a reused pid is never taken for the writer. Handles in one process share it. A second process gets `StoreError::Busy` with the writer's pid where the platform lets it be read (not Windows) |
+| Event records | Typed records: `external_event` (envelope with arrival `seq`), `external_payload`, `event_counter` (written in the same transaction), `event_automation`, `event_evaluation` (matched events only; the automation's `evaluated_seq` covers the rest) |
+| Run ids | `t-` plus a hash of (automation, event): submitting again after a crash adopts the task |
+| One run open | Matched events wait as evaluation records and become a task one at a time, oldest first |
+| Activation | A revision begins at an arrival `seq` and a time. An event matches only when it arrived after that `seq` and its provider time is no more than 5 minutes before that time, so a late re-delivery of an old event never runs under newer words. This is stricter than arrival order: mail that arrived during a backoff before a change is skipped |
+| Content isolation | Each automation has an agent of its own that takes no other work; each event run starts a fresh conversation and reads no inbox |

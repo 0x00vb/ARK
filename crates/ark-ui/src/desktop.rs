@@ -1001,9 +1001,7 @@ pub(crate) fn run(
         .find(|window| window.label == MAIN)
     {
         window.url = WebviewUrl::App(assets.versioned("index.html").into());
-        if start_hidden {
-            window.visible = false;
-        }
+        hide_if_asked(window, start_hidden);
     }
     context.config_mut().app.with_global_tauri = true;
     let name = context
@@ -1412,6 +1410,12 @@ fn shows_at_setup(start_hidden: bool) -> bool {
     !start_hidden
 }
 
+fn hide_if_asked(window: &mut tauri::utils::config::WindowConfig, start_hidden: bool) {
+    if start_hidden {
+        window.visible = false;
+    }
+}
+
 fn show(app: &tauri::AppHandle) {
     if let Some(w) = main_window(app) {
         let _ = w.unminimize();
@@ -1642,6 +1646,14 @@ mod tests {
     fn a_hidden_start_leaves_the_window_hidden_at_setup() {
         assert!(shows_at_setup(false));
         assert!(!shows_at_setup(true));
+        let mut window = tauri::utils::config::WindowConfig {
+            visible: true,
+            ..Default::default()
+        };
+        hide_if_asked(&mut window, false);
+        assert!(window.visible);
+        hide_if_asked(&mut window, true);
+        assert!(!window.visible);
     }
 
     #[test]

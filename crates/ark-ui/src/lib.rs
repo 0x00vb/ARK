@@ -306,16 +306,16 @@ impl ArkUi {
         self
     }
 
-    /// The native window: closing it hides it and the app keeps running, with an item in the
-    /// menu bar (the tray elsewhere) to open it again or quit. Schedules and agents' work go on;
-    /// a question that waits shows a system notification. Default: closing the window quits.
     /// Create the window hidden, for a launch nobody asked to see (a login item). The Dock icon,
-    /// the menu bar item or opening the app again shows it. The app decides when to set this.
+    /// the menu bar item or opening the app again shows it. Applies to `run_desktop`, not to a remote window. The app decides when to set this.
     pub fn start_hidden(mut self, on: bool) -> Self {
         self.start_hidden = on;
         self
     }
 
+    /// The native window: closing it hides it and the app keeps running, with an item in the
+    /// menu bar (the tray elsewhere) to open it again or quit. Schedules and agents' work go on;
+    /// a question that waits shows a system notification. Default: closing the window quits.
     pub fn keep_running(mut self, on: bool) -> Self {
         self.keep_running = on;
         self

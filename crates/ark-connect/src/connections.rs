@@ -78,6 +78,8 @@ struct Inner {
     /// Service base URLs that replace the real ones (tests, a proxy).
     bases: HashMap<String, String>,
     api_keys: crate::ApiKeys,
+    /// Moves each time an account is connected or disconnected.
+    changed: tokio::sync::watch::Sender<u64>,
 }
 
 /// The engine's connected accounts and what they make ready. Cheap to clone.
@@ -88,11 +90,16 @@ pub struct Connections {
 
 /// A connected account that delivers events ([`Connections::event_sources`]).
 pub struct EventFeed {
+    /// The event source name (`gmail`, `whatsapp`).
+    pub source: String,
+    /// The account as its events name it.
+    pub account: String,
     /// In words: `Inbox (office@example.com)`.
     pub label: String,
     /// The actions its capability gives, which a run on its events may be allowed.
     pub actions: Vec<String>,
-    pub source: Arc<dyn ark_tools::events::EventSource>,
+    /// Its poller. `None`: the provider pushes its events to a webhook instead.
+    pub poll: Option<Arc<dyn ark_tools::events::EventSource>>,
 }
 
 /// A connection in progress: send the person to [`url`](Connecting::url), then
@@ -126,6 +133,7 @@ impl Connections {
                 tokens: Mutex::new(HashMap::new()),
                 bases: HashMap::new(),
                 api_keys,
+                changed: tokio::sync::watch::channel(0).0,
             }),
         }
     }
@@ -341,7 +349,8 @@ impl Connections {
         services::adapter(cap.service.as_deref()?, self.clone(), account.id)
     }
 
-    /// The connected accounts that deliver events, each with the poller of its events.
+    /// The connected accounts that deliver events, each with the poller of its events or
+    /// none for one that pushes them.
     pub fn event_sources(&self) -> Vec<EventFeed> {
         self.inner
             .catalog
@@ -350,23 +359,35 @@ impl Connections {
             .filter_map(|c| {
                 let service = c.service.as_deref()?;
                 let account = self.account_for(c)?;
-                let source = services::feed(
+                let poll = services::feed(
                     service,
                     self.clone(),
                     account.id.clone(),
                     account.name.clone(),
-                )?;
+                );
+                let (source, name) = match &poll {
+                    Some(p) => (p.source().to_string(), p.account().to_string()),
+                    None => return None,
+                };
                 let actions = self
                     .tools_of(c)
                     .map(|t| t.actions().into_iter().map(|d| d.name).collect())
                     .unwrap_or_default();
                 Some(EventFeed {
+                    source,
+                    account: name,
                     label: format!("{} ({})", c.label, account.name),
                     actions,
-                    source,
+                    poll,
                 })
             })
             .collect()
+    }
+
+    /// Moves each time an account is connected or disconnected, so whoever keeps its events
+    /// can follow.
+    pub fn changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.inner.changed.subscribe()
     }
 
     pub(crate) fn http(&self) -> &reqwest::Client {
@@ -386,6 +407,7 @@ impl Connections {
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, text)?;
         ark_os::fs::replace(&tmp, &path)?;
+        self.inner.changed.send_modify(|n| *n += 1);
         Ok(())
     }
 }

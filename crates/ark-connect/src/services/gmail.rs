@@ -37,6 +37,8 @@ pub const SOURCE: &str = "gmail";
 const TEXT_MAX: usize = 64 << 10;
 /// History and message pages read in one poll or reconcile, at most.
 const PAGES: usize = 50;
+/// How much earlier than a gap's start a reconcile looks.
+const RECONCILE_MARGIN_MS: u64 = 10 * 60 * 1000;
 /// How long a send may take before its outcome counts as unknown.
 const SEND_WAIT: Duration = Duration::from_secs(60);
 
@@ -124,6 +126,13 @@ impl Inbox {
             .into_iter()
             .flatten()
             .rev()
+            .filter(|m| {
+                !m["labelIds"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|l| matches!(l.as_str(), Some("SPAM" | "DRAFT" | "SENT")))
+            })
             .map(Headers::of)
             .find(|h| h.get("from").and_then(|f| canonical(&f)).as_deref() == Some(&to))
             .ok_or_else(|| {
@@ -168,7 +177,8 @@ impl Inbox {
             }))),
             Err(CallError::Network { sent: true, .. })
             | Err(CallError::Status {
-                status: 500..=599, ..
+                status: 408 | 500..=599,
+                ..
             }) => {
                 let effect = format!("{REPLY}:{thread}:{to}");
                 let says = format!(
@@ -358,9 +368,18 @@ impl EventSource for Feed {
     ) -> std::result::Result<Batch, SourceError> {
         // The cursor first: what arrives while the old mail is listed comes with the next poll.
         let cursor = self.present().await?;
+        // Mail can arrive late with an older date, and clocks differ: look a little earlier.
+        // A message seen twice keeps its key, so the log keeps it once.
+        let since_ms = since_ms.saturating_sub(RECONCILE_MARGIN_MS);
         let mut ids: Vec<String> = Vec::new();
         let mut page: Option<String> = None;
-        for _ in 0..PAGES {
+        for round in 0.. {
+            if round == PAGES {
+                return Err(SourceError::Transient(format!(
+                    "more than {} messages arrived since then; a check cannot list them all, so start from now",
+                    PAGES * 100
+                )));
+            }
             let mut path = format!(
                 "messages?labelIds=INBOX&maxResults=100&q=after%3A{}",
                 since_ms / 1000

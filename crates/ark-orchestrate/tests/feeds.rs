@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use ark_orchestrate::*;
 use ark_store::Store;
-use ark_tools::events::{Direction, EventSource, ExternalEvent, FakeSource, SourceError};
+use ark_tools::events::{
+    Direction, EventSink, EventSource, ExternalEvent, FakeSource, SourceError,
+};
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -230,4 +232,58 @@ async fn a_rate_limit_and_a_failure_that_may_pass_wait_before_polling_again() {
     };
     assert_eq!(first.failures, 1);
     assert!(a > first.last_ok_ms.unwrap(), "waits before trying again");
+}
+
+#[tokio::test]
+async fn events_saved_before_a_crash_that_lost_the_cursor_are_kept_once_when_polled_again() {
+    let f = fixture();
+    f.feed().poll_once().await.unwrap();
+    // The process saved the batch, then stopped before the cursor was saved.
+    f.log.ingest(vec![mail("m1"), mail("m2")]).unwrap();
+    assert_eq!(f.feed().record().cursor.as_deref(), Some("0"));
+    // After the restart the provider lists the same events again from the old cursor.
+    f.src.push(Ok(vec![mail("m1"), mail("m2"), mail("m3")]));
+    let r = f.feed().poll_once().await.unwrap();
+    assert_eq!(r.cursor.as_deref(), Some("1"));
+    assert_eq!(f.log.current_seq(), 3, "m1 and m2 once each, m3 new");
+}
+
+#[tokio::test]
+async fn a_disconnected_account_needs_connection_and_resumes_from_its_cursor_when_back() {
+    let f = fixture();
+    let offered = Offered {
+        source: "fake".into(),
+        account: "office@example.com".into(),
+        label: "Inbox (office@example.com)".into(),
+        actions: vec![],
+    };
+    f.feed().poll_once().await.unwrap();
+    f.log.sync(vec![]);
+    assert!(f.log.feed("fake", "office@example.com").is_none());
+    assert_eq!(
+        f.log
+            .feed_record("fake", "office@example.com")
+            .unwrap()
+            .state,
+        FeedState::NeedsConnection {
+            detail: "Inbox (office@example.com) was disconnected".into()
+        }
+    );
+    // Connected again after the start: a new source, polled from the saved cursor.
+    let again = Arc::new(FakeSource::new("fake", "office@example.com"));
+    again.push(Ok(vec![mail("m1")]));
+    f.log.sync(vec![(
+        offered.clone(),
+        Some(again.clone() as Arc<dyn EventSource>),
+    )]);
+    let r = f.feed().poll_once().await.unwrap();
+    assert_eq!(r.state, FeedState::Listening);
+    assert_eq!(again.seen.lock().unwrap().clone(), vec![Some("0".into())]);
+    assert_eq!(f.log.current_seq(), 1);
+    // Syncing the same account again keeps the feed it has.
+    let other = Arc::new(FakeSource::new("fake", "office@example.com"));
+    f.log
+        .sync(vec![(offered, Some(other.clone() as Arc<dyn EventSource>))]);
+    f.feed().poll_once().await.unwrap();
+    assert!(other.seen.lock().unwrap().is_empty());
 }

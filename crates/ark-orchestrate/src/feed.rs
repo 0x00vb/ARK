@@ -91,7 +91,7 @@ pub struct FeedRecord {
 }
 
 impl FeedRecord {
-    fn new(source: &str, account: &str) -> Self {
+    pub(crate) fn new(source: &str, account: &str) -> Self {
         FeedRecord {
             source: source.into(),
             account: account.into(),
@@ -304,15 +304,20 @@ fn keep(log: &EventLog, r: &mut FeedRecord, events: Vec<ExternalEvent>) -> Resul
     }
 }
 
-fn degraded(mut r: FeedRecord, error: String, every: Duration) -> FeedRecord {
-    r.failures += 1;
+/// When to try again after `r.failures` failures in a row, doubling from [`BACKOFF`].
+fn backoff_until(r: &FeedRecord, every: Duration) -> u64 {
     let wait = BACKOFF
         .max(every)
-        .saturating_mul(1 << (r.failures - 1).min(10))
+        .saturating_mul(1 << r.failures.saturating_sub(1).min(10))
         .min(BACKOFF_MAX);
+    now_ms() + wait.as_millis() as u64
+}
+
+fn degraded(mut r: FeedRecord, error: String, every: Duration) -> FeedRecord {
+    r.failures += 1;
     r.state = FeedState::Degraded {
         error,
-        retry_at_ms: now_ms() + wait.as_millis() as u64,
+        retry_at_ms: backoff_until(&r, every),
     };
     r
 }
@@ -327,8 +332,11 @@ fn failed(mut r: FeedRecord, e: SourceError, every: Duration) -> FeedRecord {
             }
         }
         SourceError::RateLimited { retry_at_ms } => {
+            // The provider's time, but never sooner than the doubling wait: limits in a row
+            // wait longer each time.
+            r.failures += 1;
             r.state = FeedState::RateLimited {
-                until_ms: retry_at_ms,
+                until_ms: retry_at_ms.max(backoff_until(&r, every)),
             }
         }
         SourceError::Transient(error) => return degraded(r, error, every),
@@ -339,6 +347,25 @@ fn failed(mut r: FeedRecord, e: SourceError, every: Duration) -> FeedRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limits_in_a_row_wait_longer_each_time_and_never_less_than_the_provider_asks() {
+        let every = Duration::from_secs(60);
+        let mut r = FeedRecord::new("fake", "a");
+        let mut waits = Vec::new();
+        for _ in 0..3 {
+            let before = now_ms();
+            r = failed(r, SourceError::RateLimited { retry_at_ms: 0 }, every);
+            let FeedState::RateLimited { until_ms } = r.state else {
+                panic!()
+            };
+            waits.push((until_ms - before) / 1000);
+        }
+        assert_eq!(waits, vec![60, 120, 240]);
+        let far = now_ms() + 3_600_000;
+        let r = failed(r, SourceError::RateLimited { retry_at_ms: far }, every);
+        assert_eq!(r.state, FeedState::RateLimited { until_ms: far });
+    }
 
     #[test]
     fn failures_that_may_pass_wait_twice_as_long_each_time_up_to_a_bound() {

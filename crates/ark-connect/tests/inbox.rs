@@ -138,7 +138,7 @@ fn full(id: &str, labels: &[&str], from: &str) -> Value {
 fn feed(conns: &Connections) -> Arc<dyn EventSource> {
     let mut all = conns.event_sources();
     assert_eq!(all.len(), 1);
-    all.remove(0).source
+    all.remove(0).poll.unwrap()
 }
 
 #[tokio::test]
@@ -272,10 +272,31 @@ async fn an_expired_history_is_a_gap_and_reconciling_lists_inbox_mail_since_then
         "the cursor is taken before the mail is listed"
     );
     assert!(
-        paths[list].contains("q=after%3A1699999000"),
-        "{}",
+        paths[list].contains("q=after%3A1699998400"),
+        "ten minutes earlier than the gap, for late mail: {}",
         paths[list]
     );
+}
+
+#[tokio::test]
+async fn a_reconcile_that_cannot_list_everything_keeps_the_gap() {
+    let route: Route = Arc::new(|_, path, _| {
+        token(path).or(Some(match path {
+            "/users/me/profile" => (200, json!({ "historyId": "500" })),
+            p if p.starts_with("/users/me/messages?labelIds=INBOX") => (
+                200,
+                json!({ "messages": [{ "id": "m1" }], "nextPageToken": "again" }),
+            ),
+            _ => (404, json!({})),
+        }))
+    });
+    let (base, _) = server(route).await;
+    let dir = tempfile::tempdir().unwrap();
+    let f = feed(&connected(dir.path(), &base, &[READ, SEND]));
+    let Err(SourceError::Transient(why)) = f.reconcile(1_699_999_000_000, 100).await else {
+        panic!("a truncated listing is not a complete check")
+    };
+    assert!(why.contains("start from now"), "{why}");
 }
 
 #[tokio::test]
@@ -442,6 +463,28 @@ async fn a_send_that_got_no_answer_is_unconfirmed_and_not_to_be_retried() {
         .unwrap()
         .contains("may or may not have been sent"));
 
+    // A server error after the send was taken: also unknown.
+    let (base, _) = server(thread_routes(Some((
+        503,
+        json!({ "error": { "message": "backend error" } }),
+    ))))
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let tools = inbox(&connected(dir.path(), &base, &[READ, SEND]));
+    let out = tools
+        .run(
+            "inbox.reply",
+            json!({ "to": "lara@example.com", "thread": "t1", "body": "Totals." }),
+            &RunCtx::new(&NoBlobs),
+        )
+        .await
+        .map_err(|e| e.to_string())
+        .unwrap();
+    assert_eq!(
+        out.effect.expect("unconfirmed").state,
+        ark_core::ExternalEffectState::Unconfirmed
+    );
+
     // A refusal from Gmail is certain: nothing was sent, and it is an error.
     let (base, _) = server(thread_routes(Some((
         400,
@@ -458,4 +501,52 @@ async fn a_send_that_got_no_answer_is_unconfirmed_and_not_to_be_retried() {
         )
         .await
         .is_err());
+}
+
+#[tokio::test]
+async fn mail_in_spam_or_a_draft_does_not_make_its_sender_someone_to_reply_to() {
+    let route: Route = Arc::new(|_, path, _| {
+        token(path).or(match path {
+            p if p.starts_with("/users/me/threads/t1?") => Some((
+                200,
+                json!({ "messages": [
+                    { "labelIds": ["INBOX"], "payload": { "headers": [
+                        { "name": "From", "value": "lara@example.com" },
+                        { "name": "Subject", "value": "Q4" }
+                    ] } },
+                    { "labelIds": ["SPAM"], "payload": { "headers": [
+                        { "name": "From", "value": "eve@example.com" },
+                        { "name": "Subject", "value": "Re: Q4" }
+                    ] } },
+                    { "labelIds": ["DRAFT"], "payload": { "headers": [
+                        { "name": "From", "value": "mallory@example.com" },
+                        { "name": "Subject", "value": "Re: Q4" }
+                    ] } }
+                ] }),
+            )),
+            "/users/me/messages/send" => Some((200, json!({ "id": "sent-1" }))),
+            _ => Some((404, json!({}))),
+        })
+    });
+    let (base, seen) = server(route).await;
+    let dir = tempfile::tempdir().unwrap();
+    let tools = inbox(&connected(dir.path(), &base, &[READ, SEND]));
+    for who in ["eve@example.com", "mallory@example.com"] {
+        let e = tools
+            .run(
+                "inbox.reply",
+                json!({ "to": who, "thread": "t1", "body": "Totals." }),
+                &RunCtx::new(&NoBlobs),
+            )
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("{who} must be refused"))
+            .to_string();
+        assert!(e.contains("did not write in this thread"), "{e}");
+    }
+    assert!(!seen
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|(_, p, _)| p == "/users/me/messages/send"));
 }

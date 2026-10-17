@@ -144,15 +144,24 @@ impl<'a> OrchestratorBuilder<'a> {
         let (events, _) = broadcast::channel(1024);
         let log = crate::automation::EventLog::of(&engine.store);
         if let Some(c) = self.ark.connections() {
-            for f in c.event_sources() {
-                let o = crate::automation::Offered {
-                    source: f.source.source().to_string(),
-                    account: f.source.account().to_string(),
-                    label: f.label,
-                    actions: f.actions,
-                };
-                log.provide(o, f.source);
-            }
+            let changes = c.changes();
+            let c = c.clone();
+            let connected = move || {
+                c.event_sources()
+                    .into_iter()
+                    .map(|f| {
+                        let o = crate::automation::Offered {
+                            source: f.source,
+                            account: f.account,
+                            label: f.label,
+                            actions: f.actions,
+                        };
+                        (o, f.poll)
+                    })
+                    .collect()
+            };
+            log.sync(connected());
+            log.follow(changes, connected);
         }
         let project = self.project;
         let inner = Arc::new_cyclic(|me| Inner {

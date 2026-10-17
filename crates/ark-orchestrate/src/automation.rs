@@ -386,6 +386,8 @@ pub struct EventLog {
     feeds: Mutex<HashMap<String, Arc<Feed>>>,
     /// Counts changes of any feed's state, so views show them.
     feeds_moved: watch::Sender<u64>,
+    /// [`EventLog::follow`] runs at most once per log.
+    following: std::sync::atomic::AtomicBool,
 }
 
 fn logs() -> &'static Mutex<HashMap<PathBuf, Weak<EventLog>>> {
@@ -454,6 +456,7 @@ impl EventLog {
             sources: Mutex::new(HashMap::new()),
             feeds: Mutex::new(HashMap::new()),
             feeds_moved: watch::channel(0).0,
+            following: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -483,8 +486,92 @@ impl EventLog {
     pub fn provide(self: &Arc<Self>, o: Offered, source: Arc<dyn EventSource>) {
         let scope = scope_of(&o.source, &o.account);
         self.offer(o);
-        self.sources.lock().unwrap().insert(scope, source);
+        self.sources.lock().unwrap().insert(scope.clone(), source);
+        // A running feed holds the source it was given: replace it with one for this source.
+        if let Some(f) = self.feeds.lock().unwrap().remove(&scope) {
+            f.stop();
+        }
         self.ensure_feeds();
+    }
+
+    /// Match the offered accounts to the ones connected now (with the poller of each, or none
+    /// for one that pushes its events): a new one is offered, one that is gone is withdrawn
+    /// and its saved feed needs connection until it comes back. An account still connected
+    /// keeps its running feed.
+    pub fn sync(self: &Arc<Self>, connected: Vec<(Offered, Option<Arc<dyn EventSource>>)>) {
+        use crate::feed::FeedState;
+        let now: HashSet<String> = connected
+            .iter()
+            .map(|(o, _)| scope_of(&o.source, &o.account))
+            .collect();
+        let gone: Vec<Offered> = self
+            .offered()
+            .into_iter()
+            .filter(|o| !now.contains(&scope_of(&o.source, &o.account)))
+            .collect();
+        for o in gone {
+            self.withdraw(&o.source, &o.account);
+            if let Some(mut r) = self.feed_record(&o.source, &o.account) {
+                r.state = FeedState::NeedsConnection {
+                    detail: format!("{} was disconnected", o.label),
+                };
+                if let Err(e) = self.save_feed(&r) {
+                    tracing::warn!(account = o.account, "feed: {e}");
+                }
+            }
+        }
+        for (o, poll) in connected {
+            let scope = scope_of(&o.source, &o.account);
+            match poll {
+                Some(source) if !self.sources.lock().unwrap().contains_key(&scope) => {
+                    self.provide(o, source)
+                }
+                Some(_) => self.offer(o),
+                None => {
+                    // A pushed account has no poller; its record says it is connected again.
+                    let back = self
+                        .feed_record(&o.source, &o.account)
+                        .filter(|r| matches!(r.state, FeedState::NeedsConnection { .. }));
+                    if let Some(mut r) = back {
+                        r.state = FeedState::Listening;
+                        if let Err(e) = self.save_feed(&r) {
+                            tracing::warn!(account = o.account, "feed: {e}");
+                        }
+                    } else if self.feed_record(&o.source, &o.account).is_none() {
+                        let mut r = FeedRecord::new(&o.source, &o.account);
+                        r.state = FeedState::Listening;
+                        if let Err(e) = self.save_feed(&r) {
+                            tracing::warn!(account = o.account, "feed: {e}");
+                        }
+                    }
+                    self.offer(o);
+                }
+            }
+        }
+    }
+
+    /// [`EventLog::sync`] with `connected()` each time `changed` moves, until the log closes.
+    /// Once per log, and only inside a Tokio runtime.
+    pub fn follow<F>(self: &Arc<Self>, mut changed: watch::Receiver<u64>, connected: F)
+    where
+        F: Fn() -> Vec<(Offered, Option<Arc<dyn EventSource>>)> + Send + 'static,
+    {
+        let Ok(rt) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if self
+            .following
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
+        let me = Arc::downgrade(self);
+        rt.spawn(async move {
+            while changed.changed().await.is_ok() {
+                let Some(log) = me.upgrade() else { return };
+                log.sync(connected());
+            }
+        });
     }
 
     /// Start a feed for each provided account an automation reads and none polls yet, and stop

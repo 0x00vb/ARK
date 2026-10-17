@@ -425,6 +425,18 @@ async fn closing_a_setup_sheet_while_it_opens_closes_the_late_terminal() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_apps_conversation_draws_exactly_as_the_chat() {
+    let script = vec![
+        say("", true),
+        say(
+            "## Notes\n\nThey mention **a locket** and `the key`:\n\n```rust\nfn main() {}\n```\n\n> Next: the door.",
+            false,
+        ),
+    ];
+    drive("chat-view", script, Duration::from_millis(5)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn streamed_text_keeps_its_last_chunk_and_answers_once() {
     let script = vec![
         say("Reading the notes now.", true),

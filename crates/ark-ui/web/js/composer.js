@@ -22,15 +22,16 @@ export class Composer {
     this.send = elements.send || $("#send");
     this.queueEl = elements.queue || $("#queue");
     this.slash = elements.slash || $("#slash");
-    this.model = elements.model || $("#model-chip");
-    this.mode = elements.mode || $("#mode-chip");
-    this.attach = elements.attach || $("#attach");
+    // `null` leaves a control out (an app's conversation has no model, mode or files).
+    this.model = "model" in elements ? elements.model : $("#model-chip");
+    this.mode = "mode" in elements ? elements.mode : $("#mode-chip");
+    this.attach = "attach" in elements ? elements.attach : $("#attach");
     const dictationId = `dictation-status-${++composerNumber}`;
     this.mic = elements.mic || this.form.querySelector(".dictate") || h("button.icon-btn.dictate", { type: "button", "aria-label": "Start dictation" });
     this.dictationStatus = elements.dictationStatus || this.form.querySelector(".dictation-status") || h("div.dictation-status", { role: "status", "aria-live": "polite", hidden: true });
     if (!this.dictationStatus.id) this.dictationStatus.id = dictationId;
     this.mic.setAttribute("aria-describedby", this.dictationStatus.id);
-    if (!this.mic.isConnected) this.attach.after(this.mic);
+    if (!this.mic.isConnected) this.attach ? this.attach.after(this.mic) : this.form.querySelector(".composer-bar").prepend(this.mic);
     if (!this.dictationStatus.isConnected) this.input.after(this.dictationStatus);
     this.queue = [];
     this.running = false;
@@ -48,8 +49,8 @@ export class Composer {
       if (this.running && !this.input.value.trim()) api.cancel();
       else this.submit(false);
     });
-    this.model.addEventListener("click", () => this.modelMenu());
-    this.mode.addEventListener("click", () => this.modeMenu());
+    this.model?.addEventListener("click", () => this.modelMenu());
+    this.mode?.addEventListener("click", () => this.modeMenu());
     this.attach?.addEventListener("click", () => chooseFiles(api, this));
     this.dictation = new DictationController({
       api,
@@ -196,7 +197,7 @@ export class Composer {
   }
 
   key(e) {
-    if (e.key === "Tab" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    if (this.mode && e.key === "Tab" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
       e.preventDefault();
       this.cycleMode();
       return;

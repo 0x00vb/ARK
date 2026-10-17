@@ -350,6 +350,96 @@ const scenarios = {
   },
 
   // Narration written just before a tool call keeps its last chunk, and the answer shows once.
+  // An app's conversation drawn with ark.chatView is the chat: the same turn the chat drew
+  // comes out with the same elements and the same computed styles, and its composer has none
+  // of the chat's own controls (ADR 0076).
+  async "chat-view"(page) {
+    await finished(page, () => page.locator("#input").fill("What do the notes say?").then(() => page.keyboard.press("Enter")));
+    const result = await page.evaluate(async () => {
+      const ark = window.ark;
+      const read = await ark.call("chat_read", { session: ark.summary().session.id, limit: 5 });
+      const turns = read.transcript.map((t) => ({ ...t, key: String(t.index) }));
+      const sent = [];
+      let view;
+      ark.panel({ id: "parity", title: "Parity", fill: true, render(el) { view = ark.chatView(el, { submit: (text) => sent.push(text) }); view.render(turns); } });
+      ark.openPanel("parity");
+      await new Promise((ok) => setTimeout(ok, 400));
+      document.activeElement?.blur();
+      await new Promise((ok) => setTimeout(ok, 300));
+      const main = document.querySelector("main");
+      const pane = document.querySelector(".chat-view");
+      const shape = (root) => [...root.querySelector(".turn .agent").children].map((el) => el.className.replace(/\s+/g, " ").trim());
+      const props = ["font-family", "font-size", "line-height", "font-weight", "letter-spacing", "color", "background-color", "padding", "border-radius", "max-width", "box-shadow"];
+      const style = (el) => el && Object.fromEntries(props.map((p) => [p, getComputedStyle(el).getPropertyValue(p)]));
+      const drift = {};
+      for (const sel of [".turn .bubble", ".prose.answer", ".prose pre.md-code", ".prose code", ".work-head", ".act", ".turn-foot", ".composer", ".composer textarea", ".composer .send"]) {
+        const a = style(main.querySelector(sel)), b = style(pane.querySelector(sel));
+        if (!a || !b) { drift[sel] = `missing in ${a ? "view" : "chat"}`; continue; }
+        const d = props.filter((p) => a[p] !== b[p]).map((p) => `${p}: ${a[p]} / ${b[p]}`);
+        if (d.length) drift[sel] = d;
+      }
+      const before = pane.querySelector(".turn");
+      view.render(turns);
+      const kept = pane.querySelector(".turn") === before;
+      view.render([...turns, { key: "run", input: "Keep going", note: "From planner", activity: [{ kind: "tool", label: "Reading notes", call: "x", action: "notes.read" }], working: { label: "Working", since: Date.now() - 3000 } }]);
+      await new Promise((ok) => setTimeout(ok, 700));
+      const run = [...pane.querySelectorAll(".turn")].pop();
+      const mode = document.querySelector("#mode-chip").textContent;
+      const input = pane.querySelector("textarea");
+      input.focus();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+      input.value = "Next step";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      const chatShape = shape(main), viewShape = shape(pane);
+      // The states a run can be in, and a composer that cannot take a message now.
+      view.reset();
+      const many = Array.from({ length: 12 }, (_, i) => ({ key: `t${i}`, input: `Task ${i}`, activity: [], answer: `Answer ${i}\n\n${"Line. ".repeat(60)}` }));
+      view.render([...many,
+        { key: "failed", input: "Fail", activity: [], unfinished: "Provider unavailable" },
+        { key: "cancelled", input: "Stop", activity: [], cancelled: true },
+        { key: "waiting", input: "Wait", activity: [], status: "Paused" }]);
+      const stored = pane.querySelector(".turn").classList.contains("stored");
+      const notices = [...pane.querySelectorAll(".notice")].map((n) => `${n.className}: ${n.textContent}`);
+      view.setComposer({ placeholder: "Writer is paused", disabled: true });
+      view.actions.append(Object.assign(document.createElement("button"), { className: "btn primary", textContent: "Resume" }));
+      const refused = { placeholder: input.placeholder, disabled: input.disabled, send: getComputedStyle(pane.querySelector(".composer .send")).display };
+      // Scrolled up, a turn drawn again keeps its place.
+      const scroller = pane.querySelector(".scroller");
+      const target = pane.querySelectorAll(".turn")[3];
+      scroller.scrollTop = target.offsetTop + 20;
+      scroller.dispatchEvent(new Event("scroll"));
+      const offset = target.offsetTop - scroller.scrollTop;
+      many[2] = { ...many[2], answer: `${many[2].answer}\n\n${"Grown above. ".repeat(80)}` };
+      many[3] = { ...many[3], answer: `${many[3].answer}\n\nMore.` };
+      view.render([...many]);
+      const again = pane.querySelectorAll(".turn")[3];
+      const anchored = again !== target && Math.abs(again.offsetTop - scroller.scrollTop - offset) <= 1;
+      return {
+        stored, notices, refused, anchored,
+        same: JSON.stringify(chatShape) === JSON.stringify(viewShape), chat: chatShape, view: viewShape, drift, kept,
+        note: run.querySelector(".user-note")?.textContent, open: run.querySelector(".work")?.dataset.open,
+        elapsed: run.querySelector(".working-line .elapsed")?.textContent, inspectable: !!run.querySelector(".act.inspectable"),
+        controls: [...pane.querySelectorAll(".composer .model-chip, .composer .mode-chip, .composer .attach")].length,
+        mode: document.querySelector("#mode-chip").textContent === mode, sent,
+      };
+    });
+    assert.ok(result.same, `chat ${JSON.stringify(result.chat)} view ${JSON.stringify(result.view)}`);
+    assert.deepEqual(result.drift, {});
+    assert.equal(result.kept, true, "an unchanged turn is not drawn again");
+    assert.equal(result.note, "From planner");
+    assert.equal(result.open, "true", "work still going keeps its block open");
+    assert.match(result.elapsed, /^\d+s$/, "elapsed time without an Esc hint");
+    assert.equal(result.inspectable, false);
+    assert.equal(result.controls, 0);
+    assert.equal(result.mode, true, "Shift+Tab in the view leaves the chat's mode alone");
+    assert.deepEqual(result.sent, ["Next step"]);
+    assert.equal(result.stored, true, "after reset, turns do not rise in");
+    assert.deepEqual(result.notices, ["notice tone-error: Provider unavailable", "notice tone-muted: Stopped.", "notice tone-muted: Paused"]);
+    assert.deepEqual(result.refused, { placeholder: "Writer is paused", disabled: true, send: "none" });
+    assert.equal(result.anchored, true, "a redrawn turn in view keeps its place");
+    await shot(page, "chat-view");
+  },
+
   async stream(page) {
     await finished(page, () => page.locator("#input").fill("What do the notes say?").then(() => page.keyboard.press("Enter")));
     const live = await shape(page);

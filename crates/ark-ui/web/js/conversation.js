@@ -15,10 +15,12 @@ import { kindOf, kindNoun, KIND_ICON } from "./file.js";
 const TOOLISH = new Set(["tool", "retrieval", "reuse", "capability", "present", "plan", "state", "note", "steered", "warning"]);
 
 export class Thread {
-  constructor(root, scroller, api) {
+  /// `inspect: false` for turns with no call to open: their tool rows do not open.
+  constructor(root, scroller, api, { inspect = true } = {}) {
     this.root = root;
     this.scroller = scroller;
     this.api = api;
+    this.inspect = inspect;
     this.live = null;
     this.stick = true;
     scroller.addEventListener("scroll", () => {
@@ -90,7 +92,12 @@ export class Thread {
   }
 
   storedTurn(t) {
-    const turn = new TurnView(this, t.input, t.index);
+    return this.storedTurnView(t).el;
+  }
+
+  /// A stored turn. An app's turn (`ark.chatView`) may add `note`, `working`, `status`, `after`.
+  storedTurnView(t) {
+    const turn = new TurnView(this, t.input, t.index, t.note);
     turn.el.classList.add("stored");
     // Activity replays in order: narration where it was written, steering where it was read.
     // Turns stored before traces were kept only have the steered list.
@@ -101,7 +108,10 @@ export class Thread {
       else if (a.kind === "steered") turn.userLine(a.detail || a.label, true);
       else turn.activity(a, null);
     }
-    turn.closeBlocks();
+    // Work still going keeps its block open, as a live turn does.
+    if (t.working) turn.since(t.working.label, t.working.since);
+    else turn.closeBlocks();
+    if (t.status) turn.notice(t.status, "muted");
     // A replayed "stopped" activity already said so, as it did live.
     const stopped = acts.some((a) => a.kind === "stopped");
     if (t.cancelled && !stopped) turn.notice("Stopped.", "muted");
@@ -110,9 +120,11 @@ export class Thread {
     // The chat's last turn did not finish: one way on. It is the person's next message.
     if (t.resume) turn.resume();
     turn.fileCards();
+    if (t.after) turn.agent.append(t.after);
+    turn.keepWorkingLast();
     turn.footer(t.footer, t.index);
     for (const p of t.posts || []) turn.el.append(postView(p));
-    return turn.el;
+    return turn;
   }
 
   /// Something work this chat set up posted here (a scheduled run's result), as it arrives.
@@ -204,7 +216,7 @@ function postView(p) {
 }
 
 class TurnView {
-  constructor(thread, input, index) {
+  constructor(thread, input, index, note) {
     this.thread = thread;
     this.api = thread.api;
     this.index = index;
@@ -219,7 +231,7 @@ class TurnView {
     this.before = new Map();
     this.started = performance.now();
     this.el = h("article.turn",
-      h("div.user", h("div.bubble", input)),
+      h(`div.user${note ? ".noted" : ""}`, h("div.bubble", input), note ? h("div.user-note", note) : null),
       (this.agent = h("div.agent")),
     );
   }
@@ -238,10 +250,24 @@ class TurnView {
       this.agent.append(this.workEl);
       this.timer = setInterval(() => {
         const s = Math.floor((performance.now() - this.started) / 1000);
-        this.workEl.querySelector(".elapsed").textContent = s >= 1 ? (touch() ? `${s}s` : `${s}s · esc to stop`) : "";
+        this.workEl.querySelector(".elapsed").textContent = s >= 1 ? (touch() || this.unstoppable ? `${s}s` : `${s}s · esc to stop`) : "";
       }, 500);
     }
     this.workEl.querySelector(".shimmer").textContent = label;
+  }
+
+  /// Work an app runs, going since `at` (ms since the epoch). Esc does not stop it.
+  since(label, at) {
+    this.live = true;
+    this.unstoppable = true;
+    if (Number.isFinite(at)) this.started = performance.now() - Math.max(0, Date.now() - at);
+    this.working(label || "Working");
+    const s = Math.floor((performance.now() - this.started) / 1000);
+    this.workEl.querySelector(".elapsed").textContent = s >= 1 ? `${s}s` : "";
+  }
+
+  stop() {
+    clearInterval(this.timer);
   }
 
   keepWorkingLast() {
@@ -316,8 +342,10 @@ class TurnView {
       row.dataset.action = a.action || "";
       blk.el.dataset.tools = Number(blk.el.dataset.tools || 0) + 1;
       this.rows.set(a.call, row);
-      row.classList.add("inspectable");
-      row.querySelector(".act-line").addEventListener("click", () => this.toggleCall(row));
+      if (this.thread.inspect) {
+        row.classList.add("inspectable");
+        row.querySelector(".act-line").addEventListener("click", () => this.toggleCall(row));
+      }
       this.working("Working");
     }
     blk.rows.append(row);

@@ -318,3 +318,47 @@ async fn without_a_client_id_a_capability_says_it_cannot_connect() {
     assert!(matches!(mail.state, State::Unavailable(_)), "{mail:?}");
     assert!(conns.begin("mail").await.is_err());
 }
+
+/// A browser may send the redirect in pieces, and may open a connection it never uses: the
+/// sign-in waits for the whole request and is not held up by the idle connection.
+#[tokio::test]
+async fn a_redirect_that_arrives_in_pieces_still_signs_in() {
+    let (provider, _) = server(provider_routes).await;
+    let dir = tempfile::tempdir().unwrap();
+    let conns = Connections::open(
+        dir.path(),
+        catalog(&provider),
+        Arc::new(MemorySecrets::default()),
+    );
+    let connecting = conns.begin("Mail").await.unwrap();
+    let url = reqwest::Url::parse(connecting.url()).unwrap();
+    let get = |k: &str| {
+        url.query_pairs()
+            .find(|(n, _)| n == k)
+            .unwrap()
+            .1
+            .to_string()
+    };
+    let (redirect, state) = (
+        reqwest::Url::parse(&get("redirect_uri")).unwrap(),
+        get("state"),
+    );
+    let addr = format!("127.0.0.1:{}", redirect.port().unwrap());
+    let browser = async move {
+        let _idle = tokio::net::TcpStream::connect(&addr).await.unwrap();
+        let mut sock = tokio::net::TcpStream::connect(&addr).await.unwrap();
+        sock.write_all(b"GET /").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        sock.write_all(
+            format!("?code=c0de&state={state} HTTP/1.1\r\nhost: {addr}\r\n\r\n").as_bytes(),
+        )
+        .await
+        .unwrap();
+        let mut reply = String::new();
+        sock.read_to_string(&mut reply).await.unwrap();
+        reply
+    };
+    let (account, reply) = tokio::join!(connecting.finish(Duration::from_secs(8)), browser);
+    assert!(reply.contains("Connected"), "{reply}");
+    assert_eq!(account.unwrap().id, "google:ada@example.com");
+}

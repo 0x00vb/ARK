@@ -14,6 +14,9 @@ use tokio::net::TcpListener;
 use crate::catalog::Provider;
 use crate::ConnectError;
 
+/// The longest the browser's request may take to arrive on one connection.
+const HEAD_TIME: Duration = Duration::from_secs(2);
+
 /// What a provider gave back.
 #[derive(Clone, Debug, Default)]
 pub struct Tokens {
@@ -130,11 +133,22 @@ impl SignIn {
     }
 
     async fn wait_for_code(&self) -> Result<String, ConnectError> {
+        // Each connection reads on its own: a browser may send the request in pieces, or open
+        // a connection it never uses, and neither holds up the one that brings the code.
+        let (heads, mut arrived) = tokio::sync::mpsc::channel(8);
         loop {
-            let (mut sock, _) = self.listener.accept().await?;
-            let mut buf = vec![0u8; 8192];
-            let n = sock.read(&mut buf).await.unwrap_or(0);
-            let head = String::from_utf8_lossy(&buf[..n]);
+            let (mut sock, head) = tokio::select! {
+                accepted = self.listener.accept() => {
+                    let (mut sock, _) = accepted?;
+                    let heads = heads.clone();
+                    tokio::spawn(async move {
+                        let head = read_head(&mut sock).await;
+                        let _ = heads.send((sock, head)).await;
+                    });
+                    continue;
+                }
+                Some(read) = arrived.recv() => read,
+            };
             let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
             let url = reqwest::Url::parse(&format!("http://127.0.0.1{path}"))
                 .map_err(|e| ConnectError::Provider(e.to_string()))?;
@@ -180,6 +194,22 @@ impl SignIn {
             return Ok(code.unwrap_or_default());
         }
     }
+}
+
+/// The request line and headers of one connection, as far as they arrived in [`HEAD_TIME`].
+async fn read_head(sock: &mut tokio::net::TcpStream) -> String {
+    let mut buf = vec![0u8; 8192];
+    let mut n = 0;
+    let _ = tokio::time::timeout(HEAD_TIME, async {
+        while n < buf.len() && !buf[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+            match sock.read(&mut buf[n..]).await {
+                Ok(0) | Err(_) => break,
+                Ok(read) => n += read,
+            }
+        }
+    })
+    .await;
+    String::from_utf8_lossy(&buf[..n]).into_owned()
 }
 
 /// New tokens from a refresh token. The provider may or may not send a new refresh token.

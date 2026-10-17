@@ -157,6 +157,8 @@ export class Thread {
   }
 
   approval(msg, onDecide) {
+    // `hello` and the event that follows it may both carry a question asked while it answered.
+    if (this.root.querySelector(`.approval[data-id="${msg.id}"]`)) return;
     (this.live || this.lastTurn())?.approval(msg, onDecide);
     this.scroll(true);
   }

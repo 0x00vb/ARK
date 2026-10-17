@@ -29,6 +29,9 @@ What changed for people building on ARK, per release. Not a commit log.
   chat back.
 - A Browser tab closes when the window moves to another project, and the agent there is no longer
   told about the other project's page.
+- The sign-in callback waits for the browser's whole request and is not held up by a connection
+  the browser opened and never used. A window that loads its state while a question is asked no
+  longer misses the question.
 
 ## [0.25.0] - 2026-10-16
 

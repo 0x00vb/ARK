@@ -2904,15 +2904,6 @@ impl Host {
                 if let Some(tz) = params.get("tz").and_then(Value::as_str) {
                     self.siblings.set_zone(Some(tz));
                 }
-                let mut pending: Vec<Value> = self
-                    .approvals
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"], "session": req["session"], "chat": req["chat"], "project": req["project"] }))
-                    .collect();
-                pending.extend(self.kept_questions(&pending));
-                pending.extend(self.held_questions());
                 let cur = self.cur();
                 let mut running = cur
                     .running
@@ -2923,6 +2914,17 @@ impl Host {
                 // Everything up to `seq` is in this answer: stored turns through `summary`,
                 // the running turn through `live`. A window ignores events at or below it.
                 let (seq, mut live) = self.feed.position(&cur.session());
+                // Read after `seq`: a question asked meanwhile is here and may also arrive as
+                // an event (the window shows it once), never in neither.
+                let mut pending: Vec<Value> = self
+                    .approvals
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(id, (req, _))| json!({ "id": id, "request": req["request"], "line": req["line"], "title": req["title"], "choices": req["choices"], "session": req["session"], "chat": req["chat"], "project": req["project"] }))
+                    .collect();
+                pending.extend(self.kept_questions(&pending));
+                pending.extend(self.held_questions());
                 let mut summary = self.summary();
                 if let Some(chat) = self.shown_held() {
                     (summary, running, live) = self.held_hello(&chat);
@@ -3733,12 +3735,12 @@ impl Host {
             ix.follow_model();
             cur.note(&ix);
             drop(ix);
-            cur.clone()
-        };
             if cur.about.lock().unwrap().project != before {
                 // A report of what the person saw in the other project is not about this one.
                 *cur.focus.lock().unwrap() = None;
             }
+            cur.clone()
+        };
         // The change landed on a chat that is live in the background: that one comes forward.
         if let Some(live) = self.take_background(&conv.session()) {
             if cur.is_running() {

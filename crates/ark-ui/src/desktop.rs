@@ -953,16 +953,28 @@ fn ark_page_update_events(
     Ok(())
 }
 
+/// How the app's main window lives, set by the app through `ArkUi`.
+#[derive(Clone, Copy)]
+pub(crate) struct WindowBehavior {
+    pub keep_running: bool,
+    pub start_hidden: bool,
+    pub ambient_window: bool,
+}
+
 pub(crate) fn run(
     host: Arc<Host>,
     assets: Arc<Assets>,
     mut context: tauri::Context<Wry>,
-    keep_running: bool,
-    ambient_window: bool,
+    behavior: WindowBehavior,
     overlay_accent: Option<String>,
     #[cfg(feature = "desktop-updater")] page_update_config: Option<crate::page_updates::Config>,
     #[cfg(not(feature = "desktop-updater"))] page_update_config: Option<()>,
 ) -> std::process::ExitCode {
+    let WindowBehavior {
+        keep_running,
+        start_hidden,
+        ambient_window,
+    } = behavior;
     #[cfg(all(feature = "desktop-updater", target_os = "macos"))]
     if let Some(config) = page_update_config.as_ref() {
         assets.use_release(crate::page_updates::active(config));
@@ -989,6 +1001,9 @@ pub(crate) fn run(
         .find(|window| window.label == MAIN)
     {
         window.url = WebviewUrl::App(assets.versioned("index.html").into());
+        if start_hidden {
+            window.visible = false;
+        }
     }
     context.config_mut().app.with_global_tauri = true;
     let name = context
@@ -1086,7 +1101,9 @@ pub(crate) fn run(
             }
             if let Some(w) = main_window(app.handle()) {
                 fit_to_screen(&w);
-                let _ = w.show();
+                if shows_at_setup(start_hidden) {
+                    let _ = w.show();
+                }
             }
             if keep_running {
                 tray(app, &name, ambient_window, app.state::<State>().0.uses_computer())?;
@@ -1390,6 +1407,11 @@ fn overlay_control_position(
     )
 }
 
+/// A hidden start leaves the window as built; the Dock icon, the tray and `Reopen` show it.
+fn shows_at_setup(start_hidden: bool) -> bool {
+    !start_hidden
+}
+
 fn show(app: &tauri::AppHandle) {
     if let Some(w) = main_window(app) {
         let _ = w.unminimize();
@@ -1615,6 +1637,12 @@ impl tauri::Assets<Wry> for EmptyAssets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hidden_start_leaves_the_window_hidden_at_setup() {
+        assert!(shows_at_setup(false));
+        assert!(!shows_at_setup(true));
+    }
 
     #[test]
     fn the_menu_gives_the_page_new_chat_and_commands_only() {

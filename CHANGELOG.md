@@ -11,6 +11,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- `ArkUi::start_hidden(true)` creates the window hidden for a launch nobody asked to see (a login
+  item). The Dock icon, the menu bar item or opening the app again shows it.
 - `ark.chatView(el, { submit, placeholder })` draws an app's conversation with the chat's own
   turns, work blocks, prose and composer, so it reads exactly as a chat. ARK Desktop's agent pane
   is the first user ([ADR 0076](docs/adr/0076-an-apps-conversation-uses-the-chats-own-view.md)).

@@ -84,6 +84,7 @@ pub struct ArkUi {
     access: Access,
     entry: Option<String>,
     keep_running: bool,
+    start_hidden: bool,
     ambient_window: bool,
     links: Vec<ark_interact::links::Link>,
     computers: Option<computers::ComputerSetup>,
@@ -135,6 +136,7 @@ impl ArkUi {
             access: Access::default(),
             entry: None,
             keep_running: false,
+            start_hidden: false,
             ambient_window: false,
             links: Vec::new(),
             computers: None,
@@ -307,6 +309,13 @@ impl ArkUi {
     /// The native window: closing it hides it and the app keeps running, with an item in the
     /// menu bar (the tray elsewhere) to open it again or quit. Schedules and agents' work go on;
     /// a question that waits shows a system notification. Default: closing the window quits.
+    /// Create the window hidden, for a launch nobody asked to see (a login item). The Dock icon,
+    /// the menu bar item or opening the app again shows it. The app decides when to set this.
+    pub fn start_hidden(mut self, on: bool) -> Self {
+        self.start_hidden = on;
+        self
+    }
+
     pub fn keep_running(mut self, on: bool) -> Self {
         self.keep_running = on;
         self
@@ -416,6 +425,7 @@ impl ArkUi {
     pub fn run_desktop(self, context: tauri::Context<tauri::Wry>) -> std::process::ExitCode {
         let keep_running = self.keep_running;
         let ambient_window = self.ambient_window;
+        let start_hidden = self.start_hidden;
         let overlay_accent = self.info.accent.clone();
         #[cfg(feature = "desktop-updater")]
         let page_updates = self.page_updates.clone();
@@ -427,8 +437,11 @@ impl ArkUi {
                 host,
                 assets,
                 context,
-                keep_running,
-                ambient_window,
+                desktop::WindowBehavior {
+                    keep_running,
+                    start_hidden,
+                    ambient_window,
+                },
                 overlay_accent,
                 page_updates,
             ),

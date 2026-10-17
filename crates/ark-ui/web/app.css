@@ -1445,7 +1445,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 
 @media (max-width: 760px) {
   .app { --sb: 0px; }
-  .app[data-pane="open"] { --pw: 100vw; grid-template-columns: 0 0 100vw; }
   /* The pane is then the whole window: its tabs clear the macOS window buttons. */
   .app[data-shell="desktop"][data-os="macos"][data-pane="open"] .pane-head { padding-left: 84px; }
   .thread { padding: 8px 16px 40px; }

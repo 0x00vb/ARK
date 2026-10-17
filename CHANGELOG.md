@@ -9,6 +9,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+
+### Fixed
+
+- At 760 px and below, what opens in the side pane shows (it was 0 wide) and closing it brings the
+  chat back.
+
 ## [0.25.0] - 2026-10-16
 
 ### Added

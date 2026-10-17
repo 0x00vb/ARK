@@ -1063,6 +1063,11 @@ async fn a_narrow_window_keeps_the_sidebar_reachable() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_narrow_window_shows_what_opens_in_the_side_pane_and_comes_back() {
+    drive("narrow-pane", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_project_terminal_opens_without_changing_the_chat() {
     drive("project-terminal", vec![], Duration::ZERO).await;
 }

@@ -3016,6 +3016,40 @@ scenarios.computers = async (page) => {
   await shot(page, "computers-address");
 };
 
+// At 760 px and below the destinations sit at the bottom and the side pane takes the whole
+// window: what opens in it shows, and closing it brings the chat back.
+async function narrowPane(page) {
+  const box = (selector) => page.locator(selector).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: Math.round(r.left), width: Math.round(r.width), height: Math.round(r.height) };
+  });
+  for (const m of ["light", "dark"]) {
+    await page.evaluate((m) => window.arkTheme.setMode(m), m);
+    await page.setViewportSize({ width: 760, height: 800 });
+    await page.waitForFunction(() => document.getElementById("app").dataset.compact === "true");
+    await page.evaluate(() => window.ark.openPanel("files"));
+    await page.waitForFunction(() => document.getElementById("app").dataset.pane === "open");
+    await page.waitForTimeout(350);
+    const pane = await box("#pane");
+    assert.deepEqual({ left: pane.left, width: pane.width }, { left: 0, width: 760 }, JSON.stringify(pane));
+    assert.ok(pane.height > 600, JSON.stringify(pane));
+    assert.equal((await box(".main")).width, 0);
+    assert.ok(await page.locator(".pane-tab", { hasText: "Files" }).isVisible(), "the pane's tab shows");
+    assert.ok(await page.locator("#close-pane").isVisible(), "the way back shows");
+    const rail = await page.locator(".destinations").boundingBox();
+    assert.ok(rail.y >= 700 && rail.width === 760, JSON.stringify(rail));
+    await shot(page, `narrow-pane-${m}`);
+    await page.click("#close-pane");
+    await page.waitForFunction(() => document.getElementById("app").dataset.pane !== "open");
+    await page.waitForTimeout(350);
+    assert.equal((await box(".main")).width, 760);
+    assert.ok(await page.locator("#input").isVisible(), "the chat is back");
+    await page.setViewportSize({ width: 1100, height: 800 });
+  }
+  await page.evaluate(() => window.arkTheme.setMode("light"));
+}
+scenarios["narrow-pane"] = narrowPane;
+
 const run = scenarios[scenario];
 if (!run) {
   console.error(`unknown scenario ${scenario}`);

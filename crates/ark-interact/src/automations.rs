@@ -80,7 +80,8 @@ pub fn event_view(o: &Orchestrator, a: &EventAutomationRecord) -> EventView {
     let feed = o
         .event_log()
         .feed_record(&a.pattern.source, &a.pattern.account);
-    let (status, tone, recovery) = status(a, last.as_ref(), pending, feed.as_ref());
+    let account_full = o.event_log().is_full(&a.pattern.source, &a.pattern.account);
+    let (status, tone, recovery) = status(a, last.as_ref(), pending, feed.as_ref(), account_full);
     let label = |ms: u64| ark_orchestrate::schedule::local_label(ms);
     let ended = last.as_ref().filter(|t| t.state.is_final()).and_then(|t| {
         let at = label(t.finished_ms.unwrap_or(t.created_ms));
@@ -129,6 +130,7 @@ fn status(
     last: Option<&TaskRecord>,
     pending: usize,
     feed: Option<&FeedRecord>,
+    account_full: bool,
 ) -> (String, &'static str, Option<&'static str>) {
     let label = |ms: u64| ark_orchestrate::schedule::local_label(ms);
     if let Some(t) = last.filter(|t| !t.state.is_final()) {
@@ -196,8 +198,12 @@ fn status(
                 None,
             )
         }
+        Some(FeedState::Full { .. }) => return full(&a.pattern.account),
         Some(FeedState::Starting) => return ("starting".into(), "muted", None),
         _ => {}
+    }
+    if account_full {
+        return full(&a.pattern.account);
     }
     if let Some(l) = a.limited.as_ref().filter(|l| l.until_ms > now_ms()) {
         return (
@@ -224,6 +230,14 @@ fn status(
         n => format!(", {n} waiting"),
     };
     (format!("listening{waiting}"), "muted", None)
+}
+
+fn full(account: &str) -> (String, &'static str, Option<&'static str>) {
+    (
+        format!("full: {account} keeps all the messages it may; new ones are not read until there is room"),
+        "warn",
+        Some("discard"),
+    )
 }
 
 fn now_ms() -> u64 {
@@ -295,4 +309,85 @@ pub fn webhook(
 )> {
     let hook = conns.webhook(source, route)?;
     Some((hook, ark_orchestrate::EventLog::of(&engine.store)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_orchestrate::{EventPattern, SkippedGap, TaskSpec};
+
+    fn automation() -> EventAutomationRecord {
+        serde_json::from_value(serde_json::json!({
+            "id": "a-00000001",
+            "project": "p",
+            "agent": "w",
+            "task": serde_json::to_value(TaskSpec::new("reply")).unwrap(),
+            "pattern": serde_json::to_value(EventPattern::new("mail", "office@example.com")).unwrap(),
+            "revision": 1,
+            "activated_seq": 0,
+            "activated_ms": 0,
+            "evaluated_seq": 0,
+            "created_ms": 0,
+        }))
+        .unwrap()
+    }
+
+    fn feed(state: FeedState) -> FeedRecord {
+        FeedRecord {
+            source: "mail".into(),
+            account: "office@example.com".into(),
+            cursor: Some("1".into()),
+            state,
+            last_ok_ms: None,
+            failures: 0,
+            skipped: Vec::<SkippedGap>::new(),
+            refused: Vec::new(),
+        }
+    }
+
+    fn shown(state: FeedState, full: bool) -> (String, &'static str, Option<&'static str>) {
+        status(&automation(), None, 0, Some(&feed(state)), full)
+    }
+
+    #[test]
+    fn every_way_the_account_can_stop_says_so_and_names_what_to_do() {
+        let far = now_ms() + 3_600_000;
+        let (s, tone, fix) = shown(FeedState::Full { detail: "x".into() }, false);
+        assert!(s.starts_with("full:"), "{s}");
+        assert_eq!((tone, fix), ("warn", Some("discard")));
+        let (s, _, fix) = shown(FeedState::Listening, true);
+        assert!(
+            s.starts_with("full:"),
+            "a webhook account has no feed state: {s}"
+        );
+        assert_eq!(fix, Some("discard"));
+        let (s, tone, fix) = shown(
+            FeedState::Degraded {
+                error: "down".into(),
+                retry_at_ms: far,
+            },
+            false,
+        );
+        assert!(s.starts_with("cannot check for messages"), "{s}");
+        assert_eq!((tone, fix), ("warn", None));
+        let (s, _, fix) = shown(
+            FeedState::Gap {
+                since_ms: Some(1),
+                detail: "history gone".into(),
+            },
+            false,
+        );
+        assert!(s.contains("may be missing"), "{s}");
+        assert_eq!(fix, Some("reconcile"));
+        let (s, _, fix) = shown(FeedState::RateLimited { until_ms: far }, false);
+        assert!(s.starts_with("checks again at"), "{s}");
+        assert_eq!(fix, None);
+        let (_, _, fix) = shown(
+            FeedState::NeedsConnection {
+                detail: "signed out".into(),
+            },
+            false,
+        );
+        assert_eq!(fix, Some("connect"));
+    }
 }

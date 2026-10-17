@@ -942,3 +942,153 @@ async fn one_feed_polls_an_account_for_all_its_automations_and_each_mail_runs_on
         "the feed stopped"
     );
 }
+
+#[tokio::test]
+async fn retention_removes_old_text_only_when_looked_at_and_not_waiting_for_a_run() {
+    let app = App::new();
+    let log = app.log();
+    let gate = Arc::new(Semaphore::new(0));
+    let m = Script::gated(vec![], Some(gate.clone()));
+    let (o, a) = app.automated(&m).await;
+    log.ingest(vec![
+        mail("s", "stranger@example.com", "from a stranger"),
+        mail("1", "lara@example.com", "number 1"),
+        mail("2", "lara@example.com", "number 2"),
+    ])
+    .unwrap();
+    for _ in 0..500 {
+        if o.automation_pending(&a.id).len() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let all = log.events_after("fake", "office@example.com", 0, 10);
+    let [stranger, one, two] = &all[..] else {
+        panic!("{all:?}")
+    };
+    let day = 25 * 3_600_000;
+    let month = 31 * 24 * 3_600_000;
+    assert_eq!(log.prune(now() + 1_000), 0, "nothing is old yet");
+    assert_eq!(log.prune(now() + day), "from a stranger".len() as u64);
+    assert!(log.payload(&stranger.id).is_none());
+    assert_eq!(log.event(&stranger.id).unwrap().payload_bytes, 0);
+    assert!(log.payload(&one.id).is_some(), "its run is open");
+    assert!(log.payload(&two.id).is_some());
+    assert_eq!(
+        log.prune(now() + month),
+        8,
+        "the open run's text goes at 30 days"
+    );
+    assert!(
+        log.payload(&two.id).is_some(),
+        "text waiting for a run stays"
+    );
+    gate.add_permits(2);
+    ended(&o, &a.id, 2).await;
+    assert_eq!(log.prune(now() + day), 0, "a run's message is kept 30 days");
+    assert_eq!(log.prune(now() + month), 8);
+    assert!(log.payload(&two.id).is_none());
+    assert!(
+        log.event(&one.id).is_some(),
+        "the id stays for de-duplication"
+    );
+    assert_eq!(
+        log.ingest(vec![mail("1", "lara@example.com", "number 1")])
+            .unwrap()
+            .repeated,
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_message_that_ran_is_kept_only_among_the_newest_fifty_runs() {
+    let app = App::new();
+    let log = app.log();
+    let m = Script::new(vec![]);
+    let (o, a) = app.automated(&m).await;
+    for i in 0..52 {
+        log.ingest(vec![mail(&i.to_string(), "lara@example.com", "x")])
+            .unwrap();
+        ended(&o, &a.id, i + 1).await;
+    }
+    assert_eq!(log.prune(now() + 1_000), 2, "the two oldest of 52");
+    assert_eq!(log.prune(now() + 1_000), 0);
+}
+
+#[tokio::test]
+async fn storage_pressure_refuses_then_accepts_once_old_text_is_pruned() {
+    let app = App::new();
+    let log = app.log();
+    log.set_limits(LogLimits {
+        retained_bytes: 20,
+        ..LogLimits::default()
+    });
+    let m = Script::new(vec![]);
+    let (_o, _a) = app.automated(&m).await;
+    log.ingest(vec![mail("s", "stranger@example.com", "0123456789012345")])
+        .unwrap();
+    let e = log
+        .ingest(vec![mail("t", "stranger@example.com", "0123456789")])
+        .unwrap_err();
+    assert!(matches!(e, IngestError::Full(_)), "{e}");
+    for _ in 0..500 {
+        if log.waiting("fake", "office@example.com") == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    log.prune(now() + 25 * 3_600_000);
+    assert_eq!(
+        log.ingest(vec![mail("t", "stranger@example.com", "0123456789")])
+            .unwrap()
+            .new,
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_burst_with_every_message_delivered_twice_starts_one_run_each_and_starts_promptly() {
+    let app = App::new();
+    let log = app.log();
+    let m = Script::new(vec![]);
+    let (o, a) = app.automated(&m).await;
+    let batch = |from: usize| -> Vec<ExternalEvent> {
+        (from..from + 50)
+            .map(|i| mail(&i.to_string(), "lara@example.com", &format!("number {i}")))
+            .collect()
+    };
+    let mut repeated = 0;
+    for from in (0..250).step_by(50) {
+        log.ingest(batch(from)).unwrap();
+        repeated += log.ingest(batch(from)).unwrap().repeated;
+    }
+    assert_eq!(repeated, 250);
+    let runs = ended(&o, &a.id, 250).await;
+    settle().await;
+    let runs_now = o.automation_runs(&a.id, 1000);
+    assert_eq!(runs_now.len(), 250, "{} runs", runs.len());
+    let mut texts: Vec<&str> = runs_now.iter().map(|t| t.context.as_str()).collect();
+    texts.sort();
+    texts.dedup();
+    assert_eq!(texts.len(), 250);
+    let saved: std::collections::HashMap<String, u64> = log
+        .events_after("fake", "office@example.com", 0, 1000)
+        .into_iter()
+        .map(|e| (e.id, e.saved_ms))
+        .collect();
+    let mut waits: Vec<u64> = o
+        .automation_evaluations(&a.id)
+        .iter()
+        .take(100)
+        .filter_map(|e| match &e.outcome {
+            Outcome::Started { task } => {
+                let t = runs_now.iter().find(|t| &t.id == task)?;
+                Some(t.created_ms.saturating_sub(*saved.get(&e.event)?))
+            }
+            _ => None,
+        })
+        .collect();
+    waits.sort();
+    assert_eq!(waits.len(), 100);
+    assert!(waits[94] < 2_000, "p95 ingest to task: {} ms", waits[94]);
+}

@@ -90,7 +90,7 @@ async fn the_first_poll_saves_a_baseline_and_later_events_are_saved_before_the_c
 }
 
 #[tokio::test]
-async fn a_full_account_keeps_the_cursor_and_waits_before_polling_again() {
+async fn a_full_account_keeps_the_cursor_shows_full_and_listens_again_once_there_is_room() {
     let f = fixture();
     f.feed().poll_once().await.unwrap();
     f.log.set_limits(LogLimits {
@@ -100,14 +100,25 @@ async fn a_full_account_keeps_the_cursor_and_waits_before_polling_again() {
     f.src.push(Ok(vec![mail("m1")]));
     let r = f.feed().poll_once().await.unwrap();
     assert_eq!(r.cursor.as_deref(), Some("0"), "nothing saved, cursor kept");
-    let FeedState::Degraded { error, retry_at_ms } = &r.state else {
+    let FeedState::Full { detail } = &r.state else {
         panic!("{:?}", r.state)
     };
-    assert!(error.contains("full"), "{error}");
-    assert!(*retry_at_ms > r.last_ok_ms.unwrap() + 29_000, "backs off");
-    let polls = f.seen().len();
-    f.feed().poll_once().await.unwrap();
-    assert_eq!(f.seen().len(), polls, "no poll before the retry time");
+    assert!(detail.contains("at most 4"), "{detail}");
+    assert_eq!(r.failures, 0, "Full is not a failure and does not back off");
+    f.src.push(Ok(vec![mail("m1")]));
+    let again = f.feed().poll_once().await.unwrap();
+    assert!(matches!(again.state, FeedState::Full { .. }));
+    assert_eq!(again.cursor.as_deref(), Some("0"));
+    f.log.set_limits(LogLimits::default());
+    f.src.push(Ok(vec![mail("m1")]));
+    let r = f.feed().poll_once().await.unwrap();
+    assert_eq!(r.state, FeedState::Listening);
+    assert_eq!(
+        f.log
+            .events_after("fake", "office@example.com", 0, 10)
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]

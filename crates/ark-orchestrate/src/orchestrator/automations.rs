@@ -371,12 +371,17 @@ impl Orchestrator {
         let mut grown = self.inner.log.subscribe();
         let mut moved = self.inner.log.feeds_moved();
         tokio::spawn(async move {
+            let mut tidy = tokio::time::interval(std::time::Duration::from_secs(3600));
             loop {
                 {
                     let Some(inner) = weak.upgrade() else { break };
                     inner.evaluate();
                 }
                 tokio::select! {
+                    _ = tidy.tick() => {
+                        let Some(inner) = weak.upgrade() else { break };
+                        inner.log.prune(crate::record::now_ms());
+                    }
                     r = grown.changed() => if r.is_err() { break },
                     r = moved.changed() => {
                         if r.is_err() {

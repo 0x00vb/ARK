@@ -39,6 +39,12 @@ const COUNTER: &str = "event_counter";
 /// How far a provider's clock may be behind this machine's before an event counts as older than
 /// an activation.
 pub const CLOCK_SKEW_MS: u64 = 5 * 60_000;
+/// A message no automation matched keeps its text this long after every automation looked at it.
+pub const UNMATCHED_KEPT_MS: u64 = 24 * 3_600_000;
+/// A message that started a run keeps its text while it is among the automation's newest
+/// [`MATCHED_KEPT_RUNS`] runs, and at most this long.
+pub const MATCHED_KEPT_MS: u64 = 30 * 24 * 3_600_000;
+pub const MATCHED_KEPT_RUNS: usize = 50;
 
 /// Which events start an automation: equality over the trusted fields of an event. `source` and
 /// `account` always; the rest only when set. `actor` is compared as given and as the source
@@ -706,6 +712,16 @@ impl EventLog {
             .waiting(&scope_of(source, account))
     }
 
+    /// Whether the account holds as many messages, or as much text, as it may keep. A feed
+    /// says so itself; a webhook has no feed, so this is how its account shows Full.
+    pub fn is_full(&self, source: &str, account: &str) -> bool {
+        let scope = scope_of(source, account);
+        let limits = self.limits();
+        let index = self.index.lock().unwrap();
+        index.waiting(&scope) >= limits.inbox
+            || index.retained.get(&scope).copied().unwrap_or(0) >= limits.retained_bytes
+    }
+
     /// The (source, account) pairs automations read.
     pub fn accounts(&self) -> Vec<(String, String)> {
         let index = self.index.lock().unwrap();
@@ -718,6 +734,92 @@ impl EventLog {
                     .map(|(a, b)| (a.to_string(), b.to_string()))
             })
             .collect()
+    }
+
+    /// Remove the text of messages that passed their retention, keeping each message's id and
+    /// audit state. Returns the bytes freed. A message nobody has looked at, or that waits for
+    /// a run, is never touched.
+    pub fn prune(&self, now: u64) -> u64 {
+        let mut index = self.index.lock().unwrap();
+        self.prune_with(&mut index, now)
+    }
+
+    fn prune_with(&self, index: &mut Index, now: u64) -> u64 {
+        let events: Vec<StoredEvent> = self
+            .store
+            .list_records(EVENT, None)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|v| serde_json::from_value(v).ok())
+            .filter(|e: &StoredEvent| e.payload_bytes > 0)
+            .collect();
+        if events.is_empty() {
+            return 0;
+        }
+        let mut pending: HashSet<String> = HashSet::new();
+        let mut started: HashMap<String, Vec<(u64, String)>> = HashMap::new();
+        for v in self
+            .store
+            .list_records(EVALUATION, None)
+            .unwrap_or_default()
+        {
+            let Ok(ev) = serde_json::from_value::<EventEvaluation>(v) else {
+                continue;
+            };
+            match ev.outcome {
+                Outcome::Pending => {
+                    pending.insert(ev.event);
+                }
+                Outcome::Started { .. } => started
+                    .entry(ev.automation)
+                    .or_default()
+                    .push((ev.seq, ev.event)),
+                _ => {}
+            }
+        }
+        let mut ran: HashSet<String> = HashSet::new();
+        let mut recent: HashSet<String> = HashSet::new();
+        for runs in started.values_mut() {
+            runs.sort_by_key(|r| std::cmp::Reverse(r.0));
+            for (i, (_, event)) in runs.iter().enumerate() {
+                ran.insert(event.clone());
+                if i < MATCHED_KEPT_RUNS {
+                    recent.insert(event.clone());
+                }
+            }
+        }
+        let mut freed = 0;
+        for e in events {
+            let scope = scope_of(&e.event.source, &e.event.account);
+            let looked_at = index
+                .marks
+                .values()
+                .filter(|m| m.holds && m.scope == scope)
+                .all(|m| m.evaluated >= e.seq);
+            let age = now.saturating_sub(e.saved_ms);
+            let expired = if ran.contains(&e.id) {
+                !recent.contains(&e.id) || age >= MATCHED_KEPT_MS
+            } else {
+                age >= UNMATCHED_KEPT_MS
+            };
+            if !looked_at || pending.contains(&e.id) || !expired {
+                continue;
+            }
+            let mut gone = e.clone();
+            gone.payload_bytes = 0;
+            let Ok(v) = serde_json::to_value(&gone) else {
+                continue;
+            };
+            let done = self.store.delete_record(PAYLOAD, &e.id).is_ok()
+                && self.store.put_record(EVENT, &e.id, &scope, &v).is_ok();
+            if done {
+                freed += e.payload_bytes;
+                if let Some(kept) = index.retained.get_mut(&scope) {
+                    *kept = kept.saturating_sub(e.payload_bytes);
+                }
+            }
+        }
+        freed
     }
 
     pub(crate) fn mark(&self, a: &EventAutomationRecord) {
@@ -786,7 +888,11 @@ impl EventSink for EventLog {
                     limits.inbox
                 )));
             }
-            let kept = index.retained.get(scope).copied().unwrap_or(0);
+            let mut kept = index.retained.get(scope).copied().unwrap_or(0);
+            if kept + bytes > limits.retained_bytes {
+                self.prune_with(&mut index, now_ms());
+                kept = index.retained.get(scope).copied().unwrap_or(0);
+            }
             if kept + bytes > limits.retained_bytes {
                 return Err(IngestError::Full(format!(
                     "{scope} keeps {kept} bytes of messages; at most {} are kept",

@@ -56,6 +56,11 @@ pub enum FeedState {
         since_ms: Option<u64>,
         detail: String,
     },
+    /// The account holds as many messages as it may. Nothing is read past the cursor; the next
+    /// poll comes at the usual time and the feed listens again once there is room.
+    Full {
+        detail: String,
+    },
     /// The provider asked to wait until then.
     RateLimited {
         until_ms: u64,
@@ -170,7 +175,13 @@ impl Feed {
             match self.source.poll(r.cursor.as_deref(), MAX).await {
                 Ok(b) => {
                     if let Err(e) = keep(&log, &mut r, b.events) {
-                        r = degraded(r, e.to_string(), self.every);
+                        r = match e {
+                            IngestError::Full(detail) => {
+                                r.state = FeedState::Full { detail };
+                                r
+                            }
+                            e => degraded(r, e.to_string(), self.every),
+                        };
                         break;
                     }
                     r.cursor = Some(b.cursor);

@@ -409,7 +409,7 @@ async fn a_setup_that_graph_does_not_confirm_is_not_saved() {
                     _ => (200, json!({ "data": [] })),
                 })
             }),
-            "subscribe the app",
+            "subscribe your Meta app",
         ),
     ];
     for (route, says) in cases {

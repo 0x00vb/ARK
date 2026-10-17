@@ -11,6 +11,11 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- Event automations A4 and WhatsApp setup: a feed at its inbox or storage limit shows Full with
+  its cursor kept; text of old messages is pruned by the documented retention; Settings ›
+  WhatsApp connects a Business number with Meta's checks, lists its callback path and
+  disconnects it (`whatsapp`, `whatsapp_connect`). Secrets never come back in an error
+  ([docs/AUTOMATIONS.md](docs/AUTOMATIONS.md)).
 - `ark.chatView(el, { submit, placeholder })` draws an app's conversation with the chat's own
   turns, work blocks, prose and composer, so it reads exactly as a chat. ARK Desktop's agent pane
   is the first user ([ADR 0076](docs/adr/0076-an-apps-conversation-uses-the-chats-own-view.md)).

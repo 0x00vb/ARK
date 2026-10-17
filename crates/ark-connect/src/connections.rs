@@ -421,6 +421,11 @@ impl Connections {
         services::whatsapp::connect(self, setup).await
     }
 
+    /// The connected WhatsApp Business numbers and where Meta sends their webhooks.
+    pub fn whatsapp_numbers(&self) -> Vec<(Account, services::whatsapp::Hookup)> {
+        services::whatsapp::numbers(self)
+    }
+
     pub(crate) fn secrets(&self) -> &Arc<dyn Secrets> {
         &self.inner.secrets
     }

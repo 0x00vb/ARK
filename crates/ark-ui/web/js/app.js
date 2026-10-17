@@ -27,6 +27,7 @@ import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js
 import { os, label, relabel } from "./keys.js";
 import { Places } from "./places.js";
 import { registerComputers } from "./computers.js";
+import { registerWhatsapp } from "./whatsapp.js";
 import { MAX_VISIBLE_CHATS, chatLeaf, visibleChats, splitChat as splitLayoutChat, removeChat as removeLayoutChat, replaceChat, updateRatio, restoreLayout } from "./chat-layout.js";
 
 const transport = connect();
@@ -2047,6 +2048,7 @@ async function bootOnce(again) {
     registerSkills(window.ark);
     registerDevices(window.ark);
     registerComputers(window.ark);
+    registerWhatsapp(window.ark);
     keepInStep(window.ark);
     // A notification tapped: the item it is about (ADR 0047).
     openItems((id) => {

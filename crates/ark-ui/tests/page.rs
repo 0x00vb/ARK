@@ -869,6 +869,11 @@ async fn devices_startup_skips_native_session_fetch_and_handles_bad_browser_json
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_whatsapp_setup_form_shows_every_state_and_keeps_secrets_out_of_view() {
+    drive("whatsapp-setup", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn required_extension_failure_blocks_the_workspace_and_names_the_module() {
     drive("startup-extension-failure", vec![], Duration::ZERO).await;
 }

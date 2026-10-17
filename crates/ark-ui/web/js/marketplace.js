@@ -72,6 +72,7 @@ function marketplace(el, ark) {
 
   const connect = async (entry) => {
     if (connecting.has(entry.id)) return;
+    if (entry.source === "local" && entry.capabilityId === "whatsapp") return ark.openSettings("whatsapp");
     connecting.add(entry.id);
     notice.textContent = "";
     draw();

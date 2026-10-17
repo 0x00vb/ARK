@@ -56,6 +56,26 @@ struct DictationUpload {
     touched: std::time::Instant,
 }
 
+/// The connected WhatsApp Business numbers as the page lists them: the name, the account id to
+/// disconnect it by, and the path Meta sends webhooks to.
+fn whatsapp_numbers(
+    c: Option<&ark_interact::ark_sdk::prelude::ark_connect::Connections>,
+) -> Vec<Value> {
+    c.map(|c| c.whatsapp_numbers())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(a, h)| json!({ "id": a.id, "name": a.name, "path": h.path }))
+        .collect()
+}
+
+/// `text` with each of `secrets` replaced, so an error from a provider never echoes one back.
+fn without(text: &str, secrets: &[String]) -> String {
+    secrets
+        .iter()
+        .filter(|s| !s.is_empty())
+        .fold(text.to_string(), |t, s| t.replace(s.as_str(), "..."))
+}
+
 fn begin_dictation_upload(
     uploads: &mut HashMap<String, DictationUpload>,
     owner: String,
@@ -3507,6 +3527,35 @@ impl Host {
                 keys.save(&s("provider"), &s("key")).await?;
                 Ok(json!({ "saved": keys.saved() }))
             }
+            // WhatsApp Business numbers (ark-connect): the connected ones with the path Meta
+            // sends their webhooks to, and connecting one after Graph confirms its setup.
+            "whatsapp" => {
+                let c = self.caps.connections.as_ref();
+                Ok(json!({ "can_connect": c.is_some(), "numbers": whatsapp_numbers(c) }))
+            }
+            "whatsapp_connect" => {
+                let c = self
+                    .caps
+                    .connections
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("this app connects no accounts"))?;
+                let setup = ark_interact::ark_sdk::prelude::ark_connect::services::whatsapp::Setup {
+                    waba_id: s("waba_id").trim().into(),
+                    phone_id: s("phone_id").trim().into(),
+                    app_secret: s("app_secret").trim().into(),
+                    verify_token: s("verify_token").trim().into(),
+                    token: s("token").trim().into(),
+                };
+                let secrets = [
+                    setup.app_secret.clone(),
+                    setup.verify_token.clone(),
+                    setup.token.clone(),
+                ];
+                c.connect_whatsapp(setup)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(without(&e.to_string(), &secrets)))?;
+                Ok(json!({ "numbers": whatsapp_numbers(Some(c)) }))
+            }
             "api_key_forget" => {
                 let keys = self
                     .api_keys()
@@ -4849,5 +4898,21 @@ mod dictation_tests {
         );
         assert!(write_dictation_chunk(upload, "alice", 0, b"two").is_err());
         assert!(write_dictation_chunk(upload, "alice", 1, &vec![0; DICTATION_CHUNK + 1]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod whatsapp_tests {
+    use super::without;
+
+    #[test]
+    fn an_error_never_echoes_a_secret_back() {
+        let said =
+            "Meta refused the access token: Invalid OAuth access token EAAB123 for secret s3cr3t";
+        let out = without(said, &["EAAB123".into(), "s3cr3t".into(), String::new()]);
+        assert_eq!(
+            out,
+            "Meta refused the access token: Invalid OAuth access token ... for secret ..."
+        );
     }
 }

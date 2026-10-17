@@ -2145,7 +2145,7 @@ async function marketplace(page) {
   assert.equal(await destination.getAttribute("aria-current"), "page");
   assert.equal(await page.locator('.destination[data-destination="home"]').getAttribute("aria-current"), null);
   await page.locator('.market-row[data-id="capability:mail"]').waitFor();
-  assert.deepEqual(await page.locator(".market-row .market-copy strong").allInnerTexts(), ["Mail", "Calendar"]);
+  assert.deepEqual(await page.locator(".market-row .market-copy strong").allInnerTexts(), ["Mail", "Inbox", "WhatsApp Business", "Calendar"]);
   const size = page.viewportSize();
   for (const [name, width] of [["wide", 1280], ["narrow", 480]]) {
     await page.setViewportSize({ width, height: 800 });
@@ -3515,6 +3515,110 @@ async function computerSwitch(page) {
   await row.getByRole("button", { name: "Turn off" }).waitFor();
 }
 scenarios["computer-switch"] = computerSwitch;
+
+// Settings › WhatsApp: every state of the form against a host that checks with Meta.
+scenarios["whatsapp-setup"] = async (page) => {
+  await page.evaluate(async () => {
+    const { registerWhatsapp } = await import("./js/whatsapp.js");
+    const state = { numbers: [], calls: [], toasts: [], hold: null, fail: null };
+    window.__wa = state;
+    const ark = {
+      toast: (t) => state.toasts.push(t),
+      setting: (s) => {
+        const host = document.createElement("div");
+        host.className = "settings";
+        host.style.cssText = "position:fixed;inset:0;z-index:99;background:var(--bg,#fff);padding:24px;overflow:auto";
+        host.id = "wa-host";
+        const body = document.createElement("div");
+        body.className = "settings-section";
+        host.append(body);
+        document.body.append(host);
+        s.render(body, ark);
+      },
+      call: async (method, params) => {
+        state.calls.push([method, params]);
+        if (method === "whatsapp") return { can_connect: true, numbers: state.numbers };
+        if (method === "whatsapp_connect") {
+          if (state.hold) await state.hold;
+          if (state.fail) throw new Error(state.fail);
+          const id = `whatsapp:${params.waba_id}/${params.phone_id}`;
+          if (!state.numbers.some((n) => n.id === id)) state.numbers.push({ id, name: "+34 600 000 000", path: "/hooks/whatsapp/abc123" });
+          return { numbers: state.numbers };
+        }
+        if (method === "capability_disconnect") {
+          state.numbers = state.numbers.filter((n) => n.id !== params.id);
+          return {};
+        }
+        throw new Error(method);
+      },
+    };
+    await registerWhatsapp(ark);
+  });
+  const form = page.locator("#wa-host .wa-form");
+  await form.waitFor();
+  const connect = form.getByRole("button", { name: "Connect" });
+  assert.equal(await page.locator("#wa-host .plugin-list").isVisible(), false, "empty: no list");
+  assert.equal(await connect.isDisabled(), true, "empty: Connect waits for all five");
+  await shot(page, "whatsapp-empty");
+  const fill = async (token) => {
+    await form.locator('[name="waba_id"]').fill("111");
+    await form.locator('[name="phone_id"]').fill(" 222 ");
+    await form.locator('[name="token"]').fill(token);
+    await form.locator('[name="app_secret"]').fill("secret");
+    await form.locator('[name="verify_token"]').fill("verify");
+  };
+  await fill("tok-1");
+  assert.equal(await connect.isDisabled(), false);
+  // Checking: inputs and button locked, one request even if pressed twice.
+  await page.evaluate(() => { window.__wa.hold = new Promise((ok) => { window.__wa.release = ok; }); window.__wa.fail = "Meta refused the access token: expired"; });
+  await form.locator('[name="verify_token"]').press("Enter");
+  await form.getByRole("button", { name: "Checking…" }).waitFor();
+  assert.equal(await form.locator('[name="token"]').isDisabled(), true);
+  await form.evaluate((f) => f.requestSubmit());
+  await shot(page, "whatsapp-checking");
+  await page.evaluate(() => window.__wa.release());
+  // Error: the reason, the field at fault, the values kept.
+  await page.locator("#wa-host .plugin-why", { hasText: "Meta refused the access token" }).waitFor();
+  assert.equal(await form.locator('[name="token"]').getAttribute("aria-invalid"), "true");
+  assert.equal(await form.locator('[name="token"]').inputValue(), "tok-1", "the person's input is kept");
+  assert.equal(await page.evaluate(() => document.activeElement?.name), "token");
+  assert.equal(await page.evaluate(() => window.__wa.calls.filter((c) => c[0] === "whatsapp_connect").length), 1, "one request");
+  assert.equal(await page.evaluate(() => window.__wa.calls.find((c) => c[0] === "whatsapp_connect")[1].phone_id), "222", "values are trimmed");
+  await shot(page, "whatsapp-error");
+  // Connected: secrets cleared, a row with the path, a toast without a secret.
+  await page.evaluate(() => { window.__wa.hold = null; window.__wa.fail = null; });
+  await form.locator('[name="token"]').fill("tok-2");
+  await connect.click();
+  const row = page.locator("#wa-host .plugin-row");
+  await row.waitFor();
+  assert.match(await row.innerText(), /\+34 600 000 000[\s\S]*\/hooks\/whatsapp\/abc123/);
+  for (const n of ["waba_id", "token", "app_secret", "verify_token"]) assert.equal(await form.locator(`[name="${n}"]`).inputValue(), "", `${n} cleared`);
+  assert.deepEqual(await page.evaluate(() => window.__wa.toasts), ["+34 600 000 000 connected"]);
+  await shot(page, "whatsapp-connected");
+  // The same number again is an update, and keeps one row.
+  await fill("tok-3");
+  await connect.click();
+  await page.waitForFunction(() => window.__wa.toasts.length === 2);
+  assert.equal((await page.evaluate(() => window.__wa.toasts))[1], "+34 600 000 000 updated");
+  assert.equal(await row.count(), 1);
+  // Keyboard: the form is reachable by Tab and Disconnect is a button.
+  await row.getByRole("button", { name: "Disconnect" }).focus();
+  assert.equal(await page.evaluate(() => document.activeElement.textContent), "Disconnect");
+  // Dark and narrow.
+  await page.setViewportSize({ width: 360, height: 700 });
+  await shot(page, "whatsapp-narrow");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.evaluate(() => window.arkTheme?.setMode?.("dark"));
+  await shot(page, "whatsapp-dark");
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "no sideways scroll when narrow");
+  // Disconnect asks once, then removes.
+  const remove = row.getByRole("button", { name: "Disconnect" });
+  await remove.click();
+  await shot(page, "whatsapp-disconnect-confirm");
+  await row.getByRole("button", { name: "Disconnect?" }).click();
+  await page.waitForFunction(() => document.querySelector("#wa-host .plugin-list").hidden);
+  assert.equal(await row.count(), 0);
+};
 
 const run = scenarios[scenario];
 if (!run) {

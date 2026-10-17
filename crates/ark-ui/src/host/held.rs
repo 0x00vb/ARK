@@ -870,6 +870,8 @@ impl Host {
             | "api_keys"
             | "api_key_save"
             | "api_key_forget"
+            | "whatsapp"
+            | "whatsapp_connect"
             | "subscription_usage"
             | "capabilities"
             | "capability_connect"

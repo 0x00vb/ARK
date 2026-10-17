@@ -134,7 +134,9 @@ runs per automation and 256 MiB of retained event payloads per account. A pull f
 advancing its cursor when full. A webhook returns a retryable failure before acknowledgement.
 One attention item explains the limit. Pending, queued, open or uncertain input is never pruned.
 Evaluated unmatched payloads are removed after 24 hours; matched payloads follow the newest 50
-runs and 30-day maximum, while their ids and audit state remain.
+runs and 30-day maximum, while their ids and audit state remain. `EventLog::prune` does this
+hourly and before a save is refused for storage. A feed that cannot save for either limit shows
+Full (not Degraded), keeps its cursor and tries again at the poll interval.
 
 ### Activation and changes
 
@@ -347,8 +349,12 @@ review and a first-use dogfood.
 | A5 | Optional transports | Gmail Pub/Sub or an ARK relay only if polling latency or public webhook setup blocks real use |
 
 Status: A0, A1, A2 (Mail, against a fake Gmail) and A3 (WhatsApp Business, against a fake Graph
-API) are built on the `event-automations` branch. No real Google or Meta account was used. A3 has
-no setup form yet: a number connects through `Connections::connect_whatsapp`. Its runs show a
+API) and A4 (limits, against fakes) are built on the `event-automations` branch. No real Google
+or Meta account was used. Settings › WhatsApp connects a number with the checks of
+`Connections::connect_whatsapp` and shows the callback path. A4 ran with tight limits on a Mac:
+a run on NAS-class hardware (memory, SQLite growth, the 2-second p95 at 1,000 events) is an owner
+card. Not tested: disk full (a store error becomes Degraded with backoff by code path only),
+reply loop and quota race beyond the A1 tests. Its runs show a
 closed reply window and an uncertain send as the run's failure and effect, not as their own
 automation states.
 

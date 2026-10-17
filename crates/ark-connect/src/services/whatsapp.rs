@@ -173,7 +173,7 @@ pub async fn connect(
     let (status, apps) = get(format!("{base}/{}/subscribed_apps", setup.waba_id)).await?;
     if status != 200 || apps["data"].as_array().is_none_or(|a| a.is_empty()) {
         return Err(ConnectError::NotSetUp(format!(
-            "WhatsApp Business Account {} sends its webhooks to no app; subscribe the app to it first",
+            "WhatsApp Business Account {} sends its messages to no app; subscribe your Meta app to it first",
             setup.waba_id
         )));
     }
@@ -213,6 +213,24 @@ pub async fn connect(
             path: format!("/hooks/{SOURCE}/{route}"),
         },
     ))
+}
+
+/// Every connected number with the path Meta sends its webhooks to.
+pub fn numbers(conns: &Connections) -> Vec<(Account, Hookup)> {
+    conns
+        .accounts()
+        .into_iter()
+        .filter(|a| a.provider == PROVIDER)
+        .filter_map(|a| {
+            let route = saved(conns, &a.id)?.route;
+            Some((
+                a,
+                Hookup {
+                    path: format!("/hooks/{SOURCE}/{route}"),
+                },
+            ))
+        })
+        .collect()
 }
 
 fn saved(conns: &Connections, account: &str) -> Option<Saved> {

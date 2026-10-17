@@ -527,7 +527,7 @@ fn program_approval(action: &str, input: &Value) -> Option<String> {
     let lines: Vec<String> = command.lines().map(|l| format!("  {l}")).collect();
     // ADR 0074: a program ARK contains changes files only there.
     let how = if input.get("contained") == Some(&Value::Bool(true)) {
-        "Contained: besides its own folders, it can change files only there. It connects only over HTTPS."
+        "Contained: besides its own folders, it can change files only there. It reaches the network only on port 443."
     } else {
         "Not contained: it runs as you."
     };
@@ -962,7 +962,7 @@ mod tests {
         );
         assert_eq!(
             ask(json!({ "command": "ls -la", "folder": ".", "contained": true })),
-            "Run this in the project folder. Contained: besides its own folders, it can change files only there. It connects only over HTTPS.\n  ls -la"
+            "Run this in the project folder. Contained: besides its own folders, it can change files only there. It reaches the network only on port 443.\n  ls -la"
         );
     }
 

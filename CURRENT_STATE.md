@@ -7,6 +7,14 @@ Whisper and GGML native logs are silenced, Devices skips `/session` in native wi
 notification page setup runs only in the app's own main window (ADR 0029). Open: a native check
 of detached and remote windows at the screen. Board `26025811`.
 
+## Contained agent programs and limits (branch `contain`)
+
+ADR 0074 (Proposed): on macOS, Claude Code and Grok workers run in ARK's sandbox (writes to the
+project and their own state, port 443 only, ARK's store and credential folders hidden; Claude's
+MCP servers in `~/.claude.json` put back after each run). Codex and `process.start` are not
+contained; Linux and Windows workers not yet. Left: a signed-in prompt on Claude Code and Grok
+contained (the owner's OK), the owner accepting the ADR. Board `ae203480`.
+
 ## Bounded code runs
 
 On `main` (ADR 0072): two active code runs, eight waiting, one per project, owned cleanup on

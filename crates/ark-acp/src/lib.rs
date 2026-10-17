@@ -168,8 +168,6 @@ pub fn entries() -> Vec<Entry> {
     entries_at(Some(&root))
 }
 
-/// What Claude Code runs later from its own folder, outside the sandbox: settings (hooks,
-/// allow rules), commands, agents, skills, plugins, its old local install, its instructions.
 /// What Claude Code writes in `~/.claude` as it works: transcripts, todos, history, caches.
 /// Nothing else there is writable: settings (hooks, allow rules), commands, agents, skills,
 /// plugins and backups are what its next run outside the sandbox reads and runs.
@@ -197,6 +195,7 @@ const CLAUDE_GUARDED: &[&str] = &[
     "/projects/*/enabledMcpjsonServers",
     "/projects/*/enableAllProjectMcpServers",
     "/projects/*/allowedTools",
+    "/projects/*/hasTrustDialogAccepted",
 ];
 
 fn entries_at(root: Option<&Path>) -> Vec<Entry> {

@@ -161,7 +161,12 @@ impl Worker for Acp {
         cmd.process_group(0);
         // Put back after the run, however it ends: dropped after the program is stopped.
         let _guarded: Vec<crate::guard::Kept> = match (&self.entry.contain, &contained) {
-            (Some(c), Some(_)) => c.guarded.iter().map(crate::guard::Kept::take).collect(),
+            (Some(c), Some(_)) => c
+                .guarded
+                .iter()
+                .map(crate::guard::Kept::take)
+                .collect::<Result<_, _>>()
+                .map_err(|e| format!("{title} did not start contained: {e}"))?,
             _ => Vec::new(),
         };
         let mut child = cmd
@@ -972,7 +977,14 @@ fn bounds(c: &Contain, at: &Place<'_>) -> Result<ark_exec::Bounds, String> {
             _ => tmp,
         });
     }
-    let mut allowed = program_folders(at.program, at.path);
+    // A program kept in the home itself (`~/bin/node`) would open all of it: not allowed.
+    let mut allowed: Vec<PathBuf> = program_folders(at.program, at.path)
+        .into_iter()
+        .filter(|f| {
+            !at.home
+                .is_some_and(|h| h.starts_with(f) || resolved(h).starts_with(f))
+        })
+        .collect();
     let mut never = Vec::new();
     if let Some(home) = at.home {
         hidden.push(home.to_path_buf());
@@ -1361,6 +1373,21 @@ mod tests {
         )
         .unwrap();
         assert!(!except(&b).2.contains(&hidden[0]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_program_kept_in_the_home_itself_does_not_open_the_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().canonicalize().unwrap();
+        let tool = home.join("tool");
+        std::fs::write(&tool, "\x7fELF").unwrap();
+        let work = home.join("work");
+        std::fs::create_dir(&work).unwrap();
+        let mut at = place(&work, &home, &[]);
+        at.program = &tool;
+        let b = bounds(&Contain::default(), &at).unwrap();
+        assert!(!except(&b).1.contains(&home), "{:?}", except(&b).1);
     }
 
     #[test]

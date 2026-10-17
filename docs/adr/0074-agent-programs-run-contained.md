@@ -51,7 +51,7 @@ The catalog (`ark-acp`, data beside `settings_dir` and `isolated_home`):
 
 | Program | Writes | Kept | Keychain |
 |---|---|---|---|
-| Claude Code | in `~/.claude` only what it writes as it works (`projects`, `todos`, `statsig`, `session-env`, `file-history`, `plans`, `debug`, `telemetry`, `cache`, `paste-cache`, `ide`, `sessions`, `history.jsonl`, `stats-cache.json`, `.credentials.json`); `~/.claude.json` and its siblings; its cache folder. Not its settings, commands, agents, skills, plugins or backups | after each run ARK puts back what it changed in `~/.claude.json` under `mcpServers` and, per project, `mcpServers`, `enabledMcpjsonServers`, `enableAllProjectMcpServers`, `allowedTools` | yes |
+| Claude Code | in `~/.claude` only what it writes as it works (`projects`, `todos`, `statsig`, `session-env`, `file-history`, `plans`, `debug`, `telemetry`, `cache`, `paste-cache`, `ide`, `sessions`, `history.jsonl`, `stats-cache.json`, `.credentials.json`); `~/.claude.json` and its siblings; its cache folder. Not its settings, commands, agents, skills, plugins or backups | after each run ARK puts back what it changed in `~/.claude.json` under `mcpServers` and, per project, `mcpServers`, `enabledMcpjsonServers`, `enableAllProjectMcpServers`, `allowedTools`, `hasTrustDialogAccepted`. A file ARK cannot read as JSON after the run comes back whole; one it cannot read before, refuses the start | yes |
 | Grok | its private home (ADR 0061) | `node_modules` (its program), `config.toml` (its ask rules), `.npmrc`, `package.json`, `package-lock.json`, `.npm` (what ARK's own update reads) | no |
 | Codex | not contained | | |
 
@@ -60,8 +60,8 @@ contained program gets its own folder for the run: the adapter's empty home and 
 state folders are made first when missing (0700). It does not start contained, and says why,
 when its settings are moved (`CLAUDE_CONFIG_DIR` set) or the project folder holds the whole
 home. Approvals keep their grants: a change and a command still ask. A command's question says
-"Contained: besides its own folders, it can change files only there. It connects only over
-HTTPS." instead of "Not contained: it runs as you." Where the system has no sandbox for
+"Contained: besides its own folders, it can change files only there. It reaches the network
+only on port 443." instead of "Not contained: it runs as you." Where the system has no sandbox for
 programs, the program starts as before.
 
 | System | Agent programs |
@@ -86,7 +86,16 @@ home (`~/.npm`, `~/.cargo`), and an install needs the network. Neither was spike
   The login keychain file itself is readable (the spike: no login without it), so it can be sent
   out for an offline attack on its password.
 - `~/.claude.json` stays writable. A change to its MCP servers or allowed tools is put back after
-  the run; the person's own `claude` running at the same moment could read it before that.
+  the run, under Claude Code's own lock, through a link to the file. Not covered: the person's own
+  `claude` reading it before that; a change the person makes there during the run (`claude mcp
+  add`), which is undone too; a process the program detached (`setsid`), which outlives the run
+  and keeps its write access.
+- The keychain lookup also lets it change items (`security add-generic-password -U`), for example
+  the person's Claude login.
+- A project's own `.mcp.json` is writable like its other files; Claude Code's trust prompt is
+  what stands before it runs those servers.
+- A program found through a version manager's shim (`~/.asdf/shims`, mise) opens only the shim's
+  folder, so it may fail to start contained. A program kept in the home itself never opens the home.
 - Claude Code's memory files (`~/.claude/projects/*/memory`) stay writable: text a later session
   reads, like the project's own files.
 - A grant for a command covers it contained or not (the class is unchanged).

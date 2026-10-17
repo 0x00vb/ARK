@@ -8,6 +8,7 @@ description = "ARK's agents on other agent programs (Claude Code, Codex) over th
 
 [dependencies]
 ark-core.workspace = true
+ark-exec.workspace = true
 ark-model.workspace = true
 ark-os.workspace = true
 ark-runtime.workspace = true

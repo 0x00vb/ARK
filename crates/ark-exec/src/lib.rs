@@ -35,7 +35,7 @@ pub mod python;
 mod sandbox;
 
 pub use python::Python;
-pub use sandbox::{entry, Bounds, Sandbox};
+pub use sandbox::{entry, Bounds, Network, Reads, Sandbox, Write, PRIVATE};
 
 /// The action.
 pub const RUN: &str = "code.run";
@@ -367,11 +367,7 @@ fn prepare(
     }
     let file = work.join(launch.file);
     std::fs::write(&file, code).map_err(io)?;
-    let bounds = Bounds {
-        project: project.clone(),
-        scratch: work,
-        reads: launch.reads.clone(),
-    };
+    let bounds = Bounds::run(project.clone(), work, launch.reads.clone());
     let mut args = launch.args;
     args.push(file.display().to_string());
     check_cancel(cancel)?;

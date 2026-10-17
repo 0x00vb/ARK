@@ -9,11 +9,7 @@ fn main() {
         "environment python script project scratch [script arguments]"
     );
     let sandbox = ark_exec::Sandbox::native().expect("native sandbox");
-    let bounds = ark_exec::Bounds {
-        project: args[3].clone(),
-        scratch: args[4].clone(),
-        reads: vec![args[0].clone()],
-    };
+    let bounds = ark_exec::Bounds::run(args[3].clone(), args[4].clone(), vec![args[0].clone()]);
     let (exe, argv) = sandbox
         .wrap(
             &bounds,

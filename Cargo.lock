@@ -185,6 +185,7 @@ name = "ark-acp"
 version = "0.25.0"
 dependencies = [
  "ark-core",
+ "ark-exec",
  "ark-model",
  "ark-os",
  "ark-runtime",

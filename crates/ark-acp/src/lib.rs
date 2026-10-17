@@ -10,9 +10,11 @@
 //!
 //! ARK stays the authority: the program starts with a clean environment, without the person's
 //! or the project's own allow rules, in the mode that asks; every grant is ARK's and names the
-//! file or the command. Which programs exist and how each is started is data ([`Catalog`]).
+//! file or the command. On macOS it runs contained (ADR 0074, [`Contain`]): it writes only the
+//! project and its own state. Which programs exist and how each is started is data ([`Catalog`]).
 
 mod client;
+mod guard;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -67,6 +69,35 @@ pub struct Entry {
     pub models: &'static [(&'static str, &'static str)],
     /// How a person sets it up when it is missing.
     pub setup: &'static str,
+    /// How ARK contains it where the system can (ADR 0074). `None`: ARK does not.
+    pub contain: Option<Contain>,
+}
+
+/// What a contained program may touch besides its project (ADR 0074). It reads what is outside
+/// the person's home; in the home, only its program, its own folders and these.
+#[derive(Clone, Debug, Default)]
+pub struct Contain {
+    /// Folders it writes: its own state.
+    pub folders: Vec<PathBuf>,
+    /// Files it writes, with their siblings named after them and a dot (a lock, a copy).
+    pub files: Vec<PathBuf>,
+    /// Names inside each of `folders` that stay read-only: what runs later outside the
+    /// sandbox (its own program, settings with hooks, its ask rules).
+    pub kept: &'static [&'static str],
+    /// Its login is in the macOS keychain.
+    pub keychain: bool,
+    /// Keys of its JSON state files that ARK puts back after each run.
+    pub guarded: Vec<Guard>,
+}
+
+/// Keys of a JSON file a contained program may write but not change: what would start a
+/// program, or allow a tool, in its next run outside the sandbox. Each key is a JSON pointer;
+/// `*` stands for any key of an object. After each run ARK puts back their values from before
+/// it, and removes what it added under them; the rest of the file stays as the program left it.
+#[derive(Clone, Debug)]
+pub struct Guard {
+    pub file: PathBuf,
+    pub keys: &'static [&'static str],
 }
 
 /// How a job's model reaches a program.
@@ -137,7 +168,40 @@ pub fn entries() -> Vec<Entry> {
     entries_at(Some(&root))
 }
 
+/// What Claude Code runs later from its own folder, outside the sandbox: settings (hooks,
+/// allow rules), commands, agents, skills, plugins, its old local install, its instructions.
+/// What Claude Code writes in `~/.claude` as it works: transcripts, todos, history, caches.
+/// Nothing else there is writable: settings (hooks, allow rules), commands, agents, skills,
+/// plugins and backups are what its next run outside the sandbox reads and runs.
+const CLAUDE_FOLDERS: &[&str] = &[
+    "projects",
+    "todos",
+    "statsig",
+    "session-env",
+    "file-history",
+    "plans",
+    "debug",
+    "telemetry",
+    "cache",
+    "paste-cache",
+    "ide",
+    "sessions",
+];
+const CLAUDE_FILES: &[&str] = &["history.jsonl", "stats-cache.json", ".credentials.json"];
+
+/// What in `~/.claude.json` would start a program, or allow a tool, in Claude Code's next run
+/// outside the sandbox: put back after each contained run.
+const CLAUDE_GUARDED: &[&str] = &[
+    "/mcpServers",
+    "/projects/*/mcpServers",
+    "/projects/*/enabledMcpjsonServers",
+    "/projects/*/enableAllProjectMcpServers",
+    "/projects/*/allowedTools",
+];
+
 fn entries_at(root: Option<&Path>) -> Vec<Entry> {
+    let home = ark_os::dirs::home();
+    let home = home.as_deref();
     vec![
         Entry {
             name: "claude-code",
@@ -156,6 +220,28 @@ fn entries_at(root: Option<&Path>) -> Vec<Entry> {
             isolated_home: None,
             models: &[("sonnet", "Sonnet"), ("opus", "Opus"), ("haiku", "Haiku")],
             setup: "install Claude Code and its connector (`npm install -g @zed-industries/claude-agent-acp@0.23`), then sign in with `claude`",
+            contain: home.map(|h| Contain {
+                folders: CLAUDE_FOLDERS
+                    .iter()
+                    .map(|f| h.join(".claude").join(f))
+                    .chain([if cfg!(target_os = "macos") {
+                        h.join("Library/Caches/claude-cli-nodejs")
+                    } else {
+                        h.join(".cache/claude-cli-nodejs")
+                    }])
+                    .collect(),
+                files: CLAUDE_FILES
+                    .iter()
+                    .map(|f| h.join(".claude").join(f))
+                    .chain([h.join(".claude.json")])
+                    .collect(),
+                kept: &[],
+                keychain: true,
+                guarded: vec![Guard {
+                    file: h.join(".claude.json"),
+                    keys: CLAUDE_GUARDED,
+                }],
+            }),
         },
         Entry {
             name: "codex",
@@ -180,6 +266,9 @@ fn entries_at(root: Option<&Path>) -> Vec<Entry> {
             isolated_home: None,
             models: &[],
             setup: "install Codex and its connector (`npm install -g @zed-industries/codex-acp@0.16`), then sign in with `codex`",
+            // Codex runs each command in its own sandbox, and macOS cannot start one sandbox
+            // inside another (`sandbox_apply: Operation not permitted`).
+            contain: None,
         },
         Entry {
             name: "grok",
@@ -203,6 +292,22 @@ fn entries_at(root: Option<&Path>) -> Vec<Entry> {
                 ("grok-4.5", "Grok 4.5"),
             ],
             setup: "install Grok 1.0.50 in ARK's private worker folder, then sign in with `grok login --device-auth`",
+            contain: root.map(|r| Contain {
+                folders: vec![r.join("grok")],
+                files: Vec::new(),
+                // What ARK's own setup and probes run or read outside the sandbox: its
+                // program, its ask rules, and npm's settings and cache for an update.
+                kept: &[
+                    "node_modules",
+                    "config.toml",
+                    ".npmrc",
+                    "package.json",
+                    "package-lock.json",
+                    ".npm",
+                ],
+                keychain: false,
+                guarded: Vec::new(),
+            }),
         },
     ]
 }
@@ -211,6 +316,8 @@ fn entries_at(root: Option<&Path>) -> Vec<Entry> {
 #[derive(Clone)]
 pub struct Catalog {
     entries: Vec<Entry>,
+    /// Folders a contained program never reads: ARK's store (ADR 0074).
+    hidden: Vec<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -222,7 +329,10 @@ enum ProbeError {
 impl Catalog {
     /// Every known program, found when asked for.
     pub fn installed() -> Catalog {
-        Catalog { entries: entries() }
+        Catalog {
+            entries: entries(),
+            hidden: ark_os::dirs::app_home(".ark", "ARK").into_iter().collect(),
+        }
     }
 
     /// The built-in catalog with private worker state under `root`.
@@ -230,12 +340,23 @@ impl Catalog {
         let root = root.into();
         Catalog {
             entries: entries_at(Some(&root)),
+            hidden: Vec::new(),
         }
     }
 
     /// Only these entries (tests, an app's own programs).
     pub fn of(entries: Vec<Entry>) -> Catalog {
-        Catalog { entries }
+        Catalog {
+            entries,
+            hidden: Vec::new(),
+        }
+    }
+
+    /// Contained programs never read `folders` (ARK's store: other projects, keys), except
+    /// their own state inside them (ADR 0074).
+    pub fn hiding(mut self, folders: Vec<PathBuf>) -> Catalog {
+        self.hidden = folders;
+        self
     }
 
     /// The path of an entry's program: its variable, else `PATH`.
@@ -569,7 +690,10 @@ impl Workers for Catalog {
         let e = self.entries.iter().find(|e| e.name == name)?;
         Some(match Catalog::find(e) {
             Some(program) => match Self::prepare(e) {
-                Ok(()) => Ok(Arc::new(Acp::new(e.clone(), program)) as Arc<dyn Worker>),
+                Ok(()) => Ok(
+                    Arc::new(Acp::new(e.clone(), program).hiding(self.hidden.clone()))
+                        as Arc<dyn Worker>,
+                ),
                 Err(error) => Err(error),
             },
             None => Err(format!("{} is not set up here: {}", e.title, e.setup)),

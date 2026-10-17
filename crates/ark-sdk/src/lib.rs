@@ -1290,8 +1290,11 @@ impl ArkBuilder {
         }
         let workers = self.workers.map(|workers| match workers {
             WorkersChoice::Default => {
-                Arc::new(ark_acp::Catalog::at(engine.store.root().join("workers")))
-                    as Arc<dyn ark_runtime::worker::Workers>
+                // A contained program never reads the store: other projects, keys (ADR 0074).
+                Arc::new(
+                    ark_acp::Catalog::at(engine.store.root().join("workers"))
+                        .hiding(vec![engine.store.root().to_path_buf()]),
+                ) as Arc<dyn ark_runtime::worker::Workers>
             }
             WorkersChoice::Given(workers) => workers,
         });

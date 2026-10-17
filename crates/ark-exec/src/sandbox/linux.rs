@@ -85,7 +85,7 @@ pub(super) fn wrap(
     for p in SYSTEM {
         mount("--ro-bind-try", Path::new(p), Path::new(p));
     }
-    for r in &b.reads {
+    for r in b.only_reads() {
         let at = real(r);
         mount("--ro-bind-try", &at, &at);
         // A read reached through a link (uv's `cpython-3.12-…` names the newest 3.12.x, and
@@ -114,11 +114,11 @@ mod tests {
 
     #[test]
     fn the_project_is_writable_and_its_kept_folders_are_not() {
-        let b = Bounds {
-            project: "/work/p".into(),
-            scratch: "/store/runs/1".into(),
-            reads: vec!["/store/python".into()],
-        };
+        let b = Bounds::run(
+            "/work/p".into(),
+            "/store/runs/1".into(),
+            vec!["/store/python".into()],
+        );
         let (_, a) = wrap(
             Path::new("/usr/bin/bwrap"),
             &b,
@@ -148,11 +148,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("cpython-3.12.11")).unwrap();
         std::os::unix::fs::symlink(dir.join("cpython-3.12.11"), dir.join("cpython-3.12")).unwrap();
-        let b = Bounds {
-            project: "/work/p".into(),
-            scratch: "/store/runs/1".into(),
-            reads: vec![dir.join("cpython-3.12")],
-        };
+        let b = Bounds::run(
+            "/work/p".into(),
+            "/store/runs/1".into(),
+            vec![dir.join("cpython-3.12")],
+        );
         let (_, a) = wrap(Path::new("/usr/bin/bwrap"), &b, Path::new("/py"), &[]);
         let line = a.join(" ");
         let target = real(&dir.join("cpython-3.12.11")).display().to_string();

@@ -158,7 +158,7 @@ Measured (3 runs each, both on Sonnet, two small tasks): both succeed every time
 2.5 to 4 times cheaper and 1.6 to 3.4 times faster on them. ARK's agent stays the default.
 
 Limits:
-- The program is not contained. It reads anything it can without asking, and Claude Code runs
+- The program is not contained (on macOS it is since ADR 0074, except Codex). It reads anything it can without asking, and Claude Code runs
   commands it classifies as read-only (`ls -la` was seen) without a question, as reads do not
   ask for ARK's agents. Codex runs in its read-only sandbox. ARK's authority holds while the
   program keeps the mode ARK set; that is why only checked connector versions run.

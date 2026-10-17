@@ -525,8 +525,14 @@ fn program_approval(action: &str, input: &Value) -> Option<String> {
     }
     let command = input.get("command").and_then(Value::as_str).unwrap_or("");
     let lines: Vec<String> = command.lines().map(|l| format!("  {l}")).collect();
+    // ADR 0074: a program ARK contains changes files only there.
+    let how = if input.get("contained") == Some(&Value::Bool(true)) {
+        "Contained: besides its own folders, it can change files only there. It connects only over HTTPS."
+    } else {
+        "Not contained: it runs as you."
+    };
     Some(format!(
-        "Run this in the project folder. Not contained: it runs as you.\n{}",
+        "Run this in the project folder. {how}\n{}",
         lines.join("\n")
     ))
 }
@@ -930,6 +936,33 @@ mod tests {
         assert_eq!(
             l.result_detail(ark_exec::RUN, true, "exit 0\nstdout:\n12"),
             "Done"
+        );
+    }
+
+    #[test]
+    fn a_program_command_says_whether_it_is_contained() {
+        let l = Labels::new(vec![]);
+        let ask = |input: Value| {
+            l.approval_line(&ApprovalRequest {
+                action: ark_sdk::prelude::ark_runtime::worker::RUN.into(),
+                summary: String::new(),
+                risk: ark_sdk::prelude::RiskTier::Mutate,
+                input,
+                class: String::new(),
+                preview: String::new(),
+                agent: None,
+                task: None,
+                ask_each_time: false,
+                cut_short: false,
+            })
+        };
+        assert_eq!(
+            ask(json!({ "command": "ls -la", "folder": "." })),
+            "Run this in the project folder. Not contained: it runs as you.\n  ls -la"
+        );
+        assert_eq!(
+            ask(json!({ "command": "ls -la", "folder": ".", "contained": true })),
+            "Run this in the project folder. Contained: besides its own folders, it can change files only there. It connects only over HTTPS.\n  ls -la"
         );
     }
 

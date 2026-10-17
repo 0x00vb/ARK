@@ -1,7 +1,8 @@
 //! What contains a run, the same rules on every system: it reads the system, its runtime's
 //! environment and the project folder; it writes only the project folder and its own scratch
 //! folder; it has no network. Each system enforces them with its own mechanism, and nothing
-//! outside this module knows which one:
+//! outside this module knows which one. [`Bounds::run`] are those bounds (`code.run`); an agent
+//! program ARK starts gets wider ones, on macOS only for now (ADR 0074, [`Sandbox::programs`]):
 //!
 //! | System | Mechanism | Needs |
 //! |---|---|---|
@@ -26,15 +27,100 @@ pub(crate) const KEPT: &[&str] = &[
     ".git", ".ark", ".agents", ".claude", ".codex", ".vscode", ".idea", ".envrc", ".github",
 ];
 
-/// What one run may touch.
+/// Credential folders in a person's home that an agent program never reads, even inside its
+/// project (ADR 0074).
+pub const PRIVATE: &[&str] = &[
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".kube",
+    ".docker",
+    ".netrc",
+    ".git-credentials",
+    ".config/gcloud",
+    ".config/gh",
+];
+
+/// What one run may touch. [`Bounds::run`] builds `code.run`'s, which nothing else widens.
 #[derive(Clone, Debug)]
 pub struct Bounds {
-    /// The project folder: read and written.
+    /// The project folder: read and written, except its kept folders.
     pub project: PathBuf,
     /// The run's own folder (its program file, its temporary files): read and written.
     pub scratch: PathBuf,
-    /// Folders only read (the runtime's environment).
-    pub reads: Vec<PathBuf>,
+    /// What it reads besides the project and the scratch folder.
+    pub reads: Reads,
+    /// Where it writes besides the project and the scratch folder (a program's own state).
+    pub writes: Vec<Write>,
+    /// Names inside each folder of `writes` that stay read-only: what runs later outside the
+    /// sandbox (a program's own files, settings with hooks).
+    pub kept: Vec<String>,
+    pub network: Network,
+    /// macOS: it may ask the person's keychain (a program whose login is kept there).
+    pub keychain: bool,
+}
+
+/// What a run reads besides its project and scratch folder.
+#[derive(Clone, Debug)]
+pub enum Reads {
+    /// The system's folders and these (`code.run`: its runtime's environment).
+    Only(Vec<PathBuf>),
+    /// Everything but `hidden`, where only `allowed` is read again; `never` is not read even
+    /// inside the project, only where `writes` names it.
+    Except {
+        hidden: Vec<PathBuf>,
+        allowed: Vec<PathBuf>,
+        never: Vec<PathBuf>,
+    },
+}
+
+/// A place a run writes besides its project and scratch folder.
+#[derive(Clone, Debug)]
+pub enum Write {
+    Folder(PathBuf),
+    /// The file, and its siblings named after it and a dot (`.lock`, a temporary copy).
+    File(PathBuf),
+}
+
+/// The network a run reaches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Network {
+    None,
+    /// Outbound TCP to port 443 and name lookups. A sandbox cannot tell one host from another.
+    Https,
+}
+
+impl Bounds {
+    /// `code.run`'s bounds: the system and `reads` read, the project and `scratch` written, no
+    /// network.
+    pub fn run(project: PathBuf, scratch: PathBuf, reads: Vec<PathBuf>) -> Bounds {
+        Bounds {
+            project,
+            scratch,
+            reads: Reads::Only(reads),
+            writes: Vec::new(),
+            kept: Vec::new(),
+            network: Network::None,
+            keychain: false,
+        }
+    }
+
+    /// Whether these are no wider than [`Bounds::run`]'s.
+    pub(crate) fn is_run(&self) -> bool {
+        matches!(self.reads, Reads::Only(_))
+            && self.writes.is_empty()
+            && self.network == Network::None
+            && !self.keychain
+    }
+
+    /// The read folders of [`Reads::Only`]; empty for anything wider.
+    pub(crate) fn only_reads(&self) -> &[PathBuf] {
+        match &self.reads {
+            Reads::Only(r) => r,
+            Reads::Except { .. } => &[],
+        }
+    }
 }
 
 /// A way to contain a run on this system.
@@ -50,6 +136,16 @@ impl Sandbox {
     pub fn native() -> Option<Sandbox> {
         let exec = native_exec()?;
         Some(Sandbox { exec })
+    }
+
+    /// This system's sandbox for the agent programs ARK starts (ADR 0074): macOS only for now.
+    /// Linux and Windows contain `code.run` but not yet a program with its own state and network.
+    pub fn programs() -> Option<Sandbox> {
+        if cfg!(target_os = "macos") {
+            Sandbox::native()
+        } else {
+            None
+        }
     }
 
     /// What contains runs here, for messages (`macOS sandbox`, `bubblewrap`, `AppContainer`).
@@ -102,6 +198,9 @@ fn wrap_native(
     program: &Path,
     args: &[String],
 ) -> Result<(PathBuf, Vec<String>), String> {
+    if !b.is_run() {
+        return Err(NOT_YET.into());
+    }
     Ok(linux::wrap(exec, b, program, args))
 }
 
@@ -116,8 +215,14 @@ fn wrap_native(
     program: &Path,
     args: &[String],
 ) -> Result<(PathBuf, Vec<String>), String> {
+    if !b.is_run() {
+        return Err(NOT_YET.into());
+    }
     windows::wrap(exec, b, program, args)
 }
+
+#[cfg(any(target_os = "linux", windows))]
+const NOT_YET: &str = "this system does not contain a program with its own state and network yet";
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn native_exec() -> Option<PathBuf> {
@@ -227,4 +332,17 @@ pub(crate) fn real(p: &Path) -> PathBuf {
         }
     }
     r
+}
+
+#[cfg(all(test, any(target_os = "linux", windows)))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wider_bounds_than_code_runs_are_refused_here() {
+        let mut b = Bounds::run("/work/p".into(), "/run/1".into(), vec![]);
+        b.network = Network::Https;
+        assert!(wrap_native(Path::new("/x"), &b, Path::new("/bin/sh"), &[]).is_err());
+        assert!(Sandbox::programs().is_none());
+    }
 }

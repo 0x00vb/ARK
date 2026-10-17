@@ -129,7 +129,7 @@ pub(super) fn wrap(
     let project = real(&b.project);
     grant(&real(&b.scratch), &sid, WRITE, false)?;
     grant(&project, &sid, WRITE, false)?;
-    for r in &b.reads {
+    for r in b.only_reads() {
         let r = real(r);
         if r.exists() {
             grant(&r, &sid, READ, false)?;

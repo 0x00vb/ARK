@@ -9,6 +9,19 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Changed
+
+- On macOS the agent programs ARK starts (Claude Code, Grok) run in ARK's sandbox: they write
+  only the project, their run folder and their own state, read little of the home and never
+  ARK's store or credential folders, and reach port 443 only. Codex is not contained by ARK
+  ([ADR 0074](docs/adr/0074-agent-programs-run-contained.md)).
+
+### Breaking
+
+- `ark_exec::Bounds` has `reads: Reads`, `writes`, `kept`, `network` and `keychain`. Build
+  `code.run`'s with `Bounds::run(project, scratch, reads)`.
+- `ark_acp::Entry` has `contain: Option<Contain>`; `None` keeps a program uncontained.
+
 ## [0.25.0] - 2026-10-16
 
 ### Added

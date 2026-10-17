@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout};
 
-use crate::{Entry, ModelSetting, BASE_ENV};
+use crate::{Contain, Entry, ModelSetting, BASE_ENV};
 
 pub use ark_runtime::worker::{CHANGE, OTHER, RUN};
 
@@ -30,11 +30,23 @@ Continue from where it stopped: look at what is already done in the folder and d
 pub struct Acp {
     entry: Entry,
     program: PathBuf,
+    /// Folders a contained program never reads (ARK's store).
+    hidden: Vec<PathBuf>,
 }
 
 impl Acp {
     pub fn new(entry: Entry, program: PathBuf) -> Acp {
-        Acp { entry, program }
+        Acp {
+            entry,
+            program,
+            hidden: Vec::new(),
+        }
+    }
+
+    /// A contained program never reads `folders` ([`crate::Catalog::hiding`]).
+    pub fn hiding(mut self, folders: Vec<PathBuf>) -> Acp {
+        self.hidden = folders;
+        self
     }
 }
 
@@ -51,11 +63,65 @@ impl Worker for Acp {
             .canonicalize()
             .unwrap_or_else(|_| job.folder.to_path_buf());
         let model = job.model.or(self.entry.default_model);
-        let mut cmd = tokio::process::Command::new(&self.program);
-        cmd.args(self.entry.args);
+        let mut args: Vec<String> = self.entry.args.iter().map(|a| a.to_string()).collect();
         if let (ModelSetting::ConfigArg, Some(m)) = (self.entry.model, model) {
-            cmd.arg("-c").arg(format!("model=\"{m}\""));
+            args.extend(["-c".to_string(), format!("model=\"{m}\"")]);
         }
+        // The run's own folder (0700), gone when the run ends: the adapter's empty home and,
+        // contained, its temporary files.
+        let run_dir = tempfile::Builder::new()
+            .prefix("ark-program")
+            .tempdir()
+            .map_err(|e| format!("{title} did not start: {e}"))?;
+        let empty = run_dir.path().join("home");
+        let tmp = run_dir.path().join("tmp");
+        for d in [&empty, &tmp] {
+            std::fs::create_dir(d).map_err(|e| format!("{title} did not start: {e}"))?;
+        }
+        let contained = match (&self.entry.contain, ark_exec::Sandbox::programs()) {
+            (Some(c), Some(sandbox)) => {
+                let config = self.entry.settings_dir.and_then(std::env::var_os);
+                let bounds = bounds(
+                    c,
+                    &Place {
+                        folder: &folder,
+                        run: run_dir.path(),
+                        program: &self.program,
+                        home: ark_os::dirs::home().as_deref(),
+                        hidden: &self.hidden,
+                        path: std::env::var_os("PATH").as_deref(),
+                        config: config.as_deref().map(Path::new),
+                        tmp: Some(&std::env::temp_dir()),
+                    },
+                )
+                .map_err(|e| format!("{title} did not start: {e}"))?;
+                for w in &bounds.writes {
+                    if let ark_exec::Write::Folder(f) = w {
+                        if !f.exists() {
+                            private_dirs(f).map_err(|e| format!("{title} did not start: {e}"))?;
+                        }
+                    }
+                }
+                Some(
+                    sandbox
+                        .wrap(&bounds, &self.program, &args)
+                        .map_err(|e| format!("{title} did not start: {e}"))?,
+                )
+            }
+            _ => None,
+        };
+        let mut cmd = match &contained {
+            Some((exec, wrapped)) => {
+                let mut cmd = tokio::process::Command::new(exec);
+                cmd.args(wrapped);
+                cmd
+            }
+            None => {
+                let mut cmd = tokio::process::Command::new(&self.program);
+                cmd.args(&args);
+                cmd
+            }
+        };
         // Only who and where the person is: never ARK's keys, tokens or secrets.
         cmd.env_clear();
         for k in BASE_ENV.iter().chain(self.entry.env) {
@@ -69,17 +135,15 @@ impl Worker for Acp {
                 .env("GROK_AGENT_DASHBOARD", "0")
                 .env("GROK_WORKFLOWS", "0");
         }
+        if contained.is_some() {
+            cmd.env("TMPDIR", &tmp);
+        }
         // The adapter reads the person's settings from its home: it gets an empty one. The
         // program it starts gets the person's real home (its login, its sessions) through the
         // session's options, exactly as when the person runs it.
-        // A private folder of this run (0700), gone when the run ends.
-        let empty = tempfile::Builder::new()
-            .prefix("ark-program-home")
-            .tempdir()
-            .map_err(|e| format!("{title} did not start: {e}"))?;
         let settings_home: Vec<(String, std::ffi::OsString)> = match self.entry.settings_dir {
             Some(var) => {
-                cmd.env("HOME", empty.path()).env_remove(var);
+                cmd.env("HOME", &empty).env_remove(var);
                 ["HOME", var]
                     .into_iter()
                     .filter_map(|k| std::env::var_os(k).map(|v| (k.to_string(), v)))
@@ -95,6 +159,11 @@ impl Worker for Acp {
         // Its own group, so stopping it stops the commands it started too.
         #[cfg(unix)]
         cmd.process_group(0);
+        // Put back after the run, however it ends: dropped after the program is stopped.
+        let _guarded: Vec<crate::guard::Kept> = match (&self.entry.contain, &contained) {
+            (Some(c), Some(_)) => c.guarded.iter().map(crate::guard::Kept::take).collect(),
+            _ => Vec::new(),
+        };
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("{title} did not start: {e}"))?;
@@ -112,6 +181,7 @@ impl Worker for Acp {
             next: 0,
         };
         let mut turn = Turn::new(&folder, title, self.entry.name == "grok");
+        turn.contained = contained.is_some();
         let ran = self
             .session(
                 &job,
@@ -143,6 +213,7 @@ impl Worker for Acp {
         drop(conn);
         drop(group);
         let _ = child.kill().await;
+        drop(run_dir);
         out
     }
 
@@ -453,6 +524,8 @@ struct Turn {
     by: &'static str,
     /// Grok is offered only with the permission shapes recorded in ADR 0061.
     strict_permissions: bool,
+    /// It runs in ARK's sandbox (ADR 0074): a command's question says so.
+    contained: bool,
     session: String,
     text: String,
     since_tool: String,
@@ -466,6 +539,7 @@ impl Turn {
             folder: folder.to_path_buf(),
             by,
             strict_permissions,
+            contained: false,
             session: String::new(),
             text: String::new(),
             since_tool: String::new(),
@@ -541,7 +615,10 @@ impl Turn {
     /// A permission request, asked as an ARK question. ARK answers with the program's "once"
     /// options only: a grant is ARK's, kept by its gate, and names the file or the command.
     async fn permission(&mut self, params: &Value, job: &WorkerJob<'_>) -> Result<Value, String> {
-        let request = request(&params["toolCall"], &self.folder, self.by);
+        let mut request = request(&params["toolCall"], &self.folder, self.by);
+        if self.contained && request.action == RUN {
+            request.input["contained"] = Value::Bool(true);
+        }
         if self.strict_permissions && !known_grok_permission(&request) {
             return Err(format!(
                 "sent an unrecognized permission request ({})",
@@ -829,6 +906,171 @@ impl Drop for Group {
     }
 }
 
+/// Make `dir` and the folders above it that are missing, readable only by the person.
+fn private_dirs(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(dir)
+}
+
+/// Where a contained program runs, for [`bounds`].
+struct Place<'a> {
+    /// The project folder, resolved.
+    folder: &'a Path,
+    /// The run's own folder.
+    run: &'a Path,
+    program: &'a Path,
+    home: Option<&'a Path>,
+    /// Folders it never reads (ARK's store).
+    hidden: &'a [PathBuf],
+    /// The `PATH` it gets, to find the interpreter of a script.
+    path: Option<&'a std::ffi::OsStr>,
+    /// The folder its settings variable names, when the person set one (`CLAUDE_CONFIG_DIR`).
+    config: Option<&'a Path>,
+    /// The system's folder for temporary files.
+    tmp: Option<&'a Path>,
+}
+
+/// The bounds of a contained program (ADR 0074). Outside the person's home it reads
+/// everything; in the home only its program, git's settings, the system's global preferences,
+/// its own folders and, when its login is there, the keychain. Credential folders stay closed
+/// even inside the project, and ARK's store too unless the project is in it. It writes the
+/// project, its run folder and its own state; it reaches hosts on port 443.
+fn bounds(c: &Contain, at: &Place<'_>) -> Result<ark_exec::Bounds, String> {
+    // Compared resolved: a path may go through a link (`/var` is `/private/var`).
+    let resolved = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let folder = resolved(at.folder);
+    if let Some(config) = at.config {
+        return Err(format!(
+            "it cannot run contained while its settings are moved to {}; unset that variable",
+            config.display()
+        ));
+    }
+    if at
+        .home
+        .is_some_and(|h| h.starts_with(at.folder) || resolved(h).starts_with(&folder))
+    {
+        return Err(
+            "the project folder holds the whole home folder, so it cannot run contained".into(),
+        );
+    }
+    let folders = c.folders.clone();
+    let mut hidden: Vec<PathBuf> = at.hidden.to_vec();
+    // Other programs' temporary files, and other runs' folders (macOS: `/var/folders/../T`
+    // and its cache sibling `C`). The run's own folder is opened again.
+    if let Some(tmp) = at.tmp {
+        let tmp = resolved(tmp);
+        hidden.push(match tmp.parent() {
+            Some(parent) if tmp.file_name().is_some_and(|n| n == "T") => parent.to_path_buf(),
+            _ => tmp,
+        });
+    }
+    let mut allowed = program_folders(at.program, at.path);
+    let mut never = Vec::new();
+    if let Some(home) = at.home {
+        hidden.push(home.to_path_buf());
+        allowed.extend(
+            [
+                ".gitconfig",
+                ".config/git",
+                ".CFUserTextEncoding",
+                "Library/Preferences/.GlobalPreferences.plist",
+                "Library/Preferences/.GlobalPreferences_m.plist",
+            ]
+            .iter()
+            .map(|p| home.join(p)),
+        );
+        if c.keychain {
+            allowed.push(home.join("Library/Keychains"));
+        }
+        never.extend(ark_exec::PRIVATE.iter().map(|p| home.join(p)));
+    }
+    never.extend(
+        at.hidden
+            .iter()
+            .filter(|h| !folder.starts_with(resolved(h)))
+            .cloned(),
+    );
+    let mut writes: Vec<ark_exec::Write> =
+        folders.into_iter().map(ark_exec::Write::Folder).collect();
+    writes.extend(c.files.iter().cloned().map(ark_exec::Write::File));
+    Ok(ark_exec::Bounds {
+        project: at.folder.to_path_buf(),
+        scratch: at.run.to_path_buf(),
+        reads: ark_exec::Reads::Except {
+            hidden,
+            allowed,
+            never,
+        },
+        writes,
+        kept: c.kept.iter().map(|k| k.to_string()).collect(),
+        network: ark_exec::Network::Https,
+        keychain: c.keychain,
+    })
+}
+
+/// The folders a program needs to read to start: where it is installed (the outermost
+/// `node_modules` it is in, else its own folder), and for a script the install folder of the
+/// interpreter its first line names, as found on `path`.
+fn program_folders(program: &Path, path: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
+    let installed = |p: &Path| -> Option<PathBuf> {
+        let real = p.canonicalize().ok()?;
+        let top = real
+            .ancestors()
+            .filter(|a| a.file_name().is_some_and(|n| n == "node_modules"))
+            .last()
+            .map(Path::to_path_buf);
+        top.or_else(|| real.parent().map(Path::to_path_buf))
+    };
+    let mut out: Vec<PathBuf> = installed(program).into_iter().collect();
+    let mut head = Vec::new();
+    if let Ok(f) = std::fs::File::open(program) {
+        use std::io::Read;
+        let _ = f.take(256).read_to_end(&mut head);
+    }
+    let first = head
+        .split(|c| *c == b'\n')
+        .next()
+        .map(|l| String::from_utf8_lossy(l).into_owned())
+        .unwrap_or_default();
+    if let Some(line) = first.strip_prefix("#!") {
+        let mut words = line.split_whitespace();
+        let mut interpreter = words.next().unwrap_or("").to_string();
+        if interpreter.ends_with("/env") {
+            interpreter = words
+                .find(|w| !w.starts_with('-'))
+                .unwrap_or("")
+                .to_string();
+        }
+        let found = if interpreter.contains('/') {
+            Some(PathBuf::from(&interpreter))
+        } else {
+            path.and_then(|p| {
+                std::env::split_paths(p)
+                    .map(|d| d.join(&interpreter))
+                    .find(|p| p.is_file())
+            })
+        };
+        // `<prefix>/bin/node`: the prefix, where its own modules are too.
+        if let Some(real) = found.and_then(|f| f.canonicalize().ok()) {
+            let dir = real.parent().map(Path::to_path_buf);
+            let prefix = dir
+                .as_ref()
+                .filter(|d| d.file_name().is_some_and(|n| n == "bin"))
+                .and_then(|d| d.parent().map(Path::to_path_buf));
+            out.extend(prefix.or(dir));
+        }
+    }
+    out
+}
+
 /// Stop a group a gone process left, if its leader is still the program it started (a process
 /// id can be reused).
 fn stop_group_of(group: u32, program: &Path) {
@@ -1050,5 +1292,137 @@ mod tests {
             "Grok",
         );
         assert_eq!(grok_meta.class, "program.change:web/a.md");
+    }
+
+    fn place<'a>(folder: &'a Path, home: &'a Path, hidden: &'a [PathBuf]) -> Place<'a> {
+        Place {
+            folder,
+            run: Path::new("/run/1"),
+            program: Path::new("/nonexistent/program"),
+            home: Some(home),
+            hidden,
+            path: None,
+            config: None,
+            tmp: None,
+        }
+    }
+
+    fn except(b: &ark_exec::Bounds) -> (&[PathBuf], &[PathBuf], &[PathBuf]) {
+        match &b.reads {
+            ark_exec::Reads::Except {
+                hidden,
+                allowed,
+                never,
+            } => (hidden, allowed, never),
+            ark_exec::Reads::Only(_) => panic!("a program's reads are wider than code.run's"),
+        }
+    }
+
+    #[test]
+    fn a_program_reads_little_of_the_home_and_never_the_store_or_credentials() {
+        let home = Path::new("/home/a");
+        let store = vec![PathBuf::from("/home/a/.ark")];
+        let claude = crate::entries_at(Some(Path::new("/home/a/.ark/workers")))
+            .into_iter()
+            .find(|e| e.name == "claude-code")
+            .unwrap();
+        let c = claude.contain.unwrap();
+        let b = bounds(&c, &place(Path::new("/home/a/work"), home, &store)).unwrap();
+        let (hidden, allowed, never) = except(&b);
+        assert!(hidden.contains(&home.to_path_buf()) && hidden.contains(&store[0]));
+        assert!(allowed.contains(&home.join(".gitconfig")));
+        assert!(
+            allowed.contains(&home.join("Library/Keychains")),
+            "its login"
+        );
+        assert!(never.contains(&home.join(".ssh")) && never.contains(&store[0]));
+        assert_eq!(b.network, ark_exec::Network::Https);
+        assert!(b.keychain);
+
+        // A project inside the store (ARK's own project folders) stays readable: the store is
+        // hidden, and opened again only for the project.
+        let b = bounds(&c, &place(Path::new("/home/a/.ark/p/1"), home, &store)).unwrap();
+        assert!(!except(&b).2.contains(&store[0]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_project_in_the_store_through_a_link_stays_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().canonicalize().unwrap().join("store");
+        std::fs::create_dir_all(real.join("p")).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let hidden = vec![link];
+        let project = real.join("p");
+        let b = bounds(
+            &Contain::default(),
+            &place(&project, Path::new("/home/a"), &hidden),
+        )
+        .unwrap();
+        assert!(!except(&b).2.contains(&hidden[0]));
+    }
+
+    #[test]
+    fn a_moved_settings_folder_or_a_project_holding_the_home_is_refused() {
+        let home = Path::new("/home/a");
+        let c = Contain::default();
+        let mut at = place(Path::new("/home/a/work"), home, &[]);
+        at.config = Some(Path::new("/home/a/claude-config"));
+        assert!(bounds(&c, &at).is_err());
+        for project in ["/home/a", "/home", "/"] {
+            assert!(
+                bounds(&c, &place(Path::new(project), home, &[])).is_err(),
+                "{project}"
+            );
+        }
+        assert!(bounds(&c, &place(Path::new("/home/a/work"), home, &[])).is_ok());
+    }
+
+    #[test]
+    fn codex_is_not_contained_and_grok_keeps_its_program() {
+        let entries = crate::entries_at(Some(Path::new("/s/workers")));
+        let named = |n: &str| entries.iter().find(|e| e.name == n).unwrap();
+        assert!(named("codex").contain.is_none());
+        let grok = named("grok").contain.clone().unwrap();
+        assert_eq!(grok.folders, vec![PathBuf::from("/s/workers/grok")]);
+        for name in [
+            "node_modules",
+            "config.toml",
+            ".npmrc",
+            "package.json",
+            ".npm",
+        ] {
+            assert!(grok.kept.contains(&name), "{name}");
+        }
+        let claude = named("claude-code").contain.clone().unwrap();
+        assert!(
+            claude.folders.iter().all(|f| !f.ends_with(".claude")),
+            "not the whole folder"
+        );
+        assert!(claude
+            .guarded
+            .iter()
+            .any(|g| g.keys.contains(&"/mcpServers")));
+        assert!(!grok.keychain);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_script_reads_its_install_folder_and_its_interpreter() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let script = root.join("lib/node_modules/@x/acp/dist/index.js");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "#!/usr/bin/env node\n").unwrap();
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::write(root.join("bin/node"), "").unwrap();
+        let path = std::ffi::OsString::from(root.join("bin"));
+        let folders = program_folders(&script, Some(&path));
+        assert_eq!(folders, vec![root.join("lib/node_modules"), root.clone()]);
+        // A program outside any `node_modules`: its own folder.
+        let tool = root.join("tool");
+        std::fs::write(&tool, "\x7fELF").unwrap();
+        assert_eq!(program_folders(&tool, None), vec![root]);
     }
 }

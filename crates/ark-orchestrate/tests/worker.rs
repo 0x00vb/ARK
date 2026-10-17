@@ -105,6 +105,18 @@ fn serve(log: &Path) {
                     } else {
                         std::fs::write(cwd.join("report.md"), "# Report\n\nfeb: 32\n").unwrap();
                     }
+                    // A program that reaches past its project: what it managed is logged.
+                    if let (Ok(outside), Ok(secret)) =
+                        (std::env::var("FAKE_OUTSIDE"), std::env::var("FAKE_SECRET"))
+                    {
+                        note(
+                            "escape",
+                            &json!({
+                                "wrote": std::fs::write(&outside, "out").is_ok(),
+                                "read": std::fs::read(&secret).is_ok(),
+                            }),
+                        );
+                    }
                     send(
                         json!({ "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": "s1",
                         "update": { "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed" } } }),
@@ -143,11 +155,16 @@ fn serve(log: &Path) {
 
 /// The scripted program as a catalog entry, checked with connector versions `checked`.
 fn catalog_checked(checked: &'static [&'static str]) -> Arc<dyn ark_runtime::worker::Workers> {
+    Arc::new(fake_catalog(checked))
+}
+
+/// The scripted program's catalog.
+fn fake_catalog(checked: &'static [&'static str]) -> ark_acp::Catalog {
     std::env::set_var(
         "ARK_TEST_FAKE_PROGRAM_PATH",
         std::env::current_exe().unwrap(),
     );
-    Arc::new(ark_acp::Catalog::of(vec![ark_acp::Entry {
+    ark_acp::Catalog::of(vec![ark_acp::Entry {
         name: "fake",
         title: "Fake",
         program: "fake-program",
@@ -160,11 +177,26 @@ fn catalog_checked(checked: &'static [&'static str]) -> Arc<dyn ark_runtime::wor
         mode: Some("default"),
         checked,
         settings_dir: None,
-        env: &["ARK_FAKE_PROGRAM", "FAKE_MODE", "FAKE_KIND", "FAKE_HANG"],
+        env: &[
+            "ARK_FAKE_PROGRAM",
+            "FAKE_MODE",
+            "FAKE_KIND",
+            "FAKE_HANG",
+            "FAKE_OUTSIDE",
+            "FAKE_SECRET",
+        ],
         isolated_home: None,
         models: &[],
         setup: "",
-    }]))
+        // Contained where the system can (macOS): its log folder is its own state.
+        contain: Some(ark_acp::Contain {
+            folders: std::env::var_os("ARK_FAKE_PROGRAM")
+                .map(PathBuf::from)
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        }),
+    }])
 }
 
 /// Never answers: the question waits for another client.
@@ -208,12 +240,20 @@ fn setup() -> Setup {
         "FAKE_MODE",
         "FAKE_KIND",
         "FAKE_HANG",
+        "FAKE_OUTSIDE",
+        "FAKE_SECRET",
         "ANTHROPIC_API_KEY",
     ]
     .into_iter()
     .map(|key| (key, std::env::var_os(key)))
     .collect();
-    for k in ["FAKE_MODE", "FAKE_KIND", "FAKE_HANG"] {
+    for k in [
+        "FAKE_MODE",
+        "FAKE_KIND",
+        "FAKE_HANG",
+        "FAKE_OUTSIDE",
+        "FAKE_SECRET",
+    ] {
         std::env::remove_var(k);
     }
     let dir = tempfile::tempdir().unwrap();
@@ -343,6 +383,41 @@ async fn a_program_asks_ark_keeps_the_question_and_another_client_answers() {
         "allow",
         "never 'always'"
     );
+}
+
+/// ADR 0074: on macOS the program runs contained. Its allowed change lands in the project; a
+/// write outside the project and a read of ARK's store fail.
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_contained_program_cannot_write_outside_or_read_the_store() {
+    let s = setup();
+    let outside = s.store.parent().unwrap().join("outside.txt");
+    let secret = s.store.join("secret.txt");
+    std::fs::create_dir_all(&s.store).unwrap();
+    std::fs::write(&secret, "key").unwrap();
+    std::env::set_var("FAKE_OUTSIDE", &outside);
+    std::env::set_var("FAKE_SECRET", &secret);
+    let catalog = Arc::new(fake_catalog(&["1."]).hiding(vec![s.store.clone()]));
+    let asked = Arc::new(AtomicUsize::new(0));
+    let (ark, o) = open_with(&s, asked, catalog);
+    o.spawn(AgentSpec::new("w").model("agent:fake"))
+        .await
+        .unwrap();
+    let id = o.submit("w", TaskSpec::new("write the report")).unwrap();
+    until_asked(&o, &id).await;
+    o.answer(&id, ApprovalDecision::AllowOnce).unwrap();
+    let done = o.wait(&id).await.unwrap();
+
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert!(folder(&ark).join("report.md").exists());
+    let log = calls(&s);
+    let escape = log
+        .lines()
+        .find_map(|l| l.strip_prefix("escape "))
+        .unwrap_or_else(|| panic!("no escape line: {log}"));
+    let escape: Value = serde_json::from_str(escape).unwrap();
+    assert_eq!(escape, json!({ "wrote": false, "read": false }), "{log}");
+    assert!(!outside.exists());
 }
 
 /// A command with no path in its request (a shell's write): its file is still an output, from

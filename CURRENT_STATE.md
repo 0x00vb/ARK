@@ -5,8 +5,10 @@
 On `main`, an upload keeps its completion notice in the originating chat draft.
 Thirteen real WebKit frontend cases pass, including project switches, mounted, closed and
 promoted split panes, and held chats with a different resource runtime. Existing draft keys,
-failure and Stop preserve their behavior. The real-host `upload-drafts`
-page scenario is added but not run. Full CI and native acceptance remain open. Board `adb47848`.
+failure and Stop preserve their behavior. The real-host `upload-drafts` page scenario and
+full page-enabled Core CI pass on `3f14696`, including 66 WebKit scenarios, release build and
+benchmark comparison. Independent final QA is GO. Consumer native and release gates remain separate.
+Board `adb47848`.
 
 ## Dictation follow-through
 
@@ -62,7 +64,7 @@ Last updated: 2026-10-16 (dictation follow-through, IFC files and bounded code r
 
 | What | State |
 |---|---|
-| Project section hook (ADR 0077) | On `main`, card e11c3c73: generic app rows inside the current unfolded project, with owned cleanup. WebKit passes nine component cases and one actual frontend boot case against intercepted RPCs. Full Core CI and real Rust-host page test are pending capacity; Desktop-kept migration, release and repin remain separate. |
+| Project section hook (ADR 0077) | On `main`, card e11c3c73: generic app rows inside the current unfolded project, with owned cleanup. WebKit passes nine component cases and one actual frontend boot case against intercepted RPCs. The real Rust-host scenario and full page-enabled Core CI pass on `3f14696`; independent final QA is GO. Desktop-kept source/browser migration is prepared separately; its full checks, release and repin remain open. |
 | An app's conversation is the chat (ADR 0076) | Branch `agent-chat-parity`: `ark.chatView` draws ARK Desktop's agent pane with the chat's own turns and composer. Page tests `an_apps_conversation_draws_exactly_as_the_chat` and `an_apps_conversation_behaves_as_the_chat` pass (streaming, approvals in place, tool rows through `task_call`, Stop). Desktop needs a tag with it before it can ship. |
 | Completed branch audit | CI's unoptimized test profile, historical completed branches, voice dictation and the reviewed efficiency and catalog-startup patches are integrated on local `main`. Exact combined page-enabled CI and focused remote-provider, dictation and approval checks pass. No push, tag or release. |
 | IFC model files (A5) | On `main`: `.ifc` is a read-only model (STEP header check, 2 MiB limit before any copy), Source opens read-only, `api.confirm(label)` for viewers, and `ArkUi::wasm_worker_asset` (HTTP serve path only). ARK Desktop's consumer is on `codex/ifc-integration` and needs an ARK tag with this before it can pin. |

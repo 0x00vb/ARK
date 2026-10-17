@@ -19,10 +19,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use ark_store::Store;
-use ark_tools::events::{Direction, EventSink, ExternalEvent, IngestError, Ingested, Limits};
+use ark_tools::events::{
+    Direction, EventSink, EventSource, ExternalEvent, IngestError, Ingested, Limits,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
+use crate::feed::{Feed, FeedRecord, FEED};
 use crate::record::now_ms;
 use crate::spec::TaskSpec;
 
@@ -315,6 +318,8 @@ pub struct LogLimits {
     pub queue: usize,
     /// Payload bytes kept per account.
     pub retained_bytes: u64,
+    /// How often an account's feed polls while it listens.
+    pub poll_every: std::time::Duration,
 }
 
 impl Default for LogLimits {
@@ -324,6 +329,7 @@ impl Default for LogLimits {
             inbox: 1_000,
             queue: 100,
             retained_bytes: 256 << 20,
+            poll_every: std::time::Duration::from_secs(60),
         }
     }
 }
@@ -374,6 +380,12 @@ pub struct EventLog {
     claims: Mutex<HashMap<String, Weak<()>>>,
     /// Accounts the app connected that deliver events.
     offered: Mutex<Vec<Offered>>,
+    /// Their pollers' sources, by scope ([`EventLog::provide`]).
+    sources: Mutex<HashMap<String, Arc<dyn EventSource>>>,
+    /// Running pollers, one per scope.
+    feeds: Mutex<HashMap<String, Arc<Feed>>>,
+    /// Counts changes of any feed's state, so views show them.
+    feeds_moved: watch::Sender<u64>,
 }
 
 fn logs() -> &'static Mutex<HashMap<PathBuf, Weak<EventLog>>> {
@@ -439,6 +451,9 @@ impl EventLog {
             seq,
             claims: Mutex::new(HashMap::new()),
             offered: Mutex::new(Vec::new()),
+            sources: Mutex::new(HashMap::new()),
+            feeds: Mutex::new(HashMap::new()),
+            feeds_moved: watch::channel(0).0,
         }
     }
 
@@ -456,6 +471,90 @@ impl EventLog {
             .lock()
             .unwrap()
             .retain(|x| (x.source.as_str(), x.account.as_str()) != (source, account));
+        let scope = scope_of(source, account);
+        self.sources.lock().unwrap().remove(&scope);
+        if let Some(f) = self.feeds.lock().unwrap().remove(&scope) {
+            f.stop();
+        }
+    }
+
+    /// Offer an account and the source that polls it. Its feed starts once an automation
+    /// reads the account, and only one per account polls ([`EventLog::ensure_feeds`]).
+    pub fn provide(self: &Arc<Self>, o: Offered, source: Arc<dyn EventSource>) {
+        let scope = scope_of(&o.source, &o.account);
+        self.offer(o);
+        self.sources.lock().unwrap().insert(scope, source);
+        self.ensure_feeds();
+    }
+
+    /// Start a feed for each provided account an automation reads and none polls yet, and stop
+    /// the feeds of accounts no automation reads any more. Outside
+    /// a Tokio runtime nothing starts; [`EventLog::feed`] still polls on demand.
+    pub fn ensure_feeds(self: &Arc<Self>) {
+        let wanted: Vec<String> = {
+            let index = self.index.lock().unwrap();
+            index.marks.values().map(|m| m.scope.clone()).collect()
+        };
+        self.feeds.lock().unwrap().retain(|scope, f| {
+            let keep = wanted.contains(scope);
+            if !keep {
+                f.stop();
+            }
+            keep
+        });
+        let Ok(rt) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        for scope in wanted {
+            if let Some(feed) = self.feed_for(&scope) {
+                if let std::collections::hash_map::Entry::Vacant(v) =
+                    self.feeds.lock().unwrap().entry(scope)
+                {
+                    v.insert(feed.clone());
+                    rt.spawn(feed.run());
+                }
+            }
+        }
+    }
+
+    /// The poller of an account: the running one, or one made for the provided source.
+    pub fn feed(self: &Arc<Self>, source: &str, account: &str) -> Option<Arc<Feed>> {
+        self.feed_for(&scope_of(source, account))
+    }
+
+    fn feed_for(self: &Arc<Self>, scope: &str) -> Option<Arc<Feed>> {
+        if let Some(f) = self.feeds.lock().unwrap().get(scope) {
+            return Some(f.clone());
+        }
+        let src = self.sources.lock().unwrap().get(scope).cloned()?;
+        Some(Arc::new(Feed::new(self, src, self.limits().poll_every)))
+    }
+
+    /// An account's saved feed: its cursor and how it stands.
+    pub fn feed_record(&self, source: &str, account: &str) -> Option<FeedRecord> {
+        self.store
+            .get_record(FEED, &scope_of(source, account))
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::from_value(v).ok())
+    }
+
+    pub(crate) fn save_feed(&self, r: &FeedRecord) -> Result<(), String> {
+        let before = self.feed_record(&r.source, &r.account).map(|f| f.state);
+        let v = serde_json::to_value(r).map_err(|e| e.to_string())?;
+        let scope = scope_of(&r.source, &r.account);
+        self.store
+            .put_records(&[(FEED, &scope, &scope, &v)])
+            .map_err(|e| e.to_string())?;
+        if before.as_ref() != Some(&r.state) {
+            self.feeds_moved.send_modify(|n| *n += 1);
+        }
+        Ok(())
+    }
+
+    /// Changes when a feed's state changes (not on every poll).
+    pub fn feeds_moved(&self) -> watch::Receiver<u64> {
+        self.feeds_moved.subscribe()
     }
 
     pub fn offered(&self) -> Vec<Offered> {

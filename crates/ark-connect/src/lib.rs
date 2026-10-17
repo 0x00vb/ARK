@@ -20,7 +20,7 @@ mod connections;
 
 pub use api_keys::ApiKeys;
 pub use catalog::{Capability, Catalog, OAuth, Provider};
-pub use connections::{Account, CapabilityStatus, Connecting, Connections, State};
+pub use connections::{Account, CapabilityStatus, Connecting, Connections, EventFeed, State};
 pub use secrets::{FileSecrets, Keychain, MemorySecrets, Secrets, SECRETS_KEY_VAR};
 
 #[derive(Debug, thiserror::Error)]

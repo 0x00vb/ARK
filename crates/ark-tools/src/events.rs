@@ -225,6 +225,16 @@ pub trait EventSource: Send + Sync {
     /// `None`: the baseline, a cursor at the provider's present with no events, so nothing old
     /// runs. `Some(c)`: the events after `c`, at most `max`, paged to the end of whole pages.
     async fn poll(&self, cursor: Option<&str>, max: usize) -> Result<Batch, SourceError>;
+    /// After a [`SourceError::Gap`]: the events since `since_ms` (Unix ms) that the provider
+    /// can still list, at most `max`, with a fresh cursor taken before they were listed, so
+    /// nothing that arrives meanwhile is missed. The default cannot list past events.
+    async fn reconcile(&self, since_ms: u64, max: usize) -> Result<Batch, SourceError> {
+        let _ = (since_ms, max);
+        Err(SourceError::Transient(format!(
+            "{} cannot list past events",
+            self.source()
+        )))
+    }
 }
 
 /// Why a webhook request was refused.
@@ -266,6 +276,10 @@ pub struct FakeSource {
     taken: Mutex<u64>,
     /// The cursors each poll was given, in order.
     pub seen: Mutex<Vec<Option<String>>>,
+    /// What [`EventSource::reconcile`] returns next; `None`: it cannot.
+    reconciled: Mutex<Option<Result<Vec<ExternalEvent>, SourceError>>>,
+    /// The `since_ms` each reconcile was given, in order.
+    pub reconciles: Mutex<Vec<u64>>,
 }
 
 impl FakeSource {
@@ -276,10 +290,16 @@ impl FakeSource {
             steps: Mutex::new(VecDeque::new()),
             taken: Mutex::new(0),
             seen: Mutex::new(Vec::new()),
+            reconciled: Mutex::new(None),
+            reconciles: Mutex::new(Vec::new()),
         }
     }
     pub fn push(&self, step: Result<Vec<ExternalEvent>, SourceError>) {
         self.steps.lock().unwrap().push_back(step);
+    }
+    /// The next reconcile returns this, at a fresh cursor.
+    pub fn reconcile_with(&self, step: Result<Vec<ExternalEvent>, SourceError>) {
+        *self.reconciled.lock().unwrap() = Some(step);
     }
 }
 
@@ -330,6 +350,19 @@ impl EventSource for FakeSource {
                 })
             }
         }
+    }
+    async fn reconcile(&self, since_ms: u64, _max: usize) -> Result<Batch, SourceError> {
+        self.reconciles.lock().unwrap().push(since_ms);
+        let step = self.reconciled.lock().unwrap().take();
+        let events =
+            step.unwrap_or_else(|| Err(SourceError::Transient("cannot list past events".into())))?;
+        let mut taken = self.taken.lock().unwrap();
+        *taken += 1;
+        Ok(Batch {
+            events,
+            cursor: taken.to_string(),
+            more: false,
+        })
     }
 }
 

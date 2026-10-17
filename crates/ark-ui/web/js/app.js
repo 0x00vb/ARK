@@ -246,6 +246,7 @@ const RESOURCE_METHODS = {
   schedule_pause: ["project", "schedule_pause"], schedule_resume: ["project", "schedule_resume"], schedule_run: ["project", "schedule_run"],
   automations: ["project", "automations"], automation: ["project", "automation"], automation_pause: ["project", "automation_pause"],
   automation_resume: ["project", "automation_resume"], automation_stop: ["project", "automation_stop"], automation_discard: ["project", "automation_discard"],
+  automation_reconcile: ["project", "automation_reconcile"], automation_from_now: ["project", "automation_from_now"],
   board: ["project", "board"], board_add: ["project", "board_add"], board_change: ["project", "board_change"],
   board_remove: ["project", "board_remove"], board_give: ["project", "board_give"],
   suspend_agent: ["project", "suspend_agent"], resume_agent: ["project", "resume_agent"], terminate_agent: ["project", "terminate_agent"], message_agent: ["project", "message_agent"],

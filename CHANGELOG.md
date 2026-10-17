@@ -36,6 +36,14 @@ What changed for people building on ARK, per release. Not a commit log.
   front-ends show automations beside schedules: `/automations` in the terminal, the chat line
   and an automation pane in the window, with resource ops `automations`, `automation`,
   `automation_pause`, `automation_resume`, `automation_stop` and `automation_discard`.
+- Event automations, Mail (`docs/AUTOMATIONS.md` A2): an Inbox capability (`google.inbox`, its
+  own read scope) with `inbox.read` and `inbox.reply` (only to an address that wrote in the
+  thread; a send with no answer is an unconfirmed effect) and a Gmail `EventSource`.
+  `EventLog::provide` runs one `Feed` per account while an automation reads it: a baseline
+  first, the cursor saved after its events, gaps recovered by `Orchestrator::recover_feed`
+  (check since then, or start from now and keep the gap). `EventSource::reconcile` (default:
+  cannot) and `Connections::event_sources`. Feed states show in `/automations` and the pane;
+  resource ops `automation_reconcile`, `automation_from_now`.
 
 ### Changed
 
@@ -68,6 +76,7 @@ What changed for people building on ARK, per release. Not a commit log.
 - `TaskRecord` has `automation`, `revision` and `event`; struct literals add them (`None`).
 - `EventKind::{AutomationChanged, Unautomated}` are new; exhaustive matches add arms.
 - `ActionDescriptor` has `person_only`; struct literals add it (`false`).
+- `LogLimits` has `poll_every`; struct literals add it.
 - One runtime process writes a store: `Store::open` holds an OS lock on `runtime.lock`, shared
   by every handle in the process. A second process gets the new `StoreError::Busy` naming the
   first; an app that opened a store from two processes talks to the first one's protocol

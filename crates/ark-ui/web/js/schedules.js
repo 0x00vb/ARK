@@ -194,7 +194,7 @@ function draw() {
       el.append(h("button.plan", {
         type: "button",
         "data-tone": s.tone === "muted" ? null : s.tone,
-        title: `When ${s.says}: ${s.objective}`,
+        title: `When ${s.says}: ${s.objective} (${s.status})`,
         onclick: () => store.ark.openPanel("automation", { id: s.id }),
       },
         s.status === "running now" ? h("span.working-dot") : icon("bolt"),
@@ -339,7 +339,12 @@ function when(s) {
 const RECOVER = {
   resume: { method: "automation_resume", label: "Resume" },
   discard: { method: "automation_discard", label: "Drop waiting messages", confirm: "Drop them for good?" },
+  reconcile: { method: "automation_reconcile", label: "Check since then" },
+  from_now: { method: "automation_from_now", label: "Start from now", confirm: "Skip what may be missing?" },
+  connect: { view: "marketplace", label: "Connect again" },
 };
+/// A gap has two ways out: checking first, then starting from now as the second choice.
+const ALSO = { reconcile: "from_now" };
 
 function automationPanel(el, params, ark = store.ark) {
   el.classList.add("sc-panel");
@@ -392,11 +397,12 @@ function automationPanel(el, params, ark = store.ark) {
     ark.setPanelTitle("automation", clip(a.objective, 28));
     const paused = a.state === "paused" || a.state === "paused_failing";
     const actions = [];
-    const fix = RECOVER[a.recovery];
-    if (fix && !fix.confirm) {
-      actions.push(h("button.btn.small", { type: "button", onclick: () => act(fix.method, id, undefined, ark, "automation").then(fetch) }, fix.label));
-    } else if (fix) {
-      actions.push(twice("discard", fix.label, fix.confirm, () => act(fix.method, id, undefined, ark, "automation").then(fetch)));
+    for (const [i, key] of [a.recovery, ALSO[a.recovery]].entries()) {
+      const fix = RECOVER[key];
+      if (!fix) continue;
+      const run = () => fix.view ? ark.openView(fix.view) : act(fix.method, id, undefined, ark, "automation").then(fetch);
+      if (fix.confirm) actions.push(twice(key, fix.label, fix.confirm, run));
+      else actions.push(h(i ? "button.btn.ghost.small" : "button.btn.small", { type: "button", onclick: run }, fix.label));
     }
     if (!paused) {
       actions.push(h("button.btn.ghost.small", { type: "button", onclick: () => act("automation_pause", id, undefined, ark, "automation").then(fetch) }, "Pause"));

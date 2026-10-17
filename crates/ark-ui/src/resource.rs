@@ -118,6 +118,8 @@ pub enum ResourceOperationKind {
     AutomationResume,
     AutomationStop,
     AutomationDiscard,
+    AutomationReconcile,
+    AutomationFromNow,
     Board,
     BoardAdd,
     BoardChange,
@@ -225,6 +227,8 @@ impl ResourceOperationKind {
             | O::AutomationResume
             | O::AutomationStop
             | O::AutomationDiscard
+            | O::AutomationReconcile
+            | O::AutomationFromNow
             | O::Board
             | O::BoardAdd
             | O::BoardChange

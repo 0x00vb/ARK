@@ -117,7 +117,7 @@ impl Command for Automations {
         "Work that runs on its own: at set times or when a message arrives"
     );
     fn usage(&self) -> &str {
-        "[pause|resume|stop|discard <id>]"
+        "[pause|resume|stop|discard|reconcile|from-now <id>]"
     }
     async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
         let Some(o) = ix.orchestrator() else {
@@ -128,7 +128,8 @@ impl Command for Automations {
             return Ok(crate::automations::automations_report(o).into());
         }
         use crate::orchestration::Control as C;
-        let usage = "usage: /automations [pause|resume|stop|discard <id>]".to_string();
+        let usage =
+            "usage: /automations [pause|resume|stop|discard|reconcile|from-now <id>]".to_string();
         let parsed = match args.split_once(char::is_whitespace) {
             Some((verb, id)) if !id.trim().is_empty() => {
                 let id = id.trim().to_string();
@@ -141,6 +142,14 @@ impl Command for Automations {
                     ("resume", false) => Ok(C::ResumeAutomation { automation: id }),
                     ("stop", false) => Ok(C::StopAutomation { automation: id }),
                     ("discard", false) => Ok(C::DiscardPending { automation: id }),
+                    ("reconcile", false) => Ok(C::RecoverFeed {
+                        automation: id,
+                        from_now: false,
+                    }),
+                    ("from-now", false) => Ok(C::RecoverFeed {
+                        automation: id,
+                        from_now: true,
+                    }),
                     _ => Err(usage),
                 }
             }

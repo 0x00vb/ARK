@@ -2522,13 +2522,26 @@ impl Host {
                     "runs": ark_interact::automations::event_runs(&o, &id, limit),
                 }))
             }
-            O::AutomationPause | O::AutomationResume | O::AutomationStop | O::AutomationDiscard => {
+            O::AutomationPause
+            | O::AutomationResume
+            | O::AutomationStop
+            | O::AutomationDiscard
+            | O::AutomationReconcile
+            | O::AutomationFromNow => {
                 let o = self.resource_orchestrator(&r).await?;
                 let automation = s("automation");
                 let control = match operation.kind {
                     O::AutomationPause => Control::PauseAutomation { automation },
                     O::AutomationResume => Control::ResumeAutomation { automation },
                     O::AutomationStop => Control::StopAutomation { automation },
+                    O::AutomationReconcile => Control::RecoverFeed {
+                        automation,
+                        from_now: false,
+                    },
+                    O::AutomationFromNow => Control::RecoverFeed {
+                        automation,
+                        from_now: true,
+                    },
                     _ => Control::DiscardPending { automation },
                 };
                 self.control_on(&o, control).await?;

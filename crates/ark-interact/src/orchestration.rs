@@ -786,6 +786,12 @@ pub enum Control {
     DiscardPending {
         automation: String,
     },
+    /// Leave a gap in the feed of the automation's account: check what the provider still has
+    /// since the gap began, or start from now and keep the gap as skipped.
+    RecoverFeed {
+        automation: String,
+        from_now: bool,
+    },
     /// Add an item to the board.
     AddWork {
         title: String,
@@ -933,6 +939,25 @@ pub async fn control(
                 "\"{}\" dropped the messages waiting and listens from now",
                 clip(&a.task.objective, 60)
             ))
+        }
+        Control::RecoverFeed {
+            automation,
+            from_now,
+        } => {
+            let how = if from_now {
+                ark_orchestrate::Recovery::StartFromNow
+            } else {
+                ark_orchestrate::Recovery::Reconcile
+            };
+            let r = o.recover_feed(&automation, how).await?;
+            ControlOutcome::Done(if from_now {
+                format!(
+                    "{} reads on from now; what came in the gap may be missing",
+                    r.account
+                )
+            } else {
+                format!("{} was checked since the gap began and reads on", r.account)
+            })
         }
         Control::AddWork { title, change } => {
             ControlOutcome::Work(Box::new(o.add_work(PERSON, &title, change)?))

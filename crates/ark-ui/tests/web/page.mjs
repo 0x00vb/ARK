@@ -1020,6 +1020,23 @@ async function automations(page) {
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.emulateMedia({ colorScheme: "light" });
 
+  // Paused again, the provider loses its history: after Resume the pane says messages may be
+  // missing and offers checking first, starting from now second (asked once more).
+  await pane.locator("button", { hasText: "Pause" }).click();
+  await pane.locator(".sc-state", { hasText: "paused" }).waitFor();
+  await page.waitForTimeout(600);
+  await pane.locator(".sc-actions button").first().click();
+  await pane.locator(".sc-state", { hasText: /^messages since .+ may be missing$/ }).waitFor();
+  await page.locator("#plans .plan-state", { hasText: /may be missing/ }).waitFor();
+  const gapActions = await pane.locator(".sc-actions button").allInnerTexts();
+  assert.deepEqual(gapActions.slice(0, 2), ["Check since then", "Start from now"]);
+  await page.waitForTimeout(300);
+  await shot(page, "automation-pane-gap");
+  const fromNow = pane.locator(".sc-actions button", { hasText: "Start from now" });
+  await fromNow.click();
+  await pane.locator(".sc-actions button", { hasText: "Skip what may be missing?" }).click();
+  await pane.locator(".sc-state", { hasText: /^listening/ }).waitFor();
+
   // Stop asks once more, then the pane says it stopped and the line goes.
   const stop = pane.locator("button.sc-stop");
   await stop.click();

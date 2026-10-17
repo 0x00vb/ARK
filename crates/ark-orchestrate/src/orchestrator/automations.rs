@@ -277,6 +277,35 @@ impl Orchestrator {
         Ok(rec)
     }
 
+    /// Leave a gap in the feed of an automation's account the way the person chose
+    /// ([`crate::Recovery`]). Every automation on that account reads on from there.
+    pub async fn recover_feed(
+        &self,
+        id: &str,
+        how: crate::Recovery,
+    ) -> Result<crate::FeedRecord, OrchError> {
+        let a = self
+            .automation(id)
+            .ok_or_else(|| self.inner.no_automation(id))?;
+        let feed = self
+            .inner
+            .log
+            .feed(&a.pattern.source, &a.pattern.account)
+            .ok_or_else(|| {
+                OrchError::NotAllowed(format!(
+                    "{} on {} is not connected",
+                    a.pattern.account, a.pattern.source
+                ))
+            })?;
+        let r = feed.recover(how).await.map_err(OrchError::NotAllowed)?;
+        for x in self.automations() {
+            if x.pattern.scope() == a.pattern.scope() {
+                self.inner.changed_automation(&x);
+            }
+        }
+        Ok(r)
+    }
+
     /// Stop an automation. Matched events waiting and a run not started yet are cancelled; a
     /// run working goes on; its runs and their results stay.
     pub fn unautomate(&self, id: &str) -> Result<EventAutomationRecord, OrchError> {
@@ -306,6 +335,7 @@ impl Orchestrator {
             }
         }
         self.inner.log.forget(&a.id);
+        self.inner.log.ensure_feeds();
         self.inner.cancel_unstarted(&cancelled.tasks);
         self.inner.emit(EventKind::Unautomated {
             automation: a.id.clone(),
@@ -339,14 +369,27 @@ impl Orchestrator {
     pub fn spawn_event_evaluator(&self) -> tokio::task::JoinHandle<()> {
         let weak = Arc::downgrade(&self.inner);
         let mut grown = self.inner.log.subscribe();
+        let mut moved = self.inner.log.feeds_moved();
         tokio::spawn(async move {
             loop {
                 {
                     let Some(inner) = weak.upgrade() else { break };
                     inner.evaluate();
                 }
-                if grown.changed().await.is_err() {
-                    break;
+                tokio::select! {
+                    r = grown.changed() => if r.is_err() { break },
+                    r = moved.changed() => {
+                        if r.is_err() {
+                            break;
+                        }
+                        // A feed's state shows on every automation of its account.
+                        let Some(inner) = weak.upgrade() else { break };
+                        let all: Vec<EventAutomationRecord> =
+                            inner.state.lock().unwrap().automations.values().cloned().collect();
+                        for a in &all {
+                            inner.changed_automation(a);
+                        }
+                    }
                 }
             }
         })
@@ -418,6 +461,7 @@ impl Inner {
             .automations
             .insert(a.id.clone(), a.clone());
         self.log.mark(a);
+        self.log.ensure_feeds();
     }
 
     fn changed_automation(&self, a: &EventAutomationRecord) {

@@ -57,7 +57,7 @@ impl Adapter for Mail {
         let cc = addresses(SEND, &input["cc"])?;
         let subject = one_line(SEND, "subject", input["subject"].as_str().unwrap_or(""))?;
         let body = input["body"].as_str().unwrap_or("");
-        let raw = message(&to, &cc, &subject, body);
+        let raw = message(&to, &cc, &subject, body, &[]);
         let url = format!("{}/users/me/messages/send", self.0.base(GMAIL));
         let sent = self
             .0
@@ -271,7 +271,7 @@ fn list(v: &Value) -> String {
 }
 
 /// Email addresses from a string or a list. Line breaks are refused: they would add headers.
-fn addresses(action: &str, v: &Value) -> Result<Vec<String>> {
+pub(super) fn addresses(action: &str, v: &Value) -> Result<Vec<String>> {
     let raw: Vec<String> = match v {
         Value::Null => vec![],
         Value::String(s) => s.split(',').map(str::to_string).collect(),
@@ -294,7 +294,7 @@ fn addresses(action: &str, v: &Value) -> Result<Vec<String>> {
     Ok(out)
 }
 
-fn one_line(action: &str, field: &str, s: &str) -> Result<String> {
+pub(super) fn one_line(action: &str, field: &str, s: &str) -> Result<String> {
     if s.contains(['\r', '\n']) {
         return Err(AdapterError::bad_input(
             action,
@@ -306,7 +306,13 @@ fn one_line(action: &str, field: &str, s: &str) -> Result<String> {
 
 /// An RFC 2822 message, base64url as the Gmail API takes it. Non-ASCII subjects are encoded
 /// (RFC 2047); the body travels as base64 UTF-8.
-fn message(to: &[String], cc: &[String], subject: &str, body: &str) -> String {
+pub(super) fn message(
+    to: &[String],
+    cc: &[String],
+    subject: &str,
+    body: &str,
+    headers: &[(&str, &str)],
+) -> String {
     let b64 = base64::engine::general_purpose::STANDARD;
     let subject = if subject.is_ascii() {
         subject.to_string()
@@ -316,6 +322,9 @@ fn message(to: &[String], cc: &[String], subject: &str, body: &str) -> String {
     let mut m = format!("To: {}\r\n", to.join(", "));
     if !cc.is_empty() {
         m.push_str(&format!("Cc: {}\r\n", cc.join(", ")));
+    }
+    for (name, value) in headers {
+        m.push_str(&format!("{name}: {value}\r\n"));
     }
     m.push_str(&format!(
         "Subject: {subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
@@ -383,7 +392,7 @@ mod tests {
 
     #[test]
     fn a_non_ascii_subject_is_encoded() {
-        let raw = message(&["a@example.com".into()], &[], "Relatório", "Olá");
+        let raw = message(&["a@example.com".into()], &[], "Relatório", "Olá", &[]);
         let mime = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(raw)
             .unwrap();

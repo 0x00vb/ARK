@@ -40,6 +40,7 @@ pub mod board;
 mod brief;
 mod cron;
 mod event;
+pub mod feed;
 mod graph;
 pub mod models;
 mod orchestrator;
@@ -57,6 +58,7 @@ pub use automation::{
 pub use board::{WorkChange, WorkItem, WorkState, WorkStep};
 pub use brief::Brief;
 pub use event::{EventKind, OrchEvent};
+pub use feed::{Feed, FeedRecord, FeedState, Recovery, SkippedGap};
 pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskNode};
 pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
 pub use orchestrator::{

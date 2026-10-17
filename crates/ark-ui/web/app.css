@@ -1111,7 +1111,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .plan .working-dot { flex: none; }
 .plan-when { flex: none; color: var(--text); font-weight: 500; }
 .plan-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plan-state { flex: none; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.plan-state { flex: 0 1 auto; min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .plan[data-tone="ask"] .plan-state, .plan[data-tone="ask"] .ico { color: var(--accent); }
 .plan[data-tone="err"] .plan-state { color: var(--err); }
 .plan[data-tone="warn"] .plan-state { color: var(--warn); }

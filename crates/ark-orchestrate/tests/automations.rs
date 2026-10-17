@@ -872,3 +872,73 @@ async fn an_agent_that_hands_work_on_cannot_run_an_automation() {
         .unwrap_err();
     assert!(e.to_string().contains("keeps each event to itself"), "{e}");
 }
+
+/// A2: once an automation reads a provided account, one feed polls it for every automation on
+/// it, from a baseline, and each mail it brings runs once.
+#[tokio::test]
+async fn one_feed_polls_an_account_for_all_its_automations_and_each_mail_runs_once() {
+    use ark_tools::events::{EventSource, FakeSource};
+    let app = App::new();
+    let log = app.log();
+    log.set_limits(LogLimits {
+        poll_every: Duration::from_millis(20),
+        ..LogLimits::default()
+    });
+    let src = Arc::new(FakeSource::new("fake", "office@example.com"));
+    src.push(Ok(vec![mail("m1", "lara@example.com", "Q4 totals?")]));
+    log.provide(
+        Offered {
+            source: "fake".into(),
+            account: "office@example.com".into(),
+            label: "Inbox (office@example.com)".into(),
+            actions: vec![],
+        },
+        src.clone() as Arc<dyn EventSource>,
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        src.seen.lock().unwrap().is_empty(),
+        "no automation reads it yet"
+    );
+    let m = Script::new(vec![Ok(answer("Replied to Lara.")), Ok(answer("Filed."))]);
+    let (o, a) = app.automated(&m).await;
+    let feed = log.feed("fake", "office@example.com").unwrap();
+    o.spawn(AgentSpec::new("w2").model("m").tools(Vec::<String>::new()))
+        .await
+        .unwrap();
+    o.automate(
+        "w2",
+        TaskSpec::new("file the mail"),
+        lara(),
+        AutomationAuthority::default(),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(
+        &feed,
+        &log.feed("fake", "office@example.com").unwrap()
+    ));
+    let runs = ended(&o, &a.id, 1).await;
+    settle().await;
+    assert_eq!(runs.len(), 1);
+    assert_eq!(
+        o.automation_runs(&a.id, 10).len(),
+        1,
+        "one run for one mail"
+    );
+    assert_eq!(
+        src.seen.lock().unwrap()[0],
+        None,
+        "it started from a baseline"
+    );
+    assert_eq!(feed.record().state, FeedState::Listening);
+    // Stopping every automation on the account stops its feed.
+    for x in o.automations() {
+        o.unautomate(&x.id).unwrap();
+    }
+    let polls = src.seen.lock().unwrap().len();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        src.seen.lock().unwrap().len() <= polls + 1,
+        "the feed stopped"
+    );
+}

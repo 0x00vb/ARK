@@ -27,6 +27,11 @@
       "scopes": ["https://www.googleapis.com/auth/gmail.send"]
     },
     {
+      "id": "inbox", "label": "Inbox", "says": "read new mail and reply in its thread", "tools": ["inbox"],
+      "provider": "google", "service": "google.inbox",
+      "scopes": ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"]
+    },
+    {
       "id": "calendar", "label": "Calendar", "says": "see your events and add new ones", "tools": ["calendar"],
       "provider": "google", "service": "google.calendar",
       "scopes": ["https://www.googleapis.com/auth/calendar.events"]

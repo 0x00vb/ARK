@@ -86,6 +86,15 @@ pub struct Connections {
     inner: Arc<Inner>,
 }
 
+/// A connected account that delivers events ([`Connections::event_sources`]).
+pub struct EventFeed {
+    /// In words: `Inbox (office@example.com)`.
+    pub label: String,
+    /// The actions its capability gives, which a run on its events may be allowed.
+    pub actions: Vec<String>,
+    pub source: Arc<dyn ark_tools::events::EventSource>,
+}
+
 /// A connection in progress: send the person to [`url`](Connecting::url), then
 /// [`finish`](Connecting::finish).
 pub struct Connecting {
@@ -330,6 +339,34 @@ impl Connections {
     pub fn tools_of(&self, cap: &Capability) -> Option<Arc<dyn Adapter>> {
         let account = self.account_for(cap)?;
         services::adapter(cap.service.as_deref()?, self.clone(), account.id)
+    }
+
+    /// The connected accounts that deliver events, each with the poller of its events.
+    pub fn event_sources(&self) -> Vec<EventFeed> {
+        self.inner
+            .catalog
+            .capabilities
+            .iter()
+            .filter_map(|c| {
+                let service = c.service.as_deref()?;
+                let account = self.account_for(c)?;
+                let source = services::feed(
+                    service,
+                    self.clone(),
+                    account.id.clone(),
+                    account.name.clone(),
+                )?;
+                let actions = self
+                    .tools_of(c)
+                    .map(|t| t.actions().into_iter().map(|d| d.name).collect())
+                    .unwrap_or_default();
+                Some(EventFeed {
+                    label: format!("{} ({})", c.label, account.name),
+                    actions,
+                    source,
+                })
+            })
+            .collect()
     }
 
     pub(crate) fn http(&self) -> &reqwest::Client {

@@ -227,40 +227,66 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             ));
     }
     let ark = builder.build().unwrap();
-    // An account that delivers mail; Lara's mail arrives once the automation listens.
+    // An account that delivers mail through a feed: Lara's mail arrives once the automation
+    // listens; after the person pauses it a second time, the provider loses its history (a gap).
     let _events = (scenario == "automations").then(|| {
-        use ark_interact::ark_orchestrate::{EventLog, Offered};
-        use ark_tools::events::{Direction, EventSink, ExternalEvent};
-        let log = EventLog::of(&ark.engine().store);
-        log.offer(Offered {
+        use ark_interact::ark_orchestrate::{EventLog, LogLimits, Offered};
+        use ark_tools::events::{Direction, EventSource, ExternalEvent, FakeSource, SourceError};
+        let store = ark.engine().store.clone();
+        let log = EventLog::of(&store);
+        log.set_limits(LogLimits {
+            poll_every: Duration::from_millis(200),
+            ..LogLimits::default()
+        });
+        let src = Arc::new(FakeSource::new("gmail", "office@example.com"));
+        let at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        src.push(Ok(vec![ExternalEvent {
             source: "gmail".into(),
             account: "office@example.com".into(),
-            label: "Mail (office@example.com)".into(),
-            actions: vec!["mail.reply".into()],
-        });
-        let l = log.clone();
-        tokio::spawn(async move {
-            while l.accounts().is_empty() {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-            let at_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
-            l.ingest(vec![ExternalEvent {
+            key: "gmail:m-lara-1".into(),
+            kind: "message".into(),
+            direction: Direction::Inbound,
+            actor: Some("lara@example.com".into()),
+            subject: Some("th-budget".into()),
+            at_ms,
+            label: "Mail from lara@example.com".into(),
+            fields: Default::default(),
+            payload: Some("Can you send me the Q4 totals?".into()),
+        }]));
+        log.provide(
+            Offered {
                 source: "gmail".into(),
                 account: "office@example.com".into(),
-                key: "gmail:m-lara-1".into(),
-                kind: "message".into(),
-                direction: Direction::Inbound,
-                actor: Some("lara@example.com".into()),
-                subject: Some("th-budget".into()),
-                at_ms,
-                label: "Mail from lara@example.com".into(),
-                fields: Default::default(),
-                payload: Some("Can you send me the Q4 totals?".into()),
-            }])
-            .unwrap();
+                label: "Mail (office@example.com)".into(),
+                actions: vec!["mail.reply".into()],
+            },
+            src.clone() as Arc<dyn EventSource>,
+        );
+        tokio::spawn(async move {
+            let mut pauses = 0;
+            let mut was_paused = false;
+            loop {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let paused = store
+                    .list_records("event_automation", None)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|a| a["state"] == "paused");
+                if paused && !was_paused {
+                    pauses += 1;
+                    if pauses == 2 {
+                        src.push(Err(SourceError::Gap {
+                            since_ms: None,
+                            detail: "history expired".into(),
+                        }));
+                        break;
+                    }
+                }
+                was_paused = paused;
+            }
         });
         log
     });

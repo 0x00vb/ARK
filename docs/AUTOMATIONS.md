@@ -335,7 +335,7 @@ review and a first-use dogfood.
 | A4 | Load and recovery | 1,000 mixed fake events, 100 queued runs, slow model, full inbox, full then drain, full then discard, another automation sharing the account, reply loop, quota race, disconnect, SIGKILL and disk full. No duplicate task or effect attempt; preserved capacity input is not pruned; manual pause and explicit discard have terminal audit reasons; ingest-to-task p95 under 2 seconds excluding model and provider poll; retained event storage stays within the configured 256 MiB cap |
 | A5 | Optional transports | Gmail Pub/Sub or an ARK relay only if polling latency or public webhook setup blocks real use |
 
-Status: A0 and A1 are built on the `event-automations` branch. A1 shows Listening, Running, Paused
+Status: A0, A1 and A2 (Mail, against a fake Gmail) are built on the `event-automations` branch. A1 shows Listening, Running, Paused
 and stopped in both front-ends; the provider states (Needs connection, Recovery
 gap, Degraded, Reply window ended, Send uncertain) arrive with A2 and A3, which produce them.
 

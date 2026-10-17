@@ -3,7 +3,8 @@
 //! words; schedules keep their own view and calls unchanged.
 
 use ark_orchestrate::{
-    AutomationState, EventAutomationRecord, Orchestrator, TaskRecord, TaskState,
+    AutomationState, EventAutomationRecord, FeedRecord, FeedState, Orchestrator, TaskRecord,
+    TaskState,
 };
 use serde::Serialize;
 
@@ -38,7 +39,8 @@ pub struct EventView {
     pub status: String,
     /// `live`, `ask`, `warn`, `err` or `muted`: how much it needs the person.
     pub tone: &'static str,
-    /// What the person can do about it now: `resume`, `discard`, `check`, or none.
+    /// What the person can do about it now: `resume`, `discard`, `check`, `reconcile` (or
+    /// start from now), `from_now`, `connect`, or none.
     pub recovery: Option<&'static str>,
     /// The last message that started it, in the source's words, and when.
     pub last_event: Option<String>,
@@ -75,7 +77,10 @@ pub fn automations(o: &Orchestrator, chat: Option<&str>) -> Vec<AutomationView> 
 pub fn event_view(o: &Orchestrator, a: &EventAutomationRecord) -> EventView {
     let last = a.last_task.as_deref().and_then(|t| o.task(t));
     let pending = o.automation_pending(&a.id).len();
-    let (status, tone, recovery) = status(a, last.as_ref(), pending);
+    let feed = o
+        .event_log()
+        .feed_record(&a.pattern.source, &a.pattern.account);
+    let (status, tone, recovery) = status(a, last.as_ref(), pending, feed.as_ref());
     let label = |ms: u64| ark_orchestrate::schedule::local_label(ms);
     let ended = last.as_ref().filter(|t| t.state.is_final()).and_then(|t| {
         let at = label(t.finished_ms.unwrap_or(t.created_ms));
@@ -123,6 +128,7 @@ fn status(
     a: &EventAutomationRecord,
     last: Option<&TaskRecord>,
     pending: usize,
+    feed: Option<&FeedRecord>,
 ) -> (String, &'static str, Option<&'static str>) {
     let label = |ms: u64| ark_orchestrate::schedule::local_label(ms);
     if let Some(t) = last.filter(|t| !t.state.is_final()) {
@@ -151,6 +157,47 @@ fn status(
             )
         }
         AutomationState::Listening => {}
+    }
+    match feed.map(|f| &f.state) {
+        Some(FeedState::Gap {
+            since_ms: Some(since),
+            ..
+        }) => {
+            return (
+                format!("messages since {} may be missing", label(*since)),
+                "err",
+                Some("reconcile"),
+            )
+        }
+        Some(FeedState::Gap { since_ms: None, .. }) => {
+            return ("messages may be missing".into(), "err", Some("from_now"))
+        }
+        Some(FeedState::NeedsConnection { .. }) => {
+            return (
+                format!("{} needs connecting again", a.pattern.account),
+                "err",
+                Some("connect"),
+            )
+        }
+        Some(FeedState::Degraded { retry_at_ms, .. }) => {
+            return (
+                format!(
+                    "cannot check for messages; trying again at {}",
+                    label(*retry_at_ms)
+                ),
+                "warn",
+                None,
+            )
+        }
+        Some(FeedState::RateLimited { until_ms }) if *until_ms > now_ms() => {
+            return (
+                format!("checks again at {}", label(*until_ms)),
+                "warn",
+                None,
+            )
+        }
+        Some(FeedState::Starting) => return ("starting".into(), "muted", None),
+        _ => {}
     }
     if let Some(l) = a.limited.as_ref().filter(|l| l.until_ms > now_ms()) {
         return (

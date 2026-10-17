@@ -107,6 +107,49 @@ impl Command for Schedules {
     }
 }
 
+/// `/automations`: everything that runs on its own (schedules and event automations), and
+/// pausing, resuming, stopping or draining one.
+pub struct Automations;
+#[async_trait::async_trait]
+impl Command for Automations {
+    meta!(
+        "automations",
+        "Work that runs on its own: at set times or when a message arrives"
+    );
+    fn usage(&self) -> &str {
+        "[pause|resume|stop|discard <id>]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let Some(o) = ix.orchestrator() else {
+            return Ok(Report::new().note("This app runs a single agent.").into());
+        };
+        let args = args.trim();
+        if args.is_empty() {
+            return Ok(crate::automations::automations_report(o).into());
+        }
+        use crate::orchestration::Control as C;
+        let usage = "usage: /automations [pause|resume|stop|discard <id>]".to_string();
+        let parsed = match args.split_once(char::is_whitespace) {
+            Some((verb, id)) if !id.trim().is_empty() => {
+                let id = id.trim().to_string();
+                let schedule = !id.starts_with("a-");
+                match (verb, schedule) {
+                    ("pause", true) => Ok(C::PauseSchedule { schedule: id }),
+                    ("resume", true) => Ok(C::ResumeSchedule { schedule: id }),
+                    ("stop", true) => Ok(C::Unschedule { schedule: id }),
+                    ("pause", false) => Ok(C::PauseAutomation { automation: id }),
+                    ("resume", false) => Ok(C::ResumeAutomation { automation: id }),
+                    ("stop", false) => Ok(C::StopAutomation { automation: id }),
+                    ("discard", false) => Ok(C::DiscardPending { automation: id }),
+                    _ => Err(usage),
+                }
+            }
+            _ => Err(usage),
+        };
+        control_cmd(ix, parsed).await
+    }
+}
+
 /// `/board`: the project's work by column, and changing it.
 pub struct Board;
 #[async_trait::async_trait]

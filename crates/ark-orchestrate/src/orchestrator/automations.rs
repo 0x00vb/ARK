@@ -3,6 +3,7 @@
 //! rules are in [`crate::automation`].
 
 use super::*;
+use crate::authority::AutomationAuthority;
 use crate::automation::{
     event_brief, run_task_id, AutomationState, EventAutomationRecord, EventEvaluation,
     EventPattern, Outcome, StoredEvent, AUTOMATION, CLOCK_SKEW_MS, EVALUATION,
@@ -20,6 +21,7 @@ pub struct AutomationChange {
     pub objective: Option<String>,
     pub context: Option<String>,
     pub pattern: Option<EventPattern>,
+    pub authority: Option<AutomationAuthority>,
 }
 
 /// What a cutover ends: matched events still waiting get a final outcome, and a run made but
@@ -28,6 +30,9 @@ pub struct AutomationChange {
 struct Cutting {
     evals: Vec<EventEvaluation>,
     tasks: Vec<String>,
+    /// Those tasks as saved, cancelled, in the cutover's transaction: a crash before they end
+    /// never runs them under the old words.
+    records: Vec<TaskRecord>,
 }
 
 /// How a cutover ends the matched events still waiting.
@@ -59,6 +64,7 @@ impl Orchestrator {
         agent: &str,
         task: TaskSpec,
         pattern: EventPattern,
+        authority: AutomationAuthority,
     ) -> Result<EventAutomationRecord, OrchError> {
         if task.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
@@ -88,6 +94,11 @@ impl Orchestrator {
                     "`{agent}` runs on another agent program; an automation runs on ARK's own agent"
                 )));
             }
+            if !a.record.spec.delegates_to.is_empty() {
+                return Err(OrchError::NotAllowed(format!(
+                    "`{agent}` hands work to other agents; an automation's agent keeps each event to itself"
+                )));
+            }
             let standing = st.automations.values().any(|x| x.agent == agent)
                 || st.schedules.values().any(|s| s.agent == agent);
             let open = st
@@ -108,6 +119,7 @@ impl Orchestrator {
             agent: agent.to_string(),
             task,
             pattern,
+            authority,
             state: AutomationState::Listening,
             revision: 1,
             activated_seq: seq,
@@ -121,11 +133,17 @@ impl Orchestrator {
             last_task: None,
             failures: 0,
             counted: None,
+            limited: None,
         };
         self.inner.persist(Some(&rec), &[])?;
         self.inner.keep_automation(&rec);
         self.inner.changed_automation(&rec);
         Ok(rec)
+    }
+
+    /// The store's event log, where providers deliver events and apps offer accounts.
+    pub fn event_log(&self) -> Arc<crate::automation::EventLog> {
+        self.inner.log.clone()
     }
 
     /// The automations kept, oldest first.
@@ -231,6 +249,9 @@ impl Orchestrator {
                 }
                 a.pattern = p.clone();
             }
+            if let Some(au) = &change.authority {
+                a.authority = au.clone();
+            }
             let cancelled = inner.cut(a, Cut::Change);
             if !a.state.paused() {
                 a.state = AutomationState::Listening;
@@ -270,7 +291,8 @@ impl Orchestrator {
             .cloned();
         let a = found.ok_or_else(|| self.inner.no_automation(id))?;
         let cancelled = self.inner.cut(&a, Cut::Stop);
-        self.inner.persist(None, &cancelled.evals)?;
+        self.inner
+            .persist_with(None, &cancelled.evals, &cancelled.records)?;
         self.inner
             .engine
             .store
@@ -357,8 +379,21 @@ impl Inner {
         a: Option<&EventAutomationRecord>,
         evals: &[EventEvaluation],
     ) -> Result<(), OrchError> {
+        self.persist_with(a, evals, &[])
+    }
+
+    /// [`persist`](Self::persist), with task records in the same transaction.
+    fn persist_with(
+        &self,
+        a: Option<&EventAutomationRecord>,
+        evals: &[EventEvaluation],
+        tasks: &[TaskRecord],
+    ) -> Result<(), OrchError> {
         let project = self.project.id.as_str();
         let mut values = Vec::new();
+        for t in tasks {
+            values.push((TASK, t.id.clone(), serde_json::to_value(t)?));
+        }
         if let Some(a) = a {
             values.push((AUTOMATION, a.id.clone(), serde_json::to_value(a)?));
         }
@@ -405,7 +440,7 @@ impl Inner {
         let found = self.state.lock().unwrap().automations.get(id).cloned();
         let mut a = found.ok_or_else(|| self.no_automation(id))?;
         let cancelled = f(self, &mut a)?;
-        self.persist(Some(&a), &cancelled.evals)?;
+        self.persist_with(Some(&a), &cancelled.evals, &cancelled.records)?;
         {
             let mut st = self.state.lock().unwrap();
             for e in &cancelled.evals {
@@ -431,7 +466,7 @@ impl Inner {
     /// begun. Nothing changes until the caller saves the evaluations and cancels the tasks; a
     /// run working goes on.
     fn cut(&self, a: &EventAutomationRecord, how: Cut) -> Cutting {
-        let (out, unstarted) = {
+        let (out, unstarted, records) = {
             let st = self.state.lock().unwrap();
             let unstarted: Vec<String> = st
                 .tasks
@@ -444,25 +479,42 @@ impl Inner {
                 })
                 .map(|t| t.record.id.clone())
                 .collect();
-            let out: Vec<EventEvaluation> = st
-                .evaluations
-                .values()
-                .filter(|e| e.automation == a.id)
-                .filter(|e| match &e.outcome {
-                    Outcome::Pending => true,
-                    Outcome::Started { task } => unstarted.contains(task),
-                    _ => false,
-                })
-                .map(|e| EventEvaluation {
-                    outcome: how.outcome(),
-                    ..e.clone()
+            let mut out = Vec::new();
+            for e in st.evaluations.values().filter(|e| e.automation == a.id) {
+                let task = match &e.outcome {
+                    Outcome::Pending => run_task_id(&a.id, &e.event),
+                    Outcome::Started { task } => task.clone(),
+                    _ => continue,
+                };
+                let outcome = match st.tasks.get(&task) {
+                    // Its run began (before a crash took its mark): it goes on, as runs do.
+                    Some(_) if !unstarted.contains(&task) => Outcome::Started { task },
+                    _ => how.outcome(),
+                };
+                if outcome != e.outcome {
+                    out.push(EventEvaluation {
+                        outcome,
+                        ..e.clone()
+                    });
+                }
+            }
+            let records = unstarted
+                .iter()
+                .filter_map(|t| st.tasks.get(t))
+                .map(|t| {
+                    let mut r = t.record.clone();
+                    r.state = TaskState::Cancelled;
+                    r.waiting_on = None;
+                    r.finished_ms = Some(now_ms());
+                    r
                 })
                 .collect();
-            (out, unstarted)
+            (out, unstarted, records)
         };
         Cutting {
             evals: out,
             tasks: unstarted,
+            records,
         }
     }
 
@@ -482,6 +534,35 @@ impl Inner {
             .collect();
         v.sort_by_key(|e| e.seq);
         v
+    }
+
+    /// Mark started the waiting events whose task exists already (made before a crash took
+    /// the mark): never made again, and not counted as waiting.
+    fn adopt_made(&self, a: &mut EventAutomationRecord) {
+        let made: Vec<EventEvaluation> = {
+            let st = self.state.lock().unwrap();
+            st.evaluations
+                .values()
+                .filter(|e| e.automation == a.id && e.outcome == Outcome::Pending)
+                .filter_map(|e| {
+                    let task = run_task_id(&a.id, &e.event);
+                    st.tasks.contains_key(&task).then(|| EventEvaluation {
+                        outcome: Outcome::Started { task },
+                        ..e.clone()
+                    })
+                })
+                .collect()
+        };
+        if made.is_empty() || self.persist(None, &made).is_err() {
+            return;
+        }
+        let mut st = self.state.lock().unwrap();
+        for e in made {
+            if let Outcome::Started { task } = &e.outcome {
+                a.last_task.get_or_insert_with(|| task.clone());
+            }
+            st.evaluations.insert(e.id.clone(), e);
+        }
     }
 
     /// See [`Orchestrator::evaluate_events`]. One evaluation or change at a time.
@@ -580,13 +661,14 @@ impl Inner {
     /// Whether `e` came after `a`'s current revision began: by arrival and by the provider's
     /// time, so a late re-delivery of an old event never runs under newer words.
     fn current(&self, a: &EventAutomationRecord, e: &StoredEvent) -> bool {
-        e.seq > a.activated_seq && e.event.at_ms + CLOCK_SKEW_MS >= a.activated_ms
+        e.seq > a.activated_seq && e.event.at_ms.saturating_add(CLOCK_SKEW_MS) >= a.activated_ms
     }
 
     /// Start the run of `a`'s oldest waiting event when no run of it is open. A task made for
     /// that event before a crash is adopted, not made again (and not started twice: the
     /// restart already continues it).
     fn submit_next(&self, a: &mut EventAutomationRecord) -> Option<String> {
+        self.adopt_made(a);
         loop {
             let open = {
                 let st = self.state.lock().unwrap();
@@ -658,6 +740,7 @@ impl Inner {
                 automation: &a.id,
                 revision: a.revision,
                 event: &event.id,
+                authority: &a.authority,
             };
             let id = match self.create_run(&a.agent, spec, Origin::External, None, Some(run)) {
                 Ok(id) => id,
@@ -767,5 +850,166 @@ impl Inner {
     /// Whether `agent` is an automation's: it runs nothing else.
     pub(crate) fn runs_an_automation(&self, st: &State, agent: &str) -> bool {
         st.automations.values().any(|a| a.agent == agent)
+    }
+}
+
+/// Changes allowed under an authority are counted under one lock, so two runs never both take
+/// the last one of a quota.
+pub(crate) const QUOTA: &str = "automation_quota";
+
+/// An event run's authority as the harness checks it: before every call, then each change is
+/// counted (per run, and against its quota) before it runs, and an uncertain one stops the run
+/// from changing anything else.
+struct AuthorityGuard {
+    inner: Arc<Inner>,
+    task: String,
+    automation: String,
+    authority: AutomationAuthority,
+    event: StoredEvent,
+    workspace: Option<std::path::PathBuf>,
+}
+
+impl Inner {
+    /// The guard of event run `task`. Errs when its event is gone: then it cannot be bound.
+    pub(crate) fn guard_for(
+        &self,
+        task: &TaskRecord,
+        authority: &AutomationAuthority,
+    ) -> Result<Arc<dyn ark_runtime::CallGuard>, String> {
+        let event = task
+            .event
+            .as_deref()
+            .and_then(|e| self.log.event(e))
+            .ok_or("the event this run is for is gone")?;
+        Ok(Arc::new(AuthorityGuard {
+            inner: self.arc(),
+            task: task.id.clone(),
+            automation: task.automation.clone().unwrap_or_default(),
+            authority: authority.clone(),
+            event,
+            workspace: self.engine.workspace_dir(&self.project.id).ok(),
+        }))
+    }
+}
+
+impl ark_runtime::CallGuard for AuthorityGuard {
+    fn check(
+        &self,
+        action: &str,
+        input: &serde_json::Value,
+        risk: Option<ark_core::RiskTier>,
+    ) -> ark_runtime::Verdict {
+        self.authority
+            .check(action, input, risk, &self.event, self.workspace.as_deref())
+    }
+
+    fn commit(&self, action: &str, _input: &serde_json::Value) -> Result<(), String> {
+        let allowed = self
+            .authority
+            .allowed(action)
+            .ok_or_else(|| format!("`{action}` is not one of the actions it may use"))?;
+        let inner = &self.inner;
+        let _one = inner.quotas.lock().unwrap();
+        let mut task = inner
+            .state
+            .lock()
+            .unwrap()
+            .tasks
+            .get(&self.task)
+            .map(|t| t.record.clone())
+            .ok_or("the run is gone")?;
+        if task.effect_uncertain {
+            return Err(
+                "an earlier change in this run may or may not have happened; nothing more changes until the person checks"
+                    .into(),
+            );
+        }
+        let used = task.authority_used.get(action).copied().unwrap_or(0);
+        if used >= allowed.per_run {
+            return Err(format!(
+                "`{action}` may run {} time{} per event",
+                allowed.per_run,
+                if allowed.per_run == 1 { "" } else { "s" }
+            ));
+        }
+        let project = inner.project.id.to_string();
+        let mut quota = None;
+        if let Some(q) = allowed.quota {
+            let now = now_ms();
+            let start = now - now % q.window_ms.max(1);
+            let id = format!("{}/{action}/{start}", self.automation);
+            let count = inner
+                .engine
+                .store
+                .get_record(QUOTA, &id)
+                .ok()
+                .flatten()
+                .and_then(|v| v["count"].as_u64())
+                .unwrap_or(0);
+            if count >= q.count as u64 {
+                let until = start + q.window_ms;
+                inner.rate_limited(&self.automation, action, until);
+                return Err(format!(
+                    "rate limited: `{action}` may run {} times per {}; it can run again at {}",
+                    q.count,
+                    window_words(q.window_ms),
+                    crate::schedule::local_label(until)
+                ));
+            }
+            quota = Some((
+                id,
+                serde_json::json!({ "count": count + 1, "until_ms": start + q.window_ms }),
+            ));
+        }
+        *task.authority_used.entry(action.to_string()).or_default() += 1;
+        let task_json = serde_json::to_value(&task).map_err(|e| e.to_string())?;
+        let mut rows: Vec<(&str, &str, &str, &serde_json::Value)> =
+            vec![(TASK, task.id.as_str(), project.as_str(), &task_json)];
+        if let Some((id, v)) = &quota {
+            rows.push((QUOTA, id.as_str(), project.as_str(), v));
+        }
+        inner
+            .engine
+            .store
+            .put_records(&rows)
+            .map_err(|e| format!("could not record the change before making it: {e}"))?;
+        if let Some(t) = inner.state.lock().unwrap().tasks.get_mut(&self.task) {
+            t.record.authority_used = task.authority_used;
+        }
+        Ok(())
+    }
+
+    fn ended(&self, _action: &str, risk: ark_core::RiskTier, _ok: bool, uncertain: bool) {
+        if risk == ark_core::RiskTier::Mutate && uncertain {
+            self.inner.update_task(&self.task, |t| {
+                t.effect_uncertain = true;
+                // Trying again could make the change twice.
+                t.max_attempts = t.attempts.max(1);
+            });
+        }
+    }
+}
+
+impl Inner {
+    /// Note on the automation that a change was refused for its quota until `until_ms`.
+    fn rate_limited(&self, automation: &str, action: &str, until_ms: u64) {
+        let limited = crate::automation::RateLimited {
+            action: action.to_string(),
+            until_ms,
+        };
+        let _ = self.alter(automation, |_, a| {
+            a.limited = Some(limited);
+            Ok(Cutting::default())
+        });
+    }
+}
+
+fn window_words(ms: u64) -> String {
+    match ms {
+        86_400_000 => "day".into(),
+        3_600_000 => "hour".into(),
+        m if m % 86_400_000 == 0 => format!("{} days", m / 86_400_000),
+        m if m % 3_600_000 == 0 => format!("{} hours", m / 3_600_000),
+        m => format!("{} minutes", (m / 60_000).max(1)),
     }
 }

@@ -446,6 +446,9 @@ impl Adapter for ChatTools {
                 }
             })),
         ]
+        .into_iter()
+        .chain(crate::automate_tools::descriptors(&self.orch, self.chat.is_some()))
+        .collect()
     }
 
     /// The work a stopped turn of this chat handed off, for the turn that continues it.
@@ -726,6 +729,17 @@ impl Adapter for ChatTools {
                 })?;
                 let mut v = schedule_json(&rec);
                 v[if pause { "paused" } else { "stopped" }] = json!(true);
+                Ok(ActionOutput::json(v))
+            }
+            crate::automate_tools::AUTOMATE | crate::automate_tools::PAUSE_AUTOMATION => {
+                let v = crate::automate_tools::run(
+                    &self.orch,
+                    self.chat.as_deref(),
+                    |o| self.name_for(o),
+                    action,
+                    &input,
+                )
+                .await?;
                 Ok(ActionOutput::json(v))
             }
             other => Err(AdapterError::UnknownAction(other.to_string())),

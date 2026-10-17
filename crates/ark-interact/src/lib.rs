@@ -20,6 +20,7 @@
 pub mod activity;
 pub mod approval;
 pub mod attention;
+pub mod automations;
 mod builtins;
 pub mod capabilities;
 pub mod command;

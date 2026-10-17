@@ -12,14 +12,14 @@ use ark_orchestrate::*;
 use ark_sdk::prelude::*;
 use ark_tools::events::{Direction, EventSink, ExternalEvent, IngestError};
 use serde_json::json;
-use tokio::sync::Notify;
+use tokio::sync::Semaphore;
 
 /// A scripted model: each call takes the next reply and records the request it saw. With a
 /// gate, each call waits for one permit first.
 struct Script {
     replies: Mutex<VecDeque<Result<Completion, ProviderError>>>,
     seen: Mutex<Vec<String>>,
-    gate: Option<Arc<Notify>>,
+    gate: Option<Arc<Semaphore>>,
 }
 
 impl Script {
@@ -28,7 +28,7 @@ impl Script {
     }
     fn gated(
         replies: Vec<Result<Completion, ProviderError>>,
-        gate: Option<Arc<Notify>>,
+        gate: Option<Arc<Semaphore>>,
     ) -> Arc<Self> {
         Arc::new(Script {
             replies: Mutex::new(replies.into()),
@@ -56,7 +56,7 @@ impl Provider for Script {
         }
         self.seen.lock().unwrap().push(t);
         if let Some(g) = &self.gate {
-            g.notified().await;
+            g.acquire().await.unwrap().forget();
         }
         let next = self.replies.lock().unwrap().pop_front();
         next.unwrap_or_else(|| Ok(answer("handled")))
@@ -135,6 +135,7 @@ impl App {
                 "w",
                 TaskSpec::new("reply in the same thread using budget.csv").report_to(&self.chat),
                 lara(),
+                AutomationAuthority::default(),
             )
             .unwrap();
         (o, a)
@@ -244,7 +245,14 @@ async fn events_from_the_acceptance_fixtures_start_one_run_each() {
             .await
             .unwrap();
         let p: EventPattern = serde_json::from_value(fixture["pattern"].clone()).unwrap();
-        let a = o.automate("w", TaskSpec::new("answer"), p).unwrap();
+        let a = o
+            .automate(
+                "w",
+                TaskSpec::new("answer"),
+                p,
+                AutomationAuthority::default(),
+            )
+            .unwrap();
         let events: Vec<ExternalEvent> = fixture["expected"]
             .as_array()
             .unwrap()
@@ -288,7 +296,7 @@ async fn an_event_saved_before_the_automation_never_runs() {
 #[tokio::test]
 async fn pause_lets_events_go_and_resume_starts_from_now() {
     let app = App::new();
-    let gate = Arc::new(Notify::new());
+    let gate = Arc::new(Semaphore::new(0));
     let m = Script::gated(vec![], Some(gate.clone()));
     let (o, a) = app.automated(&m).await;
     let log = app.log();
@@ -326,7 +334,7 @@ async fn pause_lets_events_go_and_resume_starts_from_now() {
     log.ingest(vec![mail("4", "lara@example.com", "while paused")])
         .unwrap();
     // The run that was working goes on.
-    gate.notify_one();
+    gate.add_permits(1);
     let runs = ended(&o, &a.id, 1).await;
     assert!(runs[0].context.contains("one"));
     let r = o.resume_automation(&a.id).unwrap();
@@ -345,7 +353,7 @@ async fn pause_lets_events_go_and_resume_starts_from_now() {
     o.resume_automation(&a.id).unwrap();
     log.ingest(vec![mail("5", "lara@example.com", "after resume")])
         .unwrap();
-    gate.notify_one();
+    gate.add_permits(1);
     let runs = ended(&o, &a.id, 2).await;
     assert!(
         runs[0].context.contains("after resume"),
@@ -357,7 +365,7 @@ async fn pause_lets_events_go_and_resume_starts_from_now() {
 #[tokio::test]
 async fn a_change_cancels_waiting_events_and_only_later_events_match_the_new_words() {
     let app = App::new();
-    let gate = Arc::new(Notify::new());
+    let gate = Arc::new(Semaphore::new(0));
     let m = Script::gated(vec![], Some(gate.clone()));
     let (o, a) = app.automated(&m).await;
     let log = app.log();
@@ -391,7 +399,7 @@ async fn a_change_cancels_waiting_events_and_only_later_events_match_the_new_wor
         .automation_evaluations(&a.id)
         .iter()
         .any(|e| e.outcome == Outcome::CancelledByChange));
-    gate.notify_one();
+    gate.add_permits(1);
     let runs = ended(&o, &a.id, 1).await;
     assert_eq!(runs[0].revision, Some(1), "the working run kept its words");
     log.ingest(vec![
@@ -399,7 +407,7 @@ async fn a_change_cancels_waiting_events_and_only_later_events_match_the_new_wor
         mail("4", "ana@example.org", "from ana"),
     ])
     .unwrap();
-    gate.notify_one();
+    gate.add_permits(1);
     let runs = ended(&o, &a.id, 2).await;
     assert_eq!(runs[0].revision, Some(2));
     assert!(runs[0].objective.contains("prices.csv"));
@@ -411,7 +419,7 @@ async fn a_change_cancels_waiting_events_and_only_later_events_match_the_new_wor
 #[tokio::test]
 async fn stop_cancels_waiting_events_and_keeps_the_running_task_and_history() {
     let app = App::new();
-    let gate = Arc::new(Notify::new());
+    let gate = Arc::new(Semaphore::new(0));
     let m = Script::gated(vec![], Some(gate.clone()));
     let (o, a) = app.automated(&m).await;
     let log = app.log();
@@ -443,7 +451,7 @@ async fn stop_cancels_waiting_events_and_keeps_the_running_task_and_history() {
         .filter(|e| e.outcome == Outcome::CancelledByStop)
         .collect();
     assert_eq!(stopped.len(), 1, "{evaluations_before:?}");
-    gate.notify_one();
+    gate.add_permits(1);
     let runs = ended(&o, &a.id, 1).await;
     assert_eq!(runs[0].state, TaskState::Done, "the running task finished");
     log.ingest(vec![mail("3", "lara@example.com", "after stop")])
@@ -451,7 +459,13 @@ async fn stop_cancels_waiting_events_and_keeps_the_running_task_and_history() {
     settle().await;
     assert_eq!(o.automation_runs(&a.id, 10).len(), 1);
     assert!(
-        o.automate("w", TaskSpec::new("again"), lara()).is_ok(),
+        o.automate(
+            "w",
+            TaskSpec::new("again"),
+            lara(),
+            AutomationAuthority::default()
+        )
+        .is_ok(),
         "the agent is free again"
     );
 }
@@ -464,7 +478,7 @@ async fn full_then_drain_keeps_the_revision_and_the_queue_in_order() {
         queue: 2,
         ..LogLimits::default()
     });
-    let gate = Arc::new(Notify::new());
+    let gate = Arc::new(Semaphore::new(0));
     let m = Script::gated(vec![], Some(gate.clone()));
     let (o, a) = app.automated(&m).await;
     log.ingest(
@@ -482,10 +496,7 @@ async fn full_then_drain_keeps_the_revision_and_the_queue_in_order() {
     let full = o.automation(&a.id).unwrap();
     assert_eq!(full.state, AutomationState::Full);
     assert_eq!(o.automation_pending(&a.id).len(), 2, "one runs, two wait");
-    for _ in 0..5 {
-        gate.notify_one();
-        tokio::time::sleep(Duration::from_millis(30)).await;
-    }
+    gate.add_permits(5);
     let runs = ended(&o, &a.id, 5).await;
     let order: Vec<String> = runs
         .iter()
@@ -517,7 +528,7 @@ async fn full_then_discard_cancels_the_queue_and_cuts_over() {
         queue: 1,
         ..LogLimits::default()
     });
-    let gate = Arc::new(Notify::new());
+    let gate = Arc::new(Semaphore::new(0));
     let m = Script::gated(vec![], Some(gate.clone()));
     let (o, a) = app.automated(&m).await;
     log.ingest(
@@ -539,7 +550,7 @@ async fn full_then_discard_cancels_the_queue_and_cuts_over() {
         .automation_evaluations(&a.id)
         .iter()
         .any(|e| e.outcome == Outcome::Discarded));
-    gate.notify_one();
+    gate.add_permits(1);
     ended(&o, &a.id, 1).await;
     settle().await;
     assert_eq!(
@@ -549,7 +560,7 @@ async fn full_then_discard_cancels_the_queue_and_cuts_over() {
     );
     log.ingest(vec![mail("5", "lara@example.com", "number 5")])
         .unwrap();
-    gate.notify_one();
+    gate.add_permits(1);
     let runs = ended(&o, &a.id, 2).await;
     assert!(runs[0].context.contains("number 5"));
 }
@@ -563,7 +574,7 @@ async fn the_account_inbox_limit_refuses_until_events_are_read() {
         inbox: 2,
         ..LogLimits::default()
     });
-    let gate = Arc::new(Notify::new());
+    let gate = Arc::new(Semaphore::new(0));
     let m = Script::gated(vec![], Some(gate.clone()));
     let (o, a) = app.automated(&m).await;
     log.ingest(vec![
@@ -601,10 +612,7 @@ async fn the_account_inbox_limit_refuses_until_events_are_read() {
             .repeated,
         1
     );
-    for _ in 0..4 {
-        gate.notify_one();
-        tokio::time::sleep(Duration::from_millis(30)).await;
-    }
+    gate.add_permits(4);
     ended(&o, &a.id, 4).await;
     assert_eq!(
         log.ingest(vec![mail("5", "lara@example.com", "x")])
@@ -777,17 +785,30 @@ async fn an_automation_needs_an_agent_of_its_own_on_arks_agent() {
     let m = Script::new(vec![]);
     let o = app.orch(&m);
     o.spawn(AgentSpec::new("w").model("m")).await.unwrap();
-    o.automate("w", TaskSpec::new("one"), lara()).unwrap();
-    let e = o.automate("w", TaskSpec::new("two"), lara()).unwrap_err();
+    o.automate(
+        "w",
+        TaskSpec::new("one"),
+        lara(),
+        AutomationAuthority::default(),
+    )
+    .unwrap();
+    let e = o
+        .automate(
+            "w",
+            TaskSpec::new("two"),
+            lara(),
+            AutomationAuthority::default(),
+        )
+        .unwrap_err();
     assert!(e.to_string().contains("agent of its own"), "{e}");
-    o.spawn(AgentSpec::new("prog").model("agent:grok"))
-        .await
-        .ok();
-    if o.agent("prog").is_some() {
-        let e = o.automate("prog", TaskSpec::new("x"), lara()).unwrap_err();
-        assert!(e.to_string().contains("ARK's own agent"), "{e}");
-    }
-    let e = o.automate("w", TaskSpec::new(" "), lara()).unwrap_err();
+    let e = o
+        .automate(
+            "w",
+            TaskSpec::new(" "),
+            lara(),
+            AutomationAuthority::default(),
+        )
+        .unwrap_err();
     assert!(e.to_string().contains("objective"), "{e}");
 }
 
@@ -830,4 +851,24 @@ async fn projects_with_automations_open_when_an_app_starts() {
         scheduled_projects(store).is_empty(),
         "schedules are their own"
     );
+}
+
+#[tokio::test]
+async fn an_agent_that_hands_work_on_cannot_run_an_automation() {
+    let app = App::new();
+    let m = Script::new(vec![]);
+    let o = app.orch(&m);
+    o.spawn(AgentSpec::new("helper").model("m")).await.unwrap();
+    o.spawn(AgentSpec::new("lead").model("m").delegates_to(["helper"]))
+        .await
+        .unwrap();
+    let e = o
+        .automate(
+            "lead",
+            TaskSpec::new("x"),
+            lara(),
+            AutomationAuthority::default(),
+        )
+        .unwrap_err();
+    assert!(e.to_string().contains("keeps each event to itself"), "{e}");
 }

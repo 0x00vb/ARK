@@ -66,6 +66,7 @@ pub(crate) fn agents() -> Vec<Arc<dyn Command>> {
         Arc::new(views::AgentCmd),
         Arc::new(views::TaskCmd),
         Arc::new(views::Schedules),
+        Arc::new(views::Automations),
         Arc::new(views::Board),
     ]
 }

@@ -2497,6 +2497,43 @@ impl Host {
                     _ => Ok(json!({})),
                 }
             }
+            O::Automations => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.resource_subscribers.subscribe(
+                    ResourceKind::Project,
+                    project.id.as_str(),
+                    "orch",
+                    r,
+                );
+                let chat = Some(s("session")).filter(|c| !c.is_empty());
+                Ok(serde_json::to_value(
+                    ark_interact::automations::automations(&o, chat.as_deref()),
+                )?)
+            }
+            O::Automation => {
+                let o = self.resource_orchestrator(&r).await?;
+                let id = s("automation");
+                let rec = o
+                    .automation(&id)
+                    .ok_or_else(|| anyhow::anyhow!("no automation `{id}`"))?;
+                let limit = n("limit").unwrap_or(20).min(50) as usize;
+                Ok(json!({
+                    "automation": ark_interact::automations::event_view(&o, &rec),
+                    "runs": ark_interact::automations::event_runs(&o, &id, limit),
+                }))
+            }
+            O::AutomationPause | O::AutomationResume | O::AutomationStop | O::AutomationDiscard => {
+                let o = self.resource_orchestrator(&r).await?;
+                let automation = s("automation");
+                let control = match operation.kind {
+                    O::AutomationPause => Control::PauseAutomation { automation },
+                    O::AutomationResume => Control::ResumeAutomation { automation },
+                    O::AutomationStop => Control::StopAutomation { automation },
+                    _ => Control::DiscardPending { automation },
+                };
+                self.control_on(&o, control).await?;
+                Ok(json!({}))
+            }
             O::Board => {
                 let o = self.resource_orchestrator(&r).await?;
                 self.resource_subscribers.subscribe(

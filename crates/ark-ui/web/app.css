@@ -1199,6 +1199,9 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .sc-said.more { cursor: pointer; max-height: 8.5em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
 .sc-files { display: flex; flex-wrap: wrap; gap: 6px; }
 .sc-gone { font-size: 13px; color: var(--text-3); }
+.sc-may { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 12.5px; }
+.sc-may dt { color: var(--text-3); }
+.sc-may dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
 
 .queue { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .queue:empty { display: none; }

@@ -112,6 +112,12 @@ pub enum ResourceOperationKind {
     SchedulePause,
     ScheduleResume,
     ScheduleRun,
+    Automations,
+    Automation,
+    AutomationPause,
+    AutomationResume,
+    AutomationStop,
+    AutomationDiscard,
     Board,
     BoardAdd,
     BoardChange,
@@ -213,6 +219,12 @@ impl ResourceOperationKind {
             | O::SchedulePause
             | O::ScheduleResume
             | O::ScheduleRun
+            | O::Automations
+            | O::Automation
+            | O::AutomationPause
+            | O::AutomationResume
+            | O::AutomationStop
+            | O::AutomationDiscard
             | O::Board
             | O::BoardAdd
             | O::BoardChange

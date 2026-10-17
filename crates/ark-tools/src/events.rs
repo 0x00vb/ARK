@@ -115,6 +115,25 @@ impl ExternalEvent {
         if self.label.len() > limits.field {
             return bad(format!("its label is longer than {} bytes", limits.field));
         }
+        // One line each: these are shown and hashed as given.
+        for (name, v) in [
+            ("source", Some(&self.source)),
+            ("account", Some(&self.account)),
+            ("key", Some(&self.key)),
+            ("kind", Some(&self.kind)),
+            ("actor", self.actor.as_ref()),
+            ("subject", self.subject.as_ref()),
+            ("label", Some(&self.label)),
+        ] {
+            if v.is_some_and(|v| v.chars().any(char::is_control)) {
+                return bad(format!(
+                    "its {name} has a line break or a control character"
+                ));
+            }
+        }
+        if self.source.contains('/') {
+            return bad("a source name has no `/`".into());
+        }
         if let Some(p) = &self.payload {
             if p.len() > limits.payload {
                 return bad(format!(
@@ -181,10 +200,14 @@ pub enum SourceError {
     /// The account is not connected any more (signed out, revoked).
     #[error("needs connection: {0}")]
     Disconnected(String),
-    /// The provider cannot list changes from the cursor (it expired): events in between may be
-    /// lost. Nothing moves on until the person chooses how to recover.
-    #[error("recovery gap: {0}")]
-    Gap(String),
+    /// The provider cannot list changes from the cursor (it expired): events since `since_ms`
+    /// (the last good poll, when known) may be lost. Nothing moves on until the person chooses
+    /// how to recover.
+    #[error("recovery gap: {detail}")]
+    Gap {
+        since_ms: Option<u64>,
+        detail: String,
+    },
     /// The provider asked to wait until then (Unix ms).
     #[error("rate limited until {retry_at_ms}")]
     RateLimited { retry_at_ms: u64 },

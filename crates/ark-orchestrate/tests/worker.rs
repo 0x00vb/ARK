@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use ark_orchestrate::*;
 use ark_sdk::prelude::*;
+use ark_tools::events::EventSink;
 use serde_json::{json, Value};
 
 /// The program, when this binary runs as one (`ARK_FAKE_PROGRAM` set).
@@ -552,4 +553,86 @@ async fn a_cancelled_task_leaves_nothing_behind() {
         !s.store.join("work").join(&id).exists(),
         "folder copies removed"
     );
+}
+
+/// ADR 0062: an automation runs on ARK's own agent, where its authority is checked before every
+/// call; an agent program runs its own tools, so it is refused, at creation and at run time.
+#[tokio::test]
+async fn an_automation_is_refused_on_an_agent_program() {
+    let s = setup();
+    let (ark, o) = open(&s, Arc::new(AtomicUsize::new(0)));
+    o.spawn(AgentSpec::new("w").model("agent:fake"))
+        .await
+        .unwrap();
+    let pattern = EventPattern::new("fake", "me");
+    let e = o
+        .automate(
+            "w",
+            TaskSpec::new("x"),
+            pattern.clone(),
+            AutomationAuthority::default(),
+        )
+        .unwrap_err();
+    assert!(e.to_string().contains("ARK's own agent"), "{e}");
+    // A record that names one anyway (written by hand): its run fails before anything runs.
+    o.spawn(AgentSpec::new("ark")).await.unwrap();
+    let a = o
+        .automate(
+            "ark",
+            TaskSpec::new("x"),
+            pattern,
+            AutomationAuthority::default(),
+        )
+        .unwrap();
+    drop(o);
+    let store = ark.engine().store.clone();
+    let mut v = store
+        .get_record("event_automation", &a.id)
+        .unwrap()
+        .unwrap();
+    v["agent"] = json!("w");
+    store
+        .put_record(
+            "event_automation",
+            &a.id,
+            v["project"].as_str().unwrap(),
+            &v,
+        )
+        .unwrap();
+    let project = ark.find_or_create_project("p", "").unwrap();
+    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    EventLog::of(&store)
+        .ingest(vec![ark_tools::events::ExternalEvent {
+            source: "fake".into(),
+            account: "me".into(),
+            key: "1".into(),
+            kind: "message".into(),
+            direction: ark_tools::events::Direction::Inbound,
+            actor: None,
+            subject: None,
+            at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
+            label: String::new(),
+            fields: Default::default(),
+            payload: None,
+        }])
+        .unwrap();
+    for _ in 0..500 {
+        if let Some(t) = o
+            .automation_runs(&a.id, 1)
+            .first()
+            .filter(|t| t.state.is_final())
+        {
+            assert_eq!(t.state, TaskState::Failed);
+            assert!(
+                t.error.as_deref().unwrap_or("").contains("ARK's own agent"),
+                "{t:?}"
+            );
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the run never ended");
 }

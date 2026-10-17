@@ -262,6 +262,8 @@ pub struct Harness {
     focus: Option<Focus>,
     conversation: Option<String>,
     approvals: Option<Arc<ApprovalGate>>,
+    /// Checks every call first, with an authority narrower than the person's grants.
+    guard: Option<Arc<dyn crate::guard::CallGuard>>,
     cancel: Option<CancelToken>,
     /// The process is stopping ([`Engine::stop_soon`]): like a cancel, except that a batch with
     /// a state-changing call runs to its end.
@@ -346,6 +348,7 @@ impl Harness {
             focus: None,
             conversation: None,
             approvals: None,
+            guard: None,
             cancel: None,
             stopping: None,
             steer: None,
@@ -499,6 +502,11 @@ impl Harness {
     /// Ask a human before `Mutate` actions instead of refusing them.
     pub fn approvals(mut self, gate: Option<Arc<ApprovalGate>>) -> Self {
         self.approvals = gate;
+        self
+    }
+    /// Check every call with `guard` before anything else ([`crate::guard`]).
+    pub fn guard(mut self, guard: Option<Arc<dyn crate::guard::CallGuard>>) -> Self {
+        self.guard = guard;
         self
     }
     /// Stop cooperatively when this token is cancelled.
@@ -940,6 +948,32 @@ impl Harness {
                     cancelled = true;
                     break;
                 }
+                // A guard sees every call first, on the input that would run.
+                let guarded = match &self.guard {
+                    Some(g) => {
+                        let meta = catalog::is_meta_tool(&call.name);
+                        let risk = (!meta)
+                            .then(|| engine.registry.descriptor(&call.name).map(|d| d.risk))
+                            .flatten();
+                        let input = if meta {
+                            call.arguments.clone()
+                        } else {
+                            engine.canonical_input(project, call.arguments.clone())
+                        };
+                        match g.check(&call.name, &input, risk) {
+                            crate::guard::Verdict::Refuse(why) => {
+                                flush!();
+                                round.push(Message::tool_result(
+                                    call,
+                                    format!("refused: {why}. This run may only do what it was allowed; do not try another way."),
+                                ));
+                                continue;
+                            }
+                            v => Some((v, input)),
+                        }
+                    }
+                    None => None,
+                };
                 if catalog::is_meta_tool(&call.name) {
                     flush!();
                     let repeat = !meta_seen.insert(call_digest(&call.name, &call.arguments));
@@ -1059,10 +1093,21 @@ impl Harness {
                 let auto = self.execution_mode == ExecutionMode::Auto
                     && desc.auto_eligible
                     && !desc.ask_each_time;
-                let mut approved = (self.allow_mutate || auto) && !again;
+                // Under a guard only the guard lets a change run unattended.
+                let mut approved = match &guarded {
+                    Some((v, _)) => *v == crate::guard::Verdict::Allow && !again,
+                    None => (self.allow_mutate || auto) && !again && !desc.person_only,
+                };
                 if desc.risk == RiskTier::Mutate && !approved {
                     match self
-                        .request_approval(profile, &desc, call, again, &mut on_event)
+                        .request_approval(
+                            profile,
+                            &desc,
+                            call,
+                            again,
+                            guarded.is_some(),
+                            &mut on_event,
+                        )
                         .await
                     {
                         None => {
@@ -1132,6 +1177,15 @@ impl Harness {
                 }
 
                 if desc.risk == RiskTier::Mutate {
+                    if let (Some(g), Some((_, input))) = (&self.guard, &guarded) {
+                        if let Err(why) = g.commit(&call.name, input) {
+                            round.push(Message::tool_result(
+                                call,
+                                format!("refused: {why}. Do not try it again in this run."),
+                            ));
+                            continue;
+                        }
+                    }
                     *changes_run.entry(digest.clone()).or_default() += 1;
                 }
                 batch.push(Pending {
@@ -1540,6 +1594,18 @@ impl Harness {
         };
         for (p, inv) in pending.iter().zip(results) {
             let inv = inv?;
+            if let Some(g) = &self.guard {
+                let uncertain = inv
+                    .effect
+                    .as_ref()
+                    .is_some_and(|e| e.state == ark_core::ExternalEffectState::Unconfirmed);
+                g.ended(
+                    &p.call.name,
+                    p.risk,
+                    matches!(inv.status, InvocationStatus::Ok),
+                    uncertain,
+                );
+            }
             if p.risk == RiskTier::Mutate && inv.status != InvocationStatus::PendingApproval {
                 // Something changed: earlier reads this turn may no longer hold.
                 *tally.changed_at = time::OffsetDateTime::now_utc();
@@ -1833,6 +1899,7 @@ impl Harness {
         desc: &ark_core::ActionDescriptor,
         call: &ark_model::ToolCall,
         cut_short: bool,
+        every_time: bool,
         on_event: &mut impl FnMut(HarnessEvent),
     ) -> Option<Option<ApprovalDecision>> {
         let gate = match &self.approvals {
@@ -1852,7 +1919,7 @@ impl Harness {
             preview: preview_call(&call.name, &call.arguments),
             agent: None,
             task: None,
-            ask_each_time: desc.ask_each_time || cut_short,
+            ask_each_time: desc.ask_each_time || cut_short || every_time,
             cut_short,
         };
         if request.ask_each_time || !gate.is_granted(&request.class) {
@@ -2206,7 +2273,7 @@ impl Harness {
                     None => class,
                 }
             }));
-        matches!(self.request_approval(&profile, &desc, &call, false, on_event).await, Some(Some(d)) if d.allows())
+        matches!(self.request_approval(&profile, &desc, &call, false, false, on_event).await, Some(Some(d)) if d.allows())
     }
 
     #[allow(clippy::too_many_arguments)]

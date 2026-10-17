@@ -1390,7 +1390,10 @@ async fn a_second_runtime_on_the_store_is_refused_while_clients_still_work() {
         .unwrap();
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(said.contains("REFUSED"), "{said}");
-    assert!(said.contains(&format!("pid {}", std::process::id())), "{said}");
+    assert!(
+        said.contains(&format!("pid {}", std::process::id())),
+        "{said}"
+    );
     assert!(said.contains("connect to it"), "{said}");
     let client = Client::new(&format!("http://127.0.0.1:{}", served.port), &token);
     let hello = client.hello().await.unwrap();

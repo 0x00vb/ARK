@@ -162,6 +162,7 @@ impl Labels {
             .or_else(|| process_approval(&request.action, &request.input))
             .or_else(|| program_approval(&request.action, &request.input))
             .or_else(|| schedule_approval(&request.action, &request.input))
+            .or_else(|| automation_approval(&request.action, &request.input))
             .or_else(|| image_approval(&request.action, &request.input))
             .or_else(|| runtime_label(&request.action, &request.input))
             .unwrap_or_else(|| request.preview.clone())
@@ -288,6 +289,137 @@ fn schedule_approval(action: &str, input: &Value) -> Option<String> {
         return None;
     }
     Some(schedule_line(input, None))
+}
+
+/// Making, changing or stopping work that starts when a message arrives, for its approval:
+/// which messages start it, what each run does, and in full what it may read and change, since
+/// nobody watches the runs and the messages come from outside (ADR 0062).
+fn automation_approval(action: &str, input: &Value) -> Option<String> {
+    if action != ark_orchestrate::AUTOMATE {
+        return None;
+    }
+    let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").trim();
+    let yes = |k: &str| input.get(k).and_then(Value::as_bool) == Some(true);
+    let id = s("automation");
+    if !id.is_empty() && yes("stop") {
+        return Some(format!(
+            "Stop automation {id}. Runs already done keep their results."
+        ));
+    }
+    let mut out = if id.is_empty() {
+        let kind = match s("kind") {
+            "" => "a message",
+            k => k,
+        };
+        let from = match s("from") {
+            "" => " from anyone".to_string(),
+            f => format!(" from {f}"),
+        };
+        format!(
+            "Start work each time {kind} arrives{from} on {} ({})",
+            s("account"),
+            s("source")
+        )
+    } else if yes("resume") {
+        format!("Resume automation {id}, from now on")
+    } else {
+        format!("Change automation {id}; messages waiting are dropped")
+    };
+    if !s("objective").is_empty() {
+        out.push_str(&format!(
+            "\n  Each run: {}",
+            s("objective").replace('\n', "\n    ")
+        ));
+    }
+    if !s("context").is_empty() {
+        out.push_str(&format!(
+            "\n  It is told: {}",
+            s("context").replace('\n', "\n    ")
+        ));
+    }
+    if input.get("can_do").is_some() || input.get("can_read").is_some() || id.is_empty() {
+        let read: Vec<&str> = input["can_read"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        out.push_str(&format!(
+            "\n  Can read: the message{}",
+            if read.is_empty() {
+                String::new()
+            } else {
+                format!(" and {}", read.join(", "))
+            }
+        ));
+        let mut changes = Vec::new();
+        for item in input["can_do"].as_array().into_iter().flatten() {
+            changes.push(can_do_words(item));
+        }
+        out.push_str(&match changes.is_empty() {
+            true => "\n  Can change: nothing".to_string(),
+            false => format!("\n  Can change: {}", changes.join("; ")),
+        });
+        out.push_str("\n  Limit: one run at a time; nothing else is allowed");
+    }
+    Some(out)
+}
+
+/// One allowed action of an approval, in words: what, bound to what, how often, asked or not.
+fn can_do_words(item: &Value) -> String {
+    let action = item["action"].as_str().unwrap_or("").trim();
+    let mut bound = Vec::new();
+    for (k, v) in item["inputs"].as_object().into_iter().flatten() {
+        let says = match v.as_str().map(str::trim) {
+            Some("free") => continue,
+            Some("event.actor") => "the sender".to_string(),
+            Some("event.subject") => "the same thread".to_string(),
+            Some("path") => "a file it may read".to_string(),
+            Some(f) if f.starts_with("event.fields.") => {
+                format!("the message's {}", f.trim_start_matches("event.fields."))
+            }
+            _ => v.get("literal").unwrap_or(v).to_string(),
+        };
+        bound.push(format!("{k} = {says}"));
+    }
+    let mut out = action.to_string();
+    if !bound.is_empty() {
+        out.push_str(&format!(" ({})", bound.join(", ")));
+    }
+    if let Some(n) = item["per_day"].as_u64() {
+        out.push_str(&format!(", at most {n} a day"));
+    }
+    out.push_str(if item["unattended"].as_bool() == Some(true) {
+        ", without asking"
+    } else {
+        ", asking each time"
+    });
+    out
+}
+
+/// An approved authority, in the same words as its approval.
+pub fn authority_words(a: &ark_orchestrate::AutomationAuthority) -> Vec<String> {
+    use ark_orchestrate::{Bound, Mode};
+    a.actions
+        .iter()
+        .map(|x| {
+            let mut inputs = serde_json::Map::new();
+            for (k, b) in &x.inputs {
+                let v = match b {
+                    Bound::Free => Value::from("free"),
+                    Bound::Path => Value::from("path"),
+                    Bound::Event { field } => Value::from(format!("event.{field}")),
+                    Bound::Literal { value } => serde_json::json!({ "literal": value }),
+                };
+                inputs.insert(k.clone(), v);
+            }
+            let mut item = serde_json::json!({ "action": x.action, "inputs": inputs, "unattended": x.mode == Mode::Unattended });
+            if let Some(q) = x.quota.filter(|q| q.window_ms == 86_400_000) {
+                item["per_day"] = q.count.into();
+            }
+            can_do_words(&item)
+        })
+        .collect()
 }
 
 /// [`schedule_approval`] for a change of `known`.
@@ -622,6 +754,11 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
         }
         .trim_end()
         .to_string(),
+        ark_orchestrate::AUTOMATE => match s("automation") {
+            "" => format!("Setting up: {}", clip(s("objective"), 60)),
+            id => format!("Changing automation {id}"),
+        },
+        ark_orchestrate::PAUSE_AUTOMATION => "Pausing an automation".into(),
         ark_orchestrate::UNSCHEDULE => {
             if input.get("pause").and_then(Value::as_bool) == Some(true) {
                 "Pausing a scheduled task".into()
@@ -1191,5 +1328,29 @@ mod tests {
             a.call_label("manuscript.read", &json!({ "file": "x" })),
             "Reading x"
         );
+    }
+}
+
+#[cfg(test)]
+mod automation_words {
+    use super::*;
+
+    #[test]
+    fn an_automation_approval_shows_what_starts_it_and_all_it_may_read_and_change() {
+        let input = serde_json::json!({
+            "source": "gmail", "account": "office@example.com", "from": "lara@example.com",
+            "objective": "reply in the same thread using budget.csv",
+            "can_read": ["budget.csv"],
+            "can_do": [{ "action": "mail.reply", "inputs": { "to": "event.actor", "thread": "event.subject", "body": "free" }, "per_day": 10 }]
+        });
+        let text = automation_approval(ark_orchestrate::AUTOMATE, &input).unwrap();
+        assert_eq!(
+            text,
+            "Start work each time a message arrives from lara@example.com on office@example.com (gmail)\n  Each run: reply in the same thread using budget.csv\n  Can read: the message and budget.csv\n  Can change: mail.reply (to = the sender, thread = the same thread), at most 10 a day, asking each time\n  Limit: one run at a time; nothing else is allowed"
+        );
+        let stop = serde_json::json!({ "automation": "a-1", "stop": true });
+        assert!(automation_approval(ark_orchestrate::AUTOMATE, &stop)
+            .unwrap()
+            .starts_with("Stop automation a-1"));
     }
 }

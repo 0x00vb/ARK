@@ -171,6 +171,7 @@ impl<'a> OrchestratorBuilder<'a> {
             log,
             evals: Mutex::new(()),
             claim: Arc::new(()),
+            quotas: Mutex::new(()),
         });
         let recover = inner.load()?;
         let orch = Orchestrator { inner };
@@ -197,6 +198,15 @@ const RUNS_KEPT: usize = 50;
 /// Runs in a row that did not finish before a schedule or an automation pauses itself.
 const MAX_FAILURES: u32 = 3;
 
+/// The project a task works in: its agent's own; for an event run one of its own beside it, so
+/// what one event brought (its evidence, notes, working state) never reaches another run.
+fn task_scope(task: &TaskRecord, agent_scope: &str) -> ProjectId {
+    match &task.automation {
+        Some(_) => ProjectId(format!("{agent_scope}.{}", task.id)),
+        None => ProjectId(agent_scope.to_string()),
+    }
+}
+
 /// What a run is made for, saved with its task in one write.
 pub(crate) enum RunOf<'a> {
     /// A schedule's run for the time `slot`.
@@ -206,6 +216,7 @@ pub(crate) enum RunOf<'a> {
         automation: &'a str,
         revision: u32,
         event: &'a str,
+        authority: &'a crate::authority::AutomationAuthority,
     },
 }
 
@@ -928,6 +939,8 @@ pub(crate) struct Inner {
     evals: Mutex<()>,
     /// This orchestrator's claim on evaluating its automations in this process.
     claim: Arc<()>,
+    /// Held while a change under an automation's authority is counted.
+    quotas: Mutex<()>,
     /// (task, chat): a turn of that chat waits for the task in this process and takes its
     /// result as its call's answer, so it is not posted too. Lost with the process, as the
     /// turn is: then the result is posted ([`ChatWait`]).
@@ -1680,10 +1693,13 @@ impl Inner {
                         close_open_calls(&mut r);
                         carry_decisions(&mut r);
                         let asking = r.question.as_ref().is_some_and(Question::open);
-                        let scope = st.agents.get(&r.owner).map(|a| a.record.scope.clone());
+                        let scope = st
+                            .agents
+                            .get(&r.owner)
+                            .map(|a| task_scope(&r, &a.record.scope));
                         let unsure = match (scope, r.started_ms) {
                             (Some(scope), Some(started)) if !asking => {
-                                self.change_cut_short(&ProjectId(scope), started)
+                                self.change_cut_short(&scope, started)
                             }
                             _ => None,
                         };
@@ -2086,22 +2102,23 @@ impl Inner {
         if self.state.lock().unwrap().tasks.contains_key(&id) {
             return Err(OrchError::NotAllowed(format!("task {id} exists already")));
         }
-        let (schedule, slot, automation, revision, event) = match &run {
-            Some(RunOf::Schedule { id, slot }) => {
-                (Some(id.to_string()), Some(*slot), None, None, None)
-            }
+        let (schedule, slot) = match &run {
+            Some(RunOf::Schedule { id, slot }) => (Some(id.to_string()), Some(*slot)),
+            _ => (None, None),
+        };
+        let (automation, revision, event, authority) = match &run {
             Some(RunOf::Event {
                 automation,
                 revision,
                 event,
+                authority,
             }) => (
-                None,
-                None,
                 Some(automation.to_string()),
                 Some(*revision),
                 Some(event.to_string()),
+                Some((*authority).clone()),
             ),
-            None => (None, None, None, None, None),
+            _ => (None, None, None, None),
         };
         let source = match &origin {
             Origin::Agent { agent, .. } => self.scope_of(agent).unwrap_or(self.project.id.clone()),
@@ -2159,6 +2176,9 @@ impl Inner {
             automation,
             revision,
             event,
+            authority,
+            authority_used: Default::default(),
+            effect_uncertain: false,
             retry_delay_ms: spec.retry_delay_ms,
             retry_at_ms: None,
             item: spec.item.clone(),
@@ -2981,7 +3001,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             .engine
             .tools()
             .filtered(|a| spec.tools.iter().any(|p| action_matches(p, a)));
-        if !delegates.is_empty() || !contacts.is_empty() {
+        if !event_run && (!delegates.is_empty() || !contacts.is_empty()) {
             registry.register(Arc::new(AgentTools {
                 orch: self.me.clone(),
                 agent: owner.to_string(),
@@ -3045,7 +3065,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             registry.register(Arc::new(RulesTool::new(sets)));
         }
         // Skills it may read: their catalog in the first message, their instructions on demand.
-        let skills = if spec.skills.is_empty() {
+        let skills = if spec.skills.is_empty() || event_run {
             Vec::new()
         } else {
             skills::allowed(
@@ -3057,6 +3077,18 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         if !skills.is_empty() {
             registry.register(Arc::new(skills::SkillsTool::new(skills)));
         }
+        // An event run gets only what its authority names, and cannot turn more on.
+        let guard = match (event_run, &task.authority) {
+            (false, _) => None,
+            (true, None) => return Attempt::Fatal("an event run needs its authority".into()),
+            (true, Some(authority)) => {
+                registry = registry.filtered(|a| authority.allowed(a).is_some());
+                match self.guard_for(&task, authority) {
+                    Ok(g) => Some(g),
+                    Err(e) => return Attempt::Fatal(e),
+                }
+            }
+        };
         // An event run's calls are its own work, so what it reads back is only its own.
         let engine = if event_run {
             self.engine.scoped(registry).for_work(id)
@@ -3064,7 +3096,9 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             self.engine.scoped(registry)
         };
         let mut profile = self.agent_profile(spec, &delegates);
-        if !turn_on.is_empty() {
+        if event_run {
+            profile.acquisition = None;
+        } else if !turn_on.is_empty() {
             // The app's sources first (accounts, installs), then the agent's own.
             let mut sources: Vec<_> = profile.acquisition.take().into_iter().collect();
             sources.extend(turn_on);
@@ -3079,7 +3113,22 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             profile.distillers.push(d);
         }
         profile.core_actions.extend(per_agent_actions);
-        let scope = ProjectId(agent.scope.clone());
+        let scope = task_scope(&task, &agent.scope);
+        if event_run
+            && self
+                .engine
+                .store
+                .get_project(&scope)
+                .ok()
+                .flatten()
+                .is_none()
+        {
+            let mut own = Project::new(owner, &task.objective).with_parent(self.project.id.clone());
+            own.id = scope.clone();
+            if let Err(e) = self.engine.store.put_project(&own) {
+                return Attempt::Failed(e.to_string());
+            }
+        }
 
         // A run that continues an interrupted one gets the changes it already made, so it does
         // not make them twice.
@@ -3126,9 +3175,10 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             .budget_or_auto(self.context_budget)
             .planner(spec.planner.unwrap_or(self.planner))
             .critic(spec.critic.unwrap_or(self.critic))
-            .allow_mutate(spec.allow_mutate)
+            .allow_mutate(spec.allow_mutate && !event_run)
+            .guard(guard)
             .approvals(match &self.approvals {
-                Some(gate) if !spec.allow_mutate => {
+                Some(gate) if !spec.allow_mutate || event_run => {
                     Some(Arc::new(ApprovalGate::new(Arc::new(OnBehalf {
                         orch: self.clone(),
                         agent: owner.to_string(),

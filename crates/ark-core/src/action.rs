@@ -93,6 +93,11 @@ pub struct ActionDescriptor {
     /// person's computer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_each_time: bool,
+    /// Only a person approves it: asked each time also when the turn may change things
+    /// unattended (`allow_mutate`), and refused when nobody can be asked. For setting up work
+    /// that acts on outside content with nobody watching (ADR 0062).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub person_only: bool,
     /// What one "for this session" or "always" answer covers, when it is not the action name:
     /// the calls of a group with the same values of some input fields (every Computer action in
     /// one app). See [`GrantKey`].
@@ -159,6 +164,7 @@ impl ActionDescriptor {
             capabilities: Vec::new(),
             reuse: Reuse::Auto,
             ask_each_time: false,
+            person_only: false,
             grant: None,
             auto_eligible: false,
         }
@@ -187,6 +193,12 @@ impl ActionDescriptor {
     /// Ask the person at every call; no earlier answer covers it ([`Self::ask_each_time`]).
     pub fn ask_each_time(mut self) -> Self {
         self.ask_each_time = true;
+        self
+    }
+    /// Only a person approves it, every time ([`Self::person_only`]).
+    pub fn person_only(mut self) -> Self {
+        self.ask_each_time = true;
+        self.person_only = true;
         self
     }
 

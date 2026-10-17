@@ -227,6 +227,43 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             ));
     }
     let ark = builder.build().unwrap();
+    // An account that delivers mail; Lara's mail arrives once the automation listens.
+    let _events = (scenario == "automations").then(|| {
+        use ark_interact::ark_orchestrate::{EventLog, Offered};
+        use ark_tools::events::{Direction, EventSink, ExternalEvent};
+        let log = EventLog::of(&ark.engine().store);
+        log.offer(Offered {
+            source: "gmail".into(),
+            account: "office@example.com".into(),
+            label: "Mail (office@example.com)".into(),
+            actions: vec!["mail.reply".into()],
+        });
+        let l = log.clone();
+        tokio::spawn(async move {
+            while l.accounts().is_empty() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let at_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            l.ingest(vec![ExternalEvent {
+                source: "gmail".into(),
+                account: "office@example.com".into(),
+                key: "gmail:m-lara-1".into(),
+                kind: "message".into(),
+                direction: Direction::Inbound,
+                actor: Some("lara@example.com".into()),
+                subject: Some("th-budget".into()),
+                at_ms,
+                label: "Mail from lara@example.com".into(),
+                fields: Default::default(),
+                payload: Some("Can you send me the Q4 totals?".into()),
+            }])
+            .unwrap();
+        });
+        log
+    });
     let mut app = App::new("Page test").ark(ark);
     if scenario == "connect-mid-task" {
         // The person's browser: follow the sign-in page back to ARK, without a real browser.
@@ -1315,6 +1352,34 @@ async fn the_board_is_worked_by_the_person_and_the_agents() {
         true,
     )
     .await;
+}
+
+/// Event automations (ADR 0062): made in words and approved with exactly what each run may
+/// read and change, shown beside the chat, run on a delivered message, paused, resumed from the
+/// keyboard and stopped. Light, dark and narrow screenshots with `ARK_UI_SHOTS`.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_automation_asked_in_words_runs_on_a_message_and_is_paused_and_stopped_beside_its_chat()
+{
+    let automate = Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "agents.automate".into(),
+            arguments: json!({
+                "source": "gmail", "account": "office@example.com", "from": "lara@example.com",
+                "objective": "Reply in the same thread with the Q4 totals from budget.csv",
+                "can_read": ["budget.csv"],
+                "can_do": [{ "action": "mail.reply", "inputs": { "to": "event.actor", "thread": "event.subject", "body": "free" }, "per_day": 10 }]
+            }),
+        }],
+        usage: Usage::default(),
+    };
+    let script = vec![
+        automate,
+        say("I will answer Lara's mail in its thread.", false),
+        say("Replied to Lara with the Q4 totals.", false),
+    ];
+    drive_app("automations", script, Duration::ZERO, true).await;
 }
 
 /// Schedules (ADR 0053): made in words and approved each time, shown as a line above the

@@ -339,6 +339,17 @@ pub struct TaskRecord {
     /// The saved event it runs for (its id in the event log).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<String>,
+    /// What an event run may do, copied from its automation when it was made; checked before
+    /// every call ([`crate::authority`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<crate::authority::AutomationAuthority>,
+    /// Changes made under the authority in this task, by action.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub authority_used: std::collections::BTreeMap<String, u32>,
+    /// A change of this task may or may not have happened (an unconfirmed send): nothing more
+    /// changes in it and it is not tried again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub effect_uncertain: bool,
     /// The wait before another try after a failure that may pass, doubling at each one
     /// ([`crate::TaskSpec::retry_after`]). `None`: half a second, doubling.
     #[serde(default, skip_serializing_if = "Option::is_none")]

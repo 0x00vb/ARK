@@ -6,8 +6,8 @@
 
 use ark_orchestrate::board::PERSON;
 use ark_orchestrate::{
-    AgentState, EventKind, Graph, OrchEvent, Origin, TaskNode, TaskState, WorkChange, WorkItem,
-    WorkState,
+    AgentState, EventKind, Graph, OrchEvent, Origin, TaskNode, TaskRecord, TaskState, WorkChange,
+    WorkItem, WorkState,
 };
 use ark_sdk::prelude::ark_model::SessionState;
 use ark_sdk::prelude::ApprovalDecision;
@@ -208,28 +208,31 @@ pub fn schedule_runs(o: &ark_orchestrate::Orchestrator, id: &str, limit: usize) 
     };
     o.schedule_runs(id, limit)
         .into_iter()
-        .map(|t| {
-            let at_ms = t.started_ms.unwrap_or(t.created_ms);
-            RunView {
-                at: s.when.label(at_ms),
-                at_ms,
-                task: t.id,
-                state: t.state,
-                result: t.result,
-                error: t.error.map(|e| crate::labels::person_error(&e)),
-                outputs: t.outputs,
-                attempts: t.attempts,
-                // In the person's words: a busy agent is a run waiting its turn.
-                waiting_on: t.waiting_on.filter(|_| !t.state.is_final()).map(|w| {
-                    if w.starts_with("agent ") || w.starts_with("capacity") {
-                        "its turn".to_string()
-                    } else {
-                        w
-                    }
-                }),
-            }
-        })
+        .map(|t| run_view(t, |ms| s.when.label(ms)))
         .collect()
+}
+
+/// One run as both front-ends show it, its times worded by `label`.
+pub fn run_view(t: TaskRecord, label: impl Fn(u64) -> String) -> RunView {
+    let at_ms = t.started_ms.unwrap_or(t.created_ms);
+    RunView {
+        at: label(at_ms),
+        at_ms,
+        task: t.id,
+        state: t.state,
+        result: t.result,
+        error: t.error.map(|e| crate::labels::person_error(&e)),
+        outputs: t.outputs,
+        attempts: t.attempts,
+        // In the person's words: a busy agent is a run waiting its turn.
+        waiting_on: t.waiting_on.filter(|_| !t.state.is_final()).map(|w| {
+            if w.starts_with("agent ") || w.starts_with("capacity") {
+                "its turn".to_string()
+            } else {
+                w
+            }
+        }),
+    }
 }
 
 /// What runs on its own in this project (`/schedules`).
@@ -769,6 +772,20 @@ pub enum Control {
     RunSchedule {
         schedule: String,
     },
+    /// Let an event automation's messages go until it is resumed.
+    PauseAutomation {
+        automation: String,
+    },
+    ResumeAutomation {
+        automation: String,
+    },
+    StopAutomation {
+        automation: String,
+    },
+    /// Drop the messages a Full automation keeps and listen from now.
+    DiscardPending {
+        automation: String,
+    },
     /// Add an item to the board.
     AddWork {
         title: String,
@@ -895,6 +912,28 @@ pub async fn control(
         Control::RunSchedule { schedule } => ControlOutcome::Submitted {
             task: o.run_schedule_now(&schedule)?,
         },
+        Control::PauseAutomation { automation } => {
+            let a = o.pause_automation(&automation)?;
+            ControlOutcome::Done(format!("paused \"{}\"", clip(&a.task.objective, 60)))
+        }
+        Control::ResumeAutomation { automation } => {
+            let a = o.resume_automation(&automation)?;
+            ControlOutcome::Done(format!(
+                "\"{}\" listens again, from now",
+                clip(&a.task.objective, 60)
+            ))
+        }
+        Control::StopAutomation { automation } => {
+            let a = o.stop_automation(&automation).await?;
+            ControlOutcome::Done(format!("stopped \"{}\"", clip(&a.task.objective, 60)))
+        }
+        Control::DiscardPending { automation } => {
+            let a = o.discard_pending(&automation)?;
+            ControlOutcome::Done(format!(
+                "\"{}\" dropped the messages waiting and listens from now",
+                clip(&a.task.objective, 60)
+            ))
+        }
         Control::AddWork { title, change } => {
             ControlOutcome::Work(Box::new(o.add_work(PERSON, &title, change)?))
         }

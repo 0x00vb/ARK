@@ -204,6 +204,9 @@ pub struct EventAutomationRecord {
     /// What each run is handed, with the event after it.
     pub task: TaskSpec,
     pub pattern: EventPattern,
+    /// What each run may do; copied onto every run.
+    #[serde(default)]
+    pub authority: crate::authority::AutomationAuthority,
     #[serde(default)]
     pub state: AutomationState,
     /// Goes up at each change, resume or discard.
@@ -232,6 +235,28 @@ pub struct EventAutomationRecord {
     pub failures: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counted: Option<String>,
+    /// The last change refused for its limit, and when that limit's window ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limited: Option<RateLimited>,
+}
+
+/// A change refused because its quota was used up.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RateLimited {
+    pub action: String,
+    pub until_ms: u64,
+}
+
+/// A connected account that delivers events, as an app offers it to the chat.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Offered {
+    pub source: String,
+    pub account: String,
+    /// In words: `Mail (office@example.com)`.
+    pub label: String,
+    /// The actions a run may be allowed on this account, with the inputs each takes.
+    #[serde(default)]
+    pub actions: Vec<String>,
 }
 
 /// What became of a matched event.
@@ -347,6 +372,8 @@ pub struct EventLog {
     seq: watch::Sender<u64>,
     /// Which orchestrator evaluates each automation in this process.
     claims: Mutex<HashMap<String, Weak<()>>>,
+    /// Accounts the app connected that deliver events.
+    offered: Mutex<Vec<Offered>>,
 }
 
 fn logs() -> &'static Mutex<HashMap<PathBuf, Weak<EventLog>>> {
@@ -411,7 +438,28 @@ impl EventLog {
             index: Mutex::new(index),
             seq,
             claims: Mutex::new(HashMap::new()),
+            offered: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Offer an account's events to automations (the app does, for each connected source).
+    pub fn offer(&self, o: Offered) {
+        let mut all = self.offered.lock().unwrap();
+        all.retain(|x| {
+            (x.source.as_str(), x.account.as_str()) != (o.source.as_str(), o.account.as_str())
+        });
+        all.push(o);
+    }
+
+    pub fn withdraw(&self, source: &str, account: &str) {
+        self.offered
+            .lock()
+            .unwrap()
+            .retain(|x| (x.source.as_str(), x.account.as_str()) != (source, account));
+    }
+
+    pub fn offered(&self) -> Vec<Offered> {
+        self.offered.lock().unwrap().clone()
     }
 
     pub fn limits(&self) -> LogLimits {

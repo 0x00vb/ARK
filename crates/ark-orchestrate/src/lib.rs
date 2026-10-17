@@ -33,6 +33,8 @@
 //! println!("{}", orch.graph().to_mermaid());
 //! ```
 
+pub mod authority;
+mod automate_tools;
 pub mod automation;
 pub mod board;
 mod brief;
@@ -46,9 +48,11 @@ pub mod schedule;
 mod spec;
 mod tools;
 
+pub use authority::{Allowed, AutomationAuthority, Bound, Mode, Quota};
+pub use automate_tools::{AUTOMATE, PAUSE_AUTOMATION};
 pub use automation::{
     automated_projects, AutomationState, EventAutomationRecord, EventEvaluation, EventLog,
-    EventPattern, LogLimits, Outcome, StoredEvent,
+    EventPattern, LogLimits, Offered, Outcome, RateLimited, StoredEvent,
 };
 pub use board::{WorkChange, WorkItem, WorkState, WorkStep};
 pub use brief::Brief;

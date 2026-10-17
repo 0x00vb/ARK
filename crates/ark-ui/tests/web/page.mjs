@@ -970,6 +970,63 @@ async function board(page) {
 }
 scenarios.board = board;
 
+// Event automations (ADR 0062): asked in words with exactly what each run may read and change;
+// a line beside the chat says which messages start it and where it is; its pane shows what was
+// approved, the last message, its runs, and the action that recovers it.
+async function automations(page) {
+  await page.locator("#input").fill("When Lara emails, reply in the same thread using budget.csv");
+  await page.keyboard.press("Enter");
+  const card = page.locator(".approval").first();
+  await card.waitFor();
+  const asked = await card.innerText();
+  assert.match(asked, /Start work each time a message arrives from lara@example.com on office@example.com/);
+  assert.match(asked, /Can read: the message and budget.csv/);
+  assert.match(asked, /Can change: mail.reply \(to = the sender, thread = the same thread\), at most 10 a day, asking each time/);
+  assert.equal(await card.locator("button", { hasText: /Always/ }).count(), 0, "no always for standing work");
+  await page.waitForTimeout(300);
+  await shot(page, "automation-approval");
+  await finished(page, () => card.locator("button", { hasText: "Allow once" }).click());
+
+  const line = page.locator("#plans .plan");
+  await line.waitFor();
+  assert.equal(await line.locator(".plan-when").innerText(), "When lara@example.com writes");
+  // The runtime delivers Lara's mail; the run answers and the line says when it ran.
+  await page.locator("#plans .plan-state", { hasText: /listening/ }).waitFor();
+  await shot(page, "automation-line");
+  await line.click();
+  const pane = page.locator(".sc-panel");
+  await pane.locator(".sc-may dd", { hasText: "budget.csv" }).waitFor();
+  assert.match(await pane.locator(".sc-may").innerText(), /Changes\s+mail.reply \(to = the sender, thread = the same thread\)/);
+  await pane.locator(".sc-said", { hasText: "Replied to Lara with the Q4 totals." }).waitFor();
+  assert.match(await pane.locator(".sc-last").innerText(), /Mail from lara@example.com/);
+  await shot(page, "automation-pane-light");
+
+  // Paused: the one recovery is first, and Pause is gone.
+  await pane.locator("button", { hasText: "Pause" }).click();
+  await pane.locator(".sc-state", { hasText: "paused" }).waitFor();
+  assert.equal(await pane.locator(".sc-actions button").first().innerText(), "Resume");
+  assert.equal(await pane.locator("button", { hasText: "Pause" }).count(), 0);
+  await page.locator("#plans .plan-state", { hasText: "paused" }).waitFor();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot(page, "automation-pane-dark-paused");
+  // Keyboard: Resume is reachable and works from the keyboard.
+  await pane.locator(".sc-actions button").first().focus();
+  await page.keyboard.press("Enter");
+  await pane.locator(".sc-state", { hasText: /listening/ }).waitFor();
+  await page.setViewportSize({ width: 390, height: 760 });
+  await shot(page, "automation-pane-narrow");
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.emulateMedia({ colorScheme: "light" });
+
+  // Stop asks once more, then the pane says it stopped and the line goes.
+  const stop = pane.locator("button.sc-stop");
+  await stop.click();
+  assert.equal(await stop.innerText(), "Stop for good?");
+  await stop.click();
+  await page.waitForFunction(() => !document.querySelector("#plans .plan"));
+}
+scenarios.automations = automations;
+
 // Schedules (ADR 0053): asked in words, approved each time; a quiet line above the composer
 // says when and where it is; the line opens it beside the chat: run now, pause, resume, stop.
 async function schedules(page) {

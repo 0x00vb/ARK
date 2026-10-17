@@ -4,6 +4,10 @@
 // its runs with their results and files, Run now, Pause or Resume, Stop.
 //
 // Making and changing a schedule is asked in words; the page has no form for it.
+//
+// Work that starts when a message arrives (an event automation, ADR 0062) gets the same line
+// beside its chat and its own pane: which messages start it, what each run may read and change
+// as the person approved it, where it is, and the one action that recovers it.
 
 import { h, icon, clear, clip } from "./dom.js";
 import { markdown } from "./md.js";
@@ -19,13 +23,13 @@ const store = {
 };
 
 /// Orchestrator events that can change a schedule or its last run.
-const MOVES = new Set(["scheduled", "schedule_changed", "unscheduled", "task_created", "task_queued", "task_started", "task_finished", "task_retry", "asked", "answered"]);
+const MOVES = new Set(["scheduled", "schedule_changed", "unscheduled", "automation_changed", "unautomated", "task_created", "task_queued", "task_started", "task_finished", "task_retry", "asked", "answered"]);
 
 async function load() {
   const chat = store.ark.summary?.()?.session?.id;
   store.chat = chat || null;
   try {
-    store.list = chat ? (await store.ark.call("schedules", { session: chat })) || [] : [];
+    store.list = chat ? (await store.ark.call("automations", { session: chat })) || [] : [];
   } catch {
     store.list = [];
   }
@@ -186,6 +190,19 @@ function draw() {
   if (!el) return;
   clear(el);
   for (const s of store.list) {
+    if (s.kind === "event") {
+      el.append(h("button.plan", {
+        type: "button",
+        "data-tone": s.tone === "muted" ? null : s.tone,
+        title: `When ${s.says}: ${s.objective}`,
+        onclick: () => store.ark.openPanel("automation", { id: s.id }),
+      },
+        s.status === "running now" ? h("span.working-dot") : icon("bolt"),
+        h("span.plan-when", when(s)),
+        h("span.plan-what", s.objective),
+        h("span.plan-state", s.status)));
+      continue;
+    }
     el.append(h("button.plan", {
       type: "button",
       "data-tone": TONE[s.state] || null,
@@ -199,9 +216,9 @@ function draw() {
   }
 }
 
-async function act(method, id, done, ark = store.ark) {
+async function act(method, id, done, ark = store.ark, key = "schedule") {
   try {
-    await ark.call(method, { schedule: id });
+    await ark.call(method, { [key]: id });
     if (done) ark.toast(done);
   } catch (e) {
     ark.toast(e.message);
@@ -311,6 +328,132 @@ function schedulePanel(el, params, ark = store.ark) {
   };
 }
 
+/// Which messages start an event automation, short: "When lara@example.com writes".
+function when(s) {
+  return s.from ? `When ${s.from} writes` : `When a message comes to ${s.account}`;
+}
+
+// ---- one event automation, in the side pane -----------------------------------------------------
+
+/// The action that recovers an automation from where it is, first among its controls.
+const RECOVER = {
+  resume: { method: "automation_resume", label: "Resume" },
+  discard: { method: "automation_discard", label: "Drop waiting messages", confirm: "Drop them for good?" },
+};
+
+function automationPanel(el, params, ark = store.ark) {
+  el.classList.add("sc-panel");
+  let id = params?.id;
+  let data = null;
+  let asking = null; // a destructive button asks once more: { which, timer }
+  let gone = false;
+  let failed = false;
+  const opened = new Set();
+
+  async function fetch() {
+    try {
+      data = await ark.call("automation", { automation: id, limit: 20 });
+      gone = false;
+      failed = false;
+    } catch (e) {
+      failed = true;
+      if (/no automation/.test(e.message || "")) {
+        data = null;
+        gone = true;
+      }
+    }
+    draw();
+  }
+
+  function twice(which, label, again, run) {
+    const b = h("button.btn.ghost.small", { type: "button" }, asking?.which === which ? again : label);
+    if (which === "stop") b.classList.add("sc-stop");
+    b.onclick = () => {
+      if (asking?.which !== which) {
+        clearTimeout(asking?.timer);
+        asking = { which, timer: setTimeout(() => { asking = null; draw(); }, 4000) };
+        return draw();
+      }
+      clearTimeout(asking.timer);
+      asking = null;
+      run();
+    };
+    return b;
+  }
+
+  function draw() {
+    clear(el);
+    if (!data) {
+      if (gone) el.append(h("p.sc-gone", "This automation was stopped. Its results are in the chat."));
+      else if (failed) el.append(h("p.sc-gone", "Could not reach ARK. It shows again when it is back."));
+      return;
+    }
+    const a = data.automation;
+    ark.setPanelTitle("automation", clip(a.objective, 28));
+    const paused = a.state === "paused" || a.state === "paused_failing";
+    const actions = [];
+    const fix = RECOVER[a.recovery];
+    if (fix && !fix.confirm) {
+      actions.push(h("button.btn.small", { type: "button", onclick: () => act(fix.method, id, undefined, ark, "automation").then(fetch) }, fix.label));
+    } else if (fix) {
+      actions.push(twice("discard", fix.label, fix.confirm, () => act(fix.method, id, undefined, ark, "automation").then(fetch)));
+    }
+    if (!paused) {
+      actions.push(h("button.btn.ghost.small", { type: "button", onclick: () => act("automation_pause", id, undefined, ark, "automation").then(fetch) }, "Pause"));
+    }
+    actions.push(twice("stop", "Stop", "Stop for good?", () =>
+      act("automation_stop", id, "Stopped", ark, "automation").then(() => ark.closePanel?.("automation"))));
+    const may = [`the message${a.can_read.length ? `, ${a.can_read.join(", ")}` : ""}`];
+    el.append(
+      h("div.sc-head",
+        h("div.sc-what", a.objective),
+        h("div.sc-when", `${when(a)} to ${a.account}`),
+        h("div.sc-state", { "data-tone": a.tone === "muted" ? null : a.tone }, a.status === "running now" ? h("span.working-dot") : null, a.status),
+        a.last_event ? h("div.sc-last", a.last_event) : null),
+      h("div.sc-actions", actions),
+      h("dl.sc-may",
+        h("dt", "Reads"), h("dd", may.join("")),
+        h("dt", "Changes"), h("dd", a.can_change.length ? a.can_change.join("; ") : "nothing")),
+    );
+    if (a.context) el.append(h("details.sc-context", h("summary", "What each run is told"), h("div.prose", { html: markdown(a.context) })));
+    const runs = data.runs || [];
+    if (!runs.length) return;
+    const list = h("div.sc-runs");
+    for (const r of runs) {
+      const said = r.result || r.error || (r.waiting_on ? `Waiting: ${r.waiting_on}` : "");
+      const body = h("div.sc-said.prose", { html: markdown(said) });
+      if (said.length > 280 && !opened.has(r.task)) {
+        body.classList.add("more");
+        body.onclick = () => { body.classList.remove("more"); opened.add(r.task); };
+      }
+      list.append(h("div.sc-run", { "data-state": r.state },
+        h("div.sc-run-head", h("span.sc-run-at", r.at), h("span.sc-run-state", word(r.state)), r.attempts > 1 ? h("span.sc-run-tries", `${r.attempts} tries`) : null),
+        said ? body : null,
+        (r.outputs || []).length ? h("div.sc-files", r.outputs.map((o) =>
+          h("button.bd-p-file", { type: "button", title: o.name, onclick: () => ark.openArtifact(o.id) }, icon("file"), clip(o.name, 32)))) : null));
+    }
+    el.append(list);
+  }
+
+  const off = () => fetch();
+  store.listeners.add(off);
+  fetch();
+  return {
+    update(p) {
+      if (p?.id && p.id !== id) {
+        id = p.id;
+        opened.clear();
+        fetch();
+      }
+    },
+    refresh: () => fetch(),
+    dispose() {
+      store.listeners.delete(off);
+      clearTimeout(asking?.timer);
+    },
+  };
+}
+
 /// The person's own zone: a schedule in it does not name it.
 function here() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return null; }
@@ -323,6 +466,7 @@ function word(state) {
 export function registerSchedules(ark) {
   store.ark = ark;
   ark.panel({ id: "schedule", title: "Schedule", icon: "clock", builtin: true, render: (el, params, scoped) => schedulePanel(el, params, scoped || ark) });
+  ark.panel({ id: "automation", title: "Automation", icon: "bolt", builtin: true, render: (el, params, scoped) => automationPanel(el, params, scoped || ark) });
   ark.view({ id: "schedules", title: "Schedules", icon: "clock", projectScoped: true, render: (el, params, scoped) => schedulesView(el, params, scoped || ark) });
   ark.on("ark:orch", (m) => {
     if (m.ref) return;

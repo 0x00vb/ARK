@@ -225,10 +225,12 @@ mod sys {
                 return Ok(false);
             }
             let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
-                Ok(true)
-            } else {
-                Err(error)
+            match error.raw_os_error() {
+                Some(libc::ESRCH) => Ok(true),
+                // macOS answers EPERM while the group's members are still exiting. The group
+                // is ours, so this means "not empty yet"; the caller's deadline still applies.
+                Some(libc::EPERM) => Ok(false),
+                _ => Err(error),
             }
         }
     }

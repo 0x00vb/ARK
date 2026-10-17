@@ -188,6 +188,45 @@ fn the_signature_is_checked_over_the_raw_bytes_before_anything_is_parsed() {
 #[test]
 fn a_signed_body_for_another_number_or_over_the_limit_is_refused() {
     let hook = Hook::new(setup("s", "t"));
+    // Changes for another number beside ours are left out; ours are kept.
+    let mixed = serde_json::to_vec(&json!({
+        "object": "whatsapp_business_account",
+        "entry": [
+            { "id": "waba-999", "changes": [{ "field": "messages", "value": {
+                "metadata": { "phone_number_id": "phone-999" },
+                "messages": [{ "from": "34600000009", "id": "wamid.OTHER", "timestamp": "1", "type": "text" }]
+            } }] },
+            { "id": "waba-111", "changes": [
+                { "field": "messages", "value": {
+                    "metadata": { "phone_number_id": "phone-999" },
+                    "messages": [{ "from": "34600000008", "id": "wamid.OTHER2", "timestamp": "1", "type": "text" }]
+                } },
+                { "field": "messages", "value": {
+                    "metadata": { "phone_number_id": "phone-222" },
+                    "messages": [{ "from": "34600000001", "id": "wamid.OURS", "timestamp": "1", "type": "text" }]
+                } }
+            ] }
+        ]
+    }))
+    .unwrap();
+    let kept = hook.decode(&sign("s", &mixed), &mixed).unwrap();
+    assert_eq!(
+        kept.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+        vec!["wa:msg:wamid.OURS"]
+    );
+    // A time past any window is malformed, not an overflow.
+    let huge = serde_json::to_vec(&json!({
+        "object": "whatsapp_business_account",
+        "entry": [{ "id": "waba-111", "changes": [{ "field": "messages", "value": {
+            "metadata": { "phone_number_id": "phone-222" },
+            "messages": [{ "from": "34600000001", "id": "wamid.X", "timestamp": "18446744073709551", "type": "text" }]
+        } }] }]
+    }))
+    .unwrap();
+    assert!(matches!(
+        hook.decode(&sign("s", &huge), &huge),
+        Err(HookError::Malformed(_))
+    ));
     for (waba, phone) in [("waba-999", "phone-222"), ("waba-111", "phone-999")] {
         let raw = serde_json::to_vec(&json!({
             "object": "whatsapp_business_account",
@@ -331,6 +370,15 @@ async fn a_setup_that_graph_does_not_confirm_is_not_saved() {
                 Some((
                     401,
                     json!({ "error": { "message": "Invalid OAuth access token" } }),
+                ))
+            }),
+            "refused the access token",
+        ),
+        (
+            Arc::new(|_, _, _| {
+                Some((
+                    400,
+                    json!({ "error": { "message": "Error validating access token", "code": 190 } }),
                 ))
             }),
             "refused the access token",

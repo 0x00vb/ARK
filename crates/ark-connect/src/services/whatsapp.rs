@@ -134,9 +134,10 @@ pub async fn connect(
         setup.phone_id
     ))
     .await?;
+    // An invalid token is 401, or 400 with Graph's code 190.
     match status {
         200 => {}
-        401 => {
+        _ if status == 401 || number["error"]["code"].as_u64() == Some(190) => {
             return Err(ConnectError::Refused(format!(
                 "Meta refused the access token: {}",
                 why(&number)
@@ -381,26 +382,30 @@ impl WebhookSource for Hook {
         }
         let (waba, phone) = (&self.saved.setup.waba_id, &self.saved.setup.phone_id);
         let bad = |why: &str| HookError::Malformed(why.to_string());
+        // One Meta app sends every number's changes to its one callback: changes for another
+        // number are left out, and a body with only those is refused.
         let mut out = Vec::new();
+        let (mut ours, mut foreign) = (0, None);
         for entry in body["entry"].as_array().ok_or_else(|| bad("no entries"))? {
             if entry["id"].as_str() != Some(waba.as_str()) {
-                return Err(HookError::Unbound(format!(
-                    "an entry for WhatsApp Business Account {}",
+                foreign = Some(format!(
+                    "WhatsApp Business Account {}",
                     entry["id"].as_str().unwrap_or("?")
-                )));
+                ));
+                continue;
             }
             for change in entry["changes"].as_array().into_iter().flatten() {
                 if change["field"] != "messages" {
+                    ours += 1;
                     continue;
                 }
                 let v = &change["value"];
                 let to = v["metadata"]["phone_number_id"].as_str();
                 if to != Some(phone.as_str()) {
-                    return Err(HookError::Unbound(format!(
-                        "a change for phone number id {}",
-                        to.unwrap_or("?")
-                    )));
+                    foreign = Some(format!("phone number id {}", to.unwrap_or("?")));
+                    continue;
                 }
+                ours += 1;
                 for m in v["messages"].as_array().into_iter().flatten() {
                     out.push(self.message(m)?);
                 }
@@ -408,6 +413,9 @@ impl WebhookSource for Hook {
                     out.push(self.status(s)?);
                 }
             }
+        }
+        if let (0, Some(other)) = (ours, foreign) {
+            return Err(HookError::Unbound(format!("changes only for {other}")));
         }
         Ok(out)
     }
@@ -438,14 +446,14 @@ impl Hook {
             _ => None,
         }
         .map(|p| clip(p, self.limits.payload));
+        let until = at_ms
+            .checked_add(WINDOW_MS)
+            .ok_or_else(|| bad("has a time past any window"))?;
         let fields = BTreeMap::from([
             ("message_id".to_string(), id.to_string()),
             ("from".to_string(), from.to_string()),
             ("type".to_string(), kind.to_string()),
-            (
-                "reply_until_ms".to_string(),
-                (at_ms + WINDOW_MS).to_string(),
-            ),
+            ("reply_until_ms".to_string(), until.to_string()),
         ]);
         Ok(ExternalEvent {
             source: SOURCE.into(),
@@ -602,7 +610,7 @@ impl Reply {
             408 | 500..=599 => Ok(unconfirmed(to)),
             // Meta's "re-engagement" refusal: the customer service window has closed.
             _ if code == Some(131047) => Err(AdapterError::Tool(window_ended(to))),
-            401 => Err(AdapterError::Tool(
+            _ if status == 401 || code == Some(190) => Err(AdapterError::Tool(
                 "Meta refused the access token; connect WhatsApp Business again".into(),
             )),
             _ => Err(AdapterError::Tool(format!(

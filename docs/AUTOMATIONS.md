@@ -273,6 +273,13 @@ An approved authority binds `whatsapp.reply`'s `to` to the event's `actor` and i
 `reply_until_ms` to `fields.reply_until_ms`. The action also refuses a deadline more than 24
 hours ahead, so a free-form reply outside the window fails closed even without that binding.
 
+One Meta app sends every number's changes to its one callback URL, so connect one number per
+Meta app. A body's changes for another number are left out; a body with only those is refused.
+Known limits of the first route: a request's headers get the general 30-second read limit (the
+5 seconds apply to the body), each request reads the connected numbers' secrets to find its
+route, and concurrent hook connections are not capped. The app secret is proved only by the
+first signed webhook.
+
 Personal WhatsApp remains available only through the visible Computer workflow in ADR 0056. It
 is not an unattended event source.
 

@@ -1516,4 +1516,60 @@ async fn a_webhook_route_answers_only_a_connected_account_and_saves_before_it_ac
     );
     let refused = raw(served.port, big).await;
     assert!(refused.starts_with("HTTP/1.1 413"), "{refused}");
+
+    // Signed but not a WhatsApp body: 400. Another method: 405.
+    let junk = "{\"object\":\"page\"}";
+    let sig_junk = format!("sha256={}", hmac_hex(b"app-secret", junk.as_bytes()));
+    let bad = raw(served.port, post(&hook, &sig_junk, junk)).await;
+    assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+    let put = raw(
+        served.port,
+        format!("PUT {hook} HTTP/1.1\r\nHost: shop.example.com\r\nContent-Length: 0\r\n\r\n"),
+    )
+    .await;
+    assert!(put.starts_with("HTTP/1.1 405"), "{put}");
+
+    // One body with the same message twice and a status: two new events.
+    let twice = json!({
+        "object": "whatsapp_business_account",
+        "entry": [{ "id": "waba-111", "changes": [{ "field": "messages", "value": {
+            "metadata": { "phone_number_id": "phone-222" },
+            "messages": [
+                { "from": "34600000001", "id": "wamid.IN2", "timestamp": "1791100900", "type": "text", "text": { "body": "And the small one?" } },
+                { "from": "34600000001", "id": "wamid.IN2", "timestamp": "1791100900", "type": "text", "text": { "body": "And the small one?" } }
+            ],
+            "statuses": [{ "id": "wamid.IN2", "status": "read", "timestamp": "1791100905", "recipient_id": "34600000001" }]
+        } }] }]
+    })
+    .to_string();
+    let sig_twice = format!("sha256={}", hmac_hex(b"app-secret", twice.as_bytes()));
+    let ok = raw(served.port, post(&hook, &sig_twice, &twice)).await;
+    assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
+    assert_eq!(log.current_seq(), 3, "the message once, its status apart");
+
+    // A full store: 503, so Meta sends it again later; nothing is saved.
+    log.set_limits(ark_interact::ark_orchestrate::LogLimits {
+        retained_bytes: 1,
+        ..Default::default()
+    });
+    let full = json!({
+        "object": "whatsapp_business_account",
+        "entry": [{ "id": "waba-111", "changes": [{ "field": "messages", "value": {
+            "metadata": { "phone_number_id": "phone-222" },
+            "messages": [{ "from": "34600000001", "id": "wamid.IN3", "timestamp": "1791101000", "type": "text", "text": { "body": "Hello?" } }]
+        } }] }]
+    })
+    .to_string();
+    let sig_full = format!("sha256={}", hmac_hex(b"app-secret", full.as_bytes()));
+    let busy = raw(served.port, post(&hook, &sig_full, &full)).await;
+    assert!(busy.starts_with("HTTP/1.1 503"), "{busy}");
+    assert_eq!(log.current_seq(), 3);
+
+    // A body slower than five seconds is cut off.
+    let slow = raw(
+        served.port,
+        format!("POST {hook} HTTP/1.1\r\nHost: shop.example.com\r\nContent-Length: 100\r\n\r\n{{"),
+    )
+    .await;
+    assert!(slow.starts_with("HTTP/1.1 408"), "{slow}");
 }

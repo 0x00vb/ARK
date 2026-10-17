@@ -169,6 +169,7 @@ App scripts register on `window.ark`. ARK does not know what any of it means.
 
 | Call | Registers |
 |---|---|
+| `ark.projectSection({ id, label, render(el, { project }, api) })` | An app's rows inside the current unfolded project, before chats, even without a chat. `label` names the group for accessibility. The container is attached before synchronous render; return `{ dispose() }` to clean up before removal. Unique IDs and nonempty labels are required. A later registration refreshes the project tree. See [ADR 0077](adr/0077-an-app-can-add-rows-inside-the-current-project.md) |
 | `ark.panel({ id, title, icon, nav, presents, wide, fill, render })` | A side-pane panel; `nav: true` lists it in the top bar's + menu. An app panel with the id `terminal`, `browser` or `files` replaces ARK's, and an app panel's `presents` wins over a built-in one for the same view |
 | `ark.view({ id, title, icon, nav, render })` | A view of the current project in the main column, in place of the conversation; `nav: true` makes it a top-bar tab (a string names the tab). Built once, kept while hidden |
 | `ark.setting({ id, title, icon, advanced, render(el, api) })` | A section of the Settings page; `advanced: true` lists it under Advanced |

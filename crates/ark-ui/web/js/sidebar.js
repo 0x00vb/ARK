@@ -31,6 +31,7 @@ export class Sidebar {
     this.top = $("#sidebar-ext");
     this.settings = $("#open-settings");
     this.gen = 0;
+    this.projectSections = [];
     // Project id -> unfolded (true) or folded (false), where the person chose; else the
     // current project is unfolded and the others folded.
     this.folds = {};
@@ -120,6 +121,7 @@ export class Sidebar {
     } catch {
       return; // busy while a turn runs; the list refreshes when it ends
     }
+    if (gen !== this.gen) return;
     // A project that stops being current stays unfolded. Project expansion is independent, so
     // moving between projects never turns the sidebar into a one-open accordion.
     const current = projects.find((p) => p.current)?.id || null;
@@ -138,8 +140,28 @@ export class Sidebar {
       this.unfolded(p) ? this.api.call("sessions", { project: p.id }).catch(() => []) : null));
     // A newer refresh started meanwhile; it draws.
     if (gen !== this.gen) return;
+    const sections = this.projectSections;
+    this.projectSections = [];
+    for (const section of sections) {
+      try { section.dispose?.(); } catch (e) { console.error(e); }
+    }
     clear(this.tree);
-    visible.forEach((p, i) => this.tree.append(this.project(p, chats[i])));
+    visible.forEach((p, i) => {
+      const group = this.project(p, chats[i]);
+      this.tree.append(group);
+      if (!p.current || !this.unfolded(p)) return;
+      for (const section of registry.projectSections.values()) {
+        const el = h("div.project-section", { role: "group", "aria-label": section.label, "data-id": section.id });
+        group.insertBefore(el, group.querySelector(".chats"));
+        try {
+          const controller = section.render(el, { project: p }, window.ark);
+          if (controller) this.projectSections.push(controller);
+        } catch (e) {
+          console.error(e);
+          el.remove();
+        }
+      }
+    });
   }
 
   project(p, sessions) {

@@ -40,7 +40,7 @@ const TAB_STORAGE_VERSION = 1;
 const LAYOUT_STORAGE_VERSION = 1;
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
 const appEl = $("#app");
-const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, view: null, homeView: null };
+const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, projectSectionsChanged: false, view: null, homeView: null };
 const secondaryChats = new Map();
 let activeSession = null;
 const resourceOnline = new Map();
@@ -216,12 +216,17 @@ const api = {
   },
   // Ask the window to reflect a view's focus again (after its selection changed).
   reportFocus: () => reportFocus(),
-  _changed: () => {
+  _changed: (projectSections = false) => {
     state.extChanged = true;
+    state.projectSectionsChanged ||= projectSections;
     queueMicrotask(() => {
       if (!state.extChanged) return;
       state.extChanged = false;
       sidebar?.renderExtensions();
+      if (state.projectSectionsChanged) {
+        state.projectSectionsChanged = false;
+        sidebar?.refresh();
+      }
       topbar?.render();
       composer?.setModel(state.summary?.model);
     });

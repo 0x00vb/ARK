@@ -11,6 +11,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- `ark.projectSection` places an app's rows inside the current unfolded project, before chats,
+  with cleanup before replacement ([ADR 0077](docs/adr/0077-an-app-can-add-rows-inside-the-current-project.md)).
 - `ArkUi::start_hidden(true)` creates the window hidden for a launch nobody asked to see (a login
   item). The Dock icon, the menu bar item or opening the app again shows it.
 - `ark.chatView(el, { submit, placeholder })` draws an app's conversation with the chat's own

@@ -48,6 +48,10 @@
 //   ark.sidebar({ id, render(el, api) })
 //                      a row at the top of the projects list, for what the list as a whole
 //                      depends on (an app with runtimes in several places says which here)
+//   ark.projectSection({ id, label, render(el, { project }, api) })
+//                      rows inside the current unfolded project, before its chats. `label`
+//                      names the group for accessibility. Render is synchronous, with `el`
+//                      attached; return `{ dispose() }` to release this mount before removal.
 //   ark.pickFolder({ title })   the window's folder picker: a path, null if dismissed,
 //                      undefined where there is none (a browser)
 //   ark.updates        signed native-app updates: `status()`, `check()`, `restart()`, `listen(fn)`. The
@@ -90,6 +94,7 @@ export const registry = {
   actions: [],
   statuses: [],
   sidebars: [],
+  projectSections: new Map(),
   modelPicker: null,
   submitHooks: [],
 };
@@ -199,6 +204,15 @@ export function installApi(api) {
       need(s, ["id", "render"], "sidebar");
       registry.sidebars.push(s);
       api._changed();
+    },
+    projectSection(s) {
+      need(s, ["id", "label", "render"], "projectSection");
+      if (typeof s.id !== "string" || !s.id.trim() || typeof s.label !== "string" || !s.label.trim()
+        || typeof s.render !== "function" || registry.projectSections.has(s.id)) {
+        throw new Error("Invalid or duplicate project section");
+      }
+      registry.projectSections.set(s.id, { id: s.id, label: s.label, render: s.render });
+      api._changed(true);
     },
     extensionReady,
     on: onExt,

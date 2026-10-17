@@ -811,6 +811,11 @@ async fn required_extension_failure_blocks_the_workspace_and_names_the_module() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_apps_project_section_registers_late_and_follows_the_project_fold() {
+    drive("project-sections", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn required_extension_may_register_after_the_shared_page() {
     drive("late-extension", vec![], Duration::ZERO).await;
 }

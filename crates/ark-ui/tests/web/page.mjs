@@ -45,6 +45,26 @@ async function finished(page, send) {
 }
 
 const scenarios = {
+  async "project-sections"(page) {
+    await page.evaluate(() => {
+      window.__projectSectionEvents = [];
+      window.ark.projectSection({ id: "project-notes", label: "Project notes", render(el, { project }) {
+        window.__projectSectionEvents.push(["render", project.id, el.isConnected]);
+        el.textContent = `Notes for ${project.name}`;
+        return { dispose() { window.__projectSectionEvents.push(["dispose", project.id, el.isConnected]); } };
+      } });
+    });
+    const section = page.getByRole("group", { name: "Project notes", exact: true });
+    await section.waitFor({ state: "visible" });
+    assert.equal(await section.evaluate(el => el.parentElement.querySelector(".project-row").getAttribute("aria-current")), "true");
+    await page.locator('.project-row[aria-current="true"] .project-chev').click();
+    await section.waitFor({ state: "detached" });
+    await page.locator('.project-row[aria-current="true"] .project-chev').click();
+    await section.waitFor({ state: "visible" });
+    const events = await page.evaluate(() => window.__projectSectionEvents);
+    assert.ok(events.every(event => event[2]), "render and disposal happen before detachment");
+    assert.ok(events.some(event => event[0] === "dispose"));
+  },
   async "devices-startup"(page) {
     const result = await page.evaluate(async () => {
       const { registerDevices } = await import('./js/devices.js');

@@ -320,6 +320,8 @@ async fn an_agents_task_reads_as_a_chat() {
     }));
     let host = open_with(dir.path(), saves, model).await;
     let mut rx = host.subscribe();
+    // A window that reads the graph follows the project's `orch` events.
+    host.call("graph", json!({})).await.unwrap();
     host.call(
         "spawn_agent",
         json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
@@ -346,7 +348,17 @@ async fn an_agents_task_reads_as_a_chat() {
     )
     .await
     .unwrap();
-    wait_for(&mut rx, "task finished", |v| orch_type(v, "task_finished")).await;
+    let chunks = std::cell::Cell::new(0);
+    wait_for(&mut rx, "task finished", |v| {
+        assert!(
+            v["event"]["event"]["type"] != "text_delta",
+            "streamed text is not an orch event: {v}"
+        );
+        chunks.set(chunks.get() + usize::from(v["kind"] == "orch_text"));
+        orch_type(v, "task_finished")
+    })
+    .await;
+    assert!(chunks.get() > 0, "the answer streamed");
 
     let detail = host.call("task", json!({ "task": task })).await.unwrap();
     let feed = detail["feed"].as_array().unwrap();

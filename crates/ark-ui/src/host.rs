@@ -173,6 +173,17 @@ async fn forward_attention(
             Err(broadcast::error::RecvError::Closed) => return,
         };
         let Some(host) = host.upgrade() else { return };
+        // Streamed text goes live only, as `orch_text` (`forward_orchestration`): as an `orch`
+        // event it would be numbered and kept, and each chunk would read as a change.
+        if matches!(
+            ev.kind,
+            EventKind::Agent {
+                event: HarnessEvent::TextDelta { .. },
+                ..
+            }
+        ) {
+            continue;
+        }
         for reference in
             host.resource_subscribers
                 .aliases(ResourceKind::Project, &ev.project, "orch")

@@ -50,12 +50,13 @@ export function chatView(el, base, { submit, placeholder = "" } = {}) {
 
   function render(turns, { empty = "" } = {}) {
     const stick = thread.stick;
-    const anchor = [...root.children].find((node) => node.offsetTop + node.offsetHeight >= scroller.scrollTop);
-    const anchorOffset = anchor ? anchor.offsetTop - scroller.scrollTop : 0;
+    // The turn in view, by key: it may be drawn again below, and must keep its place.
+    const anchor = [...views].find(([, entry]) => entry.view.el.offsetTop + entry.view.el.offsetHeight >= scroller.scrollTop);
+    const anchorOffset = anchor ? anchor[1].view.el.offsetTop - scroller.scrollTop : 0;
     if (!turns.length) {
       for (const entry of views.values()) drop(entry);
       views = new Map();
-      thread.welcome({ title: empty }, [], () => {});
+      if (root.querySelector(".welcome h1")?.textContent !== (empty || "What should we work on?")) thread.welcome({ title: empty }, [], () => {});
       drawn = true;
       return;
     }
@@ -85,12 +86,23 @@ export function chatView(el, base, { submit, placeholder = "" } = {}) {
     for (const [key, entry] of views) if (!next.has(key)) drop(entry);
     views = next;
     drawn = true;
+    const kept = anchor && views.get(anchor[0])?.view.el;
     if (stick) thread.scroll(true);
-    else if (anchor?.isConnected) scroller.scrollTop = anchor.offsetTop - anchorOffset;
+    else if (kept) scroller.scrollTop = kept.offsetTop - anchorOffset;
+  }
+
+  /// Another conversation in the same view: nothing carries over, and its turns do not rise in.
+  function reset() {
+    for (const entry of views.values()) drop(entry);
+    views = new Map();
+    thread.clear();
+    thread.stick = true;
+    drawn = false;
   }
 
   return {
     render,
+    reset,
     input,
     actions,
     focus: () => composer.focus(),

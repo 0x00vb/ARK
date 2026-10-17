@@ -262,6 +262,8 @@ class TurnView {
     this.unstoppable = true;
     if (Number.isFinite(at)) this.started = performance.now() - Math.max(0, Date.now() - at);
     this.working(label || "Working");
+    const s = Math.floor((performance.now() - this.started) / 1000);
+    this.workEl.querySelector(".elapsed").textContent = s >= 1 ? `${s}s` : "";
   }
 
   stop() {

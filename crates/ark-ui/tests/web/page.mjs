@@ -381,8 +381,33 @@ const scenarios = {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
       input.value = "Next step";
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      const chatShape = shape(main), viewShape = shape(pane);
+      // The states a run can be in, and a composer that cannot take a message now.
+      view.reset();
+      const many = Array.from({ length: 12 }, (_, i) => ({ key: `t${i}`, input: `Task ${i}`, activity: [], answer: `Answer ${i}\n\n${"Line. ".repeat(60)}` }));
+      view.render([...many,
+        { key: "failed", input: "Fail", activity: [], unfinished: "Provider unavailable" },
+        { key: "cancelled", input: "Stop", activity: [], cancelled: true },
+        { key: "waiting", input: "Wait", activity: [], status: "Paused" }]);
+      const stored = pane.querySelector(".turn").classList.contains("stored");
+      const notices = [...pane.querySelectorAll(".notice")].map((n) => `${n.className}: ${n.textContent}`);
+      view.setComposer({ placeholder: "Writer is paused", disabled: true });
+      view.actions.append(Object.assign(document.createElement("button"), { className: "btn primary", textContent: "Resume" }));
+      const refused = { placeholder: input.placeholder, disabled: input.disabled, send: getComputedStyle(pane.querySelector(".composer .send")).display };
+      // Scrolled up, a turn drawn again keeps its place.
+      const scroller = pane.querySelector(".scroller");
+      const target = pane.querySelectorAll(".turn")[3];
+      scroller.scrollTop = target.offsetTop + 20;
+      scroller.dispatchEvent(new Event("scroll"));
+      const offset = target.offsetTop - scroller.scrollTop;
+      many[2] = { ...many[2], answer: `${many[2].answer}\n\n${"Grown above. ".repeat(80)}` };
+      many[3] = { ...many[3], answer: `${many[3].answer}\n\nMore.` };
+      view.render([...many]);
+      const again = pane.querySelectorAll(".turn")[3];
+      const anchored = again !== target && Math.abs(again.offsetTop - scroller.scrollTop - offset) <= 1;
       return {
-        same: JSON.stringify(shape(main)) === JSON.stringify(shape(pane)), chat: shape(main), view: shape(pane), drift, kept,
+        stored, notices, refused, anchored,
+        same: JSON.stringify(chatShape) === JSON.stringify(viewShape), chat: chatShape, view: viewShape, drift, kept,
         note: run.querySelector(".user-note")?.textContent, open: run.querySelector(".work")?.dataset.open,
         elapsed: run.querySelector(".working-line .elapsed")?.textContent, inspectable: !!run.querySelector(".act.inspectable"),
         controls: [...pane.querySelectorAll(".composer .model-chip, .composer .mode-chip, .composer .attach")].length,
@@ -399,6 +424,10 @@ const scenarios = {
     assert.equal(result.controls, 0);
     assert.equal(result.mode, true, "Shift+Tab in the view leaves the chat's mode alone");
     assert.deepEqual(result.sent, ["Next step"]);
+    assert.equal(result.stored, true, "after reset, turns do not rise in");
+    assert.deepEqual(result.notices, ["notice tone-error: Provider unavailable", "notice tone-muted: Stopped.", "notice tone-muted: Paused"]);
+    assert.deepEqual(result.refused, { placeholder: "Writer is paused", disabled: true, send: "none" });
+    assert.equal(result.anchored, true, "a redrawn turn in view keeps its place");
     await shot(page, "chat-view");
   },
 

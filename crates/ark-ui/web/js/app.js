@@ -6,6 +6,7 @@ import { h, icon, clear, $, hydrateIcons, tokens, ago } from "./dom.js";
 import { markdown } from "./md.js";
 import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
+import { chatView } from "./chat-view.js";
 import { acceptDrops } from "./drop.js";
 import { Sidebar } from "./sidebar.js";
 import { Destinations } from "./destinations.js";
@@ -69,6 +70,7 @@ const api = {
     ? Promise.reject(new Error("That computer is not answering"))
     : transport.call("resource", { ref, operation: { kind, input } }),
   at: (location) => scopedApi(location),
+  chatView: (el, options) => chatView(el, window.ark || api, options),
   // The system's folder picker in the window: a path, or null when dismissed. Undefined
   // where there is none (a browser), so the caller asks for a typed path instead.
   pickFolder: ({ title } = {}) => transport.pickFolder(title),

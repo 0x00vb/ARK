@@ -24,6 +24,15 @@
 //   ark.action({ id, label, icon, where: "artifact" | "palette" | "project", when(ctx), run(ctx, api) })
 //                      `project`: an item in a project's menu in the projects list; `ctx` is
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
+//   ark.chatView(el, { submit(text), placeholder })
+//                      a conversation the app draws from its own records with the chat's
+//                      own view, so it looks and reads as a chat (ADR 0073). Returns
+//                      `{ render(turns, { empty }), input, actions, focus(), set(text),
+//                      setComposer({ placeholder, disabled }), dispose() }`. `turns` take
+//                      `chat_read`'s transcript shape plus `key`, `note`, `working:
+//                      { label, since }`, `status` and `after` (an app's node under the
+//                      reply). `submit` gets each message the person sends; `actions`
+//                      holds the app's controls beside Send.
 //   ark.onSubmit(fn)  `fn(text)` sees each message before it is sent (typed, queued or a
 //                      suggestion; not commands). Return true, or a promise of true, when the
 //                      app took it; the conversation then sends nothing.

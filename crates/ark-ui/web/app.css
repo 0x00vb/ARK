@@ -640,6 +640,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .user.steered { flex-direction: column; align-items: flex-end; margin: 4px 0; }
 .user.steered .bubble { font-size: 14px; padding: 7px 13px; }
 .user-note { font-size: 11.5px; color: var(--text-3); margin: 4px 6px 0; }
+.user.noted { flex-direction: column; align-items: flex-end; }
 .agent { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
 .prose { font-size: 15px; line-height: 1.66; overflow-wrap: anywhere; text-wrap: pretty; animation: fade 220ms var(--ease) both; }
@@ -879,7 +880,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 /* ---- views in the main column (ark.view) -------------------------------------------------- */
 
 .stage { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.app[data-view] .chat-tabs, .app[data-view] .scroller, .app[data-view] .dock { display: none; }
+.app[data-view] .chat-tabs, .app[data-view] main .scroller, .app[data-view] main .dock { display: none; }
 .app[data-view] .chat-workspace { position: absolute; inset: 0; z-index: 20; display: block; pointer-events: none; }
 .app[data-view] .chat-layout-leaf { width: 100%; height: 100%; overflow: visible; }
 .app[data-view] .chat-surface { position: static; }
@@ -2078,7 +2079,13 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   .place-file { flex-basis: 100%; }
 }
 /* A chat on a computer that does not answer reads only. */
-.composer[data-away="true"] textarea, .composer[data-away="true"] .send { pointer-events: none; opacity: 0.45; }
+.composer[data-away="true"] textarea, .composer[data-away="true"] .send,
+.composer[data-unavailable="true"] textarea, .composer[data-unavailable="true"] .send, .composer[data-unavailable="true"] .dictate { pointer-events: none; opacity: 0.45; }
+.chat-view { flex: 1; min-height: 0; height: 100%; }
+.chat-view-actions { order: 4; margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.chat-view-actions:empty { display: none; }
+.chat-view-actions:empty + .send { margin-left: auto; }
+.chat-view-actions:not(:empty) + .send { display: none; }
 
 .place-mark { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--text-3); vertical-align: 1px; }
 .place-mark svg { width: 12px; height: 12px; }

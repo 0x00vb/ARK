@@ -933,11 +933,11 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 
 /* Settings › Plugins. A catalog is a compact list of possible next actions, not a grid of
    promotional cards. Row controls stay next to the integration they change. */
-.marketplace { max-width: 860px; }
+.marketplace { max-width: 860px; margin: 0 auto; padding: 24px 32px 48px; box-sizing: border-box; }
 .market-body { display: flex; flex-direction: column; gap: 24px; }
 .market-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .market-top .settings-lead { margin: 0; }
-.market-search { width: 230px; height: 36px; box-sizing: border-box; padding: 0 11px 0 31px; border: 0; border-radius: 10px; background: var(--card); color: var(--text); outline: none; font: 13px var(--font); box-shadow: 0 0 0 1px var(--hair); }
+.market-search { width: 230px; height: 36px; box-sizing: border-box; padding: 0 11px; border: 0; border-radius: 10px; background: var(--card); color: var(--text); outline: none; font: 13px var(--font); box-shadow: 0 0 0 1px var(--hair); }
 .market-search:focus { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
 .market-heading { margin: 0 0 10px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .market-catalog, .market-installed { display: flex; flex-direction: column; gap: 18px; }
@@ -951,7 +951,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .market-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .market-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
 .market-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12.5px; }
-.market-add { width: 28px; min-width: 28px; padding: 0; display: grid; place-items: center; }
+.market-add { flex: none; white-space: nowrap; }
 .market-add .ico { width: 15px; height: 15px; }
 .market-detail-head { margin: -4px 0 -12px; }
 .market-detail { display: flex; align-items: center; gap: 14px; padding-top: 10px; }
@@ -967,7 +967,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .market-remove-detail { align-self: flex-start; color: var(--err); }
 .market-notice { margin: 0; color: var(--err); font-size: 12.5px; }
 .market-notice:empty { display: none; }
-@media (max-width: 680px) { .market-top { flex-direction: column; gap: 12px; } .market-search { width: 100%; } .market-grid { grid-template-columns: 1fr; gap: 2px; } .market-facts { grid-template-columns: 1fr; gap: 12px; } .market-detail-actions { flex-direction: column; } }
+@media (max-width: 680px) { .marketplace { padding: 16px; } .market-top { flex-direction: column; gap: 12px; } .market-search { width: 100%; } .market-grid { grid-template-columns: 1fr; gap: 2px; } .market-facts { grid-template-columns: 1fr; gap: 12px; } .market-detail-actions { flex-direction: column; } }
 .skill-scope { margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 500; color: var(--text-2); background: var(--hover); }
 .skill-desc { font-size: 12.5px; line-height: 1.45; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .skill-add { display: flex; gap: 8px; }

@@ -1848,6 +1848,17 @@ async function marketplace(page) {
   assert.equal(await page.locator('.destination[data-destination="home"]').getAttribute("aria-current"), null);
   await page.locator('.market-row[data-id="capability:mail"]').waitFor();
   assert.deepEqual(await page.locator(".market-row .market-copy strong").allInnerTexts(), ["Mail", "Calendar"]);
+  const size = page.viewportSize();
+  for (const [name, width] of [["wide", 1280], ["narrow", 480]]) {
+    await page.setViewportSize({ width, height: 800 });
+    await shot(page, `plugins-${name}`);
+    const box = await page.locator(".market-search").boundingBox();
+    const body = await page.locator(".marketplace").boundingBox();
+    const sidebar = await page.locator(".sidebar, #sidebar").first().boundingBox().catch(() => null);
+    assert.ok(box.x + box.width <= width - 8, `${name}: the search box ends inside the window`);
+    assert.ok(body.x >= (sidebar ? sidebar.x + sidebar.width : 0) + 16 || width < 700, `${name}: the content keeps a gutter from the sidebar`);
+  }
+  await page.setViewportSize(size);
   assert.equal(await page.locator('.market-row[data-id="capability:mail"] .market-add').innerText(), "Connect");
   const search = page.locator(".market-search");
   await search.pressSequentially("Calendar");

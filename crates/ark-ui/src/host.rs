@@ -114,8 +114,9 @@ fn write_dictation_chunk(
 /// Pass the orchestrator's events to every window as `{kind: "orch", event, line, tone,
 /// activity}`: the line a task's timeline shows for it (none for events a timeline leaves
 /// out), and for an agent's runtime event the activity the conversation would show for it
-/// (none for bookkeeping such as steps and context reports). Streamed text stays out: a
-/// window reads results from the graph.
+/// (none for bookkeeping such as steps and context reports). An agent's streamed text goes as
+/// `{kind: "orch_text", project, task, agent, text}`, live only: it is not numbered or kept,
+/// and a window that misses it reads the result from the graph.
 async fn forward_orchestration(
     feed: Arc<Feed>,
     labels: Labels,
@@ -126,13 +127,16 @@ async fn forward_orchestration(
     loop {
         match rx.recv().await {
             Ok(ev) => {
-                if matches!(
-                    ev.kind,
-                    EventKind::Agent {
-                        event: HarnessEvent::TextDelta { .. },
-                        ..
-                    }
-                ) {
+                if let EventKind::Agent {
+                    task,
+                    agent,
+                    event: HarnessEvent::TextDelta { text },
+                } = &ev.kind
+                {
+                    feed.send_live(json!({
+                        "kind": "orch_text", "project": ev.project, "task": task,
+                        "agent": agent, "text": text,
+                    }));
                     continue;
                 }
                 // A result posted into a chat: shown there live, like its turns.
@@ -366,6 +370,8 @@ impl WindowHandlerCtx {
 /// Events kept for a window that reconnects in the middle of a turn. Beyond this the replay
 /// is cut short (the page then shows the turn from where it rejoined).
 const LIVE_EVENTS: usize = 20_000;
+/// The most events `task` returns of one task's work (its `feed`).
+const TASK_FEED: usize = 2_000;
 
 /// The event stream every window reads. Each event gets the next sequence number, so a window
 /// that reconnects can tell what it has already seen; the running turn's events are kept so a
@@ -416,6 +422,12 @@ impl Feed {
                 st.live.remove(&session);
             }
         }
+        let _ = self.tx.send(v);
+    }
+
+    /// Send an event that is live only (streamed text): not numbered, not kept for a window
+    /// that reconnects or joins late, so it cannot push kept events out of `recent`.
+    pub(crate) fn send_live(&self, v: Value) {
         let _ = self.tx.send(v);
     }
 
@@ -2314,9 +2326,9 @@ impl Host {
                 let task = o
                     .task(&id)
                     .ok_or_else(|| anyhow::anyhow!("no task `{id}`"))?;
-                let timeline: Vec<Value> = o
-                    .task_trace(&id)?
-                    .into_iter()
+                let trace = o.task_trace(&id)?;
+                let timeline: Vec<Value> = trace
+                    .iter()
                     .filter_map(|event| {
                         let (line, tone) = event_line(&event.kind)?;
                         Some(json!({
@@ -2326,7 +2338,64 @@ impl Host {
                         }))
                     })
                     .collect();
-                Ok(json!({ "task": task, "timeline": timeline }))
+                // The task's events as windows get them live (`orch`), for an app that draws a
+                // task the live stream has passed. Bookkeeping stays out; the last ones are kept.
+                let names = HashMap::new();
+                let mut feed: Vec<Value> = trace
+                    .into_iter()
+                    .map(|event| orch_event(&self.labels, &names, event))
+                    .filter(|m| !m["line"].is_null() || !m["activity"].is_null())
+                    .collect();
+                feed.drain(..feed.len().saturating_sub(TASK_FEED));
+                Ok(json!({ "task": task, "timeline": timeline, "feed": feed }))
+            }
+            O::TaskCall => {
+                let o = self.resource_orchestrator(&r).await?;
+                let id = s("task");
+                let task = o
+                    .task(&id)
+                    .ok_or_else(|| anyhow::anyhow!("no task `{id}`"))?;
+                let wanted = s("call");
+                // The task's runtime events read as one turn, so a call reads as a chat's does.
+                let mut record = ark_interact::TurnRecord {
+                    input: task.objective.clone(),
+                    live: !matches!(
+                        task.state,
+                        ark_interact::ark_orchestrate::TaskState::Done
+                            | ark_interact::ark_orchestrate::TaskState::Failed
+                            | ark_interact::ark_orchestrate::TaskState::Cancelled
+                    ),
+                    ..Default::default()
+                };
+                let trace = o.task_trace(&id)?;
+                let start = trace.first().map(|e| e.at_ms).unwrap_or(0);
+                for e in &trace {
+                    if let ark_interact::ark_orchestrate::EventKind::Agent { event, .. } = &e.kind {
+                        record.push(e.at_ms.saturating_sub(start), event);
+                    }
+                }
+                let trace = interpret(&record);
+                let call = trace
+                    .calls
+                    .iter()
+                    .find(|c| c.id == wanted)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("no call `{wanted}` in task `{id}`"))?;
+                // The agent's evidence is kept in its own project (its scope).
+                let scope = o
+                    .agent(&task.owner)
+                    .map(|a| ProjectId(a.scope))
+                    .unwrap_or_else(|| project.id.clone());
+                let inv = match &call.invocation {
+                    Some(inv) => self.engine.store.get_invocation(&scope, inv)?,
+                    None => None,
+                };
+                let entries: Vec<_> = trace
+                    .entries
+                    .into_iter()
+                    .filter(|e| e.call == Some(call.n))
+                    .collect();
+                Ok(json!({ "call": call, "invocation": inv, "entries": entries }))
             }
             O::OrchEvents => {
                 let o = self.resource_orchestrator(&r).await?;

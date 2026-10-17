@@ -24,15 +24,22 @@
 //   ark.action({ id, label, icon, where: "artifact" | "palette" | "project", when(ctx), run(ctx, api) })
 //                      `project`: an item in a project's menu in the projects list; `ctx` is
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
-//   ark.chatView(el, { submit(text), placeholder })
+//   ark.chatView(el, { submit(text), stop(), call(key, id), placeholder })
 //                      a conversation the app draws from its own records with the chat's
-//                      own view, so it looks and reads as a chat (ADR 0076). Returns
-//                      `{ render(turns, { empty }), reset(), input, actions, focus(), set(text),
-//                      setComposer({ placeholder, disabled }), dispose() }`. `turns` take
-//                      `chat_read`'s transcript shape plus `key`, `note`, `working:
-//                      { label, since }`, `status` and `after` (an app's node under the
-//                      reply). `submit` gets each message the person sends; `actions`
-//                      holds the app's controls beside Send.
+//                      own view, so it looks and reads and behaves as a chat (ADR 0076).
+//                      Returns `{ render(turns, { empty }), reset(), input, actions, focus(),
+//                      set(text), setComposer({ placeholder, disabled, running }), dispose() }`.
+//                      `turns` take `chat_read`'s transcript shape plus `key`, `note`,
+//                      `working: { label, since }`, `status`, `after` (an app's node under
+//                      the reply), `streaming` (text being written now) and `approvals`
+//                      (questions from `ark.approvals()` the turn waits on, answered in
+//                      place). `submit` gets each message the person sends; `actions` holds
+//                      the app's controls beside Send. `call(key, id)` returns a tool call's
+//                      detail (`task_call`'s shape) so its row opens; with `stop` and
+//                      `setComposer({ running: true })` the send button is Stop while
+//                      nothing is typed.
+//   ark.approvals()    the questions waiting for an answer (`ark:approval` messages), also
+//                      those asked before the app's code ran
 //   ark.onSubmit(fn)  `fn(text)` sees each message before it is sent (typed, queued or a
 //                      suggestion; not commands). Return true, or a promise of true, when the
 //                      app took it; the conversation then sends nothing.

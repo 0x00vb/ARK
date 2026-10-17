@@ -99,6 +99,7 @@ pub enum ResourceOperationKind {
     Graph,
     TaskTrace,
     Task,
+    TaskCall,
     OrchEvents,
     Agents,
     SpawnAgent,
@@ -199,6 +200,7 @@ impl ResourceOperationKind {
             | O::Graph
             | O::TaskTrace
             | O::Task
+            | O::TaskCall
             | O::OrchEvents
             | O::Agents
             | O::SpawnAgent

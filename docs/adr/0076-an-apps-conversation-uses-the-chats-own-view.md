@@ -23,7 +23,7 @@ The cause is two rendering paths. A fix in one never reaches the other.
 
 ## Decision
 
-The page gives apps the chat's own view: `ark.chatView(el, { submit, placeholder })`. It builds
+The page gives apps the chat's own view: `ark.chatView(el, { submit, stop, call, placeholder })`. It builds
 the same `Thread`, `TurnView` and `Composer` the main and split chats use, in the same markup,
 so app.css styles it as a chat. The app projects its records into turns and calls `render`.
 
@@ -35,9 +35,11 @@ so app.css styles it as a chat. The app projects its records into turns and call
 | `working: { label, since }` | Work still going: the work block stays open and the chat's working line counts seconds from `since`. No "esc to stop": Esc does not stop an app's run |
 | `status` | A muted line for work that waits (queued, paused, waiting for an answer). `unfinished` stays the failure line; a turn has one or the other |
 | `after` | The app's node under the reply (an agent's produced files, a retry link) |
-| Composer | No model, mode or file controls, and no slash commands. Shift+Tab is not captured. Never "running": no queue, no Stop. Dictation stays. `setComposer({ placeholder, disabled })` says why it is unavailable in the placeholder |
+| `streaming` | The text being written now, drawn as the chat's streaming prose. It grows in place: a longer `streaming` on an unchanged turn does not draw the turn again. Text that is not the drawn text continued (taken back) draws it again |
+| `approvals` | Questions the run waits on (`ark:approval` messages, `ark.approvals()` for those asked before the app's code ran), drawn in place with the chat's card and answered with `approve`. The tray keeps its own card; an answer anywhere closes both (`approval_closed` removes every card with that id). A new card takes the focus only when the focus is already in the view |
+| Composer | No model, mode or file controls, and no slash commands. Shift+Tab is not captured. No queue: typed text always goes to `submit`. Dictation stays. `setComposer({ placeholder, disabled })` says why it is unavailable in the placeholder. With `stop`, `setComposer({ running: true })` makes the send button the chat's Stop while nothing is typed |
 | `actions` | A slot beside Send for the app's own control (Resume, Restore). While it holds one, Send is hidden |
-| Tool rows | Not inspectable: an app's run has no per-call detail call yet |
+| Tool rows | With `call(key, id)` (the turn's key, the call id), a tool row opens on its call as in the chat; the app returns `task_call`'s shape. A row the person opened stays open when its turn is drawn again. A detail that failed to load is asked for again on the next click |
 | Scroll | Sticks to the end like the chat; scrolled up, the turn in view keeps its place across redraws |
 
 A missing control is `null` in `Composer`'s elements, never a fallback to the main chat's
@@ -57,10 +59,15 @@ in the side pane.
 - An app's conversation changes with the chat: one place for layout, type, markdown, work
   blocks, composer, dark mode and narrow windows.
 - Agent-specific behavior stays in the app: Desktop keeps the agent's head (name, state, Runs
-  with), maps Enter while the agent works to "add to its current work", and has no Stop.
-- Not covered yet: approvals of an app's run show where they did before (the asks area), not
-  in the view; an agent's text does not stream; older tasks show no work block once the app's
-  event window has passed them; tool rows do not open.
+  with), maps Enter while the agent works to "add to its current work", and decides which task
+  Stop stops.
+- The host gives an app what it needs to draw an orchestrated task as a chat: an agent's
+  streamed text as `{kind: "orch_text", project, task, agent, text}` (live only: not numbered,
+  not kept for replay, not sent to native clients), `task {task}` with the task's `feed` (its
+  stored events in the `orch` shape, the last 2,000) and `task_call {task, call}` (one call's
+  detail, the chat `call` shape, looked up only in that task's events).
+- Narration is not stored by the runtime: a task drawn from `task` after a reload shows its
+  steps and answer, not the text it wrote between them.
 
 ## Check
 
@@ -69,7 +76,12 @@ drawn through `ark.chatView` has the same element sequence and the same computed
 bubble, prose, code, work head, tool row, footer, composer, input and send; an unchanged turn is
 not drawn again; a working turn keeps its block open with no Esc hint; the composer has no chat
 controls and Shift+Tab leaves the chat's mode alone; failed, stopped and waiting turns, a refused
-composer and a redrawn turn in view keeping its place. Desktop's `ui/tests/agent-chat-parity.test.mjs`
+composer and a redrawn turn in view keeping its place. `an_apps_conversation_behaves_as_the_chat`
+runs a real orchestrated agent: its text grows in the same element without drawing the work
+block again, its question shows in its turn and in the tray and an answer in the view closes
+both, a turn drawn from `task` keeps its work block and a tool row opens on `task_call`, and the
+send button is Stop while nothing is typed and stops the task. `tests/orchestration.rs`
+`an_agents_task_reads_as_a_chat` checks `orch_text`, `task`'s feed and `task_call`. Desktop's `ui/tests/agent-chat-parity.test.mjs`
 fails if the agent pane draws its own messages or Desktop CSS restyles the chat's elements. It
 reads source and a fixed class list, so it is a first guard; the computed-style comparison is
 ARK's page test.

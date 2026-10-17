@@ -28,8 +28,8 @@ impl Client {
     async fn call(&self, method: &str, input: Value) -> anyhow::Result<Value> {
         let operation = match method {
             "tools" | "spawn_agent" | "agents" | "submit_task" | "orch_events" | "task"
-            | "message_agent" | "graph" | "suspend_agent" | "resume_agent" | "cancel_task"
-            | "workspace" | "unschedule" => Some(("project", method, "")),
+            | "task_call" | "message_agent" | "graph" | "suspend_agent" | "resume_agent"
+            | "cancel_task" | "workspace" | "unschedule" => Some(("project", method, "")),
             "artifact" => Some(("artifact", method, input["id"].as_str().unwrap_or(""))),
             _ => None,
         };
@@ -288,6 +288,94 @@ async fn a_window_creates_agents_and_tasks_and_answers_their_questions() {
         .unwrap();
     assert!(host
         .call("cancel_task", json!({ "task": "t-nope" }))
+        .await
+        .is_err());
+}
+
+/// What an app needs to draw an agent's task as a chat (ADR 0076): its text as it is written
+/// (live only, never numbered or kept), its work from `task` once the live stream has passed,
+/// and one call's detail from `task_call`, only within that task.
+#[tokio::test]
+async fn an_agents_task_reads_as_a_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let saves = Arc::new(AtomicUsize::new(0));
+    let model = Arc::new(MockProvider::new("m", vec![]).with_fallback(|req| {
+        if req.messages.iter().any(|m| m.tool_call_id.is_some()) {
+            Completion {
+                content: "Saved the notes.".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            }
+        } else {
+            Completion {
+                content: "Saving the notes now.".into(),
+                tool_calls: vec![ToolCall {
+                    id: "c".into(),
+                    name: "notes.save".into(),
+                    arguments: json!({ "title": "Notes" }),
+                }],
+                usage: Usage::default(),
+            }
+        }
+    }));
+    let host = open_with(dir.path(), saves, model).await;
+    let mut rx = host.subscribe();
+    host.call(
+        "spawn_agent",
+        json!({ "spec": { "name": "scribe", "tools": ["notes.*"] } }),
+    )
+    .await
+    .unwrap();
+    let r = host
+        .call(
+            "submit_task",
+            json!({ "agent": "scribe", "task": { "objective": "save the notes" } }),
+        )
+        .await
+        .unwrap();
+    let task = r["task"].as_str().unwrap().to_string();
+
+    let text = wait_for(&mut rx, "streamed text", |v| v["kind"] == "orch_text").await;
+    assert_eq!(text["task"], task.as_str());
+    assert_eq!(text["agent"], "scribe");
+    assert!(text.get("seq").is_none(), "live only: {text}");
+    let ask = wait_for(&mut rx, "agent approval", |v| v["kind"] == "approval").await;
+    host.call(
+        "approve",
+        json!({ "id": ask["id"], "decision": "allow_once" }),
+    )
+    .await
+    .unwrap();
+    wait_for(&mut rx, "task finished", |v| orch_type(v, "task_finished")).await;
+
+    let detail = host.call("task", json!({ "task": task })).await.unwrap();
+    let feed = detail["feed"].as_array().unwrap();
+    let tool = feed
+        .iter()
+        .find(|m| m["activity"]["kind"] == "tool")
+        .unwrap_or_else(|| panic!("no tool row in {feed:?}"));
+    assert_eq!(tool["activity"]["call"], "c");
+    assert!(
+        feed.iter()
+            .all(|m| m["event"]["event"]["type"] != "text_delta"),
+        "streamed text is not kept"
+    );
+
+    let call = host
+        .call("task_call", json!({ "task": task, "call": "c" }))
+        .await
+        .unwrap();
+    assert_eq!(call["call"]["action"], "notes.save");
+    assert_eq!(call["call"]["status"], "ok");
+    assert_eq!(call["call"]["input"]["title"], "Notes");
+    assert_eq!(call["call"]["approval"]["decision"], "allow_once");
+    assert!(call["invocation"]["id"].is_string(), "{call}");
+    assert!(host
+        .call("task_call", json!({ "task": task, "call": "other" }))
+        .await
+        .is_err());
+    assert!(host
+        .call("task_call", json!({ "task": "t-nope", "call": "c" }))
         .await
         .is_err());
 }

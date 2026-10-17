@@ -5,6 +5,9 @@
 // own may need: `key` (stable per turn, so only a changed turn redraws), `note` (a line under
 // the person's message), `working: { label, since }` (still going, since a time in ms),
 // `status` (a muted line for a run that waits) and `after` (an app's node under the reply).
+// Two fields change in place, without drawing the turn again: `streaming` (the text being
+// written now) and `approvals` (questions the run waits on, as `ark:approval` brought them).
+// `call(key, id)` loads a tool call's detail so its row opens; `stop()` is the chat's Stop.
 
 import { h } from "./dom.js";
 import { Thread } from "./conversation.js";
@@ -12,13 +15,14 @@ import { Composer } from "./composer.js";
 
 const NEAR_END = 80;
 
-export function chatView(el, base, { submit, placeholder = "" } = {}) {
+export function chatView(el, base, { submit, stop, call, placeholder = "" } = {}) {
   if (typeof submit !== "function") throw new Error("ark.chatView needs `submit`");
   const api = Object.create(base);
   api.submit = (text) => submit(text);
   api.send = api.submit;
   api.steer = api.submit;
   api.cancel = () => {};
+  let running = false;
 
   const scroller = h("section.scroller");
   const root = h("div.thread");
@@ -32,15 +36,69 @@ export function chatView(el, base, { submit, placeholder = "" } = {}) {
   const surface = h("section.chat-surface.chat-view", scroller, h("div.dock", queue, slash, form));
   el.append(surface);
 
-  const thread = new Thread(root, scroller, api, { inspect: false });
+  const inspect = typeof call === "function" ? (turn, row) => call(turn.key, row.dataset.call) : false;
+  const thread = new Thread(root, scroller, api, { inspect });
   const composer = new Composer(api, { input, form, send, queue, slash, model: null, mode: null, attach: null });
   composer.placeholder = placeholder;
   let views = new Map();
   let drawn = false;
+  /// Questions this view has drawn, and those answered here (they stay answered when drawn again).
+  const seen = new Set();
+  const decided = new Set();
+
+  // The chat's Stop: the send button while the run goes on and nothing is typed. Typed text
+  // still goes to `submit`; there is no queue.
+  const label = () => send.setAttribute("aria-label", running && !input.value.trim() ? "Stop" : "Send");
+  new MutationObserver(label).observe(form, { attributes: true, attributeFilter: ["data-empty"] });
+  send.addEventListener("click", (e) => {
+    if (!running || input.value.trim()) return;
+    e.preventDefault();
+    stop();
+  });
 
   function signature(turn) {
-    const { after, ...rest } = turn;
+    const { after, streaming, approvals, ...rest } = turn;
     return JSON.stringify(rest) + (after ? after.outerHTML : "");
+  }
+
+  function decide(id, decision) {
+    decided.add(String(id));
+    Promise.resolve(base.call("approve", { id, decision })).catch((e) => base.toast(e.message));
+  }
+
+  /// The text being written grows where it is; the questions the run waits on come and go.
+  function sync(entry, turn) {
+    const text = turn.streaming || "";
+    if (text.length > entry.streamed.length) entry.view.stream(text.slice(entry.streamed.length));
+    entry.streamed = text;
+    const want = new Map((turn.approvals || []).map((m) => [String(m.id), m]));
+    for (const card of entry.view.agent.querySelectorAll(":scope > .approval")) {
+      if (!want.has(card.dataset.id)) card.remove();
+    }
+    for (const [id, msg] of want) {
+      if (entry.view.agent.querySelector(`:scope > .approval[data-id="${CSS.escape(id)}"]`)) continue;
+      // A new question takes the focus only from inside this view, as the chat's own does.
+      const focus = !seen.has(id) && surface.contains(document.activeElement);
+      seen.add(id);
+      const card = entry.view.approval(msg, decide, { focus });
+      if (decided.has(id)) {
+        card.classList.add("decided");
+        for (const b of card.querySelectorAll("button")) b.disabled = true;
+      }
+    }
+  }
+
+  /// A turn drawn again keeps the tool rows the person opened.
+  function carry(from, to) {
+    for (const row of from.el.querySelectorAll('.act[data-expanded="true"]')) {
+      const more = row.querySelector(":scope > .act-more");
+      const same = [...to.el.querySelectorAll(".act[data-call]")].find((r) => r.dataset.call && r.dataset.call === row.dataset.call);
+      if (!more || !same || same.querySelector(".act-more")) continue;
+      same.append(more);
+      same.dataset.expanded = "true";
+      const block = same.closest(".work");
+      if (block) block.dataset.open = "true";
+    }
   }
 
   function drop(entry) {
@@ -67,16 +125,20 @@ export function chatView(el, base, { submit, placeholder = "" } = {}) {
       const key = turn.key ?? String(i);
       const sig = signature(turn);
       let entry = views.get(key);
-      if (!entry || entry.sig !== sig) {
+      // Text that is not the drawn text continued (taken back, say) draws the turn again.
+      if (!entry || entry.sig !== sig || !(turn.streaming || "").startsWith(entry.streamed)) {
         const view = thread.storedTurnView(turn);
+        view.key = key;
         // A turn that arrives after the first draw comes in the way a chat's new turn does.
         if (drawn && !entry) view.el.classList.remove("stored");
         if (entry) {
+          carry(entry.view, view);
           entry.view.stop();
           entry.view.el.replaceWith(view.el);
         }
-        entry = { sig, view };
+        entry = { sig, view, streamed: "" };
       }
+      sync(entry, turn);
       const node = entry.view.el;
       const at = before ? before.nextSibling : root.firstChild;
       if (at !== node) root.insertBefore(node, at);
@@ -107,8 +169,14 @@ export function chatView(el, base, { submit, placeholder = "" } = {}) {
     actions,
     focus: () => composer.focus(),
     set: (text) => composer.set(text),
-    /// What the composer says while empty, and whether it takes a message now.
-    setComposer({ placeholder: words, disabled } = {}) {
+    /// What the composer says while empty, whether it takes a message now, and whether the
+    /// run goes on (with `stop`, the send button is Stop while nothing is typed).
+    setComposer({ placeholder: words, disabled, running: on } = {}) {
+      if (on != null) {
+        running = !!on && typeof stop === "function";
+        form.dataset.running = String(running);
+        label();
+      }
       if (words != null) {
         composer.placeholder = words;
         input.placeholder = words;

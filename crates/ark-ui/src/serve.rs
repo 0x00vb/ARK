@@ -1383,7 +1383,10 @@ fn client_event(
     owner: &str,
     value: &Value,
 ) -> anyhow::Result<Option<ark_protocol::EventEnvelope>> {
-    let sequence = value["seq"].as_u64().unwrap_or(0);
+    // A live-only event (an agent's streamed text) is not numbered: not a change to read.
+    let Some(sequence) = value["seq"].as_u64() else {
+        return Ok(None);
+    };
     let mut event_type = value["kind"].as_str().unwrap_or("changed").to_string();
     let mut affects = vec!["home".to_string()];
     let terminal = if event_type == "term" {

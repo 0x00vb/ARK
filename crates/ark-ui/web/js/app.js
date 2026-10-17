@@ -71,6 +71,9 @@ const api = {
     : transport.call("resource", { ref, operation: { kind, input } }),
   at: (location) => scopedApi(location),
   chatView: (el, options) => chatView(el, window.ark || api, options),
+  // The questions waiting for an answer, as `ark:approval` brought them (also those asked
+  // before the app's code ran).
+  approvals: () => [...state.approvals.values()],
   // The system's folder picker in the window: a path, or null when dismissed. Undefined
   // where there is none (a browser), so the caller asks for a typed path instead.
   pickFolder: ({ title } = {}) => transport.pickFolder(title),
@@ -236,7 +239,7 @@ const RESOURCE_METHODS = {
   file_snapshot_close: ["file", "file_snapshot_close"], file_probe: ["file", "file_probe"],
   upload_parts: ["file", "upload_parts"], upload_add: ["file", "upload_add"], upload_cancel: ["file", "upload_cancel"], file_open: ["file", "file_open"],
   workspace: ["project", "workspace"], state: ["project", "state"],
-  graph: ["project", "graph"], task_trace: ["project", "task_trace"], task: ["project", "task"], orch_events: ["project", "orch_events"],
+  graph: ["project", "graph"], task_trace: ["project", "task_trace"], task: ["project", "task"], task_call: ["project", "task_call"], orch_events: ["project", "orch_events"],
   agents: ["project", "agents"], spawn_agent: ["project", "spawn_agent"], submit_task: ["project", "submit_task"],
   cancel_task: ["project", "cancel_task"], retry_task: ["project", "retry_task"],
   schedules: ["project", "schedules"], schedule: ["project", "schedule"], unschedule: ["project", "unschedule"],
@@ -1489,7 +1492,8 @@ function onEvent(msg) {
 }
 
 function ask(msg) {
-  if (document.querySelector(`.approval[data-id="${msg.id}"]`)) return;
+  // An app's conversation may show the same question in place; the tray keeps its own card.
+  if (document.querySelector(`#asks .approval[data-id="${msg.id}"]`)) return;
   const card = approvalCard(msg, decide);
   // Another chat's question says which chat, and opens it.
   if (msg.session && !msg.request?.agent) {

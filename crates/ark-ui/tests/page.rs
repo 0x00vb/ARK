@@ -1184,6 +1184,38 @@ async fn an_app_view_takes_the_main_column_and_agents_ask_from_the_tray() {
     .await;
 }
 
+/// An app draws an agent's tasks with the chat's view (ADR 0076) and it behaves as the chat:
+/// text grows as it is written, the agent's question shows in its turn and in the tray, a
+/// tool row opens on its call, work drawn from `task` keeps its block, and Stop stops.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_apps_conversation_behaves_as_the_chat() {
+    let save = Completion {
+        content: "Saving the notes now.".into(),
+        tool_calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "notes.save".into(),
+            arguments: json!({ "title": "Notes" }),
+        }],
+        usage: Usage::default(),
+    };
+    let long = |lead: &str| {
+        say(
+            &format!(
+                "{lead} {}",
+                "and then some more words follow here. ".repeat(12)
+            ),
+            false,
+        )
+    };
+    drive_app(
+        "agent-chat",
+        vec![save, long("Saved."), long("A long answer.")],
+        Duration::from_millis(40),
+        true,
+    )
+    .await;
+}
+
 /// What waits for the person (ADR 0043): a chat named "hi" with a result posted into it while
 /// the person was in another chat, and three failures with no chat.
 /// A chat whose turn a crashed process left begun (ADR 0048): it read the notes, then the

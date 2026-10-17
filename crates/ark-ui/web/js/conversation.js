@@ -15,7 +15,8 @@ import { kindOf, kindNoun, KIND_ICON } from "./file.js";
 const TOOLISH = new Set(["tool", "retrieval", "reuse", "capability", "present", "plan", "state", "note", "steered", "warning"]);
 
 export class Thread {
-  /// `inspect: false` for turns with no call to open: their tool rows do not open.
+  /// `inspect: false` for turns with no call to open: their tool rows do not open. A function
+  /// `(turn, row)` loads a row's call instead of the chat's `call` (an app's own run).
   constructor(root, scroller, api, { inspect = true } = {}) {
     this.root = root;
     this.scroller = scroller;
@@ -175,11 +176,13 @@ export class Thread {
     this.scroll(true);
   }
 
+  /// Answered anywhere: every card of the question goes (it may show in a conversation and in
+  /// the tray at once).
   approvalClosed(id) {
-    const card = document.querySelector(`.approval[data-id="${id}"]`);
-    if (!card) return;
-    card.classList.add("leaving");
-    setTimeout(() => card.remove(), 180);
+    for (const card of document.querySelectorAll(`.approval[data-id="${id}"]`)) {
+      card.classList.add("leaving");
+      setTimeout(() => card.remove(), 180);
+    }
   }
 
   lastTurn() {
@@ -340,6 +343,7 @@ class TurnView {
       row.dataset.n = n;
       if (!blk.el.dataset.firstTool) blk.el.dataset.firstTool = a.label;
       row.dataset.action = a.action || "";
+      row.dataset.call = a.call || "";
       blk.el.dataset.tools = Number(blk.el.dataset.tools || 0) + 1;
       this.rows.set(a.call, row);
       if (this.thread.inspect) {
@@ -393,6 +397,11 @@ class TurnView {
 
   async toggleCall(row) {
     let more = row.querySelector(".act-more");
+    // A detail that did not load is asked for again.
+    if (more?.dataset.failed != null) {
+      more.remove();
+      more = null;
+    }
     if (more) {
       row.dataset.expanded = row.dataset.expanded === "true" ? "false" : "true";
       return;
@@ -402,9 +411,13 @@ class TurnView {
     requestAnimationFrame(() => (row.dataset.expanded = "true"));
     const box = more.querySelector(".call");
     try {
-      const r = await this.api.call("call", { index: this.index, n: Number(row.dataset.n) });
+      const inspect = this.thread.inspect;
+      const r = typeof inspect === "function"
+        ? await inspect(this, row)
+        : await this.api.call("call", { index: this.index, n: Number(row.dataset.n) });
       clear(box).append(callDetail(r, this.api, this.index));
     } catch (e) {
+      more.dataset.failed = "";
       clear(box).append(h("div.call-err", e.message));
     }
   }
@@ -493,13 +506,14 @@ class TurnView {
     this.agent.append(h("div.turn-foot", parts.join(" · ")));
   }
 
-  approval(msg, onDecide) {
+  approval(msg, onDecide, { focus = true } = {}) {
     const card = approvalCard(msg, onDecide, this.api);
     this.block = null;
     this.textEl = null;
     this.agent.append(card);
     this.keepWorkingLast();
-    requestAnimationFrame(() => card.querySelector(".btn.primary")?.focus({ preventScroll: true }));
+    if (focus) requestAnimationFrame(() => card.querySelector(".btn.primary")?.focus({ preventScroll: true }));
+    return card;
   }
 
   done(msg) {

@@ -14,6 +14,11 @@ What changed for people building on ARK, per release. Not a commit log.
 - `ark.chatView(el, { submit, placeholder })` draws an app's conversation with the chat's own
   turns, work blocks, prose and composer, so it reads exactly as a chat. ARK Desktop's agent pane
   is the first user ([ADR 0076](docs/adr/0076-an-apps-conversation-uses-the-chats-own-view.md)).
+- `ark.chatView` behaves as the chat too: turns take `streaming` (text being written) and
+  `approvals` (questions answered in place), `call(key, id)` opens tool rows, and `stop` with
+  `setComposer({ running })` gives the chat's Stop. `ark.approvals()` lists waiting questions.
+  The host sends an agent's streamed text as `orch_text` (live only), `task` returns the task's
+  `feed`, and `task_call {task, call}` returns one call's detail (ADR 0076).
 - On macOS the window's File menu has New Chat (⌘N) and Commands… (⌘K), so both work while the
   Browser panel's view has the keyboard ([ADR 0044](docs/adr/0044-the-browser-panel-is-a-view-of-its-own-in-the-window.md)).
 

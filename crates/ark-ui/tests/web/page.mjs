@@ -757,6 +757,130 @@ async function agents(page) {
 }
 scenarios.agents = agents;
 
+// An app draws an agent's tasks with the chat's view, the way an app projects its runs (ADR
+// 0076), and the view behaves as the chat: streamed text grows in place, the agent's question
+// shows in its turn and in the tray, a tool row opens on `task_call`, a turn drawn from
+// `task`'s feed keeps its work block, and Stop cancels the running task.
+async function agentChat(page) {
+  await page.evaluate(async () => {
+    const ark = window.ark;
+    const probe = (window.probe = { stops: 0 });
+    const streams = new Map();
+    const approvals = new Map(ark.approvals().map((m) => [m.id, m]));
+    let turns = [];
+    let view;
+    const paint = () => {
+      view.render(turns.map((t) => ({ ...t, streaming: t.live ? streams.get(t.key) || "" : "", approvals: [...approvals.values()].filter((m) => m.request?.task === t.key) })));
+      view.setComposer({ running: turns.some((t) => t.live) });
+    };
+    let busy = null;
+    const draw = async () => {
+      if (busy) return busy.then(draw);
+      busy = (async () => {
+        const graph = await ark.call("graph");
+        const mine = graph.tasks.filter((t) => t.owner === "scribe").sort((a, b) => a.created_ms - b.created_ms);
+        const next = [];
+        for (const t of mine) {
+          const { feed } = await ark.call("task", { task: t.task });
+          const turn = { key: t.task, input: t.objective, activity: feed.filter((m) => m.activity).map((m) => m.activity) };
+          turn.live = t.state === "running" || t.state === "waiting";
+          if (turn.live) turn.working = { label: "Working", since: t.started_ms || t.created_ms };
+          else if (t.state === "done") turn.answer = t.result;
+          else if (t.state === "cancelled") turn.cancelled = true;
+          next.push(turn);
+        }
+        turns = next;
+        paint();
+      })();
+      await busy;
+      busy = null;
+    };
+    probe.draw = draw;
+    ark.on("ark:orch_text", (m) => {
+      streams.set(m.task, (streams.get(m.task) || "") + m.text);
+      paint();
+    });
+    ark.on("ark:orch", (m) => {
+      if (m.event?.type === "agent" && m.event.event?.type === "tool_call") streams.delete(m.event.task);
+      draw();
+    });
+    ark.on("ark:approval", (m) => { approvals.set(m.id, m); paint(); });
+    ark.on("ark:approval_closed", (m) => { approvals.delete(m.id); paint(); });
+    ark.panel({ id: "agent-chat", title: "Scribe", fill: true, render(el) {
+      view = ark.chatView(el, {
+        submit: (text) => ark.call("submit_task", { agent: "scribe", task: { objective: text } }),
+        stop: () => {
+          probe.stops++;
+          const t = turns.find((x) => x.live);
+          if (t) ark.call("cancel_task", { task: t.key });
+        },
+        call: (key, id) => ark.call("task_call", { task: key, call: id }),
+      });
+      probe.view = view;
+    } });
+    ark.openPanel("agent-chat");
+    await ark.call("spawn_agent", { spec: { name: "scribe", tools: ["notes.*"] } });
+  });
+  const pane = page.locator(".chat-view");
+  await pane.locator("textarea").fill("Save the notes");
+  await pane.locator("textarea").press("Enter");
+
+  // The agent's question shows in its turn, and in the tray.
+  const card = pane.locator(".turn .agent > .approval");
+  await card.waitFor();
+  const id = await card.getAttribute("data-id");
+  assert.match(await card.innerText(), /scribe wants to:/);
+  assert.equal(await page.locator(`#asks .approval[data-id="${id}"]`).count(), 1, "the tray keeps the question");
+  await shot(page, "agent-chat-approval");
+  await card.locator("button", { hasText: "Allow once" }).click();
+  await page.locator(`.approval[data-id="${id}"]`).first().waitFor({ state: "detached" });
+  assert.equal(await page.locator(`.approval[data-id="${id}"]`).count(), 0, "answered in the view, both cards go");
+
+  // The answer streams, and the work block above it is not drawn again per chunk.
+  await page.waitForFunction(() => document.querySelector(".chat-view .turn .prose.streaming")?.textContent.includes("Saved."));
+  const kept = await page.evaluate(async () => {
+    const work = document.querySelector(".chat-view .turn .work");
+    const text = document.querySelector(".chat-view .turn .prose.streaming");
+    const before = text.textContent.length;
+    await new Promise((ok) => setTimeout(ok, 400));
+    const now = document.querySelector(".chat-view .turn .prose.streaming");
+    return { work: work === document.querySelector(".chat-view .turn .work"), text: text === now, grew: (now?.textContent.length || 0) > before };
+  });
+  assert.deepEqual(kept, { work: true, text: true, grew: true });
+  await pane.locator(".turn .prose.answer").waitFor();
+
+  // Drawn afresh from `task`, the finished task keeps its work block; a tool row opens on its call.
+  await page.evaluate(async () => { window.probe.view.reset(); await window.probe.draw(); });
+  const work = pane.locator(".turn .work").first();
+  await work.locator(".work-head").click();
+  const row = work.locator(".act.inspectable").first();
+  await row.locator(".act-line").click();
+  const detail = row.locator(".act-more .call-body");
+  await detail.waitFor();
+  const shown = await detail.innerText();
+  assert.match(shown, /notes\.save/);
+  assert.match(shown, /Arguments/);
+  assert.match(shown, /"title": "Notes"/);
+  await shot(page, "agent-chat-call");
+
+  // While a task runs and nothing is typed, the send button is Stop; typed text is a message.
+  await pane.locator("textarea").fill("Write a long answer");
+  await pane.locator("textarea").press("Enter");
+  await page.waitForFunction(() => document.querySelectorAll(".chat-view .turn").length === 2 && document.querySelector(".chat-view .turn:last-child .prose.streaming"));
+  const send = pane.locator(".composer .send");
+  assert.equal(await send.getAttribute("aria-label"), "Stop");
+  assert.equal(await pane.locator(".composer").getAttribute("data-running"), "true");
+  await pane.locator("textarea").fill("one more thing");
+  assert.equal(await send.getAttribute("aria-label"), "Send");
+  await pane.locator("textarea").fill("");
+  await shot(page, "agent-chat-stop");
+  await send.click();
+  await pane.locator(".turn:last-child .notice", { hasText: /Stopped/ }).waitFor();
+  assert.equal(await page.evaluate(() => window.probe.stops), 1);
+  assert.equal(await pane.locator(".composer").getAttribute("data-running"), "false");
+}
+scenarios["agent-chat"] = agentChat;
+
 // The project's board: the person adds, drags and completes cards and opens one; an agent
 // given a card moves it by itself; what waits for the person is marked; delete has an undo.
 async function board(page) {

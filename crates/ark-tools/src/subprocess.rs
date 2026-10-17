@@ -26,6 +26,8 @@ pub struct Run {
     pub stdout: String,
     pub stderr: String,
     pub code: i32,
+    /// The limit ([`Spec::limits`]) it went past and was stopped for.
+    pub stopped: Option<ark_os::process::Stop>,
 }
 
 /// Whether a tool is on PATH.
@@ -72,6 +74,7 @@ pub async fn run(tool: &str, args: &[String]) -> Result<Run, AdapterError> {
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         code: out.status.code().unwrap_or(-1),
+        stopped: None,
     })
 }
 
@@ -107,6 +110,9 @@ pub struct Spec {
     pub timeout: Option<std::time::Duration>,
     /// Keep only the last this-many bytes of each stream (`None`: all of it).
     pub keep: Option<usize>,
+    /// The most memory and processor time the program and what it starts may use; past
+    /// either it is stopped, and [`Run::stopped`] says which (`run_contained` only).
+    pub limits: ark_os::process::Limits,
 }
 
 impl Spec {
@@ -118,6 +124,7 @@ impl Spec {
             env: None,
             timeout: None,
             keep: None,
+            limits: Default::default(),
         }
     }
 }
@@ -172,6 +179,15 @@ async fn run_managed(
     if let Some(env) = &spec.env {
         c.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
     }
+    let limits = if contained {
+        spec.limits
+    } else {
+        Default::default()
+    };
+    #[cfg(unix)]
+    if let Some(seconds) = limits.cpu_seconds {
+        ark_os::process::limit_cpu(&mut c, seconds);
+    }
     let mut child = c.spawn().map_err(|e| AdapterError::ToolUnavailable {
         tool: command[0].clone(),
         detail: e.to_string(),
@@ -193,14 +209,45 @@ async fn run_managed(
             None => Ok(child.wait().await),
         }
     };
+    // Memory (and on Windows processor time) is measured while it runs; Unix limits each
+    // process's processor time itself.
+    let watch = async {
+        if limits == Default::default() {
+            return std::future::pending().await;
+        }
+        let mut every = tokio::time::interval(std::time::Duration::from_millis(100));
+        loop {
+            every.tick().await;
+            if let Some(stop) = group.usage().over(&limits) {
+                return stop;
+            }
+        }
+    };
+    let mut stopped = None;
     let (status, timed_out, cancelled) = tokio::select! {
         biased;
         _ = cancel => (None, false, true),
+        stop = watch => {
+            stopped = Some(stop);
+            (None, false, false)
+        }
         result = wait => match result {
-            Ok(status) => (status.ok().and_then(|s| s.code()), false, false),
+            Ok(status) => {
+                let status = status.ok();
+                if let (Some(s), Some(max)) = (&status, limits.cpu_seconds) {
+                    if ark_os::process::stopped_by_cpu_limit(s) {
+                        stopped = Some(ark_os::process::Stop::Cpu(max));
+                    }
+                }
+                (status.and_then(|s| s.code()), false, false)
+            }
             Err(()) => (None, true, false),
         }
     };
+    if stopped.is_some() {
+        group.terminate();
+        let _ = child.kill().await;
+    }
     if timed_out || cancelled {
         if contained {
             group.terminate();
@@ -229,6 +276,12 @@ async fn run_managed(
             stderr.push_str(&timeout_note(t));
         }
     }
+    if let Some(stop) = stopped {
+        if !stderr.is_empty() && !stderr.ends_with('\n') {
+            stderr.push('\n');
+        }
+        stderr.push_str(&stop_note(stop));
+    }
     Ok(Run {
         command,
         stdout,
@@ -240,6 +293,7 @@ async fn run_managed(
         } else {
             -1
         }),
+        stopped,
     })
 }
 
@@ -259,6 +313,31 @@ impl Reader {
 impl Drop for Reader {
     fn drop(&mut self) {
         self.0.abort();
+    }
+}
+
+/// The last line of a run's stderr when a limit stopped it: what the limit was, in plain words.
+pub fn stop_note(stop: ark_os::process::Stop) -> String {
+    match stop {
+        ark_os::process::Stop::Memory(max) => {
+            format!("(stopped: it used more than {} of memory)", bytes(max))
+        }
+        ark_os::process::Stop::Cpu(max) => {
+            format!("(stopped: it used more than {max} s of processor time)")
+        }
+    }
+}
+
+/// `512 MB`, `2 GB`: a byte count as a person reads it.
+pub fn bytes(n: u64) -> String {
+    const MB: u64 = 1024 * 1024;
+    const GB: u64 = 1024 * MB;
+    if n >= GB && n.is_multiple_of(GB) {
+        format!("{} GB", n / GB)
+    } else if n >= GB {
+        format!("{:.1} GB", n as f64 / GB as f64)
+    } else {
+        format!("{} MB", n.div_ceil(MB))
     }
 }
 

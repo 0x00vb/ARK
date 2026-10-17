@@ -47,7 +47,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | `/context` token numbers are estimates; provider numbers are in `/trace` | `ark-interact` |
 | On `workbooks`, `claude:haiku` (0/2) and qwen3.5:27b (0/2) keep orders exported twice even when told each order counts once, and Haiku does not read the `data-analysis` skill there; Sonnet and Codex pass | `bench/RESULTS.md` |
 | Agent programs (workers) run contained on macOS only. Contained, they write only the project, their run folder and their own state, reach port 443 only, and cannot `git commit`; they still read what is outside the home and can send it out. Codex is not contained by ARK (its own sandbox runs its commands; macOS does not nest sandboxes). Linux and Windows workers, and `process.start`, are not contained | `ark-acp`, `ark-exec`, ADR 0074 |
-| A program's memory and CPU are not limited: a large file can use most of the machine's memory. Code runs limit how many run at once and how much capture reads (ADR 0072), not program RAM or CPU | `ark-exec`, ADR 0032, 0033, 0072 |
+| A code run's memory and processor time are limited only when the app sets `Exec::limits` (ADR 0075); memory is checked every 100 ms and Unix limits processor time per process. Agent programs and `process.start` have no limits | `ark-exec`, ADR 0072, 0075 |
 | Run code on Linux and Windows is checked by lint and unit tests here, not yet run on a machine of each | `ark-exec`, ADR 0032 |
 | ARK has never run on Windows. `ark-os` (ADR 0022) is on `ci/windows` only; on `main`, other processes look dead to the runtime, links open through `cmd`, and stops other than Ctrl+C get no grace | `ark-desktop/docs/WINDOWS.md` |
 | Not on crates.io; consumers pin a git tag | release |

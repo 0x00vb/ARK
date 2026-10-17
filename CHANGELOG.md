@@ -16,8 +16,14 @@ What changed for people building on ARK, per release. Not a commit log.
   ARK's store or credential folders, and reach port 443 only. Codex is not contained by ARK
   ([ADR 0074](docs/adr/0074-agent-programs-run-contained.md)).
 
+### Added
+
+- `Exec::limits(Limits)`: a code run past its memory or processor limit is stopped and its
+  result says which ([ADR 0075](docs/adr/0075-code-runs-have-memory-and-cpu-limits.md)).
+
 ### Breaking
 
+- `ark_tools::subprocess::Spec` has `limits`, and `Run` has `stopped`.
 - `ark_exec::Bounds` has `reads: Reads`, `writes`, `kept`, `network` and `keychain`. Build
   `code.run`'s with `Bounds::run(project, scratch, reads)`.
 - `ark_acp::Entry` has `contain: Option<Contain>`; `None` keeps a program uncontained.

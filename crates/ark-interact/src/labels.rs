@@ -937,6 +937,15 @@ mod tests {
             l.result_detail(ark_exec::RUN, true, "exit 0\nstdout:\n12"),
             "Done"
         );
+        // ADR 0075: a run stopped by its limit says which, in the card's words.
+        assert_eq!(
+            l.result_detail(
+                ark_exec::RUN,
+                true,
+                "stopped: it used more than 512 MB of memory\nstderr:\nKilled"
+            ),
+            "stopped: it used more than 512 MB of memory"
+        );
     }
 
     #[test]

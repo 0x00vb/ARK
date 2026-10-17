@@ -112,6 +112,14 @@ impl Tree {
         self.0.attached()
     }
 
+    /// What the program and everything it started use now, where this system can say: the
+    /// memory of the group's processes (Unix: their footprint now; Windows: the job's peak)
+    /// and, on Windows, the job's processor time. Unix limits processor time per process
+    /// instead ([`limit_cpu`]).
+    pub fn usage(&self) -> Usage {
+        self.0.usage()
+    }
+
     /// Terminate the attached group and wait for it to become empty. Used by contained,
     /// finite work only. Programs intentionally left running use the existing disarm path.
     pub async fn stop(&mut self) -> std::io::Result<()> {
@@ -139,6 +147,79 @@ impl Tree {
 impl Drop for Tree {
     fn drop(&mut self) {
         self.0.kill()
+    }
+}
+
+/// The most a started program, with everything it starts, may use (ADR 0075). `None`: no limit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Limits {
+    pub memory_bytes: Option<u64>,
+    pub cpu_seconds: Option<u64>,
+}
+
+/// A limit a program went past, and so was stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stop {
+    /// It used more memory than this many bytes.
+    Memory(u64),
+    /// It used more processor time than this many seconds.
+    Cpu(u64),
+}
+
+/// What a group of processes uses, as far as this system can tell ([`Tree::usage`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub memory_bytes: Option<u64>,
+    pub cpu_seconds: Option<u64>,
+}
+
+impl Usage {
+    /// The limit this usage is past, if any.
+    pub fn over(&self, limits: &Limits) -> Option<Stop> {
+        match (self.memory_bytes, limits.memory_bytes) {
+            (Some(used), Some(max)) if used > max => return Some(Stop::Memory(max)),
+            _ => {}
+        }
+        match (self.cpu_seconds, limits.cpu_seconds) {
+            (Some(used), Some(max)) if used > max => Some(Stop::Cpu(max)),
+            _ => None,
+        }
+    }
+}
+
+/// Unix: limit each process `command` starts to `seconds` of processor time
+/// (`RLIMIT_CPU`, set in the child before it runs the program). The system stops a process
+/// past it with `SIGXCPU`, then `SIGKILL` a second later ([`stopped_by_cpu_limit`]). Windows
+/// measures the whole job instead ([`Tree::usage`]).
+#[cfg(unix)]
+pub fn limit_cpu(command: &mut tokio::process::Command, seconds: u64) {
+    // SAFETY: the closure runs in the child between fork and exec and calls only
+    // async-signal-safe `setrlimit`.
+    unsafe {
+        command.pre_exec(move || {
+            let limit = libc::rlimit {
+                rlim_cur: seconds as libc::rlim_t,
+                rlim_max: seconds.saturating_add(1) as libc::rlim_t,
+            };
+            if libc::setrlimit(libc::RLIMIT_CPU, &limit) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+/// Whether a process ended because it went past its processor time ([`limit_cpu`]).
+pub fn stopped_by_cpu_limit(status: &std::process::ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal() == Some(libc::SIGXCPU)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        false
     }
 }
 
@@ -236,6 +317,80 @@ mod sys {
     }
 
     pub fn attach_console() {}
+
+    impl Tree {
+        pub fn usage(&self) -> super::Usage {
+            super::Usage {
+                memory_bytes: self.0.and_then(|g| group_memory(g as libc::pid_t)),
+                cpu_seconds: None,
+            }
+        }
+    }
+
+    /// The physical footprint of every process in group `group`.
+    #[cfg(target_os = "macos")]
+    fn group_memory(group: libc::pid_t) -> Option<u64> {
+        let mut pids = vec![0 as libc::pid_t; 4096];
+        let size = std::mem::size_of_val(pids.as_slice()) as libc::c_int;
+        // SAFETY: the buffer holds `size` bytes; the call writes at most that many.
+        // It answers how many process ids it wrote (macOS 26.4: 1 for a group of one).
+        let count =
+            unsafe { libc::proc_listpgrppids(group, pids.as_mut_ptr() as *mut libc::c_void, size) };
+        if count <= 0 {
+            return None;
+        }
+        let count = (count as usize).min(pids.len());
+        let mut total = 0u64;
+        for &pid in pids[..count].iter().filter(|p| **p > 0) {
+            // SAFETY: zeroed is a valid rusage_info_v2; the call fills it for flavor V2.
+            let mut info: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+            let ok = unsafe {
+                libc::proc_pid_rusage(
+                    pid,
+                    libc::RUSAGE_INFO_V2,
+                    &mut info as *mut _ as *mut libc::rusage_info_t,
+                )
+            } == 0;
+            if ok {
+                total = total.saturating_add(info.ri_phys_footprint);
+            }
+        }
+        Some(total)
+    }
+
+    /// The resident memory of every process in group `group`, from `/proc`.
+    #[cfg(not(target_os = "macos"))]
+    fn group_memory(group: libc::pid_t) -> Option<u64> {
+        // SAFETY: sysconf only reads a system value.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(0) as u64;
+        let mut total = 0u64;
+        for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+            let name = entry.file_name();
+            let Some(pid) = name
+                .to_str()
+                .filter(|n| n.bytes().all(|b| b.is_ascii_digit()))
+            else {
+                continue;
+            };
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                continue;
+            };
+            // After the name in parentheses: state, parent, group.
+            let pgrp = stat
+                .rsplit_once(')')
+                .and_then(|(_, rest)| rest.split_whitespace().nth(2))
+                .and_then(|g| g.parse::<libc::pid_t>().ok());
+            if pgrp != Some(group) {
+                continue;
+            }
+            let resident = std::fs::read_to_string(format!("/proc/{pid}/statm"))
+                .ok()
+                .and_then(|m| m.split_whitespace().nth(1)?.parse::<u64>().ok())
+                .unwrap_or(0);
+            total = total.saturating_add(resident.saturating_mul(page));
+        }
+        Some(total)
+    }
 
     pub fn alive(pid: u32) -> bool {
         // SAFETY: signal 0 only checks that the process exists; nothing is delivered.
@@ -358,6 +513,41 @@ mod sys {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(info.ActiveProcesses == 0)
+        }
+        pub fn usage(&self) -> super::Usage {
+            if self.0 == 0 {
+                return super::Usage::default();
+            }
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+            let mut times: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+            // SAFETY: each struct is sized for its information class; the job is owned.
+            let (got_limits, got_times) = unsafe {
+                (
+                    QueryInformationJobObject(
+                        self.0 as HANDLE,
+                        JobObjectExtendedLimitInformation,
+                        &mut limits as *mut _ as *mut std::ffi::c_void,
+                        std::mem::size_of_val(&limits) as u32,
+                        std::ptr::null_mut(),
+                    ) != 0,
+                    QueryInformationJobObject(
+                        self.0 as HANDLE,
+                        JobObjectBasicAccountingInformation,
+                        &mut times as *mut _ as *mut std::ffi::c_void,
+                        std::mem::size_of_val(&times) as u32,
+                        std::ptr::null_mut(),
+                    ) != 0,
+                )
+            };
+            // Processor time comes in 100 ns units.
+            let ticks = times
+                .TotalUserTime
+                .saturating_add(times.TotalKernelTime)
+                .max(0) as u64;
+            super::Usage {
+                memory_bytes: got_limits.then_some(limits.PeakJobMemoryUsed as u64),
+                cpu_seconds: got_times.then_some(ticks / 10_000_000),
+            }
         }
     }
 

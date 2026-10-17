@@ -520,3 +520,55 @@ import pyarrow
     assert!(row("South").ends_with("20.0"), "{stdout}");
     assert!(s.project.join("totals.xlsx").exists());
 }
+
+/// ADR 0075: a run past its memory limit is stopped, and says so in plain words.
+#[tokio::test]
+async fn a_run_past_its_memory_limit_is_stopped_and_says_why() {
+    let mut s = setup(Arc::new(Sh));
+    s.exec = s.exec.limits(ark_exec::Limits {
+        memory_bytes: Some(200 * 1024 * 1024),
+        cpu_seconds: None,
+    });
+    let out = run(
+        &s.exec,
+        &s.project,
+        "exec /usr/bin/perl -e '$x = \"a\" x (600 * 1024 * 1024); sleep 10'",
+    )
+    .await;
+    assert_eq!(
+        out.output["stopped"],
+        json!({ "limit": "memory", "bytes": 200 * 1024 * 1024 }),
+        "{}",
+        out.output
+    );
+    let (text, _) = distill()(RUN, &out.output).unwrap();
+    assert!(
+        text.starts_with("stopped: it used more than 200 MB of memory"),
+        "{text}"
+    );
+}
+
+/// ADR 0075: a run past its processor time is stopped, and says so in plain words.
+#[tokio::test]
+async fn a_run_past_its_processor_time_is_stopped_and_says_why() {
+    let mut s = setup(Arc::new(Sh));
+    s.exec = s.exec.limits(ark_exec::Limits {
+        memory_bytes: None,
+        cpu_seconds: Some(1),
+    });
+    let out = run(&s.exec, &s.project, "while :; do :; done").await;
+    assert_eq!(
+        out.output["stopped"],
+        json!({ "limit": "cpu", "seconds": 1 }),
+        "{}",
+        out.output
+    );
+    let (text, _) = distill()(RUN, &out.output).unwrap();
+    assert!(
+        text.starts_with("stopped: it used more than 1 s of processor time"),
+        "{text}"
+    );
+    // Without limits the same kind of run is not stopped for them.
+    let out = run(&setup(Arc::new(Sh)).exec, &s.project, "echo fine").await;
+    assert_eq!(out.output["stopped"], json!(null));
+}

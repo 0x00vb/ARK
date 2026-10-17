@@ -34,6 +34,7 @@ mod lifecycle_tests;
 pub mod python;
 mod sandbox;
 
+pub use ark_os::process::{Limits, Stop};
 pub use python::Python;
 pub use sandbox::{entry, Bounds, Network, Reads, Sandbox, Write, PRIVATE};
 
@@ -96,6 +97,8 @@ pub struct Exec {
     scratch: PathBuf,
     /// What the window shows when a run writes it, for the agent ("charts as png, ...").
     shows: String,
+    /// The most memory and processor time one run may use (ADR 0075); none by default.
+    limits: Limits,
     #[cfg(all(test, unix))]
     hook: Option<Arc<lifecycle_tests::Hook>>,
 }
@@ -117,6 +120,7 @@ impl Exec {
             admission: admission::Admission::new(2, 8),
             scratch: scratch.into(),
             shows: String::new(),
+            limits: Limits::default(),
             #[cfg(all(test, unix))]
             hook: None,
         }
@@ -141,6 +145,13 @@ impl Exec {
             }
         }
         Ok(())
+    }
+
+    /// Stop a run that uses more memory or processor time than `limits` (ADR 0075). Its
+    /// result says which.
+    pub fn limits(mut self, limits: Limits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// Say what the window shows when a run writes it (one line, from the formats ARK reads).
@@ -189,6 +200,7 @@ impl Exec {
             sandbox: self.sandbox.clone(),
             scratch: self.scratch.clone(),
             shows: String::new(),
+            limits: self.limits,
             admission: self.admission.clone(),
             #[cfg(all(test, unix))]
             hook: self.hook.clone(),
@@ -260,6 +272,7 @@ impl Exec {
                     env: Some(prepared.env.clone()),
                     timeout: Some(Duration::from_secs(secs)),
                     keep: Some(KEEP),
+                    limits: self.limits,
                 },
                 cancel.cancelled(),
             )
@@ -433,7 +446,11 @@ fn finish(
         && ran
             .stderr
             .ends_with(&subprocess::timeout_note(Duration::from_secs(secs)));
-    let output = json!({ "runtime": runtime, "exit_code": ran.code, "timed_out": timed_out,
+    let stopped = ran.stopped.map(|stop| match stop {
+        Stop::Memory(max) => json!({ "limit": "memory", "bytes": max }),
+        Stop::Cpu(max) => json!({ "limit": "cpu", "seconds": max }),
+    });
+    let output = json!({ "runtime": runtime, "exit_code": ran.code, "timed_out": timed_out, "stopped": stopped,
         "stdout": ran.stdout, "stderr": ran.stderr, "files": files,
         "more_files": written.len().saturating_sub(MAX_LISTED), "not_kept": not_kept,
         "removed": kept.removed, "no_copy": kept.no_copy });
@@ -588,8 +605,19 @@ pub fn distill() -> ark_runtime::distill::Distiller {
         };
         let files = list("files");
         let code = out["exit_code"].as_i64().unwrap_or(-1);
+        let stopped = &out["stopped"];
         let mut t = if out["timed_out"] == true {
             "stopped: it ran past its timeout".to_string()
+        } else if stopped["limit"] == "memory" {
+            format!(
+                "stopped: it used more than {} of memory",
+                subprocess::bytes(stopped["bytes"].as_u64().unwrap_or(0))
+            )
+        } else if stopped["limit"] == "cpu" {
+            format!(
+                "stopped: it used more than {} s of processor time",
+                stopped["seconds"].as_u64().unwrap_or(0)
+            )
         } else {
             format!("exit {code}")
         };

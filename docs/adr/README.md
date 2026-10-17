@@ -80,6 +80,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0071](0071-advanced-files-use-one-viewer-seam.md) | Maps, 3D models and later professional files use one file-viewer seam with versioned bounded bytes and focus; CAD generation stays in a consuming app's contained runtime | Accepted for implementation |
 | [0072](0072-code-runs-have-bounded-admission-and-owned-cleanup.md) | Code runs share finite admission, own cancellation cleanup and capture through bounded handles | Accepted |
 | [0074](0074-agent-programs-run-contained.md) | The agent programs ARK starts run contained on macOS: writes to the project and their own state, port 443, ARK's store and credential folders hidden; Codex and `process.start` not yet | Proposed |
+| [0075](0075-code-runs-have-memory-and-cpu-limits.md) | Code runs can have memory and processor limits, enforced by the process tree that owns the run, with a stop reason in plain words | Proposed |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

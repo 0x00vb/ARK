@@ -121,6 +121,8 @@ pub enum Refused {
     Missing {
         program: String,
         install: Option<String>,
+        /// Why the last install of that tool failed (exit, end of its output), when one did.
+        failed: Option<String>,
     },
     /// Too many run already.
     Limit(usize),
@@ -133,11 +135,15 @@ pub enum Refused {
 impl std::fmt::Display for Refused {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Refused::Missing { program, install: Some(id) } => write!(
+            Refused::Missing { program, failed: Some(why), .. } => write!(
+                f,
+                "`{program}` is not installed on this computer. ARK tried to install it and it failed: {why} Do not ask to install it again. Tell the person what failed and what is missing."
+            ),
+            Refused::Missing { program, install: Some(id), .. } => write!(
                 f,
                 "`{program}` is not installed on this computer. Call acquire_capability with need \"{id}\": it asks the person to install it. Then start the process again."
             ),
-            Refused::Missing { program, install: None } => write!(
+            Refused::Missing { program, install: None, .. } => write!(
                 f,
                 "`{program}` is not installed on this computer, and ARK does not know how to install it. Tell the person what is missing."
             ),
@@ -212,6 +218,8 @@ struct Inner {
     events: broadcast::Sender<Event>,
     next: AtomicU64,
     installs: install::Catalog,
+    /// The last failed install of each tool, by tool id, until one succeeds.
+    install_failures: Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl Drop for Inner {
@@ -267,6 +275,7 @@ impl Processes {
                 events,
                 next: AtomicU64::new(1),
                 installs: install::Catalog::builtin(),
+                install_failures: Mutex::new(Default::default()),
             }),
         })
     }
@@ -278,6 +287,24 @@ impl Processes {
 
     pub fn shell(&self) -> &Shell {
         &self.inner.shell
+    }
+
+    /// Why the last install of the tool `id` failed, until an install of it succeeds.
+    pub fn install_failure(&self, id: &str) -> Option<String> {
+        self.inner.install_failures.lock().unwrap().get(id).cloned()
+    }
+
+    /// Keep why an install failed, so a start that needs the tool says it instead of asking again.
+    pub fn record_install_failure(&self, id: &str, why: String) {
+        self.inner
+            .install_failures
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), why);
+    }
+
+    pub(crate) fn clear_install_failure(&self, id: &str) {
+        self.inner.install_failures.lock().unwrap().remove(id);
     }
 
     pub(crate) fn installs(&self) -> &install::Catalog {
@@ -421,7 +448,12 @@ impl Processes {
                     .installs
                     .for_program(&program)
                     .map(|t| t.id.clone());
-                return Err(Refused::Missing { program, install });
+                let failed = install.as_ref().and_then(|id| self.install_failure(id));
+                return Err(Refused::Missing {
+                    program,
+                    install,
+                    failed,
+                });
             }
         }
         self.spawn(root, folder, cwd, command, env, req).await

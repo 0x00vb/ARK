@@ -190,9 +190,12 @@ impl AcquisitionProvider for Installs {
         let ended = self.processes.wait_end(&p.id, INSTALL_TIME).await;
         self.processes.shell().refresh().await;
         match self.plan(need).await {
-            Some(now) if now.installed => AcquisitionResult::changed(format!(
+            Some(now) if now.installed => {
+                self.processes.clear_install_failure(&now.tool.id);
+                AcquisitionResult::changed(format!(
                 "{label} is installed. Start the process again."
-            )),
+            ))
+            }
             _ => {
                 let how = match ended {
                     Some(i) if i.state == State::Exited => {
@@ -202,6 +205,10 @@ impl AcquisitionProvider for Installs {
                     _ => "it did not finish in time".into(),
                 };
                 let tail = self.processes.output(&p.id, 1500).unwrap_or_default();
+                self.processes.record_install_failure(
+                    &plan.tool.id,
+                    format!("{how}. The end of its output:\n{tail}"),
+                );
                 AcquisitionResult::info(format!(
                     "{label} was not installed: {how}. The end of its output:\n{tail}"
                 ))

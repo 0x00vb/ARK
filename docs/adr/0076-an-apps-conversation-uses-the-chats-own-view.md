@@ -66,8 +66,9 @@ in the side pane.
   not kept for replay, not sent to native clients), `task {task}` with the task's `feed` (its
   stored events in the `orch` shape, the last 2,000) and `task_call {task, call}` (one call's
   detail, the chat `call` shape, looked up only in that task's events).
-- Narration is not stored by the runtime: a task drawn from `task` after a reload shows its
-  steps and answer, not the text it wrote between them.
+- Streamed text is not stored or replayed: a task drawn from `task` after a reload shows its
+  steps and answer, not the text it wrote between them, and a window that opens while an agent
+  writes shows its text from that point.
 
 ## Check
 
@@ -80,8 +81,9 @@ composer and a redrawn turn in view keeping its place. `an_apps_conversation_beh
 runs a real orchestrated agent: its text grows in the same element without drawing the work
 block again, its question shows in its turn and in the tray and an answer in the view closes
 both, a turn drawn from `task` keeps its work block and a tool row opens on `task_call`, and the
-send button is Stop while nothing is typed and stops the task. `tests/orchestration.rs`
-`an_agents_task_reads_as_a_chat` checks `orch_text`, `task`'s feed and `task_call`. Desktop's `ui/tests/agent-chat-parity.test.mjs`
+send button is Stop while nothing is typed and stops the task. A question answered in the tray
+leaves the view too. `tests/orchestration.rs` `an_agents_task_reads_as_a_chat` checks
+`orch_text`, `task`'s feed and `task_call`. Desktop's `ui/tests/agent-chat-parity.test.mjs`
 fails if the agent pane draws its own messages or Desktop CSS restyles the chat's elements. It
 reads source and a fixed class list, so it is a first guard; the computed-style comparison is
 ARK's page test.

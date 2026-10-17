@@ -63,7 +63,15 @@ export function chatView(el, base, { submit, stop, call, placeholder = "" } = {}
 
   function decide(id, decision) {
     decided.add(String(id));
-    Promise.resolve(base.call("approve", { id, decision })).catch((e) => base.toast(e.message));
+    Promise.resolve(base.call("approve", { id, decision })).catch((e) => {
+      // Not answered: the card takes an answer again.
+      decided.delete(String(id));
+      for (const card of surface.querySelectorAll(`.approval[data-id="${CSS.escape(String(id))}"]`)) {
+        card.classList.remove("decided");
+        for (const b of card.querySelectorAll("button")) b.disabled = false;
+      }
+      base.toast(e.message);
+    });
   }
 
   /// The text being written grows where it is; the questions the run waits on come and go.
@@ -77,8 +85,9 @@ export function chatView(el, base, { submit, stop, call, placeholder = "" } = {}
     }
     for (const [id, msg] of want) {
       if (entry.view.agent.querySelector(`:scope > .approval[data-id="${CSS.escape(id)}"]`)) continue;
-      // A new question takes the focus only from inside this view, as the chat's own does.
-      const focus = !seen.has(id) && surface.contains(document.activeElement);
+      // A new question takes the focus only from inside this view, as the chat's own does, and
+      // not from a message being typed, so a key meant for it cannot answer.
+      const focus = !seen.has(id) && surface.contains(document.activeElement) && !input.value.trim();
       seen.add(id);
       const card = entry.view.approval(msg, decide, { focus });
       if (decided.has(id)) {

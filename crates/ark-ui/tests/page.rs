@@ -1209,7 +1209,7 @@ async fn an_apps_conversation_behaves_as_the_chat() {
     };
     drive_app(
         "agent-chat",
-        vec![save, long("Saved."), long("A long answer.")],
+        vec![save.clone(), long("Saved."), save, long("A long answer.")],
         Duration::from_millis(40),
         true,
     )

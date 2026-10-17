@@ -1473,3 +1473,29 @@ fn now_ms() -> u64 {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A native client reads changes by number: a live-only event (an agent's streamed text)
+    /// is not one, and a numbered event still is.
+    #[tokio::test]
+    async fn a_live_only_event_is_not_a_client_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let ark = ark_sdk::prelude::Ark::builder()
+            .store_root(dir.path())
+            .build()
+            .unwrap();
+        let (host, _) = crate::ArkUi::new(ark_interact::App::new("Test").ark(ark))
+            .open()
+            .await
+            .unwrap();
+        let live = json!({ "kind": "orch_text", "task": "t-1", "agent": "scribe", "text": "Sav" });
+        assert!(client_event(&host, "owner", &live).unwrap().is_none());
+        let kept = json!({ "kind": "orch", "seq": 7, "event": {} });
+        let event = client_event(&host, "owner", &kept).unwrap().unwrap();
+        assert_eq!(event.id, "event-7");
+        assert_eq!(event.event_type, "orch");
+    }
+}

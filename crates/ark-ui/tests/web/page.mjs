@@ -863,9 +863,17 @@ async function agentChat(page) {
   assert.match(shown, /"title": "Notes"/);
   await shot(page, "agent-chat-call");
 
-  // While a task runs and nothing is typed, the send button is Stop; typed text is a message.
+  // Answered in the tray, the question leaves the view too.
   await pane.locator("textarea").fill("Write a long answer");
   await pane.locator("textarea").press("Enter");
+  const again = pane.locator(".turn:last-child .agent > .approval");
+  await again.waitFor();
+  const second = await again.getAttribute("data-id");
+  await page.locator(`#asks .approval[data-id="${second}"] button`, { hasText: "Allow once" }).click();
+  await page.locator(`.approval[data-id="${second}"]`).first().waitFor({ state: "detached" });
+  assert.equal(await page.locator(`.approval[data-id="${second}"]`).count(), 0, "answered in the tray, both cards go");
+
+  // While a task runs and nothing is typed, the send button is Stop; typed text is a message.
   await page.waitForFunction(() => document.querySelectorAll(".chat-view .turn").length === 2 && document.querySelector(".chat-view .turn:last-child .prose.streaming"));
   const send = pane.locator(".composer .send");
   assert.equal(await send.getAttribute("aria-label"), "Stop");

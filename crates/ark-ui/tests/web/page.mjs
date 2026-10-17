@@ -343,7 +343,7 @@ const scenarios = {
   // Narration written just before a tool call keeps its last chunk, and the answer shows once.
   // An app's conversation drawn with ark.chatView is the chat: the same turn the chat drew
   // comes out with the same elements and the same computed styles, and its composer has none
-  // of the chat's own controls (ADR 0073).
+  // of the chat's own controls (ADR 0076).
   async "chat-view"(page) {
     await finished(page, () => page.locator("#input").fill("What do the notes say?").then(() => page.keyboard.press("Enter")));
     const result = await page.evaluate(async () => {

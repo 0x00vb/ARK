@@ -13,7 +13,7 @@ What changed for people building on ARK, per release. Not a commit log.
 
 - `ark.chatView(el, { submit, placeholder })` draws an app's conversation with the chat's own
   turns, work blocks, prose and composer, so it reads exactly as a chat. ARK Desktop's agent pane
-  is the first user ([ADR 0073](docs/adr/0073-an-apps-conversation-uses-the-chats-own-view.md)).
+  is the first user ([ADR 0076](docs/adr/0076-an-apps-conversation-uses-the-chats-own-view.md)).
 - On macOS the window's File menu has New Chat (⌘N) and Commands… (⌘K), so both work while the
   Browser panel's view has the keyboard ([ADR 0044](docs/adr/0044-the-browser-panel-is-a-view-of-its-own-in-the-window.md)).
 

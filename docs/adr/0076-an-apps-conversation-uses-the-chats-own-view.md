@@ -1,4 +1,4 @@
-# 0073. An app's conversation uses the chat's own view
+# 0076. An app's conversation uses the chat's own view
 
 Status: Accepted
 Date: 2026-10-17

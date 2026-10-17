@@ -26,7 +26,7 @@
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
 //   ark.chatView(el, { submit(text), placeholder })
 //                      a conversation the app draws from its own records with the chat's
-//                      own view, so it looks and reads as a chat (ADR 0073). Returns
+//                      own view, so it looks and reads as a chat (ADR 0076). Returns
 //                      `{ render(turns, { empty }), reset(), input, actions, focus(), set(text),
 //                      setComposer({ placeholder, disabled }), dispose() }`. `turns` take
 //                      `chat_read`'s transcript shape plus `key`, `note`, `working:

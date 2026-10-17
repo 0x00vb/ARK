@@ -1,5 +1,5 @@
 // A conversation an app draws from its own records, with the chat's own view: the same turns,
-// work blocks, prose and composer as a chat, so the two cannot look different (ADR 0073).
+// work blocks, prose and composer as a chat, so the two cannot look different (ADR 0076).
 //
 // `turns` take the shape of `chat_read`'s transcript, plus what a run that is not this chat's
 // own may need: `key` (stable per turn, so only a changed turn redraws), `note` (a line under

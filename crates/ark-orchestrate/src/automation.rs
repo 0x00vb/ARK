@@ -715,11 +715,22 @@ impl EventLog {
     /// Whether the account holds as many messages, or as much text, as it may keep. A feed
     /// says so itself; a webhook has no feed, so this is how its account shows Full.
     pub fn is_full(&self, source: &str, account: &str) -> bool {
+        self.full_cause(source, account).is_some()
+    }
+
+    /// Why the account is full: `inbox` (messages wait to be read, which discarding frees) or
+    /// `storage` (text kept up to its limit, which retention frees with time).
+    pub fn full_cause(&self, source: &str, account: &str) -> Option<&'static str> {
         let scope = scope_of(source, account);
         let limits = self.limits();
         let index = self.index.lock().unwrap();
-        index.waiting(&scope) >= limits.inbox
-            || index.retained.get(&scope).copied().unwrap_or(0) >= limits.retained_bytes
+        if index.waiting(&scope) >= limits.inbox {
+            Some("inbox")
+        } else if index.retained.get(&scope).copied().unwrap_or(0) >= limits.retained_bytes {
+            Some("storage")
+        } else {
+            None
+        }
     }
 
     /// The (source, account) pairs automations read.
@@ -810,8 +821,8 @@ impl EventLog {
             let Ok(v) = serde_json::to_value(&gone) else {
                 continue;
             };
-            let done = self.store.delete_record(PAYLOAD, &e.id).is_ok()
-                && self.store.put_record(EVENT, &e.id, &scope, &v).is_ok();
+            let done = self.store.put_record(EVENT, &e.id, &scope, &v).is_ok()
+                && self.store.delete_record(PAYLOAD, &e.id).is_ok();
             if done {
                 freed += e.payload_bytes;
                 if let Some(kept) = index.retained.get_mut(&scope) {

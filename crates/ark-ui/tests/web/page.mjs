@@ -3582,6 +3582,7 @@ scenarios["whatsapp-setup"] = async (page) => {
   assert.equal(await form.locator('[name="token"]').getAttribute("aria-invalid"), "true");
   assert.equal(await form.locator('[name="token"]').inputValue(), "tok-1", "the person's input is kept");
   assert.equal(await page.evaluate(() => document.activeElement?.name), "token");
+  assert.equal(await connect.isEnabled(), true, "after an error the person can try again");
   assert.equal(await page.evaluate(() => window.__wa.calls.filter((c) => c[0] === "whatsapp_connect").length), 1, "one request");
   assert.equal(await page.evaluate(() => window.__wa.calls.find((c) => c[0] === "whatsapp_connect")[1].phone_id), "222", "values are trimmed");
   await shot(page, "whatsapp-error");

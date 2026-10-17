@@ -80,7 +80,9 @@ pub fn event_view(o: &Orchestrator, a: &EventAutomationRecord) -> EventView {
     let feed = o
         .event_log()
         .feed_record(&a.pattern.source, &a.pattern.account);
-    let account_full = o.event_log().is_full(&a.pattern.source, &a.pattern.account);
+    let account_full = o
+        .event_log()
+        .full_cause(&a.pattern.source, &a.pattern.account);
     let (status, tone, recovery) = status(a, last.as_ref(), pending, feed.as_ref(), account_full);
     let label = |ms: u64| ark_orchestrate::schedule::local_label(ms);
     let ended = last.as_ref().filter(|t| t.state.is_final()).and_then(|t| {
@@ -130,7 +132,7 @@ fn status(
     last: Option<&TaskRecord>,
     pending: usize,
     feed: Option<&FeedRecord>,
-    account_full: bool,
+    account_full: Option<&'static str>,
 ) -> (String, &'static str, Option<&'static str>) {
     let label = |ms: u64| ark_orchestrate::schedule::local_label(ms);
     if let Some(t) = last.filter(|t| !t.state.is_final()) {
@@ -198,12 +200,14 @@ fn status(
                 None,
             )
         }
-        Some(FeedState::Full { .. }) => return full(&a.pattern.account),
+        Some(FeedState::Full { .. }) => {
+            return full(&a.pattern.account, account_full.unwrap_or("inbox"));
+        }
         Some(FeedState::Starting) => return ("starting".into(), "muted", None),
         _ => {}
     }
-    if account_full {
-        return full(&a.pattern.account);
+    if let Some(cause) = account_full {
+        return full(&a.pattern.account, cause);
     }
     if let Some(l) = a.limited.as_ref().filter(|l| l.until_ms > now_ms()) {
         return (
@@ -232,11 +236,12 @@ fn status(
     (format!("listening{waiting}"), "muted", None)
 }
 
-fn full(account: &str) -> (String, &'static str, Option<&'static str>) {
+fn full(account: &str, cause: &str) -> (String, &'static str, Option<&'static str>) {
+    let fix = (cause == "inbox").then_some("discard");
     (
-        format!("full: {account} keeps all the messages it may; new ones are not read until there is room"),
+        format!("full: no room for new messages on {account}"),
         "warn",
-        Some("discard"),
+        fix,
     )
 }
 
@@ -345,17 +350,22 @@ mod tests {
         }
     }
 
-    fn shown(state: FeedState, full: bool) -> (String, &'static str, Option<&'static str>) {
+    fn shown(
+        state: FeedState,
+        full: Option<&'static str>,
+    ) -> (String, &'static str, Option<&'static str>) {
         status(&automation(), None, 0, Some(&feed(state)), full)
     }
 
     #[test]
     fn every_way_the_account_can_stop_says_so_and_names_what_to_do() {
         let far = now_ms() + 3_600_000;
-        let (s, tone, fix) = shown(FeedState::Full { detail: "x".into() }, false);
+        let (s, tone, fix) = shown(FeedState::Full { detail: "x".into() }, Some("inbox"));
         assert!(s.starts_with("full:"), "{s}");
         assert_eq!((tone, fix), ("warn", Some("discard")));
-        let (s, _, fix) = shown(FeedState::Listening, true);
+        let (_, _, fix) = shown(FeedState::Full { detail: "x".into() }, Some("storage"));
+        assert_eq!(fix, None, "discarding frees no stored text");
+        let (s, _, fix) = shown(FeedState::Listening, Some("inbox"));
         assert!(
             s.starts_with("full:"),
             "a webhook account has no feed state: {s}"
@@ -366,7 +376,7 @@ mod tests {
                 error: "down".into(),
                 retry_at_ms: far,
             },
-            false,
+            None,
         );
         assert!(s.starts_with("cannot check for messages"), "{s}");
         assert_eq!((tone, fix), ("warn", None));
@@ -375,18 +385,18 @@ mod tests {
                 since_ms: Some(1),
                 detail: "history gone".into(),
             },
-            false,
+            None,
         );
         assert!(s.contains("may be missing"), "{s}");
         assert_eq!(fix, Some("reconcile"));
-        let (s, _, fix) = shown(FeedState::RateLimited { until_ms: far }, false);
+        let (s, _, fix) = shown(FeedState::RateLimited { until_ms: far }, None);
         assert!(s.starts_with("checks again at"), "{s}");
         assert_eq!(fix, None);
         let (_, _, fix) = shown(
             FeedState::NeedsConnection {
                 detail: "signed out".into(),
             },
-            false,
+            None,
         );
         assert_eq!(fix, Some("connect"));
     }

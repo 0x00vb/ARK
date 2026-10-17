@@ -133,7 +133,7 @@ payload, 64 scalar fields of at most 4 KiB each, 1,000 unevaluated events per ac
 runs per automation and 256 MiB of retained event payloads per account. A pull feed stops before
 advancing its cursor when full. A webhook returns a retryable failure before acknowledgement.
 One attention item explains the limit. Pending, queued, open or uncertain input is never pruned.
-Evaluated unmatched payloads are removed after 24 hours; matched payloads follow the newest 50
+Evaluated unmatched payloads are removed 24 hours after they were saved, once every automation has looked at them; matched payloads follow the newest 50
 runs and 30-day maximum, while their ids and audit state remain. `EventLog::prune` does this
 hourly and before a save is refused for storage. A feed that cannot save for either limit shows
 Full (not Degraded), keeps its cursor and tries again at the poll interval.
@@ -353,7 +353,7 @@ API) and A4 (limits, against fakes) are built on the `event-automations` branch.
 or Meta account was used. Settings › WhatsApp connects a number with the checks of
 `Connections::connect_whatsapp` and shows the callback path. A4 ran with tight limits on a Mac:
 a run on NAS-class hardware (memory, SQLite growth, the 2-second p95 at 1,000 events) is an owner
-card. Not tested: disk full (a store error becomes Degraded with backoff by code path only),
+card. Settings › WhatsApp shows the callback path only (`/hooks/whatsapp/<route>`); the person adds their public HTTPS address (owner card on the Meta app and route). Storage Full offers no action: retention frees it. Not tested: disk full (a store error becomes Degraded with backoff by code path only),
 reply loop and quota race beyond the A1 tests. Its runs show a
 closed reply window and an uncertain send as the run's failure and effect, not as their own
 automation states.

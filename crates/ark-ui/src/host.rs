@@ -3539,13 +3539,14 @@ impl Host {
                     .connections
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("this app connects no accounts"))?;
-                let setup = ark_interact::ark_sdk::prelude::ark_connect::services::whatsapp::Setup {
-                    waba_id: s("waba_id").trim().into(),
-                    phone_id: s("phone_id").trim().into(),
-                    app_secret: s("app_secret").trim().into(),
-                    verify_token: s("verify_token").trim().into(),
-                    token: s("token").trim().into(),
-                };
+                let setup =
+                    ark_interact::ark_sdk::prelude::ark_connect::services::whatsapp::Setup {
+                        waba_id: s("waba_id").trim().into(),
+                        phone_id: s("phone_id").trim().into(),
+                        app_secret: s("app_secret").trim().into(),
+                        verify_token: s("verify_token").trim().into(),
+                        token: s("token").trim().into(),
+                    };
                 let secrets = [
                     setup.app_secret.clone(),
                     setup.verify_token.clone(),

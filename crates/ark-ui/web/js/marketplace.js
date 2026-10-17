@@ -103,6 +103,7 @@ function marketplace(el, ark) {
 
   const disconnect = async (entry) => {
     if (!entry.connection) return;
+    if (entry.source === "local" && entry.capabilityId === "whatsapp") return ark.openSettings("whatsapp");
     notice.textContent = "";
     try {
       if (entry.source === "local") await ark.call("capability_disconnect", { id: entry.capabilityId });

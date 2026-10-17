@@ -68,5 +68,8 @@ in the side pane.
 drawn through `ark.chatView` has the same element sequence and the same computed styles for the
 bubble, prose, code, work head, tool row, footer, composer, input and send; an unchanged turn is
 not drawn again; a working turn keeps its block open with no Esc hint; the composer has no chat
-controls and Shift+Tab leaves the chat's mode alone. Desktop's `ui/tests/agent-chat-parity.test.mjs`
-fails if the agent pane draws its own messages or Desktop CSS restyles the chat's elements.
+controls and Shift+Tab leaves the chat's mode alone; failed, stopped and waiting turns, a refused
+composer and a redrawn turn in view keeping its place. Desktop's `ui/tests/agent-chat-parity.test.mjs`
+fails if the agent pane draws its own messages or Desktop CSS restyles the chat's elements. It
+reads source and a fixed class list, so it is a first guard; the computed-style comparison is
+ARK's page test.

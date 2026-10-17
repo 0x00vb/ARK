@@ -321,7 +321,8 @@ const scenarios = {
       }
     }
     await page.setViewportSize({ width: 390, height: 760 });
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    // The layout settles over a few frames after a resize; a lasting overflow still fails here.
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth, null, { timeout: 2000 });
     await shot(page, "project-terminal-narrow");
 
     await page.evaluate(() => {

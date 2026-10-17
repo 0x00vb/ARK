@@ -210,7 +210,7 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
                 .unwrap(),
         );
     }
-    if scenario == "files" || scenario == "drop" {
+    if scenario == "files" || scenario == "drop" || scenario == "upload-drafts" {
         builder = builder.files(true);
     }
     if scenario == "analysis" || scenario == "image-failure" || scenario == "restore" {
@@ -724,6 +724,11 @@ fn tiny_pdf() -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn files_dropped_on_the_chat_go_into_the_project() {
     drive("drop", vec![], Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upload_completion_preserves_the_originating_chat_draft() {
+    drive("upload-drafts", vec![], Duration::ZERO).await;
 }
 
 /// ADR 0034: a run changes a file and removes another; the turn's cards put each back.

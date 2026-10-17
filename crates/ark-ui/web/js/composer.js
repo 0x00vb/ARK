@@ -51,7 +51,7 @@ export class Composer {
     });
     this.model?.addEventListener("click", () => this.modelMenu());
     this.mode?.addEventListener("click", () => this.modeMenu());
-    this.attach?.addEventListener("click", () => chooseFiles(api, this));
+    this.attach?.addEventListener("click", () => chooseFiles(api, elements.captureDraft));
     this.dictation = new DictationController({
       api,
       button: this.mic,
@@ -95,12 +95,15 @@ export class Composer {
 
   /// Put `text` under the message being written, on a line of its own, and leave the cursor
   /// at the end of the person's words: what they ask stays first (and names the chat).
-  addLine(text) {
+  addLine(text, { focus = true } = {}) {
+    const selection = [this.input.selectionStart, this.input.selectionEnd, this.input.selectionDirection];
     const v = this.input.value.replace(/\s+$/, "");
     this.input.value = `${v}\n${text}`;
     this.changed();
-    this.focus();
-    this.input.setSelectionRange(v.length, v.length);
+    if (focus) {
+      this.focus();
+      this.input.setSelectionRange(v.length, v.length);
+    } else this.input.setSelectionRange(...selection);
   }
 
   changed() {

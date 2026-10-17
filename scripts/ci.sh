@@ -31,7 +31,7 @@ fi
 
 if [ -n "$page_tests" ]; then
   step "WebKit page tests"
-  node --test crates/ark-ui/tests/web/project-section.test.mjs
+  node --test --test-concurrency=1 crates/ark-ui/tests/web/project-section.test.mjs crates/ark-ui/tests/web/upload-drafts.test.mjs
   ARK_UI_PAGE_TESTS="$page_tests" cargo test -p ark-ui --test page --locked -- --test-threads 1
   ARK_UI_PAGE_TESTS="$page_tests" cargo test -p ark-ui --lib --locked desktop_notification
 fi

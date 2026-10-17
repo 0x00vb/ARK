@@ -355,21 +355,37 @@ let pendingPrimary = null;
 let draggedSession = null;
 const chatTabs = { ids: [], titles: new Map() };
 
-function draftKey(session) {
-  return `ark-draft:${state.runtime || "runtime"}:${session}`;
+function draftKey(session, runtime = state.runtime) {
+  return `ark-draft:${runtime || "runtime"}:${session}`;
 }
 
 function scrollKey(session) {
   return `ark-scroll:${state.runtime || "runtime"}:${session}`;
 }
 
-function saveDraft(session = state.sessionId, value = composer?.input?.value) {
+function saveDraft(session = state.sessionId, value = composer?.input?.value, runtime = state.runtime) {
   if (!session || value == null) return;
-  try { localStorage.setItem(draftKey(session), value); } catch {}
+  try { localStorage.setItem(draftKey(session, runtime), value); } catch (error) { console.error(error); }
 }
 
-function savedDraft(session) {
-  try { return localStorage.getItem(draftKey(session)) || ""; } catch { return ""; }
+function savedDraft(session, runtime = state.runtime) {
+  try { return localStorage.getItem(draftKey(session, runtime)) || ""; } catch { return ""; }
+}
+
+function captureDraft(location) {
+  const runtime = state.runtime;
+  return text => {
+    const key = locationKey(location);
+    const target = locationKey(state.summary?.location) === key ? composer
+      : [...secondaryChats.values()].find(chat => locationKey(chat.summary.location) === key)?.composer;
+    if (target) {
+      target.addLine(text, { focus: false });
+      saveDraft(location.session, target.input.value, runtime);
+    } else {
+      const draft = savedDraft(location.session, runtime).replace(/\s+$/, "");
+      saveDraft(location.session, `${draft}\n${text}`, runtime);
+    }
+  };
 }
 
 function saveScroll(session, element) {
@@ -637,7 +653,7 @@ class SecondaryChat {
       return summary;
     };
     this.thread = new Thread(elements.threadEl, elements.scroller, this.api);
-    this.composer = new Composer(this.api, elements);
+    this.composer = new Composer(this.api, { ...elements, captureDraft });
     this.composer.commands = state.commands || [];
     this.composer.placeholder = `Ask ${read.summary.name} anything`;
     this.applySummary(read.summary);
@@ -2118,9 +2134,9 @@ async function start() {
     focusChat(state.sessionId, false);
   }, true);
   thread = new Thread($("#thread"), $("#scroller"), api);
-  composer = new Composer(api);
+  composer = new Composer(api, { captureDraft });
   places = new Places(api);
-  acceptDrops(api, composer, $(".main"));
+  acceptDrops(api, captureDraft, $(".main"));
   sidebar = new Sidebar(api);
   destinations = new Destinations(openDestination, (id) => showView(id));
   waiting = new Waiting(api, transport, () => state.sessionId);

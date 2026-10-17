@@ -36,6 +36,9 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Fixed
 
+- A file upload adds its filename to the originating chat's saved draft, even after switching
+  projects or closing a split pane. It preserves the current draft, focus and selection.
+
 - A failed install of a program a process needs keeps its reason (exit code, end of its output)
   and a later start says it instead of asking to install again.
 - The Files tab closes with its project, as the Browser tab does.

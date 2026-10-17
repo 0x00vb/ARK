@@ -1488,6 +1488,62 @@ async function drop(page) {
 }
 scenarios.drop = drop;
 
+async function uploadDrafts(page) {
+  const input = page.locator("#input");
+  const origin = await page.evaluate(() => window.ark.summary().location);
+  const open = async id => {
+    await page.evaluate(id => window.ark.openSession(id), id);
+    await page.evaluate(id => window.ark.shown(id), id);
+  };
+  for (const differentProject of [false, true]) {
+    await input.fill("Origin draft");
+    if (differentProject) await page.evaluate(() => window.ark.addProject({ name: "Upload destination check" }));
+    else await page.evaluate(() => window.ark.newSession());
+    await page.waitForFunction(origin => window.ark.summary().session.id !== origin.session, origin);
+    const other = await page.evaluate(() => window.ark.summary().session.id);
+    await page.evaluate(id => window.ark.shown(id), other);
+    await open(origin.session);
+    const name = differentProject ? "cross-project.txt" : "same-project.txt";
+    let release, started;
+    const waiting = new Promise(resolve => { started = resolve; });
+    const handler = async route => {
+      const request = route.request().postDataJSON();
+      if (request.method !== "resource" || request.params.operation.kind !== "upload_add") return route.continue();
+      assert.deepEqual(request.params.ref.location, origin);
+      const response = await route.fetch();
+      await new Promise(resolve => { release = resolve; started(); });
+      await route.fulfill({ response });
+    };
+    await page.route("**/rpc", handler);
+    try {
+      await page.evaluate(name => {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(new File(["Origin project only"], name));
+        document.querySelector("#thread").dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true }));
+      }, name);
+      await waiting;
+      await open(other);
+      await input.fill("Unrelated draft");
+      await input.evaluate(el => el.setSelectionRange(2, 5));
+      await page.locator("#mode-chip").focus();
+      release();
+      await page.locator(".adding").waitFor({ state: "detached" });
+      assert.equal(await input.inputValue(), "Unrelated draft");
+      assert.deepEqual(await input.evaluate(el => [el.selectionStart, el.selectionEnd]), [2, 5]);
+      assert.equal(await page.locator("#mode-chip").evaluate(el => document.activeElement === el), true);
+      if (differentProject) await assert.rejects(page.evaluate(name => window.ark.call("file_read", { path: name }), name));
+      await open(origin.session);
+      assert.equal(await input.inputValue(), `Origin draft\nAdded to the project: ${name}`);
+      assert.equal(await page.evaluate(name => window.ark.call("file_read", { path: name }).then(file => file.text), name), "Origin project only");
+    } finally {
+      release?.();
+      await page.unroute("**/rpc", handler);
+    }
+  }
+  await shot(page, "upload-drafts");
+}
+scenarios["upload-drafts"] = uploadDrafts;
+
 // The + menu opens the built-in panels. Files edits and saves a file in the project folder;
 // the terminal runs a shell there. A page on this machine's loopback address says its runtime
 // is local.

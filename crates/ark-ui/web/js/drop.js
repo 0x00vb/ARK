@@ -15,7 +15,7 @@ const TRIES = 3;
 /// One set of files on its way at a time, from a drop or a picker.
 let busy = null;
 
-export function acceptDrops(api, composer, zone) {
+export function acceptDrops(api, captureDraft, zone) {
   let depth = 0;
   const hint = h("div.drop-hint", { hidden: true }, h("div.drop-hint-box", icon("plus"), h("span", "Drop to add to the project")));
   zone.append(hint);
@@ -52,15 +52,17 @@ export function acceptDrops(api, composer, zone) {
     // read through them: then the files as dropped.
     const plain = () => files.map((file) => ({ path: file.name, file }));
     const target = api.at(api.summary().location);
-    once(target, async () => addToProject(target, composer, entries.length ? await walkAll(entries).catch(plain) : plain()));
+    const complete = captureDraft(target.location);
+    once(target, async () => addToProject(target, complete, entries.length ? await walkAll(entries).catch(plain) : plain()));
   });
 }
 
 /// The system's file chooser (a phone has no drag and drop): the files go into the project.
-export function chooseFiles(api, composer) {
+export function chooseFiles(api, captureDraft) {
   choose({ multiple: true }, (files) => {
     const target = api.at(api.summary().location);
-    once(target, () => addToProject(target, composer, files.map((file) => ({ path: file.name, file }))));
+    const complete = captureDraft(target.location);
+    once(target, () => addToProject(target, complete, files.map((file) => ({ path: file.name, file }))));
   });
 }
 
@@ -108,12 +110,12 @@ function choose(attrs, picked) {
   input.click();
 }
 
-async function addToProject(api, composer, list) {
+async function addToProject(api, complete, list) {
   if (!list.length) return api.toast("There is nothing to add: only files are added, and the folders had none.");
   const progress = new Progress(list, "Adding");
   try {
     const { added } = await send(api, list, progress, { method: "upload_add", params: {} });
-    composer.addLine(`Added to the project: ${added.join(", ")}`);
+    complete(`Added to the project: ${added.join(", ")}`);
   } catch (e) {
     api.toast(progress.stopped ? "Stopped. Nothing was added." : `The files were not added: ${e.message}`);
   } finally {

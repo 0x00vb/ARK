@@ -32,7 +32,7 @@ use ark_interact::interaction::load_trace;
 use ark_interact::orchestration::{event_line, Control, ControlOutcome};
 use ark_interact::trace::interpret;
 use ark_interact::{Effect, Interaction, Labels, PendingApproval, TurnControl};
-use ark_sdk::prelude::ark_core::Focus;
+use ark_sdk::prelude::ark_core::{Focus, SessionId};
 use ark_sdk::prelude::ark_runtime::STATE_DIGEST_ITEMS;
 use ark_sdk::prelude::*;
 use base64::Engine as _;
@@ -723,6 +723,29 @@ pub(crate) enum ClientMutationError {
     Store(anyhow::Error),
 }
 
+#[derive(Debug)]
+pub(crate) enum ClientChatCreateError {
+    RequestConflict,
+    Store(anyhow::Error),
+}
+
+impl From<anyhow::Error> for ClientChatCreateError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Store(error)
+    }
+}
+
+impl ClientChatCreateError {
+    fn into_anyhow(self) -> anyhow::Error {
+        match self {
+            Self::RequestConflict => {
+                anyhow::anyhow!("that creation request belongs to another project")
+            }
+            Self::Store(error) => error,
+        }
+    }
+}
+
 impl From<anyhow::Error> for ClientMutationError {
     fn from(error: anyhow::Error) -> Self {
         Self::Store(error)
@@ -1071,6 +1094,20 @@ impl Host {
     ) -> anyhow::Result<Arc<Conv>> {
         let (approver, rx) = ark_interact::ChannelApprover::channel();
         let ix = self.siblings.open(session, project, Arc::new(approver))?;
+        let conv = Conv::new(ix);
+        tokio::spawn(forward_approvals(self.clone(), rx, Arc::downgrade(&conv)));
+        Ok(conv)
+    }
+
+    fn open_new_sibling(
+        self: &Arc<Self>,
+        session: SessionId,
+        project: &ProjectId,
+    ) -> anyhow::Result<Arc<Conv>> {
+        let (approver, rx) = ark_interact::ChannelApprover::channel();
+        let ix = self
+            .siblings
+            .open_new(session, project, Arc::new(approver))?;
         let conv = Conv::new(ix);
         tokio::spawn(forward_approvals(self.clone(), rx, Arc::downgrade(&conv)));
         Ok(conv)
@@ -3466,7 +3503,13 @@ impl Host {
                 } else {
                     project
                 };
-                self.create_client_chat(&project).await
+                self.create_client_chat(
+                    "desktop-window",
+                    &project,
+                    &uuid::Uuid::new_v4().to_string(),
+                )
+                .await
+                .map_err(ClientChatCreateError::into_anyhow)
             }
             "new_session" => {
                 let project = s("project");
@@ -3985,14 +4028,37 @@ impl Host {
     /// Make a chat for an external client without changing the chat shown in any window.
     pub(crate) async fn create_client_chat(
         self: &Arc<Self>,
+        device: &str,
         project: &str,
-    ) -> anyhow::Result<Value> {
+        request_id: &str,
+    ) -> Result<Value, ClientChatCreateError> {
+        let _serial = self.client_mutations.lock().await;
         let project = self
             .engine
             .store
-            .get_project(&ProjectId(project.to_string()))?
+            .get_project(&ProjectId(project.to_string()))
+            .map_err(|error| ClientChatCreateError::Store(error.into()))?
             .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))?;
-        let conv = self.open_sibling(None, &project.id)?;
+        let digest = Sha256::digest(format!("{device}\0{request_id}").as_bytes());
+        let session = format!("client-{digest:x}");
+        let conv = if let Some(conv) = self.conv_of(&session) {
+            if conv.about.lock().unwrap().project != project.id.as_str() {
+                return Err(ClientChatCreateError::RequestConflict);
+            }
+            conv
+        } else if let Some(record) = self
+            .engine
+            .store
+            .get_session(&session)
+            .map_err(|error| ClientChatCreateError::Store(error.into()))?
+        {
+            if record["project"].as_str() != Some(project.id.as_str()) {
+                return Err(ClientChatCreateError::RequestConflict);
+            }
+            self.open_sibling(Some(&session), &project.id)?
+        } else {
+            self.open_new_sibling(SessionId(session.clone()), &project.id)?
+        };
         let session = conv.session();
         self.addressed.lock().unwrap().insert(session, conv.clone());
         Ok(self.summary_of(&conv))

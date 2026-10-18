@@ -543,14 +543,32 @@ impl Session {
         Self::start_with(engine, project, CarryPolicy::default())
     }
 
+    /// Start a new, empty session with an identity chosen by a trusted caller.
+    pub fn start_named(
+        engine: &Engine,
+        id: SessionId,
+        project: &ProjectId,
+    ) -> Result<Session, AgentError> {
+        Self::start_named_with(engine, id, project, CarryPolicy::default())
+    }
+
     pub fn start_with(
         engine: &Engine,
         project: &ProjectId,
         policy: CarryPolicy,
     ) -> Result<Session, AgentError> {
+        Self::start_named_with(engine, SessionId::new(), project, policy)
+    }
+
+    fn start_named_with(
+        engine: &Engine,
+        id: SessionId,
+        project: &ProjectId,
+        policy: CarryPolicy,
+    ) -> Result<Session, AgentError> {
         let now = OffsetDateTime::now_utc();
         let record = SessionRecord {
-            id: SessionId::new(),
+            id,
             project: project.clone(),
             title: String::new(),
             created_at: now,
@@ -573,7 +591,11 @@ impl Session {
             steered: Vec::new(),
             turn_execution_mode: None,
         };
-        s.save(engine)?;
+        engine.store.create_session(
+            s.record.id.as_str(),
+            &s.record.project,
+            &serde_json::to_value(&s.record)?,
+        )?;
         Ok(s)
     }
 
@@ -1264,6 +1286,26 @@ mod tests {
             steered: vec![],
             ran_out: false,
         }
+    }
+
+    #[test]
+    fn named_session_creation_never_replaces_an_existing_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let project = engine.create_project("p", "").unwrap();
+        let id = SessionId("stable-client-request".into());
+        let mut first = Session::start_named(&engine, id.clone(), &project.id).unwrap();
+        first
+            .record_turn(&engine, "keep this", &outcome("kept"))
+            .unwrap();
+
+        assert!(Session::start_named(&engine, id.clone(), &project.id).is_err());
+        let reopened = Session::open(&engine, id.as_str()).unwrap().unwrap();
+        assert_eq!(reopened.record().turn_count, 1);
+        assert_eq!(
+            reopened.transcript(&engine, None).unwrap()[0].input,
+            "keep this"
+        );
     }
 
     #[test]

@@ -505,6 +505,12 @@
       "properties": {
         "project": {
           "type": "string"
+        },
+        "requestId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

@@ -24,7 +24,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ark_connect::Connections;
-use ark_core::{ActionDescriptor, ArtifactKind, Focus, Project, ProjectId, RiskTier, RuleScope};
+use ark_core::{
+    ActionDescriptor, ArtifactKind, Focus, Project, ProjectId, RiskTier, RuleScope, SessionId,
+};
 use ark_model::session::SubscriptionRuntime;
 use ark_model::Provider;
 use ark_runtime::per_agent::{Owner, PerAgent};
@@ -450,6 +452,15 @@ impl Ark {
     /// Start a new conversation session in `project`.
     pub fn start_session(&self, project: &ProjectId) -> Result<Session, ArkError> {
         Ok(Session::start(&self.engine, project)?)
+    }
+
+    /// Start a new conversation session with an identity chosen by a trusted caller.
+    pub fn start_named_session(
+        &self,
+        id: SessionId,
+        project: &ProjectId,
+    ) -> Result<Session, ArkError> {
+        Ok(Session::start_named(&self.engine, id, project)?)
     }
 
     /// Reopen a session by id or unique prefix.

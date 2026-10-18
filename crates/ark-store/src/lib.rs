@@ -558,6 +558,26 @@ impl Store {
 impl Store {
     // ---- sessions -----------------------------------------------------------
 
+    /// Persist a new conversation session without replacing an existing one.
+    pub fn create_session(
+        &self,
+        id: &str,
+        project: &ProjectId,
+        record: &serde_json::Value,
+    ) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO sessions(id, project_id, updated_at, json) VALUES(?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                id,
+                project.as_str(),
+                rfc(OffsetDateTime::now_utc()),
+                serde_json::to_string(record)?
+            ],
+        )?;
+        Ok(())
+    }
+
     /// Persist a conversation session record (opaque JSON owned by the runtime).
     pub fn put_session(
         &self,

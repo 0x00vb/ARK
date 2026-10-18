@@ -125,6 +125,7 @@ impl Adapter for Notes {
 async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     let dir = tempfile::tempdir().unwrap();
     let work = tempfile::tempdir().unwrap();
+    let other_work = tempfile::tempdir().unwrap();
     let tokens = Tokens::in_store(dir.path());
     let code = tokens
         .pair_code(
@@ -185,6 +186,12 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         match path {
             "/client/v1/hello" => {
                 serde_json::from_value::<ark_protocol::Hello>(value.clone()).unwrap();
+                assert_eq!(value["protocolMinor"], 2);
+                assert!(value["capabilities"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|capability| capability == "chat.create.idempotent"));
                 assert_eq!(value["mutationEpoch"], mutation_epoch);
                 assert_eq!(value["nextMutationCounter"], "1");
             }
@@ -306,7 +313,7 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         assert!(response.starts_with("HTTP/1.1 401"), "{response}");
     }
 
-    let create_body = json!({ "project": project }).to_string();
+    let create_body = json!({ "project": project, "requestId": "ios-create-1" }).to_string();
     let created = raw(
         served.port,
         post("/client/v1/chats", address, None, &auth, &create_body),
@@ -314,9 +321,86 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     .await;
     assert!(created.starts_with("HTTP/1.1 200"), "{created}");
     let created: Value = serde_json::from_str(created.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let retried = raw(
+        served.port,
+        post("/client/v1/chats", address, None, &auth, &create_body),
+    )
+    .await;
+    assert!(retried.starts_with("HTTP/1.1 200"), "{retried}");
+    let retried: Value = serde_json::from_str(retried.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(retried["id"], created["id"]);
+    let (_, restarted) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let retried_after_restart = raw(
+        restarted.port,
+        post("/client/v1/chats", address, None, &auth, &create_body),
+    )
+    .await;
+    assert!(
+        retried_after_restart.starts_with("HTTP/1.1 200"),
+        "{retried_after_restart}"
+    );
+    let retried_after_restart: Value =
+        serde_json::from_str(retried_after_restart.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(retried_after_restart["id"], created["id"]);
+    let legacy = raw(
+        served.port,
+        post(
+            "/client/v1/chats",
+            address,
+            None,
+            &auth,
+            &json!({ "project": project }).to_string(),
+        ),
+    )
+    .await;
+    assert!(legacy.starts_with("HTTP/1.1 200"), "{legacy}");
+    let legacy: Value = serde_json::from_str(legacy.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let legacy_retry = raw(
+        served.port,
+        post(
+            "/client/v1/chats",
+            address,
+            None,
+            &auth,
+            &json!({ "project": project }).to_string(),
+        ),
+    )
+    .await;
+    assert!(legacy_retry.starts_with("HTTP/1.1 200"), "{legacy_retry}");
+    let legacy_retry: Value =
+        serde_json::from_str(legacy_retry.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_ne!(legacy_retry["id"], legacy["id"]);
     let after = runtime.call("summary", json!({})).await.unwrap();
     assert_ne!(created["id"], before["session"]["id"]);
     assert_eq!(after["session"]["id"], before["session"]["id"]);
+    let other = runtime
+        .call(
+            "add_project",
+            json!({ "name": "Another Project", "path": other_work.path() }),
+        )
+        .await
+        .unwrap();
+    let conflict = raw(
+        served.port,
+        post(
+            "/client/v1/chats",
+            address,
+            None,
+            &auth,
+            &json!({
+                "project": other["project"]["id"],
+                "requestId": "ios-create-1",
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    assert!(conflict.starts_with("HTTP/1.1 409"), "{conflict}");
+    assert!(conflict.contains("request_conflict"), "{conflict}");
 
     let mutation_input = json!({ "attachmentIds": [], "body": "Review the delivery dates." });
     let input_digest = format!(
@@ -408,6 +492,28 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     .await;
     assert!(accepted.starts_with("HTTP/1.1 200"), "{accepted}");
     assert!(accepted.contains(r#""status":"accepted""#), "{accepted}");
+
+    let retried_while_running = raw(
+        served.port,
+        post("/client/v1/chats", address, None, &auth, &create_body),
+    )
+    .await;
+    assert!(
+        retried_while_running.starts_with("HTTP/1.1 200"),
+        "{retried_while_running}"
+    );
+    let conversation = raw(
+        served.port,
+        format!(
+            "GET /client/v1/chats/{} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {credential}\r\n\r\n",
+            created["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    assert!(conversation.starts_with("HTTP/1.1 200"), "{conversation}");
+    let conversation: Value =
+        serde_json::from_str(conversation.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(conversation["activeTurnId"], "running");
 
     let gap_input = json!({ "attachmentIds": [], "body": "Skipped counter." });
     let gap_digest = format!(

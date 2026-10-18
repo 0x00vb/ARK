@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ark_sdk::prelude::ark_core::Focus;
+use ark_sdk::prelude::ark_core::{Focus, SessionId};
 use ark_sdk::prelude::ark_runtime::{CompactReport, STATE_DIGEST_ITEMS};
 use ark_sdk::prelude::*;
 
@@ -626,6 +626,28 @@ impl Siblings {
                 .ok_or_else(|| anyhow::anyhow!("no session matches `{id}`"))?,
             None => ark.start_session(project)?,
         };
+        self.open_session(ark, session, approver)
+    }
+
+    /// Another live conversation with an identity chosen by a trusted caller.
+    pub fn open_new(
+        &self,
+        id: SessionId,
+        project: &ProjectId,
+        approver: Arc<dyn Approver>,
+    ) -> anyhow::Result<Interaction> {
+        let mut ark = self.ark.clone();
+        ark.follow_current_model();
+        let session = ark.start_named_session(id, project)?;
+        self.open_session(ark, session, approver)
+    }
+
+    fn open_session(
+        &self,
+        ark: Ark,
+        session: Session,
+        approver: Arc<dyn Approver>,
+    ) -> anyhow::Result<Interaction> {
         let project = ark
             .engine()
             .store

@@ -11,6 +11,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- Client protocol v1.2 adds `chat.create.idempotent` and an optional `requestId` so native clients
+  can retry chat creation without creating a duplicate. Older v1 clients keep their prior behavior.
 - `ark.projectSection` places an app's rows inside the current unfolded project, before chats,
   with cleanup before replacement ([ADR 0077](docs/adr/0077-an-app-can-add-rows-inside-the-current-project.md)).
 - `ArkUi::start_hidden(true)` creates the window hidden for a launch nobody asked to see (a login

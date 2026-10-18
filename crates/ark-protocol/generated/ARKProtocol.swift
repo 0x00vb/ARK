@@ -392,11 +392,14 @@ public struct MutationRequest: Codable, Equatable, Sendable {
 
 public struct NewChatRequest: Codable, Equatable, Sendable {
     public let project: String
+    public let requestId: String?
 
     public init(
-        project: String
+        project: String,
+        requestId: String? = nil
     ) {
         self.project = project
+        self.requestId = requestId
     }
 }
 

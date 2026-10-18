@@ -95,8 +95,13 @@ pub(crate) async fn conversation(host: &Arc<Host>, id: &str) -> anyhow::Result<V
     }))
 }
 
-pub(crate) async fn create_chat(host: &Arc<Host>, project: &str) -> anyhow::Result<Value> {
-    let summary = host.create_client_chat(project).await?;
+pub(crate) async fn create_chat(
+    host: &Arc<Host>,
+    device: &str,
+    project: &str,
+    request_id: &str,
+) -> Result<Value, crate::host::ClientChatCreateError> {
+    let summary = host.create_client_chat(device, project, request_id).await?;
     Ok(chat_item(&summary))
 }
 

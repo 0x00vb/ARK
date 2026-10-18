@@ -568,6 +568,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     "results",
                     "chat.send",
                     "chat.create",
+                    "chat.create.idempotent",
                     "project.terminal",
                 ]
                 .into_iter()
@@ -906,16 +907,58 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 )
                 .await;
             }
-            let input: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
-            let project = input["project"].as_str().unwrap_or("");
-            let body = crate::client::create_chat(&host, project).await?;
-            respond(
-                &mut sock,
-                "200 OK",
-                "application/json",
-                body.to_string().as_bytes(),
-            )
-            .await
+            let input: ark_protocol::NewChatRequest = match serde_json::from_slice(&req.body) {
+                Ok(value) => value,
+                Err(_) => {
+                    return client_error(
+                        &mut sock,
+                        "invalid_request",
+                        "Choose a project and try again.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            };
+            if input.project.is_empty()
+                || input.request_id.as_ref().is_some_and(|request_id| {
+                    request_id.is_empty() || request_id.len() > 128 || !request_id.is_ascii()
+                })
+            {
+                return client_error(
+                    &mut sock,
+                    "invalid_request",
+                    "Choose a project and try again.",
+                    "400 Bad Request",
+                )
+                .await;
+            }
+            let device = client_device_id(client_credential);
+            let request_id = input
+                .request_id
+                .as_deref()
+                .map(str::to_owned)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            match crate::client::create_chat(&host, &device, &input.project, &request_id).await {
+                Ok(body) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        body.to_string().as_bytes(),
+                    )
+                    .await
+                }
+                Err(crate::host::ClientChatCreateError::RequestConflict) => {
+                    client_error(
+                        &mut sock,
+                        "request_conflict",
+                        "Choose the original project or start a new chat.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientChatCreateError::Store(error)) => Err(error),
+            }
         }
         ("GET", path) if path.starts_with("/client/v1/chats/") => {
             if !client_authed {

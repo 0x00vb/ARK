@@ -1,5 +1,13 @@
 # Current state
 
+## Mobile result files
+
+Protocol v1.3 advertises `results.download`. A paired native client can list up to 50 files
+produced by that conversation and fetch the exact bytes. Inputs and rollback copies stay hidden.
+Downloads require the paired credential, an exact chat-project-scoped content address, a real
+blob no larger than 50 MiB and one of four bounded read slots. The full Core gate passes,
+including the release build and benchmark. The iOS consumer and its signed device run are next.
+
 ## Upload completion drafts
 
 On `main`, an upload keeps its completion notice in the originating chat draft.

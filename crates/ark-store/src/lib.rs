@@ -340,6 +340,28 @@ impl Store {
         collect(rows)
     }
 
+    /// Newest invocations whose work belongs to one conversation.
+    pub fn list_invocations_with_work_prefix(
+        &self,
+        project: &ProjectId,
+        prefix: &str,
+        limit: usize,
+    ) -> Result<Vec<Invocation>> {
+        let db = self.db.lock().unwrap();
+        let mut stmt = db.prepare(
+            "SELECT json FROM invocations
+             WHERE project_id=?1
+               AND substr(json_extract(json, '$.work'), 1, length(?2))=?2
+               AND json_array_length(json_extract(json, '$.produced')) > 0
+             ORDER BY created_at DESC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![project.as_str(), prefix, limit as i64],
+            |row| row.get::<_, String>(0),
+        )?;
+        collect(rows)
+    }
+
     /// Counts and sizes for a project, computed in the database (no rows are loaded).
     pub fn project_stats(&self, project: &ProjectId) -> Result<ProjectStats> {
         let db = self.db.lock().unwrap();

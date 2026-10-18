@@ -87,6 +87,8 @@ const PAIRED_SESSION_DAYS: u64 = 90;
 
 /// How long a client may take to send a request's head and body.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const CLIENT_RESULT_BYTES: u64 = 50 * 1024 * 1024;
+static CLIENT_RESULT_DOWNLOADS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 enum Check {
     OneTime(String),
@@ -566,6 +568,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     "chats",
                     "approvals",
                     "results",
+                    "results.download",
                     "chat.send",
                     "chat.create",
                     "chat.create.idempotent",
@@ -958,6 +961,78 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     .await
                 }
                 Err(crate::host::ClientChatCreateError::Store(error)) => Err(error),
+            }
+        }
+        ("GET", path) if client_result_path(path).is_some() => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let (chat, result) = client_result_path(path).expect("guarded result path");
+            let Ok(_download) = CLIENT_RESULT_DOWNLOADS.try_acquire() else {
+                return client_error(
+                    &mut sock,
+                    "result_busy",
+                    "Another result is opening. Try again.",
+                    "429 Too Many Requests",
+                )
+                .await;
+            };
+            let host = Arc::clone(&host);
+            let chat = chat.to_string();
+            let result = result.to_string();
+            let file = tokio::task::spawn_blocking(move || {
+                host.client_result_file(&chat, &result, CLIENT_RESULT_BYTES)
+            })
+            .await?;
+            match file {
+                Ok(file) => {
+                    let name = safe_download_name(&file.name);
+                    let headers =
+                        format!("Content-Disposition: attachment; filename=\"{name}\"\r\n");
+                    respond_with(
+                        &mut sock,
+                        "200 OK",
+                        client_result_mime(&file.kind, &name),
+                        &headers,
+                        &file.bytes,
+                    )
+                    .await
+                }
+                Err(crate::host::ClientResultError::ChatMissing)
+                | Err(crate::host::ClientResultError::ResultMissing) => {
+                    client_error(
+                        &mut sock,
+                        "result_missing",
+                        "That result is no longer available.",
+                        "404 Not Found",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientResultError::TooLarge) => {
+                    client_error(
+                        &mut sock,
+                        "result_too_large",
+                        "This result is too large to open on this device.",
+                        "413 Content Too Large",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientResultError::Store(error)) => {
+                    tracing::error!("could not read client result: {error:#}");
+                    client_error(
+                        &mut sock,
+                        "result_unavailable",
+                        "That result could not be opened. Try again.",
+                        "500 Internal Server Error",
+                    )
+                    .await
+                }
             }
         }
         ("GET", path) if path.starts_with("/client/v1/chats/") => {
@@ -1419,6 +1494,48 @@ fn client_mutation_epoch(credential: &str) -> String {
 
 fn client_device_id(credential: &str) -> String {
     format!("{:x}", Sha256::digest(credential.as_bytes()))
+}
+
+fn client_result_path(path: &str) -> Option<(&str, &str)> {
+    let tail = path.strip_prefix("/client/v1/chats/")?;
+    let (chat, result) = tail.split_once("/results/")?;
+    (!chat.is_empty() && !result.is_empty() && !chat.contains('/') && !result.contains('/'))
+        .then_some((chat, result))
+}
+
+fn safe_download_name(name: &str) -> String {
+    let safe = name
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || " ._-".contains(*character))
+        .take(120)
+        .collect::<String>();
+    let safe = safe.trim_matches([' ', '.']);
+    if safe.is_empty() {
+        "result".into()
+    } else {
+        safe.into()
+    }
+}
+
+fn client_result_mime<'a>(kind: &str, name: &'a str) -> &'a str {
+    match name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+    {
+        Some(extension) if extension == "json" => "application/json",
+        Some(extension) if extension == "pdf" => "application/pdf",
+        Some(extension) if extension == "png" => "image/png",
+        Some(extension) if extension == "jpg" || extension == "jpeg" => "image/jpeg",
+        Some(extension) if extension == "gif" => "image/gif",
+        Some(extension) if extension == "webp" => "image/webp",
+        Some(extension) if extension == "zip" => "application/zip",
+        Some(extension) if extension == "csv" => "text/csv; charset=utf-8",
+        Some(extension) if extension == "html" || extension == "htm" => "text/html; charset=utf-8",
+        Some(extension) if extension == "md" || extension == "txt" => "text/plain; charset=utf-8",
+        _ if matches!(kind, "text" | "source") => "text/plain; charset=utf-8",
+        _ if kind == "json" => "application/json",
+        _ => "application/octet-stream",
+    }
 }
 
 fn client_event(

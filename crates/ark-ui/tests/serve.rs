@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use ark_interact::ark_orchestrate::Orchestrator;
 use ark_interact::App;
+use ark_sdk::prelude::ark_core::Invocation;
 use ark_sdk::prelude::ark_model::{Completion, MockProvider, ToolCall, Usage};
 use ark_sdk::prelude::*;
 use ark_ui::access::Tokens;
@@ -186,12 +187,17 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         match path {
             "/client/v1/hello" => {
                 serde_json::from_value::<ark_protocol::Hello>(value.clone()).unwrap();
-                assert_eq!(value["protocolMinor"], 2);
+                assert_eq!(value["protocolMinor"], 3);
                 assert!(value["capabilities"]
                     .as_array()
                     .unwrap()
                     .iter()
                     .any(|capability| capability == "chat.create.idempotent"));
+                assert!(value["capabilities"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|capability| capability == "results.download"));
                 assert_eq!(value["mutationEpoch"], mutation_epoch);
                 assert_eq!(value["nextMutationCounter"], "1");
             }
@@ -329,6 +335,149 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     assert!(retried.starts_with("HTTP/1.1 200"), "{retried}");
     let retried: Value = serde_json::from_str(retried.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(retried["id"], created["id"]);
+
+    let result_bytes = br#"{"recommended":"North Mill"}"#;
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    let result_id = store.put_blob(result_bytes).unwrap();
+    let before_id = store.put_blob(b"old private version").unwrap();
+    let mut result_invocation = Invocation::new("files.write", RiskTier::Mutate, json!({}));
+    result_invocation.work = Some(format!("session:{}/0", created["id"].as_str().unwrap()));
+    result_invocation.produced = vec![result_id.clone(), before_id.clone()];
+    let result = Artifact::new(
+        result_id.clone(),
+        ArtifactKind::Json,
+        "supplier\"\r\nreport.json",
+        result_bytes.len() as u64,
+        Provenance::Produced {
+            invocation: result_invocation.id.clone(),
+        },
+    );
+    store
+        .put_artifact(&ProjectId(project.to_string()), &result)
+        .unwrap();
+    let mut before_artifact = Artifact::new(
+        before_id.clone(),
+        ArtifactKind::Text,
+        "supplier-old.json",
+        19,
+        Provenance::Produced {
+            invocation: result_invocation.id.clone(),
+        },
+    );
+    before_artifact.meta = json!({ "before": true, "path": "supplier.json" });
+    store
+        .put_artifact(&ProjectId(project.to_string()), &before_artifact)
+        .unwrap();
+    store
+        .put_invocation(&ProjectId(project.to_string()), &result_invocation)
+        .unwrap();
+    let too_large_id = store.put_blob(b"large fixture").unwrap();
+    let mut too_large_invocation = Invocation::new("files.write", RiskTier::Mutate, json!({}));
+    too_large_invocation.work = Some(format!("session:{}/1", created["id"].as_str().unwrap()));
+    too_large_invocation.produced = vec![too_large_id.clone()];
+    let too_large = Artifact::new(
+        too_large_id.clone(),
+        ArtifactKind::Binary,
+        "large.bin",
+        50 * 1024 * 1024 + 1,
+        Provenance::Produced {
+            invocation: too_large_invocation.id.clone(),
+        },
+    );
+    store
+        .put_artifact(&ProjectId(project.to_string()), &too_large)
+        .unwrap();
+    store
+        .put_invocation(&ProjectId(project.to_string()), &too_large_invocation)
+        .unwrap();
+    let input_id = store.put_blob(b"private input").unwrap();
+    store
+        .put_artifact(
+            &ProjectId(project.to_string()),
+            &Artifact::new(
+                input_id.clone(),
+                ArtifactKind::Text,
+                "input.txt",
+                13,
+                Provenance::Captured {
+                    origin: "test".into(),
+                    locator: "input".into(),
+                },
+            ),
+        )
+        .unwrap();
+    for index in 0..51 {
+        let mut read = Invocation::new("files.read", RiskTier::Read, json!({ "index": index }));
+        read.work = Some(format!(
+            "session:{}/{}",
+            created["id"].as_str().unwrap(),
+            index + 2
+        ));
+        store
+            .put_invocation(&ProjectId(project.to_string()), &read)
+            .unwrap();
+    }
+    drop(store);
+
+    let conversation = raw(
+        served.port,
+        format!(
+            "GET /client/v1/chats/{} HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n",
+            created["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    let conversation: Value =
+        serde_json::from_str(conversation.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let downloadable = conversation["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|result| result["id"] == result_id.as_str())
+        .unwrap();
+    assert!(conversation["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|result| result["id"] != input_id.as_str()));
+    assert!(conversation["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|result| result["id"] != before_id.as_str()));
+    assert_eq!(downloadable["byteCount"], result_bytes.len());
+    let download_path = downloadable["downloadPath"].as_str().unwrap();
+    let downloaded = raw(
+        served.port,
+        format!("GET {download_path} HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n"),
+    )
+    .await;
+    assert!(downloaded.starts_with("HTTP/1.1 200"), "{downloaded}");
+    assert!(downloaded.contains("Content-Type: application/json"));
+    assert!(
+        downloaded.contains("Content-Disposition: attachment; filename=\"supplierreport.json\"")
+    );
+    assert_eq!(
+        downloaded.split("\r\n\r\n").nth(1).unwrap().as_bytes(),
+        result_bytes
+    );
+    let oversized = raw(
+        served.port,
+        format!(
+            "GET /client/v1/chats/{}/results/{} HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n",
+            created["id"].as_str().unwrap(),
+            too_large_id.as_str()
+        ),
+    )
+    .await;
+    assert!(oversized.starts_with("HTTP/1.1 413"), "{oversized}");
+    let signed_out = raw(
+        served.port,
+        format!("GET {download_path} HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+    )
+    .await;
+    assert!(signed_out.starts_with("HTTP/1.1 401"), "{signed_out}");
+
     let (_, restarted) = ArkUi::new(app(dir.path()))
         .access(Access::Tokens(tokens.clone()))
         .serve_background("127.0.0.1:0")
@@ -401,6 +550,33 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     .await;
     assert!(conflict.starts_with("HTTP/1.1 409"), "{conflict}");
     assert!(conflict.contains("request_conflict"), "{conflict}");
+    let other_chat = raw(
+        served.port,
+        post(
+            "/client/v1/chats",
+            address,
+            None,
+            &auth,
+            &json!({
+                "project": other["project"]["id"],
+                "requestId": "ios-create-other",
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+    let other_chat: Value =
+        serde_json::from_str(other_chat.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let cross_project = raw(
+        served.port,
+        format!(
+            "GET /client/v1/chats/{}/results/{} HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n",
+            other_chat["id"].as_str().unwrap(),
+            result_id.as_str()
+        ),
+    )
+    .await;
+    assert!(cross_project.starts_with("HTTP/1.1 404"), "{cross_project}");
 
     let mutation_input = json!({ "attachmentIds": [], "body": "Review the delivery dates." });
     let input_digest = format!(

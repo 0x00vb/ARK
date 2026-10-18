@@ -729,6 +729,28 @@ pub(crate) enum ClientChatCreateError {
     Store(anyhow::Error),
 }
 
+pub(crate) struct ClientResultFile {
+    pub(crate) name: String,
+    pub(crate) kind: String,
+    pub(crate) bytes: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub(crate) enum ClientResultError {
+    ChatMissing,
+    ResultMissing,
+    TooLarge,
+    Store(anyhow::Error),
+}
+
+const CLIENT_RESULT_COUNT: usize = 50;
+
+impl From<anyhow::Error> for ClientResultError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Store(error)
+    }
+}
+
 impl From<anyhow::Error> for ClientChatCreateError {
     fn from(error: anyhow::Error) -> Self {
         Self::Store(error)
@@ -4062,6 +4084,145 @@ impl Host {
         let session = conv.session();
         self.addressed.lock().unwrap().insert(session, conv.clone());
         Ok(self.summary_of(&conv))
+    }
+
+    pub(crate) fn client_results(
+        &self,
+        session: &str,
+    ) -> Result<Vec<ark_protocol::ResultSummary>, ClientResultError> {
+        let record = self
+            .engine
+            .store
+            .get_session(session)
+            .map_err(|error| ClientResultError::Store(error.into()))?
+            .ok_or(ClientResultError::ChatMissing)?;
+        let project_id = record["project"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or(ClientResultError::ChatMissing)?;
+        let project = ProjectId(project_id.to_string());
+        let project_name = self
+            .engine
+            .store
+            .get_project(&project)
+            .map_err(|error| ClientResultError::Store(error.into()))?
+            .map(|project| project.name)
+            .unwrap_or_else(|| "ARK".to_string());
+        let work_prefix = format!("session:{session}/");
+        let invocations = self
+            .engine
+            .store
+            .list_invocations_with_work_prefix(&project, &work_prefix, CLIENT_RESULT_COUNT)
+            .map_err(|error| ClientResultError::Store(error.into()))?;
+        let mut seen = std::collections::HashSet::new();
+        let mut results = Vec::new();
+        for invocation in invocations {
+            for artifact_id in &invocation.produced {
+                if results.len() == CLIENT_RESULT_COUNT {
+                    return Ok(results);
+                }
+                if !seen.insert(artifact_id.as_str().to_string()) {
+                    continue;
+                }
+                let Some(artifact) = self
+                    .engine
+                    .store
+                    .get_artifact(&project, artifact_id)
+                    .map_err(|error| ClientResultError::Store(error.into()))?
+                    .filter(|artifact| {
+                        artifact.meta["before"] != true
+                            &&
+                        matches!(
+                            &artifact.provenance,
+                            Provenance::Produced { invocation: source } if source == &invocation.id
+                        )
+                    })
+                else {
+                    continue;
+                };
+                results.push(ark_protocol::ResultSummary {
+                    id: artifact.id.as_str().to_string(),
+                    title: artifact.name,
+                    project: project_name.clone(),
+                    created_at: artifact
+                        .created_at
+                        .format(&time::format_description::well_known::Rfc3339)
+                        .map_err(|error| ClientResultError::Store(error.into()))?,
+                    kind: artifact.kind.as_tag(),
+                    byte_count: Some(artifact.size),
+                    preview_text: None,
+                    download_path: Some(format!(
+                        "/client/v1/chats/{session}/results/{}",
+                        artifact.id.as_str()
+                    )),
+                });
+            }
+        }
+        Ok(results)
+    }
+
+    pub(crate) fn client_result_file(
+        &self,
+        session: &str,
+        result: &str,
+        max_bytes: u64,
+    ) -> Result<ClientResultFile, ClientResultError> {
+        let record = self
+            .engine
+            .store
+            .get_session(session)
+            .map_err(|error| ClientResultError::Store(error.into()))?
+            .ok_or(ClientResultError::ChatMissing)?;
+        let project_id = record["project"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or(ClientResultError::ChatMissing)?;
+        if result.len() != 64 || !result.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(ClientResultError::ResultMissing);
+        }
+        let requested = ArtifactId(result.to_string());
+        let allowed = self
+            .client_results(session)?
+            .into_iter()
+            .any(|summary| summary.id == result);
+        if !allowed {
+            return Err(ClientResultError::ResultMissing);
+        }
+        let artifact = self
+            .engine
+            .store
+            .get_artifact(&ProjectId(project_id.to_string()), &requested)
+            .map_err(|error| ClientResultError::Store(error.into()))?
+            .ok_or(ClientResultError::ResultMissing)?;
+        if artifact.id != requested || artifact.size > max_bytes {
+            return Err(ClientResultError::TooLarge);
+        }
+        let path = self.engine.store.blob_path(&artifact.id);
+        let file = std::fs::File::open(path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ClientResultError::ResultMissing
+            } else {
+                ClientResultError::Store(error.into())
+            }
+        })?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| ClientResultError::Store(error.into()))?;
+        if !metadata.is_file() || metadata.len() > max_bytes {
+            return Err(ClientResultError::TooLarge);
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(max_bytes + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| ClientResultError::Store(error.into()))?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(ClientResultError::TooLarge);
+        }
+        Ok(ClientResultFile {
+            name: artifact.name,
+            kind: artifact.kind.as_tag(),
+            bytes,
+        })
     }
 
     /// The questions a chat asks now (`hello`'s shape).

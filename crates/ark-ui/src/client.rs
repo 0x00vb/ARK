@@ -86,11 +86,14 @@ pub(crate) async fn conversation(host: &Arc<Host>, id: &str) -> anyhow::Result<V
         .flatten()
         .map(attention_item)
         .collect::<Vec<_>>();
+    let results = host
+        .client_results(id)
+        .map_err(|error| anyhow::anyhow!("could not read results: {error:?}"))?;
     Ok(json!({
         "chat": chat,
         "messages": messages,
         "approvals": approvals,
-        "results": [],
+        "results": results,
         "activeTurnId": read["running"].as_str().map(|_| "running"),
     }))
 }

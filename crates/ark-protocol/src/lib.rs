@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_MAJOR: u16 = 1;
-pub const CURRENT_MINOR: u16 = 2;
+pub const CURRENT_MINOR: u16 = 3;
 pub const TERMINAL_WRITE_BYTES: u64 = 16 * 1024;
 pub const TERMINAL_REPLAY_BYTES: u64 = 256 * 1024;
 

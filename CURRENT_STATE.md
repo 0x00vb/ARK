@@ -1,5 +1,23 @@
 # Current state
 
+## Mobile continuity listener
+
+In development on `codex/mobile-client-listener`: a stoppable client-only listener attaches to
+the same live Host as Desktop. Credentials distinguish owner from external client. Legacy access
+entries default to owner, while external-client credentials and grants live in separate fields so
+an older binary cannot reinterpret them as owner authority. QR and account pairing issue
+external-client credentials. Account
+pairing binds the verified account subject and requested route id to the listener route. Desktop
+still needs to construct `ark-account`'s production route-assertion verifier, register its route and
+retain the listener handle across sign-in state. The verifier requires exact ES256 claims, refreshes
+unknown signing keys and consumes assertion ids in memory; credential issuance also persists the
+assertion-id hash atomically so replay stays refused across restarts. Source review added a
+loopback-only cleartext boundary, bounded connections and bodies, signing-key cache expiry and
+completion-based JWKS refresh throttling, including empty, invalid, slow and stale-key cases. A
+real HTTP integration test signs through a served pairing JWKS, pairs once and refuses replay with
+the typed error envelope. The full repository gate passes. Desktop still must wire the listener
+into its signed-in lifecycle before account pairing is reachable in production.
+
 ## Mobile result files
 
 Protocol v1.3 advertises `results.download`. A paired native client can list up to 50 files

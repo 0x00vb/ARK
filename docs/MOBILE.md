@@ -169,7 +169,7 @@ on or names iOS. Wording and display semantics stay computed in `ark-interact` a
 A version-independent, additive `/client/bootstrap` envelope returns the protocol majors served,
 their latest minors, the runtime version and an update URL. After negotiation, `hello` returns the
 selected major and minor, runtime-scoped capabilities, payload and upload limits, and the minimum
-client protocol it accepts.
+client protocol it accepts. A registered computer also returns the stable account route id.
 
 A major change is incompatible. A minor version only adds optional fields, events or
 capabilities. Clients ignore unknown object fields and unknown events, retain their sequence
@@ -239,18 +239,31 @@ ARK releases the protocol first. The app then pins that release.
 
 ## 7. Native authentication and local data
 
-The pairing exchange issues one random native device credential. Only its hash is stored by the
-runtime. It is bound to an immutable device id, expiry and mutation epoch. The editable device
-name is not identity.
+The pairing exchange issues one random `external_client` credential. Only its hash is stored by
+the runtime, outside the legacy owner-token array so older binaries fail closed. It is bound to an
+immutable device id, expiry and mutation epoch. Account pairing also records the installation id
+for revocation and diagnostics. Re-pairing that installation replaces its earlier credential. The
+editable device name is not identity.
 
 The app stores the credential only in Keychain with a ThisDeviceOnly accessibility class. It
 never enters UserDefaults, a file, URL, universal link, custom scheme, notification, crash report
 or log. App Transport Security allows valid HTTPS only, with no broad exception.
 
-The credential has runtime-owner authority. It may reach projects, file writes and shell-backed
-actions even though the phone UI hides them. Another signed-in device can revoke it immediately.
-A 401, explicit sign-out or revoke cancels SSE, deletes the Keychain item, purges protected local
-data and returns to pairing.
+The credential is accepted only by `/client/v1/*` on a client-only listener. It cannot authenticate
+the runtime page, generic RPC, browser carrier, generic event stream or screen control. The typed
+contract still includes bounded project terminal actions, so hiding a control is never treated as
+authorization. Another signed-in device can revoke it immediately. A 401, explicit sign-out or
+revoke cancels SSE, deletes the Keychain item, purges protected local data and returns to pairing.
+
+Google sign-in gives the app an ARK Account access token with `runtime.pair`. The app sends that
+token only to the ARK Cloud API, which returns a 60-second ES256 assertion addressed to the exact
+runtime route. The app sends that assertion as the bearer credential to
+`POST /client/v1/account-pair`; the account token never reaches the computer. `ark-account`
+verifies the API's
+separate pairing JWKS, issuer, route audience, type, `azp=ark-ios`, scope, owner `sub`, route id,
+`iat`, `exp` and one-use `jti`. Credential issuance and the persisted `jti` hash share one locked
+write, so a process restart cannot replay an assertion that has not expired. The account registry
+returns no runtime credential.
 
 First release stores no chat or result body persistently. It may keep a bounded, Data Protection
 protected index of ids, titles and restoration hints. It clears on sign-out or revoke. Drafts stay

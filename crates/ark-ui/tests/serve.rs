@@ -4,18 +4,48 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use ark_account::pairing::{
+    PairingAssertionVerifier, PairingVerificationError, RuntimePairingVerifier,
+    VerifiedRuntimePairing,
+};
 use ark_interact::ark_orchestrate::Orchestrator;
 use ark_interact::App;
 use ark_sdk::prelude::ark_core::Invocation;
 use ark_sdk::prelude::ark_model::{Completion, MockProvider, ToolCall, Usage};
 use ark_sdk::prelude::*;
-use ark_ui::access::Tokens;
+use ark_ui::access::{CredentialScope, Tokens};
 use ark_ui::remote::Client;
-use ark_ui::{Access, ArkUi};
+use ark_ui::{Access, AccountPairing, ArkUi, ClientListener};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 struct Notes;
+
+struct TestAccountVerifier;
+
+#[async_trait::async_trait]
+impl PairingAssertionVerifier for TestAccountVerifier {
+    async fn verify(
+        &self,
+        assertion: &str,
+        _route_id: &str,
+        _owner_subject: &str,
+    ) -> Result<VerifiedRuntimePairing, PairingVerificationError> {
+        match assertion {
+            "owner-jwt" => Ok(VerifiedRuntimePairing {
+                subject: "account-owner".into(),
+                assertion_id: "owner-assertion".into(),
+                expires_at: u64::MAX,
+            }),
+            "other-jwt" => Ok(VerifiedRuntimePairing {
+                subject: "another-account".into(),
+                assertion_id: "other-assertion".into(),
+                expires_at: u64::MAX,
+            }),
+            _ => Err(PairingVerificationError::Assertion),
+        }
+    }
+}
 
 #[tokio::test]
 async fn wasm_compilation_is_scoped_to_an_exact_trusted_worker() {
@@ -128,20 +158,28 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     let work = tempfile::tempdir().unwrap();
     let other_work = tempfile::tempdir().unwrap();
     let tokens = Tokens::in_store(dir.path());
-    let code = tokens
-        .pair_code(
-            "Owner Mac",
-            Duration::from_secs(60),
-            Duration::from_secs(90 * 24 * 3600),
-            None,
-        )
-        .unwrap();
+    let owner = tokens.create("Owner Mac").unwrap();
     let (runtime, served) = ArkUi::new(app(dir.path()))
         .access(Access::Tokens(tokens.clone()))
         .serve_background("127.0.0.1:0")
         .await
         .unwrap();
     let address = "runtime.example";
+
+    let made = raw(
+        served.port,
+        post(
+            "/pair",
+            address,
+            Some("https://runtime.example"),
+            &format!("Authorization: Bearer {owner}\r\n"),
+            r#"{"scope":"external_client"}"#,
+        ),
+    )
+    .await;
+    assert!(made.starts_with("HTTP/1.1 200"), "{made}");
+    let made: Value = serde_json::from_str(made.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let code = made["code"].as_str().unwrap();
 
     let bootstrap = raw(
         served.port,
@@ -187,7 +225,7 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         match path {
             "/client/v1/hello" => {
                 serde_json::from_value::<ark_protocol::Hello>(value.clone()).unwrap();
-                assert_eq!(value["protocolMinor"], 3);
+                assert_eq!(value["protocolMinor"], 4);
                 assert!(value["capabilities"]
                     .as_array()
                     .unwrap()
@@ -871,6 +909,347 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         revoked_terminal.starts_with("HTTP/1.1 401"),
         "{revoked_terminal}"
     );
+}
+
+#[tokio::test]
+async fn client_listener_shares_one_host_and_exposes_only_the_typed_surface() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("owner").unwrap();
+    let phone = tokens
+        .issue_external_client(
+            "ARK Account",
+            "Phone",
+            "install-phone",
+            Duration::from_secs(24 * 3600),
+        )
+        .unwrap();
+    let (host, _assets) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    assert!(ClientListener::new(tokens.clone())
+        .serve(host.clone(), "0.0.0.0:0")
+        .await
+        .is_err());
+    let served = ClientListener::new(tokens.clone())
+        .serve(host.clone(), "127.0.0.1:0")
+        .await
+        .unwrap();
+    let address = format!("127.0.0.1:{}", served.port);
+
+    let created = host.call("new_session", json!({})).await.unwrap();
+    let created_id = created["session"]["id"].as_str().unwrap();
+    let phone_auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let chats = raw(
+        served.port,
+        format!("GET /client/v1/chats HTTP/1.1\r\nHost: {address}\r\n{phone_auth}\r\n"),
+    )
+    .await;
+    assert!(chats.starts_with("HTTP/1.1 200"), "{chats}");
+    let chats: Value = serde_json::from_str(chats.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let chats = chats["chats"].as_array().unwrap();
+    assert_eq!(chats.len(), 2);
+    assert!(chats.iter().any(|chat| chat["id"] == created_id));
+
+    let owner_auth = format!("Authorization: Bearer {owner}\r\n");
+    let owner_on_client_surface = raw(
+        served.port,
+        format!("GET /client/v1/chats HTTP/1.1\r\nHost: {address}\r\n{owner_auth}\r\n"),
+    )
+    .await;
+    assert!(
+        owner_on_client_surface.starts_with("HTTP/1.1 401"),
+        "{owner_on_client_surface}"
+    );
+    for (method, path, auth, body) in [
+        ("GET", "/", phone_auth.as_str(), ""),
+        ("GET", "/manifest.webmanifest", phone_auth.as_str(), ""),
+        ("GET", "/events", phone_auth.as_str(), ""),
+        ("POST", "/rpc", phone_auth.as_str(), r#"{"method":"hello"}"#),
+        ("POST", "/rpc", owner_auth.as_str(), r#"{"method":"hello"}"#),
+        ("GET", "/ext/browser.html", phone_auth.as_str(), ""),
+    ] {
+        let request = format!(
+            "{method} {path} HTTP/1.1\r\nHost: {address}\r\n{auth}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let response = raw(served.port, request).await;
+        assert!(response.starts_with("HTTP/1.1 404"), "{path}: {response}");
+    }
+
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut events = tokio::net::TcpStream::connect(&address).await.unwrap();
+    events
+        .write_all(
+            format!(
+                "GET /client/v1/events?after=0 HTTP/1.1\r\nHost: {address}\r\n{phone_auth}\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut ready = [0; 512];
+    let count = tokio::time::timeout(Duration::from_secs(1), events.read(&mut ready))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&ready[..count]).contains("200 OK"));
+    drop(served);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if events.read(&mut ready).await.unwrap() == 0 {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("dropping the listener closes active streams");
+    assert!(
+        tokio::net::TcpStream::connect(&address).await.is_err(),
+        "dropping the server stops the listener"
+    );
+}
+
+#[tokio::test]
+async fn account_pairing_binds_the_verified_subject_and_issues_external_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let (host, _assets) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let pairing = AccountPairing::new(
+        "route-macbook",
+        "account-owner",
+        Arc::new(TestAccountVerifier),
+    )
+    .unwrap();
+    let served = ClientListener::new(tokens.clone())
+        .account_pairing(pairing)
+        .serve(host, "127.0.0.1:0")
+        .await
+        .unwrap();
+    let address = format!("127.0.0.1:{}", served.port);
+    let body = json!({
+        "routeId": "route-macbook",
+        "deviceName": "Valentino's iPhone",
+        "installationId": "install-1"
+    })
+    .to_string();
+
+    let wrong_route = json!({
+        "routeId": "route-someone-else",
+        "deviceName": "Valentino's iPhone",
+        "installationId": "install-1"
+    })
+    .to_string();
+    let invalid_body = json!({
+        "routeId": "route-macbook",
+        "deviceName": "",
+        "installationId": "install-1"
+    })
+    .to_string();
+    let invalid = raw(
+        served.port,
+        post(
+            "/client/v1/account-pair",
+            &address,
+            None,
+            "Authorization: Bearer owner-jwt\r\n",
+            &invalid_body,
+        ),
+    )
+    .await;
+    assert!(invalid.starts_with("HTTP/1.1 400"), "{invalid}");
+    let invalid_error: ark_protocol::ErrorEnvelope =
+        serde_json::from_str(invalid.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(invalid_error.code, "invalid_request");
+    assert!(!invalid_error.display.is_empty());
+    assert_eq!(invalid_error.retry_after_seconds, None);
+    let refused_route = raw(
+        served.port,
+        post(
+            "/client/v1/account-pair",
+            &address,
+            None,
+            "Authorization: Bearer owner-jwt\r\n",
+            &wrong_route,
+        ),
+    )
+    .await;
+    assert!(refused_route.starts_with("HTTP/1.1 401"), "{refused_route}");
+
+    for assertion in ["invalid-jwt", "other-jwt"] {
+        let auth = format!("Authorization: Bearer {assertion}\r\n");
+        let response = raw(
+            served.port,
+            post("/client/v1/account-pair", &address, None, &auth, &body),
+        )
+        .await;
+        assert!(response.starts_with("HTTP/1.1 401"), "{response}");
+    }
+
+    let auth = "Authorization: Bearer owner-jwt\r\n";
+    let response = raw(
+        served.port,
+        post("/client/v1/account-pair", &address, None, auth, &body),
+    )
+    .await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let response: ark_protocol::PairResponse =
+        serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert!(tokens
+        .check_scope(&response.credential, CredentialScope::ExternalClient)
+        .is_some());
+    assert!(tokens
+        .check_scope(&response.credential, CredentialScope::Owner)
+        .is_none());
+    assert_eq!(
+        tokens
+            .info(&response.credential)
+            .unwrap()
+            .installation_id
+            .as_deref(),
+        Some("install-1")
+    );
+
+    let replay = raw(
+        served.port,
+        post("/client/v1/account-pair", &address, None, auth, &body),
+    )
+    .await;
+    assert!(replay.starts_with("HTTP/1.1 401"), "{replay}");
+
+    let hello = raw(
+        served.port,
+        format!(
+            "GET /client/v1/hello HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {}\r\n\r\n",
+            response.credential
+        ),
+    )
+    .await;
+    assert!(hello.contains(r#""routeId":"route-macbook""#), "{hello}");
+}
+
+#[tokio::test]
+async fn real_cloud_assertion_pairs_once_through_the_listener() {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    use ring::rand::SystemRandom;
+    use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let random = SystemRandom::new();
+    let document = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &random).unwrap();
+    let signing_key =
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, document.as_ref(), &random)
+            .unwrap();
+    let public = signing_key.public_key().as_ref();
+    let jwks = json!({
+        "keys": [{
+            "kty": "EC",
+            "crv": "P-256",
+            "kid": "integration-key",
+            "alg": "ES256",
+            "use": "sig",
+            "x": URL_SAFE_NO_PAD.encode(&public[1..33]),
+            "y": URL_SAFE_NO_PAD.encode(&public[33..65])
+        }]
+    })
+    .to_string();
+    let keys = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let keys_address = keys.local_addr().unwrap();
+    let keys_task = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = keys.accept().await else {
+                return;
+            };
+            let body = jwks.clone();
+            tokio::spawn(async move {
+                let mut request = [0; 2048];
+                let _ = socket.read(&mut request).await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    let issuer = format!("http://{keys_address}");
+    let verifier = RuntimePairingVerifier::new(&issuer, format!("{issuer}/pairing-jwks")).unwrap();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let header = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&json!({
+            "alg": "ES256",
+            "kid": "integration-key",
+            "typ": "ark-runtime-pair+jwt"
+        }))
+        .unwrap(),
+    );
+    let claims = URL_SAFE_NO_PAD.encode(
+        serde_json::to_vec(&json!({
+            "iss": issuer,
+            "aud": "urn:ark:runtime:route-integration",
+            "sub": "account-owner",
+            "azp": "ark-ios",
+            "scope": "runtime.pair",
+            "route_id": "route-integration",
+            "jti": "integration-jti",
+            "iat": now,
+            "exp": now + 60
+        }))
+        .unwrap(),
+    );
+    let signing_input = format!("{header}.{claims}");
+    let signature = signing_key.sign(&random, signing_input.as_bytes()).unwrap();
+    let assertion = format!(
+        "{signing_input}.{}",
+        URL_SAFE_NO_PAD.encode(signature.as_ref())
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let (host, _assets) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let pairing =
+        AccountPairing::new("route-integration", "account-owner", Arc::new(verifier)).unwrap();
+    let served = ClientListener::new(tokens.clone())
+        .account_pairing(pairing)
+        .serve(host, "127.0.0.1:0")
+        .await
+        .unwrap();
+    let address = format!("127.0.0.1:{}", served.port);
+    let body = json!({
+        "routeId": "route-integration",
+        "deviceName": "Integration iPhone",
+        "installationId": "integration-install"
+    })
+    .to_string();
+    let auth = format!("Authorization: Bearer {assertion}\r\n");
+
+    let paired = raw(
+        served.port,
+        post("/client/v1/account-pair", &address, None, &auth, &body),
+    )
+    .await;
+    assert!(paired.starts_with("HTTP/1.1 200"), "{paired}");
+    let paired: ark_protocol::PairResponse =
+        serde_json::from_str(paired.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert!(tokens
+        .check_scope(&paired.credential, CredentialScope::ExternalClient)
+        .is_some());
+
+    let replay = raw(
+        served.port,
+        post("/client/v1/account-pair", &address, None, &auth, &body),
+    )
+    .await;
+    assert!(replay.starts_with("HTTP/1.1 401"), "{replay}");
+    let replay: ark_protocol::ErrorEnvelope =
+        serde_json::from_str(replay.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(replay.code, "account_pairing_refused");
+    assert!(!replay.display.is_empty());
+    assert_eq!(replay.retry_after_seconds, None);
+    keys_task.abort();
 }
 
 /// Reads the notes once, then answers "Read.".

@@ -1,5 +1,30 @@
 {
   "$defs": {
+    "AccountPairRequest": {
+      "properties": {
+        "deviceName": {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        "installationId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "routeId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "routeId",
+        "deviceName",
+        "installationId"
+      ],
+      "type": "object"
+    },
     "ApprovalChoice": {
       "properties": {
         "destructive": {
@@ -351,6 +376,12 @@
           "maximum": 65535,
           "minimum": 0,
           "type": "integer"
+        },
+        "routeId": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -960,6 +991,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "A schema root that names every type a separately released client may receive or send.",
   "properties": {
+    "account_pair_request": {
+      "$ref": "#/$defs/AccountPairRequest"
+    },
     "bootstrap": {
       "$ref": "#/$defs/Bootstrap"
     },
@@ -1030,6 +1064,7 @@
   "required": [
     "bootstrap",
     "pair_request",
+    "account_pair_request",
     "pair_response",
     "hello",
     "error",

@@ -263,6 +263,7 @@ async fn sign_in_through_the_browser_and_stay_signed_in() {
     assert_eq!(q["prompt"], "login");
     assert!(q["redirect_uri"].starts_with("http://127.0.0.1:"));
     assert!(q["scope"].split(' ').any(|s| s == "offline_access"));
+    assert!(q["scope"].split(' ').any(|s| s == "runtime.pair"));
 
     let url = s.url().to_string();
     let (profile, landing) = tokio::join!(s.finish(Duration::from_secs(5)), browser(&url));

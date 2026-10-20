@@ -4,7 +4,8 @@
 //! A token is created once, shown once, and kept only as its SHA-256 hash in
 //! `<store>/access.json` (mode 0600 on Unix). Each has a name ("laptop", "phone") so it can be
 //! revoked alone. The file is read on every check, so a revoke takes effect without a restart.
-//! A token can do everything the window can: it is the runtime owner's key, not a user account.
+//! Owner tokens can do everything the window can. External-client credentials are limited by
+//! the HTTP surface that accepts them.
 //!
 //! A link is a one-time code for a browser: whoever runs the runtime (a control plane, a
 //! person) makes one with [`Tokens::link`], and the browser trades it once, within a minute or
@@ -33,6 +34,12 @@ pub struct TokenInfo {
     /// When a session ends (milliseconds since the epoch). None for a saved token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_ms: Option<u64>,
+    /// Missing on access files written before credential scopes existed, where every token was
+    /// an owner token.
+    #[serde(default, skip_serializing_if = "CredentialScope::is_owner")]
+    pub scope: CredentialScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_id: Option<String>,
 }
 
 impl TokenInfo {
@@ -48,6 +55,22 @@ pub struct Session {
     /// The session's secret: it goes in the browser's cookie and nowhere else.
     pub token: String,
     pub expires_ms: u64,
+    pub scope: CredentialScope,
+}
+
+/// Authority carried by a saved credential.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialScope {
+    #[default]
+    Owner,
+    ExternalClient,
+}
+
+impl CredentialScope {
+    fn is_owner(&self) -> bool {
+        matches!(self, Self::Owner)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -71,6 +94,14 @@ struct Link {
     /// ends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     until_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "CredentialScope::is_owner")]
+    scope: CredentialScope,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ConsumedPairingAssertion {
+    sha256: String,
+    expires_ms: u64,
 }
 
 /// Between a name and the name of a device it signed in: `laptop › Phone Safari`. Revoking a
@@ -81,12 +112,20 @@ pub const UNDER: &str = " › ";
 struct File {
     #[serde(default)]
     tokens: Vec<Entry>,
+    /// External-client credentials live outside the legacy owner array so an older binary
+    /// cannot reinterpret them as owner credentials during a downgrade.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    client_tokens: Vec<Entry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     links: Vec<Link>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    client_links: Vec<Link>,
     /// When a typed code was wrong, lately: past [`PAIR_TRIES`] in [`PAIR_WINDOW_MS`], every
     /// open code ends.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pair_misses: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pairing_assertions: Vec<ConsumedPairingAssertion>,
 }
 
 /// Wrong typed codes allowed in [`PAIR_WINDOW_MS`] before every open code ends.
@@ -96,12 +135,57 @@ const PAIR_WINDOW_MS: u64 = 10 * 60 * 1000;
 const PAIR_ALPHABET: &[u8; 32] = b"23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 impl File {
+    fn tokens_mut(&mut self, scope: CredentialScope) -> &mut Vec<Entry> {
+        match scope {
+            CredentialScope::Owner => &mut self.tokens,
+            CredentialScope::ExternalClient => &mut self.client_tokens,
+        }
+    }
+
+    fn links(&self, scope: CredentialScope) -> &Vec<Link> {
+        match scope {
+            CredentialScope::Owner => &self.links,
+            CredentialScope::ExternalClient => &self.client_links,
+        }
+    }
+
+    fn links_mut(&mut self, scope: CredentialScope) -> &mut Vec<Link> {
+        match scope {
+            CredentialScope::Owner => &mut self.links,
+            CredentialScope::ExternalClient => &mut self.client_links,
+        }
+    }
+
+    fn separate_scopes(&mut self) {
+        let mut owner_tokens = Vec::with_capacity(self.tokens.len());
+        for token in self.tokens.drain(..) {
+            match token.info.scope {
+                CredentialScope::Owner => owner_tokens.push(token),
+                CredentialScope::ExternalClient => self.client_tokens.push(token),
+            }
+        }
+        self.tokens = owner_tokens;
+        let mut owner_links = Vec::with_capacity(self.links.len());
+        for link in self.links.drain(..) {
+            match link.scope {
+                CredentialScope::Owner => owner_links.push(link),
+                CredentialScope::ExternalClient => self.client_links.push(link),
+            }
+        }
+        self.links = owner_links;
+    }
+
     /// Drop sessions and links whose time is up.
     fn prune(&mut self, now: u64) {
+        self.separate_scopes();
         self.tokens.retain(|t| t.info.live(now));
+        self.client_tokens.retain(|t| t.info.live(now));
         self.links.retain(|l| l.expires_ms > now);
+        self.client_links.retain(|l| l.expires_ms > now);
         self.pair_misses
             .retain(|t| now.saturating_sub(*t) < PAIR_WINDOW_MS);
+        self.pairing_assertions
+            .retain(|assertion| assertion.expires_ms > now);
     }
 }
 
@@ -127,7 +211,12 @@ impl Tokens {
             anyhow::bail!("a token needs a name");
         }
         self.update(|file| {
-            if file.tokens.iter().any(|t| t.info.name == name) {
+            if file
+                .tokens
+                .iter()
+                .chain(&file.client_tokens)
+                .any(|t| t.info.name == name)
+            {
                 anyhow::bail!("a token named `{name}` exists; revoke it first");
             }
             let token = secret("ark_");
@@ -136,6 +225,8 @@ impl Tokens {
                     name: name.to_string(),
                     created_ms: now_ms(),
                     expires_ms: None,
+                    scope: CredentialScope::Owner,
+                    installation_id: None,
                 },
                 sha256: hash(&token),
             });
@@ -160,6 +251,7 @@ impl Tokens {
             if file
                 .tokens
                 .iter()
+                .chain(&file.client_tokens)
                 .any(|t| t.info.name == name && t.info.expires_ms.is_none())
             {
                 anyhow::bail!("a saved token is named `{name}`; links need another name");
@@ -172,6 +264,7 @@ impl Tokens {
                 session_ms: session.as_millis() as u64,
                 short: false,
                 until_ms: None,
+                scope: CredentialScope::Owner,
             });
             Ok(code)
         })
@@ -194,6 +287,38 @@ impl Tokens {
         if name.is_empty() {
             anyhow::bail!("a device needs a name");
         }
+        self.pair_code_with_scope(name, valid_for, session, until_ms, CredentialScope::Owner)
+    }
+
+    /// A pairing grant that can become only an external-client credential.
+    pub fn external_client_pair_code(
+        &self,
+        name: &str,
+        valid_for: Duration,
+        session: Duration,
+        until_ms: Option<u64>,
+    ) -> anyhow::Result<String> {
+        self.pair_code_with_scope(
+            name,
+            valid_for,
+            session,
+            until_ms,
+            CredentialScope::ExternalClient,
+        )
+    }
+
+    fn pair_code_with_scope(
+        &self,
+        name: &str,
+        valid_for: Duration,
+        session: Duration,
+        until_ms: Option<u64>,
+        scope: CredentialScope,
+    ) -> anyhow::Result<String> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("a device needs a name");
+        }
         self.update(|file| {
             let raw: String = uuid::Uuid::new_v4()
                 .as_bytes()
@@ -201,13 +326,14 @@ impl Tokens {
                 .take(8)
                 .map(|b| PAIR_ALPHABET[(*b % 32) as usize] as char)
                 .collect();
-            file.links.push(Link {
+            file.links_mut(scope).push(Link {
                 name: name.to_string(),
                 sha256: hash(&raw),
                 expires_ms: now_ms() + valid_for.as_millis() as u64,
                 session_ms: session.as_millis() as u64,
                 short: true,
                 until_ms,
+                scope,
             });
             Ok(format!("{}-{}", &raw[..4], &raw[4..]))
         })
@@ -221,6 +347,17 @@ impl Tokens {
     /// [`redeem`](Self::redeem), from a device that says what it is (`Phone Safari`): a typed
     /// code's session is named `<who made the code> › <device>`.
     pub fn redeem_as(&self, code: &str, device: &str) -> anyhow::Result<Option<Session>> {
+        self.redeem_as_scope(code, device, CredentialScope::Owner)
+    }
+
+    /// Trade a code only when it was issued for `scope`. A code for another surface remains
+    /// unused, so presenting it to the wrong endpoint cannot change its authority.
+    pub fn redeem_as_scope(
+        &self,
+        code: &str,
+        device: &str,
+        scope: CredentialScope,
+    ) -> anyhow::Result<Option<Session>> {
         let code = code.trim();
         if code.is_empty() {
             return Ok(None);
@@ -234,22 +371,31 @@ impl Tokens {
         let short = typed.len() == 8 && typed.bytes().all(|b| PAIR_ALPHABET.contains(&b));
         let h = hash(if short { &typed } else { code });
         self.update(|file| {
-            let found = file
-                .links
+            let other_scope = match scope {
+                CredentialScope::Owner => CredentialScope::ExternalClient,
+                CredentialScope::ExternalClient => CredentialScope::Owner,
+            };
+            let known_other_scope = file
+                .links(other_scope)
                 .iter()
-                .position(|l| same(&l.sha256, &h) && l.short == short);
-            let Some(i) = found else {
-                if short {
+                .any(|link| same(&link.sha256, &h) && link.short == short);
+            let matching_secret = file
+                .links(scope)
+                .iter()
+                .position(|link| same(&link.sha256, &h) && link.short == short);
+            let Some(i) = matching_secret else {
+                if short && !known_other_scope {
                     file.pair_misses.push(now_ms());
                     let extra = file.pair_misses.len().saturating_sub(PAIR_TRIES);
                     file.pair_misses.drain(..extra);
                     if file.pair_misses.len() >= PAIR_TRIES {
                         file.links.retain(|l| !l.short);
+                        file.client_links.retain(|l| !l.short);
                     }
                 }
                 return Ok(None);
             };
-            let link = file.links.remove(i);
+            let link = file.links_mut(scope).remove(i);
             let now = now_ms();
             let token = secret("arks_");
             let expires_ms = (now + link.session_ms).min(link.until_ms.unwrap_or(u64::MAX));
@@ -272,7 +418,12 @@ impl Tokens {
                         device.as_str()
                     }
                 );
-                let taken = |n: &str| file.tokens.iter().any(|t| t.info.name == n);
+                let taken = |n: &str| {
+                    file.tokens
+                        .iter()
+                        .chain(&file.client_tokens)
+                        .any(|t| t.info.name == n)
+                };
                 let mut name = base.clone();
                 let mut k = 2;
                 while taken(&name) {
@@ -283,11 +434,13 @@ impl Tokens {
             } else {
                 link.name.clone()
             };
-            file.tokens.push(Entry {
+            file.tokens_mut(scope).push(Entry {
                 info: TokenInfo {
                     name: name.clone(),
                     created_ms: now,
                     expires_ms: Some(expires_ms),
+                    scope: link.scope,
+                    installation_id: None,
                 },
                 sha256: hash(&token),
             });
@@ -295,6 +448,123 @@ impl Tokens {
                 name,
                 token,
                 expires_ms,
+                scope: link.scope,
+            }))
+        })
+    }
+
+    /// Issue a revocable external-client credential after another trusted boundary has
+    /// authenticated the account. The credential is shown once and only its hash is saved.
+    pub fn issue_external_client(
+        &self,
+        parent: &str,
+        device: &str,
+        installation_id: &str,
+        valid_for: Duration,
+    ) -> anyhow::Result<Session> {
+        Ok(self
+            .issue_external_client_inner(parent, device, installation_id, valid_for, None)?
+            .expect("issuing without an assertion cannot be a replay"))
+    }
+
+    /// Issue an external-client credential and durably consume a verified pairing assertion in
+    /// the same locked write. `None` means that assertion was already used before it expired.
+    pub fn issue_external_client_for_assertion(
+        &self,
+        parent: &str,
+        device: &str,
+        installation_id: &str,
+        valid_for: Duration,
+        assertion_id: &str,
+        assertion_expires_at: u64,
+    ) -> anyhow::Result<Option<Session>> {
+        let assertion_id = assertion_id.trim();
+        if assertion_id.is_empty() || assertion_id.len() > 200 {
+            anyhow::bail!("a pairing assertion needs a bounded id");
+        }
+        let expires_ms = assertion_expires_at.saturating_mul(1000);
+        if expires_ms <= now_ms() {
+            anyhow::bail!("a pairing assertion must still be live");
+        }
+        self.issue_external_client_inner(
+            parent,
+            device,
+            installation_id,
+            valid_for,
+            Some((hash(assertion_id), expires_ms)),
+        )
+    }
+
+    fn issue_external_client_inner(
+        &self,
+        parent: &str,
+        device: &str,
+        installation_id: &str,
+        valid_for: Duration,
+        assertion: Option<(String, u64)>,
+    ) -> anyhow::Result<Option<Session>> {
+        let parent = parent.trim();
+        if parent.is_empty() {
+            anyhow::bail!("an external client needs an owner name");
+        }
+        let installation_id = installation_id.trim();
+        if installation_id.is_empty() || installation_id.len() > 200 {
+            anyhow::bail!("an external client needs a bounded installation id");
+        }
+        self.update(|file| {
+            if let Some((digest, expires_ms)) = assertion.as_ref() {
+                if file
+                    .pairing_assertions
+                    .iter()
+                    .any(|assertion| same(&assertion.sha256, digest))
+                {
+                    return Ok(None);
+                }
+                file.pairing_assertions.push(ConsumedPairingAssertion {
+                    sha256: digest.clone(),
+                    expires_ms: *expires_ms,
+                });
+            }
+            let device: String = device
+                .replace(UNDER.trim(), "-")
+                .trim()
+                .chars()
+                .take(80)
+                .collect();
+            file.client_tokens
+                .retain(|entry| entry.info.installation_id.as_deref() != Some(installation_id));
+            let base = format!(
+                "{parent}{UNDER}{}",
+                if device.is_empty() { "device" } else { &device }
+            );
+            let mut name = base.clone();
+            let mut suffix = 2;
+            while file
+                .tokens
+                .iter()
+                .chain(&file.client_tokens)
+                .any(|token| token.info.name == name)
+            {
+                name = format!("{base} {suffix}");
+                suffix += 1;
+            }
+            let token = secret("arks_");
+            let expires_ms = now_ms().saturating_add(valid_for.as_millis() as u64);
+            file.client_tokens.push(Entry {
+                info: TokenInfo {
+                    name: name.clone(),
+                    created_ms: now_ms(),
+                    expires_ms: Some(expires_ms),
+                    scope: CredentialScope::ExternalClient,
+                    installation_id: Some(installation_id.to_string()),
+                },
+                sha256: hash(&token),
+            });
+            Ok(Some(Session {
+                name,
+                token,
+                expires_ms,
+                scope: CredentialScope::ExternalClient,
             }))
         })
     }
@@ -306,22 +576,26 @@ impl Tokens {
         }
         let h = hash(token);
         self.update(|file| {
-            let before = file.tokens.len();
+            let before = file.tokens.len() + file.client_tokens.len();
             file.tokens.retain(|t| !same(&t.sha256, &h));
-            Ok(file.tokens.len() != before)
+            file.client_tokens.retain(|t| !same(&t.sha256, &h));
+            Ok(file.tokens.len() + file.client_tokens.len() != before)
         })
     }
 
     /// Every saved token and live session, oldest first.
     pub fn list(&self) -> anyhow::Result<Vec<TokenInfo>> {
         let now = now_ms();
-        Ok(self
-            .read()?
+        let file = self.read()?;
+        let mut tokens: Vec<_> = file
             .tokens
             .into_iter()
-            .map(|t| t.info)
-            .filter(|t| t.live(now))
-            .collect())
+            .chain(file.client_tokens)
+            .map(|token| token.info)
+            .filter(|token| token.live(now))
+            .collect();
+        tokens.sort_by_key(|token| token.created_ms);
+        Ok(tokens)
     }
 
     /// Remove the token named `name`, with every session and unused link of that name. False
@@ -331,10 +605,33 @@ impl Tokens {
         let under = format!("{name}{UNDER}");
         let gone = |n: &str| n == name || n.starts_with(&under);
         self.update(|file| {
-            let before = file.tokens.len() + file.links.len();
+            let before = file.tokens.len()
+                + file.client_tokens.len()
+                + file.links.len()
+                + file.client_links.len();
             file.tokens.retain(|t| !gone(&t.info.name));
+            file.client_tokens.retain(|t| !gone(&t.info.name));
             file.links.retain(|l| !gone(&l.name));
-            Ok(file.tokens.len() + file.links.len() != before)
+            file.client_links.retain(|l| !gone(&l.name));
+            Ok(file.tokens.len()
+                + file.client_tokens.len()
+                + file.links.len()
+                + file.client_links.len()
+                != before)
+        })
+    }
+
+    /// Remove every live credential and unused pairing grant for one authority class. Account
+    /// sign-out uses this for external clients without disturbing local owner/browser access.
+    pub fn revoke_scope(&self, scope: CredentialScope) -> anyhow::Result<usize> {
+        self.update(|file| {
+            let tokens = file.tokens_mut(scope);
+            let token_count = tokens.len();
+            tokens.clear();
+            let links = file.links_mut(scope);
+            let link_count = links.len();
+            links.clear();
+            Ok(token_count + link_count)
         })
     }
 
@@ -344,12 +641,12 @@ impl Tokens {
             return None;
         }
         let (h, now) = (hash(token), now_ms());
-        self.read()
-            .ok()?
-            .tokens
+        let file = self.read().ok()?;
+        file.tokens
             .into_iter()
-            .find(|t| same(&t.sha256, &h) && t.info.live(now))
-            .map(|t| t.info)
+            .chain(file.client_tokens)
+            .find(|token| same(&token.sha256, &h) && token.info.live(now))
+            .map(|token| token.info)
     }
 
     /// The name of the saved token or live session `token` is, if any.
@@ -358,12 +655,17 @@ impl Tokens {
             return None;
         }
         let (h, now) = (hash(token), now_ms());
-        self.read()
-            .ok()?
-            .tokens
+        let file = self.read().ok()?;
+        file.tokens
             .into_iter()
-            .find(|t| same(&t.sha256, &h) && t.info.live(now))
-            .map(|t| t.info.name)
+            .chain(file.client_tokens)
+            .find(|token| same(&token.sha256, &h) && token.info.live(now))
+            .map(|token| token.info.name)
+    }
+
+    /// The credential when it is live and carries exactly `scope`.
+    pub fn check_scope(&self, token: &str, scope: CredentialScope) -> Option<TokenInfo> {
+        self.info(token).filter(|info| info.scope == scope)
     }
 
     /// Read, change and write the file under its lock; expired sessions and links go first.
@@ -386,7 +688,11 @@ impl Tokens {
 
     fn read(&self) -> anyhow::Result<File> {
         match std::fs::read(&self.path) {
-            Ok(b) => Ok(serde_json::from_slice(&b)?),
+            Ok(b) => {
+                let mut file: File = serde_json::from_slice(&b)?;
+                file.separate_scopes();
+                Ok(file)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(File::default()),
             Err(e) => Err(anyhow::anyhow!("reading {}: {e}", self.path.display())),
         }
@@ -506,6 +812,109 @@ mod tests {
         assert!(!tokens.revoke("laptop").unwrap());
         assert_eq!(tokens.check(&t), None);
         assert!(tokens.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn old_credentials_are_owners_and_external_grants_cannot_cross_surfaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let tokens = Tokens::in_store(dir.path());
+        std::fs::write(
+            tokens.path(),
+            r#"{"tokens":[{"name":"old","created_ms":1,"sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            tokens
+                .check_scope("test", CredentialScope::Owner)
+                .unwrap()
+                .name,
+            "old"
+        );
+
+        let code = tokens
+            .external_client_pair_code(
+                "old",
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+                None,
+            )
+            .unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(tokens.path()).unwrap()).unwrap();
+        assert!(saved["links"].as_array().is_none_or(Vec::is_empty));
+        assert_eq!(saved["client_links"].as_array().unwrap().len(), 1);
+        assert!(tokens.redeem_as(&code, "browser").unwrap().is_none());
+        let phone = tokens
+            .redeem_as_scope(&code, "phone", CredentialScope::ExternalClient)
+            .unwrap()
+            .expect("the wrong endpoint did not consume the grant");
+        assert_eq!(phone.scope, CredentialScope::ExternalClient);
+        assert!(tokens
+            .check_scope(&phone.token, CredentialScope::Owner)
+            .is_none());
+        assert!(tokens
+            .check_scope(&phone.token, CredentialScope::ExternalClient)
+            .is_some());
+
+        let expiry = now_ms() / 1000 + 60;
+        let account_phone = tokens
+            .issue_external_client_for_assertion(
+                "ARK Account",
+                "phone",
+                "installation",
+                Duration::from_secs(60),
+                "assertion-jti",
+                expiry,
+            )
+            .unwrap()
+            .expect("a fresh account assertion");
+        assert!(tokens
+            .issue_external_client_for_assertion(
+                "ARK Account",
+                "phone",
+                "installation",
+                Duration::from_secs(60),
+                "assertion-jti",
+                expiry,
+            )
+            .unwrap()
+            .is_none());
+        assert!(tokens
+            .check_scope(&account_phone.token, CredentialScope::ExternalClient)
+            .is_some());
+        let replacement = tokens
+            .issue_external_client_for_assertion(
+                "ARK Account",
+                "phone",
+                "installation",
+                Duration::from_secs(60),
+                "replacement-assertion-jti",
+                expiry,
+            )
+            .unwrap()
+            .expect("the same installation can replace its credential");
+        assert_eq!(replacement.name, "ARK Account › phone");
+        assert!(tokens.check(&account_phone.token).is_none());
+        assert!(tokens.check(&replacement.token).is_some());
+        let raw = std::fs::read_to_string(tokens.path()).unwrap();
+        assert!(!raw.contains("assertion-jti"));
+        let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(saved["tokens"].as_array().unwrap().len(), 1);
+        assert_eq!(saved["client_tokens"].as_array().unwrap().len(), 2);
+        assert!(saved["tokens"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| { entry.get("scope").is_none_or(|scope| scope == "owner") }));
+        assert_eq!(
+            tokens
+                .revoke_scope(CredentialScope::ExternalClient)
+                .unwrap(),
+            2
+        );
+        assert!(tokens.check(&phone.token).is_none());
+        assert!(tokens.check(&account_phone.token).is_none());
+        assert!(tokens.check("test").is_some(), "the legacy owner remains");
     }
 
     #[test]

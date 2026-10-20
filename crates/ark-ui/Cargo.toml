@@ -21,6 +21,7 @@ desktop-updater = ["desktop", "dep:tauri-plugin-updater", "dep:minisign-verify"]
 
 [dependencies]
 ark-os.workspace = true
+ark-account.workspace = true
 ark-reach.workspace = true
 ark-interact.workspace = true
 ark-protocol.workspace = true

@@ -22,12 +22,13 @@
 
 use std::sync::Arc;
 
+use ark_account::pairing::PairingAssertionVerifier;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::access::Tokens;
+use crate::access::{CredentialScope, Tokens};
 use crate::assets::Assets;
 use crate::host::Host;
 
@@ -41,6 +42,116 @@ pub enum Access {
     /// The saved tokens ([`Tokens`]); any address and `Host`. For a runtime other machines
     /// connect to, behind a TLS proxy or on a private network.
     Tokens(Tokens),
+}
+
+/// Account binding for one registered runtime route.
+#[derive(Clone)]
+pub struct AccountPairing {
+    route_id: String,
+    owner_subject: String,
+    verifier: Arc<dyn PairingAssertionVerifier>,
+}
+
+impl AccountPairing {
+    pub fn new(
+        route_id: impl Into<String>,
+        owner_subject: impl Into<String>,
+        verifier: Arc<dyn PairingAssertionVerifier>,
+    ) -> anyhow::Result<Self> {
+        let route_id = route_id.into();
+        let owner_subject = owner_subject.into();
+        if route_id.trim().is_empty() || route_id.len() > 200 {
+            anyhow::bail!("account pairing needs the registered runtime route id");
+        }
+        if owner_subject.trim().is_empty() || owner_subject.len() > 500 {
+            anyhow::bail!("account pairing needs the registered route owner's subject");
+        }
+        Ok(Self {
+            route_id,
+            owner_subject,
+            verifier,
+        })
+    }
+}
+
+/// A network surface for separately released clients. It attaches to an existing [`Host`] and
+/// never opens another runtime.
+#[derive(Clone)]
+pub struct ClientListener {
+    tokens: Tokens,
+    route_id: Option<String>,
+    account_pairing: Option<AccountPairing>,
+}
+
+impl ClientListener {
+    pub fn new(tokens: Tokens) -> Self {
+        Self {
+            tokens,
+            route_id: None,
+            account_pairing: None,
+        }
+    }
+
+    pub fn route_id(mut self, route_id: impl Into<String>) -> anyhow::Result<Self> {
+        let route_id = route_id.into();
+        if route_id.trim().is_empty() || route_id.len() > 200 {
+            anyhow::bail!("a client listener route id cannot be empty");
+        }
+        self.route_id = Some(route_id);
+        Ok(self)
+    }
+
+    pub fn account_pairing(mut self, pairing: AccountPairing) -> Self {
+        self.route_id = Some(pairing.route_id.clone());
+        self.account_pairing = Some(pairing);
+        self
+    }
+
+    /// Listen on a loopback TCP address or Unix socket. Put it behind an HTTPS terminator such as
+    /// Tailscale Serve. Direct cleartext network exposure is refused.
+    pub async fn serve(self, host: Arc<Host>, addr: &str) -> anyhow::Result<ClientServer> {
+        if !addr.starts_with("unix:")
+            && !addr
+                .parse::<std::net::SocketAddr>()
+                .is_ok_and(|address| address.ip().is_loopback())
+        {
+            anyhow::bail!("a client listener must bind to loopback or a Unix socket behind HTTPS");
+        }
+        let (served, task) = serve_with(
+            host,
+            addr,
+            ServeConfig {
+                assets: None,
+                access: Access::Tokens(self.tokens),
+                entry: None,
+                surface: ListenerSurface::ClientOnly,
+                account_pairing: self.account_pairing,
+                route_id: self.route_id,
+            },
+        )
+        .await?;
+        Ok(ClientServer { served, task })
+    }
+}
+
+/// A running external-client listener. Dropping it stops accepting connections.
+pub struct ClientServer {
+    served: Served,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl std::ops::Deref for ClientServer {
+    type Target = Served;
+
+    fn deref(&self) -> &Self::Target {
+        &self.served
+    }
+}
+
+impl Drop for ClientServer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 /// A running server.
@@ -87,12 +198,42 @@ const PAIRED_SESSION_DAYS: u64 = 90;
 
 /// How long a client may take to send a request's head and body.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const CLIENT_CONNECTIONS: usize = 32;
+const CLIENT_BODY_BYTES: usize = 1024 * 1024;
+const CLIENT_PAIR_BODY_BYTES: usize = 16 * 1024;
 const CLIENT_RESULT_BYTES: u64 = 50 * 1024 * 1024;
 static CLIENT_RESULT_DOWNLOADS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
 enum Check {
     OneTime(String),
     Tokens(Tokens),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListenerSurface {
+    Full,
+    ClientOnly,
+}
+
+struct ServeConfig {
+    assets: Option<Arc<Assets>>,
+    access: Access,
+    entry: Option<String>,
+    surface: ListenerSurface,
+    account_pairing: Option<AccountPairing>,
+    route_id: Option<String>,
+}
+
+#[derive(Clone)]
+struct RequestContext {
+    host: Arc<Host>,
+    assets: Option<Arc<Assets>>,
+    check: Arc<Check>,
+    port: u16,
+    entry: Arc<Option<String>>,
+    surface: ListenerSurface,
+    account_pairing: Arc<Option<AccountPairing>>,
+    route_id: Arc<Option<String>>,
 }
 
 pub(crate) async fn serve(
@@ -102,6 +243,34 @@ pub(crate) async fn serve(
     access: Access,
     entry: Option<String>,
 ) -> anyhow::Result<(Served, tokio::task::JoinHandle<()>)> {
+    serve_with(
+        host,
+        addr,
+        ServeConfig {
+            assets: Some(assets),
+            access,
+            entry,
+            surface: ListenerSurface::Full,
+            account_pairing: None,
+            route_id: None,
+        },
+    )
+    .await
+}
+
+async fn serve_with(
+    host: Arc<Host>,
+    addr: &str,
+    config: ServeConfig,
+) -> anyhow::Result<(Served, tokio::task::JoinHandle<()>)> {
+    let ServeConfig {
+        assets,
+        access,
+        entry,
+        surface,
+        account_pairing,
+        route_id,
+    } = config;
     let listener = Listener::bind(addr, &access).await?;
     let port = listener.port();
     let (served, check) = match access {
@@ -128,8 +297,23 @@ pub(crate) async fn serve(
     host.resume_client_mutations().await?;
     let check = Arc::new(check);
     let entry = Arc::new(entry);
+    let account_pairing = Arc::new(account_pairing);
+    let route_id = Arc::new(route_id);
+    let request_context = RequestContext {
+        host: host.clone(),
+        assets,
+        check,
+        port,
+        entry,
+        surface,
+        account_pairing,
+        route_id,
+    };
     let task = tokio::spawn(async move {
         let mut mutations = tokio::time::interval(std::time::Duration::from_millis(250));
+        let mut connections = tokio::task::JoinSet::new();
+        let connection_limit = (surface == ListenerSurface::ClientOnly)
+            .then(|| Arc::new(tokio::sync::Semaphore::new(CLIENT_CONNECTIONS)));
         loop {
             tokio::select! {
                 accepted = listener.accept() => {
@@ -138,12 +322,20 @@ pub(crate) async fn serve(
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         continue;
                     };
-                    let (host, assets, check, entry) =
-                        (host.clone(), assets.clone(), check.clone(), entry.clone());
-                    tokio::spawn(async move {
-                        let _ = handle(sock, host, assets, &check, port, &entry).await;
+                    let permit = match connection_limit.as_ref() {
+                        Some(limit) => match Arc::clone(limit).try_acquire_owned() {
+                            Ok(permit) => Some(permit),
+                            Err(_) => continue,
+                        },
+                        None => None,
+                    };
+                    let request_context = request_context.clone();
+                    connections.spawn(async move {
+                        let _permit = permit;
+                        let _ = handle(sock, request_context).await;
                     });
                 }
+                Some(_) = connections.join_next(), if !connections.is_empty() => {}
                 _ = mutations.tick() => {
                     let _ = host.resume_client_mutations().await;
                 }
@@ -308,7 +500,10 @@ impl Request {
     }
 }
 
-async fn read_request<S: AsyncRead + Unpin>(sock: &mut S) -> anyhow::Result<Request> {
+async fn read_request<S: AsyncRead + Unpin>(
+    sock: &mut S,
+    surface: ListenerSurface,
+) -> anyhow::Result<Request> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     let head_end = loop {
@@ -342,7 +537,13 @@ async fn read_request<S: AsyncRead + Unpin>(sock: &mut S) -> anyhow::Result<Requ
         .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
         .and_then(|(_, v)| v.parse().ok())
         .unwrap_or(0);
-    if len > 32 * 1024 * 1024 {
+    let body_limit = match (surface, path.as_str()) {
+        (ListenerSurface::ClientOnly, "/client/v1/pair")
+        | (ListenerSurface::ClientOnly, "/client/v1/account-pair") => CLIENT_PAIR_BODY_BYTES,
+        (ListenerSurface::ClientOnly, _) => CLIENT_BODY_BYTES,
+        (ListenerSurface::Full, _) => 32 * 1024 * 1024,
+    };
+    if len > body_limit {
         anyhow::bail!("body too large");
     }
     let mut body = buf[head_end + 4..].to_vec();
@@ -445,13 +646,23 @@ impl Cookie {
 
 async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
     mut sock: S,
-    host: Arc<Host>,
-    assets: Arc<Assets>,
-    check: &Check,
-    port: u16,
-    entry: &Option<String>,
+    context: RequestContext,
 ) -> anyhow::Result<()> {
-    let req = tokio::time::timeout(READ_TIMEOUT, read_request(&mut sock)).await??;
+    let RequestContext {
+        host,
+        assets,
+        check,
+        port,
+        entry,
+        surface,
+        account_pairing,
+        route_id,
+    } = context;
+    let check = check.as_ref();
+    let entry = entry.as_ref();
+    let account_pairing = account_pairing.as_ref();
+    let route_id = route_id.as_ref();
+    let req = tokio::time::timeout(READ_TIMEOUT, read_request(&mut sock, surface)).await??;
     let token_authed = match check {
         Check::OneTime(token) => {
             let host_ok = matches!(
@@ -469,21 +680,30 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
             }
             req.token() == token
         }
-        Check::Tokens(tokens) => tokens.check(req.token()).is_some(),
+        Check::Tokens(tokens) => tokens
+            .check_scope(req.token(), CredentialScope::Owner)
+            .is_some(),
     };
     // Without a token, a browser's session cookie (saved tokens only).
     let cookie = Cookie::of(&req, port);
     let session = match check {
         Check::Tokens(tokens) if req.token().is_empty() => req
             .cookie(&cookie.name)
-            .filter(|t| tokens.check(t).is_some())
+            .filter(|t| tokens.check_scope(t, CredentialScope::Owner).is_some())
             .map(str::to_string),
         _ => None,
     };
     let client_credential = req.bearer_token();
-    let client_authed =
-        matches!(check, Check::Tokens(tokens) if tokens.check(client_credential).is_some());
+    let client_authed = matches!(check, Check::Tokens(tokens) if match surface {
+        ListenerSurface::Full => tokens.check(client_credential).is_some(),
+        ListenerSurface::ClientOnly => tokens
+            .check_scope(client_credential, CredentialScope::ExternalClient)
+            .is_some(),
+    });
     let authed = token_authed || session.is_some();
+    if surface == ListenerSurface::ClientOnly && !client_listener_path(&req.path) {
+        return respond(&mut sock, "404 Not Found", "text/plain", b"not found").await;
+    }
     if req.path.starts_with("/client/v1/") && !client_authed && !client_credential.is_empty() {
         host.forget_client_terminal_routes(&client_device_id(client_credential));
     }
@@ -521,7 +741,12 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     .await
                 }
             };
-            let Some(paired) = tokens.redeem_as(&request.code, &request.device_name)? else {
+            let Some(paired) = tokens.redeem_as_scope(
+                &request.code,
+                &request.device_name,
+                CredentialScope::ExternalClient,
+            )?
+            else {
                 return client_error(
                     &mut sock,
                     "pairing_code",
@@ -530,20 +755,97 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 )
                 .await;
             };
-            let digest = Sha256::digest(paired.token.as_bytes());
-            let device_id = format!("{:x}", digest);
-            let epoch = client_mutation_epoch(&paired.token);
-            let expires_at = time::OffsetDateTime::from_unix_timestamp_nanos(
-                i128::from(paired.expires_ms) * 1_000_000,
-            )?
-            .format(&time::format_description::well_known::Rfc3339)?;
-            let body = serde_json::to_vec(&ark_protocol::PairResponse {
-                device_id,
-                credential: paired.token,
-                expires_at,
-                mutation_epoch: epoch,
-                next_mutation_counter: ark_protocol::DecimalString::new("1").expect("one"),
-            })?;
+            let body = client_pair_response(&paired)?;
+            respond(&mut sock, "200 OK", "application/json", &body).await
+        }
+        ("POST", "/client/v1/account-pair") => {
+            let (Check::Tokens(tokens), Some(pairing)) = (check, account_pairing.as_ref()) else {
+                return client_error(
+                    &mut sock,
+                    "account_pairing_unavailable",
+                    "This computer is not available for account pairing.",
+                    "404 Not Found",
+                )
+                .await;
+            };
+            let request: ark_protocol::AccountPairRequest = match serde_json::from_slice(&req.body)
+            {
+                Ok(value) => value,
+                Err(_) => {
+                    return client_error(
+                        &mut sock,
+                        "invalid_request",
+                        "Try connecting this computer again.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            };
+            if request.route_id.trim().is_empty()
+                || request.route_id.len() > 200
+                || request.device_name.trim().is_empty()
+                || request.device_name.chars().count() > 80
+                || request.installation_id.trim().is_empty()
+                || request.installation_id.len() > 200
+            {
+                return client_error(
+                    &mut sock,
+                    "invalid_request",
+                    "Try connecting this computer again.",
+                    "400 Bad Request",
+                )
+                .await;
+            }
+            if request.route_id != pairing.route_id {
+                return client_error(
+                    &mut sock,
+                    "account_pairing_refused",
+                    "This account cannot connect to this computer.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let verified = match pairing
+                .verifier
+                .verify(client_credential, &pairing.route_id, &pairing.owner_subject)
+                .await
+            {
+                Ok(verified) if verified.subject == pairing.owner_subject => verified,
+                _ => {
+                    return client_error(
+                        &mut sock,
+                        "account_pairing_refused",
+                        "This account cannot connect to this computer.",
+                        "401 Unauthorized",
+                    )
+                    .await
+                }
+            };
+            let paired = tokens.issue_external_client_for_assertion(
+                "ARK Account",
+                &request.device_name,
+                &request.installation_id,
+                std::time::Duration::from_secs(PAIRED_SESSION_DAYS * 24 * 3600),
+                &verified.assertion_id,
+                verified.expires_at,
+            );
+            let Some(paired) = (match paired {
+                Ok(paired) => paired,
+                Err(error) => {
+                    tracing::warn!("account pairing credential was not issued: {error:#}");
+                    None
+                }
+            }) else {
+                return client_error(
+                    &mut sock,
+                    "account_pairing_refused",
+                    "This account cannot connect to this computer.",
+                    "401 Unauthorized",
+                )
+                .await;
+            };
+            debug_assert_eq!(paired.scope, CredentialScope::ExternalClient);
+            let body = client_pair_response(&paired)?;
             respond(&mut sock, "200 OK", "application/json", &body).await
         }
         ("GET", "/client/v1/hello") => {
@@ -576,6 +878,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 ]
                 .into_iter()
                 .map(str::to_string)
+                .chain(account_pairing.as_ref().map(|_| "account.pair".to_string()))
                 .collect(),
                 limits: ark_protocol::Limits {
                     page_size: 50,
@@ -590,6 +893,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     counter.saturating_add(1).to_string(),
                 )
                 .expect("u64 is decimal"),
+                route_id: route_id.clone(),
             };
             respond(
                 &mut sock,
@@ -1310,7 +1614,33 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
             };
             let valid = std::time::Duration::from_secs(PAIR_VALID_SECS);
             let lasts = std::time::Duration::from_secs(PAIRED_SESSION_DAYS * 24 * 3600);
-            let code = tokens.pair_code(&me.name, valid, lasts, me.expires_ms)?;
+            let request: Value = match serde_json::from_slice(&req.body) {
+                Ok(request) => request,
+                Err(_) => {
+                    return respond(
+                        &mut sock,
+                        "400 Bad Request",
+                        "application/json",
+                        br#"{"error":"request"}"#,
+                    )
+                    .await
+                }
+            };
+            let code = match request["scope"].as_str() {
+                None | Some("owner") => tokens.pair_code(&me.name, valid, lasts, me.expires_ms)?,
+                Some("external_client") => {
+                    tokens.external_client_pair_code(&me.name, valid, lasts, me.expires_ms)?
+                }
+                Some(_) => {
+                    return respond(
+                        &mut sock,
+                        "400 Bad Request",
+                        "application/json",
+                        br#"{"error":"scope"}"#,
+                    )
+                    .await
+                }
+            };
             let body = json!({ "code": code, "expires_ms": now_ms() + PAIR_VALID_SECS * 1000 });
             respond(
                 &mut sock,
@@ -1442,6 +1772,9 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
         }
         // What a phone's Home Screen needs to add the page as an app; public, like the page.
         ("GET", "/manifest.webmanifest") => {
+            let Some(assets) = assets.as_ref() else {
+                return respond(&mut sock, "404 Not Found", "text/plain", b"not found").await;
+            };
             let body = host.manifest(assets.title()).to_string();
             respond(
                 &mut sock,
@@ -1451,11 +1784,19 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
             )
             .await
         }
-        ("GET", path) => match assets.get(path) {
-            Some((body, mime)) if assets.is_wasm_worker(path) => {
+        ("GET", path) => match assets.as_ref().and_then(|assets| assets.get(path)) {
+            Some((body, mime))
+                if assets
+                    .as_ref()
+                    .is_some_and(|assets| assets.is_wasm_worker(path)) =>
+            {
                 respond_with_policy(&mut sock, "200 OK", mime, "", &body, WASM_WORKER_HEADERS).await
             }
-            Some((body, mime)) if assets.is_frame_asset(path) => {
+            Some((body, mime))
+                if assets
+                    .as_ref()
+                    .is_some_and(|assets| assets.is_frame_asset(path)) =>
+            {
                 respond_with_policy(&mut sock, "200 OK", mime, "", &body, FRAME_ASSET_HEADERS).await
             }
             Some((body, mime)) => respond(&mut sock, "200 OK", mime, &body).await,
@@ -1463,6 +1804,24 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
         },
         _ => respond(&mut sock, "405 Method Not Allowed", "text/plain", b"").await,
     }
+}
+
+fn client_listener_path(path: &str) -> bool {
+    path == "/health" || path == "/client/bootstrap" || path.starts_with("/client/v1/")
+}
+
+fn client_pair_response(paired: &crate::access::Session) -> anyhow::Result<Vec<u8>> {
+    let digest = Sha256::digest(paired.token.as_bytes());
+    let expires_at =
+        time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(paired.expires_ms) * 1_000_000)?
+            .format(&time::format_description::well_known::Rfc3339)?;
+    Ok(serde_json::to_vec(&ark_protocol::PairResponse {
+        device_id: format!("{:x}", digest),
+        credential: paired.token.clone(),
+        expires_at,
+        mutation_epoch: client_mutation_epoch(&paired.token),
+        next_mutation_counter: ark_protocol::DecimalString::new("1").expect("one"),
+    })?)
 }
 
 async fn client_error<S: AsyncWrite + Unpin>(

@@ -42,11 +42,21 @@ constructors and methods. `ark-cli` moves to `ark-client` directly. The current
 available in the upper transport layer while typed endpoints move one group at a time. There is
 one wire model, never a second set in `ark-ui` or `ark-client`.
 
+A native consumer may start a second HTTP listener against the exact `Arc<Host>` used by its
+window. That listener serves only `/health`, `/client/bootstrap` and `/client/v1/*`. It does not
+serve the page, static assets, browser carrier, `/session`, `/rpc` or `/events`. It is bound to
+loopback or a Unix socket and published through an HTTPS terminator such as Tailscale
+Serve. A cleartext network bind is refused. The listener bounds concurrent connections and request
+bodies. Dropping its handle closes active streams and stops it, so account sign-out can stop phone
+access without stopping the runtime.
+
 A small `/client/bootstrap` response is version-independent and additive forever. It lists the
 protocol majors the runtime serves, each latest minor, the runtime version and an update URL.
-After negotiation, `hello` publishes the selected major and minor, accepted client range, limits
-and capabilities. Major changes may break compatibility. Minor changes only add optional fields,
-events or capabilities. A client disables a missing capability.
+After negotiation, `hello` publishes the selected major and minor, accepted client range, limits,
+capabilities and an optional stable account registry route id. A client compares the route id with
+the route it selected instead of deriving runtime identity from a URL. Major changes may break
+compatibility. Minor changes only add optional fields, events or capabilities. A client disables a
+missing capability.
 
 Rust types generate checked-in JSON Schema and golden fixtures. A deterministic generator makes
 Swift wire models from that released schema. Wording and display semantics remain in

@@ -47,6 +47,22 @@ public static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue.count == rhs.
 }
 public enum DecimalStringError: Error, Equatable { case invalid(String) }
 
+public struct AccountPairRequest: Codable, Equatable, Sendable {
+    public let deviceName: String
+    public let installationId: String
+    public let routeId: String
+
+    public init(
+        deviceName: String,
+        installationId: String,
+        routeId: String
+    ) {
+        self.deviceName = deviceName
+        self.installationId = installationId
+        self.routeId = routeId
+    }
+}
+
 public struct ApprovalChoice: Codable, Equatable, Sendable {
     public let destructive: Bool
     public let id: String
@@ -279,6 +295,7 @@ public struct Hello: Codable, Equatable, Sendable {
     public let nextMutationCounter: String
     public let protocolMajor: Int
     public let protocolMinor: Int
+    public let routeId: String?
 
     public init(
         capabilities: [String],
@@ -287,7 +304,8 @@ public struct Hello: Codable, Equatable, Sendable {
         mutationEpoch: String,
         nextMutationCounter: String,
         protocolMajor: Int,
-        protocolMinor: Int
+        protocolMinor: Int,
+        routeId: String? = nil
     ) {
         self.capabilities = capabilities
         self.limits = limits
@@ -296,6 +314,7 @@ public struct Hello: Codable, Equatable, Sendable {
         self.nextMutationCounter = nextMutationCounter
         self.protocolMajor = protocolMajor
         self.protocolMinor = protocolMinor
+        self.routeId = routeId
     }
 }
 

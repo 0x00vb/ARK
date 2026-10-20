@@ -6,8 +6,9 @@ Date: 2026-10-10
 
 Browser pairing ends in an HttpOnly cookie and protects changes with same-origin checks. A native
 app has no trusted page origin or cookie boundary. Its credential has the runtime owner's full
-authority, including project writes and shell-backed actions. A lost or restored phone must not
-keep that authority accidentally.
+authority if the same saved token is reused. A native credential must instead be accepted only by
+the typed external-client contract. A lost or restored phone must not keep either authority
+accidentally.
 
 ## Decision
 
@@ -17,6 +18,25 @@ server-side device id, expiry and mutation epoch. It keeps only the credential h
 installation nonce may correlate diagnostics, but it is never authorization identity. The
 server-generated record and credential binding are the only identity used for authorization and
 revocation. The editable device name is not identity.
+
+Saved credentials carry `owner` or `external_client`. A missing scope in an older access file is
+`owner`. External-client credentials and grants are stored outside the legacy owner arrays, so an
+older binary ignores them instead of widening their authority. Browser links remain owner-scoped.
+A native QR grant is external-client-scoped and cannot be redeemed by `/session`. An
+external-client credential can call only `/client/v1/*`; it cannot authenticate the page, generic
+RPC, browser carrier, generic event stream or screen controls.
+
+Account pairing is a second entry to the same credential type. The ARK Cloud API trades the app's
+account access token for a 60-second ES256 assertion addressed only to
+`urn:ark:runtime:<route-id>`. The account access token never reaches the runtime. The client sends
+the assertion with its stable runtime route id, installation id and device name. `ark-account`
+fetches and caches the API's separate pairing JWKS and requires the exact API issuer, audience,
+`typ=ark-runtime-pair+jwt`, `azp=ark-ios`, `scope=runtime.pair`, route id, owner `sub`, `iat`, `exp`
+and `jti`. Signing keys have a bounded cache lifetime. An unknown `kid` refreshes the JWKS at a
+bounded cadence. A verified `jti` is consumed once until expiry.
+Credential issuance and the persisted `jti` hash share one locked write, so restart does not reopen
+the assertion. The registry never returns runtime credentials. Pairing one installation does not
+revoke another. Re-pairing the same installation replaces its earlier credential.
 
 The app stores the credential only in Keychain with
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. It never stores it in UserDefaults, files, URLs,
@@ -41,12 +61,14 @@ and receipt protocol in `docs/MOBILE.md`. One device has one mutation in flight.
 
 - Native and browser sessions remain separate security mechanisms with the same revocation list.
 - The app stays useful after ordinary launches but never transfers authority through a backup.
-- Pairing needs a new endpoint and server-side immutable device records.
-- Hiding powerful controls on the phone does not reduce the credential's authority.
+- Pairing needs new endpoints and server-side immutable device records.
+- The listener boundary, not hidden controls, limits a phone credential's authority.
 
 ## Check
 
 - Tests cover one-use and expired codes, rate limits, wrong-code invalidation and HTTPS refusal.
+- Tests cover wrong account subject, wrong route, owner-default migration and refusal of every
+  non-client HTTP surface.
 - Security tests search app containers, logs, URLs and crash fixtures for the credential.
 - Device tests cover launch, backup/restore expectation, reinstall, revoke, 401 and sign-out.
 - Revocation closes SSE, refuses every mutation and removes the notification route.

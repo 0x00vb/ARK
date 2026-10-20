@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_MAJOR: u16 = 1;
-pub const CURRENT_MINOR: u16 = 3;
+pub const CURRENT_MINOR: u16 = 4;
 pub const TERMINAL_WRITE_BYTES: u64 = 16 * 1024;
 pub const TERMINAL_REPLAY_BYTES: u64 = 256 * 1024;
 
@@ -55,6 +55,16 @@ wire!(
     }
 );
 wire!(
+    pub struct AccountPairRequest {
+        #[schemars(length(min = 1, max = 200))]
+        route_id: String,
+        #[schemars(length(min = 1, max = 80))]
+        device_name: String,
+        #[schemars(length(min = 1, max = 200))]
+        installation_id: String,
+    }
+);
+wire!(
     pub struct PairResponse {
         device_id: String,
         credential: String,
@@ -72,6 +82,8 @@ wire!(
         limits: Limits,
         mutation_epoch: String,
         next_mutation_counter: DecimalString,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        route_id: Option<String>,
     }
 );
 wire!(
@@ -366,6 +378,7 @@ wire!(
 pub struct ProtocolSchema {
     bootstrap: Bootstrap,
     pair_request: PairRequest,
+    account_pair_request: AccountPairRequest,
     pair_response: PairResponse,
     hello: Hello,
     error: ErrorEnvelope,

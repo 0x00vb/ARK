@@ -41,13 +41,22 @@ use ark_connect::oauth;
 use ark_connect::{ConnectError, Secrets};
 use serde::{Deserialize, Serialize};
 
+pub mod pairing;
+
 /// ARK's account service, the OAuth issuer.
 pub const ARK_ISSUER: &str = "https://account.aiark.dev";
 /// The ARK Cloud API: the audience of access tokens.
 pub const ARK_API: &str = "https://api.aiark.dev";
 
-/// Scopes an app asks for: who the person is, and `offline_access` to stay signed in.
-const SCOPES: [&str; 4] = ["openid", "profile", "email", "offline_access"];
+/// Scopes an app asks for: identity, a refresh token, and the narrow right to pair one of the
+/// account's registered runtimes with an external client.
+const SCOPES: [&str; 5] = [
+    "openid",
+    "profile",
+    "email",
+    "offline_access",
+    "runtime.pair",
+];
 
 /// Where the account lives and which app is signing in.
 #[derive(Clone, Debug, PartialEq, Eq)]

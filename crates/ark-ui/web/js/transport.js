@@ -150,8 +150,8 @@ export function connect() {
       return !!r?.ok;
     },
     /// A code for another device (ADR 0047): `{code, expires_ms}`.
-    async pairCode() {
-      const r = await fetch("/pair", { method: "POST", headers, body: "{}" });
+    async pairCode(scope = "owner") {
+      const r = await fetch("/pair", { method: "POST", headers, body: JSON.stringify({ scope }) });
       if (!r.ok) throw new Error("A code could not be made.");
       return r.json();
     },

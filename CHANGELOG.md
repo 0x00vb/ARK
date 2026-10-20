@@ -11,6 +11,9 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- Client protocol v1.4 adds account-bound runtime pairing and an optional stable route id.
+  `ClientListener` exposes only typed phone routes against the same live `Host`; scoped phone
+  credentials cannot authenticate the page, generic RPC, browser carrier or screen controls.
 - Client protocol v1.3 adds `results.download` so native clients can list and fetch real project
   result files from a conversation. Downloads are chat-project scoped and capped at 50 MiB.
 - Client protocol v1.2 adds `chat.create.idempotent` and an optional `requestId` so native clients

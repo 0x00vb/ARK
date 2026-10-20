@@ -66,7 +66,7 @@ pub use assets::Assets;
 pub use host::{
     Emitter, Handler, Host, ProjectHandlerCtx, Theme, UiInfo, Welcome, WindowHandlerCtx,
 };
-pub use serve::{Access, Served};
+pub use serve::{Access, AccountPairing, ClientListener, ClientServer, Served};
 
 /// The ARK build whose native page contract this crate provides.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -147,6 +147,7 @@ impl ArkUi {
             page_updates: None,
         }
     }
+
     /// Speech-to-text used by the shared composer. Applications opt in; generic ARK apps do not
     /// inherit a speech engine or model download (ADR 0070).
     pub fn transcription_provider(
@@ -423,6 +424,21 @@ impl ArkUi {
     /// Open the native window. `context` is the app's `tauri::generate_context!()`.
     #[cfg(feature = "desktop")]
     pub fn run_desktop(self, context: tauri::Context<tauri::Wry>) -> std::process::ExitCode {
+        self.run_desktop_with_host(context, |_| Ok(()))
+    }
+
+    /// Open the native window and hand its live [`Host`] to a consumer coordinator first.
+    /// The coordinator may start and retain a [`ClientServer`] after account sign-in, then drop
+    /// it on sign-out. The window and listener therefore use one runtime.
+    #[cfg(feature = "desktop")]
+    pub fn run_desktop_with_host<F>(
+        self,
+        context: tauri::Context<tauri::Wry>,
+        opened: F,
+    ) -> std::process::ExitCode
+    where
+        F: FnOnce(Arc<Host>) -> anyhow::Result<()>,
+    {
         let keep_running = self.keep_running;
         let ambient_window = self.ambient_window;
         let start_hidden = self.start_hidden;
@@ -431,7 +447,11 @@ impl ArkUi {
         let page_updates = self.page_updates.clone();
         #[cfg(not(feature = "desktop-updater"))]
         let page_updates = None;
-        let opened = tauri::async_runtime::block_on(self.open());
+        let opened = tauri::async_runtime::block_on(async move {
+            let (host, assets) = self.open().await?;
+            opened(host.clone())?;
+            Ok::<_, anyhow::Error>((host, assets))
+        });
         match opened {
             Ok((host, assets)) => desktop::run(
                 host,

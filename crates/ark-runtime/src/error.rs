@@ -2,6 +2,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AgentError {
+    #[error("project memory changed while waiting for the model; continue to use the current correction")]
+    MemoryChanged,
+
     #[error("unknown action: {0}")]
     UnknownAction(String),
 

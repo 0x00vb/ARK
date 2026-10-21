@@ -628,6 +628,29 @@ impl Ark {
         input: &str,
     ) -> Result<(Arc<Engine>, Option<RuleSelection>), ArkError> {
         let engine = self.turn_engine();
+        let words: Vec<_> = input
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect();
+        let requested = words
+            .iter()
+            .any(|w| matches!(w.as_str(), "remember" | "memorize"))
+            || words.windows(2).any(|w| w[0] == "learn" && w[1] == "from")
+            || (words.iter().any(|w| w == "save") && words.iter().any(|w| w == "correction"));
+        let enabled = requested
+            || !engine
+                .store
+                .project_memories(project)
+                .map_err(ark_runtime::AgentError::from)?
+                .is_empty();
+        let engine = if enabled {
+            Arc::new(engine.scoped(engine.registry.clone().with(Arc::new(
+                ark_runtime::memory::MemoryTool::new(engine.store.clone(), project.clone()),
+            ))))
+        } else {
+            engine
+        };
         let sets = self
             .rule_book()
             .resolve(&[RuleScope::Project(project.to_string())])?;
@@ -828,24 +851,43 @@ impl Ark {
         present: bool,
         tools: &[TurnTools],
     ) -> Result<ContextReport, ArkError> {
-        let (engine, rules) = self.with_rules(session.project(), "")?;
+        self.context_preview_task(session, present, tools, "").await
+    }
+
+    /// Preview selection for a concrete next message, without calling a model.
+    pub async fn context_preview_task(
+        &self,
+        session: &Session,
+        present: bool,
+        tools: &[TurnTools],
+        task: &str,
+    ) -> Result<ContextReport, ArkError> {
+        let unfinished = session.unfinished(&self.engine)?;
+        let goal = session.goal_for(unfinished.as_ref(), task);
+        let query = goal
+            .as_ref()
+            .map(|g| g.text())
+            .unwrap_or_else(|| task.to_string());
+        let router = self.session_router(session).await;
+        let (engine, rules) = self.with_rules(session.project(), &query)?;
         let (engine, catalog) = self.with_skills(engine, session.project());
         let owner = format!("session:{}", session.id());
-        let tools = self.turn_tools(tools, &self.router, &owner);
+        let tools = self.turn_tools(tools, &router, &owner);
         let (engine, mut profile) = self.with_tools(engine, &tools);
-        self.owned(&mut profile, &owner, &self.router);
+        self.owned(&mut profile, &owner, &router);
         if catalog.is_some() {
             let p = profile.to_mut();
             p.distillers.push(skills::distiller());
             p.core_actions.push(skills::READ.into());
         }
         Ok(self
-            .harness()
+            .harness_with(router)
+            .goal(goal)
             .presentation(present)
             .conversation(session.conversation_digest())
             .rules(rules)
             .skills(catalog)
-            .preview_context(&engine, &profile, session.project(), "")
+            .preview_context(&engine, &profile, session.project(), task)
             .await?)
     }
 
@@ -1343,6 +1385,118 @@ mod tests {
     use ark_tools::{Adapter, AdapterError, BlobResolver, RunCtx};
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn project_memory_suggestions_have_no_empty_project_overhead() {
+        use ark_core::{Invocation, MemorySource, RiskTier, SessionId};
+        use ark_runtime::{
+            catalog::capability_index,
+            memory::{MemoryReview, SUGGEST},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let model = Arc::new(MockProvider::new("memory-test", vec![]));
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(model.clone())
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("memory", "").unwrap();
+        let base = ark.turn_engine();
+        for input in ["", "write a report", "a remembered detail", "fix the code"] {
+            let (engine, _) = ark.with_rules(&project.id, input).unwrap();
+            assert_eq!(
+                capability_index(&engine.registry),
+                capability_index(&base.registry)
+            );
+            assert!(engine.registry.descriptor(SUGGEST).is_none());
+        }
+        for input in [
+            "REMEMBER this correction",
+            "memorize the convention",
+            "learn from this correction",
+            "learn  \n from this correction",
+            "save this correction",
+        ] {
+            let (engine, _) = ark.with_rules(&project.id, input).unwrap();
+            assert!(engine.registry.descriptor(SUGGEST).is_some());
+        }
+        let session = SessionId::new();
+        base.store
+            .create_session(session.as_str(), &project.id, &serde_json::json!({}))
+            .unwrap();
+        let inv = Invocation::new(SUGGEST, RiskTier::Mutate, serde_json::json!({}));
+        base.store.put_invocation(&project.id, &inv).unwrap();
+        let pending = base
+            .store
+            .record_memory(
+                &project.id,
+                "report",
+                "Use a bullet list.",
+                MemorySource::Agent { invocation: inv.id },
+                None,
+            )
+            .unwrap();
+        assert!(ark
+            .with_rules(&project.id, "write a report")
+            .unwrap()
+            .0
+            .registry
+            .descriptor(SUGGEST)
+            .is_some());
+        base.store
+            .review_memory(
+                &project.id,
+                pending.id.as_str(),
+                MemoryReview::Accept,
+                &session,
+            )
+            .unwrap();
+        assert!(ark
+            .with_rules(&project.id, "write a report")
+            .unwrap()
+            .0
+            .registry
+            .descriptor(SUGGEST)
+            .is_some());
+        base.store
+            .review_memory(
+                &project.id,
+                pending.id.as_str(),
+                MemoryReview::Forget,
+                &session,
+            )
+            .unwrap();
+        assert!(ark
+            .with_rules(&project.id, "write a report")
+            .unwrap()
+            .0
+            .registry
+            .descriptor(SUGGEST)
+            .is_none());
+        let mut chat = ark.start_session(&project.id).unwrap();
+        let preview = ark
+            .context_preview_task(&chat, false, &[], "write a report")
+            .await
+            .unwrap();
+        let outcome = ark
+            .ask_session(&mut chat, "write a report", TurnOptions::default(), |_| {})
+            .await
+            .unwrap();
+        assert_eq!(preview.memory, 0);
+        assert_eq!(outcome.metrics.steps, 1);
+        assert!(!model.recorded()[0].system.contains(SUGGEST));
+        ark.ask_session(
+            &mut chat,
+            "remember this correction",
+            TurnOptions::default(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert!(model.recorded()[1].system.contains(SUGGEST));
+    }
 
     struct NoBlobs;
     impl BlobResolver for NoBlobs {

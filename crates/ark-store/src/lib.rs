@@ -28,8 +28,10 @@ use time::OffsetDateTime;
 
 mod error;
 mod index;
+mod memory;
 pub use error::StoreError;
 pub use index::Hit;
+pub use memory::MemoryReview;
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 /// What a project holds, counted (see [`Store::project_stats`]).

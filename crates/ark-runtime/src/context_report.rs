@@ -32,6 +32,9 @@ pub struct ContextReport {
     /// The skills catalog: one line per skill the turn may read.
     #[serde(default)]
     pub skills: u32,
+    /// Reviewed project corrections recalled for this task.
+    #[serde(default)]
+    pub memory: u32,
     /// The user's message for this turn.
     pub task: u32,
     /// This turn's distilled tool results (and any steering) still inside the window.
@@ -73,6 +76,7 @@ impl ContextReport {
             ("Workspace", self.workspace),
             ("Rules", self.rules),
             ("Skills", self.skills),
+            ("Project memory", self.memory),
             ("Task", self.task),
             ("Tool results", self.tool_rounds),
             ("Model output", self.model_output),

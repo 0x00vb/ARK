@@ -81,6 +81,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0072](0072-code-runs-have-bounded-admission-and-owned-cleanup.md) | Code runs share finite admission, own cancellation cleanup and capture through bounded handles | Accepted |
 | [0076](0076-an-apps-conversation-uses-the-chats-own-view.md) | An app's conversation (ARK Desktop's agent pane) is drawn by the chat's own view through `ark.chatView` | Accepted |
 | [0077](0077-an-app-can-add-rows-inside-the-current-project.md) | An app can add rows inside the current unfolded project through `ark.projectSection` | Accepted for implementation |
+| [0079](0079-project-memory-is-reviewed-and-project-scoped.md) | Project memory is reviewed and project scoped | Proposed |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

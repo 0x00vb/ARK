@@ -418,7 +418,14 @@ async fn sessions_commands_and_rename() {
 
     // A command whose effect is Submit starts a turn by itself.
     let ctx = host.call("context", json!({})).await.unwrap();
-    assert!(ctx["included"].as_array().unwrap().len() == 9);
+    let included = ctx["included"].as_array().unwrap();
+    assert_eq!(included.len(), 10);
+    let memory = included
+        .iter()
+        .find(|section| section["key"] == "memory")
+        .unwrap();
+    assert_eq!(memory["label"], "Project memory");
+    assert_eq!(memory["tokens"], 0);
 }
 
 #[tokio::test]

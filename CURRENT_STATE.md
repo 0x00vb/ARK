@@ -1,5 +1,33 @@
 # Current state
 
+## Project memory in development (2026-10-20)
+
+Isolated `codex/project-memory` in `../ark-project-memory`. The existing records table holds
+project-scoped reviewed corrections. Shared commands remember, accept, reject, replace and
+forget; agent suggestions remain pending behind existing mutation approval. Replacement is
+transactional. Harness reasoning and final-answer requests refresh bounded active memory,
+including after provider retry delays. `/context next message` previews selection.
+
+Independent plan/design/source QA approved functional behavior. Aggregate efficacy remains
+unproven. Store tests pass 9/9, runtime
+memory tests 7/7, shared interaction tests 18/18 and proof-grader checks 2/2. The SDK test
+covers explicit first use, project opt-in, empty-project index parity and real session requests.
+Full `scripts/ci.sh` passes, including workspace/doc tests, release build and all 22 simulated
+workloads with exact committed-baseline parity. Actual terminal and page dogfood passed.
+The SDK offers suggestions for an explicit request or when active/pending records exist. Safe cleanup recovered 8.490 GiB from eight unused ignored Next
+build directories; source status was unchanged and active output was preserved.
+
+Eight real Claude Haiku file tasks completed. Baseline: 4/4 correct, 24 calls, 79.3 seconds.
+Memory: 3/4 correct, 24 calls, 82.6 seconds. Both document tasks saved correct reports in
+four calls versus five. The replacement coding task recalled the right rule but exhausted its
+step budget before saving. Scope, retired-memory exclusion and current-instruction override
+checks passed. This proves a narrow document benefit, not overall reliability improvement.
+The failed coding attempt needs a separate execution-budget investigation before claiming
+broader workflow improvement. Evidence: workspace `board/evidence/project-memory-2026-10-20/`,
+including `full-ci-verified.log` and `verification-summary.json`. No commit, main
+integration, release or consumer repin. Board `ark-project-memory-20261020`.
+
+
 ## Mobile continuity listener
 
 In development on `codex/mobile-client-listener`: a stoppable client-only listener attaches to

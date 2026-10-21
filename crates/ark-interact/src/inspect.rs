@@ -95,6 +95,11 @@ const SECTIONS: &[(&str, &str, &str)] = &[
         "Workspace",
         "What you are looking at and evidence near it.",
     ),
+    (
+        "memory",
+        "Project memory",
+        "Reviewed corrections selected for this project and task.",
+    ),
     ("task", "Task", "Your message for this turn."),
     (
         "tool_results",
@@ -139,6 +144,7 @@ impl ContextView {
             report.working_state,
             report.conversation,
             report.workspace,
+            report.memory,
             report.task,
             report.tool_rounds,
             report.retrieved,
@@ -737,7 +743,7 @@ mod tests {
             state_overflow: 4,
         };
         let v = ContextView::build(&report, ContextSource::LastRequest, Some(1200), &k);
-        assert_eq!(v.included.len(), 9);
+        assert_eq!(v.included.len(), 10);
         assert!(v.included.iter().all(|s| !s.about.is_empty()));
         let labels: Vec<&str> = v.excluded.iter().map(|e| e.label.as_str()).collect();
         assert_eq!(

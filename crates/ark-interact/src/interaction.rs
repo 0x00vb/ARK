@@ -1541,6 +1541,20 @@ impl Interaction {
         Ok(ContextView::build(&report, source, next, &self.kept_out()?))
     }
 
+    /// Preview the actual selection for a concrete next message.
+    pub async fn context_for_task(&self, task: &str) -> anyhow::Result<ContextView> {
+        let report = self
+            .ark
+            .context_preview_task(&self.session, self.present, &self.turn_tools(), task)
+            .await?;
+        Ok(ContextView::build(
+            &report,
+            ContextSource::Preview,
+            None,
+            &self.kept_out()?,
+        ))
+    }
+
     /// The measurements behind the "kept out of the request" list.
     pub fn kept_out(&self) -> anyhow::Result<KeptOut> {
         // Counted in the database: this runs after every turn, and loading every stored

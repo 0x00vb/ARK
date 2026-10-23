@@ -17,7 +17,9 @@ function ordered() {
     const own = in_.filter((s) => s.builtin).sort((a, b) => a.title.localeCompare(b.title));
     return [...in_.filter((s) => !s.builtin), ...own];
   };
-  return [...group(false), ...group(true)];
+  const primary = ["account", "models", "appearance", "startup", "computers", "devices", "permissions"];
+  const rank = section => { const index = primary.indexOf(section.id); return index < 0 ? -1 : index; };
+  return [...group(false).sort((a, b) => rank(a) - rank(b)), ...group(true)];
 }
 
 export const settingsView = {
@@ -30,6 +32,7 @@ export const settingsView = {
     el.append(list, body);
     let current = null;
     let ctl = {};
+    let advancedOpen = false;
 
     const pick = (id) => {
       const s = registry.settings.get(id) || ordered()[0];
@@ -37,6 +40,7 @@ export const settingsView = {
         clear(body).append(h("p.settings-none", "Nothing to set here."));
         return;
       }
+      if (s.advanced) advancedOpen = true;
       // The same section again: a section added since still joins the list.
       if (current === s.id) {
         mark();
@@ -64,9 +68,10 @@ export const settingsView = {
       for (const s of ordered()) {
         if (s.advanced && !advanced) {
           advanced = true;
-          list.append(h("div.settings-group", "Advanced"));
+          list.append(h("button.nav-row.settings-advanced", { type: "button", "aria-expanded": String(advancedOpen), onclick: () => { advancedOpen = !advancedOpen; mark(); list.querySelector(".settings-advanced")?.focus(); } },
+            h("span.nav-icon", icon("settings")), h("span.nav-label", "Advanced")));
         }
-        list.append(h("button.nav-row", { type: "button", "aria-current": String(s.id === current), onclick: () => pick(s.id) },
+        list.append(h("button.nav-row", { type: "button", hidden: s.advanced && !advancedOpen, "aria-current": String(s.id === current), onclick: () => pick(s.id) },
           h("span.nav-icon", icon(s.icon || "settings")), h("span.nav-label", s.title)));
       }
     };
@@ -78,6 +83,7 @@ export const settingsView = {
       update: (p) => pick(p?.section),
       refresh: () => { mark(); ctl.refresh?.(); },
       focus: () => ctl.focus?.() || null,
+      dispose: () => ctl.dispose?.(),
     };
   },
 };
@@ -145,10 +151,12 @@ export function registerAppearance(ark) {
       el.append(
         themeGroup);
       themeGroup.append(
-        h("section.appearance-section", h("h2", "Mode"), modeGroup),
+        h("section.appearance-section", modeGroup));
+      const more = h("details.settings-options", h("summary", "More appearance options"),
         h("section.appearance-section", h("h2", "Palette"), paletteGroup));
       if (document.querySelector('.app[data-shell="desktop"][data-os="macos"]'))
-        el.append(h("section.appearance-section", h("h2", "Window"), materialGroup));
+        more.append(h("section.appearance-section", h("h2", "Window"), materialGroup));
+      el.append(more);
       return { dispose: () => window.removeEventListener("ark:theme", themeChanged) };
     },
   });

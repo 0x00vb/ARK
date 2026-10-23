@@ -1694,7 +1694,7 @@ function openDestination(destination, { keyboard = false } = {}) {
 function showTitle() {
   const v = state.view && (state.view === SETTINGS ? settingsView : registry.views.get(state.view));
   const el = $("#session-title");
-  el.textContent = !v ? state.title || "" : v.nav ? state.summary?.project?.name || "" : v.title;
+  el.textContent = !v ? state.title || "" : v.nav === true ? state.summary?.project?.name || "" : v.title;
   // A chat that runs on another computer says where.
   const place = !v && state.summary?.place;
   if (place) el.append(h("span.place-mark", { title: `Runs on ${place.name}` }, icon("server"), place.name));

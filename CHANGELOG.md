@@ -7,6 +7,13 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Changed
+
+- Collapse advanced settings and secondary appearance choices. Keep header highlights inset.
+- Show bundled plugin artwork and allow apps to register optional plugin setup in the marketplace. Clear setup controls when leaving Plugins.
+
 ## [0.25.0] - 2026-10-23
 
 ### Breaking

@@ -515,7 +515,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   min-width: 0; height: 100%; flex: 1 1 140px; display: flex; align-items: center; gap: 4px;
 }
 .chat-tabs[hidden] { display: none; }
-.chat-tab-list { min-width: 0; flex: 1; display: flex; align-items: center; gap: var(--rail-tab-gap); overflow-x: auto; scrollbar-width: none; }
+.chat-tab-list { box-sizing: border-box; padding-block: 7px; min-width: 0; flex: 1; display: flex; align-items: center; gap: var(--rail-tab-gap); overflow-x: auto; scrollbar-width: none; }
 .chat-tab-list::-webkit-scrollbar { display: none; }
 .chat-tab-item {
   min-width: 120px; max-width: 200px; height: var(--rail-tab-height); flex: 0 0 auto;
@@ -524,7 +524,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   transition-property: background-color, color; transition-duration: 120ms;
   transition-timing-function: var(--ease);
 }
-.chat-tab-item:hover { color: var(--text-2); }
+.chat-tab-item:hover { background: var(--hover); color: var(--text-2); }
 .chat-tab-item[data-selected="true"] { background: var(--active); color: var(--text); }
 .chat-tab-item[data-dragging="true"], .chat-tab-item[data-detaching="true"] { opacity: 0.45; }
 .chat-tab-item[data-drop="true"] { box-shadow: inset 2px 0 0 var(--accent); }
@@ -1246,7 +1246,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 
 .pane-head { height: 44px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; }
 .app[data-shell="browser"] .pane-head { height: 44px; }
-.pane-tabs { flex: 1; display: flex; align-items: center; gap: var(--rail-tab-gap); overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.pane-tabs { box-sizing: border-box; padding-block: 7px; flex: 1; display: flex; align-items: center; gap: var(--rail-tab-gap); overflow-x: auto; scrollbar-width: none; min-width: 0; }
 .pane-tabs::-webkit-scrollbar { display: none; }
 .pane-tab-item {
   min-width: 120px; max-width: 200px; height: var(--rail-tab-height); flex: 0 0 auto;
@@ -2167,7 +2167,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 @media (hover: hover) and (pointer: fine) {
   .app { --rail: 44px; --project-width: 236px; }
   .sidebar > * { min-width: 216px; }
-  .sidebar-top, .topbar, .pane-head, .destination-drag, .app[data-shell="browser"] .topbar, .app[data-shell="browser"] .pane-head, .app[data-shell="browser"] .sidebar-top, .app[data-shell="browser"] .destination-drag { height: 36px; }
+  .sidebar-top, .topbar, .pane-head, .destination-drag, .app[data-shell="browser"] .topbar, .app[data-shell="browser"] .pane-head, .app[data-shell="browser"] .sidebar-top, .app[data-shell="browser"] .destination-drag { height: 44px; }
   .destination { width: 32px; min-height: 32px; height: 32px; border-radius: 8px; }
   .destination .ico { width: 15px; height: 15px; }
   .ico { width: 14px; height: 14px; }
@@ -2180,3 +2180,22 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   .project-more, .project-new-chat { width: 28px; height: 28px; }
   .session { font-size: 12.5px; padding-block: 4px; gap: 7px; }
 }
+
+.settings-list .nav-row[hidden] { display: none; }
+.settings-advanced { margin-top: 14px; color: var(--text-2); }
+.settings-advanced::after { content: "+"; margin-left: auto; }
+.settings-advanced[aria-expanded="true"]::after { content: "−"; }
+.settings-options { margin-top: 28px; border-top: 1px solid var(--hair); padding-top: 16px; }
+.settings-options > summary { color: var(--text-2); font-size: 13px; cursor: pointer; }
+.settings-options[open] > summary { margin-bottom: 20px; }
+.settings-add { padding-top: 16px; }
+.market-top { justify-content: flex-end; }
+.market-icon { background: transparent; box-shadow: none; }
+.market-icon img { width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
+.market-detail .market-icon img { width: 46px; height: 46px; }
+.market-plugin-settings { display: flex; flex-direction: column; gap: 16px; padding-block: 12px; max-width: 480px; }
+.game-plugin-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.game-plugin-connect { display: flex; align-items: flex-end; gap: 10px; width: 100%; }
+.game-plugin-connect label { display: flex; flex: 1; flex-direction: column; gap: 8px; font-size: 13px; }
+.game-plugin-connect input { width: 100%; box-sizing: border-box; }
+@media (max-width: 680px) { .settings-advanced { margin-top: 0; } }

@@ -10,6 +10,9 @@ import { setAgentIdentity } from "./dom.js";
 //   ark.setting({ id, title, icon, advanced, render(el, api) })
 //                      a section of the Settings page: the app's or the account's
 //                      configuration, not one project's. `advanced` lists it under Advanced.
+//   ark.plugin({ id, name, summary, category, icon, render(el, api) })
+//                      a trusted app integration in Plugins; render returns optional dispose().
+//                      icon is a bundled same-origin image URL. Listing does not enable it.
 //   ark.modelPicker({ label(model), render(el, { close }) })
 //                      the app draws the composer's model menu and names the model on its
 //                      button. `label` gets the host's model ("claude sonnet") and returns
@@ -92,6 +95,7 @@ export const registry = {
   panels: new Map(),
   views: new Map(),
   settings: new Map(),
+  plugins: new Map(),
   viewers: [],
   fileViewers: new Map(),
   toolRenderers: [],
@@ -175,6 +179,15 @@ export function installApi(api) {
       // An app's section keeps its id: ARK's own, registered later, does not replace it.
       if (s.builtin && registry.settings.has(s.id) && !registry.settings.get(s.id).builtin) return;
       registry.settings.set(s.id, s);
+      api._changed();
+    },
+    plugin(entry) {
+      need(entry, ["id", "name", "summary", "category", "icon", "render"], "plugin");
+      if (["id", "name", "summary", "category", "icon"].some(key => typeof entry[key] !== "string" || !entry[key].trim())
+          || typeof entry.render !== "function" || registry.plugins.has(entry.id)) throw new Error("Invalid or duplicate plugin");
+      const image = new URL(entry.icon, document.baseURI);
+      if (image.origin !== location.origin || !["http:", "https:", "tauri:"].includes(image.protocol)) throw new Error("Plugin artwork must be bundled with the app");
+      registry.plugins.set(entry.id, entry);
       api._changed();
     },
     artifactViewer(v) {

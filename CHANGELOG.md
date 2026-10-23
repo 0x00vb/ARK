@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.2] - 2026-10-23
+
+- Draw navigation and common controls with one original outline icon family.
+- Preserve existing unsent text when appending plugin workflow requests.
+- Label app plugin detail actions Open.
+
+
 What changed for people building on ARK, per release. Not a commit log.
 
 - Sections: `Added`, `Changed`, `Fixed`, `Breaking`. A `Breaking` entry says what an app must

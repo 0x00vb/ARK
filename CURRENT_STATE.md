@@ -1,5 +1,15 @@
 # Current state
 
+## Creative UI patch assembly (2026-10-23)
+
+v0.25.2 is assembled from published v0.25.1 plus the reviewed b09aa0d UI changes.
+No Rust runtime, hosted-provider or protocol source changes are included. The six copied
+paths match the reviewed creative-polish source exactly. Focused WebKit proof is retained
+from that source, with actual source-overridden Desktop preview proof. Independent assembly
+review, immutable tag publication and bounded fresh-clone verification are pending.
+No full suites or native compilation were repeated, per the owner's instruction.
+
+
 ## Settings and plugin presentation (2026-10-23)
 
 Settings now collapses Advanced and secondary appearance options. Plugins supports trusted app
@@ -205,12 +215,12 @@ Last updated: 2026-10-21 (combined release source, checks and remaining gates)
 
 | | |
 |---|---|
-| Latest tag | v0.25.1 metadata prepared. Published stable base is v0.25.0; patch publication and bounded fresh-clone verification are pending. |
+| Latest tag | v0.25.2 metadata prepared. Published stable base is v0.25.1; patch publication and bounded fresh-clone verification are pending. |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
-| Next tag | not set. |
+| Next tag | v0.25.2, pending assembly review and publication. |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | `ci/windows` merged into v0.14.0 (`ark-os`, ADR 0022): every OS difference ARK had on 2026-10-05 goes through it; code written on `main` after that (processes, notifications, durable turns) mostly does not yet, and newer shell-script tests are not marked unix-only. Never run on Windows. Next: the machine run (`scripts/windows-check.ps1`), Office fixes in `ark-files`, one runtime per store. Analysis and plan: `ark-desktop/docs/WINDOWS.md` |
 | Accounts | In v0.10.0: `ark-account` (ADR 0026, 0031), an optional ARK Account for ARK Cloud. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local) |

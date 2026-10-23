@@ -6,8 +6,11 @@ Settings now collapses Advanced and secondary appearance options. Plugins suppor
 entries with local artwork and disposable configuration views. Shared navigation has inset
 header states. The focused Desktop WebKit regression passes, including offline catalogs,
 secret cleanup on Chat navigation, deep links and narrow layout. Live browser preview verified.
-This source is unreleased. Desktop needs a Core tag containing the plugin registry before its
-new game plugin registrations can be packaged. No full CI or native build ran for this UI change.
+The v0.25.1 release branch contains only this reviewed UI patch above published v0.25.0.
+Hosted account-pairing changes remain separate on main. The exact UI assets match the reviewed
+source. Focused WebKit and live preview results are reused. No full CI was rerun, as requested
+by the owner. Immutable tag publication and bounded fresh-clone verification remain pending.
+Desktop must pin the verified patch before packaging its plugin registrations.
 
 ## Combined release verification (2026-10-23)
 
@@ -202,8 +205,8 @@ Last updated: 2026-10-21 (combined release source, checks and remaining gates)
 
 | | |
 |---|---|
-| Latest tag | v0.25.0 release metadata prepared for 2026-10-21. Publication and fresh-clone verification are tracked above and remain open. |
-| `main` | v0.25.0 release tree. |
+| Latest tag | v0.25.1 metadata prepared. Published stable base is v0.25.0; patch publication and bounded fresh-clone verification are pending. |
+| Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |

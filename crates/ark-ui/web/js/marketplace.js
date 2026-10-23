@@ -17,6 +17,7 @@ function marketplace(el, ark) {
   let alive = true;
   let generation = 0;
   let detailControl = null;
+  let mountedAppId = null;
   let selected = null;
   let query = "";
   let loading = true;
@@ -218,6 +219,7 @@ function marketplace(el, ark) {
       const host = h("div.market-plugin-settings");
       clear(body).append(h("div.market-detail-head", back),
         h("section.market-detail", entryIcon(entry), h("div", h("h2", entry.name), h("p", entry.summary))), host);
+      mountedAppId = entry.id;
       try { detailControl = entry.render(host, ark) || null; }
       catch (error) { host.append(h("p.market-notice", { role: "alert" }, error.message || String(error))); }
       return;
@@ -249,9 +251,10 @@ function marketplace(el, ark) {
   };
 
   const draw = () => {
-    if (!alive) return;
+    if (!alive || (selected?.source === "app" && mountedAppId === selected.id)) return;
     detailControl?.dispose?.();
     detailControl = null;
+    mountedAppId = null;
     if (selected) drawDetail(offers.find(entry => entry.id === selected.id) || selected);
     else drawCatalog();
   };
@@ -260,6 +263,7 @@ function marketplace(el, ark) {
     detailControl?.dispose?.();
     detailControl = null;
     selected = null;
+    mountedAppId = null;
     clear(body);
   });
   visibility.observe(el, { attributes: true, attributeFilter: ["hidden"] });

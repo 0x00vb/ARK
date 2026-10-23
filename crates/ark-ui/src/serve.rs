@@ -242,7 +242,14 @@ pub(crate) async fn serve(
     addr: &str,
     access: Access,
     entry: Option<String>,
+    account_pairing: Option<AccountPairing>,
 ) -> anyhow::Result<(Served, tokio::task::JoinHandle<()>)> {
+    if account_pairing.is_some() && !matches!(&access, Access::Tokens(_)) {
+        anyhow::bail!("account pairing needs saved access tokens");
+    }
+    let route_id = account_pairing
+        .as_ref()
+        .map(|pairing| pairing.route_id.clone());
     serve_with(
         host,
         addr,
@@ -251,8 +258,8 @@ pub(crate) async fn serve(
             access,
             entry,
             surface: ListenerSurface::Full,
-            account_pairing: None,
-            route_id: None,
+            account_pairing,
+            route_id,
         },
     )
     .await

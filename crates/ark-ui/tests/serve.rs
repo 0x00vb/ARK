@@ -1127,6 +1127,106 @@ async fn account_pairing_binds_the_verified_subject_and_issues_external_scope() 
 }
 
 #[tokio::test]
+async fn hosted_workspace_pairs_the_exact_route_without_granting_owner_access() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("owner").unwrap();
+    let pairing = AccountPairing::new(
+        "route-cloud-workspace",
+        "account-owner",
+        Arc::new(TestAccountVerifier),
+    )
+    .unwrap();
+    let (_, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .account_pairing(pairing)
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let address = format!("127.0.0.1:{}", served.port);
+    let body = json!({
+        "routeId": "route-cloud-workspace",
+        "deviceName": "Valentino's iPhone",
+        "installationId": "install-cloud-1"
+    })
+    .to_string();
+    let paired = raw(
+        served.port,
+        post(
+            "/client/v1/account-pair",
+            &address,
+            None,
+            "Authorization: Bearer owner-jwt\r\n",
+            &body,
+        ),
+    )
+    .await;
+    assert!(paired.starts_with("HTTP/1.1 200"), "{paired}");
+    let paired: ark_protocol::PairResponse =
+        serde_json::from_str(paired.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert!(tokens
+        .check_scope(&paired.credential, CredentialScope::ExternalClient)
+        .is_some());
+    assert!(tokens
+        .check_scope(&paired.credential, CredentialScope::Owner)
+        .is_none());
+
+    let phone_auth = format!("Authorization: Bearer {}\r\n", paired.credential);
+    let hello = raw(
+        served.port,
+        format!("GET /client/v1/hello HTTP/1.1\r\nHost: {address}\r\n{phone_auth}\r\n"),
+    )
+    .await;
+    assert!(hello.starts_with("HTTP/1.1 200"), "{hello}");
+    assert!(
+        hello.contains(r#""routeId":"route-cloud-workspace""#),
+        "{hello}"
+    );
+
+    let session = raw(
+        served.port,
+        format!("GET /session HTTP/1.1\r\nHost: {address}\r\n{phone_auth}\r\n"),
+    )
+    .await;
+    assert!(session.contains(r#""signed_in":false"#), "{session}");
+    let phone_rpc = raw(served.port, rpc(&address, &phone_auth, "hello")).await;
+    assert!(phone_rpc.starts_with("HTTP/1.1 401"), "{phone_rpc}");
+    let phone_events = raw(
+        served.port,
+        format!("GET /events HTTP/1.1\r\nHost: {address}\r\n{phone_auth}\r\n"),
+    )
+    .await;
+    assert!(phone_events.starts_with("HTTP/1.1 401"), "{phone_events}");
+
+    let owner_auth = format!("Authorization: Bearer {owner}\r\n");
+    let owner_rpc = raw(served.port, rpc(&address, &owner_auth, "hello")).await;
+    assert!(owner_rpc.contains(r#""ok":true"#), "{owner_rpc}");
+}
+
+#[tokio::test]
+async fn hosted_account_pairing_requires_saved_tokens() {
+    let dir = tempfile::tempdir().unwrap();
+    let pairing = AccountPairing::new(
+        "route-cloud-workspace",
+        "account-owner",
+        Arc::new(TestAccountVerifier),
+    )
+    .unwrap();
+    let result = ArkUi::new(app(dir.path()))
+        .account_pairing(pairing)
+        .serve_background("127.0.0.1:0")
+        .await;
+    let error = match result {
+        Ok(_) => panic!("one-time access must not host account pairing"),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("saved access tokens"),
+        "{error:#}"
+    );
+}
+
+#[tokio::test]
 async fn real_cloud_assertion_pairs_once_through_the_listener() {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine as _;

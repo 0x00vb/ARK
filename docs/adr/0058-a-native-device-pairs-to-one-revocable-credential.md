@@ -38,6 +38,11 @@ Credential issuance and the persisted `jti` hash share one locked write, so rest
 the assertion. The registry never returns runtime credentials. Pairing one installation does not
 revoke another. Re-pairing the same installation replaces its earlier credential.
 
+A hosted runtime may expose account pairing on the same server as its owner page. The pairing
+configuration is valid only with saved tokens. It supplies the stable route id returned by typed
+`hello`; the issued credential remains limited to `/client/v1/*` and cannot authenticate the page,
+generic RPC or generic event stream.
+
 The app stores the credential only in Keychain with
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. It never stores it in UserDefaults, files, URLs,
 links, notifications, analytics, crash reports or logs. App Transport Security has no broad

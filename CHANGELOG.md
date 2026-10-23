@@ -7,6 +7,13 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
+## [Unreleased]
+
+### Added
+
+- `ArkUi::account_pairing` lets a hosted workspace pair account-bound native clients and report
+  its exact route id without granting those clients browser or generic RPC access.
+
 ## [0.25.0] - 2026-10-23
 
 ### Breaking

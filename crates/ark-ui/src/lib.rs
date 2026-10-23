@@ -83,6 +83,7 @@ pub struct ArkUi {
     start: Start,
     access: Access,
     entry: Option<String>,
+    account_pairing: Option<AccountPairing>,
     keep_running: bool,
     start_hidden: bool,
     ambient_window: bool,
@@ -135,6 +136,7 @@ impl ArkUi {
             start: Start::default(),
             access: Access::default(),
             entry: None,
+            account_pairing: None,
             keep_running: false,
             start_hidden: false,
             ambient_window: false,
@@ -299,6 +301,14 @@ impl ArkUi {
         self
     }
 
+    /// Bind account pairing and typed client identity to this hosted runtime route. Pairing is
+    /// available only with saved access tokens; the issued credential remains external-client
+    /// scoped and cannot authenticate the page or generic RPC surface (ADR 0058).
+    pub fn account_pairing(mut self, pairing: AccountPairing) -> Self {
+        self.account_pairing = Some(pairing);
+        self
+    }
+
     /// Where a browser without a session is sent: the app's page that signs a person in and
     /// comes back with a one-time link (ADR 0040). With saved tokens only. Without it, the page
     /// says it needs a link.
@@ -377,7 +387,11 @@ impl ArkUi {
     /// write to it, a socket left by a stopped process is replaced, and one that answers means
     /// a server is already there. The socket file is removed when serving stops.
     pub async fn serve(self, addr: &str) -> anyhow::Result<()> {
-        let (access, entry) = (self.access.clone(), self.entry.clone());
+        let (access, entry, account_pairing) = (
+            self.access.clone(),
+            self.entry.clone(),
+            self.account_pairing.clone(),
+        );
         let (host, assets) = self.open().await?;
         screen_stays_here(&host, &access)?;
         if let Access::Tokens(tokens) = &access {
@@ -388,7 +402,8 @@ impl ArkUi {
                 );
             }
         }
-        let (served, mut task) = serve::serve(host.clone(), assets, addr, access, entry).await?;
+        let (served, mut task) =
+            serve::serve(host.clone(), assets, addr, access, entry, account_pairing).await?;
         println!("{}", served.url);
         tokio::select! {
             _ = stop_signal() => {}
@@ -414,10 +429,15 @@ impl ArkUi {
 
     /// Start serving and return at once (tests, embedding). `addr` as in [`serve`](Self::serve).
     pub async fn serve_background(self, addr: &str) -> anyhow::Result<(Arc<Host>, Served)> {
-        let (access, entry) = (self.access.clone(), self.entry.clone());
+        let (access, entry, account_pairing) = (
+            self.access.clone(),
+            self.entry.clone(),
+            self.account_pairing.clone(),
+        );
         let (host, assets) = self.open().await?;
         screen_stays_here(&host, &access)?;
-        let (served, _task) = serve::serve(host.clone(), assets, addr, access, entry).await?;
+        let (served, _task) =
+            serve::serve(host.clone(), assets, addr, access, entry, account_pairing).await?;
         Ok((host, served))
     }
 

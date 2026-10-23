@@ -1,5 +1,14 @@
 # Current state
 
+## Desktop creative polish source candidate (2026-10-23)
+
+Isolated codex/creative-polish adds one original outline icon family and an explicit
+append option for unsent composer text. Plugin setup actions now say Open. Focused WebKit
+checks prove exact draft retention across chat and project navigation and render all56 icons.
+Independent plan/design/source QA GO. This branch is not released or integrated into the
+frozen Core0.25.1/Desktop0.9.1 packet. Full CI and native packaging were not run.
+
+
 ## Settings and plugin presentation (2026-10-23)
 
 Settings now collapses Advanced and secondary appearance options. Plugins supports trusted app

@@ -9,6 +9,9 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+- Unify navigation icons and preserve existing drafts when appending plugin requests.
+
+
 ### Changed
 
 - Collapse advanced settings and secondary appearance choices. Keep header highlights inset.

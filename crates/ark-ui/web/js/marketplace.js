@@ -141,7 +141,7 @@ function marketplace(el, ark) {
   };
 
   const action = (entry) => {
-    if (entry.source === "app") return h("button.btn.ghost.small", { type: "button", "aria-label": `Set up ${entry.name}`, onclick: () => { selected = entry; draw(); } }, "Set up");
+    if (entry.source === "app") return h("button.btn.ghost.small", { type: "button", "aria-label": `Open ${entry.name}`, onclick: () => { selected = entry; draw(); } }, "Open");
     if (entry.switch) return switchButton(entry);
     if (entry.connection?.state === "connected") return h("button.btn.ghost.small", { type: "button", disabled: true }, "Connected");
     const pending = connecting.has(entry.id);

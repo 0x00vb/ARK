@@ -114,9 +114,10 @@ const api = {
   project: () => activeSummary()?.project,
   send: (text) => submit(text),
   // Put text in the composer, unsent, with the conversation in view.
-  compose: (text) => {
+  compose: (text, { append = false } = {}) => {
+    const draft = append ? composer.input.value : "";
     showConversation();
-    composer.set(text);
+    composer.set(draft ? `${draft}\n\n${text}` : text);
   },
   submit: (text) => submit(text),
   steer,

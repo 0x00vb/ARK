@@ -9,6 +9,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Changed
+
+- Collapse advanced settings and secondary appearance choices. Keep header highlights inset.
+- Show bundled plugin artwork and allow apps to register optional plugin setup in the marketplace. Clear setup controls when leaving Plugins.
+
+
 ### Added
 
 - `ArkUi::account_pairing` lets a hosted workspace pair account-bound native clients and report

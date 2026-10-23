@@ -1,5 +1,14 @@
 # Current state
 
+## Settings and plugin presentation (2026-10-23)
+
+Settings now collapses Advanced and secondary appearance options. Plugins supports trusted app
+entries with local artwork and disposable configuration views. Shared navigation has inset
+header states. The focused Desktop WebKit regression passes, including offline catalogs,
+secret cleanup on Chat navigation, deep links and narrow layout. Live browser preview verified.
+This source is unreleased. Desktop needs a Core tag containing the plugin registry before its
+new game plugin registrations can be packaged. No full CI or native build ran for this UI change.
+
 ## Combined release verification (2026-10-23)
 
 The combined candidate passed full page-enabled CI: formatting, generated protocol, version

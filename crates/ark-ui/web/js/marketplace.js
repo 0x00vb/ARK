@@ -4,14 +4,19 @@
 // an agent silent access.
 
 import { h, clear } from "./dom.js";
+import { registry } from "./ext.js";
+import { pluginArtwork } from "./plugin-art.js";
 
 function entryIcon(entry) {
-  return h("span.market-icon", { "aria-hidden": "true", "data-id": entry.id }, entry.mark);
+  return pluginArtwork(entry);
 }
 
 function marketplace(el, ark) {
   el.classList.add("marketplace");
   let offers = [];
+  let alive = true;
+  let generation = 0;
+  let detailControl = null;
   let selected = null;
   let query = "";
   let loading = true;
@@ -25,6 +30,7 @@ function marketplace(el, ark) {
 
   const result = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
   const load = async () => {
+    const current = ++generation;
     loading = true;
     draw();
     const [accountResult, catalogResult, linkedResult, capabilityResult] = await Promise.all([
@@ -33,6 +39,7 @@ function marketplace(el, ark) {
       ark.ext ? result(ark.ext("desktop.plugins_connections")) : Promise.resolve({ value: null }),
       result(ark.call("capabilities")),
     ]);
+    if (!alive || current !== generation) return;
     account = accountResult.value;
     catalogError = catalogResult.error || null;
     connectionsError = linkedResult.error || null;
@@ -65,7 +72,8 @@ function marketplace(el, ark) {
         unavailable: capability.state === "unavailable",
         unavailableReason: capability.why,
       })) : [];
-    offers = [...managed, ...local];
+    const appPlugins = [...registry.plugins.values()].map(entry => ({ ...entry, id: `app:${entry.id}`, source: "app" }));
+    offers = [...appPlugins, ...managed, ...local];
     loading = false;
     draw();
   };
@@ -84,8 +92,9 @@ function marketplace(el, ark) {
       }
       notice.textContent = "Finish connecting in your browser. This page will update when it is ready.";
       const until = Date.now() + 300000;
-      while (Date.now() < until) {
+      while (alive && Date.now() < until) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
+        if (!alive) return;
         await load();
         const updated = offers.find((offer) => offer.id === entry.id);
         if (updated?.connection?.state === "connected") {
@@ -131,6 +140,7 @@ function marketplace(el, ark) {
   };
 
   const action = (entry) => {
+    if (entry.source === "app") return h("button.btn.ghost.small", { type: "button", "aria-label": `Set up ${entry.name}`, onclick: () => { selected = entry; draw(); } }, "Set up");
     if (entry.switch) return switchButton(entry);
     if (entry.connection?.state === "connected") return h("button.btn.ghost.small", { type: "button", disabled: true }, "Connected");
     const pending = connecting.has(entry.id);
@@ -189,7 +199,7 @@ function marketplace(el, ark) {
       drawCatalog();
     });
     clear(body).append(
-      h("div.market-top", h("div", h("p.settings-lead", "Connect services so ARK can work across your tools.")), search),
+      h("div.market-top", search),
       catalog,
       ...catalogStatus(),
       notice,
@@ -204,6 +214,14 @@ function marketplace(el, ark) {
     const connection = entry.connection;
     const pending = connecting.has(entry.id);
     const back = h("button.btn.ghost.small", { type: "button", onclick: () => { selected = null; draw(); } }, "Back");
+    if (entry.source === "app") {
+      const host = h("div.market-plugin-settings");
+      clear(body).append(h("div.market-detail-head", back),
+        h("section.market-detail", entryIcon(entry), h("div", h("h2", entry.name), h("p", entry.summary))), host);
+      try { detailControl = entry.render(host, ark) || null; }
+      catch (error) { host.append(h("p.market-notice", { role: "alert" }, error.message || String(error))); }
+      return;
+    }
     if (entry.switch) {
       clear(body).append(
         h("div.market-detail-head", back),
@@ -222,19 +240,34 @@ function marketplace(el, ark) {
       h("div.market-detail-head", back),
       h("section.market-detail", entryIcon(entry), h("div", h("h2", entry.name), h("p", entry.summary))),
       h("div.market-detail-actions", primary,
-        h("p.market-state", entry.unavailable ? entry.unavailableReason : connection?.state === "connected" ? "Connected. ARK asks before each action." : "Connect an account in your browser. ARK asks before each action.")),
-      h("dl.market-facts", h("div", h("dt", "Connection"), h("dd", entry.source === "managed" ? "Requires an ARK Account" : "Stored on this computer")), h("div", h("dt", "Data"), h("dd", data)), h("div", h("dt", "Access"), h("dd", "Each action still asks for approval when needed"))),
+        h("p.market-state", entry.unavailable ? entry.unavailableReason : connection?.state === "connected" ? "Connected" : "Continue in your browser")),
+      h("dl.market-facts", h("div", h("dt", "Connection"), h("dd", entry.source === "managed" ? "Requires an ARK Account" : "Stored on this computer")), h("div", h("dt", "Data"), h("dd", data))),
       connection?.state === "connected" ? h("button.btn.ghost.small.market-remove-detail", { type: "button", onclick: () => disconnect(entry) }, "Disconnect") : null,
       ...catalogStatus(),
       notice,
     );
   };
 
-  const draw = () => selected ? drawDetail(offers.find((entry) => entry.id === selected.id) || selected) : drawCatalog();
+  const draw = () => {
+    if (!alive) return;
+    detailControl?.dispose?.();
+    detailControl = null;
+    if (selected) drawDetail(offers.find(entry => entry.id === selected.id) || selected);
+    else drawCatalog();
+  };
+  const visibility = new MutationObserver(() => {
+    if (!el.closest("[hidden]")) return;
+    detailControl?.dispose?.();
+    detailControl = null;
+    selected = null;
+    clear(body);
+  });
+  visibility.observe(el, { attributes: true, attributeFilter: ["hidden"] });
+  if (el.parentElement) visibility.observe(el.parentElement, { attributes: true, attributeFilter: ["hidden"] });
   el.append(body);
   draw();
   load();
-  return { refresh: load };
+  return { refresh: load, dispose() { alive = false; generation += 1; visibility.disconnect(); detailControl?.dispose?.(); detailControl = null; } };
 }
 
 export function registerMarketplace(ark) {

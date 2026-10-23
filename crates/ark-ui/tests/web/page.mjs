@@ -1977,14 +1977,15 @@ async function settings(page) {
   await page.locator("#open-settings").click();
   assert.equal(await page.locator(".settings-title").innerText(), "Keys", "the app's section opens first");
   assert.equal(await page.locator(".settings-section").innerText(), "the keys");
-  const rows = page.locator(".settings-list .nav-row");
+  const rows = page.locator(".settings-list .nav-row:not([hidden])");
   await rows.nth(2).waitFor();
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Devices", "Permissions", "Skills", "Tool servers"]);
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Appearance", "Devices", "Permissions", "Advanced"]);
 
   await page.evaluate(() => window.ark.setting({ id: "look", title: "Look", render: (el) => el.append("the look") }));
   await page.evaluate(() => window.ark.setting({ id: "debug", title: "Debug", advanced: true, render: (el) => el.append("the debug") }));
   await page.evaluate(() => window.ark.openSettings("keys"));
-  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Devices", "Permissions", "Debug", "Skills", "Tool servers"]);
+  await page.locator(".settings-advanced").click();
+  assert.deepEqual(await rows.allInnerTexts(), ["Keys", "Look", "Appearance", "Devices", "Permissions", "Advanced", "Debug", "Skills", "Tool servers"]);
   assert.deepEqual(await page.locator(".settings-list > *").evaluateAll((els) => els.map((e) => e.textContent).slice(5, 7)), ["Advanced", "Debug"]);
 
   // The test page opens light (no app default, a light system); Dark is kept across a reload.
@@ -1997,9 +1998,11 @@ async function settings(page) {
     root.setProperty("--appearance-light-accent", "#335eb7");
   });
   await page.locator(".settings-list .nav-row", { hasText: "Appearance" }).click();
+  assert.equal(await page.locator(".appearance-palette-grid").isVisible(), false);
+  await page.locator(".settings-options > summary").click();
   assert.equal(await page.locator(".settings-section .appearance-choice").count(), 8);
   assert.equal(await page.locator('.appearance-settings [role="radiogroup"]').count(), 3);
-  assert.equal(await page.locator(".appearance-theme-group input:checked").count(), 2);
+  assert.equal(await page.locator(".appearance-settings :is(.appearance-mode-grid, .appearance-palette-grid) input:checked").count(), 2);
   assert.equal(await page.locator(".appearance-mode-grid .appearance-preview").count(), 3);
   assert.equal(await page.locator(".appearance-palette-grid .appearance-preview").count(), 3);
   assert.equal(await page.locator(".appearance-material-grid .appearance-preview").count(), 2);
@@ -2010,7 +2013,7 @@ async function settings(page) {
   assert.deepEqual(brandedLight, { background: "rgb(250, 250, 247)", accent: "rgb(51, 94, 183)" });
   await page.locator(".appearance-material-grid .appearance-choice", { hasText: "Translucent" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.material), "translucent");
-  assert.equal(await page.locator(".appearance-theme-group input:checked").count(), 2);
+  assert.equal(await page.locator(".appearance-settings :is(.appearance-mode-grid, .appearance-palette-grid) input:checked").count(), 2);
   await page.locator(".appearance-mode-grid .appearance-choice", { hasText: "Dark" }).click();
   assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
   assert.equal(await page.evaluate(() => document.documentElement.dataset.colorScheme), "dark");
@@ -2922,7 +2925,7 @@ async function chatWorkspacePolish(page) {
     };
   });
   assert.deepEqual(shell, {
-    chatsParent: "topbar", chatLabel: "Open chats", browserHeight: 36, nativeHeight: 36,
+    chatsParent: "topbar", chatLabel: "Open chats", browserHeight: 44, nativeHeight: 44,
     titleDisplay: "none", titleBarViewsHidden: true, proofParent: "workspace-destinations",
     proofLabel: "Proof", accountParent: "destinations", accountLabel: "Account and settings",
     railMaterial: "rgb(241, 241, 239)", sidebarMaterial: "rgb(247, 247, 246)",

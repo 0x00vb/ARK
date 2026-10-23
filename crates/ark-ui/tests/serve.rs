@@ -225,7 +225,7 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         match path {
             "/client/v1/hello" => {
                 serde_json::from_value::<ark_protocol::Hello>(value.clone()).unwrap();
-                assert_eq!(value["protocolMinor"], 4);
+                assert_eq!(value["protocolMinor"], ark_protocol::CURRENT_MINOR);
                 assert!(value["capabilities"]
                     .as_array()
                     .unwrap()

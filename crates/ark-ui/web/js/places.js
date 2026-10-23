@@ -63,7 +63,7 @@ export class Places {
       chip.dataset.state = down ? "down" : "ok";
       chip.title = `This chat runs on ${s.place.name}`;
       clear(chip).append(icon("server"), h("span", s.place.name));
-    } else if (this.open && (others.length || this.list?.can_add)) {
+    } else if (this.open && (others.length || this.pending)) {
       chip.hidden = false;
       chip.removeAttribute("aria-disabled");
       delete chip.dataset.state;

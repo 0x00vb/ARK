@@ -164,6 +164,15 @@ The existing Desktop Browser is a local webview, and an iframe in a served page 
 locally. Forwarding `frame_check` would not move DNS, cookies, `localhost`, WebSockets or egress,
 so neither is used for a remote `ResourceRef`.
 
+The same rendering rule applies to every HTTP-served ARK page, including `--serve`,
+`--connect` and a whole window opened through `remote::visit`. The page's runtime ID names
+the destination, not the viewer's computer. A loopback address may be an SSH tunnel, so the
+hostname does not establish where the process runs. These pages use the existing Browser
+resource even when its runtime ID matches the page's runtime ID. They require Chromium on
+that destination. Missing Chromium is shown with Try again, which navigates the requested
+address again. There is no automatic iframe or native-view fallback. The native app's own
+local page keeps its Desktop Browser view.
+
 For a remote location, `ark-browser` owns a person-driven page in Chromium on that runtime,
 separate from every agent page. `ark-ui` transports bounded rendered frames and input; the page
 draws them. CDP and its debug port never leave the destination runtime.

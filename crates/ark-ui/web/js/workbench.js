@@ -333,13 +333,13 @@ function browser(el, params, ark) {
   // Nothing answers at the address (nothing runs on that port, a name nobody knows). The bar
   // keeps what was typed.
   const downText = h("p");
-  const down = h("div.wb-empty.wb-refused", { hidden: true }, downText, h("button.btn", { type: "button", onclick: () => nav.reload() }, icon("reload"), "Try again"));
+  const down = h("div.wb-empty.wb-refused", { hidden: true }, downText, h("button.btn", { type: "button", onclick: () => (nav.retry || nav.reload)() }, icon("reload"), "Try again"));
   const ui = {
     shown: (u) => shown((s.shown = u)),
     failed,
     restore,
-    down: (u) => {
-      if (u) downText.textContent = `${hostPortOf(u)} can't be reached`;
+    down: (u, message) => {
+      if (u) downText.textContent = message || `${hostPortOf(u)} can't be reached`;
       else if (down.contains(document.activeElement)) address.focus();
       down.hidden = !u;
     },
@@ -347,11 +347,11 @@ function browser(el, params, ark) {
     // A page arrived: what shows through it is white, as a page without a background expects.
     page: () => host.setAttribute("data-page", ""),
   };
-  const nav = ark.remoteResource
+  const nav = ark.destinationBrowser || ark.remoteResource
     ? remoteBrowser(host, ark, ui)
     : view ? nativeBrowser(host, view, ui) : framedBrowser(host, ark, out);
   host.append(blank);
-  if (view || ark.remoteResource) host.append(down);
+  if (view || ark.destinationBrowser || ark.remoteResource) host.append(down);
 
   const go = (u) => {
     u = String(u || "").trim();
@@ -385,7 +385,7 @@ function remoteBrowser(host, ark, ui) {
     "aria-description": "Press Control Option Escape to return keyboard control to ARK",
   });
   host.append(image, status);
-  const s = { alive: true, loading: false, timer: 0, width: 1280, height: 900, captured: false, url: "" };
+  const s = { alive: true, loading: false, timer: 0, width: 1280, height: 900, captured: false, url: "", sequence: 0, navigation: "ready" };
   const call = (kind, input = {}) => ark.resource(ref, kind, input);
   const size = () => {
     const r = host.getBoundingClientRect();
@@ -396,20 +396,22 @@ function remoteBrowser(host, ark, ui) {
     return { x: (e.clientX - r.left) * s.width / Math.max(1, r.width), y: (e.clientY - r.top) * s.height / Math.max(1, r.height) };
   };
   const poll = async () => {
-    if (!s.alive || s.loading) return;
+    if (!s.alive || s.loading || s.navigation !== "ready") return;
     if (!ark.online()) {
       if (s.alive) s.timer = setTimeout(poll, 1000);
       return;
     }
     s.loading = true;
+    const sequence = s.sequence;
     const dims = size();
     try {
       if (dims.width !== s.width || dims.height !== s.height) {
         s.width = dims.width; s.height = dims.height;
         await call("browser_resize", { ...dims, scale: Math.min(devicePixelRatio || 1, 2) });
+        if (!s.alive || sequence !== s.sequence || s.navigation !== "ready") return;
       }
       const frame = await call("browser_snapshot", dims);
-      if (!s.alive) return;
+      if (!s.alive || sequence !== s.sequence || s.navigation !== "ready") return;
       if (frame.image) image.src = `data:${frame.media_type};base64,${frame.image}`;
       s.width = frame.width; s.height = frame.height;
       ui.loading(frame.loading);
@@ -419,28 +421,38 @@ function remoteBrowser(host, ark, ui) {
       status.textContent = frame.loading ? `Loading ${frame.url || "page"}` : frame.title || frame.url || "Browser page";
       ui.page();
     } catch (e) {
+      if (!s.alive || sequence !== s.sequence || s.navigation !== "ready") return;
       status.textContent = e.message;
-      ui.down(s.url || "remote://browser");
+      ui.loading(false);
+      ui.down(s.url || "remote://browser", e.message);
     } finally {
       s.loading = false;
       if (s.alive) s.timer = setTimeout(poll, 250);
     }
   };
-  const load = async (url) => {
+  const navigate = async (operation, input = {}) => {
+    const url = input.url || s.url;
+    const sequence = ++s.sequence;
+    s.navigation = "loading";
     s.url = url;
     ui.loading(true);
     status.textContent = `Loading ${url}`;
     try {
-      await call("browser_navigate", { url });
+      await call(operation, input);
+      if (!s.alive || sequence !== s.sequence) return;
+      s.navigation = "ready";
       ui.down("");
       await poll();
-      image.focus();
+      if (s.alive && sequence === s.sequence) image.focus();
     } catch (e) {
+      if (!s.alive || sequence !== s.sequence) return;
+      s.navigation = "failed";
       ui.loading(false);
       status.textContent = e.message;
-      ui.down(url);
+      ui.down(url, e.message);
     }
   };
+  const load = (url) => navigate("browser_navigate", { url });
   const pointer = (event) => (e) => {
     const p = point(e);
     call("browser_pointer", { event, ...p, button: e.button === 2 ? "right" : e.button === 1 ? "middle" : "left", clicks: e.detail || 1 }).catch(() => {});
@@ -471,8 +483,9 @@ function remoteBrowser(host, ark, ui) {
   poll();
   return {
     load,
-    back: () => call("browser_back").then(poll).catch(() => {}),
-    reload: () => call("browser_reload").then(poll).catch(() => {}),
+    retry: () => s.url && load(s.url),
+    back: () => navigate("browser_back"),
+    reload: () => navigate("browser_reload"),
     reconnect: poll,
     dispose: () => {
       s.alive = false;

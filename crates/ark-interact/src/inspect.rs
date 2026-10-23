@@ -511,6 +511,10 @@ impl StateView {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSummary {
+    /// Agents assigned work for this chat, including historical delegations.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub participants: Option<Vec<String>>,
     pub id: String,
     pub short: String,
     pub title: String,
@@ -528,6 +532,7 @@ pub struct SessionSummary {
 impl SessionSummary {
     pub fn of(r: &SessionRecord, project_name: &str, current: bool) -> Self {
         SessionSummary {
+            participants: None,
             id: r.id.as_str().to_string(),
             short: r.id.short().to_string(),
             title: r.title.clone(),

@@ -49,8 +49,16 @@ pub enum Error {
     Changed(String),
     #[error("{0}")]
     Path(String),
-    #[error("{0}")]
+    #[error("{}", io_error_message(.0, cfg!(windows)))]
     Io(#[from] std::io::Error),
+}
+
+fn io_error_message(error: &std::io::Error, windows: bool) -> String {
+    if windows && matches!(error.raw_os_error(), Some(32 | 33)) {
+        format!("file is in use by another application; close it there and try again: {error}")
+    } else {
+        error.to_string()
+    }
 }
 
 /// One family of files: how its bytes read as a [`Content`], and how an edit or a new file
@@ -557,6 +565,33 @@ fn save(path: &Path, bytes: &[u8]) -> Result<(), Error> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn windows_file_in_use_errors_keep_the_original_diagnostic_and_source() {
+        for code in [32, 33] {
+            let original = std::io::Error::from_raw_os_error(code);
+            let expected = original.to_string();
+            let shown = io_error_message(&original, true);
+            assert!(shown.starts_with(
+                "file is in use by another application; close it there and try again: "
+            ));
+            assert!(shown.ends_with(&expected));
+
+            let wrapped = Error::Io(original);
+            assert!(std::error::Error::source(&wrapped).is_some());
+        }
+    }
+
+    #[test]
+    fn other_io_errors_keep_their_existing_display() {
+        for (error, windows) in [
+            (std::io::Error::from_raw_os_error(5), true),
+            (std::io::Error::from_raw_os_error(32), false),
+            (std::io::Error::other("ordinary failure"), true),
+        ] {
+            assert_eq!(io_error_message(&error, windows), error.to_string());
+        }
+    }
 
     #[test]
     fn maps_keep_editable_source_and_models_refuse_text_edits() {

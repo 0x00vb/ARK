@@ -181,16 +181,19 @@ export function connect() {
       const tries = () => (entry && !token ? 4 : 10);
       let failures = 0;
       let everOpen = false;
+      let interrupted = false;
       const open = () => {
         const es = new EventSource(token ? `/events?token=${encodeURIComponent(token)}` : "/events");
         es.onopen = () => {
-          if (everOpen) fn({ kind: "resync" });
-          if (failures > 0) fn({ kind: "connected" });
+          if (everOpen || interrupted) fn({ kind: "resync" });
+          if (interrupted) fn({ kind: "connected" });
+          interrupted = false;
           everOpen = true;
           failures = 0;
         };
         es.onmessage = (e) => fn(JSON.parse(e.data));
         es.onerror = async () => {
+          interrupted = true;
           es.close();
           const s = await session();
           if (s && !s.signed_in && (await enter())) return;

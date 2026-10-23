@@ -40,7 +40,7 @@ const TAB_STORAGE_VERSION = 1;
 const LAYOUT_STORAGE_VERSION = 1;
 document.documentElement.dataset.runtime = transport.local ? "local" : "remote";
 const appEl = $("#app");
-const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], extChanged: false, projectSectionsChanged: false, view: null, homeView: null };
+const state = { summary: null, ui: {}, runtime: null, sessionId: null, running: false, approvals: new Map(), working: [], online: true, connectionEpoch: 0, extChanged: false, projectSectionsChanged: false, view: null, homeView: null };
 const secondaryChats = new Map();
 let activeSession = null;
 const resourceOnline = new Map();
@@ -286,8 +286,9 @@ function scopedApi(location) {
   const scoped = Object.create(window.ark || api);
   scoped.location = { ...location };
   scoped.remoteResource = location.runtime !== state.runtime;
+  scoped.destinationBrowser = scoped.remoteResource || transport.kind === "browser";
   scoped.online = () => resourceOnline.get(locationKey(location)) !== false;
-  if (scoped.remoteResource) scoped.browserView = undefined;
+  if (scoped.destinationBrowser) scoped.browserView = undefined;
   scoped.call = (method, params = {}) => {
     const spec = RESOURCE_METHODS[method];
     if (!spec) return (window.ark || api).call(method, params);
@@ -728,9 +729,15 @@ class SecondaryChat {
         else if (message.event?.type === "present") present(message.event.directive, this.api);
         break;
       case "approval":
+        state.approvals.set(message.id, { ...message, session: this.session });
+        sidebar.setAttention([...state.approvals.values()]);
         this.thread.approval(message, (id, decision) => transport.call("chat_approve", { session: this.session, id, decision }).catch((error) => toast(error.message)));
         break;
-      case "approval_closed": this.thread.approvalClosed(message.id); break;
+      case "approval_closed":
+        state.approvals.delete(message.id);
+        sidebar.setAttention([...state.approvals.values()]);
+        this.thread.approvalClosed(message.id);
+        break;
       case "post": this.thread.post(message.post); break;
       case "turn_finished": {
         this.thread.finish(message);
@@ -1360,7 +1367,10 @@ function receive(msg) {
 
 function connection(msg) {
   const el = $("#toast");
+  state.online = msg.kind === "connected";
   if (msg.kind === "connected") return toast("Reconnected");
+  state.connectionEpoch++;
+  sidebar.setOnline(false);
   if (msg.kind === "reconnecting") return toast(`Connection lost; retrying in ${Math.round(msg.delay / 1000)} s`);
   // Disconnected for good: say so until the person retries.
   clearTimeout(toastTimer);
@@ -1417,6 +1427,13 @@ function onEvent(msg) {
   if (msg.kind === "resource_connection" && msg.location) {
     resourceOnline.set(locationKey(msg.location), !!msg.online);
   }
+  if (msg.kind === "approval") {
+    state.approvals.set(msg.id, msg);
+    sidebar.setAttention([...state.approvals.values()]);
+  } else if (msg.kind === "approval_closed") {
+    state.approvals.delete(msg.id);
+    sidebar.setAttention([...state.approvals.values()]);
+  }
   // App scripts can follow the same stream: `ark.on("ark:turn_finished", fn)`.
   // A summary listener must see the new summary through `ark.summary()`, not the previous
   // chat. Summary is dispatched in its case below, after `applySummary`.
@@ -1459,6 +1476,9 @@ function onEvent(msg) {
       state.approvals.delete(msg.id);
       thread.approvalClosed(msg.id);
       document.querySelector(`#asks .approval[data-id="${msg.id}"]`)?.remove();
+      break;
+    case "orch":
+      if (msg.event?.type === "task_created") sidebar.refresh(state.sessionId);
       break;
     case "working":
       state.working = msg.working || [];
@@ -2027,6 +2047,7 @@ function signInScreen() {
 }
 
 async function bootOnce(again) {
+  const connectionEpoch = state.connectionEpoch;
   let hello;
   let detachedRead = null;
   try {
@@ -2087,10 +2108,18 @@ async function bootOnce(again) {
   } else await loadSession();
   state.working = hello.working || [];
   sidebar.setWorking(state.working);
+  sidebar.setOnline(state.online && connectionEpoch === state.connectionEpoch);
   showComputer(hello.computer);
   // Questions are placed again below: the current chat's in the thread, others' in the tray.
   for (const el of document.querySelectorAll("#asks .approval[data-chat]")) el.remove();
   state.approvals.clear();
+  if (detachedWindow) for (const approval of hello.approvals || []) {
+    if (approval.session !== detachedSession) state.approvals.set(approval.id, approval);
+  }
+  if (detachedWindow) for (const approval of detachedRead?.approvals || []) {
+    state.approvals.set(approval.id, { ...approval, session: detachedSession });
+  }
+  sidebar.setAttention([...state.approvals.values()]);
   if (!detachedWindow && hello.running) {
     thread.begin(hello.running);
     setRunning(true);

@@ -408,6 +408,7 @@ impl Host {
                     "tokens": 0,
                     "current": shown.as_deref() == Some(&c.session),
                     "place": self.place(&c),
+                    "participants": live.get(&c.session).and_then(|state| state.summary["session"]["participants"].as_array()),
                 });
                 if live.get(&c.session).is_some_and(|l| l.running.is_some()) {
                     row["working"] = json!(true);

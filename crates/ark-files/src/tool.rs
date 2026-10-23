@@ -466,7 +466,7 @@ fn content_from(rel: &str, input: &Json) -> std::result::Result<Content, Error> 
 // ---- list and search ---------------------------------------------------------------------------
 
 fn skipped(name: &str) -> bool {
-    name.starts_with('.') || SKIP.contains(&name)
+    name.starts_with('.') || name.starts_with("~$") || SKIP.contains(&name)
 }
 
 fn walk(root: &Path, dir: &Path, depth: usize, max: usize, out: &mut Vec<Json>) {
@@ -807,6 +807,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(said(&hits, SEARCH), "sales.xlsx: file name");
+    }
+
+    #[tokio::test]
+    async fn office_lock_files_are_hidden_from_discovery_but_explicit_paths_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        run(
+            root,
+            WRITE,
+            json!({"path": "~$book.xlsx", "rows": [["hidden workbook marker"]]}),
+        )
+        .await
+        .unwrap();
+        run(
+            root,
+            WRITE,
+            json!({"path": "book.xlsx", "rows": [["visible workbook marker"]]}),
+        )
+        .await
+        .unwrap();
+        std::fs::write(root.join("~$notes.txt"), "hidden note marker").unwrap();
+        std::fs::write(root.join("notes.txt"), "visible note marker").unwrap();
+
+        let listed = run(root, LIST, json!({})).await.unwrap();
+        let listing = said(&listed, LIST);
+        assert!(!listing.contains("~$book.xlsx"), "{listing}");
+        assert!(!listing.contains("~$notes.txt"), "{listing}");
+        assert!(listing.contains("book.xlsx"), "{listing}");
+        assert!(listing.contains("notes.txt"), "{listing}");
+
+        let hidden_name = run(root, SEARCH, json!({"query": "~$book.xlsx"}))
+            .await
+            .unwrap();
+        assert!(hidden_name.output["hits"].as_array().unwrap().is_empty());
+        let visible_name = run(root, SEARCH, json!({"query": "book.xlsx"}))
+            .await
+            .unwrap();
+        assert!(said(&visible_name, SEARCH).contains("book.xlsx: file name"));
+        let hidden_content = run(root, SEARCH, json!({"query": "hidden note marker"}))
+            .await
+            .unwrap();
+        assert!(hidden_content.output["hits"].as_array().unwrap().is_empty());
+        let visible_content = run(root, SEARCH, json!({"query": "visible note marker"}))
+            .await
+            .unwrap();
+        assert!(said(&visible_content, SEARCH).contains("notes.txt"));
+
+        let explicit_read = run(root, READ, json!({"path": "~$book.xlsx"}))
+            .await
+            .unwrap();
+        assert!(said(&explicit_read, READ).contains("hidden workbook marker"));
+        let explicit_search = run(
+            root,
+            SEARCH,
+            json!({"path": "~$notes.txt", "query": "hidden note marker"}),
+        )
+        .await
+        .unwrap();
+        assert!(said(&explicit_search, SEARCH).contains("hidden note marker"));
     }
 
     #[tokio::test]

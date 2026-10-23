@@ -31,9 +31,8 @@ App Store release is gated on native utility, not a wrapper around the runtime p
 
 | Native capability | Person-visible value |
 |---|---|
-| SwiftUI Home, Chats, Conversation, Review, Result and Me | Native navigation, restoration, Dynamic Type and accessibility |
-| APNs notifications | A waiting question can reach the phone while the app is closed |
-| Notification routing | A tap opens the exact item, then refreshes it before enabling an action |
+| SwiftUI Chats, Notifications, Conversation, Review, Result and Account | Native navigation, restoration, Dynamic Type and accessibility |
+| Voice dictation | Speech becomes editable composer text and is never sent automatically |
 | PhotosPicker and document picker | A photo or file can be attached without browser upload behavior |
 | System share sheet | Results can be handed to another app |
 | Keychain credential | The phone remains signed in without exposing a token to a URL or app storage |
@@ -57,50 +56,41 @@ Use three destinations. Frequent tab changes do not animate.
 
 | Destination | Contains | Excludes |
 |---|---|---|
-| Home | Needs you, Working, Recent results | Dashboard metrics and a duplicate activity feed |
-| Chats | Chats, search, New chat | Projects, Terminal, agent setup, provider setup and a file tree |
-| Me | This phone, notifications, appearance, help and settings | Protocol and runtime words outside Advanced |
+| Chats | The root inbox, search and New chat | Projects, Terminal, agent setup, provider setup and a file tree |
+| Notifications | Attention items that need a response | Push delivery; notifications are refreshed from the runtime |
+| Account | Connected account and routes, appearance and settings | Protocol and runtime words outside Advanced |
 
 ## 4. Screens
 
 ### Pair this iPhone
 
-The journey starts on a signed-in Desktop or Cloud client:
+The app opens with Google as the primary account flow. The account registry discovers compatible
+Mac routes and the app connects to each route without asking the person to choose infrastructure.
+This source path is implemented, but the registry is not deployed end to end. The accountless QR
+fallback connects to a self-hosted runtime:
 
-1. Settings > Devices > Add an iPhone shows a QR code containing only the configured public
-   HTTPS runtime address. It also shows the address as selectable text.
-2. The app scans the QR code or accepts the address manually. It validates HTTPS before sending
-   anything.
-3. The existing client shows a separate eight-character pairing code.
-4. The app types or pastes that code. The runtime exchanges it once for a native device
-   credential and mutation epoch.
-5. After Home is useful, the app explains notifications and asks for permission.
+1. The existing client presents a versioned pairing grant in a QR code.
+2. The app scans and validates the complete grant, then uses the unchanged pairing endpoint.
+   The QR contains no device credential; the runtime issues one after the exchange.
 
 A loopback-only runtime refuses Add an iPhone and explains that a reachable HTTPS address is
-needed. A QR code or link never contains a credential or mutation.
+needed. The app has no manual address or separate pairing-code form. A QR code or link never
+contains a credential or mutation.
 
-### Home
+### Chats
 
-Home answers one question: **What needs my attention now?** Sections appear only when non-empty.
-
-| Section | Row contents | Primary action |
-|---|---|---|
-| Needs you | Teammate, request, project, computer | Answer or Review |
-| Working | Work, current step, elapsed time, computer | Open chat |
-| Recent | Result or failure, project, time | Open result or Continue |
-
-Questions stay expanded because the choice is the work. Results remain compact. Empty Home shows
-the quiet mascot, “Nothing needs you”, and the most recent chat. It does not show a feature list.
+Chats is the root inbox. Notifications has its own destination for attention items. Results remain
+in their conversation.
 
 ### Chats and conversation
 
-Chats groups recent project chats and searches loaded titles locally. New chat chooses a project,
-then the computer where it will run, then the composer. One available computer is shown as a quiet
-line instead of a choice. An unavailable computer stays visible and read only.
+Chats groups recent conversations and searches loaded titles locally. New chat chooses a project
+and opens the composer. Account routes are discovered and managed by the account flow, not chosen
+through a single-computer setup screen. Unavailable routes remain visible and read only.
 
-The conversation has Back, title and computer in its top bar; messages, activity, results and
-approval cards in the thread; one connection state; and attachment, 16 point composer, Send or
-Stop at the bottom.
+The conversation top bar shows the chat title without a computer subtitle. Messages, activity,
+results and simple agent questions stay in the thread, with natural-language choices inline. The
+composer includes attachments, dictation, Send or Stop.
 
 - The computer becomes fixed after the first message.
 - Model choice stays in the overflow menu.
@@ -116,15 +106,15 @@ the first release. If that path is added, Terminal must use it. It must not add 
 project page, Open Terminal button or standalone destination. The project-scoped protocol in ADR
 0060 remains available for that future artifact.
 
-### Review, result and Me
+### Review, result and Account
 
 A short approval is an inline card. A long request is a page. Every choice has words and an icon;
-destructive or lasting choices are separate. A resolved request says so and returns to Home.
+destructive or lasting choices are separate. A resolved request says so and returns to its conversation.
 
 The result screen previews text, Markdown, images and PDFs. Other files show their name, kind and
 size with Download and Share. It does not recreate Desktop editors.
 
-Me contains notification state, connected runtime, appearance and Sign out this iPhone. Advanced
+Account contains connected account and route state, appearance and sign-out. Advanced
 contains the runtime address, protocol diagnostics and device details.
 
 ## 5. UI development kit
@@ -252,10 +242,13 @@ or log. App Transport Security allows valid HTTPS only, with no broad exception.
 The credential is accepted only by `/client/v1/*` on a client-only listener. It cannot authenticate
 the runtime page, generic RPC, browser carrier, generic event stream or screen control. The typed
 contract still includes bounded project terminal actions, so hiding a control is never treated as
-authorization. Another signed-in device can revoke it immediately. A 401, explicit sign-out or
-revoke cancels SSE, deletes the Keychain item, purges protected local data and returns to pairing.
+authorization. Another signed-in device can revoke it immediately. A 401 removes only the rejected route credential and its route state; other routes and the account
+session remain. Explicit sign-out attempts revocation for every route and the account before it
+clears local credentials and protected data.
 
-Google sign-in gives the app an ARK Account access token with `runtime.pair`. The app sends that
+Google sign-in gives the app an ARK Account access token with `runtime.pair`. The implemented
+source flow discovers compatible Mac routes and obtains a route-bound assertion for each route.
+The registry deployment and real-account end-to-end proof remain open. The app sends that
 token only to the ARK Cloud API, which returns a 60-second ES256 assertion addressed to the exact
 runtime route. The app sends that assertion as the bearer credential to
 `POST /client/v1/account-pair`; the account token never reaches the computer. `ark-account`
@@ -265,18 +258,18 @@ separate pairing JWKS, issuer, route audience, type, `azp=ark-ios`, scope, owner
 write, so a process restart cannot replay an assertion that has not expired. The account registry
 returns no runtime credential.
 
-First release stores no chat or result body persistently. It may keep a bounded, Data Protection
-protected index of ids, titles and restoration hints. It clears on sign-out or revoke. Drafts stay
-in memory. Downloaded previews use protected temporary files and are removed after the share or
+First release keeps chat lists, titles, results and drafts in memory. It stores no persistent
+work-content index. Downloaded previews use protected temporary files and are removed after the share or
 preview session. A cold offline launch shows connection state and no work content.
 
 A restored backup or app install on another device has no usable credential. Reinstall requires
 pairing again.
 
-## 8. APNs and links
+## 8. Future APNs and links
 
-Apple credentials never ship in a self-hosted runtime. Native push uses an optional ARK-operated
-blind relay, recorded in its own cross-repo ADR before implementation.
+The Notifications destination shows runtime-refreshed attention items. APNs push delivery is not
+included in the current binary. The following relay flow is a future proposal, not an implemented
+or deployed capability. Apple credentials never ship in a self-hosted runtime.
 
 1. The attested app registers its APNs token directly with the relay and receives a route id plus
    route-bound send and manage capabilities. No ARK Account is required.
@@ -293,8 +286,8 @@ delays notifications but does not delay work or foreground refresh. Native push 
 self-hosting is not claimed until the relay path passes production APNs tests.
 
 Universal Links may use an ARK-owned HTTPS domain with its associated-domain file. Arbitrary
-self-hosted domains cannot be entitlements and therefore enter only through the in-app QR scanner
-or manual address field. A custom scheme never carries credentials. No incoming link executes a
+self-hosted domains cannot be entitlements and therefore enter only through the in-app QR scanner.
+A custom scheme never carries credentials. No incoming link executes a
 mutation.
 
 ## 9. iOS implementation and release gates
@@ -310,8 +303,8 @@ Before release, record:
 |---|---|
 | Project | Bundle id, minimum iOS, version/build policy and ARK protocol pin |
 | Signing | Owner-selected team, automatic development signing, distribution signing and archive validation |
-| Entitlements | Push Notifications and only the ARK-owned Associated Domain, where used |
-| Configurations | Debug, TestFlight and App Store use correct APNs and runtime environments |
+| Entitlements | Only the ARK-owned Associated Domain, where used. Add Push Notifications if the relay ships |
+| Configurations | Debug, TestFlight and App Store use correct runtime environments. Add APNs configuration with relay delivery |
 | Privacy | `PrivacyInfo.xcprivacy`, privacy nutrition answers, support URL, privacy-policy URL and data retention |
 | Store record | Name, subtitle, description, keywords, age rating, export compliance, accessibility declarations, icon and screenshots |
 | Review | Stable review runtime, review access, notes and no expiring pairing step |
@@ -322,14 +315,15 @@ Only the owner submits or releases. Building, signing for development, archiving
 App Store artifacts are implementation work; public TestFlight or App Store submission needs the
 owner's explicit request and App Store Connect access.
 
-V1 pairs with a runtime and creates no account in the app. App Store account-deletion rules do not
-apply. If account creation is added later, in-app deletion becomes a release gate.
+The app signs in to an existing ARK Account and does not create account credentials. The account
+registry deployment and real-account route-continuity proof remain release gates. Reassess account
+deletion requirements before submission if account creation becomes available in the app.
 
 ## 10. Test matrix
 
 Release automation must cover all protocol and model states, fixture decoding, mutation failpoints,
 offline transitions, restoration, redaction and accessibility identifiers. UI tests must cover pairing,
-Home, Chats, Conversation, Review, Result, Me, notification routing and sign-out.
+Chats, Conversation, Review, Result, Notifications, Account and sign-out.
 
 Simulator matrix:
 
@@ -343,13 +337,16 @@ Simulator matrix:
 - online, reconnecting, offline, revoked, old runtime and unknown event.
 
 Physical evidence requires one older supported iPhone and one current iPhone. It covers QR scan,
-pairing, Keychain persistence, APNs token and tap, safe areas, keyboard, PhotosPicker, document
+pairing, Keychain persistence, safe areas, keyboard, PhotosPicker, document
 picker, share sheet, background and foreground, device lock, poor network, TestFlight upgrade,
 reinstall and revoke. Simulator output is not evidence for touch feel, APNs production, camera,
 device lock or TestFlight.
 
-Five first-use participants start with an unlocked phone and the Devices screen on a signed-in
-Desktop or Cloud client. All five must pair and answer without help. At least four must complete
+APNs token registration and tap routing remain future acceptance work if the relay is implemented.
+
+Five first-use participants start with an unlocked phone. They exercise Google account discovery
+after registry deployment and the accountless QR fallback. All five must connect and answer without
+help. At least four must complete
 every other core job without help. Nobody may cause an unintended mutation.
 
 ## 11. Delivery order
@@ -359,13 +356,13 @@ every other core job without help. Nobody may cause an unintended mutation.
 | 0. Decisions | ARK and workspace | External protocol ADR, native auth ADR, APNs relay ADR, minimum iOS and owner-confirmed repo boundary | Independent design QA says GO |
 | 1. Protocol | ARK | Types, schema, compatibility, chat-local calls, SSE resume and durable mutations | Conformance, failpoint and cross-version tests pass |
 | 2. App foundation | `ark-ios` | Generated models, transport, pairing, Keychain, restoration shell and UI kit | Unit, fixture, accessibility and snapshot checks pass |
-| 3. Core app | `ark-ios` | Home, Chats, Conversation, Review, Result and Me | Core UI tests and parity tests pass |
+| 3. Core app | `ark-ios` | Chats, Conversation, Review, Result, Notifications and Account | Core UI tests and parity tests pass |
 | 4. Native services | ARK, relay and `ark-ios` | APNs, notification routing, pickers and share | Sandbox and production APNs plus physical-device checks |
 | 5. Distribution | `ark-ios` | Signed archive, TestFlight, metadata and review runtime | Release QA says GO; owner approves submission |
 
 ## 12. Acceptance criteria
 
-1. A new person scans an address-only QR code, pairs once and reaches Home without written help.
+1. A new person connects through Google account discovery or scans a complete QR grant without written help.
 2. Phone and Desktop show different chats without moving each other.
 3. A phone message appears once on Desktop. Response loss and retry never repeat it.
 4. One approval closes on every client. An already-resolved notification explains that state.
@@ -394,3 +391,6 @@ every other core job without help. Nobody may cause an unintended mutation.
 - Arbitrary self-hosted Universal Links
 - Android native app
 - Interactive Terminal artifacts, until the generic artifact path owns their presentation
+
+
+Protocol1.5 adds optional `ChatSummary.participants`, the sorted names of agents assigned work for the chat through durable reporting and delegation links. Missing/null means unknown; an empty list is known empty. It does not prove an agent contributed a message or grant authority. Clients may show up to three faces with an overflow count, and expose all assigned names to accessibility. Legacy runtimes retain the neutral identity. The minimum supported minor version stays unchanged.

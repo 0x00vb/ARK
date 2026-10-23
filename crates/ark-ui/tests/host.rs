@@ -1072,3 +1072,47 @@ async fn another_projects_browser_tab_does_not_follow_a_project_switch() {
         "the other project's tab reached this project's turn"
     );
 }
+
+#[tokio::test]
+async fn addressed_chat_reads_include_durable_delegated_participants() {
+    let root = tempfile::tempdir().unwrap();
+    let host = open(root.path(), "notes.read", Arc::default()).await;
+    let summary = host.call("summary", json!({})).await.unwrap();
+    let project = summary["project"]["id"].as_str().unwrap();
+    let session = summary["session"]["id"].as_str().unwrap();
+    let store = ark_store::Store::open(root.path()).unwrap();
+    store
+        .put_record(
+            "orch_task",
+            "participant-root",
+            project,
+            &json!({
+                "id":"participant-root", "project":project, "owner":"Lead", "report_to":session
+            }),
+        )
+        .unwrap();
+    store.put_record("orch_task", "participant-child", project, &json!({
+        "id":"participant-child", "project":project, "owner":"Writer", "parent":"participant-root"
+    })).unwrap();
+    let read = host
+        .call("chat_read", json!({"session":session}))
+        .await
+        .unwrap();
+    assert_eq!(
+        read["summary"]["session"]["participants"],
+        json!(["Lead", "Writer"])
+    );
+    store
+        .put_record(
+            "orch_task",
+            "participant-broken",
+            project,
+            &json!({"id":"participant-broken"}),
+        )
+        .unwrap();
+    let read = host
+        .call("chat_read", json!({"session":session}))
+        .await
+        .unwrap();
+    assert!(read["summary"]["session"]["participants"].is_null());
+}

@@ -7,15 +7,23 @@ What changed for people building on ARK, per release. Not a commit log.
 - New entries go under `[Unreleased]`; a release renames it (see `docs/RELEASING.md`).
 - One line per change where possible. Link to a doc instead of explaining it here.
 
-## [Unreleased]
+## [0.25.0] - 2026-10-23
 
 ### Breaking
 
+- `SessionSummary` and protocol `ChatSummary` add optional `participants` fields. Downstream
+  Rust struct literals must set `participants: None` when participant history is unknown.
+- HTTP-served Browser panels require `ArkBuilder::browser(true)` and Chromium on the runtime.
+  There is no iframe fallback ([ADR 0052](docs/adr/0052-a-chat-runs-on-the-computer-the-person-picks.md)).
 - `ContextReport` adds the serde-defaulted `memory` count. Downstream Rust struct literals
   without `..Default::default()` must initialize it. Stored reports remain readable.
 
 ### Added
 
+- Client protocol v1.5 adds optional `ChatSummary.participants`. Missing or null means unknown;
+  an empty list means known empty. Existing clients and stored records keep their compatibility.
+- `ark.agentIdentity(fn)` supplies consumer-defined avatar identity keys for individual and
+  group views. Consumers provide face assets; Core falls back to initials.
 - Project memory stores reviewed corrections in the existing project store. Shared `/memory`
   commands review, replace and forget lessons; active memory is recalled under the context
   budget. Agents may suggest pending corrections through the approval gate ([Memory](docs/MEMORY.md)).
@@ -41,20 +49,50 @@ What changed for people building on ARK, per release. Not a commit log.
   `feed`, and `task_call {task, call}` returns one call's detail (ADR 0076).
 - On macOS the window's File menu has New Chat (⌘N) and Commands… (⌘K), so both work while the
   Browser panel's view has the keyboard ([ADR 0044](docs/adr/0044-the-browser-panel-is-a-view-of-its-own-in-the-window.md)).
+- The shared composer accepts reviewed voice dictation through an optional transcription
+  provider at the chosen computer. The optional `ark-transcribe` crate runs Whisper locally
+  ([ADR 0070](docs/adr/0070-dictation-is-client-capture-and-an-injected-transcriber.md)).
+- `.ifc` opens as a read-only model: STEP header check, a 2 MiB limit before any snapshot copy,
+  and read-only Source (file reads carry `source_available` and `read_only`). Consumers parse
+  and draw it ([ADR 0071](docs/adr/0071-advanced-files-use-one-viewer-seam.md)).
+- `api.confirm(label)` for file viewers: one local opening choice beside Cancel, no saved grant.
+- `ArkUi::wasm_worker_asset(path, bytes)`: over HTTP (`--serve`), only that exact worker entry may
+  compile WebAssembly, with `connect-src 'none'`. Other assets keep their policy and JavaScript
+  eval stays forbidden. A native window keeps the app's own CSP.
 
 ### Changed
 
+- Navigation uses smaller icons and spacing. Primary controls have 40px targets, and the
+  shared icon family matches iPhone. Composer controls are grouped.
+- Sidebar marks Working and Needs you, preserves keyboard focus on background updates, and
+  keeps pending decisions visible through detached-window reconnects. File cards have larger
+  targets and accessible open actions that remain correct after Restore.
 - `ArkUi::accent` sets the accent of ARK's light palette and a lighter mix of it in the dark one;
   the classic palettes and a consumer's styles keep their own accents. Text on the accent
   (primary buttons) is chosen to reach 4.5:1 in every palette.
 - A process start whose program is missing and installable asks Install first, then the start
   once ([ADR 0041](docs/adr/0041-project-processes-asked-seen-and-stopped.md)).
+- While a file view has nothing to show yet, its opening state, choice or error sits in the
+  middle of the pane instead of at the bottom edge.
+- Code runs have a shared active-run limit and finite waiting queue. Each project runs one
+  program at a time. CPU throttling stays off ([ADR 0072](docs/adr/0072-code-runs-have-bounded-admission-and-owned-cleanup.md)).
+- The default agent instructions reserve state updates for ongoing or later work, avoiding
+  a separate bookkeeping step just to repeat a completed result.
+- Test builds use an unoptimized Cargo profile for faster feedback. Development and release
+  builds keep their existing optimization settings.
 
 ### Fixed
 
+- A recovered first event-stream connection reloads current work and approval state before reconnecting.
+- Chat avatar initials use Unicode graphemes when supported, with a code-point fallback.
+- File discovery hides Office lock files that begin with `~$`. Explicit file paths still work.
+- Windows sharing and lock errors keep their original diagnostic and explain how to release the file.
+- The data-analysis skill reads UTF-8 CSV with or without a BOM and writes Excel CSV with a BOM.
+- HTTP-served Browser panels render on the chat's computer, including process pages opened
+  through `--connect` or a loopback tunnel. They require Chromium there and show its error
+  with Try again. The native app's local Browser view is unchanged (ADR 0052).
 - A file upload adds its filename to the originating chat's saved draft, even after switching
   projects or closing a split pane. It preserves the current draft, focus and selection.
-
 - A failed install of a program a process needs keeps its reason (exit code, end of its output)
   and a later start says it instead of asking to install again.
 - The Files tab closes with its project, as the Browser tab does.
@@ -70,35 +108,6 @@ What changed for people building on ARK, per release. Not a commit log.
 - The sign-in callback waits for the browser's whole request and is not held up by a connection
   the browser opened and never used. A window that loads its state while a question is asked no
   longer misses the question.
-
-## [0.25.0] - 2026-10-16
-
-### Added
-
-- The shared composer accepts reviewed voice dictation through an optional transcription
-  provider at the chosen computer. The optional `ark-transcribe` crate runs Whisper locally
-  ([ADR 0070](docs/adr/0070-dictation-is-client-capture-and-an-injected-transcriber.md)).
-- `.ifc` opens as a read-only model: STEP header check, a 2 MiB limit before any snapshot copy,
-  and read-only Source (file reads carry `source_available` and `read_only`). Consumers parse
-  and draw it ([ADR 0071](docs/adr/0071-advanced-files-use-one-viewer-seam.md)).
-- `api.confirm(label)` for file viewers: one local opening choice beside Cancel, no saved grant.
-- `ArkUi::wasm_worker_asset(path, bytes)`: over HTTP (`--serve`), only that exact worker entry may
-  compile WebAssembly, with `connect-src 'none'`. Other assets keep their policy and JavaScript
-  eval stays forbidden. A native window keeps the app's own CSP.
-
-### Changed
-
-- While a file view has nothing to show yet, its opening state, choice or error sits in the
-  middle of the pane instead of at the bottom edge.
-- Code runs have a shared active-run limit and finite waiting queue. Each project runs one
-  program at a time. CPU throttling stays off ([ADR 0072](docs/adr/0072-code-runs-have-bounded-admission-and-owned-cleanup.md)).
-- The default agent instructions reserve state updates for ongoing or later work, avoiding
-  a separate bookkeeping step just to repeat a completed result.
-- Test builds use an unoptimized Cargo profile for faster feedback. Development and release
-  builds keep their existing optimization settings.
-
-### Fixed
-
 - Run native notification page setup only in the app's own main page. Detached windows and
   remote pages no longer make an automatic native permission query they cannot use.
 - Settings › Devices no longer asks for a browser session in native windows. A failed or

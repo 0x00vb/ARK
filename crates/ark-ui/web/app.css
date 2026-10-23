@@ -194,8 +194,9 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 /* ---- layout ----------------------------------------------------------------------------- */
 
 .app {
-  --rail: 58px;
-  --sb: 252px;
+  --rail: 50px;
+  --project-width: 252px;
+  --sb: var(--project-width);
   --pw: 0px;
   display: grid;
   grid-template-columns: var(--rail) var(--sb) minmax(0, 1fr) var(--pw);
@@ -227,7 +228,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 }
 .app:not([data-compact="true"])[data-sidebar="closed"] .sidebar { padding-inline: 0; }
 .sidebar > * { min-width: 232px; }
-.sidebar-top { height: 52px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none; }
+.sidebar-top { height: 44px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none; }
 .app[data-shell="browser"] .sidebar-top { height: 44px; justify-content: flex-start; padding-left: 2px; }
 
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; background: var(--bg); }
@@ -301,7 +302,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
   position: relative; z-index: 2;
 }
 .workspace-destinations { display: contents; }
-.destination-drag { width: 100%; height: 56px; flex: none; }
+.destination-drag { width: 100%; height: 44px; flex: none; }
 .app[data-shell="browser"] .destination-drag { height: 44px; }
 .destination {
   width: 40px; min-height: 40px; height: 40px; flex: none;
@@ -321,7 +322,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 }
 .account-destination[aria-current="page"] .account-avatar { background: var(--text); color: var(--bg); }
 .destination-icon { display: inline-flex; }
-.destination .ico { width: 19px; height: 19px; }
+.destination .ico { width: 17px; height: 17px; }
 .destination-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .destination[aria-current="page"] { background: var(--active); color: var(--text); }
 .destination:active { scale: 0.96; }
@@ -416,6 +417,9 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .session[aria-current="true"] { background: var(--active); color: var(--text); }
 .session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-time { font-size: 11.5px; color: var(--text-3); flex: none; }
+.session-progress { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--text-2); font-size: 11.5px; }
+.session-attention { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--text); font-size: 11.5px; font-weight: 500; }
+.session-attention .ico { width: 12px; height: 12px; }
 .session-working {
   width: 12px; height: 12px; flex: none; align-self: center;
   box-sizing: border-box; border: 1.5px solid color-mix(in srgb, var(--accent) 24%, transparent);
@@ -444,7 +448,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 /* ---- top bar ------------------------------------------------------------------------------ */
 
 .topbar {
-  height: 52px; flex: none;
+  height: 44px; flex: none;
   display: flex; align-items: center; gap: 8px;
   padding: 0 12px 0 20px;
   -webkit-user-select: none; user-select: none;
@@ -478,7 +482,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .app[data-compact="true"] .reveal-sidebar { display: inline-grid; }
 .app[data-compact="true"][data-shell="desktop"][data-os="macos"] .topbar { padding-left: 84px; }
 .app[data-compact="true"] .sidebar {
-  position: fixed; inset: 0 auto var(--dest-bottom) 0; width: 252px; z-index: 30;
+  position: fixed; inset: 0 auto var(--dest-bottom) 0; width: var(--project-width); z-index: 30;
   translate: -100% 0; visibility: hidden;
 }
 /* Animate only once the drawer has been used, not when a narrow window first loads. */
@@ -1240,7 +1244,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 
 /* ---- side pane ------------------------------------------------------------------------------ */
 
-.pane-head { height: 52px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; }
+.pane-head { height: 44px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 14px; }
 .app[data-shell="browser"] .pane-head { height: 44px; }
 .pane-tabs { flex: 1; display: flex; align-items: center; gap: var(--rail-tab-gap); overflow-x: auto; scrollbar-width: none; min-width: 0; }
 .pane-tabs::-webkit-scrollbar { display: none; }
@@ -1557,7 +1561,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .turn-files { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
 .file-card {
   display: inline-flex; align-items: center; gap: 10px;
-  max-width: 280px; min-width: 0;
+  max-width: 280px; min-width: 0; min-height: 44px; box-sizing: border-box;
   padding: 6px 14px 6px 6px; border: 0; border-radius: 12px;
   background: var(--card); text-align: left; cursor: pointer;
   box-shadow: 0 0 0 1px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -1579,6 +1583,9 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .file-card[data-kind="sheet"] .file-card-ico { color: var(--sheet); background: color-mix(in srgb, var(--sheet) 12%, transparent); }
 .file-card[data-kind="document"] .file-card-ico { color: var(--doc); background: color-mix(in srgb, var(--doc) 12%, transparent); }
 .file-card-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.file-card-open { display: grid; place-items: center; flex: none; color: var(--text-3); margin-left: auto; }
+.file-card-open .ico { width: 14px; height: 14px; }
+.file-card.image-preview .file-card-open { display: none; }
 .file-card-name { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-card-sub { font-size: 12px; color: var(--text-3); }
 .file-card.image-preview { display: grid; grid-template-columns: minmax(0, 180px); gap: 0; padding: 0; overflow: hidden; text-align: left; }
@@ -2042,7 +2049,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .wait-row[aria-disabled]:hover { background: transparent; }
 
 /* ---- where a chat runs (ADR 0052) ----------------------------------------------------------- */
-.composer-bar .chip.place-chip { order: 1; display: inline-flex; align-items: center; gap: 5px; margin-right: 0; max-width: 40%; }
+.composer-bar .chip.place-chip { order: 4; display: inline-flex; align-items: center; gap: 5px; margin-right: 0; max-width: 28%; }
 .composer-bar .chip.place-chip[hidden] { display: none; }
 .place-chip svg { width: 13px; height: 13px; flex: none; }
 .place-chip span { overflow: hidden; text-overflow: ellipsis; }
@@ -2126,3 +2133,50 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .computer-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (max-width: 520px) { .computer-target { width: 100%; } }
 .computer-code { width: 110px; }
+
+.sidebar-top .icon-btn, .topbar .icon-btn,
+.composer-bar .attach, .composer-bar .dictate, .composer-bar .send {
+  width: 40px; height: 40px; flex: none; margin-block: 0;
+}
+.sidebar-top .icon-btn::before, .topbar .icon-btn::before,
+.composer-bar .attach::before, .composer-bar .dictate::before, .composer-bar .send::before { content: none; }
+.sidebar-top .icon-btn .ico, .topbar .icon-btn .ico,
+.composer-bar .attach .ico, .composer-bar .dictate .ico, .composer-bar .send .ico { width: 20px; height: 20px; }
+.composer-bar { min-height: 40px; }
+.composer-bar .model-chip { order: 2; flex: 0 1 auto; max-width: 45%; margin-left: 0; text-align: left; }
+.composer-bar .mode-chip { order: 3; margin-left: auto; }
+.composer-bar .place-chip { order: 4; max-width: 28%; color: var(--text-3); }
+.composer-bar .place-chip { min-width: 0; }
+.composer-bar .attach { margin-left: 0; }
+.composer-bar .chip, .composer-bar .ctx-meter { min-height: 40px; }
+.destination:focus-visible:active, .icon-btn:focus-visible:active, .send:focus-visible:active { scale: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .destination, .icon-btn, .send, .send-icon { transition: none; }
+  .destination:active, .icon-btn:active, .send:active { scale: 1; }
+}
+
+.sidebar-top .icon-btn .ico, .topbar .icon-btn .ico, .pane-head .icon-btn .ico { width: 17px; height: 17px; }
+
+.chat-avatar { width: 32px; height: 24px; flex: none; display: inline-flex; align-items: center; position: relative; color: var(--text-3); }
+.chat-avatar .ico { width: 15px; height: 15px; margin: auto; }
+.chat-face { width: 22px; height: 22px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: 50%; font-size: 11px; background: var(--active); color: var(--text-2); }
+.chat-avatar[data-count="1"] .chat-face { margin-inline: auto; }
+.chat-avatar:not([data-count="1"]) .chat-face { width: 18px; height: 18px; border: 1px solid var(--sidebar); margin-right: -9px; }
+.chat-overflow { position: absolute; right: -3px; bottom: -3px; padding: 0 2px; background: var(--sidebar); border-radius: 4px; font-size: 8px; }
+.chats .session { align-items: center; padding-left: 8px; gap: 7px; }
+@media (hover: hover) and (pointer: fine) {
+  .app { --rail: 44px; --project-width: 236px; }
+  .sidebar > * { min-width: 216px; }
+  .sidebar-top, .topbar, .pane-head, .destination-drag, .app[data-shell="browser"] .topbar, .app[data-shell="browser"] .pane-head, .app[data-shell="browser"] .sidebar-top, .app[data-shell="browser"] .destination-drag { height: 36px; }
+  .destination { width: 32px; min-height: 32px; height: 32px; border-radius: 8px; }
+  .destination .ico { width: 15px; height: 15px; }
+  .ico { width: 14px; height: 14px; }
+  .sidebar-top .icon-btn, .topbar .icon-btn, .pane-head .icon-btn, .composer-bar .attach, .composer-bar .dictate, .composer-bar .send { width: 32px; height: 32px; }
+  .sidebar-top .icon-btn .ico, .topbar .icon-btn .ico, .pane-head .icon-btn .ico, .composer-bar .attach .ico, .composer-bar .dictate .ico, .composer-bar .send .ico { width: 15px; height: 15px; }
+  .composer-bar, .composer-bar .chip, .composer-bar .ctx-meter { min-height: 32px; height: 32px; }
+  .composer-bar { margin-top: 4px; gap: 3px; }
+  .composer { padding: 10px 12px; border-radius: 20px; }
+  .project-row { min-height: 32px; }
+  .project-more, .project-new-chat { width: 28px; height: 28px; }
+  .session { font-size: 12.5px; padding-block: 4px; gap: 7px; }
+}

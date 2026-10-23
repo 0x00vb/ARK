@@ -4044,6 +4044,25 @@ impl Host {
         let mut v = conv.about.lock().unwrap().summary.clone();
         v["running"] = json!(conv.is_running());
         v["location"] = json!(self.location_of(conv));
+        if let (Some(project), Some(session)) =
+            (v["project"]["id"].as_str(), v["session"]["id"].as_str())
+        {
+            let chats = std::collections::BTreeSet::from([session.to_string()]);
+            match ark_interact::ark_orchestrate::chat_participants(
+                &self.engine.store,
+                project,
+                &chats,
+            ) {
+                Ok(participants) => {
+                    v["session"]["participants"] =
+                        json!(participants.get(session).cloned().unwrap_or_default())
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "could not read addressed chat participants");
+                    v["session"]["participants"] = Value::Null;
+                }
+            }
+        }
         v
     }
 

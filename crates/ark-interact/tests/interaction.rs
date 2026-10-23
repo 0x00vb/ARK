@@ -1436,6 +1436,29 @@ async fn an_install_that_names_an_app_is_asked_as_an_install() {
     assert!(procs.list().is_empty(), "nothing installed");
 }
 
+#[test]
+fn malformed_participant_history_does_not_hide_valid_chats() {
+    let root = tempfile::tempdir().unwrap();
+    let interaction = open(root.path());
+    let summary = interaction.summary();
+    interaction
+        .engine()
+        .store
+        .put_record(
+            "orch_task",
+            "broken",
+            &summary.project.id,
+            &serde_json::json!({"id":"broken"}),
+        )
+        .unwrap();
+    let chats =
+        ark_interact::interaction::list_sessions(interaction.engine(), None, &summary.session.id)
+            .unwrap();
+    assert!(chats
+        .iter()
+        .any(|chat| chat.id == summary.session.id && chat.participants.is_none()));
+}
+
 #[tokio::test]
 async fn project_memory_commands_review_replace_forget_and_survive_new_chats() {
     use ark_core::{Invocation, MemorySource, MemoryState};

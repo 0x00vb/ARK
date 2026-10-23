@@ -28,11 +28,16 @@ In `code.run` with Python:
 | To | Use |
 |---|---|
 | Read workbooks | `pd.read_excel(path, sheet_name=None, engine="calamine")` reads every sheet at once; also `.xls`, `.xlsb`, `.ods` |
-| Read CSV | `pd.read_csv(path, dtype={"id": str})`: IDs as text keep their leading zeros |
+| Read UTF-8 CSV | `pd.read_csv(path, encoding="utf-8-sig", dtype={"id": str})`: accepts a UTF-8 BOM; IDs as text keep their leading zeros |
+| New CSV for Excel | `df.to_csv(path, index=False, encoding="utf-8-sig")` includes a UTF-8 BOM |
 | Join, group, filter many rows or several files | DuckDB SQL: `duckdb.sql("select ... from read_csv('a.csv') join df using (id)").df()`. A data frame is a table by its variable name; `read_xlsx('f.xlsx', sheet='S')` reads a sheet |
 | Chart | matplotlib; `plt.savefig("chart.png", dpi=150, bbox_inches="tight")` |
 | New workbook | `pd.ExcelWriter(path, engine="xlsxwriter")`, with formats |
 | Change some cells of an existing workbook and keep its look | `files.edit` |
+
+`utf-8-sig` reads UTF-8 with or without a BOM. It does not detect legacy encodings such as
+Windows-1252. For those sources, establish the encoding and pass it explicitly. Never ignore or
+replace undecodable bytes.
 
 Data stays in the program: never paste rows into the conversation or into a program's source.
 A database comes through a connected plugin: query it, save the result to a file, analyze the

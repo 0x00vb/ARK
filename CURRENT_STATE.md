@@ -1,5 +1,84 @@
 # Current state
 
+## Combined release verification (2026-10-23)
+
+The combined candidate passed full page-enabled CI: formatting, generated protocol, version
+checks, clippy, workspace tests including all five Browser cases, all 66 WebKit cases, the
+optimized release build and simulated benchmark. Root independently rehashed every source
+file and verified the owned process group empty and shared lock absent. The owner explicitly
+approved ADRs0078 and0079 for release. The release tag, both remotes, fresh-clone verification
+and Desktop consumer checks remain next. Historical failures below are retained.
+Evidence: ../board/evidence/coordinated-release-2026-10-21/core-fixture-full-0255-root-result.json.
+
+## Browser fixture correction (2026-10-23)
+
+The last full gate stopped at an intermittent Browser screenshot timeout. The prior
+full run passed all four Browser cases and 65 of 66 WebKit cases. The remaining
+chat case then passed its focused check after waiting for rendered detail text.
+The Browser test server also had a separate defect: an idle connection could block
+all later requests. It now serves bounded concurrent requests and owns shutdown.
+An idle-first-connection regression joins the four existing Browser cases. Independent
+source review passed. The separate five-case check and subsequent full CI both passed.
+The fixture defect has not been established as the cause of the prior screenshot timeout.
+
+## Combined gate follow-up (2026-10-23)
+
+The fresh full gate passed the workspace tests and all four Browser integration tests.
+WebKit passed 63 of 66 cases. Two assertions still described the old sidebar and approval
+status. A browser pane header also missed the compact pointer layout rule. The bounded
+correction updates those assertions and aligns the pane header while retaining shared
+30-point chat and artifact tab controls. The next full gate passed 64 of 66 WebKit cases.
+The remaining composer assertion still expected the old control order. The chart overflow
+assertion measured immediately after resize. It now waits for explicit compact layout and
+settled pane geometry, retains the no-document-overflow check, and checks internal chart
+scrolling with failure dimensions. Scoped source review and actual verification remain open.
+The retained-executable focused run then passed the files case. The composer case reached
+a later target-size assertion that counted an absent pseudo-element. Its correction measures
+the actual 32-point fine-pointer controls and verifies that pseudo-elements remain absent.
+Independent source review passed. The corrected composer case and full gate remain open.
+The composer then passed its retained-executable check. The next full gate passed 65 of
+66 WebKit cases, including every corrected case. App conversation call details returned
+empty rendered text; disclosure timing is the suspected cause. The test now waits boundedly for expansion and
+the same rendered detail text before retaining its original assertions. Source review and
+actual verification of this correction remain open. Release build and benchmarks were not reached.
+No commit, tag or release follows from this failed run. Evidence: the workspace board's
+`core-page-ci-run-root-core-full-resume-20261023-0105` and
+`core-page-ci-run-root-core-webkit-fix-20261023-0120` receipts and logs.
+
+## Coordinated release source (2026-10-21)
+
+The owner requested completion, release and installation across clients. Current main
+workingtree includes the participant/UX source, Office discovery and Windows lock diagnostics,
+UTF-8 CSV guidance, and destination-side Browser correction alongside committed memory.
+The latest attachment-control icon change is reconciled without replacing newer main behavior.
+These source integrations are uncommitted. Focused source checks pass 22/22. Targeted
+independent Luna and Opus reviews closed the Unicode initials and reconnect Retry findings.
+The final combined page-enabled repository gate, final candidate review, immutable tag and
+fresh-clone verification remain open.
+ADRs0078 and0079 were subsequently accepted by the owner on 2026-10-23. The frozen memory CI does not certify this combined state.
+The inference CPU and sanitizer gates have completed. The separate retained-binary Metal
+test-only gate passed after configuration regeneration invalidated the earlier attempt.
+Historical failed receipts remain preserved. Core full CI needs its own fresh gate window.
+Source receipts: workspace board/evidence/coordinated-release-2026-10-21 and team-integration-2026-10-21.
+
+## Combined source integration (2026-10-20)
+
+The frozen functional project-memory candidate is committed and fast-forwarded to local main
+as `f0d10f1`. Its full CI and independent reviews apply to that exact candidate. The working
+tree retains the pre-existing participant and UX changes; combined compiler, full repository
+and native gates remain queued. Memory performance improvement is not established.
+ADRs0078 and0079 were subsequently accepted by the owner on 2026-10-23. No push, tag or release occurred.
+Evidence: `../board/evidence/team-integration-2026-10-20/core-functional-memory-local-merge.json`.
+
+## Work clarity pass (2026-10-20)
+
+In `codex/ux-clarity`: the sidebar names Working and Needs you, shows pending decisions
+on folded projects, and preserves keyboard focus during background updates. File cards have
+44px targets and explicit accessible open actions, including after Restore. Reconnect and
+detached-window state use the current approval snapshot. Real WebKit regression tests cover
+these paths. Consumer native integration and the final repository gate remain separate.
+Board `ark-ui-clarity-20261020`. No release or Desktop repin.
+
 ## Project memory in development (2026-10-20)
 
 Isolated `codex/project-memory` in `../ark-project-memory`. The existing records table holds
@@ -54,6 +133,16 @@ Downloads require the paired credential, an exact chat-project-scoped content ad
 blob no larger than 50 MiB and one of four bounded read slots. The full Core gate passes,
 including the release build and benchmark. The iOS consumer and its signed device run are next.
 
+## Hosted process Browser correction (2026-10-21)
+
+HTTP-served Browser panels use the destination Chromium surface even when the page and selected
+chat share a runtime ID. Loopback hostnames do not identify where the process runs. Missing
+Chromium stays visible and Try again reopens the requested address. The native app's local
+Browser view remains unchanged. The isolated branch's 19 focused Node cases passed; they have not
+been rerun on this combined main source. The process-page fixture enables Browser explicitly.
+Current-main page CI, real same-port viewer/destination proof and native dogfood remain open.
+Board `948e2397`.
+
 ## Upload completion drafts
 
 On `main`, an upload keeps its completion notice in the originating chat draft.
@@ -98,13 +187,13 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-16 (dictation follow-through, IFC files and bounded code runs on main)
+Last updated: 2026-10-21 (combined release source, checks and remaining gates)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.25.0 (2026-10-16), voice dictation, separate chat drafts, IFC models and bounded code runs. |
+| Latest tag | v0.25.0 release metadata prepared for 2026-10-21. Publication and fresh-clone verification are tracked above and remain open. |
 | `main` | v0.25.0 release tree. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
@@ -229,3 +318,50 @@ runs and the complete 43-scenario page gate.
   `../WORKSPACE.md`, Sessions).
 - `.playwright-mcp/` is scratch output from browser dogfooding. It is untracked; delete it when
   done.
+
+## October 20 local UX integration follow-up
+
+The reviewed clarity source is now applied in this local tree, including the new work-state WebKit test and CI entry. Shared-page tests repeated at29/29. iOS incremental source is integrated with prior edits preserved. Desktop currently previews this page through explicit source overrides on its installed0.23.6 runtime; this is not a freshly linked Desktop release. Full Core/Desktop/native gates remain pending disk admission. No commit, dependency pin, tag, push or release. Evidence: `../board/evidence/ux-clarity-2026-10-20/README.md`.
+
+
+## Desktop icon harmony trial, 20 October 2026
+
+Static Phosphor regular icons now align with iPhone. Chat, Agents, Board, new chat and attachments use explicit action symbols. Primary header/sidebar/composer controls use actual40px targets. Shared WebKit30/30 passed. A separate locally signed ARK UX Trial runs the successful currentCore0.25 cached binary with explicit current source overrides; installed ARK stays intact. Final embedded rebuild and full compiler gates still need disk admission. Native screenshot and launch command: ../board/evidence/ux-clarity-2026-10-20/. Push delivery remains incomplete.
+
+
+## Slim shell and agent conversations, 20 October2026
+
+Owner feedback applied: fixed rail50px, header44px, glyphs17px with40px primary click targets. Fixed chrome and project drawer have subtly different semantic tones. Composer model follows upload and dictation in visual/DOM order; mode is right aligned, the sole local destination stays hidden, remote choice stays visible. Project new chat uses plain plus. Desktop current-project agent faces open existing per-agent conversations, with runtime/project stale guards, focus preservation and disposal. Native row opened the correct orchestrator conversation. Desktop page tests71/71 pass; shared page verification recorded in slim-core-final.log. Group avatars remain open because chat participant metadata is absent. Full compiler/final embedded release and APNs delivery stay open. Evidence: ../board/evidence/ux-clarity-2026-10-20/.
+
+
+## Participant tracking and compact controls, 20 October 2026
+
+The participant source now derives assigned agent names from durable task report_to and parent links. This corrects the earlier assumption that no chat association existed. A read-only check found three existing chats with recorded groups. Protocol 1.5 adds optional participants; unknown remains distinct from known empty. Desktop and iPhone render a neutral identity, one face, or a capped group stack with an overflow count. Source review approved after preserving base chats on malformed task records and populating addressed reads for remote forwarding.
+
+Desktop pointer chrome is now 44px rail, 36px header, 15px navigation glyphs and 32px controls. Project drawer width is 236px; coarse input retains larger targets. The header tone continues above the project drawer. Native glyphs are 20/18/16pt with 44pt toolbar targets.
+
+Web checks: Desktop 71/71; shared page 35/35 plus focused 13/13 including touch targets. Rust formatting passes. New Rust projection/integration tests, authoritative Rust schema generation, Swift protocol tests and native simulator/device checks have NOT run: guarded commands refused current disk space. Schema-to-Swift output reproduced the existing generator output before the additive field, but does not replace the Rust generation gate. The running Desktop trial loads current UI sources with its previous native binary, so it does not yet expose real participant metadata. The installed phone remains the prior verified build.
+
+Push remains incomplete. Stored Apple keys were rejected; a valid APNs key path and ID were requested. Full trusted relay, runtime/native registration and live delivery still remain. A writable external build volume was requested; no build output was deleted. The vstack task remains in build, with guarded compiler gates configured.
+
+
+## Stable avatar identity integration, 20 October 2026
+
+Seven bundled faces now use the same frozen UTF-8 identity-v1 rule across Desktop contacts,
+canvas, individual/group chat marks and iPhone chat/group/attention marks. Working status no
+longer swaps the face. Exact-byte participant deduplication preserves distinct Unicode names.
+New192px exports remove the candidate-scale edge artifacts at compact sizes. This is a one-time
+transition from the old four-face hash; future catalog changes require an identity migration.
+
+Desktop full page suite73/73 and shared suite37/37 pass; final late-resolver14/14 pass.
+Production Swift identity code compiles under the guarded small phase and executes9cross-platform
+vectors plus Unicode group deduplication. The new source faces are visible in the existing Desktop
+trial via source overrides. This does not update its older native participant projection.
+Full Rust/native simulator/device build and install remain blocked by phase disk admission.
+Push remains unavailable: trusted relay/native registration and valid APNs credentials are still
+required. No release, deployment or claim of complete mobile integration.
+
+The later guarded checks also pass: durable projection4Rusttests, protocol4tests, generator
+nullable-collection regression1test, authoritative protocol regeneration and native byte compare,
+and Swiftpackage7tests. This supersedes earlier protocol/projection unrun statements. The
+interaction/host integration and complete application builds remain pending storage.

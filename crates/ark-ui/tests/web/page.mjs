@@ -593,7 +593,7 @@ const scenarios = {
         hscroll: document.documentElement.scrollWidth > innerWidth,
       };
     });
-    assert.deepEqual(await wide(), { railWidth: 58, sidebarWidth: 252, sidebarPadding: 10, mainLeft: 310, hscroll: false });
+    assert.deepEqual(await wide(), { railWidth: 44, sidebarWidth: 236, sidebarPadding: 10, mainLeft: 280, hscroll: false });
     const rail = await page.locator(".destinations").evaluate((el) => ({
       divider: getComputedStyle(el, "::after").content,
       height: Math.round(el.getBoundingClientRect().height),
@@ -611,7 +611,7 @@ const scenarios = {
     await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
     await page.click("#toggle-sidebar");
     await page.waitForTimeout(350);
-    assert.deepEqual(await wide(), { railWidth: 58, sidebarWidth: 0, sidebarPadding: 0, mainLeft: 58, hscroll: false });
+    assert.deepEqual(await wide(), { railWidth: 44, sidebarWidth: 0, sidebarPadding: 0, mainLeft: 44, hscroll: false });
 
     await page.setViewportSize({ width: 720, height: 800 });
     // Wait for the layout to switch rather than a fixed time (flaky on a busy machine).
@@ -632,7 +632,7 @@ const scenarios = {
     await page.waitForTimeout(350);
     const open = await state();
     assert.deepEqual({ ...open, destinations: undefined, mainBottom: undefined }, {
-      compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 252, sidebarPadding: 10, destinations: undefined, mainBottom: undefined, hscroll: false,
+      compact: "true", drawer: "open", sidebarLeft: 0, sidebarWidth: 236, sidebarPadding: 10, destinations: undefined, mainBottom: undefined, hscroll: false,
     });
     assert.equal(open.destinations.height, 56, "compact destinations keep their own layout row");
     assert.equal(open.mainBottom, open.destinations.top, "the bar does not cover the workspace");
@@ -651,7 +651,7 @@ const scenarios = {
     const restored = await state();
     assert.equal(restored.compact, "false");
     assert.equal(restored.drawer, "");
-    assert.equal(restored.sidebarLeft, 58);
+    assert.equal(restored.sidebarLeft, 44);
     assert.equal(restored.sidebarWidth, 0);
     assert.equal(restored.sidebarPadding, 0);
     assert.equal(restored.hscroll, false);
@@ -877,6 +877,12 @@ async function agentChat(page) {
   await row.locator(".act-line").click();
   const detail = row.locator(".act-more .call-body");
   await detail.waitFor();
+  await page.waitForFunction(() => {
+    const row = document.querySelector(".chat-view .turn .work .act.inspectable");
+    const text = row?.querySelector(".act-more .call-body")?.innerText || "";
+    return row?.dataset.expanded === "true" && text.includes("notes.save")
+      && text.includes("Arguments") && text.includes('"title": "Notes"');
+  });
   const shown = await detail.innerText();
   assert.match(shown, /notes\.save/);
   assert.match(shown, /Arguments/);
@@ -1240,7 +1246,25 @@ async function files(page) {
   await shot(page, "office-charts-wide");
   await page.setViewportSize({ width: 430, height: 760 });
   await page.evaluate(() => document.documentElement.dataset.theme = "dark");
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.waitForFunction(() => {
+    const app = document.querySelector(".app");
+    return app.dataset.compact === "true" && app.style.getPropertyValue("--pw") === "430px"
+      && !app.getAnimations().some((animation) => animation.playState === "running");
+  });
+  const chartLayout = await page.evaluate(() => {
+    const bounds = (selector) => {
+      const el = document.querySelector(selector);
+      const rect = el.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, width: rect.width, client: el.clientWidth, scroll: el.scrollWidth };
+    };
+    return {
+      viewport: innerWidth, document: document.documentElement.scrollWidth,
+      app: bounds(".app"), host: bounds(".chart-test-host"),
+      charts: bounds(".chart-test-host .sh-charts"), canvas: bounds(".chart-test-host .sh-chart-canvas"),
+    };
+  });
+  assert.equal(chartLayout.document > chartLayout.viewport, false, JSON.stringify(chartLayout));
+  assert.ok(chartLayout.canvas.scroll > chartLayout.canvas.client, JSON.stringify(chartLayout));
   await shot(page, "office-charts-narrow-dark");
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(() => document.documentElement.dataset.theme = "light");
@@ -1670,6 +1694,15 @@ scenarios.workbench = workbench;
 
 // The window's Browser view (ADR 0044) is drawn above the page, so the panel tells it where to
 // be and when to step aside. A stub in place of the window records what the page asks.
+async function useNativeBrowserFixture(page) {
+  await page.evaluate(async () => {
+    const { BUILTINS } = await import("./js/workbench.js");
+    const browser = BUILTINS.find(panel => panel.id === "browser");
+    window.ark.panel({ ...browser, render: (el, params, scoped) => browser.render(el, params,
+      Object.assign(Object.create(scoped), { destinationBrowser: false, browserView: window.ark.browserView })) });
+  });
+}
+
 async function browserview(page) {
   await page.evaluate(() => {
     window.calls = [];
@@ -1683,6 +1716,7 @@ async function browserview(page) {
       listen: (fn) => ((window.emitBrowser = fn), Promise.resolve()),
     };
   });
+  await useNativeBrowserFixture(page);
   const last = () => page.evaluate(() => window.calls.at(-1));
   const until = (what) => page.waitForFunction((w) => window.calls.at(-1)?.[0] === w, what);
 
@@ -1803,6 +1837,7 @@ async function browserdown(page) {
       listen: (fn) => ((window.emitBrowser = fn), Promise.resolve()),
     };
   });
+  await useNativeBrowserFixture(page);
   const bar = page.locator(".wb-bar");
   const input = page.locator(".wb-input");
   const down = page.locator(".wb-refused");
@@ -1892,18 +1927,42 @@ async function browserdown(page) {
 }
 scenarios.browserdown = browserdown;
 
-// In a browser the panel is a frame: a page that refuses frames says so, with a way out.
-async function framerefused(page) {
-  await page.evaluate(() => {
-    const call = window.ark.call;
-    window.ark.call = (m, p) => (m === "frame_check" ? Promise.resolve({ framable: false, reason: "X-Frame-Options: DENY" }) : call(m, p));
+async function destinationBrowserFixture(page, unavailable = false) {
+  const fixture = { calls: [], unavailable };
+  await page.route("**/rpc", async route => {
+    const { method, params } = route.request().postDataJSON();
+    if (method !== "resource" || params.ref?.kind !== "browser") return route.fallback();
+    fixture.calls.push(params);
+    if (fixture.unavailable) return route.fulfill({ json: { ok: false, error: "Chromium is not installed on this computer" } });
+    const result = params.operation.kind === "browser_snapshot"
+      ? { image: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+        media_type: "image/png", width: 1, height: 1, url: "http://localhost:3000/home", title: "Destination fixture", loading: false }
+      : {};
+    await route.fulfill({ json: { ok: true, result } });
   });
-  await page.evaluate(() => window.ark.openPanel("browser", { locator: "https://example.com/a" }));
+  const flags = await page.evaluate(() => {
+    const scoped = window.ark.at(window.ark.summary().location);
+    return { remoteResource: scoped.remoteResource, destinationBrowser: scoped.destinationBrowser };
+  });
+  assert.deepEqual(flags, { remoteResource: false, destinationBrowser: true });
+  return fixture;
+}
+
+// HTTP pages keep Browser rendering on the destination even when hello names that same
+// runtime. A missing Chromium stays visible and cannot fall back to the viewer's network.
+async function framerefused(page) {
+  const fixture = await destinationBrowserFixture(page, true);
+  await page.evaluate(() => window.ark.openPanel("browser", { locator: "http://localhost:3000/home" }));
   const refused = page.locator(".wb-refused");
   await refused.waitFor();
-  assert.equal(await refused.locator("p").innerText(), "example.com can't be shown here");
-  assert.equal(await refused.locator("button").innerText(), "Open in your browser");
-  assert.equal(await page.locator("iframe.wb-frame").getAttribute("src"), "https://example.com/a");
+  assert.equal(await refused.locator("p").innerText(), "Chromium is not installed on this computer");
+  fixture.unavailable = false;
+  await refused.getByRole("button", { name: "Try again" }).click();
+  await page.locator("img.remote-browser[src^='data:image/png']").waitFor();
+  await refused.waitFor({ state: "hidden" });
+  assert.equal(fixture.calls.filter(call => call.operation.kind === "browser_navigate").length, 2);
+  assert.equal(await page.locator("iframe.wb-frame").count(), 0);
+  assert.equal(fixture.calls.some(call => call.operation.kind === "browser_reload"), false);
 }
 scenarios.framerefused = framerefused;
 
@@ -2567,7 +2626,10 @@ async function background(page) {
   await tray.waitFor();
   assert.match(await tray.innerText(), /^In /, "the tray says which chat asks");
   assert.equal(await page.locator("#thread .approval").count(), 0);
-  await page.locator(`.session[data-id="${first}"] .session-working[aria-label="Working"]`).waitFor();
+  const firstRow = page.locator(`.session[data-id="${first}"]`);
+  await firstRow.locator(".session-attention").waitFor();
+  assert.equal(await firstRow.locator(".session-attention").innerText(), "Needs you");
+  assert.equal(await firstRow.locator(".session-working").count(), 0);
   assert.equal(await page.locator("#app").getAttribute("data-running"), "false", "the new chat is free");
 
   await finished(page, () => page.locator("#input").fill("And a second question?").then(() => page.keyboard.press("Enter")));
@@ -2644,6 +2706,14 @@ async function visit(page) {
   assert.equal(await page.locator("#app").getAttribute("data-shell"), "desktop");
   assert.equal(await page.evaluate(() => typeof window.__TAURI__.core), "undefined");
   assert.ok(await page.evaluate(() => window.ark.call("hello")), "the page talks to its runtime over HTTP");
+  const fixture = await destinationBrowserFixture(page);
+  const location = await page.evaluate(() => window.ark.summary().location);
+  await page.evaluate(() => window.ark.openPanel("browser", { locator: "http://localhost:3000/home" }));
+  await page.locator("img.remote-browser[src^='data:image/png']").waitFor();
+  assert.equal(await page.locator("iframe.wb-frame").count(), 0);
+  const navigate = fixture.calls.find(call => call.operation.kind === "browser_navigate");
+  assert.deepEqual(navigate.ref.location, location);
+  assert.equal(navigate.operation.input.url, "http://localhost:3000/home");
   await page.evaluate(() => window.ark.sidebar({ id: "place", render: (el) => el.append("This Mac · Cloud") }));
   const row = page.locator("#sidebar-ext .sidebar-item[data-id=place]");
   await row.waitFor();
@@ -2852,7 +2922,7 @@ async function chatWorkspacePolish(page) {
     };
   });
   assert.deepEqual(shell, {
-    chatsParent: "topbar", chatLabel: "Open chats", browserHeight: 44, nativeHeight: 52,
+    chatsParent: "topbar", chatLabel: "Open chats", browserHeight: 36, nativeHeight: 36,
     titleDisplay: "none", titleBarViewsHidden: true, proofParent: "workspace-destinations",
     proofLabel: "Proof", accountParent: "destinations", accountLabel: "Account and settings",
     railMaterial: "rgb(241, 241, 239)", sidebarMaterial: "rgb(247, 247, 246)",
@@ -2928,8 +2998,8 @@ async function chatWorkspacePolish(page) {
     const left = (selector) => Math.round(document.querySelector(selector).getBoundingClientRect().left);
     return { attach: left("#attach"), mode: left("#mode-chip"), model: left("#model-chip"), send: left("#send") };
   });
-  assert.ok(composerOrder.attach < composerOrder.mode && composerOrder.mode < composerOrder.model
-    && composerOrder.model < composerOrder.send, JSON.stringify(composerOrder));
+  assert.ok(composerOrder.attach < composerOrder.model && composerOrder.model < composerOrder.mode
+    && composerOrder.mode < composerOrder.send, JSON.stringify(composerOrder));
 
   const newChat = page.locator(".project-row[aria-current='true'] .project-new-chat");
   await newChat.hover();
@@ -3021,8 +3091,7 @@ async function chatWorkspacePolish(page) {
     const effectiveTarget = (selector) => {
       const el = document.querySelector(selector);
       const box = el.getBoundingClientRect();
-      const inset = Math.abs(parseFloat(getComputedStyle(el, "::before").inset));
-      return [Math.round(box.width + inset * 2), Math.round(box.height + inset * 2)];
+      return [Math.round(box.width), Math.round(box.height), getComputedStyle(el, "::before").content];
     };
     return {
       overflow: list.scrollWidth > list.clientWidth,
@@ -3031,7 +3100,7 @@ async function chatWorkspacePolish(page) {
       paneTarget: effectiveTarget("#toggle-pane"),
     };
   });
-  assert.deepEqual(overflow, { overflow: true, selectedVisible: true, splitTarget: [40, 40], paneTarget: [40, 40] });
+  assert.deepEqual(overflow, { overflow: true, selectedVisible: true, splitTarget: [32, 32, "none"], paneTarget: [32, 32, "none"] });
 
   await proofDestination.click();
   const projectName = await page.evaluate(() => window.ark.summary().project.name);
@@ -3182,9 +3251,18 @@ async function processes(page) {
   await page.waitForFunction(() => document.querySelector(".proc-out .xterm-rows")?.textContent.includes("Serving HTTP"), null, { timeout: 20000 });
   await page.waitForFunction(() => document.querySelector('.proc-row[data-state="ready"]'), null, { timeout: 20000 });
   // The page the agent asked for, in the Browser panel, in front.
-  await page.waitForFunction(() => /^http:\/\/localhost:\d+\/home$/.test(document.querySelector("iframe.wb-frame")?.src || ""));
+  await page.locator("img.remote-browser[src^='data:image/']").waitFor();
+  assert.match(await page.locator('input[aria-label="Address"]').inputValue(), /^http:\/\/localhost:\d+\/home$/);
+  assert.equal(await page.locator("iframe.wb-frame").count(), 0);
   assert.equal(await page.locator(".pane-tab[aria-selected=true]").innerText(), "localhost");
   await done;
+
+  // The process's manual Open takes the same destination route after the Browser closes.
+  await page.evaluate(() => window.ark.closePanel("browser"));
+  await page.locator('.pane-tab', { hasText: "Processes" }).click();
+  await page.getByRole("button", { name: "Open in the Browser", exact: true }).click();
+  await page.locator("img.remote-browser[src^='data:image/']").waitFor();
+  assert.equal(await page.locator("iframe.wb-frame").count(), 0);
 
   // Stop ends it, and it stays listed as stopped.
   await page.locator('.pane-tab', { hasText: "Processes" }).click();

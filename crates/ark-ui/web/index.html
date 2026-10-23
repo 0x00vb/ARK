@@ -19,7 +19,7 @@
       <nav class="destinations" id="destinations" aria-label="Destinations">
         <div class="destination-drag" data-tauri-drag-region></div>
         <button class="destination" type="button" data-destination="home" aria-current="page" title="Chat">
-          <span class="destination-icon" data-icon="home"></span>
+          <span class="destination-icon" data-icon="chat"></span>
           <span class="destination-label">Chat</span>
         </button>
         <div class="workspace-destinations" id="workspace-destinations" aria-label="Workspace"></div>
@@ -39,7 +39,7 @@
           <button class="icon-btn" id="toggle-sidebar" title="Hide sidebar (⌘B)" aria-label="Hide sidebar"></button>
         </div>
         <button class="nav-row new-session" id="new-session">
-          <span class="nav-icon" data-icon="compose"></span>
+          <span class="nav-icon" data-icon="new-chat"></span>
           <span class="nav-label">New chat</span>
           <kbd>⌘N</kbd>
         </button>
@@ -89,9 +89,9 @@
             <div class="composer-bar">
               <button type="button" class="icon-btn attach" id="attach" title="Add files" aria-label="Add files" data-icon="plus"></button>
               <button type="button" class="icon-btn dictate" id="dictate" aria-label="Start dictation" aria-describedby="dictation-status" data-icon="mic"></button>
-              <button type="button" class="chip place-chip" id="place-chip" hidden></button>
               <button type="button" class="chip model-chip" id="model-chip" title="Model"></button>
               <button type="button" class="chip mode-chip" id="mode-chip" title="Execution mode (⇧Tab)" aria-haspopup="menu">Manual</button>
+              <button type="button" class="chip place-chip" id="place-chip" hidden></button>
               <button type="button" class="ctx-meter" id="ctx-ring" title="Context"></button>
               <button type="submit" class="send" id="send" aria-label="Send"></button>
             </div>

@@ -205,7 +205,7 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
                 ("HOME".into(), dir.path().into()),
             ],
         );
-        builder = builder.processes_with(
+        builder = builder.browser(true).processes_with(
             ark_sdk::prelude::ark_proc::Processes::with_shell(dir.path().join("processes"), shell)
                 .unwrap(),
         );

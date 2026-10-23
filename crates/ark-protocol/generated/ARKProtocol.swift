@@ -157,6 +157,7 @@ public struct ChatMessage: Codable, Equatable, Sendable {
 public struct ChatSummary: Codable, Equatable, Sendable {
     public let computer: String
     public let id: String
+    public let participants: [String]?
     public let preview: String
     public let project: String
     public let title: String
@@ -166,6 +167,7 @@ public struct ChatSummary: Codable, Equatable, Sendable {
     public init(
         computer: String,
         id: String,
+        participants: [String]? = nil,
         preview: String,
         project: String,
         title: String,
@@ -174,6 +176,7 @@ public struct ChatSummary: Codable, Equatable, Sendable {
     ) {
         self.computer = computer
         self.id = id
+        self.participants = participants
         self.preview = preview
         self.project = project
         self.title = title

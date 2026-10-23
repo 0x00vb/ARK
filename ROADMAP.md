@@ -8,7 +8,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.25.0** (2026-10-16): voice dictation, separate chat drafts, read-only IFC models with a trusted WASM worker, and bounded code runs. Earlier releases are in `CHANGELOG.md`. |
+| Stable release | **v0.25.0** release metadata prepared for 2026-10-21. Combined checks, immutable tag publication and fresh-clone verification remain open. Earlier releases are in `CHANGELOG.md`. |
 | `main` | v0.25.0 release tree. |
 | Consumers | ARK Desktop (`ark-desktop` repo; `main` pins v0.24.0 pending the v0.25.0 upgrade), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
@@ -34,8 +34,9 @@ replacement using the existing store. ADR 0079 and `docs/MEMORY.md` define the p
 boundary. Focused tests pass. Real paired tasks show fewer calls on two document tasks,
 but a failed coding task prevents an overall improvement claim. Full CI, exact simulated
 baseline parity and actual shared-command dogfood pass. Empty ordinary projects add no
-memory capability-index cost. This is not on main or released. Agent child projects do not
-inherit memory in this slice.
+memory capability-index cost. Functional memory is committed on local main as `f0d10f1`. The current combined source
+still needs final release checks and a published tag. Agent child projects do not inherit memory
+in this slice.
 
 ## Known limitations
 

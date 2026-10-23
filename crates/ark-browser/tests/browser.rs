@@ -2,7 +2,7 @@
 //! on loopback. Skipped when no such browser is installed.
 
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,53 +20,206 @@ impl BlobResolver for NoBlobs {
     }
 }
 
-/// A site: a form that greets, sets a cookie, and a page that shows the cookies it got.
-fn site() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    std::thread::spawn(move || {
-        for mut s in listener.incoming().flatten() {
-            let mut buf = [0u8; 8192];
-            let n = s.read(&mut buf).unwrap_or(0);
-            let req = String::from_utf8_lossy(&buf[..n]).to_string();
-            let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
-            let cookie = req
-                .lines()
-                .find_map(|l| {
-                    l.strip_prefix("Cookie: ")
-                        .or_else(|| l.strip_prefix("cookie: "))
-                })
-                .unwrap_or("none")
-                .to_string();
-            let (extra, body) = if path.starts_with("/popup") {
-                (
-                    "",
-                    "<title>Opening</title><button style='width:180px;height:80px' onclick=\"window.open('/hello?name=Popup')\">Open popup</button>".to_string(),
-                )
-            } else if let Some(q) = path.strip_prefix("/hello?name=") {
-                (
-                    "Set-Cookie: seen=yes\r\n",
-                    format!(
-                        "<title>Hello</title><h1>Hello, {}</h1><a href=\"/\">Home</a>",
-                        q.replace('+', " ")
-                    ),
-                )
-            } else if path.starts_with("/whoami") {
-                ("", format!("<title>Who</title><p>cookies: {cookie}</p>"))
-            } else {
-                (
-                    "",
-                    "<title>Greeter</title><main><h1>Greeter</h1><form action=\"/hello\"><label for=n>Your name</label><input autofocus oninput=\"document.title=this.value\" id=n name=name style=\"position:fixed;left:10px;top:10px;width:180px;height:32px\"><button>Greet me</button></form><a href=\"/whoami\">Who am I</a></main>".to_string(),
-                )
-            };
-            let _ = write!(
-                s,
-                "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\n{extra}content-length: {}\r\nconnection: close\r\n\r\n{body}",
-                body.len()
-            );
+const SITE_CONNECTIONS: usize = 16;
+const SITE_HEADER_BYTES: usize = 8192;
+const SITE_REQUEST_LIMIT: Duration = Duration::from_secs(5);
+
+struct Site {
+    url: String,
+    addr: SocketAddr,
+    first_accepted: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    connection_errors: Arc<[std::sync::atomic::AtomicUsize; 2]>,
+}
+
+impl Drop for Site {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            // A closed receiver is reported by joining its failed server thread below.
+            let _ = stop.send(());
         }
+        if let Some(thread) = self.thread.take() {
+            if let Err(error) = thread.join() {
+                if !std::thread::panicking() {
+                    std::panic::resume_unwind(error);
+                }
+            }
+        }
+        let expired = self.connection_errors[0].load(std::sync::atomic::Ordering::Relaxed);
+        let disconnected = self.connection_errors[1].load(std::sync::atomic::Ordering::Relaxed);
+        if expired != 0 || disconnected != 0 {
+            eprintln!("fixture connections: {expired} expired, {disconnected} disconnected");
+        }
+    }
+}
+
+/// A site: a form that greets, sets a cookie, and a page that shows the cookies it got.
+fn site() -> Site {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let (stop, mut stopped) = tokio::sync::oneshot::channel();
+    let first_accepted = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let accepted = first_accepted.clone();
+    let connection_errors: Arc<[std::sync::atomic::AtomicUsize; 2]> =
+        Arc::new(std::array::from_fn(|_| {
+            std::sync::atomic::AtomicUsize::new(0)
+        }));
+    let errors = connection_errors.clone();
+    let thread = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+            let mut requests = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut stopped => break,
+                    completed = requests.join_next(), if !requests.is_empty() => {
+                        completed.unwrap().unwrap();
+                    }
+                    connection = listener.accept(), if requests.len() < SITE_CONNECTIONS => {
+                        let (stream, _) = connection.unwrap();
+                        *accepted.0.lock().unwrap() = true;
+                        accepted.1.notify_all();
+                        let errors = errors.clone();
+                        requests.spawn(async move {
+                            match tokio::time::timeout(SITE_REQUEST_LIMIT, serve_site(stream)).await {
+                                Ok(Ok(())) => (),
+                                Err(_) => { errors[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+                                Ok(Err(error)) if matches!(error.kind(),
+                                    std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset) => {
+                                    errors[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                Ok(Err(error)) => panic!("fixture request failed: {error}"),
+                            }
+                        });
+                    }
+                }
+            }
+            requests.abort_all();
+            while let Some(completed) = requests.join_next().await {
+                if let Err(error) = completed {
+                    assert!(error.is_cancelled(), "fixture request panicked: {error}");
+                }
+            }
+        });
     });
-    base
+    Site {
+        url: format!("http://{addr}"),
+        addr,
+        first_accepted,
+        stop: Some(stop),
+        thread: Some(thread),
+        connection_errors,
+    }
+}
+
+async fn serve_site(mut stream: tokio::net::TcpStream) -> std::io::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buf = [0u8; SITE_HEADER_BYTES];
+    let mut used = 0;
+    while !buf[..used].windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+        if used == buf.len() {
+            return stream.write_all(b"HTTP/1.1 431 Request Header Fields Too Large\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").await;
+        }
+        let read = stream.read(&mut buf[used..]).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        used += read;
+    }
+    let req =
+        match std::str::from_utf8(&buf[..used]) {
+            Ok(req) => req,
+            Err(_) => return stream
+                .write_all(
+                    b"HTTP/1.1 400 Bad Request\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .await,
+        };
+    let path = req.split_whitespace().nth(1).unwrap_or("/");
+    let cookie = req
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Cookie: ")
+                .or_else(|| line.strip_prefix("cookie: "))
+        })
+        .unwrap_or("none");
+    let (extra, body) = if path.starts_with("/popup") {
+        (
+            "",
+            "<title>Opening</title><button style='width:180px;height:80px' onclick=\"window.open('/hello?name=Popup')\">Open popup</button>".to_string(),
+        )
+    } else if let Some(q) = path.strip_prefix("/hello?name=") {
+        (
+            "Set-Cookie: seen=yes\r\n",
+            format!(
+                "<title>Hello</title><h1>Hello, {}</h1><a href=\"/\">Home</a>",
+                q.replace('+', " ")
+            ),
+        )
+    } else if path.starts_with("/whoami") {
+        ("", format!("<title>Who</title><p>cookies: {cookie}</p>"))
+    } else {
+        (
+            "",
+            "<title>Greeter</title><main><h1>Greeter</h1><form action=\"/hello\"><label for=n>Your name</label><input autofocus oninput=\"document.title=this.value\" id=n name=name style=\"position:fixed;left:10px;top:10px;width:180px;height:32px\"><button>Greet me</button></form><a href=\"/whoami\">Who am I</a></main>".to_string(),
+        )
+    };
+    let reply = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/html\r\n{extra}content-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(reply.as_bytes()).await
+}
+
+#[test]
+fn an_idle_site_socket_does_not_block_another_request() {
+    let server = site();
+    let mut idle = TcpStream::connect(server.addr).unwrap();
+    idle.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    idle.set_write_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let accepted = server.first_accepted.0.lock().unwrap();
+    let (accepted, timeout) = server
+        .first_accepted
+        .1
+        .wait_timeout_while(accepted, Duration::from_secs(2), |accepted| !*accepted)
+        .unwrap();
+    assert!(
+        *accepted && !timeout.timed_out(),
+        "first idle socket was not accepted"
+    );
+    drop(accepted);
+
+    let mut second = TcpStream::connect(server.addr).unwrap();
+    second
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    second
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    second
+        .write_all(b"GET /hello?name=Second HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    let mut response = String::new();
+    second.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert!(response.contains("Hello, Second"), "{response}");
+
+    idle.write_all(b"GET /hello?name=Idle HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    response.clear();
+    idle.read_to_string(&mut response).unwrap();
+    assert!(
+        response.contains("Hello, Idle"),
+        "the first socket stayed open: {response}"
+    );
 }
 
 fn element(out: &Value, role: &str, name: &str) -> u64 {
@@ -91,7 +244,8 @@ async fn agents_browse_apart_and_take_turns_on_the_signed_in_browser() {
         eprintln!("skipped: no Chrome, Edge or Brave on this machine");
         return;
     }
-    let base = site();
+    let server = site();
+    let base = server.url.clone();
     let ctx = RunCtx::new(&NoBlobs);
     let alice = svc.for_owner("alice");
     let bob = svc.for_owner("bob");
@@ -192,7 +346,8 @@ async fn a_person_surface_has_its_own_context_frames_navigation_and_popups() {
         eprintln!("skipped: no Chrome, Edge or Brave on this machine");
         return;
     }
-    let base = site();
+    let server = site();
+    let base = server.url.clone();
     let first = svc.surface("chat-a");
     let second = svc.surface("chat-b");
     first.resize(640, 480, 1.0).await.unwrap();

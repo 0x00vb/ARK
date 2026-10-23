@@ -1,6 +1,6 @@
 # 0079. Project memory is reviewed and project scoped
 
-Status: Proposed
+Status: Accepted by the owner for release, 2026-10-23.
 Date: 2026-10-20
 
 ## Context

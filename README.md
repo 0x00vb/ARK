@@ -9,7 +9,8 @@ ARK came out of a security research workstation (SecRes, now retired) and keeps 
 The same runtime runs [`examples/writing-agent`](examples/writing-agent), an editor for
 novelists, with no change to any ARK crate.
 
-Latest release: **v0.25.0**. A git tag is the release (not on crates.io). Rust 1.90 or newer.
+Release target: **v0.25.0**. Publication and verification are tracked in [`CURRENT_STATE.md`](CURRENT_STATE.md).
+A published git tag is the release (not on crates.io). Rust 1.90 or newer.
 State and next steps: [`ROADMAP.md`](ROADMAP.md).
 
 ## How it is structured

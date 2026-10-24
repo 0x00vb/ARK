@@ -556,7 +556,7 @@ kbd { font: 11px var(--font); color: var(--text-3); }
 .chat-layout-leaf { min-width: 0; min-height: 0; position: relative; overflow: hidden; }
 .chat-layout-leaf > .chat-surface { width: 100%; height: 100%; }
 .chat-layout-leaf:has(.chat-surface[data-active="true"]) { box-shadow: inset 0 0 0 1px var(--hair); }
-.chat-surface { min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.chat-surface { background: var(--bg); min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .chat-surface .scroller { flex: 1; }
 .chat-surface .dock { width: 100%; }
 .chat-divider { position: relative; z-index: 3; touch-action: none; outline: 0; }
@@ -2199,3 +2199,15 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .game-plugin-connect label { display: flex; flex: 1; flex-direction: column; gap: 8px; font-size: 13px; }
 .game-plugin-connect input { width: 100%; box-sizing: border-box; }
 @media (max-width: 680px) { .settings-advanced { margin-top: 0; } }
+
+.pane:has(.chat-view) { background: var(--bg); }
+
+.pane-tab-menu {
+  width: var(--rail-tab-height); height: var(--rail-tab-height); flex: none;
+  display: grid; place-items: center; border: 0; border-radius: var(--rail-tab-radius);
+  background: transparent; color: inherit; cursor: pointer;
+}
+.pane-tab-menu .ico { width: 14px; height: 14px; }
+.pane-tab-menu:hover { background: var(--hover); }
+.pane-tab-menu:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.composer-bar:has(.mode-chip) .chat-view-actions:empty + .send { margin-left: 0; }

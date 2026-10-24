@@ -134,3 +134,40 @@ for (const other of ["chat-b", "chat-c"]) {
     assert.equal(await input.inputValue(), "Replace explicitly");
   }));
 }
+
+test("primary, split and app conversations share the same canvas and composer", async () => fixture(async (page) => {
+  await page.locator('.session[data-id="chat-b"]').click();
+  await page.waitForFunction(() => window.ark.summary().session.id === "chat-b");
+  await page.locator("#chat-split").click();
+  await page.locator(".secondary textarea").waitFor();
+  await page.evaluate(() => {
+    const mount = document.createElement("div");
+    document.querySelector(".pane-body").append(mount);
+    const view = window.ark.chatView(mount, {
+      submit: async () => {},
+      model: { open: () => { mount.dataset.modelOpened = "true"; } },
+      files: { captureOrigin: () => { throw Error("No upload expected"); } },
+    });
+    view.render([{ key: "fixture", input: "A question", answer: "An answer" }]);
+    view.setComposer({ modelLabel: "mock" });
+  });
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate(theme => document.documentElement.dataset.colorScheme = theme, theme);
+    const styles = await page.locator(".chat-surface").evaluateAll(surfaces => surfaces.map(surface => {
+      const composer = surface.querySelector(".composer");
+      return {
+        paper: getComputedStyle(surface).backgroundColor,
+        font: getComputedStyle(surface.querySelector("textarea")).font,
+        padding: getComputedStyle(composer).padding,
+        files: !!composer.querySelector('[aria-label="Add files"]'),
+        model: !!composer.querySelector(".model-chip"),
+        mic: !!composer.querySelector(".dictate"),
+      };
+    }));
+    assert.equal(styles.length, 3);
+    assert.deepEqual(styles[1], styles[0]);
+    assert.deepEqual(styles[2], styles[0]);
+  }
+  await page.locator(".chat-view .model-chip").dispatchEvent("click");
+  assert.equal(await page.locator(".pane-body > div").getAttribute("data-model-opened"), "true");
+}));

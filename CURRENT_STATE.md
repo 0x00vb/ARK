@@ -1,5 +1,15 @@
 # Current state
 
+## Shared chat surface patch (2026-10-24)
+
+The UI-only release branch adds a shared primary, secondary and app-conversation surface
+above published v0.25.2. No runtime, protocol or hosted changes are included. App conversations
+can supply real model selection and origin-bound file controls. Panel tab menus hold secondary
+actions. Actual main, split and agent surfaces passed isolated signed-executable source preview;
+focused upload/draft tests and shared-surface WebKit checks pass. Desktop consumes this API in
+its pending UI change. A new immutable Core patch and consumer pin are required before native
+packaging. Evidence: workspace board/evidence/chat-surface-parity-20261024/.
+
 ## Creative UI patch assembly (2026-10-23)
 
 v0.25.2 is assembled from published v0.25.1 plus the reviewed b09aa0d UI changes.

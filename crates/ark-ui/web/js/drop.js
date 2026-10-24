@@ -58,11 +58,16 @@ export function acceptDrops(api, captureDraft, zone) {
 }
 
 /// The system's file chooser (a phone has no drag and drop): the files go into the project.
-export function chooseFiles(api, captureDraft) {
+export function chooseFiles(api, captureDraft, { captureOrigin, progressTarget } = {}) {
+  const target = captureOrigin ? null : api.at(api.summary().location);
+  const origin = captureOrigin ? captureOrigin() : {
+    uploadApi: target,
+    appendDraft: captureDraft(target.location),
+    progressTarget,
+  };
   choose({ multiple: true }, (files) => {
-    const target = api.at(api.summary().location);
-    const complete = captureDraft(target.location);
-    once(target, () => addToProject(target, complete, files.map((file) => ({ path: file.name, file }))));
+    once(origin.uploadApi, () => addToProject(origin.uploadApi, origin.appendDraft,
+      files.map((file) => ({ path: file.name, file })), origin.progressTarget));
   });
 }
 
@@ -110,9 +115,9 @@ function choose(attrs, picked) {
   input.click();
 }
 
-async function addToProject(api, complete, list) {
+async function addToProject(api, complete, list, progressTarget) {
   if (!list.length) return api.toast("There is nothing to add: only files are added, and the folders had none.");
-  const progress = new Progress(list, "Adding");
+  const progress = new Progress(list, "Adding", undefined, progressTarget);
   try {
     const { added } = await send(api, list, progress, { method: "upload_add", params: {} });
     complete(`Added to the project: ${added.join(", ")}`);
@@ -162,7 +167,7 @@ async function send(api, list, progress, last) {
 
 /// The line above the composer while files are sent: what, how far, and Stop.
 class Progress {
-  constructor(list, verb, what) {
+  constructor(list, verb, what, target) {
     this.total = list.reduce((n, f) => n + f.file.size, 0);
     this.done = 0;
     this.stopped = false;
@@ -170,7 +175,8 @@ class Progress {
     this.what = what || (list.length === 1 ? list[0].path : `${list.length} files`);
     this.el = h("div.queued.adding", h("span.queued-k", verb), this.text,
       h("button.icon-btn.small", { title: "Stop", "aria-label": "Stop", onclick: () => this.stop() }, icon("x")));
-    $("#queue").before(this.el);
+    if (target) target.append(this.el);
+    else $("#queue").before(this.el);
     this.paint();
   }
   sent(bytes) {

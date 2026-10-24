@@ -9,13 +9,13 @@
 // written now) and `approvals` (questions the run waits on, as `ark:approval` brought them).
 // `call(key, id)` loads a tool call's detail so its row opens; `stop()` is the chat's Stop.
 
-import { h } from "./dom.js";
 import { Thread } from "./conversation.js";
 import { Composer } from "./composer.js";
+import { createChatSurface } from "./chat-surface.js";
 
 const NEAR_END = 80;
 
-export function chatView(el, base, { submit, stop, call, placeholder = "" } = {}) {
+export function chatView(el, base, { submit, stop, call, placeholder = "", model = null, files = null } = {}) {
   if (typeof submit !== "function") throw new Error("ark.chatView needs `submit`");
   const api = Object.create(base);
   api.submit = (text) => submit(text);
@@ -24,21 +24,14 @@ export function chatView(el, base, { submit, stop, call, placeholder = "" } = {}
   api.cancel = () => {};
   let running = false;
 
-  const scroller = h("section.scroller");
-  const root = h("div.thread");
-  scroller.append(root);
-  const input = h("textarea", { rows: "1", placeholder, spellcheck: "true" });
-  const send = h("button.send", { type: "submit", "aria-label": "Send" });
-  const actions = h("span.chat-view-actions");
-  const form = h("form.composer", { autocomplete: "off" }, input, h("div.composer-bar", actions, send));
-  const queue = h("div.queue");
-  const slash = h("div.palette", { hidden: true });
-  const surface = h("section.chat-surface.chat-view", scroller, h("div.dock", queue, slash, form));
+  const elements = createChatSurface({ kind: "chat-view", capabilities: { model: !!model, files: !!files, mode: false } });
+  const { surface, scroller, threadEl: root, input, send, form, queue, actions } = elements;
+  input.placeholder = placeholder;
   el.append(surface);
 
   const inspect = typeof call === "function" ? (turn, row) => call(turn.key, row.dataset.call) : false;
   const thread = new Thread(root, scroller, api, { inspect });
-  const composer = new Composer(api, { input, form, send, queue, slash, model: null, mode: null, attach: null });
+  const composer = new Composer(api, { ...elements, modelOpen: model?.open, captureOrigin: files?.captureOrigin });
   composer.placeholder = placeholder;
   let views = new Map();
   let drawn = false;
@@ -176,11 +169,20 @@ export function chatView(el, base, { submit, stop, call, placeholder = "" } = {}
     reset,
     input,
     actions,
+    uploads: elements.uploads,
+    addLine: (text, options) => {
+      composer.addLine(text, options);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    },
     focus: () => composer.focus(),
     set: (text) => composer.set(text),
     /// What the composer says while empty, whether it takes a message now, and whether the
     /// run goes on (with `stop`, the send button is Stop while nothing is typed).
-    setComposer({ placeholder: words, disabled, running: on } = {}) {
+    setComposer({ placeholder: words, disabled, running: on, modelLabel, modelDisabled } = {}) {
+      if (elements.model) {
+        if (modelLabel != null) elements.model.textContent = modelLabel;
+        if (modelDisabled != null) elements.model.disabled = !!modelDisabled;
+      }
       if (on != null) {
         running = !!on && typeof stop === "function";
         form.dataset.running = String(running);
@@ -192,6 +194,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "" } = {}
       }
       if (disabled != null) {
         input.disabled = !!disabled;
+        if (elements.attach) elements.attach.disabled = !!disabled;
         send.disabled = !!disabled;
         form.dataset.unavailable = String(!!disabled);
       }

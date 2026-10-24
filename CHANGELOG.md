@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+- Construct main, split and app conversations with one shared chat surface.
+- Let app conversations supply real model and file controls in the shared composer.
+- Capture file-picker destinations before opening and keep progress local to its conversation.
+- Support app conversation actions in the panel tab menu.
+
 ## [0.25.2] - 2026-10-23
 
 - Draw navigation and common controls with one original outline icon family.

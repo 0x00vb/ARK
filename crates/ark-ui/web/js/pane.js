@@ -94,7 +94,14 @@ export class Pane {
       b.addEventListener("click", () => this.show(t.key));
       const close = h("button.pane-tab-close", { type: "button", title: `Close ${t.title}`, "aria-label": `Close ${t.title}` }, icon("x"));
       close.addEventListener("click", () => this.remove(t.key));
-      this.tabsEl.append(h("div.pane-tab-item", { "data-selected": String(selected) }, b, close));
+      const menu = typeof t.ctl?.menu === "function" ? h("button.pane-tab-menu", {
+        type: "button", "aria-label": `Options for ${t.title}`, "aria-haspopup": "menu",
+        onclick: (event) => {
+          const items = t.ctl.menu();
+          if (items?.length) t.api.popover(event.currentTarget, items);
+        },
+      }, icon("more")) : null;
+      this.tabsEl.append(h("div.pane-tab-item", { "data-selected": String(selected) }, b, menu, close));
     }
   }
 

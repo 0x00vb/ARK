@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.25.3] - 2026-10-24
 
 - Construct main, split and app conversations with one shared chat surface.
 - Let app conversations supply real model and file controls in the shared composer.

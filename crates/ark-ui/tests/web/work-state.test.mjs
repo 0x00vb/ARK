@@ -233,7 +233,7 @@ test("model follows attachment and dictation in visual and keyboard order", () =
   const [attach, dictate, model, mode] = await Promise.all(["#attach", "#dictate", "#model-chip", "#mode-chip"].map(selector => page.locator(selector).boundingBox()));
   assert.ok(attach.x < dictate.x && dictate.x < model.x && model.x < mode.x);
   assert.ok(model.x - (dictate.x + dictate.width) <= 8);
-  assert.equal(await page.locator(".topbar").evaluate(el => el.getBoundingClientRect().height), 36);
+  assert.equal(await page.locator(".topbar").evaluate(el => el.getBoundingClientRect().height), 44);
 }));
 
 

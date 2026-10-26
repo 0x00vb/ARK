@@ -1,6 +1,6 @@
-//! The project's board driven by scripted models: the conversation plans on it and hands items
-//! to agents, the items follow their tasks, two agents never take one item, and the board
-//! survives a restart. No model or CLI is needed.
+//! The project's boards driven by scripted models: the conversation plans on the board of a
+//! goal and hands items to agents, the items follow their tasks, two agents never take one item,
+//! each goal keeps its own board, and the boards survive a restart. No model or CLI is needed.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -158,9 +158,14 @@ async fn the_conversation_plans_on_the_board_and_the_items_follow_the_work() {
         "chat",
         vec![
             calls(vec![("board.list", json!({}))]),
+            // An id that names no board is refused, not taken for a goal.
             calls(vec![(
                 "board.add",
-                json!({ "items": [
+                json!({ "board": "b-00000000", "items": [{ "title": "Draft chapter 3" }] }),
+            )]),
+            calls(vec![(
+                "board.add",
+                json!({ "board": "Chapters", "items": [
                     { "title": "Draft chapter 3", "note": "Under 2,000 words." },
                     { "title": "Edit chapter 2" },
                     { "title": "Pick a title", "owner": "user" }
@@ -199,20 +204,27 @@ async fn the_conversation_plans_on_the_board_and_the_items_follow_the_work() {
         .ask_session(&mut session, "plan the next chapters", opts(), |_| {})
         .await
         .unwrap();
-    // The board reads as a summary in its tool's description; empty at first.
+    // The boards read as a summary in their tool's description; none at first.
     let offered = chat.tools.lock().unwrap()[0].clone();
     let list = offered.iter().find(|t| t.name == "board.list").unwrap();
     assert!(
-        list.description.contains("The board is empty."),
+        list.description.contains("There are no boards yet."),
         "{}",
         list.description
     );
+    // The goal made a board that remembers the chat it was planned in.
+    let boards = o.boards();
+    assert_eq!(boards.len(), 1);
+    assert_eq!(boards[0].goal, "Chapters");
+    assert_eq!(boards[0].chat.as_deref(), Some(session.id().as_str()));
     assert_eq!(
         titles(&o, WorkState::Todo),
         ["Draft chapter 3", "Edit chapter 2", "Pick a title"]
     );
     let board = o.board();
-    assert!(board.iter().all(|w| w.by == CHAT));
+    assert!(board
+        .iter()
+        .all(|w| w.by == CHAT && w.board == boards[0].id));
     assert_eq!(board[2].owner.as_deref(), Some(PERSON));
     let (draft, edit) = (board[0].id.clone(), board[1].id.clone());
 
@@ -270,7 +282,7 @@ async fn the_conversation_plans_on_the_board_and_the_items_follow_the_work() {
     let list = offered.iter().find(|t| t.name == "board.list").unwrap();
     assert!(
         list.description
-            .contains("Board: 1 to do, 0 in progress, 2 done."),
+            .contains("Boards: \"Chapters\" (1 to do, 0 in progress, 2 done)."),
         "{}",
         list.description
     );
@@ -310,6 +322,7 @@ async fn the_conversation_plans_on_the_board_and_the_items_follow_the_work() {
         .await
         .unwrap();
     let last = chat.texts().last().unwrap().clone();
+    assert!(last.contains("Board \"Chapters\" (b-"), "{last}");
     assert!(last.contains("[todo, user] Pick a title"), "{last}");
     assert!(last.contains("[done, writer] Draft chapter 3"), "{last}");
 }
@@ -455,4 +468,103 @@ async fn the_person_orders_and_changes_the_board() {
     let o = orch(&f, vec![]);
     let all: Vec<String> = o.board().into_iter().map(|w| w.title).collect();
     assert_eq!(all, ["B", "A"]);
+}
+
+#[tokio::test]
+async fn each_goal_has_its_own_board() {
+    let f = fixture(Script::new("chat", vec![]));
+    let o = orch(&f, vec![]);
+    let site = o.add_board(CHAT, "Launch the site", None).unwrap();
+    // The same goal in other case and spacing is the same board.
+    assert_eq!(
+        o.add_board(PERSON, " launch  the SITE", None).unwrap(),
+        site
+    );
+    let book = o.add_board(PERSON, "Chapter 3", None).unwrap();
+    let on = |b: &str| WorkChange::default().board(b);
+    let copy = o.add_work(PERSON, "Write the copy", on(&site.id)).unwrap();
+    let draft = o.add_work(PERSON, "Draft it", on(&book.id)).unwrap();
+    // Each board orders its own columns.
+    let logo = o
+        .add_work(PERSON, "Pick a logo", on(&site.id).before(&copy.id))
+        .unwrap();
+    let column = |b: &str| -> Vec<String> {
+        o.board()
+            .into_iter()
+            .filter(|w| w.board == b)
+            .map(|w| w.title)
+            .collect()
+    };
+    assert_eq!(column(&site.id), ["Pick a logo", "Write the copy"]);
+    assert_eq!(column(&book.id), ["Draft it"]);
+    assert!(o.add_work(PERSON, "x", on("b-nothere")).is_err());
+    // The latest activity comes first; a new item without a board goes on it.
+    assert_eq!(o.boards()[0].id, site.id);
+    let loose = o
+        .add_work(PERSON, "Buy the domain", WorkChange::default())
+        .unwrap();
+    assert_eq!(loose.board, site.id);
+
+    // An item moves to another board, at the end of its column, and says so.
+    let moved = o.change_work(PERSON, &logo.id, on(&book.id)).unwrap();
+    assert_eq!(column(&book.id), ["Draft it", "Pick a logo"]);
+    assert_eq!(
+        moved.log.last().unwrap().text,
+        "moved it to the board \"Chapter 3\""
+    );
+
+    // A goal changes; two boards never share one.
+    let renamed = o
+        .change_board(PERSON, &book.id, "Chapter 3, first draft")
+        .unwrap();
+    assert_eq!(renamed.goal, "Chapter 3, first draft");
+    assert!(o.change_board(PERSON, &book.id, "Launch the site").is_err());
+
+    // Removing a board removes its items, not the other board's.
+    o.remove_board(&book.id).unwrap();
+    assert!(o.work_item(&draft.id).is_none());
+    assert_eq!(o.boards().len(), 1);
+    let events = o.events(0, 500).unwrap();
+    assert!(events
+        .iter()
+        .any(|e| matches!(&e.kind, EventKind::BoardRemoved { board, .. } if *board == book.id)));
+    assert!(events
+        .iter()
+        .any(|e| matches!(&e.kind, EventKind::Board { board, .. } if board.id == site.id)));
+
+    drop(o);
+    let o = orch(&f, vec![]);
+    assert_eq!(o.boards(), vec![site.clone()]);
+    let left: Vec<String> = o.board().into_iter().map(|w| w.title).collect();
+    assert_eq!(left, ["Write the copy", "Buy the domain"]);
+}
+
+#[tokio::test]
+async fn items_made_before_boards_had_goals_join_one_board() {
+    let f = fixture(Script::new("chat", vec![]));
+    let item = |id: &str, title: &str| {
+        json!({
+            "id": id, "project": f.project.id.to_string(), "title": title,
+            "state": "todo", "rank": 0.0, "by": "user", "created_ms": 1
+        })
+    };
+    for (id, title) in [
+        ("w-old00001", "Draft chapter 3"),
+        ("w-old00002", "Edit chapter 2"),
+    ] {
+        f.ark
+            .engine()
+            .store
+            .put_record("orch_work", id, f.project.id.as_str(), &item(id, title))
+            .unwrap();
+    }
+    let o = orch(&f, vec![]);
+    let boards = o.boards();
+    assert_eq!(boards.len(), 1);
+    assert_eq!(boards[0].goal, board::FIRST_GOAL);
+    assert!(o.board().iter().all(|w| w.board == boards[0].id));
+    // The move is kept: a restart finds the same board.
+    drop(o);
+    let o = orch(&f, vec![]);
+    assert_eq!(o.boards(), boards);
 }

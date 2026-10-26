@@ -4,7 +4,7 @@
 //! task and its events). Both come from the orchestrator's own records and event log. The
 //! project's board (`/board`) is read and changed here too, for both front-ends.
 
-use ark_orchestrate::board::PERSON;
+use ark_orchestrate::board::{Board, PERSON};
 use ark_orchestrate::{
     AgentState, EventKind, Graph, OrchEvent, Origin, TaskNode, TaskState, WorkChange, WorkItem,
     WorkState,
@@ -648,6 +648,14 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
             format!("removed from the board: {}", clip(title, 60)),
             Tone::Muted,
         ),
+        EventKind::Board { board, by } => (
+            format!("{} keeps the board \"{}\"", who(by), clip(&board.goal, 60)),
+            Tone::Normal,
+        ),
+        EventKind::BoardRemoved { goal, .. } => (
+            format!("removed the board \"{}\"", clip(goal, 60)),
+            Tone::Muted,
+        ),
         EventKind::AgentSpawned { .. }
         | EventKind::AgentState { .. }
         | EventKind::Session { .. } => return None,
@@ -662,15 +670,30 @@ pub fn who(by: &str) -> String {
     }
 }
 
-/// The project's board (`/board`): what is open by column, the latest done.
-pub fn board_report(items: &[WorkItem]) -> Report {
-    let r = Report::titled("Board");
-    if items.is_empty() {
-        return r.note("The board is empty. Add an item with /board add <title>, or ask in words.");
+/// The project's boards (`/board`), the latest first: each one's open work by column and the
+/// latest done.
+pub fn board_report(boards: &[Board], items: &[WorkItem]) -> Report {
+    let r = Report::titled("Boards");
+    if boards.is_empty() {
+        return r.note(
+            "There are no boards yet. Add an item with /board add <title>, or ask in words.",
+        );
     }
     let mut r = r;
+    for b in boards {
+        r = r.heading(format!("{} · {}", b.goal, b.id));
+        let on: Vec<&WorkItem> = items.iter().filter(|w| w.board == b.id).collect();
+        if on.is_empty() {
+            r = r.note("Nothing on it yet.");
+        }
+        r = board_columns(r, &on);
+    }
+    r.note("/board add <title> · done <item> · move <item> todo|doing|done · give <item> <agent> · remove <item>")
+}
+
+fn board_columns(mut r: Report, items: &[&WorkItem]) -> Report {
     for state in WorkState::ALL {
-        let col: Vec<&WorkItem> = items.iter().filter(|w| w.state == state).collect();
+        let col: Vec<&WorkItem> = items.iter().copied().filter(|w| w.state == state).collect();
         if col.is_empty() {
             continue;
         }
@@ -699,7 +722,7 @@ pub fn board_report(items: &[WorkItem]) -> Report {
             .heading(format!("{} ({})", state.label(), col.len()))
             .table(t);
     }
-    r.note("/board add <title> · done <item> · move <item> todo|doing|done · give <item> <agent> · remove <item>")
+    r
 }
 
 // ---- control ---------------------------------------------------------------------------------
@@ -773,6 +796,15 @@ pub enum Control {
         item: String,
         agent: String,
     },
+    /// Give a board another goal.
+    ChangeBoard {
+        board: String,
+        goal: String,
+    },
+    /// Remove a board and its items.
+    RemoveBoard {
+        board: String,
+    },
     /// Answer the question a task waits on (ADR 0036).
     Answer {
         task: String,
@@ -793,6 +825,7 @@ pub enum ControlOutcome {
         delivered: bool,
     },
     Work(Box<WorkItem>),
+    Board(Box<Board>),
     Done(String),
 }
 
@@ -810,6 +843,7 @@ impl ControlOutcome {
                 format!("kept for {agent}'s next task")
             }),
             ControlOutcome::Work(w) => Report::new().success(w.line()),
+            ControlOutcome::Board(b) => Report::new().success(format!("{} · {}", b.goal, b.id)),
             ControlOutcome::Done(what) => Report::new().success(what.clone()),
         }
     }
@@ -901,6 +935,13 @@ pub async fn control(
                     "declined"
                 }
             ))
+        }
+        Control::ChangeBoard { board, goal } => {
+            ControlOutcome::Board(Box::new(o.change_board(PERSON, &board, &goal)?))
+        }
+        Control::RemoveBoard { board } => {
+            let b = o.remove_board(&board)?;
+            ControlOutcome::Done(format!("removed the board \"{}\"", clip(&b.goal, 60)))
         }
         Control::GiveWork { item, agent } => {
             let w = o

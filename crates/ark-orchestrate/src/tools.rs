@@ -44,7 +44,7 @@ pub const BOARD_UPDATE: &str = "board.update";
 /// Who the person's conversation is on the board.
 pub const CHAT: &str = "chat";
 
-/// Open items `board.list` returns at most; Done shows the latest few.
+/// Open items `board.list` returns at most; each board's Done shows the latest few.
 pub const BOARD_LISTED: usize = 40;
 const DONE_LISTED: usize = 5;
 
@@ -733,7 +733,7 @@ impl Adapter for ChatTools {
     }
 }
 
-/// The project's board for the person's conversation: read it, add items, change them. Its
+/// The project's boards for the person's conversation: read them, add items, change them. Its
 /// changes are the chat's (`by: chat`).
 pub(crate) struct BoardTools {
     pub orch: Orchestrator,
@@ -750,8 +750,8 @@ impl Adapter for BoardTools {
             ActionDescriptor::new(
                 BOARD_LIST,
                 format!(
-                    "read the project's board: the work planned, in progress and done, kept across chats and sessions. Read it before planning or continuing project work. {}",
-                    board::summary(&self.orch.board())
+                    "read the project's boards, one per goal: the work planned, in progress and done, kept across chats and sessions. Read them before planning or continuing project work. {}",
+                    board::summary(&self.orch.boards(), &self.orch.board())
                 ),
                 RiskTier::Observe,
             )
@@ -759,13 +759,14 @@ impl Adapter for BoardTools {
             .with_input_schema(json!({ "type": "object", "properties": {} })),
             ActionDescriptor::new(
                 BOARD_ADD,
-                "add items to the project's board: pieces of project work worth tracking (a deliverable, a step that takes a task), not every small action. Hand one to an agent with agents.delegate and its item id",
+                "add items to the board of one goal: pieces of work worth tracking (a deliverable, a step that takes a task), not every small action. A new goal makes a new board, which the person sees beside the chat. Hand an item to an agent with agents.delegate and its item id",
                 RiskTier::Observe,
             )
             .with_input_schema(json!({
                 "type": "object",
-                "required": ["items"],
+                "required": ["board", "items"],
                 "properties": {
+                    "board": { "type": "string", "description": "the goal this work is for, in a few words: an existing board's goal or id (b-…), or a new goal" },
                     "items": {
                         "type": "array",
                         "items": {
@@ -804,7 +805,7 @@ impl Adapter for BoardTools {
         &self,
         action: &str,
         input: Value,
-        _ctx: &RunCtx<'_>,
+        ctx: &RunCtx<'_>,
     ) -> ark_tools::Result<ActionOutput> {
         let opt = |v: &Value, k: &str| {
             v.get(k)
@@ -815,16 +816,35 @@ impl Adapter for BoardTools {
         match action {
             BOARD_LIST => {
                 let all = self.orch.board();
-                let open: Vec<&WorkItem> =
-                    all.iter().filter(|w| w.state != WorkState::Done).collect();
-                let done: Vec<&WorkItem> =
-                    all.iter().filter(|w| w.state == WorkState::Done).collect();
+                let boards = self.orch.boards();
+                let mut room = BOARD_LISTED;
+                let listed: Vec<Value> = boards
+                    .iter()
+                    .take(board::SUMMARY_BOARDS)
+                    .map(|b| {
+                        let open: Vec<&WorkItem> = all
+                            .iter()
+                            .filter(|w| w.board == b.id && w.state != WorkState::Done)
+                            .collect();
+                        let done: Vec<&WorkItem> = all
+                            .iter()
+                            .filter(|w| w.board == b.id && w.state == WorkState::Done)
+                            .collect();
+                        let shown = open.len().min(room);
+                        room -= shown;
+                        json!({
+                            "board": b.id,
+                            "goal": b.goal,
+                            "items": open.iter().take(shown).map(|w| item_json(w)).collect::<Vec<_>>(),
+                            "more_open": open.len() - shown,
+                            "done": done.iter().take(DONE_LISTED).map(|w| item_json(w)).collect::<Vec<_>>(),
+                            "more_done": done.len().saturating_sub(DONE_LISTED),
+                        })
+                    })
+                    .collect();
                 Ok(ActionOutput::json(json!({
-                    "summary": board::summary(&all),
-                    "items": open.iter().take(BOARD_LISTED).map(|w| item_json(w)).collect::<Vec<_>>(),
-                    "more_open": open.len().saturating_sub(BOARD_LISTED),
-                    "done": done.iter().take(DONE_LISTED).map(|w| item_json(w)).collect::<Vec<_>>(),
-                    "more_done": done.len().saturating_sub(DONE_LISTED),
+                    "summary": board::summary(&boards, &all),
+                    "boards": listed,
                 })))
             }
             BOARD_ADD => {
@@ -836,19 +856,46 @@ impl Adapter for BoardTools {
                 if items.is_empty() {
                     return Err(AdapterError::bad_input(action, "name at least one item"));
                 }
+                let named = opt(&input, "board").unwrap_or_default();
+                if named.is_empty() {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        "name the goal this work is for in `board`: an existing board's goal or id, or a new goal",
+                    ));
+                }
+                let board = match self.orch.boards().into_iter().find(|b| b.id == named) {
+                    Some(b) => b,
+                    // An id that names no board is a mistake, not a goal.
+                    None if is_board_id(&named) => {
+                        return Err(AdapterError::bad_input(
+                            action,
+                            format!(
+                                "no board `{named}`; {}",
+                                board::summary(&self.orch.boards(), &self.orch.board())
+                            ),
+                        ))
+                    }
+                    None => self
+                        .orch
+                        .add_board(CHAT, &named, chat_of(ctx))
+                        .map_err(bad)?,
+                };
                 let mut added = Vec::new();
                 for it in &items {
                     let title = opt(it, "title").unwrap_or_default();
                     let change = WorkChange {
                         note: opt(it, "note").filter(|n| !n.is_empty()),
                         owner: opt(it, "owner").filter(|n| !n.is_empty()),
+                        board: Some(board.id.clone()),
                         ..Default::default()
                     };
                     added.push(item_json(
                         &self.orch.add_work(CHAT, &title, change).map_err(bad)?,
                     ));
                 }
-                Ok(ActionOutput::json(json!({ "added": added })))
+                Ok(ActionOutput::json(
+                    json!({ "board": board.id, "goal": board.goal, "added": added }),
+                ))
             }
             BOARD_UPDATE => {
                 let id = opt(&input, "item").unwrap_or_default();
@@ -865,6 +912,7 @@ impl Adapter for BoardTools {
                     owner: opt(&input, "owner"),
                     blocked: opt(&input, "blocked"),
                     before: None,
+                    board: None,
                 };
                 let w = self.orch.change_work(CHAT, &id, change).map_err(bad)?;
                 Ok(ActionOutput::json(json!({ "updated": item_json(&w) })))
@@ -872,6 +920,25 @@ impl Adapter for BoardTools {
             other => Err(AdapterError::UnknownAction(other.to_string())),
         }
     }
+}
+
+/// The chat a turn's call is made in: its work is `session:<chat>/<turn>`.
+fn chat_of(ctx: &RunCtx<'_>) -> Option<String> {
+    let work = ctx.work.as_deref()?.strip_prefix("session:")?;
+    let chat = work.rsplit_once('/').map_or(work, |(chat, _)| chat);
+    (!chat.is_empty()).then(|| chat.to_string())
+}
+
+/// `b-` and eight hex digits, as [`board::Board`] ids are made.
+fn is_board_id(s: &str) -> bool {
+    s.strip_prefix("b-")
+        .is_some_and(|h| h.len() == 8 && h.bytes().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// A board's goal and id as the model reads them: `"Launch the site" (b-1a2b3c4d)`.
+fn board_name(v: &Value) -> String {
+    let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("");
+    format!("\"{}\" ({})", g("goal"), g("board"))
 }
 
 fn item_json(w: &WorkItem) -> Value {
@@ -920,28 +987,38 @@ pub(crate) fn board_distiller() -> Distiller {
         };
         match action {
             BOARD_LIST => {
-                let open = lines("items");
-                let done = lines("done");
                 let mut s = out
                     .get("summary")
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                for v in &open {
-                    s.push_str(&format!("\n{}", item_line(v)));
+                let mut all = Vec::new();
+                for b in lines("boards") {
+                    let part = |key: &str| -> Vec<Value> {
+                        b.get(key)
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default()
+                    };
+                    let (open, done) = (part("items"), part("done"));
+                    s.push_str(&format!("\n\nBoard {}:", board_name(&b)));
+                    for v in &open {
+                        s.push_str(&format!("\n{}", item_line(v)));
+                    }
+                    if let Some(n) = b
+                        .get("more_open")
+                        .and_then(Value::as_u64)
+                        .filter(|n| *n > 0)
+                    {
+                        s.push_str(&format!("\n({n} more open)"));
+                    }
+                    for v in &done {
+                        s.push_str(&format!("\n{}", item_line(v)));
+                    }
+                    all.extend(b.get("board").and_then(Value::as_str).map(str::to_string));
+                    all.extend(ids(&open));
+                    all.extend(ids(&done));
                 }
-                if let Some(n) = out
-                    .get("more_open")
-                    .and_then(Value::as_u64)
-                    .filter(|n| *n > 0)
-                {
-                    s.push_str(&format!("\n({n} more open)"));
-                }
-                for v in &done {
-                    s.push_str(&format!("\n{}", item_line(v)));
-                }
-                let mut all = ids(&open);
-                all.extend(ids(&done));
                 Some((s, all))
             }
             BOARD_ADD => {
@@ -951,7 +1028,17 @@ pub(crate) fn board_distiller() -> Distiller {
                     1 => "1 item".to_string(),
                     n => format!("{n} items"),
                 };
-                Some((format!("added {n} to the board:\n{s}"), ids(&added)))
+                let mut all: Vec<String> = out
+                    .get("board")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .into_iter()
+                    .collect();
+                all.extend(ids(&added));
+                Some((
+                    format!("added {n} to the board {}:\n{s}", board_name(out)),
+                    all,
+                ))
             }
             BOARD_UPDATE => {
                 let v = lines("updated");

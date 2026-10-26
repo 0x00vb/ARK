@@ -33,7 +33,9 @@ use ark_sdk::Ark;
 use ark_tools::{action_matches, Registry};
 use tokio::sync::{broadcast, watch, OwnedSemaphorePermit, Semaphore};
 
-use crate::board::{self, rank_before, WorkChange, WorkItem, WorkState, PERSON, WORK};
+use crate::board::{
+    self, rank_before, Board, WorkChange, WorkItem, WorkState, BOARD, FIRST_GOAL, PERSON, WORK,
+};
 use crate::brief::{clip, Brief};
 use crate::event::{EventKind, OrchEvent};
 use crate::models::{AgentModels, ModelResolver, Models, ModelsBuilder};
@@ -771,13 +773,41 @@ impl Orchestrator {
         })
     }
 
-    // ---- the board ---------------------------------------------------------------------
+    // ---- the boards --------------------------------------------------------------------
 
-    /// The project's board in order: To do, In progress, Done (latest first). See
+    /// Every board's items in order: To do, In progress, Done (latest first). See
     /// [`crate::board`].
     pub fn board(&self) -> Vec<WorkItem> {
         let st = self.inner.state.lock().unwrap();
         board::ordered(st.work.values().cloned().collect())
+    }
+
+    /// The project's boards, the latest activity first.
+    pub fn boards(&self) -> Vec<Board> {
+        let st = self.inner.state.lock().unwrap();
+        let items: Vec<WorkItem> = st.work.values().cloned().collect();
+        board::latest_first(st.boards.values().cloned().collect(), &items)
+    }
+
+    /// The board for `goal`: the one with that goal, or a new one. `chat` is the conversation
+    /// that asks for it, if one does.
+    pub fn add_board(
+        &self,
+        by: &str,
+        goal: &str,
+        chat: Option<String>,
+    ) -> Result<Board, OrchError> {
+        self.inner.add_board(by, goal, chat)
+    }
+
+    /// Give a board another goal.
+    pub fn change_board(&self, by: &str, id: &str, goal: &str) -> Result<Board, OrchError> {
+        self.inner.change_board(by, id, goal)
+    }
+
+    /// Remove a board and its items. Tasks run for them stay as they are.
+    pub fn remove_board(&self, id: &str) -> Result<Board, OrchError> {
+        self.inner.remove_board(id)
     }
 
     pub fn work_item(&self, id: &str) -> Option<WorkItem> {
@@ -866,7 +896,8 @@ pub(crate) struct State {
     pub tasks: HashMap<String, TaskRt>,
     pub messages: Vec<crate::graph::MessageEdge>,
     pub schedules: HashMap<String, ScheduleRecord>,
-    /// The project's board.
+    /// The project's boards and their items.
+    pub boards: HashMap<String, Board>,
     pub work: HashMap<String, WorkItem>,
 }
 
@@ -1048,12 +1079,12 @@ fn claimable(st: &State, item: &str, owner: &str) -> Result<(), OrchError> {
     }
 }
 
-/// The rank that puts `w` before `before` in its column, or at the column's end.
+/// The rank that puts `w` before `before` in its board's column, or at the column's end.
 fn column_rank(st: &State, w: &WorkItem, before: Option<&str>) -> f64 {
     let mut column: Vec<&WorkItem> = st
         .work
         .values()
-        .filter(|o| o.state == w.state && o.id != w.id)
+        .filter(|o| o.board == w.board && o.state == w.state && o.id != w.id)
         .collect();
     column.sort_by(|a, b| {
         a.rank
@@ -1224,19 +1255,32 @@ impl Inner {
         }
     }
 
-    fn save_work(&self, w: &WorkItem, by: &str) {
-        match serde_json::to_value(w) {
+    /// Store a board or an item of one.
+    fn put(&self, kind: &str, id: &str, value: &impl serde::Serialize) {
+        match serde_json::to_value(value) {
             Ok(v) => {
-                if let Err(e) =
-                    self.engine
-                        .store
-                        .put_record(WORK, &w.id, self.project.id.as_str(), &v)
+                if let Err(e) = self
+                    .engine
+                    .store
+                    .put_record(kind, id, self.project.id.as_str(), &v)
                 {
-                    tracing::warn!(item = %w.id, "could not save the board item: {e}");
+                    tracing::warn!(%id, "could not save {kind}: {e}");
                 }
             }
-            Err(e) => tracing::warn!("could not encode a board item: {e}"),
+            Err(e) => tracing::warn!(%id, "could not encode {kind}: {e}"),
         }
+    }
+
+    fn save_board(&self, b: &Board, by: &str) {
+        self.put(BOARD, &b.id, b);
+        self.emit(EventKind::Board {
+            board: b.clone(),
+            by: by.to_string(),
+        });
+    }
+
+    fn save_work(&self, w: &WorkItem, by: &str) {
+        self.put(WORK, &w.id, w);
         self.emit(EventKind::Work {
             item: w.clone(),
             by: by.to_string(),
@@ -1719,10 +1763,33 @@ impl Inner {
                     }
                 }
             }
+            for v in store.list_records(BOARD, Some(self.project.id.as_str()))? {
+                if let Ok(b) = serde_json::from_value::<Board>(v) {
+                    st.boards.insert(b.id.clone(), b);
+                }
+            }
             for v in store.list_records(WORK, Some(self.project.id.as_str()))? {
                 if let Ok(w) = serde_json::from_value::<WorkItem>(v) {
                     st.work.insert(w.id.clone(), w);
                 }
+            }
+            // Items made before boards had goals, or whose board is gone, join one board.
+            let lost: Vec<String> = st
+                .work
+                .values()
+                .filter(|w| !st.boards.contains_key(&w.board))
+                .map(|w| w.id.clone())
+                .collect();
+            if !lost.is_empty() {
+                let first = Board::new(self.project.id.as_str(), PERSON, FIRST_GOAL, None);
+                self.put(BOARD, &first.id, &first);
+                for id in &lost {
+                    if let Some(w) = st.work.get_mut(id) {
+                        w.board = first.id.clone();
+                        self.put(WORK, id, &*w);
+                    }
+                }
+                st.boards.insert(first.id.clone(), first);
             }
         }
         for id in &recover {
@@ -3663,11 +3730,16 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         if title.trim().is_empty() {
             return Err(OrchError::NotAllowed("an item needs a title".into()));
         }
+        let board = match change.board.as_deref().map(str::trim) {
+            Some(id) if !id.is_empty() => self.known_board(id)?,
+            _ => self.latest_board(by)?,
+        };
         let w = {
             let mut st = self.state.lock().unwrap();
-            let mut w = WorkItem::new(self.project.id.as_str(), by, title.trim());
+            let mut w = WorkItem::new(self.project.id.as_str(), &board, by, title.trim());
             let mut change = change;
             change.title = None;
+            change.board = None;
             // A new item goes at the end of its column unless placed.
             let state = change.state.take().unwrap_or(WorkState::Todo);
             w.state = state;
@@ -3697,8 +3769,22 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
                 .get(id)
                 .cloned()
                 .ok_or_else(|| OrchError::NotAllowed(format!("no board item `{id}`")))?;
-            let moved = change.state.is_some() || change.before.is_some();
             let mut change = change;
+            let to = change
+                .board
+                .take()
+                .map(|b| b.trim().to_string())
+                .filter(|b| !b.is_empty() && *b != w.board);
+            if let Some(to) = &to {
+                let goal = st
+                    .boards
+                    .get(to)
+                    .map(|b| b.goal.clone())
+                    .ok_or_else(|| OrchError::NotAllowed(format!("no board `{to}`")))?;
+                w.board = to.clone();
+                w.step(by, format!("moved it to the board \"{goal}\""));
+            }
+            let moved = change.state.is_some() || change.before.is_some() || to.is_some();
             if let Some(s) = change.state.take() {
                 w.set_state(by, s);
             }
@@ -3730,6 +3816,101 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             title: w.title.clone(),
         });
         Ok(w)
+    }
+
+    /// `id` when it is one of the project's boards.
+    fn known_board(&self, id: &str) -> Result<String, OrchError> {
+        let st = self.state.lock().unwrap();
+        st.boards
+            .contains_key(id)
+            .then(|| id.to_string())
+            .ok_or_else(|| OrchError::NotAllowed(format!("no board `{id}`")))
+    }
+
+    /// The board with the latest activity; the project's first one when it has none.
+    fn latest_board(&self, by: &str) -> Result<String, OrchError> {
+        let latest = {
+            let st = self.state.lock().unwrap();
+            let items: Vec<WorkItem> = st.work.values().cloned().collect();
+            board::latest_first(st.boards.values().cloned().collect(), &items)
+                .into_iter()
+                .next()
+        };
+        match latest {
+            Some(b) => Ok(b.id),
+            None => Ok(self.add_board(by, FIRST_GOAL, None)?.id),
+        }
+    }
+
+    pub(crate) fn add_board(
+        &self,
+        by: &str,
+        goal: &str,
+        chat: Option<String>,
+    ) -> Result<Board, OrchError> {
+        if goal.trim().is_empty() {
+            return Err(OrchError::NotAllowed("a board needs a goal".into()));
+        }
+        let b = {
+            let mut st = self.state.lock().unwrap();
+            if let Some(b) = st.boards.values().find(|b| b.is_goal(goal)) {
+                return Ok(b.clone());
+            }
+            let b = Board::new(self.project.id.as_str(), by, goal, chat);
+            st.boards.insert(b.id.clone(), b.clone());
+            b
+        };
+        self.save_board(&b, by);
+        Ok(b)
+    }
+
+    pub(crate) fn change_board(&self, by: &str, id: &str, goal: &str) -> Result<Board, OrchError> {
+        let goal = goal.trim();
+        if goal.is_empty() {
+            return Err(OrchError::NotAllowed("a board needs a goal".into()));
+        }
+        let b = {
+            let mut st = self.state.lock().unwrap();
+            if st.boards.values().any(|b| b.id != id && b.is_goal(goal)) {
+                return Err(OrchError::NotAllowed(format!(
+                    "another board has the goal \"{goal}\""
+                )));
+            }
+            let b = st
+                .boards
+                .get_mut(id)
+                .ok_or_else(|| OrchError::NotAllowed(format!("no board `{id}`")))?;
+            b.goal = clip(goal, 120);
+            b.clone()
+        };
+        self.save_board(&b, by);
+        Ok(b)
+    }
+
+    pub(crate) fn remove_board(&self, id: &str) -> Result<Board, OrchError> {
+        let (b, items) = {
+            let mut st = self.state.lock().unwrap();
+            let b = st
+                .boards
+                .remove(id)
+                .ok_or_else(|| OrchError::NotAllowed(format!("no board `{id}`")))?;
+            let items: Vec<String> = st
+                .work
+                .values()
+                .filter(|w| w.board == id)
+                .map(|w| w.id.clone())
+                .collect();
+            (b, items)
+        };
+        for item in items {
+            self.remove_work(&item)?;
+        }
+        let _ = self.engine.store.delete_record(BOARD, id);
+        self.emit(EventKind::BoardRemoved {
+            board: b.id.clone(),
+            goal: b.goal.clone(),
+        });
+        Ok(b)
     }
 
     // ---- delegation and messages ---------------------------------------------------

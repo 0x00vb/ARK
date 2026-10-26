@@ -147,6 +147,16 @@ pub enum EventKind {
         item: String,
         title: String,
     },
+    /// A board was made or its goal changed (`by`: an agent, `user`, or `chat`).
+    Board {
+        board: crate::board::Board,
+        by: String,
+    },
+    /// A board was removed, with its items.
+    BoardRemoved {
+        board: String,
+        goal: String,
+    },
     /// A task's result was posted into the chat it reports to (`session`).
     Posted {
         session: String,

@@ -9,10 +9,15 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Breaking
+
+- `ark_orchestrate::board::summary(boards, items)` takes the boards (was `summary(items)`). The chat's `board.add` requires `board`; an app that scripts it passes a goal.
+
 ### Changed
 
 - Collapse advanced settings and secondary appearance choices. Keep header highlights inset.
 - Show bundled plugin artwork and allow apps to register optional plugin setup in the marketplace. Clear setup controls when leaving Plugins.
+- Boards per goal (ADR 0083). The board leaves the fixed rail and opens beside the chat as the `board` panel, with an item opening in its place. The current project lists its boards. `board.add` needs `board` (a goal or a board id) and a new goal makes a board. `Board`, `Orchestrator::{boards, add_board, change_board, remove_board}`, `WorkItem::board`, `WorkChange::board`, `EventKind::{Board, BoardRemoved}`, window methods `board_rename` and `board_delete`. Existing items join one board named "Board" on load. The `board-item` panel and the `board` view are removed.
 
 
 ### Added

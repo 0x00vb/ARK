@@ -1314,13 +1314,30 @@ async fn work_that_waits_for_the_person_sits_in_the_tray() {
     drive_app("waiting", vec![say("Hello.", false)], Duration::ZERO, true).await;
 }
 
-/// The board: add, drag, complete, open an item, hand it to an agent and see it move by itself,
-/// what needs the person, delete with undo.
+/// A board per goal: the chat plans one and it opens beside the conversation; the person adds,
+/// drags, completes and opens items, hands one to an agent and sees it move by itself, sees what
+/// needs them, deletes with undo, renames the goal, reopens it from the project and deletes it.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_board_is_worked_by_the_person_and_the_agents() {
+    let plan = Completion {
+        content: String::new(),
+        tool_calls: vec![ToolCall {
+            id: "c1".into(),
+            name: "board.add".into(),
+            arguments: json!({
+                "board": "Chapter 3",
+                "items": [{ "title": "Draft chapter 3" }, { "title": "Edit chapter 2" }]
+            }),
+        }],
+        usage: Usage::default(),
+    };
     drive_app(
         "board",
-        vec![say("Chapter 3 is drafted.", false)],
+        vec![
+            plan,
+            say("Two items are on the board.", false),
+            say("Chapter 3 is drafted.", false),
+        ],
         Duration::ZERO,
         true,
     )

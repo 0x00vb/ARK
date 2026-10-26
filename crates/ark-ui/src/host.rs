@@ -2585,7 +2585,24 @@ impl Host {
                     .filter(|a| a.state != ark_interact::ark_orchestrate::AgentState::Terminated)
                     .map(|a| json!({ "name": a.name, "role": a.spec.role, "state": a.state }))
                     .collect();
-                Ok(json!({ "items": items, "tasks": tasks, "agents": agents }))
+                Ok(
+                    json!({ "boards": o.boards(), "items": items, "tasks": tasks, "agents": agents }),
+                )
+            }
+            O::BoardRename | O::BoardDelete => {
+                let o = self.resource_orchestrator(&r).await?;
+                let control = if operation.kind == O::BoardRename {
+                    Control::ChangeBoard {
+                        board: s("board"),
+                        goal: s("goal"),
+                    }
+                } else {
+                    Control::RemoveBoard { board: s("board") }
+                };
+                match self.control_on(&o, control).await? {
+                    ControlOutcome::Board(board) => Ok(serde_json::to_value(*board)?),
+                    _ => Ok(json!({})),
+                }
             }
             O::BoardAdd | O::BoardChange => {
                 let o = self.resource_orchestrator(&r).await?;

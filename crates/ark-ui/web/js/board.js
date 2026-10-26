@@ -1,8 +1,11 @@
-// The project's board: To do, In progress, Done. The person and the agents change the same items
-// (ark-orchestrate's `board`); the page draws them and follows the orchestrator's `work` events.
+// The project's boards, one per goal: To do, In progress, Done. The person and the agents change
+// the same items (ark-orchestrate's `board`); the page draws them and follows the orchestrator's
+// `board` and `work` events.
 //
-//   view   "board" in the top bar beside Chat, when the app runs agents
-//   panel  "board-item" in the side pane: one item, its owner, note, the work done on it
+//   panel    "board" in the side pane: one board, and one item of it with its owner, note and
+//            the work done on it. It opens when the chat of this window makes a board, when the
+//            agent presents one (`present {view: "board", locator}`), or from the project's list
+//   section  "boards" in the current project in the sidebar: its boards, when it has any
 //
 // At rest a card is a status circle, a title and its owner. Two marks only: "Needs you" (an agent
 // waits for the person on it) and a live dot while its agent works. Everything else is in the
@@ -25,6 +28,7 @@ const UNDO_MS = 5000;
 
 const store = {
   ark: null,
+  boards: [],
   items: [],
   tasks: {},
   agents: [],
@@ -55,6 +59,7 @@ async function load() {
   try {
     const b = await store.ark.call("board");
     if (!b) return;
+    store.boards = b.boards || [];
     store.items = b.items || [];
     store.tasks = b.tasks || {};
     store.agents = b.agents || [];
@@ -93,12 +98,34 @@ async function change(id, ch) {
   }
 }
 
+/// A board as the runtime has it now: in its place, or first when it is new.
+function upsertBoard(b) {
+  const i = store.boards.findIndex((x) => x.id === b.id);
+  if (i === -1) store.boards = [b, ...store.boards];
+  else store.boards[i] = b;
+}
+
+const boardOf = (id) => store.boards.find((b) => b.id === id);
+const itemsOn = (id) => store.items.filter((w) => w.board === id);
+
 export function registerBoard(ark) {
   store.ark = ark;
   ark.on("ark:orch", (m) => {
     if (m.ref) return;
     const ev = m.event || {};
-    if (ev.type === "work") {
+    if (ev.type === "board") {
+      const made = !boardOf(ev.board.id);
+      upsertBoard(ev.board);
+      store.changed();
+      // A board this window's chat made opens beside it: the person sees the plan at once.
+      if (made && ev.board.chat && ev.board.chat === ark.summary?.()?.session?.id) {
+        ark.openPanel("board", { board: ev.board.id });
+      }
+    } else if (ev.type === "board_removed") {
+      store.boards = store.boards.filter((b) => b.id !== ev.board);
+      store.items = store.items.filter((w) => w.board !== ev.board);
+      store.changed();
+    } else if (ev.type === "work") {
       upsert(ev.item);
       store.changed({ by: ev.by, id: ev.item.id });
       if ((ev.item.tasks || []).some((t) => !task(t))) reloadSoon();
@@ -128,14 +155,46 @@ export function registerBoard(ark) {
     } catch {
       return;
     }
-    // Only an app that runs agents has a board; an app's own "board" view comes first.
-    if (!first || registry.views.has("board")) return;
+    // Only an app that runs agents has boards; an app's own "board" view or panel comes first.
+    if (!first || registry.views.has("board") || registry.panels.has("board")) return;
+    store.boards = first.boards || [];
     store.items = first.items || [];
     store.tasks = first.tasks || {};
     store.agents = first.agents || [];
-    ark.panel({ id: "board-item", title: "Item", icon: "board", render: (el, params, scoped) => itemPanel(el, params, scoped || ark) });
-    ark.view({ id: "board", title: "Board", icon: "board", nav: true, render: (el) => boardView(el) });
+    ark.panel({ id: "board", title: "Board", icon: "board", builtin: true, presents: ["board"], wide: true, fill: true, closesWithProject: true, render: (el, params) => boardView(el, params) });
+    ark.projectSection({ id: "boards", label: "Boards", render: (el) => boardsSection(el) });
   })();
+}
+
+// ---- the project's boards, in the sidebar ---------------------------------------------------------
+
+function boardsSection(el) {
+  const ark = store.ark;
+  const draw = () => {
+    clear(el);
+    el.hidden = !store.boards.length;
+    for (const b of store.boards) {
+      const on = itemsOn(b.id).filter((w) => !store.removing.has(w.id));
+      const done = on.filter((w) => w.state === "done").length;
+      const waiting = on.filter(needsYou).length;
+      el.append(h("div.session.bd-row", {
+        role: "button",
+        tabindex: "0",
+        "data-focus-key": b.id,
+        "aria-current": store.shown === b.id ? "true" : null,
+        title: b.goal,
+        onclick: () => ark.openPanel("board", { board: b.id }),
+        onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ark.openPanel("board", { board: b.id }); } },
+      },
+      icon("board"),
+      h("span.session-title", b.goal),
+      waiting ? h("span.session-attention", { title: `${waiting} waiting for you` }, icon("alert"), String(waiting)) : null,
+      on.length ? h("span.session-time", `${done}/${on.length}`) : null));
+    }
+  };
+  store.listeners.add(draw);
+  draw();
+  return { dispose: () => store.listeners.delete(draw) };
 }
 
 // ---- small pieces ---------------------------------------------------------------------------------
@@ -185,24 +244,59 @@ function autosize(t) {
 
 // ---- the board --------------------------------------------------------------------------------
 
-function boardView(el) {
+function boardView(el, params) {
   const ark = store.ark;
   el.classList.add("bd");
   const v = {
+    board: params?.board || params?.locator || store.boards[0]?.id || null,
+    known: false, // its board was seen: once gone, the panel closes
     filter: false, // only what needs you
     allDone: false,
     adding: false,
     drag: null,
     pending: false, // a render waits for the drag to end
     seen: new Set(store.items.map((w) => w.id)),
+    detail: null, // the open item's panel
     focus: null, // the card to focus after a render
   };
   const needsChip = h("button.bd-needs", { type: "button", onclick: () => { v.filter = !v.filter; render({ animate: false }); } });
-  const head = h("div.bd-head", needsChip);
+  const goal = h("input.bd-goal", { type: "text", "aria-label": "Goal", spellcheck: "false" });
+  goal.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); goal.blur(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); goal.value = boardOf(v.board)?.goal || ""; goal.blur(); }
+  });
+  goal.addEventListener("blur", async () => {
+    const b = boardOf(v.board);
+    const text = goal.value.trim();
+    if (!b || !text || text === b.goal) { goal.value = b?.goal || ""; return; }
+    try {
+      upsertBoard(await ark.call("board_rename", { board: b.id, goal: text }));
+      store.changed();
+    } catch (e) {
+      goal.value = b.goal;
+      ark.toast(e.message);
+    }
+  });
+  const moreBtn = h("button.bd-menu", { type: "button", title: "More", "aria-label": "More" }, icon("more"));
+  moreBtn.onclick = () => {
+    const b = boardOf(v.board);
+    if (!b) return;
+    const n = itemsOn(b.id).length;
+    const menu = ark.popover(moreBtn, [
+      h("button.menu-item", { type: "button", onclick: () => {
+        menu.close();
+        ark.call("board_delete", { board: b.id }).then(() => ark.closePanel("board")).catch((e) => ark.toast(e.message));
+      } }, h("span", n ? `Delete the board and its ${n === 1 ? "item" : `${n} items`}` : "Delete the board")),
+    ], { end: true });
+  };
+  const head = h("div.bd-head", goal, needsChip, moreBtn);
   const cols = h("div.bd-cols");
   const undo = h("div.bd-undo", { role: "status" });
   undo.hidden = true;
-  el.append(head, cols, undo);
+  const main = h("div.bd-main", head, cols, undo);
+  const detail = h("div.bd-detail");
+  detail.hidden = true;
+  el.append(main, detail);
   // Cards are kept by id and redrawn only when what they show changes, so a card being
   // pressed or a title being typed is never swapped out by an agent's change.
   const cards = new Map(); // id -> { node, sig }
@@ -270,7 +364,9 @@ function boardView(el) {
       fitInput();
       v.adding = true;
       try {
-        upsert(await ark.call("board_add", { title, owner: v.filter ? PERSON : undefined }));
+        const added = await ark.call("board_add", { title, board: v.board || undefined, owner: v.filter ? PERSON : undefined });
+        upsert(added);
+        if (!v.board) { v.board = added.board; load(); }
         v.mine = title;
         render();
       } catch (err) {
@@ -299,7 +395,17 @@ function boardView(el) {
     if (animate) for (const [id, c] of cards) before.set(id, c.node.getBoundingClientRect());
     const hadFocus = document.activeElement?.closest?.(".bd-card")?.dataset.id;
     const typing = document.activeElement === input;
-    const visible = store.items.filter((w) => !store.removing.has(w.id));
+    const b = boardOf(v.board);
+    // Removed by someone else: nothing is left to show.
+    if (v.board && !b && v.known) return ark.closePanel("board");
+    v.known ||= !!b;
+    if (store.shown !== (b?.id || null)) {
+      store.shown = b?.id || null;
+      queueMicrotask(() => store.changed());
+    }
+    if (document.activeElement !== goal) goal.value = b?.goal || "";
+    if (b) ark.setPanelTitle("board", clip(b.goal, 28));
+    const visible = store.items.filter((w) => w.board === v.board && !store.removing.has(w.id));
     const mine = visible.filter(needsYou);
     needsChip.hidden = !mine.length;
     if (!mine.length) v.filter = false;
@@ -371,14 +477,39 @@ function boardView(el) {
 
   // ---- actions ----
 
-  const openId = () => (registry.panels.has("board-item") && store.openItem) || null;
+  const openId = () => (v.detail && store.openItem) || null;
 
+  /// The item, in place of the board; Back or Escape returns to its card.
   function open(w) {
+    close();
     store.openItem = w.id;
-    ark.openPanel("board-item", { id: w.id });
-    for (const [id, c] of cards) c.node.setAttribute("aria-current", id === w.id ? "true" : "false");
+    const back = h("button.bd-back", { type: "button" }, icon("arrow-left"), h("span", boardOf(v.board)?.goal || "Board"));
+    back.onclick = () => close({ refocus: true });
+    const body = h("div.bd-detail-body");
+    detail.replaceChildren(back, body);
+    v.detail = itemPanel(body, { id: w.id }, ark, () => close());
+    main.hidden = true;
+    detail.hidden = false;
+    back.focus({ preventScroll: true });
     ark.reportFocus();
   }
+
+  function close({ refocus = false } = {}) {
+    if (!v.detail) return;
+    v.detail.dispose?.();
+    v.detail = null;
+    const was = store.openItem;
+    store.openItem = null;
+    detail.hidden = true;
+    clear(detail);
+    main.hidden = false;
+    if (refocus && was) v.focus = was;
+    render({ animate: false });
+    ark.reportFocus();
+  }
+  detail.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !e.target.closest("textarea, input")) { e.preventDefault(); e.stopPropagation(); close({ refocus: true }); }
+  });
 
   function toggleDone(w) {
     const to = w.state === "done" ? "todo" : "done";
@@ -409,7 +540,7 @@ function boardView(el) {
 
   function remove(w) {
     store.removing.add(w.id);
-    if (store.openItem === w.id) ark.closePanel("board-item");
+    if (store.openItem === w.id) close();
     render({ animate: false });
     clear(undo);
     const label = h("span", `Deleted “${clip(w.title, 40)}”`);
@@ -543,7 +674,7 @@ function boardView(el) {
         el.classList.remove("lifted");
         v.drag = null;
         const same = target && target.state === w.state && (target.before === w.id || (() => {
-          const ids = store.items.filter((x) => x.state === w.state).map((x) => x.id);
+          const ids = store.items.filter((x) => x.board === w.board && x.state === w.state).map((x) => x.id);
           const i = ids.indexOf(w.id);
           return target.before ? ids[i + 1] === target.before : i === ids.length - 1;
         })());
@@ -566,24 +697,36 @@ function boardView(el) {
   render({ animate: false });
 
   return {
+    update(p) {
+      const next = p?.board || p?.locator;
+      if (!next || next === v.board) return;
+      close();
+      v.board = next;
+      v.known = false;
+      v.filter = false;
+      v.allDone = false;
+      cards.clear();
+      render({ animate: false });
+    },
     refresh: () => load(),
     focus: () => {
-      const w = store.openItem && item(store.openItem);
-      return { surface: { kind_tag: "board", title: w ? w.title : "Board", locator: w ? w.id : undefined } };
+      const w = openId() && item(store.openItem);
+      const b = boardOf(v.board);
+      return { surface: { kind_tag: "board", title: w ? w.title : b?.goal || "Board", locator: w ? w.id : b?.id } };
     },
-    dispose: () => store.listeners.delete(off),
+    dispose: () => {
+      close();
+      store.shown = null;
+      store.listeners.delete(off);
+      store.changed();
+    },
   };
 }
 
-// ---- one item, in the side pane --------------------------------------------------------------
+// ---- one item, in the board's place ------------------------------------------------------------
 
-function itemPanel(el, params, ark = store.ark) {
-  const panel = { items: [], tasks: {}, agents: [] };
-  if (ark.location && JSON.stringify(ark.location) === JSON.stringify(ark.summary?.()?.location)) {
-    panel.items = store.items;
-    panel.tasks = store.tasks;
-    panel.agents = store.agents;
-  }
+function itemPanel(el, params, ark, gone) {
+  const panel = { items: store.items, tasks: store.tasks, agents: store.agents };
   const item = (key) => panel.items.find((work) => work.id === key);
   const task = (key) => panel.tasks[key];
   const openTask = (work) => [...(work.tasks || [])].reverse().map((key) => [key, task(key)])
@@ -654,7 +797,7 @@ function itemPanel(el, params, ark = store.ark) {
 
   del.onclick = () => {
     const w = item(id);
-    if (w) ark.call("board_remove", { item: w.id }).then(() => ark.closePanel("board-item")).catch((error) => ark.toast(error.message));
+    if (w) ark.call("board_remove", { item: w.id }).then(gone).catch((error) => ark.toast(error.message));
   };
 
   function menu(anchor, entries) {
@@ -669,7 +812,6 @@ function itemPanel(el, params, ark = store.ark) {
       title.value = "";
       return;
     }
-    ark.setPanelTitle("board-item", clip(w.title, 28));
     if (editing !== "title") { title.value = w.title; fitTitle(); }
     if (editing !== "note") { note.value = w.note || ""; fitNote(); }
 

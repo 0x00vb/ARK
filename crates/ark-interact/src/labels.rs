@@ -629,16 +629,20 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
                 "Stopping a scheduled task".into()
             }
         }
-        ark_orchestrate::BOARD_LIST => "Reading the board".into(),
+        ark_orchestrate::BOARD_LIST => "Reading the boards".into(),
         ark_orchestrate::BOARD_ADD => {
             let items = input.get("items").and_then(Value::as_array);
+            let board = match s("board") {
+                b if b.is_empty() || b.starts_with("b-") => "the board".to_string(),
+                goal => format!("\"{}\"", clip(goal, 40)),
+            };
             match items.map(|a| a.as_slice()) {
                 Some([one]) => format!(
-                    "Adding \"{}\" to the board",
+                    "Adding \"{}\" to {board}",
                     clip(one.get("title").and_then(Value::as_str).unwrap_or(""), 60)
                 ),
-                Some(many) => format!("Adding {} items to the board", many.len()),
-                None => "Adding to the board".into(),
+                Some(many) => format!("Adding {} items to {board}", many.len()),
+                None => format!("Adding to {board}"),
             }
         }
         ark_orchestrate::BOARD_UPDATE => match s("state") {

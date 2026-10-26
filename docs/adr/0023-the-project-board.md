@@ -1,6 +1,6 @@
 # 0023. The project's board: work items that follow their tasks
 
-Status: Accepted
+Status: Accepted, amended by 0083 (a board per goal, beside the chat)
 Date: 2026-10-05
 
 ## Context

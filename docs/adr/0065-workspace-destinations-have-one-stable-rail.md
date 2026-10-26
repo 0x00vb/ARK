@@ -1,6 +1,6 @@
 # 0065. Workspace destinations have one stable rail
 
-Status: Accepted
+Status: Accepted, amended by 0083 (Board left the rail)
 Date: 2026-10-11
 
 ## Context

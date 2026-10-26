@@ -1,5 +1,16 @@
 # Current state
 
+## Boards per goal (2026-10-26)
+
+The board left the fixed rail (ADR 0083). A project has a board per goal; `board.add` names the
+goal and a new goal makes a board. The board a chat makes opens beside it in the side pane; the
+agent can present one; the current project in the sidebar lists its boards. An item opens in the
+board's place with Back. Items from before join one board named "Board" on load. Unreleased:
+Desktop gets it with the next Core tag. Not measured: whether small local models name the goal
+well in `board.add` (the `board` benchmark workload is the check before any prompt change).
+Cost: +3.6% tokens on the simulated `board` workload (boards in the tool description and the
+new `board` field); suite total +0.02%; `bench/baseline.json` regenerated.
+
 ## Settings and plugin presentation (2026-10-23)
 
 Settings now collapses Advanced and secondary appearance options. Plugins supports trusted app

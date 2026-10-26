@@ -340,7 +340,7 @@ async fn board_command_shows_and_changes_the_board() {
         .interaction;
     assert!(ix.commands().iter().any(|c| c.name == "board"));
     let empty = ix.execute("/board").await.report.plain_text();
-    assert!(empty.contains("The board is empty"), "{empty}");
+    assert!(empty.contains("There are no boards yet"), "{empty}");
     let added = ix
         .execute("/board add Draft chapter 3")
         .await
@@ -360,8 +360,11 @@ async fn board_command_shows_and_changes_the_board() {
     let task = orch.work_item(&id).unwrap().tasks[0].clone();
     orch.wait(&task).await.unwrap();
     let text = ix.execute("/board").await.report.plain_text();
+    let board = &orch.boards()[0];
     assert!(
-        text.contains("Done (1)") && text.contains("writer"),
+        text.contains(&format!("Board · {}", board.id))
+            && text.contains("Done (1)")
+            && text.contains("writer"),
         "{text}"
     );
     ix.execute(&format!("/board move {id} to do")).await;

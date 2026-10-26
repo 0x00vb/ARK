@@ -117,6 +117,8 @@ pub enum ResourceOperationKind {
     BoardChange,
     BoardRemove,
     BoardGive,
+    BoardRename,
+    BoardDelete,
     SuspendAgent,
     ResumeAgent,
     TerminateAgent,
@@ -218,6 +220,8 @@ impl ResourceOperationKind {
             | O::BoardChange
             | O::BoardRemove
             | O::BoardGive
+            | O::BoardRename
+            | O::BoardDelete
             | O::SuspendAgent
             | O::ResumeAgent
             | O::TerminateAgent

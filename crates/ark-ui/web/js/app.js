@@ -251,6 +251,7 @@ const RESOURCE_METHODS = {
   schedule_pause: ["project", "schedule_pause"], schedule_resume: ["project", "schedule_resume"], schedule_run: ["project", "schedule_run"],
   board: ["project", "board"], board_add: ["project", "board_add"], board_change: ["project", "board_change"],
   board_remove: ["project", "board_remove"], board_give: ["project", "board_give"],
+  board_rename: ["project", "board_rename"], board_delete: ["project", "board_delete"],
   suspend_agent: ["project", "suspend_agent"], resume_agent: ["project", "resume_agent"], terminate_agent: ["project", "terminate_agent"], message_agent: ["project", "message_agent"],
   profiles: ["project", "profiles"], grants: ["project", "grants"], grant_remove: ["project", "grant_remove"],
   skills: ["project", "skills"], tools: ["project", "tools"], usage: ["project", "usage"],

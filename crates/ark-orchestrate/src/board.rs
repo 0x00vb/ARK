@@ -1,6 +1,7 @@
-//! The project's board: the work the project needs, who has each piece and how far it is. One
-//! board per project, kept across chats, agent runs, restarts and team changes. The person and
-//! the agents change the same [`WorkItem`]s; a front-end draws them (columns, a list, a report).
+//! The project's boards: the work the project needs, who has each piece and how far it is. One
+//! [`Board`] per goal ("Launch the site", "Chapter 3"), kept across chats, agent runs, restarts
+//! and team changes. The person and the agents change the same [`WorkItem`]s; a front-end draws
+//! them (columns, a list, a report).
 //!
 //! An item is an outcome ("Draft chapter 3"), not a run. A task is one agent's run toward it:
 //! handing an item to an agent creates a task linked to it, and the orchestrator keeps the item
@@ -22,6 +23,12 @@ use crate::record::now_ms;
 
 /// The record kind items are stored under, per project.
 pub(crate) const WORK: &str = "orch_work";
+
+/// The record kind boards are stored under, per project.
+pub(crate) const BOARD: &str = "orch_board";
+
+/// The goal of the board items made before boards had goals join.
+pub const FIRST_GOAL: &str = "Board";
 
 /// The owner that stands for the person.
 pub const PERSON: &str = "user";
@@ -74,12 +81,55 @@ pub struct WorkStep {
     pub text: String,
 }
 
+/// The work toward one goal. Its items carry its id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Board {
+    /// `b-` and eight hex digits.
+    pub id: String,
+    pub project: String,
+    pub goal: String,
+    /// Who made it: an agent, [`PERSON`], or `chat`.
+    #[serde(default)]
+    pub by: String,
+    /// The chat whose conversation made it, so that chat's window shows it.
+    #[serde(default)]
+    pub chat: Option<String>,
+    pub created_ms: u64,
+}
+
+impl Board {
+    pub(crate) fn new(project: &str, by: &str, goal: &str, chat: Option<String>) -> Self {
+        Board {
+            id: format!("b-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
+            project: project.to_string(),
+            goal: clip(goal.trim(), 120),
+            by: by.to_string(),
+            chat,
+            created_ms: now_ms(),
+        }
+    }
+
+    /// The same goal, in other words only by case and spaces.
+    pub fn is_goal(&self, goal: &str) -> bool {
+        let words = |s: &str| {
+            s.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        };
+        words(&self.goal) == words(goal)
+    }
+}
+
 /// A piece of the project's work. See the module docs.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkItem {
     /// `w-` and eight hex digits.
     pub id: String,
     pub project: String,
+    /// Its [`Board`]'s id.
+    #[serde(default)]
+    pub board: String,
     pub title: String,
     #[serde(default)]
     pub note: String,
@@ -110,11 +160,12 @@ pub struct WorkItem {
 }
 
 impl WorkItem {
-    pub(crate) fn new(project: &str, by: &str, title: &str) -> Self {
+    pub(crate) fn new(project: &str, board: &str, by: &str, title: &str) -> Self {
         let now = now_ms();
         let mut w = WorkItem {
             id: format!("w-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
             project: project.to_string(),
+            board: board.to_string(),
             title: clip(title, 200),
             note: String::new(),
             state: WorkState::Todo,
@@ -223,6 +274,9 @@ pub struct WorkChange {
     /// Put it before this item in its column; with `state` and no `before`, at the end.
     #[serde(default)]
     pub before: Option<String>,
+    /// The board it goes on (an id); a new item without one goes on the latest board.
+    #[serde(default)]
+    pub board: Option<String>,
 }
 
 impl WorkChange {
@@ -248,6 +302,10 @@ impl WorkChange {
     }
     pub fn before(mut self, id: impl Into<String>) -> Self {
         self.before = Some(id.into());
+        self
+    }
+    pub fn board(mut self, id: impl Into<String>) -> Self {
+        self.board = Some(id.into());
         self
     }
 }
@@ -281,18 +339,15 @@ pub(crate) fn rank_before(column: &[&WorkItem], before: Option<&str>) -> f64 {
     }
 }
 
-/// The board in a few words, for a tool's description: `4 to do, 2 in progress (1 blocked), 3 done`.
-pub fn summary(items: &[WorkItem]) -> String {
-    if items.is_empty() {
-        return "The board is empty.".into();
-    }
+/// One board's items in a few words: `4 to do, 2 in progress, 3 done, 1 blocked`.
+pub fn counts(items: &[&WorkItem]) -> String {
     let n = |s: WorkState| items.iter().filter(|w| w.state == s).count();
     let blocked = items
         .iter()
         .filter(|w| w.state != WorkState::Done && w.blocked.is_some())
         .count();
     let mut s = format!(
-        "Board: {} to do, {} in progress, {} done",
+        "{} to do, {} in progress, {} done",
         n(WorkState::Todo),
         n(WorkState::Doing),
         n(WorkState::Done)
@@ -300,8 +355,45 @@ pub fn summary(items: &[WorkItem]) -> String {
     if blocked > 0 {
         s.push_str(&format!(", {blocked} blocked"));
     }
-    s.push('.');
     s
+}
+
+/// Boards listed in [`summary`]; the rest are counted.
+pub const SUMMARY_BOARDS: usize = 6;
+
+/// The boards in a few words, for a tool's description, the latest first:
+/// `Boards: "Launch the site" (2 to do, 1 in progress, 0 done); "Chapter 3" (0 to do, 0 in progress, 3 done).`
+pub fn summary(boards: &[Board], items: &[WorkItem]) -> String {
+    if boards.is_empty() {
+        return "There are no boards yet.".into();
+    }
+    let mut parts: Vec<String> = boards
+        .iter()
+        .take(SUMMARY_BOARDS)
+        .map(|b| {
+            let on: Vec<&WorkItem> = items.iter().filter(|w| w.board == b.id).collect();
+            format!("\"{}\" ({})", b.goal, counts(&on))
+        })
+        .collect();
+    if boards.len() > SUMMARY_BOARDS {
+        parts.push(format!("{} older", boards.len() - SUMMARY_BOARDS));
+    }
+    format!("Boards: {}.", parts.join("; "))
+}
+
+/// Boards with the latest activity first: an item changed, or the board made.
+pub fn latest_first(mut boards: Vec<Board>, items: &[WorkItem]) -> Vec<Board> {
+    let last = |b: &Board| {
+        items
+            .iter()
+            .filter(|w| w.board == b.id)
+            .map(|w| w.updated_ms)
+            .max()
+            .unwrap_or(0)
+            .max(b.created_ms)
+    };
+    boards.sort_by(|a, b| last(b).cmp(&last(a)).then_with(|| b.id.cmp(&a.id)));
+    boards
 }
 
 #[cfg(test)]
@@ -309,7 +401,7 @@ mod tests {
     use super::*;
 
     fn item(id: &str, state: WorkState, rank: f64) -> WorkItem {
-        let mut w = WorkItem::new("p", PERSON, id);
+        let mut w = WorkItem::new("p", "b", PERSON, id);
         w.id = id.into();
         w.state = state;
         w.rank = rank;
@@ -346,7 +438,7 @@ mod tests {
 
     #[test]
     fn changes_leave_a_short_history() {
-        let mut w = WorkItem::new("p", "chat", "Draft chapter 3");
+        let mut w = WorkItem::new("p", "b", "chat", "Draft chapter 3");
         w.set_owner("chat", Some("writer".into()));
         w.set_state("writer", WorkState::Doing);
         w.set_state("writer", WorkState::Doing);
@@ -373,5 +465,22 @@ mod tests {
         assert_eq!(w.log.len(), LOG_KEPT);
         assert_eq!(WorkState::parse("In progress"), Some(WorkState::Doing));
         assert_eq!(WorkState::parse("to-do"), Some(WorkState::Todo));
+    }
+
+    #[test]
+    fn the_summary_names_each_board_by_its_goal() {
+        let site = Board::new("p", "chat", "Launch the site", None);
+        let book = Board::new("p", "chat", "Chapter 3", None);
+        let mut a = WorkItem::new("p", &site.id, "chat", "Write the copy");
+        a.blocked = Some("needs the logo".into());
+        let mut b = WorkItem::new("p", &book.id, "chat", "Draft it");
+        b.state = WorkState::Done;
+        assert_eq!(
+            summary(&[site.clone(), book], &[a, b]),
+            "Boards: \"Launch the site\" (1 to do, 0 in progress, 0 done, 1 blocked); \"Chapter 3\" (0 to do, 0 in progress, 1 done)."
+        );
+        assert_eq!(summary(&[], &[]), "There are no boards yet.");
+        assert!(site.is_goal("  launch   THE site "));
+        assert!(!site.is_goal("Launch the app"));
     }
 }

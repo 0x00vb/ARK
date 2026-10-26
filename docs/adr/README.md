@@ -29,7 +29,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0020](0020-running-code-contained-in-the-project.md) | Running code, contained in the project folder | Accepted |
 | [0021](0021-an-output-is-a-file-with-a-kind.md) | An output is a file with a kind; a kind has one view | Accepted |
 | [0022](0022-one-place-for-what-differs-between-systems.md) | One place for what differs between operating systems (`ark-os`) | Accepted |
-| [0023](0023-the-project-board.md) | The project's board: work items that follow their tasks | Accepted |
+| [0023](0023-the-project-board.md) | The project's board: work items that follow their tasks | Accepted, amended by 0083 |
 | [0024](0024-the-terminal-is-a-client-too.md) | The terminal is a client of a runtime too | Accepted |
 | [0025](0025-work-reports-into-the-chat-that-asked.md) | Work reports into the chat that asked for it | Accepted |
 | [0026](0026-an-optional-ark-account.md) | An optional ARK Account, signed in through the browser | Accepted |
@@ -71,7 +71,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0062](0062-event-automations-use-durable-events-and-run-scoped-authority.md) | Event automations: transport-authenticated provider events with actor claims, deterministic matching and one durable run per event; schedules stay compatible under one view; every event run has mandatory authority that broader grants cannot widen | Proposed |
 | [0063](0063-two-chats-can-share-one-window-without-sharing-state.md) | Multi-chat windows: session-scoped conversation operations, many project tabs and at most two visible panes; each pane keeps its own transcript, draft, approvals, events and resource authority | Accepted |
 | [0064](0064-execution-mode-is-per-chat-and-per-turn.md) | Plan, Manual and bounded Auto execution modes are per chat and frozen into each turn; only explicitly project-bound actions can skip approval | Proposed |
-| [0065](0065-workspace-destinations-have-one-stable-rail.md) | Home and Schedules use one icon rail; Home restores its last project view and Schedules has race-safe project-wide states | Accepted |
+| [0065](0065-workspace-destinations-have-one-stable-rail.md) | Home and Schedules use one icon rail; Home restores its last project view and Schedules has race-safe project-wide states | Accepted, amended by 0083 |
 | [0066](0066-generated-images-are-durable-project-files.md) | Generated images are validated raster outputs written as durable project files; chat previews and the side pane use that one file and viewer path | Accepted |
 | [0067](0067-signed-page-assets-can-update-without-the-native-app.md) | A local native page may load a separately signed, exact-compatible asset release with atomic activation and automatic last-known-good rollback | Accepted |
 | [0068](0068-tabs-form-a-spatial-window-layout.md) | Tabs form a spatial window layout with nested drag-created splits and a four-chat visibility bound | Accepted |
@@ -83,6 +83,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0077](0077-an-app-can-add-rows-inside-the-current-project.md) | An app can add rows inside the current unfolded project through `ark.projectSection` | Accepted for implementation |
 | [0078](0078-chat-participants-come-from-durable-assignments.md) | Chat participants come from durable assignments | Accepted |
 | [0079](0079-project-memory-is-reviewed-and-project-scoped.md) | Project memory is reviewed and project scoped | Accepted |
+| [0083](0083-a-board-per-goal-opens-beside-the-chat.md) | A board per goal opens beside the chat, not in the rail | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

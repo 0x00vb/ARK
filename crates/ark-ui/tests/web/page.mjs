@@ -915,16 +915,32 @@ async function agentChat(page) {
 }
 scenarios["agent-chat"] = agentChat;
 
-// The project's board: the person adds, drags and completes cards and opens one; an agent
-// given a card moves it by itself; what waits for the person is marked; delete has an undo.
+// A board per goal, beside the chat: the chat plans one and it opens by itself; the person adds,
+// drags and completes cards and opens one in its place; an agent given a card moves it by itself;
+// what waits for the person is marked; delete has an undo; the project lists its boards.
 async function board(page) {
-  await page.locator('.workspace-destination[data-view="board"]').click();
+  // A window wide enough for the pane to show the three columns side by side.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // No fixed place for it: the rail has no Board and the project lists none yet.
+  assert.equal(await page.locator('.workspace-destination[data-view="board"]').count(), 0);
+  assert.equal(await page.locator('.project-section[data-id="boards"] .bd-row').count(), 0);
+  await page.locator("#input").fill("plan chapter 3");
+  await page.keyboard.press("Enter");
+  const bd = page.locator(".pane-view.bd");
+  await bd.locator(".bd-card", { hasText: "Edit chapter 2" }).waitFor();
+  assert.equal(await bd.locator(".bd-goal").inputValue(), "Chapter 3");
+  const row = page.locator('.project-section[data-id="boards"] .bd-row');
+  await row.filter({ hasText: "0/2" }).waitFor();
+  assert.match(await row.innerText(), /Chapter 3/);
+  assert.equal(await row.getAttribute("aria-current"), "true");
+  // The pane has finished opening before anything is dragged in it.
+  await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState === "running"));
+  await shot(page, "board-beside-chat");
+
   const server = () => page.evaluate(async () => (await window.ark.call("board")).items.map((w) => `${w.state}:${w.title}`));
   const column = (state) => page.locator(`.bd-list[data-state="${state}"] .bd-card .bd-title`).allInnerTexts();
-  // An empty board offers the input at once.
-  const input = page.locator(".bd-input");
-  await input.click();
-  for (const t of ["Draft chapter 3", "Edit chapter 2", "Pick a title"]) {
+  await bd.locator(".bd-add").click();
+  for (const t of ["Pick a title"]) {
     // Typed, not filled: the box keeps the focus from one item to the next.
     await page.keyboard.type(t);
     await page.keyboard.press("Enter");
@@ -957,9 +973,9 @@ async function board(page) {
   await page.locator(".bd-card", { hasText: "Edit chapter 2" }).locator(".bd-check").click();
   assert.deepEqual(await column("done"), ["Edit chapter 2"]);
 
-  // A click opens the card beside the board; a note typed there is kept.
+  // A click opens the card in the board's place; a note typed there is kept.
   await page.locator(".bd-card", { hasText: "Draft chapter 3" }).click();
-  const panel = page.locator(".bd-panel");
+  const panel = page.locator(".bd-detail .bd-panel");
   await panel.waitFor();
   assert.equal(await panel.locator(".bd-p-title").inputValue(), "Draft chapter 3");
   await panel.locator(".bd-p-note").fill("Under 2,000 words.");
@@ -971,9 +987,13 @@ async function board(page) {
   await page.locator(".bd-p-give").waitFor();
   await page.locator(".bd-p-give").click();
   await page.locator(".popover .menu-item", { hasText: "writer" }).click();
-  await page.locator('.bd-list[data-state="done"] .bd-card', { hasText: "Draft chapter 3" }).waitFor();
   await panel.locator(".bd-p-said", { hasText: "Chapter 3 is drafted." }).waitFor();
   assert.match(await panel.locator(".bd-p-history summary").innerText(), /History · \d/);
+  // Back shows the board, the card in Done and the focus on it.
+  await page.locator(".bd-back").click();
+  await page.locator('.bd-list[data-state="done"] .bd-card', { hasText: "Draft chapter 3" }).waitFor();
+  assert.equal(await page.evaluate(() => document.activeElement?.closest(".bd-card")?.innerText.includes("Draft chapter 3")), true);
+  await row.filter({ hasText: "2/3" }).waitFor();
 
   // A card another client adds appears without a reload; one blocked on the person is marked.
   await page.evaluate(() => window.ark.call("board_add", { title: "Choose the cover", owner: "user", blocked: "needs your photo" }));
@@ -993,6 +1013,23 @@ async function board(page) {
   await page.locator(".bd-undo-btn").click();
   await page.locator(".bd-card", { hasText: "Pick a title" }).waitFor();
   assert.ok((await server()).includes("todo:Pick a title"));
+
+  // The goal is renamed in place; the project's list follows.
+  await bd.locator(".bd-goal").fill("Chapter 3, first draft");
+  await page.keyboard.press("Enter");
+  await row.filter({ hasText: "Chapter 3, first draft" }).waitFor();
+  assert.equal((await page.evaluate(async () => (await window.ark.call("board")).boards.map((b) => b.goal))).join(), "Chapter 3, first draft");
+
+  // Closed, it comes back from the project; deleted, it leaves the pane and the list.
+  await page.locator(".pane-tab-close").first().click();
+  assert.equal(await row.getAttribute("aria-current"), null);
+  await row.click();
+  await bd.locator(".bd-card", { hasText: "Pick a title" }).waitFor();
+  await bd.locator(".bd-menu").click();
+  await page.locator(".popover .menu-item", { hasText: "Delete the board and its 4 items" }).click();
+  await row.waitFor({ state: "detached" });
+  assert.equal(await page.locator(".pane-view.bd").count(), 0);
+  assert.deepEqual(await server(), []);
 }
 scenarios.board = board;
 

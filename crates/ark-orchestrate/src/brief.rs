@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn a_brief_carries_its_board_item_and_the_last_steps_on_it() {
         let t = task("t-2", "worker");
-        let mut w = WorkItem::new("p", "chat", "Draft chapter 3");
+        let mut w = WorkItem::new("p", "b", "chat", "Draft chapter 3");
         w.note = "Keep it under 2,000 words.".into();
         for n in 1..=5 {
             w.step("worker", format!("step {n}"));

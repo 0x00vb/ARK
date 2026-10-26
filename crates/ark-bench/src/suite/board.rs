@@ -65,7 +65,7 @@ fn policy() -> Policy {
         if first_turn && r.count_calls("board.add") == 0 {
             return Reply::call(
                 "board.add",
-                json!({ "items": [
+                json!({ "board": "Volunteer guide", "items": [
                     { "title": "Welcome page" },
                     { "title": "Watering schedule" },
                     { "title": "Composting page" }

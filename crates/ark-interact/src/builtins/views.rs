@@ -115,7 +115,7 @@ impl Command for Schedules {
     }
 }
 
-/// `/board`: the project's work by column, and changing it.
+/// `/board`: the project's boards, their work by column, and changing it.
 pub struct Board;
 #[async_trait::async_trait]
 impl Command for Board {
@@ -128,7 +128,7 @@ impl Command for Board {
             return Ok(Report::new().note("This app runs a single agent.").into());
         };
         if args.trim().is_empty() {
-            return Ok(crate::orchestration::board_report(&o.board()).into());
+            return Ok(crate::orchestration::board_report(&o.boards(), &o.board()).into());
         }
         control_cmd(ix, crate::orchestration::parse_board(args)).await
     }

@@ -6,6 +6,7 @@ import { h, icon, clear, $, hydrateIcons, tokens, ago } from "./dom.js";
 import { markdown } from "./md.js";
 import { Thread, approvalCard } from "./conversation.js";
 import { Composer } from "./composer.js";
+import { createChatSurface } from "./chat-surface.js";
 import { chatView } from "./chat-view.js";
 import { acceptDrops } from "./drop.js";
 import { Sidebar } from "./sidebar.js";
@@ -114,9 +115,10 @@ const api = {
   project: () => activeSummary()?.project,
   send: (text) => submit(text),
   // Put text in the composer, unsent, with the conversation in view.
-  compose: (text) => {
+  compose: (text, { append = false } = {}) => {
+    const draft = append ? composer.input.value : "";
     showConversation();
-    composer.set(text);
+    composer.set(draft ? `${draft}\n\n${text}` : text);
   },
   submit: (text) => submit(text),
   steer,
@@ -601,23 +603,7 @@ function renameChatTabInline(item, id, before) {
 }
 
 function buildSecondarySurface(session) {
-  const scroller = h("section.scroller");
-  const threadEl = h("div.thread");
-  scroller.append(threadEl);
-  const asks = h("div.asks", { "aria-live": "polite" });
-  const queue = h("div.queue");
-  const slash = h("div.palette", { hidden: true });
-  const input = h("textarea", { rows: "1", placeholder: "Ask anything", spellcheck: "true" });
-  const attach = h("button.icon-btn.attach", { type: "button", title: "Add files", "aria-label": "Add files" }, icon("plus"));
-  const model = h("button.chip.model-chip", { type: "button", title: "Model" });
-  const mode = h("button.chip.mode-chip", { type: "button", title: "Execution mode (⇧Tab)", "aria-haspopup": "menu" }, "Manual");
-  const send = h("button.send", { type: "submit", "aria-label": "Send" });
-  const form = h("form.composer", { autocomplete: "off" }, input,
-    h("div.composer-bar", attach, model, mode, send));
-  const dock = h("div.dock", queue, slash, form);
-  const surface = h("section.chat-surface.secondary", { "data-session": session, "data-active": "false" },
-    scroller, asks, dock);
-  return { surface, scroller, threadEl, asks, queue, slash, input, attach, model, mode, send, form };
+  return createChatSurface({ session });
 }
 
 class SecondaryChat {
@@ -2155,8 +2141,8 @@ async function start() {
     }
   } catch {}
   if (detachedSession && !chatTabs.ids.includes(detachedSession)) chatTabs.ids.push(detachedSession);
-  primarySurface = h("section.chat-surface.primary", { "data-active": "true" });
-  primarySurface.append($("#scroller"), $("#asks"), document.querySelector(".dock"));
+  const primaryElements = createChatSurface({ kind: "primary" });
+  primarySurface = primaryElements.surface;
   const workspace = h("div.chat-workspace", { id: "chat-workspace", "data-split": "false" }, primarySurface);
   $("#stage").before(workspace);
   primarySurface.addEventListener("pointerdown", () => {
@@ -2164,7 +2150,7 @@ async function start() {
     focusChat(state.sessionId, false);
   }, true);
   thread = new Thread($("#thread"), $("#scroller"), api);
-  composer = new Composer(api, { captureDraft });
+  composer = new Composer(api, { ...primaryElements, captureDraft });
   places = new Places(api);
   acceptDrops(api, captureDraft, $(".main"));
   sidebar = new Sidebar(api);

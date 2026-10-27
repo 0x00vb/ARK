@@ -49,9 +49,9 @@ export class Composer {
       if (this.running && !this.input.value.trim()) api.cancel();
       else this.submit(false);
     });
-    this.model?.addEventListener("click", () => this.modelMenu());
+    this.model?.addEventListener("click", () => elements.modelOpen ? elements.modelOpen(this.model, () => this.focus()) : this.modelMenu());
     this.mode?.addEventListener("click", () => this.modeMenu());
-    this.attach?.addEventListener("click", () => chooseFiles(api, elements.captureDraft));
+    this.attach?.addEventListener("click", () => chooseFiles(api, elements.captureDraft, { captureOrigin: elements.captureOrigin, progressTarget: elements.uploads }));
     this.dictation = new DictationController({
       api,
       button: this.mic,

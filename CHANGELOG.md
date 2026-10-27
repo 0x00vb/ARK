@@ -9,21 +9,40 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-27
+
 ### Breaking
 
 - `ark_orchestrate::board::summary(boards, items)` takes the boards (was `summary(items)`). The chat's `board.add` requires `board`; an app that scripts it passes a goal.
 
 ### Changed
 
-- Collapse advanced settings and secondary appearance choices. Keep header highlights inset.
-- Show bundled plugin artwork and allow apps to register optional plugin setup in the marketplace. Clear setup controls when leaving Plugins.
 - Boards per goal (ADR 0083). The board leaves the fixed rail and opens beside the chat as the `board` panel, with an item opening in its place. The current project lists its boards. `board.add` needs `board` (a goal or a board id) and a new goal makes a board. `Board`, `Orchestrator::{boards, add_board, change_board, remove_board}`, `WorkItem::board`, `WorkChange::board`, `EventKind::{Board, BoardRemoved}`, window methods `board_rename` and `board_delete`. Existing items join one board named "Board" on load. The `board-item` panel and the `board` view are removed.
-
 
 ### Added
 
 - `ArkUi::account_pairing` lets a hosted workspace pair account-bound native clients and report
   its exact route id without granting those clients browser or generic RPC access.
+
+## [0.25.3] - 2026-10-24
+
+- Construct main, split and app conversations with one shared chat surface.
+- Let app conversations supply real model and file controls in the shared composer.
+- Capture file-picker destinations before opening and keep progress local to its conversation.
+- Support app conversation actions in the panel tab menu.
+
+## [0.25.2] - 2026-10-23
+
+- Draw navigation and common controls with one original outline icon family.
+- Preserve existing unsent text when appending plugin workflow requests.
+- Label app plugin detail actions Open.
+
+## [0.25.1] - 2026-10-23
+
+### Changed
+
+- Collapse advanced settings and secondary appearance choices. Keep header highlights inset.
+- Show bundled plugin artwork and allow apps to register optional plugin setup in the marketplace. Preserve setup during catalog refreshes and clear controls when leaving Plugins.
 
 ## [0.25.0] - 2026-10-23
 

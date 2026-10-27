@@ -8,9 +8,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.25.0** release metadata prepared for 2026-10-21. Combined checks, immutable tag publication and fresh-clone verification remain open. Earlier releases are in `CHANGELOG.md`. |
-| `main` | v0.25.0 release tree. |
-| Consumers | ARK Desktop (`ark-desktop` repo; `main` pins v0.24.0 pending the v0.25.0 upgrade), `examples/minimal-agent`, `examples/writing-agent`, `examples/agent-team` |
+| Stable release | **v0.26.0** adds boards per goal and hosted account pairing to the v0.25.3 surface. |
+| Consumers | ARK Desktop pins v0.26.0. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

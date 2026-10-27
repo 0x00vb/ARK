@@ -5,11 +5,31 @@
 The board left the fixed rail (ADR 0083). A project has a board per goal; `board.add` names the
 goal and a new goal makes a board. The board a chat makes opens beside it in the side pane; the
 agent can present one; the current project in the sidebar lists its boards. An item opens in the
-board's place with Back. Items from before join one board named "Board" on load. Unreleased:
-Desktop gets it with the next Core tag. Not measured: whether small local models name the goal
+board's place with Back. Items from before join one board named "Board" on load. Released in
+v0.26.0. Not measured: whether small local models name the goal
 well in `board.add` (the `board` benchmark workload is the check before any prompt change).
 Cost: +3.6% tokens on the simulated `board` workload (boards in the tool description and the
 new `board` field); suite total +0.02%; `bench/baseline.json` regenerated.
+
+## Shared chat surface patch (2026-10-24)
+
+The UI-only release branch adds a shared primary, secondary and app-conversation surface
+above published v0.25.2. No runtime, protocol or hosted changes are included. App conversations
+can supply real model selection and origin-bound file controls. Panel tab menus hold secondary
+actions. Actual main, split and agent surfaces passed isolated signed-executable source preview;
+focused upload/draft tests and shared-surface WebKit checks pass. Desktop consumes this API in
+its pending UI change. v0.25.3 contains this UI patch. Immutable publication, bounded fresh-clone verification and
+the final consumer pin are tracked in the workspace release evidence. Evidence: workspace board/evidence/chat-surface-parity-20261024/.
+
+## Creative UI patch assembly (2026-10-23)
+
+v0.25.2 is assembled from published v0.25.1 plus the reviewed b09aa0d UI changes.
+No Rust runtime, hosted-provider or protocol source changes are included. The six copied
+paths match the reviewed creative-polish source exactly. Focused WebKit proof is retained
+from that source, with actual source-overridden Desktop preview proof. Independent assembly
+review, immutable tag publication and bounded fresh-clone verification are pending.
+No full suites or native compilation were repeated, per the owner's instruction.
+
 
 ## Settings and plugin presentation (2026-10-23)
 
@@ -19,6 +39,12 @@ header states. The focused Desktop WebKit regression passes, including offline c
 secret cleanup on Chat navigation, deep links and narrow layout. Live browser preview verified.
 This source is unreleased. Desktop needs a Core tag containing the plugin registry before its
 new game plugin registrations can be packaged. No full CI or native build ran for this UI change.
+
+The v0.25.1 release branch contains only this reviewed UI patch above published v0.25.0.
+Hosted account-pairing changes remain separate on main. The exact UI assets match the reviewed
+source. Focused WebKit and live preview results are reused. No full CI was rerun, as requested
+by the owner. Immutable tag publication and bounded fresh-clone verification remain pending.
+Desktop must pin the verified patch before packaging its plugin registrations.
 
 ## Combined release verification (2026-10-23)
 
@@ -213,12 +239,12 @@ Last updated: 2026-10-21 (combined release source, checks and remaining gates)
 
 | | |
 |---|---|
-| Latest tag | v0.25.0 release metadata prepared for 2026-10-21. Publication and fresh-clone verification are tracked above and remain open. |
-| `main` | v0.25.0 release tree. |
+| Latest tag | v0.26.0 |
+| Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
-| Next tag | not set. |
+| Next tag | v0.25.2, pending assembly review and publication. |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | `ci/windows` merged into v0.14.0 (`ark-os`, ADR 0022): every OS difference ARK had on 2026-10-05 goes through it; code written on `main` after that (processes, notifications, durable turns) mostly does not yet, and newer shell-script tests are not marked unix-only. Never run on Windows. Next: the machine run (`scripts/windows-check.ps1`), Office fixes in `ark-files`, one runtime per store. Analysis and plan: `ark-desktop/docs/WINDOWS.md` |
 | Accounts | In v0.10.0: `ark-account` (ADR 0026, 0031), an optional ARK Account for ARK Cloud. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local) |

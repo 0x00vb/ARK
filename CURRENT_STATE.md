@@ -5,7 +5,7 @@
 Branch `mac-computers`: Reach (ADR 0052, amended) sets up a Mac with Apple silicon. `Facts.os`
 is new (breaking: the next tag is v0.27.0). The scripts fall back to `shasum`, `ps` and
 `stat -f`. Proven through ARK Desktop's ignored real-computer test against a macOS 26 sshd and a
-Debian 12 container. Released as v0.27.0.
+Debian 12 container. Released as v0.27.0. v0.27.1: a computer that refuses every key (the owner's MacBook takes only a password) gets ARK's own key from the terminal sheet. Proven with a stand-in ssh; the MacBook itself is the owner's step.
 
 ## Boards per goal (2026-10-26)
 
@@ -240,13 +240,13 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-28 (v0.27.0, a Mac as a computer)
+Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.27.0 |
+| Latest tag | v0.27.1 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

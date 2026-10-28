@@ -8,8 +8,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.27.0** sets up a Mac with Apple silicon as one of the person's computers (Reach, ADR 0052), on the v0.26.1 surface. |
-| Consumers | ARK Desktop pins v0.27.0. Examples use workspace versions. |
+| Stable release | **v0.27.1** sets up a Mac with Apple silicon, or a computer that takes only a password, as one of the person's computers (Reach, ADR 0052). |
+| Consumers | ARK Desktop pins v0.27.1. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

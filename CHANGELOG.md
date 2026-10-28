@@ -9,6 +9,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-28
+
+### Fixed
+
+- A computer that takes only a password could not be set up: the password opened one connection, and the tunnel after it had none. Answering in a terminal now adds ARK's own key, `~/.ssh/ark_ed25519` (made once, without a passphrase), there after the password once, and checks it. Every ARK `ssh` passes that key with `-i`.
+
 ## [0.27.0] - 2026-10-28
 
 ### Added

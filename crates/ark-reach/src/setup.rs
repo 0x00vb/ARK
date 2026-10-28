@@ -511,7 +511,11 @@ fn read_facts(contract: &dyn ServeContract, home: &str, stdout: &str) -> (Facts,
     let (os, arch) = (os_of(kernel), arch_of(machine));
     f.os = os.unwrap_or(kernel).to_string();
     f.arch = arch.unwrap_or(machine).to_string();
-    (f, os.is_some() && arch.is_some())
+    let supported = matches!(
+        (os, arch),
+        (Some("linux"), Some(_)) | (Some("macos"), Some("aarch64"))
+    );
+    (f, supported)
 }
 
 async fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
@@ -557,10 +561,10 @@ mkdir -p \"$d\"
 chmod 700 \"$d\"
 t=\"$d/.$n.new\"
 cat > \"$t\"
-got=
-if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum \"$t\" | cut -d ' ' -f 1)
-elif command -v shasum >/dev/null 2>&1; then got=$(shasum -a 256 \"$t\" | cut -d ' ' -f 1); fi
-if [ -n \"$got\" ]; then
+h=
+if command -v sha256sum >/dev/null 2>&1; then h=1; got=$(sha256sum \"$t\" | cut -d ' ' -f 1)
+elif command -v shasum >/dev/null 2>&1; then h=1; got=$(shasum -a 256 \"$t\" | cut -d ' ' -f 1); fi
+if [ -n \"$h\" ]; then
   if [ \"$got\" != \"$want\" ]; then rm -f \"$t\"; echo \"the copy that arrived does not match\" >&2; exit 3; fi
 fi
 chmod 755 \"$t\"
@@ -598,8 +602,8 @@ echo restarted";
 const WAIT: &str = "s=$1; i=0
 while [ $i -lt 100 ]; do
   if [ -S \"$s\" ]; then
-    if ! command -v curl >/dev/null 2>&1; then echo \"up $(stat -c %a \"$s\" 2>/dev/null || stat -f %Lp \"$s\" 2>/dev/null)\"; exit 0; fi
-    if curl -s -o /dev/null --max-time 2 --unix-socket \"$s\" http://localhost/; then echo \"up $(stat -c %a \"$s\" 2>/dev/null || stat -f %Lp \"$s\" 2>/dev/null)\"; exit 0; fi
+    if ! command -v curl >/dev/null 2>&1; then echo \"up $(if [ \"$(uname)\" = Darwin ]; then stat -f %Lp \"$s\"; else stat -c %a \"$s\"; fi 2>/dev/null)\"; exit 0; fi
+    if curl -s -o /dev/null --max-time 2 --unix-socket \"$s\" http://localhost/; then echo \"up $(if [ \"$(uname)\" = Darwin ]; then stat -f %Lp \"$s\"; else stat -c %a \"$s\"; fi 2>/dev/null)\"; exit 0; fi
   fi
   sleep 0.2; i=$((i+1))
 done
@@ -1029,7 +1033,7 @@ mod tests {
         let (f, _) = read_facts(&Fake, "/h", "uname=Linux x86_64\n");
         assert_eq!(f.forwarding, None);
         assert_eq!((f.os.as_str(), f.arch.as_str()), ("linux", "x86_64"));
-        for unsupported in ["SunOS i86pc", "Linux riscv64", "Darwin"] {
+        for unsupported in ["SunOS i86pc", "Linux riscv64", "Darwin", "Darwin x86_64"] {
             let (_, ok) = read_facts(&Fake, "/h", &format!("uname={unsupported}\n"));
             assert!(!ok, "{unsupported}");
         }

@@ -1,5 +1,12 @@
 # Current state
 
+## A Mac as a computer (2026-10-28)
+
+Branch `mac-computers`: Reach (ADR 0052, amended) sets up a Mac with Apple silicon. `Facts.os`
+is new (breaking: the next tag is v0.27.0). The scripts fall back to `shasum`, `ps` and
+`stat -f`. Proven through ARK Desktop's ignored real-computer test against a macOS 26 sshd and a
+Debian 12 container. Not tagged yet.
+
 ## Boards per goal (2026-10-26)
 
 The board left the fixed rail (ADR 0083). A project has a board per goal; `board.add` names the

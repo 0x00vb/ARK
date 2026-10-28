@@ -5,7 +5,7 @@
 Branch `mac-computers`: Reach (ADR 0052, amended) sets up a Mac with Apple silicon. `Facts.os`
 is new (breaking: the next tag is v0.27.0). The scripts fall back to `shasum`, `ps` and
 `stat -f`. Proven through ARK Desktop's ignored real-computer test against a macOS 26 sshd and a
-Debian 12 container. Not tagged yet.
+Debian 12 container. Released as v0.27.0.
 
 ## Boards per goal (2026-10-26)
 
@@ -240,18 +240,18 @@ What is happening in ARK right now. Read this at the start of a session. Update 
 of a session that changed what is in progress, blocked or next. Keep it under a page: history
 goes in git and `CHANGELOG.md`, direction in `ROADMAP.md`, decisions in `docs/adr/`.
 
-Last updated: 2026-10-21 (combined release source, checks and remaining gates)
+Last updated: 2026-10-28 (v0.27.0, a Mac as a computer)
 
 ## Release
 
 | | |
 |---|---|
-| Latest tag | v0.26.1 |
+| Latest tag | v0.27.0 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
 | v0.16.0 | ADR 0052 resource-location amendment: every resource is bound to its runtime, project replica and opening chat; missing routes fail closed; remote Browser rendering, terminal replay and reconnect; exact transfer plans, epochs and durable receipts. `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. A real Linux x86_64 runtime covered Files, `.xlsx`, `.docx`, Terminal, processes, artifacts and Browser with no matching local workspace |
-| Next tag | v0.25.2, pending assembly review and publication. |
+| Next tag | none planned. |
 | Step 2 | Done in v0.9.0 (ADR 0012, ADR 0014). Deferred: start the CLI before the first call, deeper provider telemetry |
 | Windows | `ci/windows` merged into v0.14.0 (`ark-os`, ADR 0022): every OS difference ARK had on 2026-10-05 goes through it; code written on `main` after that (processes, notifications, durable turns) mostly does not yet, and newer shell-script tests are not marked unix-only. Never run on Windows. Next: the machine run (`scripts/windows-check.ps1`), Office fixes in `ark-files`, one runtime per store. Analysis and plan: `ark-desktop/docs/WINDOWS.md` |
 | Accounts | In v0.10.0: `ark-account` (ADR 0026, 0031), an optional ARK Account for ARK Cloud. Tested against a fake service and dogfooded in ARK Desktop against the real account service (`ark-cloud/account`, local) |

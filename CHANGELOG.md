@@ -9,6 +9,14 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+
+- A Mac with Apple silicon can be set up as one of the person's computers (ADR 0052, Reach). The setup scripts use `shasum`, `ps` and `stat -f` where Linux's tools are missing.
+
+### Breaking
+
+- `ark_reach::Facts` has `os` (`linux` or `macos`). An app that builds a `Facts` sets it, and picks the build from `os` and `arch` together.
+
 ## [0.26.1] - 2026-10-28
 
 ### Fixed

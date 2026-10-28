@@ -386,7 +386,7 @@ Host keys follow the person's `known_hosts`. ARK never passes `accept-new` or
 | Step | Does | Fails with |
 |---|---|---|
 | 1. Connect | `ssh -o BatchMode=yes -- host true`. An unknown host key, or a key with a passphrase not in the agent, opens the system `ssh` in a terminal sheet once, so the person answers `ssh` itself. A changed host key stops setup | "Could not reach vps: <ssh's last line>" |
-| 2. Look | `uname -sm`, glibc version, free disk, an ARK already there and its version, `systemd --user` and linger, an `sshd` that turns socket forwarding off (`AllowStreamLocalForwarding no`, `DisableForwarding yes`) | "vps runs <system>; ARK runs on Linux x86_64 and arm64", or "vps does not allow forwarding (sshd_config)" |
+| 2. Look | `uname -sm`, glibc version, free disk, an ARK already there and its version, `systemd --user` and linger, an `sshd` that turns socket forwarding off (`AllowStreamLocalForwarding no`, `DisableForwarding yes`) | "vps runs <system>; ARK runs on Linux x86_64 and arm64, and macOS arm64", or "vps does not allow forwarding (sshd_config)" |
 | 3. Install | This Mac downloads the build for that target, checks it against the SHA-256 compiled into the app, and sends it over the SSH connection (the computer may have no `curl` or no way out). Kept under `~/.local/share/<app>/`, with the previous one | "The build did not match; nothing was installed". The release builds the Linux targets first, so their hashes go into the app. A development build takes a local server build from `ARK_SERVER_BUILD` and its hash from the file itself |
 | 4. Start | A `systemd --user` service serving on a Unix socket (mode 0600, in a 0700 folder). Linger on (`loginctl enable-linger`); if refused, a terminal sheet runs `sudo loginctl enable-linger <user>` with the person's consent (that stream, with the password, is never stored or traced); if still refused, the chip shows "Stops when you log out of vps" | the service's last log lines |
 | 5. Pair | The `ServeContract`'s token command, named after this computer, over the same connection. The token goes to the keychain, never to the screen | |
@@ -399,6 +399,15 @@ store there.
 
 Today's My machine (an HTTPS address and a token in the keychain, `connection.json`) becomes a
 Computer reached by address, without SSH. Its chats are held chats like any other.
+
+A Mac (amendment, 2026-10-28). A Mac with Apple silicon is a computer too. `Facts.os` says
+`linux` or `macos`, so the app picks the build by system and architecture. The scripts try the
+GNU tool, then the BSD one (`sha256sum` or `shasum`, `/proc` or `ps`, `stat -c` or `stat -f`).
+A Mac has no `systemd`, so step 4 starts the program in the background with a pid file, as on
+Linux without `systemd`, and it stops when the Mac restarts. The
+build is the app's own (ARK Desktop: its program, signed again ad hoc, because a copy taken out
+of `ARK.app` no longer matches the bundle's signature and macOS kills it at start). Nothing is
+downloaded, so no SHA-256 is compiled in; the hash is the signed copy's.
 
 ### Project copy
 

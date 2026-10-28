@@ -10,6 +10,10 @@
 //! | `~/.config/systemd/user/<name>.service` | with `systemd --user`: the service |
 //!
 //! `$XDG_RUNTIME_DIR` is not used: it goes away when the person's last session ends.
+//!
+//! Linux and macOS. The scripts try the GNU tool first, then the BSD one: `sha256sum` or
+//! `shasum`, `/proc` or `ps`, `stat -c` or `stat -f`. A Mac has no `systemd`, so it serves in
+//! the background with a pid file.
 
 use std::path::PathBuf;
 
@@ -95,7 +99,9 @@ pub struct Facts {
     pub user: String,
     /// `uname -sm`, as it says it: `Linux x86_64`.
     pub system: String,
-    /// `x86_64` or `aarch64`.
+    /// `linux` or `macos`; else the kernel name as it says it.
+    pub os: String,
+    /// `x86_64` or `aarch64`; else the machine as it says it.
     pub arch: String,
     /// `glibc 2.36`, `musl`, or None when it could not tell.
     pub libc: Option<String>,
@@ -105,7 +111,7 @@ pub struct Facts {
     pub installed: bool,
     /// Its version, as [`ServeContract::version_of`] reads it.
     pub version: Option<String>,
-    /// Its SHA-256, when `sha256sum` is there.
+    /// Its SHA-256, when `sha256sum` or `shasum` is there.
     pub sha256: Option<String>,
     /// `systemctl --user` answers.
     pub systemd: bool,
@@ -225,7 +231,7 @@ if command -v systemctl >/dev/null 2>&1 && [ -f \"$f\" ]; then
 fi
 if [ -f \"$pf\" ]; then
   o=$(cat \"$pf\")
-  if [ -n \"$o\" ] && kill -0 \"$o\" 2>/dev/null && grep -qaF \"$b\" \"/proc/$o/cmdline\" 2>/dev/null; then kill \"$o\"; fi
+  if [ -n \"$o\" ] && kill -0 \"$o\" 2>/dev/null && { grep -qaF \"$b\" \"/proc/$o/cmdline\" 2>/dev/null || ps -o command= -p \"$o\" 2>/dev/null | grep -qF \"$b\"; }; then kill \"$o\"; fi
 fi
 rm -rf \"$s\"
 rm -f \"$pf\" \"$st/serve.log\" \"$b\" \"$b.previous\"
@@ -411,6 +417,14 @@ fn libc_of(raw: &str) -> Option<String> {
         .then(|| format!("glibc {v}"))
 }
 
+fn os_of(kernel: &str) -> Option<&'static str> {
+    match kernel {
+        "Linux" => Some("linux"),
+        "Darwin" => Some("macos"),
+        _ => None,
+    }
+}
+
 fn arch_of(machine: &str) -> Option<&'static str> {
     match machine {
         "x86_64" | "amd64" => Some("x86_64"),
@@ -433,6 +447,7 @@ fn read_facts(contract: &dyn ServeContract, home: &str, stdout: &str) -> (Facts,
         home: home.to_string(),
         user: String::new(),
         system: String::new(),
+        os: String::new(),
         arch: String::new(),
         libc: None,
         free_kib: None,
@@ -491,15 +506,12 @@ fn read_facts(contract: &dyn ServeContract, home: &str, stdout: &str) -> (Facts,
     if f.installed {
         f.version = version_out.and_then(|v| contract.version_of(v));
     }
-    let machine = f.system.split_whitespace().nth(1).unwrap_or("").to_string();
-    let linux = f.system.split_whitespace().next() == Some("Linux");
-    let arch = arch_of(&machine).filter(|_| linux);
-    if let Some(a) = arch {
-        f.arch = a.to_string();
-    } else {
-        f.arch = machine;
-    }
-    (f, arch.is_some())
+    let mut words = f.system.split_whitespace();
+    let (kernel, machine) = (words.next().unwrap_or(""), words.next().unwrap_or(""));
+    let (os, arch) = (os_of(kernel), arch_of(machine));
+    f.os = os.unwrap_or(kernel).to_string();
+    f.arch = arch.unwrap_or(machine).to_string();
+    (f, os.is_some() && arch.is_some())
 }
 
 async fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
@@ -532,7 +544,8 @@ for s in /usr/sbin/sshd /usr/local/sbin/sshd; do
 done
 if [ -x \"$b\" ]; then
   echo installed=yes
-  if command -v sha256sum >/dev/null 2>&1; then echo \"sha256=$(sha256sum \"$b\")\"; fi
+  if command -v sha256sum >/dev/null 2>&1; then echo \"sha256=$(sha256sum \"$b\")\"
+  elif command -v shasum >/dev/null 2>&1; then echo \"sha256=$(shasum -a 256 \"$b\")\"; fi
   echo version-follows
   \"$@\" 2>/dev/null
 fi
@@ -544,8 +557,10 @@ mkdir -p \"$d\"
 chmod 700 \"$d\"
 t=\"$d/.$n.new\"
 cat > \"$t\"
-if command -v sha256sum >/dev/null 2>&1; then
-  got=$(sha256sum \"$t\" | cut -d ' ' -f 1)
+got=
+if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum \"$t\" | cut -d ' ' -f 1)
+elif command -v shasum >/dev/null 2>&1; then got=$(shasum -a 256 \"$t\" | cut -d ' ' -f 1); fi
+if [ -n \"$got\" ]; then
   if [ \"$got\" != \"$want\" ]; then rm -f \"$t\"; echo \"the copy that arrived does not match\" >&2; exit 3; fi
 fi
 chmod 755 \"$t\"
@@ -564,7 +579,7 @@ elif systemctl --user is-active --quiet \"$u\"; then echo running
 else systemctl --user start \"$u\"; echo restarted; fi";
 
 const BACKGROUND: &str = "pf=$1; log=$2; r=$3; b=$4; shift 4
-alive() { kill -0 \"$1\" 2>/dev/null && grep -qaF \"$b\" \"/proc/$1/cmdline\" 2>/dev/null; }
+alive() { kill -0 \"$1\" 2>/dev/null && { grep -qaF \"$b\" \"/proc/$1/cmdline\" 2>/dev/null || ps -o command= -p \"$1\" 2>/dev/null | grep -qF \"$b\"; }; }
 o=$(cat \"$pf\" 2>/dev/null || true)
 if [ -n \"$o\" ] && alive \"$o\"; then
   if [ \"$r\" != 1 ]; then echo running; exit 0; fi
@@ -583,8 +598,8 @@ echo restarted";
 const WAIT: &str = "s=$1; i=0
 while [ $i -lt 100 ]; do
   if [ -S \"$s\" ]; then
-    if ! command -v curl >/dev/null 2>&1; then echo \"up $(stat -c %a \"$s\" 2>/dev/null)\"; exit 0; fi
-    if curl -s -o /dev/null --max-time 2 --unix-socket \"$s\" http://localhost/; then echo \"up $(stat -c %a \"$s\" 2>/dev/null)\"; exit 0; fi
+    if ! command -v curl >/dev/null 2>&1; then echo \"up $(stat -c %a \"$s\" 2>/dev/null || stat -f %Lp \"$s\" 2>/dev/null)\"; exit 0; fi
+    if curl -s -o /dev/null --max-time 2 --unix-socket \"$s\" http://localhost/; then echo \"up $(stat -c %a \"$s\" 2>/dev/null || stat -f %Lp \"$s\" 2>/dev/null)\"; exit 0; fi
   fi
   sleep 0.2; i=$((i+1))
 done
@@ -640,7 +655,7 @@ impl Session {
                 step,
                 Kind::Unsupported,
                 format!(
-                    "{} runs {}; ARK runs on Linux x86_64 and arm64",
+                    "{} runs {}; ARK runs on Linux x86_64 and arm64, and macOS arm64",
                     self.name(),
                     facts.system
                 ),
@@ -1007,12 +1022,17 @@ mod tests {
             "/h",
             "uname=Darwin arm64\nsshd=disableforwarding yes\n",
         );
-        assert!(!ok);
+        assert!(ok);
+        assert_eq!((f.os.as_str(), f.arch.as_str()), ("macos", "aarch64"));
         assert_eq!(f.forwarding, Some(false));
         assert!(!f.installed && f.version.is_none());
         let (f, _) = read_facts(&Fake, "/h", "uname=Linux x86_64\n");
         assert_eq!(f.forwarding, None);
-        assert_eq!(f.arch, "x86_64");
+        assert_eq!((f.os.as_str(), f.arch.as_str()), ("linux", "x86_64"));
+        for unsupported in ["SunOS i86pc", "Linux riscv64", "Darwin"] {
+            let (_, ok) = read_facts(&Fake, "/h", &format!("uname={unsupported}\n"));
+            assert!(!ok, "{unsupported}");
+        }
     }
 
     #[test]

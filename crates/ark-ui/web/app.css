@@ -888,6 +888,9 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .app[data-view] .chat-workspace { position: absolute; inset: 0; z-index: 20; display: block; pointer-events: none; }
 .app[data-view] .chat-layout-leaf { width: 100%; height: 100%; overflow: visible; }
 .app[data-view] .chat-surface { position: static; }
+/* The chat stays above the view only for its approvals, so it must not paint over the view. */
+.app[data-view] .chat-workspace :is(.chat-layout-leaf, .chat-surface) { background: transparent; box-shadow: none; }
+.app[data-view] .chat-workspace .chat-divider { visibility: hidden; }
 .app[data-view] .asks { pointer-events: auto; }
 .view { min-height: 100%; }
 .nav-row[aria-current="true"] { background: var(--active); }

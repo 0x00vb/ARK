@@ -9,6 +9,12 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-10-28
+
+### Fixed
+
+- An app view (Plugins, Agents, Schedules, Settings) showed empty in v0.25.3 and v0.26.0: the chat kept above it for its approvals painted its background over the view. The chat now paints nothing there.
+
 ## [0.26.0] - 2026-10-27
 
 ### Breaking

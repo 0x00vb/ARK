@@ -2244,6 +2244,30 @@ async function marketplace(page) {
   assert.equal(await destination.getAttribute("aria-current"), "page");
   assert.equal(await page.locator('.destination[data-destination="home"]').getAttribute("aria-current"), null);
   await page.locator('.market-row[data-id="capability:mail"]').waitFor();
+  // The chat kept above a view for its approvals paints nothing over it.
+  assert.deepEqual(
+    await page.evaluate(() => [".chat-layout-leaf", ".chat-surface"].map((s) => {
+      const style = getComputedStyle(document.querySelector(`.chat-workspace ${s}`));
+      return [style.backgroundColor, style.boxShadow];
+    })),
+    [["rgba(0, 0, 0, 0)", "none"], ["rgba(0, 0, 0, 0)", "none"]],
+  );
+  // Only that chat: a chat in the side pane stays solid, and a split's divider leaves the view.
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const paneChat = document.createElement("section");
+      paneChat.className = "chat-surface";
+      document.querySelector(".pane").append(paneChat);
+      const divider = document.createElement("div");
+      divider.className = "chat-divider";
+      document.querySelector(".chat-workspace").append(divider);
+      const state = [getComputedStyle(paneChat).backgroundColor !== "rgba(0, 0, 0, 0)", getComputedStyle(divider).visibility];
+      paneChat.remove();
+      divider.remove();
+      return state;
+    }),
+    [true, "hidden"],
+  );
   assert.deepEqual(await page.locator(".market-row .market-copy strong").allInnerTexts(), ["Mail", "Calendar"]);
   const size = page.viewportSize();
   for (const [name, width] of [["wide", 1280], ["narrow", 480]]) {

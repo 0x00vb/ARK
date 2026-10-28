@@ -57,12 +57,14 @@ pub enum Step {
 /// What kind of failure, so the window can offer the right next action.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// `ssh` needs the person: a host key it has not seen, or a passphrase not in the agent.
+    /// `ssh` needs the person: a host key it has not seen.
     /// The app runs [`Failure::terminal`] in a terminal once, then tries again.
     NeedsTerminal,
     /// The computer's host key is not the one in `known_hosts`. Setup stops.
     HostKeyChanged,
-    /// The computer refused every key.
+    /// The computer refused every key (it takes only a password, or the person's key needs a
+    /// passphrase or a touch). [`Failure::terminal`] adds ARK's own key there
+    /// ([`ssh::ark_key`]) after the password once, and checks that it works.
     AuthRefused,
     /// No answer: name not found, refused, timed out, connection closed.
     Unreachable,

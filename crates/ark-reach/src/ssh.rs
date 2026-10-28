@@ -27,6 +27,8 @@ const CONTROL_MAX: usize = SOCKET_MAX - 17;
 pub struct Ssh {
     program: PathBuf,
     config: Option<PathBuf>,
+    /// ARK's key: [`ark_key`] unless [`Ssh::key`] says otherwise.
+    key: Option<PathBuf>,
 }
 
 impl Ssh {
@@ -36,11 +38,22 @@ impl Ssh {
         Some(Ssh {
             program: ark_os::find::program("ssh")?,
             config,
+            key: ark_key(),
         })
     }
 
     pub fn new(program: PathBuf, config: Option<PathBuf>) -> Ssh {
-        Ssh { program, config }
+        Ssh {
+            program,
+            config,
+            key: ark_key(),
+        }
+    }
+
+    /// ARK's key at `path` instead of `~/.ssh/ark_ed25519`.
+    pub fn key(mut self, path: PathBuf) -> Ssh {
+        self.key = Some(path);
+        self
     }
 
     pub fn program(&self) -> &Path {
@@ -51,11 +64,14 @@ impl Ssh {
         self.config.as_deref()
     }
 
-    /// `ssh` with `-F <config>` when one is set.
+    /// `ssh` with `-F <config>` when one is set, and ARK's key ([`ark_key`]) once it exists.
     pub(crate) fn command(&self) -> tokio::process::Command {
         let mut c = ark_os::process::command(&self.program);
         if let Some(f) = &self.config {
             c.arg("-F").arg(f);
+        }
+        if let Some(k) = self.key.as_ref().filter(|k| k.is_file()) {
+            c.arg("-i").arg(k);
         }
         c.stdin(Stdio::null()).kill_on_drop(true);
         c
@@ -375,9 +391,11 @@ impl Session {
             format!("Could not reach {}: {line}", self.name())
         };
         let mut f = Failure::new(step, kind.clone(), words);
-        if matches!(kind, Kind::NeedsTerminal | Kind::AuthRefused) {
-            f.terminal = Some(self.terminal_connect());
-        }
+        f.terminal = match kind {
+            Kind::NeedsTerminal => Some(self.terminal_connect()),
+            Kind::AuthRefused => Some(self.terminal_authorize()),
+            _ => None,
+        };
         f
     }
 
@@ -391,6 +409,29 @@ impl Session {
             .collect();
         rest.extend(["--".into(), self.target.to_string(), "true".into()]);
         self.ssh.argv(&rest)
+    }
+
+    /// The command the person runs once in a terminal when the computer refuses every key (it
+    /// takes only a password, or the person's key needs a passphrase or a touch): it adds
+    /// ARK's key ([`ark_key`]) there, so every later connection, the tunnel's too, needs no
+    /// one. `ssh` asks for the password once; that connection stays open as the setup's
+    /// master. It ends by logging in with the key alone, and fails when that does not work.
+    /// Not on Windows (no `sh`): there the plain connect.
+    pub fn terminal_authorize(&self) -> Vec<String> {
+        let Some(key) = self.ssh.key.clone().filter(|_| cfg!(unix)) else {
+            return self.terminal_connect();
+        };
+        let mut v: Vec<String> = vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            AUTHORIZE.into(),
+            "sh".into(),
+            self.target.to_string(),
+            key.to_string_lossy().into_owned(),
+            self.control.to_string_lossy().into_owned(),
+        ];
+        v.extend(self.ssh.argv(&[]));
+        v
     }
 
     /// A terminal command that runs `words` there with a terminal (for `sudo`).
@@ -414,6 +455,34 @@ impl Session {
         let _ = tokio::time::timeout(secs(5), c.status()).await;
     }
 }
+
+/// ARK's own key for reaching the person's computers: `~/.ssh/ark_ed25519`, no passphrase.
+/// Made by [`Session::terminal_authorize`] when a computer refuses every key; never replaced.
+pub fn ark_key() -> Option<PathBuf> {
+    ark_os::dirs::home().map(|h| h.join(".ssh").join("ark_ed25519"))
+}
+
+/// `$1` the target, `$2` ARK's key, `$3` the master's socket, the rest `ssh` and `-F`. Prints
+/// what it does in the person's terminal. The part there runs under `sh`, whatever the login
+/// shell, and ends `authorized_keys` with a newline before adding a line.
+const AUTHORIZE: &str = r#"t=$1; k=$2; cp=$3; shift 3
+if [ ! -e "$k" ]; then
+  echo "ARK makes its own key for your computers: $k (no passphrase, only ARK uses it)."
+  mkdir -p "${k%/*}" && chmod 700 "${k%/*}" || exit 1
+  ssh-keygen -q -t ed25519 -N '' -C ARK -f "$k" || exit 1
+elif [ ! -e "$k.pub" ]; then
+  ssh-keygen -y -f "$k" > "$k.pub" || exit 1
+fi
+echo "Adding ARK's key to $t. ssh asks for the password there once."
+r='umask 077; mkdir -p ~/.ssh && f=~/.ssh/authorized_keys && k=$(cat) && { grep -qxF "$k" "$f" 2>/dev/null || { if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then echo >> "$f"; fi; printf "%s
+" "$k" >> "$f"; }; }'
+"$@" -T -o RemoteCommand=none -o ControlMaster=auto -o "ControlPath=$cp" -o ControlPersist=60 -- "$t" "sh -c '$r'" < "$k.pub" || exit 1
+if "$@" -T -o BatchMode=yes -o ControlMaster=no -o ControlPath=none -o RemoteCommand=none -o IdentitiesOnly=yes -i "$k" -- "$t" true; then
+  echo "Done. Go back to ARK and try again."
+else
+  echo "$t still does not take ARK's key. Its sshd may read keys from elsewhere (AuthorizedKeysFile)."
+  exit 1
+fi"#;
 
 pub(crate) fn secs(n: u64) -> Duration {
     Duration::from_secs(n)
@@ -538,6 +607,73 @@ mod tests {
         assert!(s.control.as_os_str().len() <= CONTROL_MAX);
     }
 
+    /// The terminal step for a computer that refuses every key, with a stand-in `ssh` (no ssh
+    /// server is involved): it runs the command meant for there in a home folder of its own,
+    /// and a login with the key alone works when the key is in that folder's authorized_keys.
+    #[cfg(unix)]
+    #[test]
+    fn authorize_adds_arks_key_once_and_checks_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (home, there) = (dir.path().join("home"), dir.path().join("there"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(there.join(".ssh")).unwrap();
+        let fake = dir.path().join("ssh");
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nthere={}\n\
+                 for a; do last=$a; case $a in BatchMode=yes) batch=1 ;; esac; done\n\
+                 for a; do [ \"$p\" = -i ] && k=$a; p=$a; done\n\
+                 if [ -n \"$batch\" ]; then [ -e $there/refuse ] && exit 255; grep -qxF \"$(cat \"$k.pub\")\" $there/.ssh/authorized_keys; exit; fi\n\
+                 HOME=$there sh -c \"$last\"\n",
+                there.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let key = home.join(".ssh/ark_ed25519");
+        let s = Session::new(
+            Ssh::new(fake, None).key(key.clone()),
+            Target::parse("me@mac").unwrap(),
+            dir.path(),
+        )
+        .unwrap();
+        let run = || {
+            let argv = s.terminal_authorize();
+            std::process::Command::new(&argv[0])
+                .args(&argv[1..])
+                .output()
+                .unwrap()
+        };
+        let keys = there.join(".ssh/authorized_keys");
+        // A line without its newline stays whole.
+        std::fs::write(&keys, "ssh-rsa AAAAold other").unwrap();
+
+        let out = run();
+        assert!(out.status.success(), "{out:?}");
+        let made = std::fs::read_to_string(key.with_extension("pub")).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&keys).unwrap(),
+            format!("ssh-rsa AAAAold other\n{made}")
+        );
+        let mode = std::fs::metadata(&key).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0);
+
+        // Again, and with the .pub gone: the key is kept, its .pub made from it, added once.
+        let private = std::fs::read(&key).unwrap();
+        std::fs::remove_file(key.with_extension("pub")).unwrap();
+        assert!(run().status.success());
+        assert_eq!(std::fs::read(&key).unwrap(), private);
+        assert_eq!(std::fs::read_to_string(&keys).unwrap().lines().count(), 2);
+
+        // A computer that still refuses the key: the step fails and says so.
+        std::fs::write(there.join("refuse"), "").unwrap();
+        let out = run();
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("still does not take"));
+    }
+
     #[test]
     fn terminal_commands_keep_the_target_after_dashes() {
         let s = Session::new(
@@ -549,6 +685,16 @@ mod tests {
         let argv = s.terminal_connect();
         assert_eq!(&argv[..3], ["/usr/bin/ssh", "-F", "/c/config"]);
         assert_eq!(&argv[argv.len() - 3..], ["--", "me@vps", "true"]);
+        let s = Session::new(
+            Ssh::new("/usr/bin/ssh".into(), Some("/c/config".into())).key("/k/ark".into()),
+            Target::parse("me@vps").unwrap(),
+            tempfile::tempdir().unwrap().path(),
+        )
+        .unwrap();
+        let argv = s.terminal_authorize();
+        assert_eq!(&argv[..2], ["/bin/sh", "-c"]);
+        assert_eq!(&argv[3..6], ["sh", "me@vps", "/k/ark"]);
+        assert_eq!(&argv[argv.len() - 3..], ["/usr/bin/ssh", "-F", "/c/config"]);
         let argv = s.terminal_run(&["sudo", "loginctl", "enable-linger", "me"]);
         assert_eq!(
             &argv[argv.len() - 3..],

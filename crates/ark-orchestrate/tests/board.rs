@@ -484,7 +484,9 @@ async fn each_goal_has_its_own_board() {
     let on = |b: &str| WorkChange::default().board(b);
     let copy = o.add_work(PERSON, "Write the copy", on(&site.id)).unwrap();
     let draft = o.add_work(PERSON, "Draft it", on(&book.id)).unwrap();
-    // Each board orders its own columns.
+    // Each board orders its own columns. Activity is ordered by millisecond, so step past
+    // the draft's.
+    std::thread::sleep(std::time::Duration::from_millis(2));
     let logo = o
         .add_work(PERSON, "Pick a logo", on(&site.id).before(&copy.id))
         .unwrap();

@@ -206,6 +206,8 @@ for (const runtime of ["fixture", "window"]) for (const state of ["mounted", "di
     upload.release();
     await page.locator(".adding").waitFor({ state: "detached" });
     const expected = "Latest origin draft\nAdded to the project: notes.txt";
+    // A promoted origin's draft is restored, then completed, after the progress row goes.
+    if (state === "promoted") await page.waitForFunction(v => document.querySelector("#input").value === v, expected, { timeout: 5000 }).catch(() => {});
     assert.equal(await input.inputValue(), state === "promoted" ? expected : "Unrelated primary draft");
     assert.deepEqual(await input.evaluate(el => [el.selectionStart, el.selectionEnd]), [2, 5]);
     assert.equal(await page.locator("#mode-chip").evaluate(el => document.activeElement === el), true);

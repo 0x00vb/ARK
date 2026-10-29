@@ -30,14 +30,18 @@ impl Accent {
 
     pub(crate) fn line_editor_color(&self) -> reedline::Color {
         match self {
-            Accent::Red => reedline::Color::Red,
-            Accent::Green => reedline::Color::Green,
-            Accent::Yellow => reedline::Color::Yellow,
-            Accent::Blue => reedline::Color::Blue,
-            Accent::Magenta => reedline::Color::Magenta,
-            Accent::Cyan => reedline::Color::Cyan,
-            Accent::White => reedline::Color::White,
-            Accent::Rgb(r, g, b) => reedline::Color::Rgb(*r, *g, *b),
+            Accent::Red => reedline::Color::DarkRed,
+            Accent::Green => reedline::Color::DarkGreen,
+            Accent::Yellow => reedline::Color::DarkYellow,
+            Accent::Blue => reedline::Color::DarkBlue,
+            Accent::Magenta => reedline::Color::DarkMagenta,
+            Accent::Cyan => reedline::Color::DarkCyan,
+            Accent::White => reedline::Color::Grey,
+            Accent::Rgb(r, g, b) => reedline::Color::Rgb {
+                r: *r,
+                g: *g,
+                b: *b,
+            },
         }
     }
 }

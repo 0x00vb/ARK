@@ -5,10 +5,10 @@
 use std::borrow::Cow;
 
 use reedline::{
-    default_emacs_keybindings, ColumnarMenu, Completer, CompletionResult, DefaultHinter,
-    EditCommand, Emacs, FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Prompt,
-    PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus, Reedline, ReedlineEvent,
-    ReedlineMenu, Signal, Span, Suggestion, ValidationResult, Validator,
+    default_emacs_keybindings, ColumnarMenu, Completer, DefaultHinter, EditCommand, Emacs,
+    FileBackedHistory, KeyCode, KeyModifiers, MenuBuilder, Prompt, PromptEditMode,
+    PromptHistorySearch, PromptHistorySearchStatus, Reedline, ReedlineEvent, ReedlineMenu, Signal,
+    Span, Suggestion, ValidationResult, Validator,
 };
 
 use std::collections::VecDeque;
@@ -188,7 +188,7 @@ fn build_editor(st: &ShellState) -> Reedline {
         )))
         .with_validator(Box::new(Continuation))
         .with_hinter(Box::new(
-            DefaultHinter::default().with_style(reedline::Color::DarkGray.normal()),
+            DefaultHinter::default().with_style(nu_ansi_term::Color::DarkGray.normal()),
         ))
         .use_bracketed_paste(true)
         .with_ansi_colors(st.cfg.theme.color_enabled());
@@ -225,10 +225,10 @@ struct SlashCompleter {
 }
 
 impl Completer for SlashCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
+    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
         let head = &line[..pos.min(line.len())];
         if !head.starts_with('/') || head.contains(char::is_whitespace) {
-            return CompletionResult::fresh(Vec::<Suggestion>::new());
+            return Vec::new();
         }
         let typed = &head[1..];
         let mut out: Vec<Suggestion> = self
@@ -244,7 +244,7 @@ impl Completer for SlashCompleter {
             })
             .collect();
         out.sort_by(|a, b| a.value.cmp(&b.value));
-        CompletionResult::fresh(out)
+        out
     }
 }
 
@@ -276,7 +276,7 @@ impl Prompt for ShellPrompt {
     }
     fn get_indicator_color(&self) -> reedline::Color {
         if self.plain {
-            reedline::Color::Default
+            reedline::Color::Reset
         } else {
             self.color
         }
@@ -365,11 +365,11 @@ mod tests {
             ],
         };
         let r = c.complete("/res", 4);
-        let vals: Vec<&str> = r.suggestions().iter().map(|s| s.value.as_str()).collect();
+        let vals: Vec<&str> = r.iter().map(|s| s.value.as_str()).collect();
         assert_eq!(vals, vec!["/research", "/resume"]);
-        assert!(c.complete("hello /res", 10).suggestions().is_empty());
+        assert!(c.complete("hello /res", 10).is_empty());
         assert!(
-            c.complete("/resume abc", 11).suggestions().is_empty(),
+            c.complete("/resume abc", 11).is_empty(),
             "no completion once args start"
         );
     }

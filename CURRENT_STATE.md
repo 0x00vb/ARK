@@ -1,3 +1,11 @@
+## Desktop consumer delivered (2026-10-29)
+
+Desktop0.9.7 is published on the Mac download and signed updater. It pins this immutable
+v0.27.2 tag at f797df9d7cf1c299bfa6aeaa1f0414cc2e8b6a5b. Current Mac signing, notarization,
+downloaded-package/Gatekeeper/signature checks and Linux8/8 pass. Installed-app upgrade,
+clean-Mac and physical-phone observations remain separate. Source and delivery receipts:
+../board/evidence/marketplace-release-20261029/. The notes below record earlier release stages.
+
 ## Release 0.27.2 (2026-10-29)
 
 The qualified marketplace, data-only skill packages, calendar file/artifact viewer, immediate

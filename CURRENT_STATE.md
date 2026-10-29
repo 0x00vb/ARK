@@ -1,3 +1,17 @@
+## Release 0.27.2 (2026-10-29)
+
+The qualified marketplace, data-only skill packages, calendar file/artifact viewer, immediate
+view commands, compact file rows and Rust 1.90 CLI compatibility are committed. Production
+source matches the retained Core qualification. Version, lock package versions and release
+docs are the only subsequent changes. The owner requested implementation and shipping.
+
+Completed suites and builds were not replayed. Source-bound segmented Core gates,66 actual
+page cases,50 direct browser cases and actual Desktop consumer proofs remain the evidence.
+Fresh-clone source/version/locked metadata verification is tracked separately from those tests
+in ../board/evidence/marketplace-release-20261029/. Desktop pins the immutable Core tag only
+after both-remote publication and verification. Physical-phone and real schedule/provider
+projections remain separate. Historical local-candidate notes below record prior states.
+
 ## Calendar file and artifact viewer (2026-10-29)
 
 Verified local candidate, ready on codex/marketplace-skills. Calendar JSON files and artifacts
@@ -295,7 +309,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.27.1 |
+| Latest tag | v0.27.2 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

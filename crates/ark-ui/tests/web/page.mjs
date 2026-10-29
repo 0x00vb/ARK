@@ -3316,6 +3316,7 @@ async function processes(page) {
   await page.waitForFunction(() => document.querySelector('.proc-row[data-state="ready"]'), null, { timeout: 20000 });
   // The page the agent asked for, in the Browser panel, in front.
   await page.locator("img.remote-browser[src^='data:image/']").waitFor();
+  await page.waitForFunction(() => /^http:\/\/localhost:\d+\/home$/.test(document.querySelector('input[aria-label="Address"]')?.value), null, { timeout: 20000 });
   assert.match(await page.locator('input[aria-label="Address"]').inputValue(), /^http:\/\/localhost:\d+\/home$/);
   assert.equal(await page.locator("iframe.wb-frame").count(), 0);
   assert.equal(await page.locator(".pane-tab[aria-selected=true]").innerText(), "localhost");

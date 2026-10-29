@@ -152,6 +152,24 @@ impl Adapter for Notes {
     }
 }
 
+async fn close_listener(listener: ark_ui::ClientServer) {
+    let port = listener.port;
+    drop(listener);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => break,
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+                Err(error) => panic!("could not verify listener closure: {error}"),
+                Ok(socket) => drop(socket),
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the temporary restart listener must close before another mutation");
+}
+
 #[tokio::test]
 async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     let dir = tempfile::tempdir().unwrap();
@@ -516,9 +534,9 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     .await;
     assert!(signed_out.starts_with("HTTP/1.1 401"), "{signed_out}");
 
-    let (_, restarted) = ArkUi::new(app(dir.path()))
-        .access(Access::Tokens(tokens.clone()))
-        .serve_background("127.0.0.1:0")
+    let (restarted_runtime, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let restarted = ClientListener::new(tokens.clone())
+        .serve(restarted_runtime, "127.0.0.1:0")
         .await
         .unwrap();
     let retried_after_restart = raw(
@@ -533,6 +551,7 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     let retried_after_restart: Value =
         serde_json::from_str(retried_after_restart.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(retried_after_restart["id"], created["id"]);
+    close_listener(restarted).await;
     let legacy = raw(
         served.port,
         post(
@@ -789,9 +808,9 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     store
         .put_record("client_mutation", &record_id, &device, &interrupted)
         .unwrap();
-    let (_resumed, _served_again) = ArkUi::new(app(dir.path()))
-        .access(Access::Tokens(tokens.clone()))
-        .serve_background("127.0.0.1:0")
+    let (resumed_runtime, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let served_again = ClientListener::new(tokens.clone())
+        .serve(resumed_runtime, "127.0.0.1:0")
         .await
         .unwrap();
     let resumed = store
@@ -810,6 +829,7 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         1,
         "restart after the durable turn began must not send it again"
     );
+    close_listener(served_again).await;
 
     let mut events = tokio::net::TcpStream::connect(("127.0.0.1", served.port))
         .await

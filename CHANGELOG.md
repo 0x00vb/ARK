@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.27.3] - 2026-10-29
+
+- View authoritative scheduled starts and actual run states in Calendar.
+- Preview, install and export private data-only skill packages with digest and destination checks.
+
 What changed for people building on ARK, per release. Not a commit log.
 
 - Sections: `Added`, `Changed`, `Fixed`, `Breaking`. A `Breaking` entry says what an app must

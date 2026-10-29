@@ -45,6 +45,37 @@ async function finished(page, send) {
 }
 
 const scenarios = {
+  async "product-followups"(page) {
+    const calls=[];page.on('request',request=>{if(request.method()==='POST'&&new URL(request.url()).pathname==='/rpc') calls.push(request.postDataJSON());});
+    await page.evaluate(()=>window.ark.openView('schedules'));
+    await page.getByRole('button',{name:'Calendar',exact:true}).click();
+    await page.getByRole('button',{name:/Review real schedule/}).first().waitFor();
+    await page.getByRole('button',{name:/Review real schedule/}).first().click();
+    assert.match(await page.locator('.cal-facts').innerText(),/s-fixture/);
+    const when = await page.locator('.cal-facts dt').filter({hasText:/^When$/}).evaluate(el=>el.nextElementSibling.textContent);
+    assert.ok(!when.includes(' to '),when);
+    await shot(page,'real-schedule-details');
+    await page.evaluate(()=>window.ark.openView('marketplace'));
+    await page.getByRole('tab',{name:'Skills',exact:true}).click();
+    const data={id:'private.notes',name:'Private notes',summary:'Private workflow',publisher:'Local author',version:'1',skills:[{name:'private-notes',files:{'SKILL.md':'---\nname: private-notes\ndescription: Keep private notes\n---\nRead references/checklist.md.','references/checklist.md':'Use actual evidence. '+ 'x'.repeat(500)}}]};
+    await page.getByLabel('Skill package file').setInputFiles({name:'private.skills.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
+    await page.getByRole('heading',{name:'Review skill package'}).waitFor();
+    assert.equal(await page.getByRole('heading',{name:'Review skill package'}).evaluate(el=>el===document.activeElement),true);
+    await page.getByText('references/checklist.md',{exact:true}).click();
+    await page.setViewportSize({width:390,height:850});
+    assert.ok(await page.locator('.market-skills').evaluate(el=>el.scrollWidth<=el.clientWidth));
+    await shot(page,'real-private-import-narrow');
+    await page.getByRole('button',{name:'Install package',exact:true}).click();
+    await page.getByRole('button',{name:'View Private notes',exact:true}).click();
+    const downloading=page.waitForEvent('download');await page.getByRole('button',{name:'Export package',exact:true}).click();
+    const download=await downloading;const stream=await download.createReadStream();let source='';for await(const chunk of stream)source+=chunk;
+    assert.deepEqual(JSON.parse(source),data);
+    await page.getByRole('button',{name:'Remove',exact:true}).click();
+    await page.getByRole('button',{name:'View Private notes',exact:true}).waitFor({state:'detached'});
+    const retained=await page.evaluate(()=>window.ark.call('skill_packages',{id:'private.notes'}));assert.deepEqual(retained,data);
+    assert.equal(calls.filter(call=>call.method==='send').length,0);
+  },
+
   async "project-sections"(page) {
     await page.evaluate(() => {
       window.__projectSectionEvents = [];

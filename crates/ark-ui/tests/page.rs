@@ -241,7 +241,15 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         }));
     }
     if agents {
-        app = app.orchestrate(|ark, project, gate| {
+        let product_followups = scenario == "product-followups";
+        app = app.orchestrate(move |ark, project, gate| {
+            if product_followups {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64;
+                ark.engine().store.put_record("orch_schedule", "s-fixture", project.id.as_str(), &json!({
+                    "id":"s-fixture", "project":project.id, "agent":"fixture", "task":{"objective":"Review real schedule"},
+                    "when":{"every_minutes":1440}, "says":"every day", "next_ms":now+3_600_000, "created_ms":now
+                }))?;
+            }
             Ok(
                 ark_interact::ark_orchestrate::Orchestrator::builder(ark, project)
                     .approvals(gate)
@@ -1468,4 +1476,9 @@ async fn a_process_shows_its_output_and_opens_its_page() {
         ),
     ];
     drive("processes", script, Duration::ZERO).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn private_skills_and_schedule_calendar_work_through_the_real_page_and_scoped_host() {
+    drive_app("product-followups", vec![], Duration::ZERO, true).await;
 }

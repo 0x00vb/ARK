@@ -1,3 +1,17 @@
+## Release0.27.3, 29 October2026
+
+Schedules project current records and actual runs into the existing calendar. Private data-only
+skill JSON can be previewed, installed and exported through the existing scoped lifecycle.
+Core requirements pass as preserved stages: workspace Rust/doc tests,67 actual page cases,
+workspace release build and simulated benchmark. Final all-target strict clippy and the
+UTF-16 history regression pass on final source. No production job, social post or grant was
+created. The real-page fixture uses only temporary synthetic schedule/package data.
+
+The initial version-state failure and disk-guard stop are preserved. Completed stages were
+not replayed. A later shared debug cache disappearance failed a final check; the final check
+passed in the private target. Evidence: ../board/evidence/product-followups-20261029/.
+Desktop delivery follows the immutable Core tag. Physical observation stays separate.
+
 ## Desktop consumer delivered (2026-10-29)
 
 Desktop0.9.7 is published on the Mac download and signed updater. It pins this immutable
@@ -317,7 +331,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.27.2 |
+| Latest tag | v0.27.3 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

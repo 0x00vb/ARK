@@ -24,6 +24,8 @@
 //! ([`Engine::add_skills`]). A name in an earlier place hides the same name in a later one. Installing skills is not ARK's business (a person runs an installer, or
 //! copies a folder).
 
+pub mod packages;
+
 use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -80,6 +82,10 @@ pub fn dirs(engine: &Engine, project: &ProjectId) -> Vec<(PathBuf, SkillScope)> 
         out.push((ws.join(".agents").join("skills"), SkillScope::Project));
     }
     out.push((engine.store.root().join("skills"), SkillScope::Store));
+    match packages::directories(engine) {
+        Ok(dirs) => out.extend(dirs.into_iter().map(|(_, path)| (path, SkillScope::Store))),
+        Err(error) => tracing::warn!(%error, "Installed skill packages could not be read"),
+    }
     for d in engine.skill_dirs() {
         out.push((d.clone(), SkillScope::Builtin));
     }
@@ -316,7 +322,7 @@ pub fn distiller() -> Distiller {
 
 /// Front matter (`key: value` lines between `---` fences, with `>` and `|` blocks and quoted
 /// values) and the text after it. A file without front matter is all body.
-fn split_front_matter(text: &str) -> (std::collections::HashMap<String, String>, &str) {
+pub(crate) fn split_front_matter(text: &str) -> (std::collections::HashMap<String, String>, &str) {
     let mut map = std::collections::HashMap::new();
     let t = text.trim_start_matches('\u{feff}');
     let Some(rest) = t.strip_prefix("---") else {
@@ -369,7 +375,7 @@ fn unquote(v: &str) -> String {
 }
 
 /// Lower-case letters, digits and `-`, as the format asks; 64 at most.
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name

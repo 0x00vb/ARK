@@ -39,6 +39,7 @@ pub struct Engine {
     sources: Vec<Arc<dyn ToolSource>>,
     /// Folders of skills that come with the app's tools ([`crate::skills::dirs`]).
     skills: Vec<std::path::PathBuf>,
+    skill_packages: Vec<Arc<crate::skills::packages::SkillPackage>>,
     /// Shared with every engine made by [`scoped`](Engine::scoped): the process is stopping.
     stopping: Arc<Stopping>,
     /// Pictures a call showed, by invocation, until the harness takes them for the model.
@@ -104,6 +105,7 @@ impl Engine {
             plugins: None,
             sources: Vec::new(),
             skills: Vec::new(),
+            skill_packages: Vec::new(),
             stopping: Arc::default(),
             pictures: Arc::default(),
             shown: Arc::default(),
@@ -124,6 +126,7 @@ impl Engine {
             plugins: None,
             sources: Vec::new(),
             skills: self.skills.clone(),
+            skill_packages: self.skill_packages.clone(),
             stopping: self.stopping.clone(),
             pictures: self.pictures.clone(),
             shown: self.shown.clone(),
@@ -143,6 +146,7 @@ impl Engine {
             plugins: self.plugins.clone(),
             sources: self.sources.clone(),
             skills: self.skills.clone(),
+            skill_packages: self.skill_packages.clone(),
             stopping: self.stopping.clone(),
             pictures: self.pictures.clone(),
             shown: self.shown.clone(),
@@ -228,6 +232,27 @@ impl Engine {
     /// one by name.
     pub fn add_skills(&mut self, dir: impl Into<std::path::PathBuf>) {
         self.skills.push(dir.into());
+    }
+
+    /// Register reviewed data-only skills for person-directed installation.
+    pub fn add_skill_package(
+        &mut self,
+        package: crate::skills::packages::SkillPackage,
+    ) -> Result<(), AgentError> {
+        package.validate()?;
+        if self.skill_packages.len() >= 128
+            || self.skill_packages.iter().any(|p| p.id == package.id)
+        {
+            return Err(AgentError::Plugin(
+                "Duplicate or excessive skill package registration".into(),
+            ));
+        }
+        self.skill_packages.push(Arc::new(package));
+        Ok(())
+    }
+
+    pub fn skill_packages(&self) -> &[Arc<crate::skills::packages::SkillPackage>] {
+        &self.skill_packages
     }
 
     /// The folders given to [`add_skills`](Engine::add_skills).

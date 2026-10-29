@@ -18,6 +18,8 @@ pub struct SkillView {
     pub scope: SkillScope,
     /// The conversation may read it (agents choose their own).
     pub chat: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<String>,
 }
 
 /// Every skill of the project folder and the store, project first, and whether the
@@ -29,9 +31,20 @@ pub fn list(ark: &Ark, project: &ProjectId) -> Vec<SkillView> {
 /// [`list`] from the engine and the names the conversation's skills are chosen by, for a
 /// front-end that should not wait for a running turn.
 pub fn list_for(engine: &Engine, project: &ProjectId, chat: &[String]) -> Vec<SkillView> {
+    let packages = match skills::packages::directories(engine) {
+        Ok(packages) => packages,
+        Err(error) => {
+            tracing::warn!(%error, "Installed skill ownership could not be read");
+            Vec::new()
+        }
+    };
     all(engine, project)
         .into_iter()
         .map(|s| SkillView {
+            package: packages
+                .iter()
+                .find(|(_, root)| s.dir.starts_with(root))
+                .map(|(id, _)| id.clone()),
             chat: chat.iter().any(|p| p == "*" || p == &s.name),
             name: s.name,
             description: s.description,
@@ -78,4 +91,24 @@ pub fn report(list: &[SkillView], engine: &Engine, project: &ProjectId) -> Repor
         "The conversation reads them when a task fits; an agent reads the ones it was given. More go in {}.",
         places.join(" or ")
     ))
+}
+
+pub fn packages(engine: &Engine) -> anyhow::Result<Vec<skills::packages::PackageView>> {
+    Ok(skills::packages::list(engine)?)
+}
+
+pub async fn install_package(
+    engine: std::sync::Arc<Engine>,
+    project: ProjectId,
+    id: String,
+    digest: String,
+) -> anyhow::Result<skills::packages::PackageView> {
+    Ok(tokio::task::spawn_blocking(move || {
+        skills::packages::install(&engine, &project, &id, &digest)
+    })
+    .await??)
+}
+
+pub async fn remove_package(engine: std::sync::Arc<Engine>, id: String) -> anyhow::Result<()> {
+    Ok(tokio::task::spawn_blocking(move || skills::packages::remove(&engine, &id)).await??)
 }

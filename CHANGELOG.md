@@ -9,6 +9,22 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+### Added
+
+- Calendar JSON files and artifacts have month, week and day views, item details and visible snapshot times. Reading creates no scheduled work. See [Calendar snapshots](docs/CALENDAR.md).
+
+- Apps can register reviewed skill packages. People can browse, install and remove them from Plugins › Skills or `/skills`. Releases use durable receipts, and removal preserves local files. See [Skill packages](docs/SKILL_PACKAGES.md).
+
+### Changed
+
+- View commands such as `/agents` open immediately, including while a chat is working.
+- File cards use compact rows and show an honest fallback label for unknown formats.
+
+### Fixed
+
+- Marketplace search uses readable text on touch devices while keeping browser zoom available.
+- Keep CLI completion compatible with the declared Rust 1.90 minimum.
+
 ## [0.27.1] - 2026-10-28
 
 ### Fixed

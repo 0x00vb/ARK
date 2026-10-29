@@ -6,6 +6,7 @@
 import { h, clear } from "./dom.js";
 import { registry } from "./ext.js";
 import { pluginArtwork } from "./plugin-art.js";
+import { skillsMarketplace } from "./marketplace-skills.js";
 
 function entryIcon(entry) {
   return pluginArtwork(entry);
@@ -28,6 +29,28 @@ function marketplace(el, ark) {
   const connecting = new Set();
   const body = h("div.market-body");
   const notice = h("div.market-notice", { role: "status" });
+  const skillBody = h("div", { hidden: true, id: "market-skills", role: "tabpanel", "aria-labelledby": "market-skills-tab" });
+  body.id = "market-plugins";
+  body.setAttribute("role", "tabpanel"); body.setAttribute("aria-labelledby", "market-plugins-tab");
+  let skillControl = null;
+  const tabs = ["Plugins", "Skills"].map((title, index) => h("button", {
+    type: "button", role: "tab", id: index === 0 ? "market-plugins-tab" : "market-skills-tab", "aria-selected": String(index === 0), tabindex: index === 0 ? "0" : "-1",
+    "aria-controls": index === 0 ? "market-plugins" : "market-skills",
+    onclick: () => choose(index),
+  }, title));
+  function choose(index) {
+    tabs.forEach((tab, at) => { tab.setAttribute("aria-selected", String(at === index)); tab.tabIndex = at === index ? 0 : -1; });
+    body.hidden = index !== 0; skillBody.hidden = index !== 1;
+    if (index === 1 && !skillControl) skillControl = skillsMarketplace(skillBody, ark);
+  }
+  const kinds = h("div.market-types", { role: "tablist", "aria-label": "Catalog type" }, tabs);
+  kinds.addEventListener("keydown", event => {
+    const at = tabs.indexOf(document.activeElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? 1 : ["ArrowLeft", "ArrowRight"].includes(event.key) ? 1 - at : null;
+    if (at < 0 || next === null) return;
+    event.preventDefault(); choose(next); tabs[next].focus();
+  });
+
 
   const result = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
   const load = async () => {
@@ -218,7 +241,9 @@ function marketplace(el, ark) {
     if (entry.source === "app") {
       const host = h("div.market-plugin-settings");
       clear(body).append(h("div.market-detail-head", back),
-        h("section.market-detail", entryIcon(entry), h("div", h("h2", entry.name), h("p", entry.summary))), host);
+        h("section.market-detail", entryIcon(entry), h("div", h("h2", entry.name), h("p", entry.summary))),
+        entry.skills?.length ? h("section", h("h3.market-heading", "Included skills"), h("ul.market-includes", entry.skills.map(skill => h("li", skill.name)))) : null,
+        host);
       mountedAppId = entry.id;
       try { detailControl = entry.render(host, ark) || null; }
       catch (error) { host.append(h("p.market-notice", { role: "alert" }, error.message || String(error))); }
@@ -268,10 +293,10 @@ function marketplace(el, ark) {
   });
   visibility.observe(el, { attributes: true, attributeFilter: ["hidden"] });
   if (el.parentElement) visibility.observe(el.parentElement, { attributes: true, attributeFilter: ["hidden"] });
-  el.append(body);
+  el.append(kinds, body, skillBody);
   draw();
   load();
-  return { refresh: load, dispose() { alive = false; generation += 1; visibility.disconnect(); detailControl?.dispose?.(); detailControl = null; } };
+  return { refresh: () => Promise.all([load(), skillControl?.refresh()]), dispose() { alive = false; skillControl?.dispose(); generation += 1; visibility.disconnect(); detailControl?.dispose?.(); detailControl = null; } };
 }
 
 export function registerMarketplace(ark) {

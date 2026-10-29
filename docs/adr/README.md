@@ -115,3 +115,7 @@ What gets easier, what gets harder, what is now ruled out.
 ## Check
 The test, script or review step that keeps it true.
 ```
+
+- [0084. Skill packages are person-installed data](0084-skill-packages-are-person-installed-data.md)
+
+- [0085. A calendar is a read-only file lens](0085-calendar-is-a-read-only-file-lens.md)

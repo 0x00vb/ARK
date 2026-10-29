@@ -12,10 +12,11 @@ let browser;
 before(async () => { browser = await webkit.launch({ headless: true }); });
 after(async () => { await browser?.close(); });
 
-async function fixture(run, { detached = false, empty = false, coarse = false, places = { here: "This computer", places: [] } } = {}) {
+async function fixture(run, { detached = false, empty = false, coarse = false, remote = false, places = { here: "This computer", places: [] } } = {}) {
   const projects = [{ id: "a", name: "Operations", current: true }, { id: "b", name: "Writing", current: false }];
   const sessions = ["chat-a", "chat-b"].map((id, i) => ({ id, title: i ? "Supplier comparison" : "Quarterly review", turns: 1, updated_at: Date.now(), working: i === 1, participants: i ? ["Editor", "Lead", "Reader", "Writer"] : [] }));
   const summary = { name: "ARK", tagline: "", model: "mock", grants: [], project: projects[0], session: sessions[0], location: { runtime: "fixture", project: "a", session: "chat-a" }, execution_mode: "manual", execution_mode_revision: 0 };
+  if (remote) summary.place = { id: "remote", name: "Remote computer", state: "ok" };
   if (empty) summary.session = { ...summary.session, turns: 0 };
   const request = { id: 7, session: "chat-b", chat: "Supplier comparison", project: null, line: "Send the supplier summary?", request: {}, choices: [] };
   let approvals = [], stream, holdRead = false, releaseRead, readStarted;
@@ -39,10 +40,10 @@ async function fixture(run, { detached = false, empty = false, coarse = false, p
     if (method === "dictation_status") return { status: "unavailable" };
     if (method === "resource") {
       const key = `${params.ref.kind}:${params.operation.kind}`;
-      const results = { "project:grants": [], "project:skills": [], "project:board": null, "project:schedules": [], "process:processes": [] };
+      const results = { "project:focus": {}, "project:grants": [], "project:skills": [], "project:board": null, "project:schedules": [], "process:processes": [] };
       if (Object.hasOwn(results, key)) return results[key];
     }
-    throw Error(`Unexpected RPC ${method}`);
+    throw Error(`Unexpected RPC ${method} ${JSON.stringify(params)}`);
   };
   const server = createServer(async (req, res) => {
     try {
@@ -306,4 +307,66 @@ test("an app identity resolver is shared by individual and group chat avatars", 
   });
   assert.deepEqual(result, ["agent-Writer", "agent-Writer"]);
   await page.locator('.session[data-id="chat-b"] .chat-face[data-variant="agent-Editor"]').waitFor();
+}));
+
+
+test("mixed scene files keep accurate labels and compact cards", () => fixture(async page => {
+  await page.evaluate(async () => {
+    const { Thread } = await import("./js/conversation.js");
+    const { setFileKinds } = await import("./js/file.js");
+    setFileKinds({ png: "image", glb: "model", txt: "text" }, { image: "image", model: "3D model", text: "text file" });
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="blue"/></svg>';
+    const api = { openFile: path => { window.openedFile = path; }, call: async method => {
+      if (method === "file_media") return { data: btoa(svg), media_type: "image/svg+xml" };
+      throw Error(method);
+    }, toast() {} };
+    const thread = new Thread(document.querySelector("#thread"), document.querySelector("#thread").parentElement, api, { inspect: false });
+    thread.renderStored([{ input: "Build a scene", index: 0, answer: "Saved the scene.", activity: [{ kind: "result", files: ["render.png", "scene.glb", "editable.blend", "notes.txt", "archive.unknown"] }] }]);
+  });
+  await page.waitForFunction(() => document.querySelector(".file-card-image")?.naturalWidth > 0);
+  for (const [theme, width] of [["light", 1180], ["dark", 1180], ["light", 390]]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+    if (process.env.ARK_UI_SHOTS) {
+      await mkdir(process.env.ARK_UI_SHOTS, { recursive: true });
+      await page.screenshot({ path: resolve(process.env.ARK_UI_SHOTS, `scene-files-${theme}-${width}.png`), animations: "disabled" });
+    }
+    for (const [name, label] of [["editable.blend", "File"], ["archive.unknown", "File"], ["notes.txt", "Text file"], ["scene.glb", "3D model"]]) {
+      const card = page.getByRole("button", { name: `Open ${name}`, exact: true });
+      assert.equal(await card.locator(".file-card-sub").innerText(), label);
+      const box = await card.boundingBox();
+      assert.ok(box.height >= 44 && box.height <= 64, `${name} height ${box.height}`);
+      assert.ok(box.x >= 0 && box.x + box.width <= width);
+      await card.focus(); await page.keyboard.press("Enter");
+      assert.equal(await page.evaluate(() => window.openedFile), name);
+    }
+  }
+}));
+
+
+for (const remote of [false, true]) test(`a view slash command opens outside the fixed rail without sending a message (${remote ? "remote" : "local"})`, () => fixture(async page => {
+  await page.evaluate(() => window.ark.view({ id: "agents", title: "Agents", command: "/agents", render(el) {
+    el.append(window.ark.h("h1", "Agent canvas"));
+  } }));
+  assert.equal(await page.locator('#destinations [data-view="agents"]').count(), 0);
+  await page.locator("#input").fill("/agents");
+  await page.locator("#input").press("Enter");
+  await page.getByRole("heading", { name: "Agent canvas", exact: true }).waitFor();
+  assert.equal(await page.locator('#destinations [data-view="agents"]').count(), 0);
+  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await page.getByRole("heading", { name: "Agent canvas", exact: true }).waitFor({ state: "hidden" });
+}, { remote }));
+
+
+test("view navigation stays immediate while a turn is running", () => fixture(async (page, { emit }) => {
+  await page.evaluate(() => window.ark.view({ id: "agents", title: "Agents", command: "/agents", render(el) {
+    el.append(window.ark.h("h1", "Agent canvas"));
+  } }));
+  emit({ kind: "turn_started", input: "Existing work" });
+  await page.locator('.app[data-running="true"]').waitFor();
+  await page.locator("#input").fill("/agents");
+  await page.locator("#input").press("Enter");
+  await page.getByRole("heading", { name: "Agent canvas", exact: true }).waitFor();
+  assert.equal(await page.locator("#queue").innerText(), "");
+  assert.equal(await page.locator(".app").getAttribute("data-running"), "true");
 }));

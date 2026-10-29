@@ -1,3 +1,52 @@
+## Calendar file and artifact viewer (2026-10-29)
+
+Verified local candidate, ready on codex/marketplace-skills. Calendar JSON files and artifacts
+have month/week/day, item details, named zones, bounded data and a visible snapshot time.
+Files retain Source and version refresh; artifacts retain Raw and scoped complete-byte checks.
+No scheduler, account grant or publication authority is created. See docs/CALENDAR.md.
+
+Actual current-asset Desktop consumer file/artifact/week/day/details/narrow-dark and corrected
+clock proof PASS with0 live model calls/sends/schedules; processes closed and tokens revoked.
+Final qualification retains49 direct browser cases plus1 new Raw-recovery case, including9
+calendar cases. All66 actual Core page cases pass across saved records. Core requirements pass
+as a segmented gate; the original failed single script is preserved as failed. Rust/doc tests,
+clippy/fmt/protocol/version, release build and simulated benchmark pass. Post-review recovery
+label correction has its new browser case and rebuilt release assets. Completed checks were
+retained. Temporary fixture listeners and the initial navigation observation were corrected.
+Runner/dependency failures and the three synthetic outputs are preserved in evidence.
+
+Review used vstack's cold author fallback under the owner's no-agent/no-more-questions
+constraints. No independent reviewer is claimed. Physical-phone behavior and real scheduler or
+provider projections remain separate. No commit, push or release.
+Evidence: ../board/evidence/marketplace-skills-20261029/calendar-final-verification-v2.json and
+CALENDAR-REVIEW-CORRECTION.md. Earlier gate records remain immutable.
+
+## Marketplace touch search follow-up (2026-10-29)
+
+One coarse-pointer rule gives marketplace search16px text; fine-pointer desktop stays13px.
+Actual WebKit focus/input/style tests2 pass and full Core scripts/ci.sh passes for this change.
+Browser zoom remains enabled. This verifies the CSS prerequisite; physical iPhone keyboard,
+zoom and touch feel remain unobserved. Existing marketplace logic/API/lifecycle is unchanged.
+Owner Go for all, dont ask again authorizes the bounded follow-up without repeated review
+requests. No independent reviewer is fabricated. No commit, push or release.
+Evidence: ../board/evidence/marketplace-skills-20261029/mobile-search-tests.log and core-ci-mobile.log.
+
+## Plugins and Skills marketplace implementation (2026-10-29)
+
+Local candidate in `codex/marketplace-skills`. The owner accepted plan/design and four preview
+skills. Core now registers validated data-only packages, installs owned content-addressed
+releases and activates durable receipts. Removal preserves files. The Plugins page has a
+searchable Skills tab, scoped installs, status, retry and removal. CLI and UI share lifecycle.
+Final Core scripts/ci.sh passed after a red/green receipt-capacity correction (12 lifecycle
+and2 host tests). Desktop full check passed91 Rust tests (10 ignored) and139 UI tests before
+that internal correction. Final headless Desktop build and real WebKit install/restart/remove
+proof use corrected Core.41 existing Core page tests and4 marketplace tests passed. Actual
+Rust1.90 lifecycle tests12 passed. Both isolated app runs exited0, groups absent, token revoked,
+zero sends/model calls. Independent implementation review accepted by the owner: Go both29Oct. Ready on branch; no commit or release.
+No public catalog, arbitrary download, skill publishing or social transport is implemented.
+Calendar proposal and an interactive fixture preview are separate from scheduled work.
+Evidence: ../board/evidence/marketplace-skills-20261029/.
+
 # Current state
 
 ## A Mac as a computer (2026-10-28)

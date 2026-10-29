@@ -14,7 +14,7 @@ import { Destinations } from "./destinations.js";
 import { Topbar } from "./topbar.js";
 import { SETTINGS, settingsView, registerAppearance } from "./settings.js";
 import { Pane, invocationView, artifactView } from "./pane.js";
-import { registry, installApi, dispatchExt, presenterFor, onExt, waitForExtension, loadedExtensions } from "./ext.js";
+import { registry, installApi, dispatchExt, presenterFor, onExt, waitForExtension, loadedExtensions, viewForCommand } from "./ext.js";
 import { registerBuiltins, BUILTINS } from "./workbench.js";
 import { fileView, fileRecovery, kindOf, KIND_ICON, setFileKinds } from "./file.js";
 import { registerGrants } from "./grants.js";
@@ -23,6 +23,7 @@ import { registerMarketplace } from "./marketplace.js";
 import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
 import { registerSchedules, schedulesFollow } from "./schedules.js";
+import { registerCalendar } from "./calendar.js";
 import { Waiting } from "./waiting.js";
 import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js";
 import { os, label, relabel } from "./keys.js";
@@ -256,6 +257,7 @@ const RESOURCE_METHODS = {
   board_rename: ["project", "board_rename"], board_delete: ["project", "board_delete"],
   suspend_agent: ["project", "suspend_agent"], resume_agent: ["project", "resume_agent"], terminate_agent: ["project", "terminate_agent"], message_agent: ["project", "message_agent"],
   profiles: ["project", "profiles"], grants: ["project", "grants"], grant_remove: ["project", "grant_remove"],
+  skill_packages: ["project", "skill_packages"], skill_package_install: ["project", "skill_package_install"], skill_package_remove: ["project", "skill_package_remove"],
   skills: ["project", "skills"], tools: ["project", "tools"], usage: ["project", "usage"],
   artifacts: ["artifact", "artifacts"], artifact: ["artifact", "artifact"], invocation: ["invocation", "invocation"],
   picture: ["picture", "picture"], computer_picture: ["picture", "computer_picture"],
@@ -1153,7 +1155,7 @@ async function submit(text) {
   if (!text) return;
   // A slash word that is not a command in this chat is ordinary message text. In particular,
   // selecting another computer must never make a hidden command mutate the local empty chat.
-  if (text.startsWith("/") && composer.commandAvailable(text)) return runCommand(text);
+  if (text.startsWith("/") && (viewForCommand(text, api.project()) || composer.commandAvailable(text))) return runCommand(text);
   if (state.running) return composer.enqueue(text);
   // No model chosen yet: the text waits in the composer while the person picks one.
   if (composer.missing) {
@@ -1197,6 +1199,8 @@ async function steer(text) {
 }
 
 async function runCommand(line) {
+  const view = viewForCommand(line, api.project());
+  if (view) return showView(view.id);
   if (state.running) return composer.enqueue(line);
   let reply;
   try {
@@ -2084,6 +2088,7 @@ async function bootOnce(again) {
     registerBoard(window.ark);
     // What this chat runs on its own, above the composer.
     registerSchedules(window.ark);
+    registerCalendar(window.ark);
   }
   if (detachedWindow) {
     secondaryChats.get(detachedSession)?.dispose();

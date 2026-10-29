@@ -127,6 +127,9 @@ pub enum ResourceOperationKind {
     Grants,
     GrantRemove,
     Skills,
+    SkillPackages,
+    SkillPackageInstall,
+    SkillPackageRemove,
     Tools,
     Usage,
     Artifacts,
@@ -230,6 +233,9 @@ impl ResourceOperationKind {
             | O::Grants
             | O::GrantRemove
             | O::Skills
+            | O::SkillPackages
+            | O::SkillPackageInstall
+            | O::SkillPackageRemove
             | O::Tools
             | O::Usage
             | O::RunAction

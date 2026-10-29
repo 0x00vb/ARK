@@ -549,7 +549,7 @@ class TurnView {
 function fileCard(api, path, here, before) {
   const kind = kindOf(path);
   const name = path.split("/").pop();
-  const sub = h("span.file-card-sub", here ? kindNoun(kind) : "Removed");
+  const sub = h("span.file-card-sub", here ? kindNoun(kind, path) : "Removed");
   const open = h("span.file-card-open", { "aria-hidden": "true", hidden: !here }, icon("chevron-right"));
   const preview = kind === "image" && here ? h("img.file-card-image", { alt: "", hidden: true }) : null;
   const card = h("button.file-card", { type: "button", "data-kind": kind, title: path, "aria-label": here ? `Open ${name}` : `${name}, removed`, disabled: !here, onclick: () => api.openFile(path) },
@@ -584,7 +584,7 @@ function fileCard(api, path, here, before) {
       card.disabled = false;
       card.setAttribute("aria-label", `Open ${name}`);
       open.hidden = false;
-      sub.textContent = kindNoun(kind);
+      sub.textContent = kindNoun(kind, path);
       if (r.undo) version = r.undo;
       label.textContent = restored ? "Undo" : "Restore";
       btn.title = restored ? "Put back this turn's version" : "Put the file back as it was before this turn";

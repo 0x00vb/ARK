@@ -547,9 +547,35 @@ impl Command for Skills {
         "skills",
         "Skills the conversation and agents can read, and where they are"
     );
-    async fn run(&self, ix: &mut Interaction, _args: &str) -> anyhow::Result<Reply> {
-        let found = crate::skills::list(ix.ark(), &ix.project().id);
-        Ok(crate::skills::report(&found, ix.ark().engine(), &ix.project().id).into())
+    fn usage(&self) -> &str {
+        "[available | install <package> | remove <package>]"
+    }
+    async fn run(&self, ix: &mut Interaction, args: &str) -> anyhow::Result<Reply> {
+        let words: Vec<_> = args.split_whitespace().collect();
+        match words.as_slice() {
+            [] => {
+                let found = crate::skills::list(ix.ark(), &ix.project().id);
+                Ok(crate::skills::report(&found, ix.ark().engine(), &ix.project().id).into())
+            }
+            ["available"] => {
+                let rows = crate::skills::packages(ix.engine())?;
+                let mut table = Table::plain(3);
+                for row in rows {
+                    table.push(Row { cells: vec![Cell::new(row.id, Tone::Normal), Cell::new(row.name, Tone::Normal), Cell::new(row.error.unwrap_or_else(|| if row.installed { "Installed".into() } else { "Available".into() }), Tone::Muted)], tone: Tone::Normal, command: None });
+                }
+                Ok(Report::new().table(table).into())
+            }
+            ["install", id] => {
+                let package = crate::skills::packages(ix.engine())?.into_iter().find(|p| p.id == *id && p.available).ok_or_else(|| anyhow::anyhow!("No reviewed skill package named {id}"))?;
+                let result = crate::skills::install_package(ix.ark().shared_engine(), ix.project().id.clone(), id.to_string(), package.digest).await?;
+                Ok(Report::new().note(format!("Installed {} on this computer.", result.name)).into())
+            }
+            ["remove", id] => {
+                crate::skills::remove_package(ix.ark().shared_engine(), id.to_string()).await?;
+                Ok(Report::new().note("Removed from active skills. Local files were kept.").into())
+            }
+            _ => anyhow::bail!("Use /skills, /skills available, /skills install <package> or /skills remove <package>"),
+        }
     }
 }
 

@@ -14,6 +14,7 @@ import { documentView } from "./document.js";
 import { highlight, languageOf, MAX_CHARS } from "./highlight.js";
 import { registry } from './ext.js';
 import { extensionFileView } from './file-viewer.js';
+import { calendarView } from './calendar.js';
 
 /// The view for each kind of file (`ark_files::Kind`). A new kind is one more entry; a new
 /// format of an existing kind needs none.
@@ -33,15 +34,19 @@ export function setFileKinds(map, nouns) {
 }
 
 /// What a kind is called, capitalized for a card ("Spreadsheet", "PDF").
-export function kindNoun(kind) {
-  const n = NOUNS.get(kind) || "file";
+export function kindNoun(kind, path) {
+  const known = path === undefined || KINDS.has(extensionOf(path));
+  const n = (known && NOUNS.get(kind)) || "file";
   return n[0].toUpperCase() + n.slice(1);
 }
 
 /// The kind of a file from its name, before it is read.
+function extensionOf(path) {
+  return String(path).split("/").pop().split(".").slice(1).pop()?.toLowerCase();
+}
+
 export function kindOf(path) {
-  const ext = String(path).split("/").pop().split(".").slice(1).pop()?.toLowerCase();
-  return (ext && KINDS.get(ext)) || "text";
+  return KINDS.get(extensionOf(path)) || "text";
 }
 
 // A navigation bookmark, never file content or permission. The host still authorizes Retry.
@@ -74,6 +79,7 @@ export function fileRecovery(location, path, action) {
 
 export function fileView(el, path, ark, params) {
   el.classList.add("fv");
+  const calendar = /\.calendar\.json$/i.test(path);
   const s = { path, file: null, view: null, version: null, busy: 0, offs: [], alive: true, ctl: null, change: null, source: false, loading: 0, recovering: !!params?.recover };
   const status = h("span.fv-status", { "aria-live": "polite", role: "status" });
   const show = (state) => {
@@ -85,10 +91,10 @@ export function fileView(el, path, ark, params) {
       s.statusTimer = setTimeout(() => { status.dataset.state = ""; status.textContent = ""; }, 1400);
     }
   };
-  const sourceButton = h('button', { type: 'button', hidden: kindOf(path) !== 'map', onclick: async (event) => {
+  const sourceButton = h('button', { type: 'button', hidden: !calendar && kindOf(path) !== 'map', onclick: async (event) => {
       if (s.ctl?.dirty?.()) await s.ctl.flush?.();
       if (s.ctl?.dirty?.()) return;
-      s.source = !s.source; event.currentTarget.textContent = s.source ? kindOf(path) === 'map' ? 'Map' : 'Model' : 'Source'; await load(true);
+      s.source = !s.source; event.currentTarget.textContent = s.source ? calendar ? 'Calendar' : kindOf(path) === 'map' ? 'Map' : 'Model' : 'Source'; await load(true);
     } }, 'Source');
   const tools = h("div.fv-tools", status, sourceButton,
     ark.isLocal() && kindOf(path) !== "text"
@@ -146,21 +152,24 @@ export function fileView(el, path, ark, params) {
     if (!force && file.version && file.version === s.version) return;
     s.version = file.version;
     s.file = file;
-    sourceButton.hidden = !(s.source || kindOf(path) === 'map' || file.source_available);
+    sourceButton.hidden = !(calendar || s.source || kindOf(path) === 'map' || file.source_available);
     const kind = file.text == null && !file.kind ? null : file.kind || "text";
     if (!kind || (kind === "text" && file.text == null)) {
       s.ctl?.dispose?.();
       s.ctl = null;
       return clear(body).append(h("div.wb-empty", `${file.path.split("/").pop()} is ${file.why || "not shown here"}.`));
     }
-    if (s.ctl && s.kind === kind && s.ctl.update) return s.ctl.update(file);
+    const viewKey = calendar && !s.source && kind === 'text' ? 'calendar' : kind;
+    if (s.ctl && s.viewKey === viewKey && s.ctl.update) return s.ctl.update(file);
     s.ctl?.dispose?.();
     s.kind = kind;
+    s.viewKey = viewKey;
     el.prepend(tools);
     clear(body);
     const viewer = !s.source && [...registry.fileViewers.values()].find(v => v.kinds.includes(kind));
     const supported = file.snapshot_supported ?? ark.fileSnapshots?.();
-    if (viewer && supported) s.ctl = extensionFileView(body, file, ctx, viewer);
+    if (viewKey === 'calendar') s.ctl = calendarView(body, file);
+    else if (viewer && supported) s.ctl = extensionFileView(body, file, ctx, viewer);
     else if (VIEWS[kind]) s.ctl = VIEWS[kind](body, file, ctx, params) || {};
     else if (kind === 'map' && file.text != null) { s.kind = 'text'; s.ctl = textView(body, file, ctx, params); }
     else {

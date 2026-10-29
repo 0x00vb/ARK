@@ -2675,6 +2675,22 @@ impl Host {
                     &self.engine.store, project.id.as_str(), &s("class"),
                 )
             })),
+            O::SkillPackages => Ok(serde_json::to_value(ark_interact::skills::packages(
+                &self.engine,
+            )?)?),
+            O::SkillPackageInstall => Ok(serde_json::to_value(
+                ark_interact::skills::install_package(
+                    self.engine.clone(),
+                    project.id.clone(),
+                    s("id"),
+                    s("digest"),
+                )
+                .await?,
+            )?),
+            O::SkillPackageRemove => {
+                ark_interact::skills::remove_package(self.engine.clone(), s("id")).await?;
+                Ok(json!({}))
+            }
             O::Skills => Ok(serde_json::to_value(ark_interact::skills::list_for(
                 &self.engine,
                 &project.id,

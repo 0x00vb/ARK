@@ -2,9 +2,10 @@ import { setAgentIdentity } from "./dom.js";
 // The extension points an app's scripts use, available as `window.ark`:
 //
 //   ark.panel({ id, title, icon, nav, presents, wide, fill, render(el, params, api) })
-//   ark.view({ id, title, icon, nav, render(el, params, api) })
+//   ark.view({ id, title, icon, nav, command, render(el, params, api) })
 //                      a view of the current project in the main column, in place of the
 //                      conversation; `nav` makes it a destination in the fixed workspace rail.
+//                      `command` optionally opens the view from an exact slash command.
 //                      Choosing Chat brings the conversation back. A panel's `nav` lists it in
 //                      the title bar's + menu, after ARK's Terminal, Browser and Files.
 //   ark.setting({ id, title, icon, advanced, render(el, api) })
@@ -257,4 +258,8 @@ export function presenterFor(view) {
   for (const p of panels) if ((p.presents || []).includes(view)) return { panel: p };
   for (const v of registry.viewers) if ((v.presents || []).includes(view)) return { viewer: v };
   return null;
+}
+
+export function viewForCommand(line, project) {
+  return [...registry.views.values()].find(v => v.command === line.trim() && (!v.when || v.when({ project })));
 }

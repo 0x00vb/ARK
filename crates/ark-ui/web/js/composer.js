@@ -4,7 +4,7 @@
 // in early or removed.
 
 import { h, icon, clear, clip, touch, $ } from "./dom.js";
-import { registry } from "./ext.js";
+import { registry, viewForCommand } from "./ext.js";
 import { chooseFiles } from "./drop.js";
 import { label } from "./keys.js";
 import { programSheet } from "./places.js";
@@ -240,6 +240,8 @@ export class Composer {
     if (!text) return;
     this.input.value = "";
     this.changed();
+    const view = text.startsWith("/") && viewForCommand(text, this.api.project?.());
+    if (view) return this.api.openView(view.id);
     if (!this.running) return this.api.submit(text);
     if (text.startsWith("/")) {
       this.enqueue(text);

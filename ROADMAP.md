@@ -22,6 +22,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 | Models (`ark-model`) | Ollama, Anthropic and OpenAI APIs, Claude and ChatGPT subscriptions through their CLIs, mock |
 | Interaction (`ark-interact`) | commands, reports, activity, traces, context and usage views shared by both front-ends |
 | Terminal (`ark-cli`) | interactive shell, approvals, steering, resume, headless `-p` |
+| Calendar snapshots | Local candidate: `.calendar.json` files/artifacts have month/week/day, details and explicit snapshot times; no scheduler or publication authority. Real schedule/provider projections remain separate. |
 | Workspace (`ark-ui`) | Tauri window and loopback browser page; page tested in WebKit; orchestration control in the protocol, app views in the main column |
 | Measurement (`ark-bench`) | 16 generic workloads (one orchestrated team), simulated and live, a naive baseline loop, faults, record and replay; regression gate in `scripts/ci.sh` |
 | Release | `scripts/ci.sh`, `scripts/verify-release.sh`, immutable tags, two remotes |
@@ -143,7 +144,7 @@ webhook. Design, states, NAS and scale path, delivery gates:
 | Kept out on purpose | Until |
 |---|---|
 | Remote MCP servers (HTTP/SSE `url` entries) | a consumer needs one; stdio servers only today |
-| Installing skills from ARK | never in the runtime: a person runs an installer (`npx skills add`) or copies a folder |
+| Installing skills from ARK | Reviewed data-only packages can be registered by an app and explicitly installed by a person (ADR0084). Local candidate implemented; public package sources and publishing remain separate. Manual skill folders still work. |
 | Preloading a skill's instructions when a task matches it | a benchmark shows it pays (the `skill` workload is the start) |
 
 ### Work runtime (ADR 0036)

@@ -2675,9 +2675,31 @@ impl Host {
                     &self.engine.store, project.id.as_str(), &s("class"),
                 )
             })),
+            O::SkillPackages if input.get("source").is_some() => {
+                let package =
+                    ark_sdk::prelude::ark_runtime::skills::packages::preview(&s("source"))?;
+                Ok(json!({"digest": package.digest()?, "package": package}))
+            }
+            O::SkillPackages if input.get("id").is_some() => Ok(serde_json::to_value(
+                ark_sdk::prelude::ark_runtime::skills::packages::export(&self.engine, &s("id"))?,
+            )?),
             O::SkillPackages => Ok(serde_json::to_value(ark_interact::skills::packages(
                 &self.engine,
             )?)?),
+            O::SkillPackageInstall if input.get("source").is_some() => {
+                let engine = self.engine.clone();
+                let project = project.id.clone();
+                let source = s("source");
+                let digest = s("digest");
+                Ok(serde_json::to_value(
+                    tokio::task::spawn_blocking(move || {
+                        ark_sdk::prelude::ark_runtime::skills::packages::import(
+                            &engine, &project, &source, &digest,
+                        )
+                    })
+                    .await??,
+                )?)
+            }
             O::SkillPackageInstall => Ok(serde_json::to_value(
                 ark_interact::skills::install_package(
                     self.engine.clone(),

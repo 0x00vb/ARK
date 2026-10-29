@@ -44,3 +44,17 @@ This slice executes no package hooks, downloads or arbitrary commands. Data form
 Markdown, text, JSON and CSV. Public publishing, remote package sources and general plugin
 bundle transactions require a later reviewed contract. A plugin may declare `skills` metadata
 for its existing companion skills. This display does not claim a new download transaction.
+
+## Private package import and export
+
+Import selects a local UTF-8 JSON SkillPackage of at most1MiB. Preview validates every field,
+path, file type and skill. Unknown fields, including hooks, are refused. The page shows
+provided publisher metadata and every file as plain text. Preview installs nothing. Install
+confirms the immutable digest on the captured computer. Changing computers discards preview.
+An app-registered package id cannot be substituted with different private content.
+
+The existing scoped skill_packages read accepts source for preview, or id to export a
+verified installed package. skill_package_install optionally accepts source with digest.
+Import shares the existing operation lock, collision checks, immutable staging and receipt.
+Export package downloads canonical JSON. Remove preserves files; a damaged payload cannot
+be exported as verified content. No archive extraction, downloader or executable hook runs.

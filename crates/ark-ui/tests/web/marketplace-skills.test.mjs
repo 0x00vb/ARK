@@ -123,3 +123,34 @@ test("Plugins and Skills selector supports keyboard, dark and narrow layouts", a
   await page.getByRole("tab", { name: "Skills", exact: true }).focus(); await page.keyboard.press("ArrowLeft");
   assert.equal(await page.getByRole("tab", { name: "Plugins", exact: true }).getAttribute("aria-selected"), "true");
 }, true));
+
+test('private file preview is inert, shows all files as text, cancels and installs only on its captured computer', () => fixture(async page => {
+  await page.getByRole('button',{name:'Import skill package'}).waitFor();
+  await page.evaluate(()=>{
+    const oldAt=window.api.at;
+    window.sourcePackage={id:'private.notes',name:'Private notes',summary:'Private workflow',publisher:'Local author',version:'1',skills:[{name:'private-notes',files:{'SKILL.md':'<script>bad()</script>','reference.txt':'Keep evidence'}}]};
+    window.api.at=location=>({call:async(method,input={})=>{
+      if(method==='skill_packages'&&input.source){window.importPreview={location,input};return {package:window.sourcePackage,digest:'frozen'};}
+      if(method==='skill_package_install'&&input.source){window.importInstalls=(window.importInstalls||0)+1;window.installLocation=location;return {};}
+      return oldAt(location).call(method,input);
+    }});
+    window.control.refresh();
+  });
+  const source=await page.evaluate(()=>JSON.stringify(window.sourcePackage));
+  await page.getByLabel('Skill package file').setInputFiles({name:'private.skills.json',mimeType:'application/json',buffer:Buffer.from(source)});
+  await page.getByRole('heading',{name:'Review skill package'}).waitFor();
+  assert.equal(await page.evaluate(()=>window.importInstalls||0),0);
+  await page.getByText('SKILL.md',{exact:true}).click();
+  assert.equal(await page.getByText('<script>bad()</script>',{exact:true}).count(),1);
+  assert.equal(await page.locator('.market-skills script').count(),0);
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.importInstalls||0),0);
+  await page.getByLabel('Skill package file').setInputFiles({name:'private.skills.json',mimeType:'application/json',buffer:Buffer.from(source)});
+  await page.getByRole('heading',{name:'Review skill package'}).waitFor();
+  await page.getByRole('button',{name:'Install package',exact:true}).click();
+  await page.waitForFunction(()=>window.importInstalls===1);
+  assert.equal(await page.evaluate(()=>window.installLocation.runtime),'mac');
+  await page.getByRole('button',{name:'Import skill package'}).waitFor();
+  await page.getByLabel('Skill package file').setInputFiles({name:'large.json',mimeType:'application/json',buffer:Buffer.alloc(1048577)});
+  await page.getByText('Skill package exceeds the 1 MiB import limit',{exact:true}).waitFor();
+}));

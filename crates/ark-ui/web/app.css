@@ -2296,3 +2296,6 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 @media (max-width: 560px) { .market-skills .market-top { flex-wrap: wrap; } .market-skills .market-search { width: 100%; } }
 
 .market-install-scope { color: var(--text-2); font-size: 12px; margin: 8px 0 20px; }
+
+.market-import-files { min-width: 0; overflow-wrap: anywhere; }
+.market-import-files pre { white-space: pre-wrap; overflow-wrap: anywhere; }

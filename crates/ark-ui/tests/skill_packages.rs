@@ -123,3 +123,58 @@ async fn stale_digest_foreign_computer_and_wrong_resource_cannot_install() {
         false
     );
 }
+
+#[tokio::test]
+async fn private_source_preview_install_export_and_foreign_destination_refusal() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = host(dir.path()).await;
+    let summary = h
+        .call("add_project", json!({"name":"Import proof"}))
+        .await
+        .unwrap();
+    let location = summary["location"].clone();
+    let source = json!({"id":"private.notes","name":"Private notes","summary":"Private workflow","publisher":"Local author","version":"1","skills":[{"name":"private-notes","files":{"SKILL.md":"---\nname: private-notes\ndescription: Private notes\n---\nKeep evidence."}}]}).to_string();
+    let preview = resource(&h, &location, "skill_packages", json!({"source":source}))
+        .await
+        .unwrap();
+    assert_eq!(
+        resource(&h, &location, "skills", json!({}))
+            .await
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    let mut foreign = location.clone();
+    foreign["runtime"] = json!("foreign");
+    assert!(resource(
+        &h,
+        &foreign,
+        "skill_package_install",
+        json!({"source":source,"digest":preview["digest"]})
+    )
+    .await
+    .is_err());
+    resource(
+        &h,
+        &location,
+        "skill_package_install",
+        json!({"source":source,"digest":preview["digest"]}),
+    )
+    .await
+    .unwrap();
+    let exported = resource(
+        &h,
+        &location,
+        "skill_packages",
+        json!({"id":"private.notes"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(exported, serde_json::from_str::<Value>(&source).unwrap());
+    assert_eq!(
+        resource(&h, &location, "skills", json!({})).await.unwrap()[0]["name"],
+        "private-notes"
+    );
+}

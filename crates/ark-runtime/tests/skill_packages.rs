@@ -382,3 +382,62 @@ fn receipt_capacity_refuses_before_writing_or_hiding_existing_packages() {
         .exists());
     assert_eq!(packages::list(&e).unwrap().len(), 1);
 }
+
+#[test]
+fn private_import_preview_digest_restart_export_and_removal_share_ownership() {
+    let root = tempfile::tempdir().unwrap();
+    let p = package("private.notes", "private-notes");
+    let source = serde_json::to_string(&p).unwrap();
+    let project = ProjectId::new();
+    let e = Engine::new(Store::open(root.path()).unwrap(), Registry::new());
+    let preview = packages::preview(&source).unwrap();
+    assert_eq!(preview, p);
+    assert!(packages::list(&e).unwrap().is_empty());
+    assert!(packages::import(&e, &project, &source, "stale").is_err());
+    let digest = preview.digest().unwrap();
+    assert!(
+        packages::import(&e, &project, &source, &digest)
+            .unwrap()
+            .installed
+    );
+    assert_eq!(packages::export(&e, &p.id).unwrap(), p);
+    drop(e);
+    let e = Engine::new(Store::open(root.path()).unwrap(), Registry::new());
+    assert_eq!(
+        skills::discover(&skills::dirs(&e, &project))[0].name,
+        "private-notes"
+    );
+    packages::remove(&e, &p.id).unwrap();
+    assert!(skills::discover(&skills::dirs(&e, &project)).is_empty());
+    assert_eq!(packages::export(&e, &p.id).unwrap(), p);
+    assert!(root.path().join("skill-packages").join(digest).exists());
+}
+
+#[test]
+fn private_import_rejects_hooks_paths_oversize_and_registered_identity_substitution() {
+    let root = tempfile::tempdir().unwrap();
+    let p = package("example.notes", "release-notes");
+    let e = engine(root.path(), &p);
+    let mut data = serde_json::to_value(&p).unwrap();
+    data["hooks"] = serde_json::json!({"install":"bad"});
+    assert!(packages::preview(&data.to_string()).is_err());
+    data.as_object_mut().unwrap().remove("hooks");
+    data["skills"][0]["hooks"] = serde_json::json!({"install":"bad"});
+    assert!(packages::preview(&data.to_string()).is_err());
+    assert!(packages::preview(&" ".repeat(1_048_577)).is_err());
+    let mut changed = p.clone();
+    changed.skills[0]
+        .files
+        .insert("../bad.md".into(), "bad".into());
+    assert!(packages::preview(&serde_json::to_string(&changed).unwrap()).is_err());
+    changed = p.clone();
+    changed.summary = "Substitute".into();
+    assert!(packages::import(
+        &e,
+        &ProjectId::new(),
+        &serde_json::to_string(&changed).unwrap(),
+        &changed.digest().unwrap()
+    )
+    .is_err());
+    assert!(packages::list(&e).unwrap().iter().all(|p| !p.installed));
+}

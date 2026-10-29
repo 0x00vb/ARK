@@ -13,12 +13,14 @@ const RECORD: &str = "skill_package";
 const MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PackagedSkill {
     pub name: String,
     pub files: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SkillPackage {
     pub id: String,
     pub name: String,
@@ -425,6 +427,41 @@ fn prepare(package: &SkillPackage, root: &Path) -> Result<String, AgentError> {
     Ok(digest)
 }
 
+pub fn preview(source: &str) -> Result<SkillPackage, AgentError> {
+    if source.len() > MAX_BYTES {
+        return Err(invalid("Skill package exceeds the 1 MiB import limit"));
+    }
+    let package: SkillPackage = serde_json::from_str(source)?;
+    package.validate()?;
+    Ok(package)
+}
+
+pub fn export(engine: &Engine, id: &str) -> Result<SkillPackage, AgentError> {
+    let receipt = receipts(engine)?
+        .into_iter()
+        .find(|r| r.package.id == id)
+        .ok_or_else(|| invalid("That skill package is not installed"))?;
+    verify(&receipt.package, &release(engine, &receipt.digest)?)?;
+    Ok(receipt.package)
+}
+
+pub fn import(
+    engine: &Engine,
+    project: &ProjectId,
+    source: &str,
+    digest: &str,
+) -> Result<PackageView, AgentError> {
+    let package = preview(source)?;
+    if engine
+        .skill_packages()
+        .iter()
+        .any(|p| p.id == package.id && p.digest().ok().as_deref() != Some(digest))
+    {
+        return Err(invalid("An application package already owns this id"));
+    }
+    install_data(engine, project, &package, digest)
+}
+
 pub fn install(
     engine: &Engine,
     project: &ProjectId,
@@ -436,6 +473,16 @@ pub fn install(
         .iter()
         .find(|p| p.id == id)
         .ok_or_else(|| invalid("No reviewed skill package with that id"))?;
+    install_data(engine, project, package, expected_digest)
+}
+
+fn install_data(
+    engine: &Engine,
+    project: &ProjectId,
+    package: &SkillPackage,
+    expected_digest: &str,
+) -> Result<PackageView, AgentError> {
+    let id = package.id.as_str();
     if package.digest()? != expected_digest {
         return Err(invalid("Skill package changed; review the current version"));
     }
@@ -478,7 +525,7 @@ pub fn install(
     let digest = prepare(package, &root)?;
     let receipt = Receipt {
         schema_version: 1,
-        package: package.as_ref().clone(),
+        package: package.clone(),
         digest,
         active: true,
     };

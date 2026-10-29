@@ -1,3 +1,16 @@
+## Desktop0.9.8 published, 29 October2026
+
+Desktopv0.9.8 e9d76d84549e15c9ca412c0d0a1edf67f007eee7 is public on the Mac download
+and signed updater. It pins Corev0.27.3 f46593e5e4646ac745551e7697a4798b7f9ea8d4.
+PNG/GLB previews, private skill import/export, authoritative schedule calendars and the IFC
+scrubbed-memory fix are delivered. Signed/notarized/stapled Mac and downloaded Gatekeeper,
+updater signature, Linux8/8 and exact public-source checks pass. Desktop92Rust and143UI
+cases pass as source-bound stages. IFC growth6MiB/64MiB and peak1325MiB/1536MiB pass.
+Completed suites were not replayed. Installed0.9.6, managed Blender WIP and inference remain
+preserved. Clean-Mac/installed upgrade and physical-phone observations remain owner checks.
+Primary receipt: ../board/evidence/product-followups-20261029/RESULT.json.
+The notes below preserve earlier qualification states.
+
 ## Release0.27.3, 29 October2026
 
 Schedules project current records and actual runs into the existing calendar. Private data-only

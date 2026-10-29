@@ -79,3 +79,20 @@ or requested reminders. A stale snapshot must be regenerated from those records.
 
 CSV or spreadsheets can be separate exports. Editing a calendar Source file changes its
 snapshot, and never silently creates standing work.
+
+## Scheduled work
+
+Schedules has List and Calendar views. Calendar reads current schedule records and stored
+runs through the scoped schedules operation with calendar:{from_ms,to_ms,timezone}. Each
+request covers at most62days,1000occurrences and1MiB. The existing scheduler resolves cron,
+intervals and DST. Planned starts use the persisted next time; paused schedules produce no
+future starts. Actual runs retain task state even after their schedule was removed. IDs stay
+stable and content revisions change with the authoritative record. A one-minute planned or
+open-run marker has no claimed finish time. Completed run times use recorded start and end.
+
+Navigation reloads the visible period. An error clears stale items and keeps date/view controls available. Retry or a shorter
+period reads again. Reads create no jobs, posts or provider grants.
+
+`end_known` is an optional boolean, defaulttrue. Producers setfalse for planned starts and
+open runs whose one-minute marker is only a layout bound. Details show only the known start
+in that case. A marker is never presented as a recorded finish time.

@@ -29,11 +29,16 @@ export function registerCalendar(ark) {
   });
 }
 
-export function calendarView(el, file, sourceLabel = 'Source') {
+export function calendarView(el, file, sourceLabel = 'Source', options = {}) {
   const root = h('section.cal', { 'aria-label': 'Calendar' });
   el.append(root);
   let data, date, mode = 'month', selected = null;
   const eventButtons = new Map();
+  let lastRange = '';
+  const changedRange = () => {
+    const days = calendarRange(date, mode), range = `${days[0]}:${days.at(-1)}`;
+    if (range !== lastRange) { lastRange = range; options.range?.(days[0], shiftDate(days.at(-1), 1)); }
+  };
   const time = ms => new Intl.DateTimeFormat(undefined, { timeZone: data.timezone, hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(ms);
 
   function move(direction) {
@@ -51,7 +56,7 @@ export function calendarView(el, file, sourceLabel = 'Source') {
     const back = h('button.btn.ghost.small', { type: 'button', onclick: () => { selected = null; draw(); eventButtons.get(event.id)?.focus(); } }, 'Back to calendar');
     const heading = h('h2', { tabindex: '-1' }, event.title);
     const rows = h('dl.cal-facts');
-    const when = event.all_day ? `${event.start} to ${event.end} (end excluded)` : `${dateLabel(dateInZone(event.start_ms, data.timezone))} ${time(event.start_ms)} to ${dateLabel(dateInZone(event.end_ms, data.timezone))} ${time(event.end_ms)}`;
+    const when = event.end_known === false ? (event.all_day ? event.start : `${dateLabel(dateInZone(event.start_ms, data.timezone))} ${time(event.start_ms)}`) : event.all_day ? `${event.start} to ${event.end} (end excluded)` : `${dateLabel(dateInZone(event.start_ms, data.timezone))} ${time(event.start_ms)} to ${dateLabel(dateInZone(event.end_ms, data.timezone))} ${time(event.end_ms)}`;
     for (const [key, value] of [['When', when], ['Timezone', data.timezone], ['Delivery', DELIVERY[event.delivery]], ['State', STATES[event.state]], ['Account', event.account], ['Next action', event.next_action], ['Draft', event.draft], ['Receipt', event.receipt], ['Source', event.source_record], ['Revision', event.source_revision]]) {
       if (value) rows.append(h('dt', key), h('dd', value));
     }
@@ -62,6 +67,7 @@ export function calendarView(el, file, sourceLabel = 'Source') {
   function draw() {
     clear(root); eventButtons.clear();
     if (!data) return;
+    changedRange();
     const label = mode === 'month'
       ? new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(new Date(`${date}T00:00:00Z`))
       : mode === 'week' ? `${dateLabel(calendarRange(date, mode)[0])} to ${dateLabel(calendarRange(date, mode)[6])}` : dateLabel(date);
@@ -107,7 +113,7 @@ export function calendarView(el, file, sourceLabel = 'Source') {
       draw();
     } catch (error) {
       data = null; selected = null; clear(root);
-      root.append(h('h2', 'Calendar is unavailable'), h('p', String(error.message)), h('p', `Open ${sourceLabel} to inspect this file.`));
+      root.append(h('h2', 'Calendar is unavailable'), h('p', String(error.message)), sourceLabel ? h('p', `Open ${sourceLabel} to inspect this file.`) : null);
     }
   }
   update(file);

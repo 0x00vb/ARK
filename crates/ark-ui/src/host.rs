@@ -2524,6 +2524,18 @@ impl Host {
                     "orch",
                     r,
                 );
+                if let Some(calendar) = input.get("calendar") {
+                    let from = calendar["from_ms"]
+                        .as_u64()
+                        .ok_or_else(|| anyhow::anyhow!("Calendar needs from_ms"))?;
+                    let to = calendar["to_ms"]
+                        .as_u64()
+                        .ok_or_else(|| anyhow::anyhow!("Calendar needs to_ms"))?;
+                    let zone = calendar["timezone"]
+                        .as_str()
+                        .ok_or_else(|| anyhow::anyhow!("Calendar needs timezone"))?;
+                    return ark_interact::orchestration::schedule_calendar(&o, from, to, zone);
+                }
                 let chat = Some(s("session")).filter(|c| !c.is_empty());
                 Ok(serde_json::to_value(
                     ark_interact::orchestration::schedules(&o, chat.as_deref()),

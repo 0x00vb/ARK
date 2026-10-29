@@ -19,3 +19,12 @@ test('calendar refuses ambiguous times, invalid dates, duplicate ids and excessi
  assert.throws(()=>readCalendar(source([]).replace('America/New_York','Not/AZone')),/IANA/);assert.throws(()=>readCalendar(' '.repeat(1048577)),/1 MiB/);
  assert.throws(()=>readCalendar(source([{...event,start:'2026-11-01T24:00:00Z'}])));assert.equal(readCalendar(source([{...event,title:'<img src=x onerror=alert(1)>'}])).events[0].title,'<img src=x onerror=alert(1)>');
 });
+
+test('unknown end markers preserve certainty and refuse nonboolean claims',()=>{
+ assert.equal(readCalendar(source([{...event,end_known:false}])).events[0].end_known,false);
+ assert.equal(readCalendar(source([event])).events[0].end_known,true);
+ const marker=readCalendar(source([{...event,end_known:false,start:'2026-11-01T23:59:50-05:00',end:'2026-11-02T00:00:50-05:00'}])).events[0];
+ assert.equal(calendarOnDay(marker,'2026-11-01','America/New_York'),true);
+ assert.equal(calendarOnDay(marker,'2026-11-02','America/New_York'),false);
+ assert.throws(()=>readCalendar(source([{...event,end_known:'false'}])),/end certainty/);
+});

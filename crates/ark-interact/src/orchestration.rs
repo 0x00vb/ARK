@@ -150,6 +150,145 @@ pub fn schedules(o: &ark_orchestrate::Orchestrator, chat: Option<&str>) -> Vec<S
         .collect()
 }
 
+/// A bounded read-only snapshot of persisted schedules and actual runs.
+pub fn schedule_calendar(
+    o: &ark_orchestrate::Orchestrator,
+    from: u64,
+    to: u64,
+    zone: &str,
+) -> anyhow::Result<serde_json::Value> {
+    use serde_json::json;
+    anyhow::ensure!(
+        from < to && to - from <= 62 * 86_400_000 && to < 253_370_764_800_000,
+        "Calendar range must be at most 62 days"
+    );
+    jiff::tz::TimeZone::get(zone).map_err(|_| anyhow::anyhow!("Invalid calendar timezone"))?;
+    let instant = |ms: u64| -> anyhow::Result<String> {
+        Ok(jiff::Timestamp::from_millisecond(i64::try_from(ms)?)?.to_string())
+    };
+    let title = |value: &str| {
+        let mut units = 0;
+        value
+            .chars()
+            .take_while(|ch| {
+                units += ch.len_utf16();
+                units <= 240
+            })
+            .collect::<String>()
+    };
+    let mut events = Vec::new();
+    let tasks: Vec<_> = o
+        .tasks()
+        .into_iter()
+        .filter(|task| task.schedule.is_some())
+        .collect();
+    let occupied: std::collections::HashSet<_> = tasks
+        .iter()
+        .filter_map(|task| Some((task.schedule.as_deref()?, task.slot?)))
+        .collect();
+    let records = o.schedules();
+    anyhow::ensure!(
+        records.len() <= 1000,
+        "Too many schedules for one calendar snapshot"
+    );
+    for record in records {
+        let revision =
+            ark_sdk::prelude::ArtifactId::of_bytes(&serde_json::to_vec(&record)?).to_string();
+        let record_title = title(&record.task.objective);
+        let mut add = |id: String,
+                       start: u64,
+                       end: u64,
+                       state: &str,
+                       revision: &str,
+                       action: &str|
+         -> anyhow::Result<()> {
+            if start < to && end > from {
+                anyhow::ensure!(
+                    events.len() < 1000,
+                    "Calendar has more than 1000 occurrences; choose a shorter period"
+                );
+                events.push(json!({"id": id, "title": record_title, "start": instant(start)?, "end": instant(end.max(start + 1))?,
+                    "all_day": false, "end_known": false, "state": state, "delivery": "agent_run", "source_record": record.id,
+                    "source_revision": revision, "next_action": action}));
+            }
+            Ok(())
+        };
+        if !record.paused {
+            if let Some(mut next) = record.next_ms {
+                if next < from && !record.when.once {
+                    next = if let Some(minutes) = record.when.every_minutes {
+                        let step = u64::from(minutes) * 60_000;
+                        anyhow::ensure!(step >= 300_000, "Invalid stored schedule interval");
+                        next + (from - next).div_ceil(step) * step
+                    } else {
+                        record.when.next_after(from.saturating_sub(1)).unwrap_or(to)
+                    };
+                }
+                while next < to {
+                    if !occupied.contains(&(record.id.as_str(), next)) {
+                        add(
+                        format!("{}-{next}", record.id),
+                        next,
+                        next + 60_000,
+                        "planned",
+                        &revision,
+                        "Scheduled start. Duration is not known. A run does not prove publication.",
+                    )?;
+                    }
+                    if record.when.once {
+                        break;
+                    }
+                    let Some(after) = record.when.next_after(next) else {
+                        break;
+                    };
+                    anyhow::ensure!(after > next, "Stored schedule did not advance");
+                    next = after;
+                }
+            }
+        }
+    }
+    for task in tasks {
+        let start = task.started_ms.unwrap_or(task.created_ms);
+        let end = task
+            .finished_ms
+            .unwrap_or(start.saturating_add(60_000))
+            .max(start.saturating_add(1));
+        if start >= to || end <= from {
+            continue;
+        }
+        anyhow::ensure!(
+            events.len() < 1000,
+            "Calendar has more than 1000 occurrences; choose a shorter period"
+        );
+        let state = match task.state {
+            TaskState::Done => "completed",
+            TaskState::Failed => "failed",
+            TaskState::Cancelled => "cancelled",
+            TaskState::Waiting | TaskState::Suspended => "needs_you",
+            TaskState::Running => "running",
+            _ => "planned",
+        };
+        let revision =
+            ark_sdk::prelude::ArtifactId::of_bytes(&serde_json::to_vec(&task)?).to_string();
+        events.push(json!({"id": format!("run-{}", task.id), "title": title(&task.objective),
+            "start": instant(start)?, "end": instant(end)?, "all_day":false, "end_known": task.finished_ms.is_some(), "state":state, "delivery":"agent_run",
+            "source_record":task.schedule, "source_revision":revision, "next_action":"Recorded run. An open run has no recorded finish time."}));
+    }
+    events.sort_by(|a, b| {
+        a["start"]
+            .as_str()
+            .cmp(&b["start"].as_str())
+            .then(a["id"].as_str().cmp(&b["id"].as_str()))
+    });
+    let snapshot = json!({"type": "ark.calendar", "version": 1, "title": "Scheduled work", "timezone": zone,
+        "generated_at": instant(u64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis())?)?, "events": events});
+    anyhow::ensure!(
+        serde_json::to_vec(&snapshot)?.len() <= 1_048_576,
+        "Calendar exceeds the 1 MiB limit"
+    );
+    Ok(snapshot)
+}
+
 pub fn schedule_view(
     o: &ark_orchestrate::Orchestrator,
     s: &ark_orchestrate::ScheduleRecord,

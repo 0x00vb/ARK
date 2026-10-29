@@ -46,6 +46,7 @@ export function calendarRange(date, mode) {
 }
 
 export function calendarOnDay(event, date, zone) {
+  if (event.end_known === false) return event.all_day ? event.start === date : dateInZone(event.start_ms, zone) === date;
   if (event.all_day) return event.start <= date && event.end > date;
   if (event.calendar_zone === zone) return event.first_day <= date && event.last_day >= date;
   return dateInZone(event.start_ms, zone) <= date && dateInZone(event.end_ms - 1, zone) >= date;
@@ -64,12 +65,13 @@ export function readCalendar(source) {
     if (ids.has(id)) throw new Error('Calendar item ids must be unique');
     ids.add(id);
     if (!STATES.has(item.state) || !DELIVERY.has(item.delivery) || typeof item.all_day !== 'boolean') throw new Error('Invalid calendar item state or delivery');
+    if (item.end_known !== undefined && typeof item.end_known !== 'boolean') throw new Error('Invalid calendar end certainty');
     const start = item.all_day ? calendarDate(item.start) : text(item.start, 'start', 40);
     const end = item.all_day ? calendarDate(item.end) : text(item.end, 'end', 40);
     const startMs = item.all_day ? Date.parse(`${start}T00:00:00Z`) : instant(start);
     const endMs = item.all_day ? Date.parse(`${end}T00:00:00Z`) : instant(end);
     if (endMs <= startMs || endMs - startMs > 366 * DAY) throw new Error('Calendar items need an end after start, within 366 days');
-    const event = { id, title: text(item.title, 'title'), state: item.state, delivery: item.delivery, all_day: item.all_day, start, end, start_ms: startMs, end_ms: endMs };
+    const event = { id, title: text(item.title, 'title'), state: item.state, delivery: item.delivery, all_day: item.all_day, end_known: item.end_known !== false, start, end, start_ms: startMs, end_ms: endMs };
     if (!item.all_day) Object.assign(event, { calendar_zone: zone, first_day: dateInZone(startMs, zone), last_day: dateInZone(endMs - 1, zone) });
     for (const key of ['account', 'next_action', 'draft', 'receipt', 'source_record', 'source_revision']) {
       if (item[key] !== undefined) event[key] = text(item[key], key, key === 'next_action' ? 2000 : 512);

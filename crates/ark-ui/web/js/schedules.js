@@ -7,6 +7,7 @@
 
 import { h, icon, clear, clip } from "./dom.js";
 import { markdown } from "./md.js";
+import { calendarView } from "./calendar.js";
 
 const store = {
   ark: null,
@@ -61,11 +62,40 @@ function schedulesView(el, params, ark) {
   let error = "";
   let stale = false;
   let reloadTimer;
+  let alive = true;
+  let mode = 'list', calendar, calendarRequest = 0, calendarRange = null;
+  const calendarHost = h('div.sv-calendar');
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const calendarStatus = h('div', { role: 'status' });
+  const calendarRead = async () => {
+    if (!alive || !calendarRange || mode !== 'calendar') return;
+    const request = ++calendarRequest, wanted = project;
+    calendarStatus.replaceChildren();
+    try {
+      const result = await ark.call('schedules', { calendar: { ...calendarRange, timezone: zone } });
+      if (!alive || request !== calendarRequest || wanted !== project || mode !== 'calendar') return;
+      calendar.update({ text: JSON.stringify(result) });
+    } catch (e) {
+      if (!alive || request !== calendarRequest || wanted !== project || mode !== 'calendar') return;
+      calendar.update({ text: JSON.stringify({ type:'ark.calendar', version:1, title:'Scheduled work', timezone:zone, generated_at:new Date().toISOString(), events:[] }) });
+      calendarStatus.replaceChildren(h('p', 'Calendar is unavailable'), h('p', String(e.message)), h('button.btn.small', { type:'button', onclick: () => { calendarHost.hidden = false; calendarRead(); } }, 'Retry'));
+    }
+  };
+  const controls = h('div.cal-modes', { role: 'group', 'aria-label': 'Schedules view' });
+  for (const value of ['list', 'calendar']) controls.append(h('button.btn.ghost.small', {
+    type: 'button', 'data-view': value, 'aria-pressed': String(mode === value), onclick: () => {
+      mode = value; calendarRequest++;
+      for (const button of controls.children) button.setAttribute('aria-pressed', String(button.dataset.view === mode));
+      draw();
+      if (mode === 'calendar') calendarRead();
+    },
+  }, value === 'list' ? 'List' : 'Calendar'));
+
 
   const heading = h("h1.sv-title", { tabindex: "-1", "data-destination-heading": "" }, "Schedules");
   const live = h("div.sr-only", { role: "status", "aria-live": "polite", "aria-atomic": "true" });
   const body = h("div.sv-body");
-  el.append(h("header.sv-head", heading), live, body);
+  el.append(h("header.sv-head", heading, controls), live, body);
 
   function row(s) {
     const count = counters(s);
@@ -95,6 +125,16 @@ function schedulesView(el, params, ark) {
   function draw({ announce = "" } = {}) {
     clear(body);
     live.textContent = announce;
+    if (mode === 'calendar') {
+      body.append(calendarStatus, calendarHost); calendarHost.hidden = false;
+      if (!calendar) calendar = calendarView(calendarHost, { text: JSON.stringify({ type:'ark.calendar', version:1, title:'Scheduled work', timezone:zone, generated_at:new Date().toISOString(), events:[] }) }, null, {
+        range(first, end) {
+          calendarRange = { from_ms: Date.parse(first+'T00:00:00Z') - 86400000, to_ms: Date.parse(end+'T00:00:00Z') + 86400000 };
+          queueMicrotask(calendarRead);
+        },
+      });
+      return;
+    }
     el.setAttribute("aria-busy", String(loading));
     if (loading && !list.length) {
       body.append(h("div.sv-loading", { "aria-hidden": "true" },
@@ -137,6 +177,7 @@ function schedulesView(el, params, ark) {
       stale = false;
       loading = false;
       draw();
+      if (mode === 'calendar') calendarRead();
     } catch (e) {
       if (request !== generation || requestedProject !== project) return;
       error = String(e?.message || e || "unavailable");
@@ -164,6 +205,7 @@ function schedulesView(el, params, ark) {
       if (id === project) return load();
       generation++;
       project = id;
+      calendarRequest++; calendar?.dispose(); calendar = null; calendarRange = null; calendarStatus.replaceChildren();
       list = [];
       error = "";
       stale = false;
@@ -174,6 +216,7 @@ function schedulesView(el, params, ark) {
     refresh: load,
     focus: () => ({ surface: { kind_tag: "schedules", title: "Schedules" } }),
     dispose() {
+      alive = false; calendarRequest++; calendar?.dispose();
       generation++;
       clearTimeout(reloadTimer);
       for (const off of offs) off?.();

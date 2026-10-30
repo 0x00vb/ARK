@@ -399,7 +399,13 @@ window.ark.extensionReady("late");"#
         .expect("node is on PATH");
     let text =
         String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
-    assert!(out.status.success(), "{scenario} failed:\n{text}");
+    if !out.status.success() {
+        let retained = dir.keep();
+        panic!(
+            "{scenario} failed; fixture retained at {}:\n{text}",
+            retained.display()
+        );
+    }
     if scenario == "computer" {
         let log = screen.log.lock().unwrap().clone();
         assert!(

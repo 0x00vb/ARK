@@ -2900,6 +2900,7 @@ scenarios["expanded-projects"] = expandedProjects;
 // chat keeps running, the host still lists the project, the preference survives reload, and the
 // Add project menu provides the recovery path.
 async function hiddenProject(page) {
+  await page.evaluate(() => window.ark.ready());
   const before = await page.evaluate(() => ({
     project: window.ark.summary().project,
     session: window.ark.summary().session.id,
@@ -2934,6 +2935,7 @@ scenarios["hidden-project"] = hiddenProject;
 // Multi-chat controls use the same quiet tab grammar as artifacts. Split view has one clear
 // scope, so project views disappear while it is open and return on every exit path.
 async function chatWorkspacePolish(page) {
+  await page.evaluate(() => window.ark.ready());
   const initial = await page.evaluate(() => window.ark.summary().session.id);
   // A person upgrading from the early spatial-tabs experiment gets one complete conversation,
   // not a stale empty pane or an unexplained extra tab.
@@ -2944,8 +2946,10 @@ async function chatWorkspacePolish(page) {
     }));
     localStorage.setItem("ark-open-chats", JSON.stringify([id, "missing-chat"]));
   }, initial);
+  await rpcIdle();
   await page.reload();
   await page.locator("#input").waitFor();
+  await page.evaluate(() => window.ark.ready());
   const recovery = await page.evaluate(() => {
     const workspace = document.querySelector("#chat-workspace").getBoundingClientRect();
     const surface = document.querySelector(".chat-surface").getBoundingClientRect();
@@ -3776,6 +3780,13 @@ try {
     const page = browser.contexts()[0]?.pages()[0];
     if (page) console.error('File view state:', await page.locator('.fv').innerText().catch(() => 'unavailable'));
     if (page) console.error('Frame states:', await Promise.all(page.frames().map(async frame => [frame.url(), await frame.locator('body').innerText().catch(() => '')])));
+  }
+  if (scenario === 'processes') {
+    const page = browser.contexts()[0]?.pages()[0];
+    if (page) {
+      console.error('Process UI:', await page.evaluate(() => ({ address: document.querySelector('input[aria-label="Address"]')?.value, rows: document.querySelector('.proc-list')?.innerText, error: document.querySelector('.wb-refused')?.innerText })));
+      console.error('Process frame:', await page.evaluate(async () => { const api = window.ark; const frame = await api.resource(api.resourceRef('browser', 'main', api.summary().location), 'browser_snapshot'); const { image, ...metadata } = frame; return { ...metadata, imageBytes: image?.length }; }));
+    }
   }
   // What the page threw before it failed, if anything.
   for (const err of errors) console.error(`page error: ${err}`);

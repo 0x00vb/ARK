@@ -1,3 +1,16 @@
+## Core0.27.4 qualification, 30 October2026
+
+Reviewed OpenCode Go source is integrated on the current release line. Existing providers keep
+their shared identity unless explicitly conversation-bound. Go uses a stable opaque scope,
+its own user agent and the three transport-qualified models. Saving keys is unverified;
+local fixtures qualify protocol behavior without paid requests. Live subscription proof waits
+on the existing owner key card. Core qualification passes as source-bound stages: workspace Rust/doc and strict clippy,67actual
+page cases, native Browser6unit/5integration, release build and simulated benchmark. Initial
+page failures and a real Chromium two-tab red fixture are retained. First Browser page lookup,
+creation and publication are atomic; fresh/signed modes and different-owner isolation pass.
+Consumer distribution follows. Inference source,
+active routes/guards and processes are unchanged. Evidence ../board/evidence/provider-delivery-20261030/.
+
 ## Desktop0.9.8 published, 29 October2026
 
 Desktopv0.9.8 e9d76d84549e15c9ca412c0d0a1edf67f007eee7 is public on the Mac download
@@ -344,7 +357,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.27.3 |
+| Latest tag | v0.27.4 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

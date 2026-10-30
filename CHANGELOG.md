@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.4] - 2026-10-30
+
+- Add OpenCode Go coding models through a separate key-backed provider.
+- Keep simultaneous first Browser requests on one owned page.
+- Keep conversation identity stable across coding, auxiliary calls and retries without changing shared providers.
+- Saving a Go key reports configuration only. Public discovery does not verify subscription access.
+
 ## [0.27.3] - 2026-10-29
 
 - View authoritative scheduled starts and actual run states in Calendar.

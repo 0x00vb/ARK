@@ -1,3 +1,21 @@
+## Desktop0.9.9 delivered, 30 October2026
+
+Desktopv0.9.9 7d70c88062e6e4c3435faba5df831bd5131ab662 is public on the Mac download
+and signed updater. All22 Core packages pin v0.27.4 24552e5d561314946ca1605b35a8e57a1f27efa5.
+Go coding models use conversation-scoped requests. Key setup reports saved state without
+claiming paid entitlement; failed password entries retain focus and clear when changing
+computers or closing Settings. First Browser page ownership is atomic under concurrent calls.
+Native/headless strict clippy,92Rust/10existingignored and144uniqueUI source-bound aggregate
+pass. Signed embedded WebKit with the real backend proves local key refusal and draft/focus,
+with no stored key or model call. Mac app/DMG signing, notarization/stapling, downloaded
+signature/Gatekeeper and Linux8compatibility pass. Public latest and manifest match0.9.9.
+One8GiB build-growth stop is retained; completed x86 build reused, unfinished arm64 resumed.
+Installed0.9.6 PID80889, inference and separate managed Blender WIP remain untouched.
+Live Go key and clean-Mac/installed-upgrade observations remain owner gates. Changed integration
+uses disclosed cold author review under the no-agents instruction; no independent verdict invented.
+Primary receipt: ../board/evidence/provider-delivery-20261030/RESULT.json.
+Earlier entries below preserve the qualification history.
+
 ## Core0.27.4 qualification, 30 October2026
 
 Reviewed OpenCode Go source is integrated on the current release line. Existing providers keep

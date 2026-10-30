@@ -3567,8 +3567,13 @@ impl Host {
                         "this app keeps no keys; set the provider's environment variable"
                     )
                 })?;
-                keys.save(&s("provider"), &s("key")).await?;
-                Ok(json!({ "saved": keys.saved() }))
+                let provider = s("provider");
+                keys.save(&provider, &s("key")).await?;
+                let mut reply = json!({ "saved": keys.saved() });
+                if provider == "opencode-go" {
+                    reply["verified"] = json!(false);
+                }
+                Ok(reply)
             }
             "api_key_forget" => {
                 let keys = self
@@ -4705,8 +4710,13 @@ impl Host {
                 let keys = self.api_keys().ok_or_else(|| {
                     anyhow::anyhow!("this computer keeps no keys; set the provider's environment variable there")
                 })?;
-                keys.save(&s("provider"), &s("key")).await?;
-                Ok(json!({ "saved": keys.saved() }))
+                let provider = s("provider");
+                keys.save(&provider, &s("key")).await?;
+                let mut reply = json!({ "saved": keys.saved() });
+                if provider == "opencode-go" {
+                    reply["verified"] = json!(false);
+                }
+                Ok(reply)
             }
             "chat_trace" => {
                 let conv = self.chat_conv(&session, &s("model"), false).await?;

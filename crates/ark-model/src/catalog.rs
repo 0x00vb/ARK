@@ -8,7 +8,15 @@ use std::time::Duration;
 
 /// The built-in provider names a model spec may start with (`claude:sonnet`, `ollama qwen3:4b`).
 /// Named endpoints add theirs ([`crate::endpoints::is_provider`]).
-pub const PROVIDERS: &[&str] = &["ollama", "openai", "anthropic", "claude", "codex", "mock"];
+pub const PROVIDERS: &[&str] = &[
+    "ollama",
+    "openai",
+    "anthropic",
+    "claude",
+    "codex",
+    "opencode-go",
+    "mock",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -41,7 +49,7 @@ pub struct Backend {
     pub provider: String,
     pub label: String,
     pub kind: BackendKind,
-    /// Usable now.
+    /// Configured and selectable. This does not prove current inference entitlement.
     pub ready: bool,
     /// How it is connected, or why it is not.
     pub detail: String,
@@ -129,6 +137,7 @@ pub async fn catalog() -> Vec<Backend> {
             step: None,
         });
     }
+    out.push(crate::opencode_go::backend().await);
     out.extend(named);
     out
 }

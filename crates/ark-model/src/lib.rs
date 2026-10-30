@@ -23,6 +23,7 @@ mod live;
 pub mod mock;
 mod ollama;
 mod openai;
+mod opencode_go;
 mod reply;
 pub mod resilience;
 pub mod session;
@@ -37,6 +38,7 @@ pub use endpoints::{is_provider, Endpoint};
 pub use mock::MockProvider;
 pub use ollama::Ollama;
 pub use openai::OpenAi;
+pub use opencode_go::OpenCodeGo;
 pub use resilience::{HttpConfig, RetryPolicy};
 pub use session::{
     ManagedSession, SessionBackend, SessionEvent, SessionEventKind, SessionPolicy, SessionSnapshot,
@@ -396,6 +398,14 @@ pub type TextSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
 /// A model backend. One required method; everything else is translation inside the impl.
 #[async_trait]
 pub trait Provider: Send + Sync {
+    /// An immutable view bound to this conversation. `None` keeps this provider unchanged.
+    /// Wrappers forward binding and preserve their shared accounting state.
+    fn for_conversation(
+        &self,
+        _conversation: &str,
+    ) -> Result<Option<std::sync::Arc<dyn Provider>>> {
+        Ok(None)
+    }
     async fn complete(
         &self,
         system: &str,
@@ -475,6 +485,10 @@ fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
         "anthropic" => Ok(Box::new(Anthropic::from_env(
             model.unwrap_or_else(|| "claude-sonnet-5-5".into()),
         )?)),
+        "opencode-go" => Ok(Box::new(OpenCodeGo::new(model.ok_or_else(|| ProviderError::Api {
+            provider: "opencode-go".into(),
+            detail: "choose an OpenCode Go model".into(),
+        })?)?)),
         "claude" => Ok(Box::new(CliModel::try_new(
             Cli::Claude,
             model.unwrap_or_default(),

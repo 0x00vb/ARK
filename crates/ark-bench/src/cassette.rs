@@ -150,8 +150,8 @@ impl Cassette {
             rep,
             inner,
             model,
-            seq: AtomicU32::new(0),
-            pending: Mutex::new(pending.into_iter().map(Some).collect()),
+            seq: Arc::new(AtomicU32::new(0)),
+            pending: Arc::new(Mutex::new(pending.into_iter().map(Some).collect())),
         })
     }
 
@@ -177,9 +177,9 @@ struct Tape {
     rep: u32,
     inner: Option<Arc<dyn Provider>>,
     model: String,
-    seq: AtomicU32,
+    seq: Arc<AtomicU32>,
     /// Replay: the run's replies not served yet, in recorded order.
-    pending: Mutex<Vec<Option<Entry>>>,
+    pending: Arc<Mutex<Vec<Option<Entry>>>>,
 }
 
 impl Tape {
@@ -245,6 +245,24 @@ impl Tape {
 
 #[async_trait]
 impl Provider for Tape {
+    fn for_conversation(&self, conversation: &str) -> ModelResult<Option<Arc<dyn Provider>>> {
+        let Some(inner) = self.inner.as_ref() else {
+            return Ok(None);
+        };
+        Ok(inner.for_conversation(conversation)?.map(|inner| {
+            let bound: Arc<dyn Provider> = Arc::new(Self {
+                cassette: self.cassette.clone(),
+                workload: self.workload.clone(),
+                rep: self.rep,
+                inner: Some(inner),
+                model: self.model.clone(),
+                seq: self.seq.clone(),
+                pending: self.pending.clone(),
+            });
+            bound
+        }))
+    }
+
     async fn complete(
         &self,
         system: &str,

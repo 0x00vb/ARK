@@ -230,6 +230,7 @@ impl ModelResolver for Models {
             Some(s) => s.to_string(),
             None => match self.default.as_ref().map(CurrentModel::get) {
                 Some(r) => {
+                    let r = r.for_conversation(&format!("agent/{lane}"))?;
                     let id = r.model_id(Role::Reason);
                     // The app's own model is a subscription CLI: the agent still gets a
                     // managed session of its own. Decided by the provider (`claude sonnet`),
@@ -260,7 +261,10 @@ impl ModelResolver for Models {
             },
         };
         if let Some(p) = self.named.get(&spec) {
-            return Ok(self.single(p.clone(), &spec, spec.clone()));
+            let p = p
+                .for_conversation(&format!("agent/{lane}"))?
+                .unwrap_or_else(|| p.clone());
+            return Ok(self.single(p, &spec, spec.clone()));
         }
         if let Some(session) = self.subs.session(lane, &spec).await {
             let (provider, _) = ark_model::session::split_spec(&spec);
@@ -280,6 +284,7 @@ impl ModelResolver for Models {
         }
         let (provider, model) = ark_model::session::split_spec(&spec);
         let p = ark_model::build(provider, (!model.is_empty()).then(|| model.to_string()))?;
+        let p = p.for_conversation(&format!("agent/{lane}"))?.unwrap_or(p);
         let model = p.model_id();
         Ok(self.single(p, provider, model))
     }

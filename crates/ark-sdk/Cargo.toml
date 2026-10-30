@@ -11,6 +11,7 @@ serde.workspace = true
 ark-core.workspace = true
 ark-os.workspace = true
 ark-model.workspace = true
+uuid.workspace = true
 ark-tools.workspace = true
 ark-files.workspace = true
 ark-exec.workspace = true

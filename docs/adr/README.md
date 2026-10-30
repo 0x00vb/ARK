@@ -119,3 +119,5 @@ The test, script or review step that keeps it true.
 - [0084. Skill packages are person-installed data](0084-skill-packages-are-person-installed-data.md)
 
 - [0085. A calendar is a read-only file lens](0085-calendar-is-a-read-only-file-lens.md)
+
+- [0080. OpenCode Go uses explicit conversations](0080-opencode-go-uses-explicit-conversations.md)

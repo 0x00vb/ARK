@@ -387,6 +387,7 @@ dependencies = [
  "ark-os",
  "async-trait",
  "base64 0.22.1",
+ "blake3",
  "futures",
  "reqwest 0.12.28",
  "serde",
@@ -518,6 +519,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

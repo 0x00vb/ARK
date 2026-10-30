@@ -1,7 +1,7 @@
 //! OpenAI-compatible chat completions (also serves any OpenAI-compatible endpoint via
 //! `OPENAI_BASE_URL`). API-key auth.
 
-use crate::resilience::{status_error, HttpConfig};
+use crate::resilience::{raw_status_error, status_error, HttpConfig};
 use crate::stream::{for_each_line, parse_args, sse_data, OpenAiFold};
 use crate::{
     mangle_tool_name, unmangle_tool_name, Completion, GeneratedImage, Message, Provider,
@@ -26,6 +26,8 @@ pub struct OpenAi {
     pictures: bool,
     /// Input tokens a request may have, when known ([`Provider::context_window`]).
     window: Option<u32>,
+    headers: reqwest::header::HeaderMap,
+    raw_status: bool,
 }
 
 impl OpenAi {
@@ -55,6 +57,8 @@ impl OpenAi {
             http,
             pictures: false,
             window: None,
+            headers: reqwest::header::HeaderMap::new(),
+            raw_status: false,
         }
     }
 
@@ -82,10 +86,38 @@ impl OpenAi {
         self.http = http;
         self
     }
+
+    pub(crate) fn with_raw_status(mut self) -> Self {
+        self.raw_status = true;
+        self
+    }
+
+    async fn response_error(&self, response: reqwest::Response) -> ProviderError {
+        if self.raw_status {
+            raw_status_error(&self.name, response, error_detail, Some(&self.key)).await
+        } else {
+            status_error(&self.name, response, error_detail).await
+        }
+    }
+
+    pub(crate) fn with_transport(
+        mut self,
+        client: reqwest::Client,
+        headers: reqwest::header::HeaderMap,
+        http: HttpConfig,
+    ) -> Self {
+        self.client = client;
+        self.headers = headers;
+        self.http = http;
+        self
+    }
 }
 
 fn error_detail(v: &Value) -> Option<String> {
-    v["error"]["message"].as_str().map(str::to_string)
+    v["error"]["message"]
+        .as_str()
+        .or_else(|| v["message"].as_str())
+        .map(str::to_string)
 }
 
 fn role_str(r: Role) -> &'static str {
@@ -194,7 +226,7 @@ impl Provider for OpenAi {
         let body = self.body(system, messages, tools, false);
         let resp = self.post(&body, false).await?;
         if !resp.status().is_success() {
-            return Err(status_error(&self.name, resp, error_detail).await);
+            return Err(self.response_error(resp).await);
         }
         let v: Value = resp.json().await?;
         let msg = &v["choices"][0]["message"];
@@ -238,7 +270,7 @@ impl Provider for OpenAi {
         let body = self.body(system, messages, tools, true);
         let resp = self.post(&body, true).await?;
         if !resp.status().is_success() {
-            return Err(status_error(&self.name, resp, error_detail).await);
+            return Err(self.response_error(resp).await);
         }
         let mut fold = OpenAiFold::default();
         for_each_line(resp, |line| match sse_data(line) {
@@ -271,7 +303,7 @@ impl OpenAi {
             .send()
             .await?;
         if !resp.status().is_success() {
-            return Err(status_error(&self.name, resp, error_detail).await);
+            return Err(self.response_error(resp).await);
         }
         if resp
             .content_length()
@@ -336,6 +368,7 @@ impl OpenAi {
         let mut req = self
             .client
             .post(format!("{}/chat/completions", self.base))
+            .headers(self.headers.clone())
             .bearer_auth(&self.key)
             .json(body);
         if !stream {

@@ -17,6 +17,7 @@ use crate::{ConnectError, Secrets};
 pub const PROVIDERS: &[(&str, &str, &str)] = &[
     ("anthropic", "Anthropic", "ANTHROPIC_API_KEY"),
     ("openai", "OpenAI", "OPENAI_API_KEY"),
+    ("opencode-go", "OpenCode Go", "OPENCODE_GO_API_KEY"),
 ];
 
 const INDEX: &str = "api-keys.json";
@@ -75,14 +76,22 @@ impl ApiKeys {
         Ok(())
     }
 
-    /// Check `key` with the provider, then keep it. A key the provider refuses is not kept.
+    /// Check and save a key. Go defers inference validation to the first task.
     pub async fn save(&self, provider: &str, key: &str) -> Result<(), ConnectError> {
         known(provider)?;
         let key = key.trim();
         if key.is_empty() {
             return Err(ConnectError::Provider("Paste the key first.".into()));
         }
-        self.check(provider, key).await?;
+        if provider == "opencode-go" {
+            if key.len() > 8192 || key.bytes().any(|b| !b.is_ascii_graphic()) {
+                return Err(ConnectError::Provider(
+                    "That key contains invalid characters.".into(),
+                ));
+            }
+        } else {
+            self.check(provider, key).await?;
+        }
         self.secrets.set(&secret(provider), key)?;
         self.cache
             .lock()
@@ -117,6 +126,10 @@ impl ApiKeys {
 
     /// Whether the provider takes `key`: one cheap request that lists its models.
     pub async fn check(&self, provider: &str, key: &str) -> Result<(), ConnectError> {
+        known(provider)?;
+        if provider == "opencode-go" {
+            return Err(ConnectError::Provider("OpenCode Go access is checked on the first task. Listing models does not verify a key.".into()));
+        }
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
             .build()?;
@@ -207,6 +220,42 @@ mod tests {
             }
         });
         format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn go_keys_are_saved_without_claiming_verified_access_and_can_be_rotated() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = Arc::new(MemorySecrets::default());
+        let keys = ApiKeys::open(dir.path(), secrets.clone());
+        assert!(keys.save("opencode-go", "bad\nheader").await.is_err());
+        assert!(keys.saved().is_empty());
+        keys.save("opencode-go", " test-go-key ").await.unwrap();
+        assert!(keys
+            .check("opencode-go", "test-go-key")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("does not verify"));
+        assert_eq!(
+            keys.key("OPENCODE_GO_API_KEY").as_deref(),
+            Some("test-go-key")
+        );
+        assert!(!std::fs::read_to_string(dir.path().join(INDEX))
+            .unwrap()
+            .contains("test-go-key"));
+        keys.save("opencode-go", "rotated-go-key").await.unwrap();
+        assert_eq!(
+            keys.key("OPENCODE_GO_API_KEY").as_deref(),
+            Some("rotated-go-key")
+        );
+        let reopened = ApiKeys::open(dir.path(), secrets.clone());
+        assert_eq!(
+            reopened.key("OPENCODE_GO_API_KEY").as_deref(),
+            Some("rotated-go-key")
+        );
+        keys.forget("opencode-go").unwrap();
+        assert!(keys.key("OPENCODE_GO_API_KEY").is_none());
+        assert!(secrets.get("api-key:opencode-go").unwrap().is_none());
     }
 
     #[tokio::test]

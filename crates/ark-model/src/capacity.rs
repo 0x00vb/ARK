@@ -217,6 +217,12 @@ impl Limited {
 
 #[async_trait]
 impl Provider for Limited {
+    fn for_conversation(&self, conversation: &str) -> Result<Option<Arc<dyn Provider>>> {
+        Ok(self.inner.for_conversation(conversation)?.map(|inner| {
+            let bound: Arc<dyn Provider> = Arc::new(Self::new(inner, self.limiter.clone()));
+            bound
+        }))
+    }
     fn generates_images(&self) -> bool {
         self.inner.generates_images()
     }

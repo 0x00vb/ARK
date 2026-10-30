@@ -65,6 +65,22 @@ impl ModelRouter {
         }
     }
 
+    /// Bind both tiers without changing the shared providers or their model identity.
+    pub fn for_conversation(&self, conversation: &str) -> Result<Self, ProviderError> {
+        let fast = self
+            .fast
+            .for_conversation(conversation)?
+            .unwrap_or_else(|| self.fast.clone());
+        let strong = if Arc::ptr_eq(&self.fast, &self.strong) {
+            fast.clone()
+        } else {
+            self.strong
+                .for_conversation(conversation)?
+                .unwrap_or_else(|| self.strong.clone())
+        };
+        Ok(Self::new(fast, strong))
+    }
+
     /// Both tiers share one provider (a single-model setup).
     pub fn single(provider: Arc<dyn Provider>) -> Self {
         ModelRouter {
@@ -185,6 +201,22 @@ mod tests {
         current.set(ModelRouter::single(b));
         assert_eq!(follower.get().model_id(Role::Reason), "b");
         assert_eq!(follower.version(), 1);
+    }
+
+    #[test]
+    fn conversation_binding_preserves_unbound_provider_identity_and_tiers() {
+        let fast: Arc<dyn Provider> = Arc::new(MockProvider::new("fast", vec![]));
+        let strong: Arc<dyn Provider> = Arc::new(MockProvider::new("strong", vec![]));
+        let bound = ModelRouter::new(fast.clone(), strong.clone())
+            .for_conversation("chat/synthetic")
+            .unwrap();
+        assert!(Arc::ptr_eq(bound.provider(Role::Classify), &fast));
+        assert!(Arc::ptr_eq(bound.provider(Role::Reason), &strong));
+        let single = ModelRouter::single(fast.clone())
+            .for_conversation("chat/other")
+            .unwrap();
+        assert!(Arc::ptr_eq(single.provider(Role::Classify), &fast));
+        assert!(Arc::ptr_eq(single.provider(Role::Reason), &fast));
     }
 
     #[test]

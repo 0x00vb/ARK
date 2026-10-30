@@ -230,6 +230,13 @@ impl Metered {
 
 #[async_trait]
 impl Provider for Metered {
+    fn for_conversation(&self, conversation: &str) -> ModelResult<Option<Arc<dyn Provider>>> {
+        Ok(self
+            .inner
+            .for_conversation(conversation)?
+            .map(|inner| Self::wrap(inner, self.recorder.clone())))
+    }
+
     async fn complete(
         &self,
         system: &str,

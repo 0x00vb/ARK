@@ -439,6 +439,11 @@ impl Ark {
         self.harness_with(self.router.clone_view())
     }
 
+    /// A lower-level harness bound to an explicit, stable conversation identifier.
+    pub fn harness_for_conversation(&self, conversation: &str) -> Result<Harness, ArkError> {
+        Ok(self.harness_with(self.router.for_conversation(conversation)?))
+    }
+
     fn harness_with(&self, router: ModelRouter) -> Harness {
         Harness::new(router)
             .max_steps(self.max_steps)
@@ -483,7 +488,7 @@ impl Ark {
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
         let project = session.project().clone();
-        let router = self.session_router(session).await;
+        let router = self.session_router(session).await?;
         // The turn before did not finish (the app stopped, it failed, the person stopped it):
         // this one continues it (ADR 0048). Its goal is that turn's goal with this message
         // added, so "continue" never becomes the task (ADR 0050), and what is chosen from the
@@ -583,17 +588,20 @@ impl Ark {
     /// sessions are on (`ARK_SESSION_REUSE`), reasoning goes through the conversation's own
     /// managed vendor session, which continues with only what is new; a planner or critic on
     /// the same model makes stateless calls on the same account. Otherwise the app's router.
-    pub async fn session_router(&self, session: &Session) -> ModelRouter {
-        let strong = self.router.provider(Role::Reason);
+    pub async fn session_router(&self, session: &Session) -> Result<ModelRouter, ArkError> {
+        let router = self
+            .router
+            .for_conversation(&format!("chat/{}", session.id()))?;
+        let strong = router.provider(Role::Reason);
         let spec = strong.model_id();
         if !self.subscriptions.policy().reuse || !self.subscriptions.manages(&spec) {
-            return self.router.clone_view();
+            return Ok(router);
         }
         let lane = format!("session/{}", session.id());
         let Some(managed) = self.subscriptions.session(&lane, &spec).await else {
-            return self.router.clone_view();
+            return Ok(router);
         };
-        let fast = self.router.provider(Role::Plan);
+        let fast = router.provider(Role::Plan);
         let fast = if Arc::ptr_eq(fast, strong) {
             self.subscriptions
                 .stateless(&spec)
@@ -601,7 +609,7 @@ impl Ark {
         } else {
             fast.clone()
         };
-        ModelRouter::new(fast, managed)
+        Ok(ModelRouter::new(fast, managed))
     }
 
     /// The store's rule sets: put a project's standards here and bind them to the project
@@ -868,7 +876,7 @@ impl Ark {
             .as_ref()
             .map(|g| g.text())
             .unwrap_or_else(|| task.to_string());
-        let router = self.session_router(session).await;
+        let router = self.session_router(session).await?;
         let (engine, rules) = self.with_rules(session.project(), &query)?;
         let (engine, catalog) = self.with_skills(engine, session.project());
         let owner = format!("session:{}", session.id());
@@ -903,11 +911,14 @@ impl Ark {
         task: &str,
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
-        let tools = self.turn_tools(&[], &self.router, "ark");
+        let router = self
+            .router
+            .for_conversation(&format!("run/{}", uuid::Uuid::new_v4()))?;
+        let tools = self.turn_tools(&[], &router, "ark");
         let (engine, mut profile) = self.with_tools(self.turn_engine(), &tools);
-        self.owned(&mut profile, "ark", &self.router);
+        self.owned(&mut profile, "ark", &router);
         Ok(self
-            .harness()
+            .harness_with(router)
             .ask(&engine, &profile, project, task, on_event)
             .await?)
     }

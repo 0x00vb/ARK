@@ -167,9 +167,30 @@ pub(crate) async fn status_error(
     resp: reqwest::Response,
     detail: impl Fn(&serde_json::Value) -> Option<String>,
 ) -> ProviderError {
+    match raw_status_error(provider, resp, detail, None).await {
+        ProviderError::Status {
+            status: 402,
+            provider,
+            detail,
+            ..
+        } => ProviderError::OutOfCredit { provider, detail },
+        error => error,
+    }
+}
+
+pub(crate) async fn raw_status_error(
+    provider: &str,
+    resp: reqwest::Response,
+    detail: impl Fn(&serde_json::Value) -> Option<String>,
+    secret: Option<&str>,
+) -> ProviderError {
     let status = resp.status().as_u16();
     let retry_after = retry_after(resp.headers());
     let text = resp.text().await.unwrap_or_default();
+    let text = match secret {
+        Some(key) if !key.is_empty() => text.replace(key, "[redacted]"),
+        _ => text,
+    };
     let body: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
     let detail = detail(&body).unwrap_or_else(|| {
         let t = text.trim();
@@ -179,12 +200,6 @@ pub(crate) async fn status_error(
             t.chars().take(300).collect()
         }
     });
-    if status == 402 {
-        return ProviderError::OutOfCredit {
-            provider: provider.to_string(),
-            detail,
-        };
-    }
     ProviderError::Status {
         provider: provider.to_string(),
         status,

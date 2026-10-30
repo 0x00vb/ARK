@@ -25,6 +25,7 @@ any application on ARK.
 | `ARK_PRICE` | none | `in,out[,cached]` US dollars per million tokens, for `/usage` |
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` | none, `https://api.anthropic.com/v1` | Anthropic provider |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL` | none, `https://api.openai.com/v1` | OpenAI, or one compatible endpoint in its place |
+| `OPENCODE_GO_API_KEY` | none | a personal key from the OpenCode Go workspace; direct coding-agent access only |
 | `ARK_ENDPOINTS`, `<NAME>_API_KEY` | none | named OpenAI-compatible endpoints, `name=url,name=url`, each with its key ([below](#named-endpoints)) |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama provider |
 | `ARK_CLAUDE_BIN`, `ARK_CODEX_BIN` | found on `PATH` and the usual install places | the CLI behind the `claude` / `codex` providers |
@@ -249,3 +250,26 @@ its answer reaches and includes the running turn's events so far; the page drops
 already shown, applies what arrived while it was loading, and reloads on a gap. A browser
 reconnects with backoff (1 s doubling to 30 s) and stops after ten failures with a Retry
 button. The HTTP server answers only the loopback host names and requires the per-run token.
+
+
+## OpenCode Go
+
+Select `opencode-go:glm-5.3-flash`, `opencode-go:kimi-k2.7-code` or
+`opencode-go:deepseek-v4.1-flash`. CLI apps can use `ARK_PROVIDER=opencode-go` and
+`ARK_MODEL=glm-5.3-flash` with `OPENCODE_GO_API_KEY` supplied through their environment.
+Desktop saves the key in the existing secret store. It does not require OpenCode installed.
+
+The key needs Models Request permission in the workspace subscribed to Go. Saving a key
+only records it. The first task checks inference access. A public model listing cannot
+verify a key, permissions or an active subscription.
+
+ARK identifies itself and sends a stable opaque conversation header on all Go completions.
+Use `ask_session`, `ask` or `harness_for_conversation`. The raw `harness` entry needs an
+explicit conversation for Go. Resumed chats keep their identifier; agents have their own.
+
+Go is intended for coding-agent traffic. Non-coding ARK traffic is not verified as supported.
+Extra usage in the OpenCode Console can spend Console balance after included limits.
+Disable that setting in OpenCode if only included usage should be consumed. ARK does not
+change that setting, fabricate quota telemetry or automatically select another provider.
+
+[Provider contract and limits](adr/0080-opencode-go-uses-explicit-conversations.md).

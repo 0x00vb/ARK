@@ -81,7 +81,7 @@ impl FaultPlan {
 pub struct Faulty {
     inner: Arc<dyn Provider>,
     plan: FaultPlan,
-    calls: AtomicU64,
+    calls: Arc<AtomicU64>,
     recorder: Arc<Recorder>,
 }
 
@@ -107,7 +107,7 @@ impl Faulty {
         Arc::new(Faulty {
             inner,
             plan,
-            calls: AtomicU64::new(0),
+            calls: Arc::new(AtomicU64::new(0)),
             recorder,
         })
     }
@@ -152,6 +152,18 @@ impl Faulty {
 
 #[async_trait]
 impl Provider for Faulty {
+    fn for_conversation(&self, conversation: &str) -> ModelResult<Option<Arc<dyn Provider>>> {
+        Ok(self.inner.for_conversation(conversation)?.map(|inner| {
+            let bound: Arc<dyn Provider> = Arc::new(Self {
+                inner,
+                plan: self.plan.clone(),
+                calls: self.calls.clone(),
+                recorder: self.recorder.clone(),
+            });
+            bound
+        }))
+    }
+
     async fn complete(
         &self,
         system: &str,

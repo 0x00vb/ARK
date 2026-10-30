@@ -764,6 +764,20 @@ impl Host {
                 let chat = self.shown_held()?;
                 Some(self.on_place(&chat, "chat_models", json!({})).await)
             }
+            "model_accounts"
+            | "model_account_key"
+            | "model_account_add"
+            | "model_account_rename"
+            | "model_account_reconnect"
+            | "model_account_remove"
+            | "model_account_usage"
+            | "subscription_usage" => {
+                let chat = self.shown_held()?;
+                Some(
+                    self.on_place(&chat, &format!("chat_{method}"), params.clone())
+                        .await,
+                )
+            }
             "place_models" => {
                 let place = s("place");
                 if place.is_empty() {
@@ -871,7 +885,6 @@ impl Host {
             | "api_keys"
             | "api_key_save"
             | "api_key_forget"
-            | "subscription_usage"
             | "capabilities"
             | "capability_connect"
             | "capability_turn"

@@ -19,6 +19,7 @@ use crate::{ModelOption, TextSink, Usage};
 const SETUP_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) struct CodexApp {
+    account: Option<crate::accounts::ModelAccount>,
     proc: LiveProcess,
     next_id: u64,
     /// Threads this process has started or loaded.
@@ -55,27 +56,50 @@ pub(crate) enum AppError {
 
 impl CodexApp {
     /// Ordinary sessions collect account usage before their first turn.
+    #[cfg(test)]
     pub(crate) async fn start(bin: &Path, version: &str) -> Result<Self, AppError> {
-        let mut app = Self::start_catalog(bin, version).await?;
+        Self::start_for(bin, version, None).await
+    }
+    pub(crate) async fn start_for(
+        bin: &Path,
+        version: &str,
+        account: Option<&crate::accounts::ModelAccount>,
+    ) -> Result<Self, AppError> {
+        let mut app = Self::start_catalog_for(bin, version, account).await?;
         // The account's usage limits, before any turn. A sign-in without them (an API key)
         // answers with an error, which changes nothing.
         if let Ok(r) = app
             .request("account/rateLimits/read", Value::Null, SETUP_TIMEOUT)
             .await
         {
-            record_limits(&r["rateLimits"]);
+            app.record_limits(&r);
         }
         Ok(app)
     }
 
     /// Start only the process and handshake. Catalog discovery needs no usage query.
-    pub(crate) async fn start_catalog(bin: &Path, version: &str) -> Result<Self, AppError> {
+    pub(crate) async fn start_catalog_for(
+        bin: &Path,
+        version: &str,
+        account: Option<&crate::accounts::ModelAccount>,
+    ) -> Result<Self, AppError> {
+        if account.is_some_and(|a| a.provider != "codex") {
+            return Err(AppError::Failed(
+                "This account belongs to another provider.".into(),
+            ));
+        }
         let mut cmd = crate::cli::command(bin);
+        if let Some(account) = account {
+            account
+                .setup_command(&mut cmd)
+                .map_err(|e| AppError::Failed(e.to_string()))?;
+        }
         cmd.args(["app-server", "-c", "sandbox_mode=\"read-only\""]);
         crate::cli::host_codex_flags(&mut cmd, false);
         let proc = LiveProcess::spawn(cmd)
             .map_err(|e| AppError::Broken(format!("could not start: {e}")))?;
         let mut app = CodexApp {
+            account: account.cloned(),
             proc,
             next_id: 0,
             threads: Default::default(),
@@ -89,6 +113,16 @@ impl CodexApp {
         .await?;
         app.notify("initialized").await?;
         Ok(app)
+    }
+
+    fn record_limits(&self, limits: &Value) {
+        if let Some(u) = crate::usage::from_codex_response(limits) {
+            if let Some(account) = &self.account {
+                account.record(u);
+            } else {
+                crate::usage::record(u);
+            }
+        }
     }
 
     pub(crate) fn running(&mut self) -> bool {
@@ -115,6 +149,17 @@ impl CodexApp {
         let config = host_config(&response)?;
         self.host_config = Some(config.clone());
         Ok(config)
+    }
+
+    pub(crate) async fn identity(&mut self) -> Result<Option<String>, AppError> {
+        let response = self
+            .request(
+                "account/read",
+                json!({"refreshToken": false}),
+                SETUP_TIMEOUT,
+            )
+            .await?;
+        Ok(response["account"]["email"].as_str().map(str::to_string))
     }
 
     /// Models and effort levels available to this signed-in Codex account.
@@ -246,7 +291,7 @@ impl CodexApp {
                 Some("item/completed") if params["item"]["type"] == "agentMessage" => {
                     text = params["item"]["text"].as_str().map(str::to_string);
                 }
-                Some("account/rateLimits/updated") => record_limits(&params["rateLimits"]),
+                Some("account/rateLimits/updated") => self.record_limits(params),
                 Some("thread/tokenUsage/updated") => {
                     usage = turn_usage(&params["tokenUsage"]["last"]);
                 }
@@ -395,12 +440,6 @@ fn host_config(response: &Value) -> Result<Value, AppError> {
         }
     }
     Ok(overrides)
-}
-
-fn record_limits(limits: &Value) {
-    if let Some(u) = crate::usage::from_codex(limits) {
-        crate::usage::record(u);
-    }
 }
 
 /// A turn's token counts. Codex counts cached input inside `inputTokens`.

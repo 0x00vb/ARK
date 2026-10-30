@@ -61,6 +61,9 @@ import { setAgentIdentity } from "./dom.js";
 //                      depends on (an app with runtimes in several places says which here)
 //   ark.agentIdentity(name => styleKey)
 //                      one stable style key per assigned participant, shared by single and group chats.
+//   ark.searchSource({ id, load(project, api), open(entry, scopedApi) })
+//                      project search rows: { id, title, description?, updated_at? }.
+//                      Loading never navigates. Opening uses the selected project's API.
 //   ark.projectSection({ id, label, render(el, { project }, api) })
 //                      rows inside the current unfolded project, before its chats. `label`
 //                      names the group for accessibility. Render is synchronous, with `el`
@@ -110,6 +113,7 @@ export const registry = {
   statuses: [],
   sidebars: [],
   projectSections: new Map(),
+  searchSources: new Map(),
   modelPicker: null,
   submitHooks: [],
 };
@@ -232,6 +236,14 @@ export function installApi(api) {
       need(s, ["id", "render"], "sidebar");
       registry.sidebars.push(s);
       api._changed();
+    },
+    searchSource(source) {
+      need(source, ["id", "load", "open"], "searchSource");
+      if (typeof source.id !== "string" || !source.id.trim() || typeof source.load !== "function"
+        || typeof source.open !== "function" || registry.searchSources.has(source.id)) {
+        throw new Error("Invalid or duplicate search source");
+      }
+      registry.searchSources.set(source.id, source);
     },
     projectSection(s) {
       need(s, ["id", "label", "render"], "projectSection");

@@ -607,6 +607,7 @@ fn runtime_label(action: &str, input: &Value) -> Option<String> {
         ark_orchestrate::WAIT => "Waiting for delegated work".into(),
         ark_orchestrate::CREATE => format!("Creating agent {}", s("name")),
         ark_orchestrate::MESSAGE => format!("Messaging {}", s("to")),
+        ark_orchestrate::START => format!("Starting a conversation with {}", s("to")),
         ark_orchestrate::SCHEDULE => match (s("schedule"), s("to")) {
             ("", "") => format!(
                 "Scheduling {} {}",
@@ -1140,6 +1141,14 @@ mod tests {
         assert_eq!(
             l.call_label("agents.message", &json!({ "to": "lead", "text": "x" })),
             "Messaging lead"
+        );
+
+        assert_eq!(
+            l.call_label(
+                "agents.start",
+                &json!({ "to": "reviewer", "objective": "Review" })
+            ),
+            "Starting a conversation with reviewer"
         );
         assert_eq!(
             l.call_label("diagram.create", &json!({ "title": "Themes" })),

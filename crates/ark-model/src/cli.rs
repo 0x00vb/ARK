@@ -65,7 +65,7 @@ pub const REPLY_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,
 pub const CLAUDE_REPLY_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"properties":{"action":{"type":"string","enum":["reply","call_tools"]},"text":{"type":"string"},"tool_calls":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"arguments":{"type":"object"}},"required":["name","arguments"]}}},"required":["action","text","tool_calls"]}"#;
 
 /// Which vendor CLI.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Cli {
     /// Claude Code, signed in with a Claude subscription.
@@ -226,16 +226,72 @@ pub struct CliStatus {
     pub signed_in: bool,
     /// How it is signed in ("claude.ai", "ChatGPT"), or why it is not usable.
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
 }
 
 /// Check one CLI. Never fails: problems come back in `detail`.
 pub async fn status(cli: Cli) -> CliStatus {
+    status_for(cli, None).await
+}
+
+pub async fn account_status(cli: Cli, account: &crate::accounts::ModelAccount) -> CliStatus {
+    let _lease = match crate::accounts::Lease::setup(account) {
+        Ok(lease) => lease,
+        Err(error) => {
+            return CliStatus {
+                cli,
+                installed: cli.locate().is_some(),
+                signed_in: false,
+                detail: error.to_string(),
+                identity: None,
+            }
+        }
+    };
+    let mut status = status_for(cli, Some(account)).await;
+    if status.signed_in {
+        if cli == Cli::Codex {
+            if let Some(bin) = cli.locate() {
+                status.identity = tokio::time::timeout(Duration::from_secs(6), async {
+                    let mut app =
+                        CodexApp::start_catalog_for(&bin, env!("CARGO_PKG_VERSION"), Some(account))
+                            .await
+                            .ok()?;
+                    let identity = app.identity().await.ok().flatten();
+                    app.stop().await;
+                    identity
+                })
+                .await
+                .ok()
+                .flatten();
+            }
+        }
+        if let Some(source) = crate::keys::source() {
+            if let Err(error) = source.activate_account(account, status.identity.as_deref()) {
+                status.signed_in = false;
+                status.detail = error.to_string();
+            }
+        }
+    }
+    status
+}
+
+pub(crate) async fn status_for(
+    cli: Cli,
+    account: Option<&crate::accounts::ModelAccount>,
+) -> CliStatus {
+    let _lease = account.map(crate::accounts::Lease::setup).transpose();
     let mut st = CliStatus {
         cli,
         installed: false,
         signed_in: false,
         detail: String::new(),
+        identity: None,
     };
+    if account.is_some_and(|a| a.provider != cli.name()) {
+        st.detail = "This account belongs to another provider.".into();
+        return st;
+    }
     let Some(bin) = cli.locate() else {
         st.detail = format!("not installed ({})", cli.install_hint());
         return st;
@@ -245,7 +301,29 @@ pub async fn status(cli: Cli) -> CliStatus {
         Cli::Claude => &["auth", "status"],
         Cli::Codex => &["login", "status"],
     };
-    let out = command(&bin).args(args).stdin(Stdio::null()).output();
+    let mut cmd = command(&bin);
+    if let Some(account) = account {
+        if let Err(error) = account.setup_command(&mut cmd) {
+            st.detail = error.to_string();
+            return st;
+        }
+    }
+    let child = match cmd
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => {
+            st.detail = "Could not check this account. Try again.".into();
+            return st;
+        }
+    };
+    let mut tree = ark_os::process::Tree::of(child.id());
+    let out = child.wait_with_output();
     let out = match tokio::time::timeout(Duration::from_secs(20), out).await {
         Ok(Ok(o)) => o,
         Ok(Err(e)) => {
@@ -257,12 +335,18 @@ pub async fn status(cli: Cli) -> CliStatus {
             return st;
         }
     };
+    tree.disarm();
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     (st.signed_in, st.detail) = parse_status(cli, out.status.success(), &text);
+    if cli == Cli::Claude && st.signed_in {
+        st.identity = serde_json::from_slice::<Value>(&out.stdout)
+            .ok()
+            .and_then(|v| v["email"].as_str().map(str::to_string));
+    }
     st
 }
 
@@ -294,17 +378,37 @@ fn parse_status(cli: Cli, ok: bool, text: &str) -> (bool, String) {
 /// A model reached through a vendor CLI.
 pub struct CliModel {
     cli: Cli,
+    account: Option<crate::accounts::ModelAccount>,
     model: String,
     effort: Option<String>,
     program: Option<PathBuf>,
     calls: AtomicU64,
     /// Claude Code processes kept for vendor sessions, by session id. Only idle ones are
     /// here: a call takes its process out and puts it back after a complete reply.
-    live: Mutex<HashMap<String, LiveProcess>>,
+    idle: Arc<CliIdle>,
     /// The Codex app server holding this model's threads, when idle (taken the same way).
-    app: Mutex<Option<CodexApp>>,
+
     /// The app server could not be started: Codex sessions run `codex exec` instead.
     no_app: std::sync::atomic::AtomicBool,
+}
+
+#[derive(Default)]
+struct CliIdle {
+    live: Mutex<HashMap<String, LiveProcess>>,
+    app: Mutex<Option<CodexApp>>,
+}
+#[async_trait]
+impl crate::accounts::AccountProcesses for CliIdle {
+    async fn stop(&self) {
+        let live = std::mem::take(&mut *self.live.lock().unwrap());
+        let app = self.app.lock().unwrap().take();
+        for (_, process) in live {
+            process.stop().await;
+        }
+        if let Some(app) = app {
+            app.stop().await;
+        }
+    }
 }
 
 impl CliModel {
@@ -313,6 +417,7 @@ impl CliModel {
         let (model, effort) = requested_parts(&requested);
         CliModel {
             cli,
+            account: None,
             model: if model.trim().is_empty() {
                 cli.default_model().into()
             } else {
@@ -321,8 +426,7 @@ impl CliModel {
             effort,
             program: None,
             calls: AtomicU64::new(0),
-            live: Mutex::new(HashMap::new()),
-            app: Mutex::new(None),
+            idle: Arc::default(),
             no_app: Default::default(),
         }
     }
@@ -334,6 +438,40 @@ impl CliModel {
         let mut this = Self::new(cli, model);
         this.effort = effort;
         Ok(this)
+    }
+
+    pub fn for_account(
+        cli: Cli,
+        model: impl Into<String>,
+        account: crate::accounts::ModelAccount,
+    ) -> Result<Self> {
+        account.check()?;
+        if account.provider != cli.name() {
+            return Err(ProviderError::Api {
+                provider: account.provider.clone(),
+                detail: "This account belongs to another provider.".into(),
+            });
+        }
+        let (model, effort) = split_effort_for(cli, &model.into(), Some(&account))?;
+        let mut this = Self::new(cli, model);
+        this.effort = effort;
+        crate::accounts::register_processes(&account.id, this.idle.clone());
+        this.account = Some(account);
+        Ok(this)
+    }
+
+    fn identity(&self) -> &str {
+        self.account
+            .as_ref()
+            .map_or(self.cli.name(), |a| a.id.as_str())
+    }
+
+    fn command(&self, bin: &Path) -> Result<tokio::process::Command> {
+        let mut cmd = command(bin);
+        if let Some(account) = &self.account {
+            account.command(&mut cmd)?;
+        }
+        Ok(cmd)
     }
 
     /// Run this executable instead of looking the CLI up (tests, unusual installs).
@@ -389,6 +527,11 @@ impl CliModel {
         tools: &[ToolDef],
         on_text: Option<TextSink<'_>>,
     ) -> Result<Exec> {
+        let _lease = self
+            .account
+            .as_ref()
+            .map(crate::accounts::Lease::acquire)
+            .transpose()?;
         if self.cli == Cli::Claude {
             return self.claude(mode, sys, &input, on_text).await;
         }
@@ -440,7 +583,7 @@ impl CliModel {
         let mut proc = match running {
             Some(p) => p,
             None => {
-                let mut cmd = command(&self.program()?);
+                let mut cmd = self.command(&self.program()?)?;
                 cmd.args(claude_stream_args(
                     mode,
                     &self.model,
@@ -489,7 +632,11 @@ impl CliModel {
                 Some("rate_limit_event") => {
                     let info = &ev["rate_limit_info"];
                     if let Some(u) = crate::usage::from_claude(info) {
-                        crate::usage::record(u);
+                        if let Some(account) = &self.account {
+                            account.record(u);
+                        } else {
+                            crate::usage::record(u);
+                        }
                     }
                     if info["status"].as_str().is_some_and(|s| s != "allowed") {
                         reset = info["resetsAt"].as_u64();
@@ -517,7 +664,7 @@ impl CliModel {
             Mode::OneShot => None,
         });
         if let (Some(v), false) = (&vendor, matches!(mode, Mode::OneShot)) {
-            self.live.lock().unwrap().insert(v.clone(), proc);
+            self.idle.live.lock().unwrap().insert(v.clone(), proc);
         }
         Ok(Exec {
             completion: c,
@@ -541,17 +688,21 @@ impl CliModel {
             Ok(b) => b,
             Err(e) => return Some(Err(e)),
         };
-        let idle = self.app.lock().unwrap().take();
+        let idle = self.idle.app.lock().unwrap().take();
         let mut app = match idle.and_then(|mut a| a.running().then_some(a)) {
             Some(a) => a,
-            None => match CodexApp::start(&bin, env!("CARGO_PKG_VERSION")).await {
-                Ok(a) => a,
-                Err(e) => {
-                    tracing::warn!(error = %self.app_error(&e, ""), "codex app-server unavailable; using codex exec");
-                    self.no_app.store(true, Ordering::Relaxed);
-                    return None;
+            None => {
+                match CodexApp::start_for(&bin, env!("CARGO_PKG_VERSION"), self.account.as_ref())
+                    .await
+                {
+                    Ok(a) => a,
+                    Err(e) => {
+                        tracing::warn!(error = %self.app_error(&e, ""), "codex app-server unavailable; using codex exec");
+                        self.no_app.store(true, Ordering::Relaxed);
+                        return None;
+                    }
                 }
-            },
+            }
         };
         let dir = match work_dir() {
             Ok(d) => d,
@@ -596,12 +747,12 @@ impl CliModel {
                 let err = self.app_error(&e, &app.stderr_tail());
                 // A Codex error leaves the process usable; anything else ends it.
                 if matches!(e, AppError::Failed(_)) {
-                    *self.app.lock().unwrap() = Some(app);
+                    *self.idle.app.lock().unwrap() = Some(app);
                 }
                 return Some(Err(self.refused(err, shape)));
             }
         };
-        *self.app.lock().unwrap() = Some(app);
+        *self.idle.app.lock().unwrap() = Some(app);
         let reply: Value = match serde_json::from_str(turn.text.trim()) {
             Ok(v) => v,
             Err(_) => {
@@ -632,7 +783,11 @@ impl CliModel {
     /// Codex's reply shape for a call offering `tools`: a closed variant per tool, or the older
     /// string form once Codex refused a typed schema for this model.
     fn codex_shape(&self, tools: &[ToolDef]) -> ReplyShape {
-        let model = Provider::model_id(self);
+        let model = if let Some(account) = &self.account {
+            format!("{}#{}", Provider::model_id(self), account.revision)
+        } else {
+            Provider::model_id(self)
+        };
         if REFUSED.lock().unwrap().contains(&model) {
             ReplyShape::legacy()
         } else {
@@ -651,7 +806,11 @@ impl CliModel {
         if !shape.typed || !refused {
             return e;
         }
-        let model = Provider::model_id(self);
+        let model = if let Some(account) = &self.account {
+            format!("{}#{}", Provider::model_id(self), account.revision)
+        } else {
+            Provider::model_id(self)
+        };
         tracing::warn!(model = %model, error = %detail, "codex refused the typed reply schema; tool arguments travel as JSON strings from now on");
         let mut r = REFUSED.lock().unwrap();
         if !r.contains(&model) {
@@ -665,7 +824,7 @@ impl CliModel {
 
     /// The running process of vendor session `id`, if there is one that has not exited.
     fn take_live(&self, id: &str) -> Option<LiveProcess> {
-        let mut p = self.live.lock().unwrap().remove(id)?;
+        let mut p = self.idle.live.lock().unwrap().remove(id)?;
         p.running().then_some(p)
     }
 
@@ -683,6 +842,11 @@ impl CliModel {
     /// One search with the CLI's own web search on, and nothing else: Claude Code's
     /// `WebSearch` tool, Codex `--search`. Always a fresh run, never a session.
     async fn search(&self, query: &str, limit: usize) -> Result<Vec<WebHit>> {
+        let _lease = self
+            .account
+            .as_ref()
+            .map(crate::accounts::Lease::acquire)
+            .transpose()?;
         let input = crate::search_prompt(query, limit);
         let p = self
             .invoke(Mode::OneShot, None, input, crate::SEARCH_SCHEMA, true)
@@ -705,7 +869,7 @@ impl CliModel {
         let dir = work_dir()?;
         let (mut cmd, out_file) = match self.cli {
             Cli::Claude => {
-                let mut c = command(&bin);
+                let mut c = self.command(&bin)?;
                 let tools = if search { "WebSearch" } else { "" };
                 c.args(["-p", "--output-format", "json", "--tools", tools])
                     .args(["--strict-mcp-config", "--setting-sources", ""]);
@@ -739,7 +903,7 @@ impl CliModel {
                 // own schema.
                 let schema = dir.join(format!("schema-{}.json", new_session_id()));
                 std::fs::write(&schema, schema_text).map_err(io_err)?;
-                let mut c = command(&bin);
+                let mut c = self.command(&bin)?;
                 if search {
                     c.arg("--search");
                 }
@@ -934,6 +1098,29 @@ impl CliModel {
 
 #[async_trait]
 impl Provider for CliModel {
+    fn connection_revision(&self) -> u64 {
+        self.account.as_ref().map_or(0, |a| a.revision)
+    }
+    fn for_conversation(&self, _conversation: &str) -> Result<Option<Arc<dyn Provider>>> {
+        if let Some(account) = &self.account {
+            let current = crate::accounts::get(&account.id)?.ok_or_else(|| {
+                self.api("This account was removed. Choose an account in Models.".into())
+            })?;
+            current.check()?;
+            if current.revision != account.revision {
+                return Ok(Some(crate::build(
+                    &current.id,
+                    Some(format!(
+                        "{}{}",
+                        self.model,
+                        effort_suffix(self.effort.as_deref())
+                    )),
+                )?));
+            }
+        }
+        Ok(None)
+    }
+
     /// Claude Code takes image blocks on its input, Codex's app server image items. (`codex
     /// exec`, the fallback, takes text only.)
     fn reads_pictures(&self) -> bool {
@@ -968,7 +1155,7 @@ impl Provider for CliModel {
     fn describe(&self) -> String {
         format!(
             "{} {}{}",
-            self.cli.name(),
+            self.identity(),
             self.model,
             effort_suffix(self.effort.as_deref())
         )
@@ -977,7 +1164,7 @@ impl Provider for CliModel {
     fn model_id(&self) -> String {
         format!(
             "{}:{}{}",
-            self.cli.name(),
+            self.identity(),
             self.model,
             effort_suffix(self.effort.as_deref())
         )
@@ -1134,7 +1321,10 @@ impl SessionBackend for CliModel {
     }
 
     fn account(&self) -> String {
-        self.cli.name().to_string()
+        self.identity().to_string()
+    }
+    fn account_revision(&self) -> u64 {
+        self.account.as_ref().map_or(0, |a| a.revision)
     }
 
     async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
@@ -1162,12 +1352,12 @@ impl SessionBackend for CliModel {
     }
 
     async fn discard(&self, vendor: &str) {
-        let running = self.live.lock().unwrap().remove(vendor);
+        let running = self.idle.live.lock().unwrap().remove(vendor);
         if let Some(p) = running {
             p.stop().await;
         }
         let app = {
-            let mut a = self.app.lock().unwrap();
+            let mut a = self.idle.app.lock().unwrap();
             if a.as_ref().is_some_and(|a| a.has_thread(vendor)) {
                 a.take()
             } else {
@@ -1287,9 +1477,13 @@ impl CliModel {
         let home = ark_os::dirs::home();
         match self.cli {
             Cli::Claude => {
-                let config = std::env::var_os("CLAUDE_CONFIG_DIR")
-                    .map(PathBuf::from)
-                    .or_else(|| home.map(|h| h.join(".claude")));
+                let config = if let Some(account) = &self.account {
+                    account.directory().ok()
+                } else {
+                    std::env::var_os("CLAUDE_CONFIG_DIR")
+                        .map(PathBuf::from)
+                        .or_else(|| home.map(|h| h.join(".claude")))
+                };
                 let (Some(config), Ok(dir)) = (config, work_dir()) else {
                     return Vec::new();
                 };
@@ -1297,9 +1491,13 @@ impl CliModel {
                 vec![claude_session_file(&config, &dir, vendor)]
             }
             Cli::Codex => {
-                let codex = std::env::var_os("CODEX_HOME")
-                    .map(PathBuf::from)
-                    .or_else(|| home.map(|h| h.join(".codex")));
+                let codex = if let Some(account) = &self.account {
+                    account.directory().ok()
+                } else {
+                    std::env::var_os("CODEX_HOME")
+                        .map(PathBuf::from)
+                        .or_else(|| home.map(|h| h.join(".codex")))
+                };
                 let Some(codex) = codex else {
                     return Vec::new();
                 };
@@ -1359,6 +1557,13 @@ fn codex_session_files(sessions: &Path, id: &str) -> Vec<PathBuf> {
 /// The session backend for a model spec's provider and model, when it is a subscription
 /// CLI (`claude`, `codex`).
 pub fn session_backend(provider: &str, model: &str) -> Option<Arc<dyn SessionBackend>> {
+    if provider.contains('~') {
+        let account = crate::accounts::get(provider).ok()??;
+        let cli = Cli::of(&account.provider)?;
+        return CliModel::for_account(cli, model, account)
+            .ok()
+            .map(|m| Arc::new(m) as Arc<dyn SessionBackend>);
+    }
     let cli = match provider {
         "claude" => Cli::Claude,
         "codex" => Cli::Codex,
@@ -1374,6 +1579,20 @@ fn effort_suffix(effort: Option<&str>) -> String {
 }
 
 fn split_effort(cli: Cli, requested: &str) -> Result<(String, Option<String>)> {
+    split_effort_for(cli, requested, None)
+}
+
+static ACCOUNT_CATALOG: LazyLock<Mutex<HashMap<String, EffortCatalog>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+fn catalog_key(account: &crate::accounts::ModelAccount) -> String {
+    format!("{}:{}", account.id, account.revision)
+}
+
+fn split_effort_for(
+    cli: Cli,
+    requested: &str,
+    account: Option<&crate::accounts::ModelAccount>,
+) -> Result<(String, Option<String>)> {
     let requested = requested.trim();
     let Some((model, effort)) = requested.rsplit_once('@') else {
         return Ok((requested.to_string(), None));
@@ -1387,7 +1606,41 @@ fn split_effort(cli: Cli, requested: &str) -> Result<(String, Option<String>)> {
             ),
         });
     }
-    if cli == Cli::Codex {
+    if let (Cli::Codex, Some(account)) = (cli, account) {
+        let key = catalog_key(account);
+        let known = ACCOUNT_CATALOG.lock().unwrap().contains_key(&key);
+        if !known {
+            let account = account.clone();
+            let listed = std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .ok()
+                    .and_then(|r| r.block_on(codex_models_for(Some(&account))))
+            })
+            .join()
+            .ok()
+            .flatten();
+            if listed.is_none() {
+                return Err(ProviderError::Api {
+                    provider: "codex".into(),
+                    detail: "Could not verify this account's models. Retry in Models.".into(),
+                });
+            }
+        }
+        let supported = ACCOUNT_CATALOG
+            .lock()
+            .unwrap()
+            .get(&key)
+            .and_then(|m| m.get(model))
+            .is_some_and(|efforts| efforts.iter().any(|e| e == effort));
+        if !supported {
+            return Err(ProviderError::Api {
+                provider: "codex".into(),
+                detail: "This account did not advertise that model and effort.".into(),
+            });
+        }
+    } else if cli == Cli::Codex {
         if CODEX_CATALOG.lock().unwrap().is_none() && !load_codex_catalog() {
             return Err(ProviderError::Api {
                 provider: cli.name().into(),
@@ -1457,12 +1710,31 @@ fn load_codex_catalog() -> bool {
 /// Ask the installed Codex app server for this account's model catalog. Explicit efforts
 /// remain unavailable when their advertised support cannot be verified.
 pub(crate) async fn codex_models() -> Option<Vec<crate::ModelOption>> {
-    codex_models_from(&Cli::Codex.locate()?, Duration::from_secs(6)).await
+    codex_models_for(None).await
 }
 
+#[cfg(test)]
 async fn codex_models_from(bin: &Path, wait: Duration) -> Option<Vec<crate::ModelOption>> {
+    codex_models_from_for(bin, wait, None).await
+}
+
+pub(crate) async fn codex_models_for(
+    account: Option<&crate::accounts::ModelAccount>,
+) -> Option<Vec<crate::ModelOption>> {
+    codex_models_from_for(&Cli::Codex.locate()?, Duration::from_secs(6), account).await
+}
+
+async fn codex_models_from_for(
+    bin: &Path,
+    wait: Duration,
+    account: Option<&crate::accounts::ModelAccount>,
+) -> Option<Vec<crate::ModelOption>> {
+    let _lease = account
+        .map(crate::accounts::Lease::acquire)
+        .transpose()
+        .ok()?;
     let listed = tokio::time::timeout(wait, async {
-        let mut app = CodexApp::start_catalog(bin, env!("CARGO_PKG_VERSION"))
+        let mut app = CodexApp::start_catalog_for(bin, env!("CARGO_PKG_VERSION"), account)
             .await
             .ok()?;
         let models = app.models().await.ok();
@@ -1475,7 +1747,17 @@ async fn codex_models_from(bin: &Path, wait: Duration) -> Option<Vec<crate::Mode
     if listed.is_empty() {
         return None;
     }
-    remember_codex_models(&listed);
+    if let Some(account) = account {
+        ACCOUNT_CATALOG.lock().unwrap().insert(
+            catalog_key(account),
+            listed
+                .iter()
+                .map(|m| (m.id.clone(), m.efforts.clone()))
+                .collect(),
+        );
+    } else {
+        remember_codex_models(&listed);
+    }
     Some(listed)
 }
 
@@ -1872,6 +2154,38 @@ fn clip(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+pub async fn refresh_codex_usage(account: Option<&crate::accounts::ModelAccount>) -> Result<()> {
+    let _lease = account.map(crate::accounts::Lease::acquire).transpose()?;
+    let bin = Cli::Codex
+        .locate()
+        .ok_or_else(|| ProviderError::MissingCredential("Codex is not installed.".into()))?;
+    let id = account.map_or("codex", |a| a.id.as_str());
+    let before = crate::usage::usage_of(id).map(|u| u.reported_ms);
+    tokio::time::timeout(Duration::from_secs(6), async {
+        let app = CodexApp::start_for(&bin, env!("CARGO_PKG_VERSION"), account)
+            .await
+            .map_err(|_| ProviderError::Api {
+                provider: "codex".into(),
+                detail: "Could not refresh usage. Try again.".into(),
+            })?;
+        app.stop().await;
+        let refreshed = crate::usage::usage_of(id)
+            .is_some_and(|u| !u.windows.is_empty() && Some(u.reported_ms) != before);
+        if !refreshed {
+            return Err(ProviderError::Api {
+                provider: "codex".into(),
+                detail: "Usage is unavailable. Try again later.".into(),
+            });
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| ProviderError::Api {
+        provider: "codex".into(),
+        detail: "Usage refresh timed out. Try again.".into(),
+    })?
 }
 
 #[cfg(test)]

@@ -2573,3 +2573,107 @@ async fn a_turn_that_continues_a_stopped_one_takes_up_its_handoff_instead_of_mak
     assert_eq!(done.state, TaskState::Done);
     assert_eq!(c.posts(&id).len(), 1);
 }
+
+struct ConversationModels {
+    source: Arc<Script>,
+    colleague: Arc<Script>,
+}
+
+#[async_trait::async_trait]
+impl Provider for ConversationModels {
+    async fn complete(
+        &self,
+        system: &str,
+        messages: &[Message],
+        tools: &[ToolDef],
+    ) -> ark_model::Result<Completion> {
+        let model = if system.contains("You are the agent \"colleague\"") {
+            &self.colleague
+        } else {
+            &self.source
+        };
+        model.complete(system, messages, tools).await
+    }
+    fn describe(&self) -> String {
+        "conversations".into()
+    }
+}
+
+#[tokio::test]
+async fn a_persistent_agent_creates_and_starts_a_colleague_without_copying_its_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = Script::new(
+        "source",
+        vec![
+            calls(vec![(
+                "agents.create",
+                json!({"name":"colleague", "role":"Reviews documents", "instructions":"Review the supplied brief."}),
+            )]),
+            calls(vec![(
+                "agents.start",
+                json!({"to":"colleague", "objective":"Review this proposal", "context":"PUBLIC-BRIEF-ONLY"}),
+            )]),
+            calls(vec![(
+                "agents.start",
+                json!({"to":"colleague", "objective":"Review this proposal", "context":"PUBLIC-BRIEF-ONLY"}),
+            )]),
+            answer("The colleague has its own conversation."),
+        ],
+    );
+    let colleague = Script::new(
+        "colleague",
+        vec![
+            answer("REVIEW-DECISION-ALPHA"),
+            answer("Continuing my review."),
+        ],
+    );
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(Arc::new(ConversationModels {
+            source: source.clone(),
+            colleague: colleague.clone(),
+        }))
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("team", "test").unwrap();
+    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    o.spawn(AgentSpec::new("source")).await.unwrap();
+    let done = o
+        .run(
+            "source",
+            TaskSpec::new("Create a colleague and start its review. PRIVATE-SOURCE-SECRET"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    let child = o
+        .tasks()
+        .into_iter()
+        .find(|t| t.owner == "colleague")
+        .expect("agents.start created a separate turn");
+    assert_eq!(o.wait(&child.id).await.unwrap().state, TaskState::Done);
+    assert!(done.children.is_empty());
+    assert!(child.parent.is_none());
+    let first = format!("{:?}", colleague.seen.lock().unwrap());
+    assert!(first.contains("PUBLIC-BRIEF-ONLY"));
+    assert!(!first.contains("PRIVATE-SOURCE-SECRET"));
+    assert_eq!(
+        o.tasks()
+            .iter()
+            .filter(|task| task.owner == "colleague")
+            .count(),
+        1,
+        "distinct engine invocations of the same sender brief must converge"
+    );
+    let identity = o.agent("colleague").unwrap();
+    let followup = o
+        .run("colleague", TaskSpec::new("Continue yesterday's review"))
+        .await
+        .unwrap();
+    assert_eq!(followup.state, TaskState::Done);
+    assert_eq!(identity.session, o.agent("colleague").unwrap().session);
+    let later = format!("{:?}", colleague.seen.lock().unwrap().last().unwrap());
+    assert!(later.contains("REVIEW-DECISION-ALPHA"), "{later}");
+}

@@ -644,7 +644,9 @@ async fn the_chat_schedules_without_naming_an_agent_and_manages_it_in_words() {
     let offered = m.tools.lock().unwrap().clone();
     let runs_tools = offered.last().unwrap();
     assert!(
-        !runs_tools.iter().any(|t| t.starts_with("agents.")),
+        !runs_tools
+            .iter()
+            .any(|t| matches!(t.as_str(), "agents.schedule" | "agents.unschedule")),
         "{runs_tools:?}"
     );
     assert_eq!(run.state, TaskState::Done);

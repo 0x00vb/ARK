@@ -1,3 +1,44 @@
+## Coordinated release qualification, 30 October2026
+
+Version0.28.0 combines persistent agent conversations, provider account identities and the
+existing private native model/push contract as protocol1.9. Integrated workspace check,
+actual protocol generation and six protocol tests pass. Full final CI and consumer delivery
+remain pending; no public tag or distribution is claimed by this preparation note.
+Evidence: ../board/evidence/coordinated-client-release-20261030/.
+
+## Compact accounts and subscription menu candidate, 30 October2026
+
+The native status menu now projects each local subscription account and its reported usage
+windows without opening the main window. Missing and stale readings stay explicit. Codex
+refresh uses bounded/coalesced metadata only; no inference. Remote shells retain their
+transport-only tray. Existing compact/open/computer/quit actions remain available.
+The account catalog now returns the provider-reported identity. Desktop collapses a single
+account into one compact row and groups only multiple accounts. Secondary actions use an
+anchored menu; usage previews show two windows with complete details available. New chat
+uses an inset, stable hover target with keyboard feedback and separate coarse-pointer size.
+Qualification: `../board/evidence/provider-account-polish-20261030/`.
+
+## Multiple provider accounts in qualification, 30 October 2026
+
+The owner requested implementation after the reviewed design. Core account records, isolated
+subscription profiles, explicit account selection, per-account limits/catalogs, revision-aware
+sessions and agent caches, request draining and process shutdown are implemented locally.
+Desktop changes are isolated in `../ark-desktop-provider-accounts` from v0.9.9. Primary Desktop
+Blender work is untouched. No commit, push or release.
+
+Focused account/process, restart, API-key and account-cache tests pass. Full workspace Rust
+and 67 actual Core page cases pass as retained stages. Final workspace clippy, affected-crate
+tests, release build and simulated benchmark pass; benchmark deltas are zero. Desktop staged native/headless clippy,92Rust cases and145UI cases pass (144retained
+plus the corrected affected suite). Actual headless runtime and real composer/settings
+prove account selection, isolated limits, cancellation and reconnect/removal restart with
+a synthetic vendor. Final independent source/visual QA and two fresh workflow reviews pass after fixes.
+Expanded runtime v16 also proves expired picker sign-in, unused setup removal without the
+vendor app, and retryable cleanup for started sign-ins. Search holds account leases and
+usage reads filter the originating revision. Real second-subscription
+sign-in and physical-phone behavior remain unverified. Earlier failed stages remain in
+evidence. Own large build output was cleaned. See `docs/PROVIDER_ACCOUNTS.md`, ADR 0086 and
+`../board/evidence/provider-accounts-20261030/`.
+
 ## Desktop0.9.9 delivered, 30 October2026
 
 Desktopv0.9.9 7d70c88062e6e4c3435faba5df831bd5131ab662 is public on the Mac download
@@ -28,6 +69,22 @@ page failures and a real Chromium two-tab red fixture are retained. First Browse
 creation and publication are atomic; fresh/signed modes and different-owner isolation pass.
 Consumer distribution follows. Inference source,
 active routes/guards and processes are unchanged. Evidence ../board/evidence/provider-delivery-20261030/.
+
+## Persistent conversations qualified candidate, 30 October 2026
+
+Uncommitted work in ../ark-persistent-conversations adds persistent colleague creation,
+independent bounded handoffs and project-qualified agent conversations. Protocol1.6 shares
+agent history, origin, full results and produced files with native clients. Durable device sends
+survive retries and restart. Validated legacy aliases preserve their requested read identity.
+Agent events reach phone-only clients. Desktop and browser group Agents/Chats and search roles;
+native iPhone has a compact agent list and stable search. No model transcript is copied on handoff.
+
+Core full CI, benchmark comparison, authenticated headless HTTP and real Host/WebKit consumer
+checks pass. Desktop full check passes144UI cases; native full gate and narrow dark supplement
+pass. Cloud's four service checks pass against isolated test databases. Independent source review
+passes. Evidence: ../board/evidence/persistent-conversations-20261030/result.json.
+No commit, release, pin bump, deployment or physical-phone install. Matching Core/consumer releases
+and the Cloud runtime image remain the delivery step when the owner requests them.
 
 ## Desktop0.9.8 published, 29 October2026
 
@@ -182,6 +239,10 @@ source. Focused WebKit and live preview results are reused. No full CI was rerun
 by the owner. Immutable tag publication and bounded fresh-clone verification remain pending.
 Desktop must pin the verified patch before packaging its plugin registrations.
 
+## Private native notification relay (2026-10-24)
+
+The isolated `codex/native-push` extension is integrated into this candidate without replacing the model and provider authorization changes. Typed external-client registration, presence and tap resolution use protocol 1.8. The runtime uses an operator-configured HTTPS origin and finite pilot expiry. Only a send capability is retained in the exact shared connection secret-store instance. Existing attention notices and chat completion feed a durable, content-free per-device outbox. The first live private binary exposed a missing headless surface: its original gate admitted only dedicated client listeners. The correction requires exact external-client scope on dedicated or account-bound headless listeners. Actual TCP tests prove all four push routes work while owner push and external generic RPC stay refused. Headless startup also resumes its prior chat; three restarts retain one session, while native window startup remains unchanged. Independent source review approved both fixes. Eleven focused push/startup cases and both model/provider HTTP regressions pass. Prior protocol checks passed six cases, and DTOs are unchanged. The corrected bounded Linux release build passes, binary SHA256 `82c890533c21a0f20b55feb7db335b98b7a5fc08cd08a1834fcd6556cd99d76e`. Physical APNs delivery and private activation remain with the parent session. Evidence: `../board/evidence/mobile-native-push-20261024/headless-followup-result.json`. No public release is implied.
+
 ## Combined release verification (2026-10-23)
 
 The combined candidate passed full page-enabled CI: formatting, generated protocol, version
@@ -325,6 +386,25 @@ been rerun on this combined main source. The process-page fixture enables Browse
 Current-main page CI, real same-port viewer/destination proof and native dogfood remain open.
 Board `948e2397`.
 
+## Native model-program authorization (2026-10-23)
+
+In development on `codex/mobile-provider-login`: protocol v1.6 adds a typed, account-route-only
+Claude connection and authorization surface for paired native clients. The runtime drives the
+official Claude Code login, status and logout commands without a shell. The CLI keeps its own
+credentials. ARK holds one active attempt and at most 32 bounded in-memory records, validates the official authorization
+address, accepts the one-time code once and restricts the attempt to its paired device. Status
+requires the exact `claude.ai` authentication method. Independent source review passed after
+fixing device scope, listener ownership, closed-channel timer starvation and fail-closed child
+cleanup. Authorization tests pass 13/13; serialized serve tests pass 16/16 and the previously
+intermittent mutation case also passed alone. A prior parallel run counted a duplicate mutation;
+it remains a historical observation, not a claimed fix. Full `scripts/ci.sh` passed formatting,
+protocol/version checks, clippy, serialized workspace tests, release build and the simulated
+benchmark with no baseline delta. The isolated Linux hosted build passed in
+4m56s. Packaged-image smoke passed official Claude authorization start/cancel, process exit,
+pairing and scope isolation. The exact image is now healthy on VPS loopback. iOS full checks
+passed and its signed artifact is ready but not installed. Real provider login/model work is
+unproven and needs the owner's physical iPhone.
+
 ## Upload completion drafts
 
 On `main`, an upload keeps its completion notice in the originating chat draft.
@@ -375,7 +455,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.27.4 |
+| Latest tag | v0.28.0 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
@@ -547,3 +627,32 @@ The later guarded checks also pass: durable projection4Rusttests, protocol4tests
 nullable-collection regression1test, authoritative protocol regeneration and native byte compare,
 and Swiftpackage7tests. This supersedes earlier protocol/projection unrun statements. The
 interaction/host integration and complete application builds remain pending storage.
+
+## Route models and official provider authorization, 23 October 2026
+
+Protocol v1.7 now has a route-owned ready model catalog, an optional model on idempotent chat
+creation, optional current model state on conversation reads and the ordered `chat.model`
+mutation. The session's first record stores an explicit model atomically. Exact retries compare
+the durable project and model. Existing records and clients remain valid without either field.
+
+The account-bound connection surface supports Claude Code and Codex through their pinned official
+commands. Codex uses its device page and opaque user code. One authorization child runs across all
+providers. Attempt ownership, bounded output, cleared environment, strict status, cancellation,
+descendant cleanup and redacted Debug output fail closed.
+
+Focused evidence passes: six protocol tests and authoritative generation, 17 authorization tests
+and the atomic session model test. Generated Swift SHA-256 is
+`54a74042c07db0268f4c335c0f10bb9c4a3030aec5dd153ca63d39c53452df98`.
+
+On 24 October the current-source focused checks passed: the route model HTTP test, native
+authorization ownership and recovery HTTP test, six protocol tests, the atomic session model
+test and authoritative generation. The route test now counts retries against the post-restart
+Host baseline, since opening that Host creates a separate default session. Its original
+lost-response one-chat assertion remains. Root independently reviewed that test correction.
+The bounded x86_64 Linux release build passed on the development Mac in 3m56s. Its 64,503,768-byte
+binary requires GLIBC 2.29 and has SHA-256
+`9d4b9e669a881ee42151593649bee2862d17aed43121d3e73b573f3233e1233c`.
+The owner requested focused
+critical checks instead of another full repository gate. No deploy, release or live provider
+login was performed by this Core session. Evidence: workspace
+`board/evidence/mobile-core-models-20261024/` and `/tmp/ark-core-model-codex-final-build-20261024.log`.

@@ -84,6 +84,30 @@ person asks in words; the chat decides what becomes an agent or a task.
 The `agents.delegate` summary lists the current agents and their roles, so the chat picks one
 without a lookup. An app with no orchestrator offers none of these.
 
+## Persistent conversations
+
+An agent can create a lasting colleague with `agents.create {name, role, instructions?}`
+when its tool patterns permit it. The colleague inherits its capabilities, skills, model,
+profile, contacts and budget. It keeps its own conversation. Creation starts no work.
+
+`agents.start {to, objective, context?}` sends one brief and returns immediately. It starts
+an independent turn in the receiving agent's existing conversation. It does not copy the
+sender's chat, wait for an answer, or start another turn when the recipient finishes.
+`agents.message` remains a note for a running turn or the next brief.
+
+The main chat's `agents.create` also accepts `contacts: [name, ...]`. Each direction is
+explicit, and names may refer to colleagues the chat will create next. The creator and an
+agent it creates can contact each other immediately. Other contacts follow the agent's
+stored permissions.
+
+Identical recipient, objective and context within one sending task return the original turn,
+including across restart. A new external request can send the same brief again. One external
+request's lineage may create eight agents and start eight independent turns, or fewer when
+its delegation budget is smaller. Objective and context limits are 8,000 and 16,000 characters.
+
+Desktop lists each agent once within its project. Kept agents stay visible. Search includes
+names and roles even before an agent's first turn. See [ADR 0086](adr/0087-agent-conversations-start-independent-turns.md).
+
 ## Schedules
 
 An agent can run a task on its own at set times: "every weekday at 09:00", "every 30

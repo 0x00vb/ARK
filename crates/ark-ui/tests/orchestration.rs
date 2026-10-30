@@ -749,3 +749,49 @@ fn an_agents_question_survives_a_restart_and_any_client_answers_it() {
         assert!(hello["approvals"].as_array().unwrap().is_empty());
     });
 }
+
+#[tokio::test]
+async fn agent_contact_search_reads_other_projects_without_opening_or_running_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let first = host.call("summary", json!({})).await.unwrap();
+    let first_id = first["project"]["id"].as_str().unwrap().to_string();
+    host.call("spawn_agent", json!({"spec":{"name":"archivist","role":"First project","instructions":"PRIVATE-INSTRUCTIONS"}})).await.unwrap();
+    host.call("add_project", json!({"name":"Second project"}))
+        .await
+        .unwrap();
+    let second = host.call("summary", json!({})).await.unwrap();
+    let second_id = second["project"]["id"].as_str().unwrap().to_string();
+    assert_ne!(first_id, second_id);
+    host.call("spawn_agent", json!({"spec":{"name":"archivist","role":"Second project","instructions":"OTHER-PRIVATE-INSTRUCTIONS"}})).await.unwrap();
+    host.call("open_project", json!({"id":first_id}))
+        .await
+        .unwrap();
+    let before = host.call("summary", json!({})).await.unwrap();
+    let a = host
+        .call("agent_contacts", json!({"project":first_id}))
+        .await
+        .unwrap();
+    let b = host
+        .call("agent_contacts", json!({"project":second_id}))
+        .await
+        .unwrap();
+    assert_eq!(a[0]["role"], "First project");
+    assert_eq!(b[0]["role"], "Second project");
+    assert_eq!(a[0]["name"], b[0]["name"]);
+    assert!(a[0].get("spec").is_none());
+    assert!(a[0].get("instructions").is_none());
+    assert!(a[0].get("session").is_none());
+    assert_eq!(
+        host.call("summary", json!({})).await.unwrap()["location"],
+        before["location"]
+    );
+    assert!(host
+        .call("agent_contacts", json!({"project":"missing"}))
+        .await
+        .is_err());
+    assert_eq!(
+        host.call("graph", json!({})).await.unwrap()["tasks"],
+        json!([])
+    );
+}

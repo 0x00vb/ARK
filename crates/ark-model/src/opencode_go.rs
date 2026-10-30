@@ -24,6 +24,7 @@ const USER_AGENT_VALUE: &str = concat!("ark/", env!("CARGO_PKG_VERSION"));
 #[derive(Clone)]
 pub struct OpenCodeGo {
     model: String,
+    account: Option<crate::accounts::ModelAccount>,
     conversation: Option<HeaderValue>,
     client: reqwest::Client,
     http: HttpConfig,
@@ -48,6 +49,7 @@ impl OpenCodeGo {
             .build()?;
         Ok(Self {
             model,
+            account: None,
             conversation: None,
             client,
             http,
@@ -55,6 +57,11 @@ impl OpenCodeGo {
             #[cfg(test)]
             source: None,
         })
+    }
+
+    pub(crate) fn with_account(mut self, account: crate::accounts::ModelAccount) -> Self {
+        self.account = Some(account);
+        self
     }
 
     fn transport(&self) -> Result<(OpenAi, String)> {
@@ -70,7 +77,10 @@ impl OpenCodeGo {
         };
         #[cfg(not(test))]
         let key = crate::keys::api_key(KEY);
-        let key = key.ok_or_else(|| ProviderError::MissingCredential(KEY.into()))?;
+        let key = match &self.account {
+            Some(account) => account.key()?,
+            None => key.ok_or_else(|| ProviderError::MissingCredential(KEY.into()))?,
+        };
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
         headers.insert("x-opencode-session", conversation);
@@ -253,6 +263,7 @@ pub(crate) async fn backend() -> Backend {
     Backend {
         provider: NAME.into(),
         label: "OpenCode Go".into(),
+        identity: None,
         kind: BackendKind::Api,
         ready,
         detail,

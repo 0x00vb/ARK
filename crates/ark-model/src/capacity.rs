@@ -55,6 +55,7 @@ impl Capacity {
     /// example `ARK_CLAUDE_CONCURRENCY=3`). Subscriptions get 2 requests at a time; local and
     /// API providers 4.
     pub fn for_provider(name: &str) -> Self {
+        let name = crate::accounts::provider(name);
         let base = match name {
             "claude" | "codex" => 2,
             _ => 4,
@@ -217,6 +218,9 @@ impl Limited {
 
 #[async_trait]
 impl Provider for Limited {
+    fn connection_revision(&self) -> u64 {
+        self.inner.connection_revision()
+    }
     fn for_conversation(&self, conversation: &str) -> Result<Option<Arc<dyn Provider>>> {
         Ok(self.inner.for_conversation(conversation)?.map(|inner| {
             let bound: Arc<dyn Provider> = Arc::new(Self::new(inner, self.limiter.clone()));

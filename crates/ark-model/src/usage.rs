@@ -34,6 +34,8 @@ pub struct SubscriptionUsage {
 /// One usage window of a subscription.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageWindow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket: Option<String>,
     /// How long the window is, in minutes (300 for five hours, 10080 for a week), when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minutes: Option<u32>,
@@ -44,20 +46,55 @@ pub struct UsageWindow {
     pub resets_at: Option<u64>,
 }
 
-static LATEST: Mutex<BTreeMap<String, SubscriptionUsage>> = Mutex::new(BTreeMap::new());
+#[derive(Clone)]
+struct CachedUsage {
+    report: SubscriptionUsage,
+    account: Option<crate::accounts::ModelAccount>,
+}
+impl CachedUsage {
+    fn current(self) -> Option<SubscriptionUsage> {
+        if self.account.as_ref().is_none_or(|a| a.check().is_ok()) {
+            Some(self.report)
+        } else {
+            None
+        }
+    }
+}
+static LATEST: Mutex<BTreeMap<String, CachedUsage>> = Mutex::new(BTreeMap::new());
 
 /// The latest usage report of every subscription account a CLI has reported on, by account.
 pub fn subscription_usage() -> Vec<SubscriptionUsage> {
-    LATEST.lock().unwrap().values().cloned().collect()
+    let reports: Vec<_> = LATEST.lock().unwrap().values().cloned().collect();
+    reports
+        .into_iter()
+        .filter_map(CachedUsage::current)
+        .collect()
 }
 
 /// The latest usage report of `account`, if its CLI has sent one.
 pub fn usage_of(account: &str) -> Option<SubscriptionUsage> {
-    LATEST.lock().unwrap().get(account).cloned()
+    let report = LATEST.lock().unwrap().get(account).cloned();
+    report.and_then(CachedUsage::current)
 }
 
 pub(crate) fn record(u: SubscriptionUsage) {
-    LATEST.lock().unwrap().insert(u.account.clone(), u);
+    LATEST.lock().unwrap().insert(
+        u.account.clone(),
+        CachedUsage {
+            report: u,
+            account: None,
+        },
+    );
+}
+
+pub(crate) fn record_account(account: &crate::accounts::ModelAccount, report: SubscriptionUsage) {
+    LATEST.lock().unwrap().insert(
+        account.id.clone(),
+        CachedUsage {
+            report,
+            account: Some(account.clone()),
+        },
+    );
 }
 
 fn now_ms() -> u64 {
@@ -76,7 +113,10 @@ pub(crate) fn from_claude(info: &Value) -> Option<SubscriptionUsage> {
     let mut windows: Vec<UsageWindow> = info["unifiedWindows"]
         .as_object()?
         .iter()
+        .filter(|(_, w)| w["utilization"].as_f64().is_some())
         .map(|(name, w)| UsageWindow {
+            bucket: (!matches!(name.as_str(), "five_hour" | "seven_day"))
+                .then(|| name.replace('_', " ")),
             minutes: match name.as_str() {
                 "five_hour" => Some(300),
                 "seven_day" => Some(10080),
@@ -105,8 +145,9 @@ pub(crate) fn from_codex(limits: &Value) -> Option<SubscriptionUsage> {
     let windows = ["primary", "secondary"]
         .iter()
         .map(|k| &limits[*k])
-        .filter(|w| w.is_object())
+        .filter(|w| w.is_object() && w["usedPercent"].as_f64().is_some())
         .map(|w| UsageWindow {
+            bucket: None,
             minutes: w["windowDurationMins"].as_u64().map(|m| m as u32),
             used_percent: percent(w["usedPercent"].as_f64().unwrap_or(0.0)),
             resets_at: w["resetsAt"].as_u64(),
@@ -122,12 +163,73 @@ pub(crate) fn from_codex(limits: &Value) -> Option<SubscriptionUsage> {
     })
 }
 
+pub fn forget_account(account: &str) {
+    LATEST.lock().unwrap().remove(account);
+}
+
+pub(crate) fn from_codex_response(response: &Value) -> Option<SubscriptionUsage> {
+    let Some(buckets) = response["rateLimitsByLimitId"]
+        .as_object()
+        .filter(|b| !b.is_empty())
+    else {
+        return from_codex(&response["rateLimits"]);
+    };
+    let mut report = SubscriptionUsage {
+        account: "codex".into(),
+        plan: None,
+        windows: vec![],
+        limited: false,
+        reported_ms: now_ms(),
+    };
+    for (id, bucket) in buckets {
+        let Some(parsed) = from_codex(bucket) else {
+            continue;
+        };
+        report.plan = report.plan.or(parsed.plan);
+        report.limited |= parsed.limited;
+        for mut window in parsed.windows {
+            window.bucket = Some(bucket["limitName"].as_str().unwrap_or(id).to_string());
+            report.windows.push(window);
+        }
+    }
+    Some(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     // Both payloads are from real runs (Claude Code 2.1.289, Codex 0.153.4, 2026-10-04).
+
+    #[test]
+    fn an_unmeasured_window_has_no_remaining_percentage() {
+        assert!(from_codex(
+            &json!({"primary": {"windowDurationMins": 300, "resetsAt": 1999999999}})
+        )
+        .unwrap()
+        .windows
+        .is_empty());
+        assert!(from_claude(
+            &json!({"status":"allowed","unifiedWindows":{"five_hour":{"resetsAt":1999999999}}})
+        )
+        .unwrap()
+        .windows
+        .is_empty());
+    }
+
+    #[test]
+    fn codex_keeps_each_reported_limit_bucket_separate() {
+        let report = from_codex_response(&json!({"rateLimitsByLimitId": {
+            "coding": {"primary": {"usedPercent": 20, "windowDurationMins": 300}},
+            "review": {"limitName": "Reviews", "primary": {"usedPercent": 80, "windowDurationMins": 10080}}
+        }})).unwrap();
+        assert_eq!(report.windows.len(), 2);
+        assert_eq!(report.windows[0].bucket.as_deref(), Some("coding"));
+        assert_eq!(report.windows[1].bucket.as_deref(), Some("Reviews"));
+        assert_eq!(report.windows[0].used_percent, 20);
+        assert_eq!(report.windows[1].used_percent, 80);
+    }
 
     #[test]
     fn claude_reports_its_windows() {
@@ -155,11 +257,13 @@ mod tests {
             u.windows,
             vec![
                 UsageWindow {
+                    bucket: None,
                     minutes: Some(300),
                     used_percent: 8,
                     resets_at: Some(1791101511)
                 },
                 UsageWindow {
+                    bucket: None,
                     minutes: Some(10080),
                     used_percent: 15,
                     resets_at: Some(1791584132)

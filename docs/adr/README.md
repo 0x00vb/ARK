@@ -7,6 +7,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 
 | # | Decision | Status |
 |---|---|---|
+| [0082](0090-external-clients-can-opt-into-a-private-notification-relay.md) | External clients can opt into a private notification relay | Accepted for private pilot |
 | [0001](0001-no-domain-in-core.md) | The runtime names no domain, tool or file format | Accepted |
 | [0002](0002-bounded-context.md) | Working state is the memory, not the transcript | Accepted |
 | [0003](0003-deterministic-before-inference.md) | Code decides what code can decide; a model call needs a benchmark | Accepted |
@@ -85,6 +86,9 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0079](0079-project-memory-is-reviewed-and-project-scoped.md) | Project memory is reviewed and project scoped | Accepted |
 | [0083](0083-a-board-per-goal-opens-beside-the-chat.md) | A board per goal opens beside the chat, not in the rail | Accepted |
 
+| [0080](0088-a-native-client-authorizes-an-official-model-program.md) | A native client authorizes the official model program without owning or copying its credential | Accepted |
+| [0081](0089-a-client-chooses-only-models-its-runtime-offers.md) | A client chooses only models its runtime offers | Accepted |
+
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.
 
@@ -121,3 +125,7 @@ The test, script or review step that keeps it true.
 - [0085. A calendar is a read-only file lens](0085-calendar-is-a-read-only-file-lens.md)
 
 - [0080. OpenCode Go uses explicit conversations](0080-opencode-go-uses-explicit-conversations.md)
+
+- [0086. Model accounts have stable execution identities](0086-model-accounts-have-stable-execution-identities.md)
+
+- [0087. Agent conversations start independent turns](0087-agent-conversations-start-independent-turns.md)

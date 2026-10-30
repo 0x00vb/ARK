@@ -26,8 +26,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::Value;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
 use tauri::webview::{DownloadEvent, NewWindowResponse, PageLoadEvent};
 use tauri::{
@@ -1426,27 +1426,28 @@ fn show(app: &tauri::AppHandle) {
 
 /// The menu-bar item: controls that remain reachable while another app is in front.
 fn tray(app: &tauri::App, name: &str, ambient_window: bool, computer: bool) -> tauri::Result<()> {
-    let compact = MenuItem::with_id(app, "compact", "Compact chat", true, None::<&str>)?;
-    let open = MenuItem::with_id(app, "open", format!("Open {name}"), true, None::<&str>)?;
-    let stop = MenuItem::with_id(app, "computer-stop", "Stop Computer", true, None::<&str>)?;
-    let check = MenuItem::with_id(
-        app,
-        "computer-check",
-        "Check message again",
-        true,
-        None::<&str>,
+    let local = app.try_state::<State>().is_some();
+    let loading = vec![crate::subscription_menu::SubscriptionEntry {
+        id: "loading".into(),
+        label: "Subscriptions".into(),
+        lines: vec!["Checking…".into()],
+    }];
+    let menu = tray_menu(
+        app.handle(),
+        name,
+        ambient_window,
+        computer,
+        local.then_some(loading.as_slice()),
     )?;
-    let quit = MenuItem::with_id(app, "quit", format!("Quit {name}"), true, None::<&str>)?;
-    let menu = match (ambient_window, computer) {
-        (true, true) => Menu::with_items(app, &[&compact, &open, &stop, &check, &quit])?,
-        (true, false) => Menu::with_items(app, &[&compact, &open, &quit])?,
-        (false, true) => Menu::with_items(app, &[&open, &stop, &check, &quit])?,
-        (false, false) => Menu::with_items(app, &[&open, &quit])?,
-    };
+    let refresh = Arc::new(tokio::sync::Notify::new());
+    let notify = refresh.clone();
     let mut b = TrayIconBuilder::with_id("ark")
         .tooltip(name)
         .menu(&menu)
         .show_menu_on_left_click(true)
+        .on_tray_icon_event(move |_, event| {
+            if matches!(event, TrayIconEvent::Enter { .. } | TrayIconEvent::Click { .. }) { notify.notify_one(); }
+        })
         .on_menu_event(|app, ev| match ev.id().as_ref() {
             "compact" => {
                 if let Err(error) = present(app, true) {
@@ -1457,6 +1458,12 @@ fn tray(app: &tauri::App, name: &str, ambient_window: bool, computer: bool) -> t
                 if let Err(error) = present(app, false) {
                     tracing::warn!(%error, "ARK could not restore its full window");
                     show(app);
+                }
+            }
+            "subscription-settings" => {
+                if let Err(error) = present(app, false) { tracing::warn!(%error, "ARK could not show account settings"); }
+                if let Some(view) = main_webview(app) {
+                    if let Err(error) = view.eval("window.ark?.openSettings('models')") { tracing::warn!(%error, "ARK could not open model accounts"); }
                 }
             }
             "computer-stop" => {
@@ -1477,7 +1484,275 @@ fn tray(app: &tauri::App, name: &str, ambient_window: bool, computer: bool) -> t
         b = b.icon(icon.clone());
     }
     b.build(app)?;
+    if local {
+        start_subscription_menu(
+            app.handle().clone(),
+            name.into(),
+            ambient_window,
+            computer,
+            refresh,
+        );
+    }
     Ok(())
+}
+
+fn tray_menu(
+    app: &tauri::AppHandle,
+    name: &str,
+    ambient_window: bool,
+    computer: bool,
+    usage: Option<&[crate::subscription_menu::SubscriptionEntry]>,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::new(app)?;
+    if let Some(entries) = usage {
+        if entries.is_empty() {
+            menu.append(&MenuItem::new(
+                app,
+                "No subscriptions connected",
+                false,
+                None::<&str>,
+            )?)?;
+        }
+        for entry in entries {
+            menu.append(&MenuItem::with_id(
+                app,
+                format!("subscription-{}", entry.id),
+                &entry.label,
+                false,
+                None::<&str>,
+            )?)?;
+            for line in &entry.lines {
+                menu.append(&MenuItem::new(
+                    app,
+                    format!("    {line}"),
+                    false,
+                    None::<&str>,
+                )?)?;
+            }
+        }
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+        menu.append(&MenuItem::with_id(
+            app,
+            "subscription-settings",
+            "Manage accounts…",
+            true,
+            None::<&str>,
+        )?)?;
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+    }
+    if ambient_window {
+        menu.append(&MenuItem::with_id(
+            app,
+            "compact",
+            "Compact chat",
+            true,
+            None::<&str>,
+        )?)?;
+    }
+    menu.append(&MenuItem::with_id(
+        app,
+        "open",
+        format!("Open {name}"),
+        true,
+        None::<&str>,
+    )?)?;
+    if computer {
+        menu.append(&MenuItem::with_id(
+            app,
+            "computer-stop",
+            "Stop Computer",
+            true,
+            None::<&str>,
+        )?)?;
+        menu.append(&MenuItem::with_id(
+            app,
+            "computer-check",
+            "Check message again",
+            true,
+            None::<&str>,
+        )?)?;
+    }
+    menu.append(&MenuItem::with_id(
+        app,
+        "quit",
+        format!("Quit {name}"),
+        true,
+        None::<&str>,
+    )?)?;
+    Ok(menu)
+}
+
+fn start_subscription_menu(
+    app: tauri::AppHandle,
+    name: String,
+    ambient: bool,
+    computer: bool,
+    refresh: Arc<tokio::sync::Notify>,
+) {
+    tauri::async_runtime::spawn(async move {
+        use ark_interact::ark_sdk::prelude::ark_model;
+        let mut shown = None;
+        let mut defaults = Vec::new();
+        let mut requested = true;
+        let mut refreshed = None::<std::time::Instant>;
+        let mut failed_refreshes = Vec::new();
+        let mut checked = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(60))
+            .unwrap_or_else(std::time::Instant::now);
+        loop {
+            if app.tray_by_id("ark").is_none() {
+                break;
+            }
+            if checked.elapsed() >= std::time::Duration::from_secs(60) {
+                let (claude, codex) = tokio::join!(
+                    ark_model::cli::status(ark_model::Cli::Claude),
+                    ark_model::cli::status(ark_model::Cli::Codex)
+                );
+                defaults = [("claude", claude), ("codex", codex)]
+                    .into_iter()
+                    .filter(|(_, status)| status.signed_in)
+                    .map(|(id, status)| (id.to_string(), status.identity))
+                    .collect();
+                checked = std::time::Instant::now();
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let entries = match ark_model::accounts::list() {
+                Ok(accounts) => {
+                    if requested
+                        && refreshed
+                            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(15))
+                    {
+                        failed_refreshes = refresh_tray_codex(
+                            &accounts,
+                            defaults.iter().any(|(id, _)| id == "codex"),
+                        )
+                        .await;
+                        refreshed = Some(std::time::Instant::now());
+                    }
+                    let mut entries = crate::subscription_menu::entries(
+                        &accounts,
+                        &ark_model::subscription_usage(),
+                        &defaults,
+                        now,
+                    );
+                    for entry in &mut entries {
+                        if failed_refreshes.contains(&entry.id)
+                            && !entry.lines.iter().any(|line| line == "Usage unavailable")
+                        {
+                            entry.lines.push("Could not refresh usage".into());
+                        }
+                    }
+                    entries
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "ARK could not read subscription accounts");
+                    vec![crate::subscription_menu::SubscriptionEntry {
+                        id: "unavailable".into(),
+                        label: "Subscriptions".into(),
+                        lines: vec!["Usage unavailable".into()],
+                    }]
+                }
+            };
+            if shown.as_ref() != Some(&entries) {
+                let installed = entries.clone();
+                let handle = app.clone();
+                let title = name.clone();
+                let (sent, received) = tokio::sync::oneshot::channel();
+                match app.run_on_main_thread(move || {
+                    let result = handle.tray_by_id("ark").is_some_and(|tray| {
+                        match tray_menu(&handle, &title, ambient, computer, Some(&entries))
+                            .and_then(|menu| tray.set_menu(Some(menu)))
+                        {
+                            Ok(()) => true,
+                            Err(error) => {
+                                tracing::warn!(%error, "ARK could not update subscription menu");
+                                false
+                            }
+                        }
+                    });
+                    if sent.send(result).is_err() {
+                        tracing::debug!("Subscription menu update receiver closed");
+                    }
+                }) {
+                    Ok(()) => {
+                        match tokio::time::timeout(std::time::Duration::from_secs(3), received)
+                            .await
+                        {
+                            Ok(Ok(true)) => shown = Some(installed),
+                            _ => tracing::warn!(
+                                "Subscription menu update did not complete; will retry"
+                            ),
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "ARK could not schedule subscription menu update")
+                    }
+                }
+            }
+            requested = tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => false,
+                _ = refresh.notified() => true,
+            };
+        }
+    });
+}
+
+async fn refresh_tray_codex(
+    accounts: &[ark_interact::ark_sdk::prelude::ark_model::accounts::ModelAccount],
+    default_signed_in: bool,
+) -> Vec<String> {
+    use ark_interact::ark_sdk::prelude::ark_model;
+    let mut targets: Vec<_> = accounts
+        .iter()
+        .filter(|a| {
+            a.provider == "codex"
+                && a.state == ark_model::accounts::AccountState::Active
+                && !a.removed
+        })
+        .cloned()
+        .map(Some)
+        .collect();
+    if default_signed_in {
+        targets.push(None);
+    }
+    let mut failed: Vec<_> = targets
+        .iter()
+        .map(|a| a.as_ref().map_or("codex", |a| a.id.as_str()).to_string())
+        .collect();
+    let permits = Arc::new(tokio::sync::Semaphore::new(4));
+    let mut tasks = tokio::task::JoinSet::new();
+    for account in targets {
+        let permits = permits.clone();
+        tasks.spawn(async move {
+            let _permit = permits
+                .acquire_owned()
+                .await
+                .expect("subscription semaphore stays open");
+            let id = account
+                .as_ref()
+                .map_or("codex", |a| a.id.as_str())
+                .to_string();
+            let result = ark_model::cli::refresh_codex_usage(account.as_ref()).await;
+            (id, result)
+        });
+    }
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(8);
+    while !tasks.is_empty() {
+        match tokio::time::timeout_at(deadline, tasks.join_next()).await {
+            Ok(Some(Ok((id, Ok(()))))) => failed.retain(|failed| failed != &id),
+            Ok(Some(Ok((id, Err(error))))) => {
+                tracing::debug!(%id, %error, "Subscription usage refresh unavailable")
+            }
+            Ok(Some(Err(error))) => {
+                tracing::warn!(%error, "Subscription usage refresh task failed")
+            }
+            _ => break,
+        }
+    }
+    failed
 }
 
 /// A native shell for a page served by another ARK runtime. The page keeps HTTP authority and

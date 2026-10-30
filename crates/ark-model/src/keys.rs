@@ -12,6 +12,22 @@ pub trait KeySource: Send + Sync {
     fn key(&self, var: &str) -> Option<String>;
     /// Whether a key is saved for `var`, without reading it.
     fn has(&self, var: &str) -> bool;
+    fn model_accounts(&self) -> crate::Result<Vec<crate::accounts::ModelAccount>> {
+        Ok(vec![])
+    }
+    fn account_directory(&self, _id: &str) -> Option<std::path::PathBuf> {
+        None
+    }
+    fn activate_account(
+        &self,
+        _account: &crate::accounts::ModelAccount,
+        _identity: Option<&str>,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+    fn account_key(&self, _id: &str) -> Option<String> {
+        None
+    }
 }
 
 static SOURCE: RwLock<Option<Arc<dyn KeySource>>> = RwLock::new(None);
@@ -33,4 +49,8 @@ pub fn api_key(var: &str) -> Option<String> {
 /// Whether a key for `var` is there (in the environment or saved), without reading a saved one.
 pub fn has_api_key(var: &str) -> bool {
     env(var).is_some() || SOURCE.read().unwrap().as_ref().is_some_and(|s| s.has(var))
+}
+
+pub(crate) fn source() -> Option<Arc<dyn KeySource>> {
+    SOURCE.read().unwrap().clone()
 }

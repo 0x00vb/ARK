@@ -48,6 +48,8 @@ pub struct Backend {
     /// The provider name in a model spec.
     pub provider: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
     pub kind: BackendKind,
     /// Configured and selectable. This does not prove current inference entitlement.
     pub ready: bool,
@@ -85,6 +87,7 @@ pub async fn catalog() -> Vec<Backend> {
         Ok(models) => Backend {
             provider: "ollama".into(),
             label: "Ollama".into(),
+            identity: None,
             kind: BackendKind::Local,
             ready: !models.is_empty(),
             detail: if models.is_empty() {
@@ -102,6 +105,7 @@ pub async fn catalog() -> Vec<Backend> {
         Err(detail) => Backend {
             provider: "ollama".into(),
             label: "Ollama".into(),
+            identity: None,
             kind: BackendKind::Local,
             ready: false,
             detail,
@@ -124,6 +128,7 @@ pub async fn catalog() -> Vec<Backend> {
         out.push(Backend {
             provider: provider.into(),
             label: label.into(),
+            identity: None,
             kind: BackendKind::Api,
             ready,
             detail: if ready {
@@ -139,6 +144,66 @@ pub async fn catalog() -> Vec<Backend> {
     }
     out.push(crate::opencode_go::backend().await);
     out.extend(named);
+    match crate::accounts::list() {
+        Ok(accounts) => {
+            let extra = futures::stream::iter(accounts.into_iter().map(|account| {
+                let base = out.iter().find(|b| b.provider == account.provider).cloned();
+                async move {
+                    let mut backend = base?;
+                    if let Some(cli) = Cli::of(&account.provider) {
+                        let status = cli::status_for(cli, Some(&account)).await;
+                        let models = if cli == Cli::Codex && status.signed_in {
+                            cli::codex_models_for(Some(&account)).await
+                        } else {
+                            None
+                        };
+                        backend = subscription(status, models);
+                    }
+                    if Cli::of(&account.provider).is_none() {
+                        backend.ready = account.state == crate::accounts::AccountState::Active;
+                        backend.detail = "key saved".into();
+                        backend.step = None;
+                        backend.fix = None;
+                    }
+                    if let Some(mut endpoint) = crate::endpoints::endpoint(&account.provider) {
+                        match account.key() {
+                            Ok(key) => {
+                                endpoint.key = Some(key);
+                                endpoint.name = format!("{}:{}", account.id, account.revision);
+                                backend = crate::endpoints::backend(&endpoint).await;
+                            }
+                            Err(error) => {
+                                backend.ready = false;
+                                backend.detail = error.to_string();
+                            }
+                        }
+                    }
+                    backend.provider = account.id.clone();
+                    backend.label = account.name.clone();
+                    if account.state != crate::accounts::AccountState::Active {
+                        backend.ready = false;
+                        backend.detail =
+                            if account.state == crate::accounts::AccountState::Removing {
+                                "Removing account"
+                            } else {
+                                "Reconnect required"
+                            }
+                            .into();
+                    }
+                    Some(backend)
+                }
+            }));
+            use futures::StreamExt;
+            out.extend(
+                extra
+                    .buffer_unordered(4)
+                    .filter_map(|b| async move { b })
+                    .collect::<Vec<_>>()
+                    .await,
+            );
+        }
+        Err(error) => tracing::warn!(error = %error, "model accounts could not be listed"),
+    }
     out
 }
 
@@ -164,6 +229,7 @@ fn subscription(st: cli::CliStatus, advertised: Option<Vec<ModelOption>>) -> Bac
     Backend {
         provider: cli.name().into(),
         label: cli.label().into(),
+        identity: st.identity,
         kind: BackendKind::Subscription,
         ready: st.installed && st.signed_in,
         detail: st.detail,

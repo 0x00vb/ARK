@@ -468,6 +468,21 @@ impl Ark {
         Ok(Session::start_named(&self.engine, id, project)?)
     }
 
+    /// Start a named conversation with an exact model choice stored in its first record.
+    pub fn start_named_session_model(
+        &self,
+        id: SessionId,
+        project: &ProjectId,
+        model: String,
+    ) -> Result<Session, ArkError> {
+        Ok(Session::start_named_model(
+            &self.engine,
+            id,
+            project,
+            model,
+        )?)
+    }
+
     /// Reopen a session by id or unique prefix.
     pub fn open_session(&self, id: &str) -> Result<Option<Session>, ArkError> {
         Ok(Session::open(&self.engine, id)?)
@@ -1240,11 +1255,6 @@ impl ArkBuilder {
     /// Wire everything together. Resolves the model in order: explicit router → explicit
     /// provider → the `ARK_PROVIDER`/`ARK_MODEL` environment (defaulting to Ollama).
     pub fn build(self) -> Result<Ark, ArkError> {
-        let router = match (self.router, self.provider) {
-            (Some(r), _) => r,
-            (None, Some(p)) => ModelRouter::single(p),
-            (None, None) => ModelRouter::from_env()?,
-        };
         let mut engine = match self.engine {
             Some(e) => e,
             None => Engine::open_with(&self.store_root, self.registry)?,
@@ -1259,6 +1269,14 @@ impl ArkBuilder {
                     .unwrap_or_else(|| Arc::new(ark_connect::Keychain)),
             ),
         });
+        if let Some(c) = &connections {
+            ark_model::keys::set_source(Arc::new(c.api_keys().clone()));
+        }
+        let router = match (self.router, self.provider) {
+            (Some(r), _) => r,
+            (None, Some(p)) => ModelRouter::single(p),
+            (None, None) => ModelRouter::from_env()?,
+        };
         let mut profile = self.profile;
         // A stored copy of a project file has the kind ark-files gives the file, whichever
         // tool wrote it: one decision for the agent, the store and the window.

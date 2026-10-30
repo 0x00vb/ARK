@@ -51,6 +51,10 @@ pub trait ModelResolver: Send + Sync {
     fn default_version(&self) -> u64 {
         0
     }
+    /// Whether cached models still use the account connection that was resolved.
+    fn is_current(&self, _models: &AgentModels) -> bool {
+        true
+    }
     /// The capacity of an account (for scheduling).
     fn capacity_of(&self, account: &str) -> Capacity {
         Capacity::for_provider(account)
@@ -287,6 +291,18 @@ impl ModelResolver for Models {
         let p = p.for_conversation(&format!("agent/{lane}"))?.unwrap_or(p);
         let model = p.model_id();
         Ok(self.single(p, provider, model))
+    }
+
+    fn is_current(&self, models: &AgentModels) -> bool {
+        if !models.account.contains('~') {
+            return true;
+        }
+        let revision = models.router.provider(Role::Reason).connection_revision();
+        ark_model::accounts::get(&models.account).is_ok_and(|account| {
+            account.is_some_and(|a| {
+                a.state == ark_model::accounts::AccountState::Active && a.revision == revision
+            })
+        })
     }
 
     fn default_version(&self) -> u64 {

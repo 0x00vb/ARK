@@ -108,6 +108,10 @@ pub struct SessionRecord {
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
     pub turn_count: u32,
+    /// The exact model spec explicitly selected for this chat. Older and default-routed chats
+    /// have no lossless single-model selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Gists of turns that left the verbatim window, oldest first.
     #[serde(default)]
     pub gists: Vec<String>,
@@ -549,7 +553,16 @@ impl Session {
         id: SessionId,
         project: &ProjectId,
     ) -> Result<Session, AgentError> {
-        Self::start_named_with(engine, id, project, CarryPolicy::default())
+        Self::start_named_with_model(engine, id, project, CarryPolicy::default(), None)
+    }
+
+    pub fn start_named_model(
+        engine: &Engine,
+        id: SessionId,
+        project: &ProjectId,
+        model: String,
+    ) -> Result<Session, AgentError> {
+        Self::start_named_with_model(engine, id, project, CarryPolicy::default(), Some(model))
     }
 
     pub fn start_with(
@@ -557,14 +570,15 @@ impl Session {
         project: &ProjectId,
         policy: CarryPolicy,
     ) -> Result<Session, AgentError> {
-        Self::start_named_with(engine, SessionId::new(), project, policy)
+        Self::start_named_with_model(engine, SessionId::new(), project, policy, None)
     }
 
-    fn start_named_with(
+    fn start_named_with_model(
         engine: &Engine,
         id: SessionId,
         project: &ProjectId,
         policy: CarryPolicy,
+        model: Option<String>,
     ) -> Result<Session, AgentError> {
         let now = OffsetDateTime::now_utc();
         let record = SessionRecord {
@@ -574,6 +588,7 @@ impl Session {
             created_at: now,
             updated_at: now,
             turn_count: 0,
+            model,
             gists: Vec::new(),
             dropped_turns: 0,
             usage: SessionUsage::default(),
@@ -725,6 +740,15 @@ impl Session {
     }
     pub fn turn_count(&self) -> u32 {
         self.record.turn_count
+    }
+
+    pub fn model(&self) -> Option<&str> {
+        self.record.model.as_deref()
+    }
+
+    pub fn set_model(&mut self, engine: &Engine, model: String) -> Result<(), AgentError> {
+        self.record.model = Some(model);
+        self.save(engine)
     }
 
     pub fn execution_mode(&self) -> ExecutionMode {
@@ -1306,6 +1330,30 @@ mod tests {
             reopened.transcript(&engine, None).unwrap()[0].input,
             "keep this"
         );
+    }
+
+    #[test]
+    fn selected_model_is_created_atomically_and_old_records_decode() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let project = engine.create_project("p", "").unwrap();
+        let id = SessionId("model-bound-client-request".into());
+        let selected =
+            Session::start_named_model(&engine, id.clone(), &project.id, "codex:gpt-5@high".into())
+                .unwrap();
+        assert_eq!(selected.model(), Some("codex:gpt-5@high"));
+        assert_eq!(
+            Session::open(&engine, id.as_str())
+                .unwrap()
+                .unwrap()
+                .model(),
+            Some("codex:gpt-5@high")
+        );
+
+        let mut legacy = serde_json::to_value(selected.record()).unwrap();
+        legacy.as_object_mut().unwrap().remove("model");
+        let legacy: SessionRecord = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.model, None);
     }
 
     #[test]

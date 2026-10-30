@@ -11,6 +11,7 @@
 
 pub mod api_keys;
 pub mod catalog;
+pub mod model_accounts;
 pub mod oauth;
 pub mod secrets;
 pub mod services;
@@ -21,6 +22,7 @@ mod connections;
 pub use api_keys::ApiKeys;
 pub use catalog::{Capability, Catalog, OAuth, Provider};
 pub use connections::{Account, CapabilityStatus, Connecting, Connections, State};
+pub use model_accounts::ModelAccounts;
 pub use secrets::{FileSecrets, Keychain, MemorySecrets, Secrets, SECRETS_KEY_VAR};
 
 #[derive(Debug, thiserror::Error)]

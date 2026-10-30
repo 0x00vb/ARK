@@ -200,10 +200,14 @@ impl App {
         };
         if let Some(spec) = &start.model {
             let (provider, model) = model_spec(spec, &ark);
-            ark.set_router(ModelRouter::single(ark_model::build(
-                &provider,
-                Some(model),
-            )?));
+            let selected = match ark_model::build(&provider, Some(model.clone())) {
+                Ok(selected) => selected,
+                Err(error) if provider.contains('~') => {
+                    ark_model::accounts::unavailable_selection(&provider, &model, error.to_string())
+                }
+                Err(error) => return Err(error.into()),
+            };
+            ark.set_router(ModelRouter::single(selected));
         }
         let project = match &start.project {
             Some(p) => ark.find_or_create_project(p, "")?,
@@ -295,6 +299,7 @@ impl App {
             links: Arc::new(crate::links::Links::default()),
             zone: Arc::new(std::sync::Mutex::new(None)),
             waiting: Vec::new(),
+            selected_model_ready: true,
         };
         ix.refresh_names();
         ix.follow_project()?;
@@ -542,6 +547,10 @@ pub struct OrchestratorSet {
 }
 
 impl OrchestratorSet {
+    pub fn supports_agents(&self) -> bool {
+        self.all.is_some() || self.one.is_some()
+    }
+
     pub fn list(&self) -> Vec<ark_orchestrate::Orchestrator> {
         match &self.all {
             Some(all) => all.built.lock().unwrap().values().cloned().collect(),
@@ -619,6 +628,26 @@ pub struct Siblings {
 type Zone = Arc<std::sync::Mutex<Option<String>>>;
 
 impl Siblings {
+    /// Resolve the shared project executor without creating or selecting a chat.
+    pub fn project_orchestrator(
+        &self,
+        project: &ProjectId,
+    ) -> anyhow::Result<ark_orchestrate::Orchestrator> {
+        let project = self
+            .ark
+            .engine()
+            .store
+            .get_project(project)?
+            .ok_or_else(|| anyhow::anyhow!("project no longer exists"))?;
+        match (&self.orchs, &self.orchestrator) {
+            (Some(all), _) => all.get(&self.ark, &project),
+            (None, Some(one)) if one.project().id == project.id => Ok(one.clone()),
+            _ => Err(anyhow::anyhow!(
+                "this project does not support agent conversations"
+            )),
+        }
+    }
+
     /// The person's time zone, for every conversation of the app ([`Interaction::set_zone`]).
     pub fn set_zone(&self, tz: Option<&str>) {
         let known = tz.filter(|t| {
@@ -656,7 +685,17 @@ impl Siblings {
                 .ok_or_else(|| anyhow::anyhow!("no session matches `{id}`"))?,
             None => ark.start_session(project)?,
         };
-        self.open_session(ark, session, approver)
+        let mut selected_model_ready = true;
+        if let Some(spec) = session.model() {
+            let (provider, model) = model_spec(spec, &ark);
+            match ark_model::build(&provider, Some(model)) {
+                Ok(selected) => ark.set_router(ModelRouter::single(selected)),
+                Err(_) => selected_model_ready = false,
+            }
+        }
+        let mut interaction = self.open_session(ark, session, approver)?;
+        interaction.selected_model_ready = selected_model_ready;
+        Ok(interaction)
     }
 
     /// Another live conversation with an identity chosen by a trusted caller.
@@ -669,6 +708,22 @@ impl Siblings {
         let mut ark = self.ark.clone();
         ark.follow_current_model();
         let session = ark.start_named_session(id, project)?;
+        self.open_session(ark, session, approver)
+    }
+
+    /// Start a named conversation with a model that was already built and validated. The
+    /// selection is stored in the same write that creates the session.
+    pub fn open_new_model(
+        &self,
+        id: SessionId,
+        project: &ProjectId,
+        spec: String,
+        router: ModelRouter,
+        approver: Arc<dyn Approver>,
+    ) -> anyhow::Result<Interaction> {
+        let mut ark = self.ark.clone();
+        ark.set_router(router);
+        let session = ark.start_named_session_model(id, project, spec)?;
         self.open_session(ark, session, approver)
     }
 
@@ -719,6 +774,7 @@ impl Siblings {
             links: self.links.clone(),
             zone: self.zone.clone(),
             waiting: Vec::new(),
+            selected_model_ready: true,
         };
         ix.refresh_names();
         ix.follow_project()?;
@@ -905,6 +961,7 @@ pub struct Interaction {
     /// The items `/waiting` listed last, in its numbers (runtime, id): a number answers what
     /// the person saw.
     pub(crate) waiting: Vec<(Option<String>, String)>,
+    selected_model_ready: bool,
 }
 
 impl Interaction {
@@ -1329,10 +1386,27 @@ impl Interaction {
     /// Use another model from the next turn on. Returns its description.
     pub fn switch_model(&mut self, spec: &str) -> anyhow::Result<String> {
         let (provider, model) = model_spec(spec, &self.ark);
-        let p = ark_model::build(&provider, Some(model))?;
+        let p = ark_model::build(&provider, Some(model.clone()))?;
         let d = p.describe();
+        self.session
+            .set_model(self.ark.engine(), format!("{provider}:{model}"))?;
         self.ark.set_router(ModelRouter::single(p));
+        self.selected_model_ready = true;
         Ok(d)
+    }
+
+    /// Install an already-built model choice after persisting its exact spec on this chat.
+    pub fn select_model(&mut self, spec: String, router: ModelRouter) -> anyhow::Result<String> {
+        let display = router.label();
+        self.session.set_model(self.ark.engine(), spec)?;
+        self.ark.set_router(router);
+        self.selected_model_ready = true;
+        Ok(display)
+    }
+
+    /// Whether this chat's stored model can still be built on this runtime.
+    pub fn selected_model_ready(&self) -> bool {
+        self.selected_model_ready
     }
 
     /// Run an action directly, recorded as an invocation like any agent call. The person asked

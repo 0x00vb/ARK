@@ -39,6 +39,7 @@ mod file_snapshots;
 mod files;
 mod frame;
 pub mod host;
+mod native_push;
 mod notify;
 #[cfg(feature = "desktop-updater")]
 pub mod page_updates;
@@ -46,6 +47,8 @@ pub mod push;
 pub mod remote;
 pub mod resource;
 mod serve;
+#[cfg(any(feature = "desktop", test))]
+mod subscription_menu;
 mod terminal;
 pub mod transcription;
 #[cfg(feature = "desktop-updater")]
@@ -386,7 +389,10 @@ impl ArkUi {
     /// socket is mode 0600, its folder is made 0700 when missing and refused when others can
     /// write to it, a socket left by a stopped process is replaced, and one that answers means
     /// a server is already there. The socket file is removed when serving stops.
-    pub async fn serve(self, addr: &str) -> anyhow::Result<()> {
+    pub async fn serve(mut self, addr: &str) -> anyhow::Result<()> {
+        if self.start.session.is_none() {
+            self.start.resume = true;
+        }
         let (access, entry, account_pairing) = (
             self.access.clone(),
             self.entry.clone(),
@@ -428,7 +434,10 @@ impl ArkUi {
     }
 
     /// Start serving and return at once (tests, embedding). `addr` as in [`serve`](Self::serve).
-    pub async fn serve_background(self, addr: &str) -> anyhow::Result<(Arc<Host>, Served)> {
+    pub async fn serve_background(mut self, addr: &str) -> anyhow::Result<(Arc<Host>, Served)> {
+        if self.start.session.is_none() {
+            self.start.resume = true;
+        }
         let (access, entry, account_pairing) = (
             self.access.clone(),
             self.entry.clone(),

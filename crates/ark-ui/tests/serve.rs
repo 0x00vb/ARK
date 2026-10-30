@@ -23,6 +23,35 @@ struct Notes;
 
 struct TestAccountVerifier;
 
+#[cfg(unix)]
+static PROVIDER_ENVIRONMENT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(unix)]
+struct EnvironmentVariable {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+#[cfg(unix)]
+impl EnvironmentVariable {
+    fn set(name: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(name);
+        std::env::set_var(name, value);
+        Self { name, previous }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for EnvironmentVariable {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            std::env::set_var(self.name, previous);
+        } else {
+            std::env::remove_var(self.name);
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl PairingAssertionVerifier for TestAccountVerifier {
     async fn verify(
@@ -45,6 +74,316 @@ impl PairingAssertionVerifier for TestAccountVerifier {
             _ => Err(PairingVerificationError::Assertion),
         }
     }
+}
+
+#[tokio::test]
+async fn agent_conversations_are_shared_by_headless_clients_and_retries() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("Owner").unwrap();
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let tablet = tokens
+        .issue_external_client("Owner", "Tablet", "tablet", Duration::from_secs(3600))
+        .unwrap();
+    let (_runtime, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let client = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let mut events = tokio::net::TcpStream::connect(("127.0.0.1", served.port))
+        .await
+        .unwrap();
+    events.write_all(format!("GET /client/v1/events HTTP/1.1\r\nHost: runtime.example\r\nAuthorization: Bearer {}\r\n\r\n", phone.token).as_bytes()).await.unwrap();
+    let rec = resource_call(
+        &client,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"researcher","role":"Acquisition research","tools":["notes.*"]}}),
+    )
+    .await
+    .unwrap();
+    let other_agent = resource_call(
+        &client,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"private","role":"Private work","tools":["notes.*"]}}),
+    )
+    .await
+    .unwrap();
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    let auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: runtime.example\r\n{auth}\r\n");
+    let response = raw(served.port, get("/client/v1/chats")).await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let chats: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let agent = chats["chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|chat| chat["agent"]["name"] == "researcher")
+        .unwrap();
+    assert_eq!(agent["agent"]["role"], "Acquisition research");
+    let id = agent["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("agent:"));
+    let streamed = tokio::time::timeout(Duration::from_secs(3), async {
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 4096];
+        while !String::from_utf8_lossy(&bytes).contains(&format!("chat:{id}")) {
+            let count = events.read(&mut chunk).await.unwrap();
+            assert!(count > 0);
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        String::from_utf8(bytes).unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(streamed.contains("chats"), "{streamed}");
+    assert!(streamed.contains("openChat"), "{streamed}");
+
+    let response = raw(served.port, get("/client/v1/hello")).await;
+    let hello: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert!(hello["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("agents.conversations")));
+    let input = json!({"body":"Read once from phone.","attachmentIds":[]});
+    let mutation = json!({"epoch":hello["mutationEpoch"],"counter":"1","operation":"chat.send","target":id,"inputDigest":format!("{:x}", Sha256::digest(serde_json::to_vec(&input).unwrap())),"input":input}).to_string();
+    let send = || {
+        post(
+            "/client/v1/mutations",
+            "runtime.example",
+            None,
+            &auth,
+            &mutation,
+        )
+    };
+    let (first, retry) = tokio::join!(raw(served.port, send()), raw(served.port, send()));
+    assert!(first.contains("completed"), "{first}");
+    assert_eq!(first, retry);
+    let mut conversation = Value::Null;
+    for _ in 0..100 {
+        let response = raw(served.port, get(&format!("/client/v1/chats/{id}"))).await;
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        conversation = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        if conversation["messages"].as_array().unwrap().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(conversation["messages"][0]["author"], "You");
+    assert_eq!(conversation["messages"][1]["body"], "Read.");
+    let tasks = store.list_records("orch_task", None).unwrap();
+    assert_eq!(
+        tasks
+            .iter()
+            .filter(|task| task["objective"] == "Read once from phone.")
+            .count(),
+        1
+    );
+    // Simulate a crash after durable task publication but before the receipt effect save.
+    let device = format!("{:x}", Sha256::digest(phone.token.as_bytes()));
+    let record_id = format!("{device}:{}:1", hello["mutationEpoch"].as_str().unwrap());
+    let mut record = store
+        .get_record("client_mutation", &record_id)
+        .unwrap()
+        .unwrap();
+    record["receipt"]["status"] = json!("accepted");
+    record.as_object_mut().unwrap().remove("effect");
+    store
+        .put_record("client_mutation", &record_id, &device, &record)
+        .unwrap();
+    let (runtime, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let resumed = ClientListener::new(tokens)
+        .serve(runtime, "127.0.0.1:0")
+        .await
+        .unwrap();
+    let replay = raw(resumed.port, send()).await;
+    assert!(replay.contains("completed"), "{replay}");
+    assert_eq!(
+        store
+            .list_records("orch_task", None)
+            .unwrap()
+            .iter()
+            .filter(|task| task["objective"] == "Read once from phone.")
+            .count(),
+        1
+    );
+    let mut missing: Value = serde_json::from_str(&mutation).unwrap();
+    missing["counter"] = json!("2");
+    missing["target"] = json!("agent:missing:deleted");
+    let rejected = raw(
+        resumed.port,
+        post(
+            "/client/v1/mutations",
+            "runtime.example",
+            None,
+            &auth,
+            &missing.to_string(),
+        ),
+    )
+    .await;
+    assert!(rejected.contains("no_longer_applicable"), "{rejected}");
+    missing["counter"] = json!("3");
+    missing["target"] = json!(id);
+    let next = raw(
+        resumed.port,
+        post(
+            "/client/v1/mutations",
+            "runtime.example",
+            None,
+            &auth,
+            &missing.to_string(),
+        ),
+    )
+    .await;
+    assert!(next.contains("completed"), "{next}");
+    let other = raw(resumed.port, format!("GET /client/v1/chats/{id} HTTP/1.1\r\nHost: runtime.example\r\nAuthorization: Bearer {}\r\n\r\n", tablet.token)).await;
+    assert!(other.contains("Read once from phone."), "{other}");
+    let scope = ProjectId(rec["scope"].as_str().unwrap().into());
+    let output = store.put_blob(b"agent output").unwrap();
+    let captured = store.put_blob(b"private captured input").unwrap();
+    let foreign = store.put_blob(b"another agent output").unwrap();
+    let foreign_scope = ProjectId(other_agent["scope"].as_str().unwrap().into());
+    store
+        .put_artifact(
+            &foreign_scope,
+            &Artifact::new(
+                foreign.clone(),
+                ArtifactKind::Text,
+                "private.txt",
+                20,
+                Provenance::Produced {
+                    invocation: ark_sdk::prelude::ark_core::InvocationId::new(),
+                },
+            ),
+        )
+        .unwrap();
+    store
+        .put_artifact(
+            &scope,
+            &Artifact::new(
+                output.clone(),
+                ArtifactKind::Text,
+                "report.txt",
+                12,
+                Provenance::Produced {
+                    invocation: ark_sdk::prelude::ark_core::InvocationId::new(),
+                },
+            ),
+        )
+        .unwrap();
+    store
+        .put_artifact(
+            &scope,
+            &Artifact::new(
+                captured.clone(),
+                ArtifactKind::Text,
+                "input.txt",
+                22,
+                Provenance::Captured {
+                    origin: "private".into(),
+                    locator: "private-input".into(),
+                },
+            ),
+        )
+        .unwrap();
+    let mut completed = tasks
+        .into_iter()
+        .find(|task| task["objective"] == "Read once from phone.")
+        .unwrap();
+    let full_result = "Complete result. ".repeat(2000);
+    completed["result"] = json!(full_result);
+    completed["origin"] = json!({"by":"agent","agent":"chief","task":"source-task"});
+    completed["outputs"] = json!([
+        {"id":output.as_str(),"name":"report.txt","kind":"text"},
+        {"id":captured.as_str(),"name":"input.txt","kind":"text"},
+        {"id":foreign.as_str(),"name":"private.txt","kind":"text"}
+    ]);
+    store
+        .put_record(
+            "orch_task",
+            completed["id"].as_str().unwrap(),
+            completed["project"].as_str().unwrap(),
+            &completed,
+        )
+        .unwrap();
+    let response = raw(resumed.port, get(&format!("/client/v1/chats/{id}"))).await;
+    let projection: Value =
+        serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(projection["messages"][0]["author"], "chief");
+    assert_eq!(projection["messages"][1]["body"], full_result);
+    assert_eq!(projection["results"].as_array().unwrap().len(), 1);
+    assert_eq!(projection["results"][0]["id"], output.as_str());
+    let file = raw(
+        resumed.port,
+        get(&format!("/client/v1/chats/{id}/results/{output}")),
+    )
+    .await;
+    assert!(file.starts_with("HTTP/1.1 200"), "{file}");
+    assert!(file.ends_with("agent output"), "{file}");
+    let private_file = raw(
+        resumed.port,
+        get(&format!("/client/v1/chats/{id}/results/{captured}")),
+    )
+    .await;
+    assert!(private_file.starts_with("HTTP/1.1 404"), "{private_file}");
+    let foreign_file = raw(
+        resumed.port,
+        get(&format!("/client/v1/chats/{id}/results/{foreign}")),
+    )
+    .await;
+    assert!(foreign_file.starts_with("HTTP/1.1 404"), "{foreign_file}");
+    let scope_sessions = store
+        .list_sessions(Some(&ProjectId(rec["scope"].as_str().unwrap().into())))
+        .unwrap();
+    if let Some(session) = scope_sessions.first() {
+        let raw_id = session["id"].as_str().unwrap();
+        let alias = raw(resumed.port, get(&format!("/client/v1/chats/{raw_id}"))).await;
+        let alias: Value = serde_json::from_str(alias.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(alias["chat"]["id"], raw_id);
+        assert_eq!(alias["chat"]["agent"]["name"], "researcher");
+        let mut aliased: Value = serde_json::from_str(&mutation).unwrap();
+        aliased["counter"] = json!("4");
+        aliased["target"] = json!(raw_id);
+        let sent = raw(
+            resumed.port,
+            post(
+                "/client/v1/mutations",
+                "runtime.example",
+                None,
+                &auth,
+                &aliased.to_string(),
+            ),
+        )
+        .await;
+        assert!(sent.contains("completed"), "{sent}");
+        let receipt = store
+            .get_record(
+                "client_mutation",
+                &format!("{device}:{}:4", hello["mutationEpoch"].as_str().unwrap()),
+            )
+            .unwrap()
+            .unwrap();
+        let task = store
+            .get_record("orch_task", receipt["effect"]["task"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(task["owner"], "researcher");
+        assert_eq!(receipt["effect"]["conversation"], id);
+        let file = raw(
+            resumed.port,
+            get(&format!("/client/v1/chats/{raw_id}/results/{output}")),
+        )
+        .await;
+        assert!(file.ends_with("agent output"), "{file}");
+    }
+    close_listener(resumed).await;
 }
 
 #[tokio::test]
@@ -172,16 +511,23 @@ async fn close_listener(listener: ark_ui::ClientServer) {
 
 #[tokio::test]
 async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
+    let (release_followup, followup) = tokio::sync::watch::channel(false);
     let dir = tempfile::tempdir().unwrap();
     let work = tempfile::tempdir().unwrap();
     let other_work = tempfile::tempdir().unwrap();
     let tokens = Tokens::in_store(dir.path());
     let owner = tokens.create("Owner Mac").unwrap();
-    let (runtime, served) = ArkUi::new(app(dir.path()))
-        .access(Access::Tokens(tokens.clone()))
-        .serve_background("127.0.0.1:0")
-        .await
-        .unwrap();
+    let (runtime, served) = ArkUi::new(app_with_provider(
+        dir.path(),
+        Arc::new(BusyTurnGate {
+            inner: model(),
+            release: followup.clone(),
+        }),
+    ))
+    .access(Access::Tokens(tokens.clone()))
+    .serve_background("127.0.0.1:0")
+    .await
+    .unwrap();
     let address = "runtime.example";
 
     let made = raw(
@@ -534,7 +880,16 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     .await;
     assert!(signed_out.starts_with("HTTP/1.1 401"), "{signed_out}");
 
-    let (restarted_runtime, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let (restarted_runtime, _) = ArkUi::new(app_with_provider(
+        dir.path(),
+        Arc::new(BusyTurnGate {
+            inner: model(),
+            release: followup.clone(),
+        }),
+    ))
+    .open()
+    .await
+    .unwrap();
     let restarted = ClientListener::new(tokens.clone())
         .serve(restarted_runtime, "127.0.0.1:0")
         .await
@@ -704,6 +1059,16 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         serde_json::from_str(replay.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(replay_receipt["id"], first_receipt["id"]);
 
+    runtime
+        .call(
+            "chat_send",
+            json!({
+                "session": created["id"],
+                "text": "Hold this turn."
+            }),
+        )
+        .await
+        .unwrap();
     let pending_input = json!({ "attachmentIds": [], "body": "Follow up once." });
     let pending_digest = format!(
         "{:x}",
@@ -769,6 +1134,7 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     .await;
     assert!(gap.starts_with("HTTP/1.1 409"), "{gap}");
     assert!(gap.contains("counter_gap"), "{gap}");
+    release_followup.send(true).unwrap();
 
     let mut pending_receipt = Value::Null;
     for _ in 0..40 {
@@ -808,7 +1174,16 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
     store
         .put_record("client_mutation", &record_id, &device, &interrupted)
         .unwrap();
-    let (resumed_runtime, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let (resumed_runtime, _) = ArkUi::new(app_with_provider(
+        dir.path(),
+        Arc::new(BusyTurnGate {
+            inner: model(),
+            release: followup.clone(),
+        }),
+    ))
+    .open()
+    .await
+    .unwrap();
     let served_again = ClientListener::new(tokens.clone())
         .serve(resumed_runtime, "127.0.0.1:0")
         .await
@@ -929,6 +1304,299 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
         revoked_terminal.starts_with("HTTP/1.1 401"),
         "{revoked_terminal}"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn route_models_create_and_change_are_typed_idempotent_and_durable() {
+    let _environment = PROVIDER_ENVIRONMENT.lock().await;
+    let _openai = EnvironmentVariable::set("OPENAI_API_KEY", "test-openai-key");
+    let _anthropic = EnvironmentVariable::set("ANTHROPIC_API_KEY", "test-anthropic-key");
+    let dir = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let other_work = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let phone = tokens
+        .issue_external_client(
+            "ARK Account",
+            "Phone",
+            "models-installation",
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+    let (runtime, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let served = ClientListener::new(tokens.clone())
+        .route_id("route-models")
+        .unwrap()
+        .serve(runtime.clone(), "127.0.0.1:0")
+        .await
+        .unwrap();
+    let address = format!("127.0.0.1:{}", served.port);
+    let auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let project = runtime
+        .call(
+            "add_project",
+            json!({ "name": "Models", "path": work.path() }),
+        )
+        .await
+        .unwrap()["project"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let other_project = runtime
+        .call(
+            "add_project",
+            json!({ "name": "Other", "path": other_work.path() }),
+        )
+        .await
+        .unwrap()["project"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let hello = raw(
+        served.port,
+        format!("GET /client/v1/hello HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n"),
+    )
+    .await;
+    assert!(hello.contains(r#""models.select""#), "{hello}");
+    let hello: ark_protocol::Hello =
+        serde_json::from_str(hello.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let models = raw(
+        served.port,
+        format!("GET /client/v1/models HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n"),
+    )
+    .await;
+    assert!(models.starts_with("HTTP/1.1 200"), "{models}");
+    let models: ark_protocol::ModelsSnapshot =
+        serde_json::from_str(models.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(models.route_id, "route-models");
+    assert!(models.default_model.selection.is_none());
+    let spec = |provider: &str| {
+        models
+            .providers
+            .iter()
+            .find(|item| item.id == provider)
+            .and_then(|item| item.models.first())
+            .map(|item| item.spec.clone())
+            .unwrap()
+    };
+    let openai = spec("openai");
+    let anthropic = spec("anthropic");
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    let before = store.list_sessions(None).unwrap().len();
+
+    let invalid = json!({
+        "project": project,
+        "requestId": "invalid-model",
+        "model": { "spec": "openai:not-in-catalog" },
+    })
+    .to_string();
+    let invalid = raw(
+        served.port,
+        post("/client/v1/chats", &address, None, &auth, &invalid),
+    )
+    .await;
+    assert!(invalid.starts_with("HTTP/1.1 409"), "{invalid}");
+    assert_eq!(store.list_sessions(None).unwrap().len(), before);
+
+    let create = json!({
+        "project": project,
+        "requestId": "model-create",
+        "model": { "spec": openai },
+    })
+    .to_string();
+    {
+        use tokio::io::AsyncWriteExt;
+        let mut dropped = tokio::net::TcpStream::connect(("127.0.0.1", served.port))
+            .await
+            .unwrap();
+        dropped
+            .write_all(post("/client/v1/chats", &address, None, &auth, &create).as_bytes())
+            .await
+            .unwrap();
+        dropped.shutdown().await.unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while store.list_sessions(None).unwrap().len() == before {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the chat is durable even when its response is dropped");
+    assert_eq!(store.list_sessions(None).unwrap().len(), before + 1);
+
+    drop(_openai);
+    let (restarted_host, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let restarted = ClientListener::new(tokens.clone())
+        .route_id("route-models")
+        .unwrap()
+        .serve(restarted_host, "127.0.0.1:0")
+        .await
+        .unwrap();
+    let restarted_address = format!("127.0.0.1:{}", restarted.port);
+    let after_restart = store.list_sessions(None).unwrap().len();
+    let retried = raw(
+        restarted.port,
+        post("/client/v1/chats", &restarted_address, None, &auth, &create),
+    )
+    .await;
+    assert!(retried.starts_with("HTTP/1.1 200"), "{retried}");
+    let created: Value = serde_json::from_str(retried.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(store.list_sessions(None).unwrap().len(), after_restart);
+
+    let unavailable = raw(
+        restarted.port,
+        format!(
+            "GET /client/v1/chats/{} HTTP/1.1\r\nHost: {restarted_address}\r\n{auth}\r\n",
+            created["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    let unavailable: ark_protocol::ConversationSnapshot =
+        serde_json::from_str(unavailable.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let unavailable = unavailable.model.unwrap();
+    assert!(unavailable.selection.is_none());
+    assert_eq!(unavailable.display, "Selected model unavailable");
+
+    let send_input = json!({ "body": "Do not silently change models" });
+    let send = json!({
+        "epoch": hello.mutation_epoch.clone(),
+        "counter": "1",
+        "operation": "chat.send",
+        "target": created["id"],
+        "inputDigest": format!("{:x}", Sha256::digest(serde_json::to_vec(&send_input).unwrap())),
+        "input": send_input,
+    })
+    .to_string();
+    let send = raw(
+        restarted.port,
+        post(
+            "/client/v1/mutations",
+            &restarted_address,
+            None,
+            &auth,
+            &send,
+        ),
+    )
+    .await;
+    assert!(send.starts_with("HTTP/1.1 409"), "{send}");
+    assert!(send.contains("model_unavailable"), "{send}");
+
+    for conflicting in [
+        json!({
+            "project": project,
+            "requestId": "model-create",
+            "model": { "spec": anthropic },
+        }),
+        json!({
+            "project": other_project,
+            "requestId": "model-create",
+            "model": { "spec": openai },
+        }),
+    ] {
+        let conflict = raw(
+            served.port,
+            post(
+                "/client/v1/chats",
+                &address,
+                None,
+                &auth,
+                &conflicting.to_string(),
+            ),
+        )
+        .await;
+        assert!(conflict.starts_with("HTTP/1.1 409"), "{conflict}");
+        assert!(conflict.contains("request_conflict"), "{conflict}");
+    }
+    assert_eq!(store.list_sessions(None).unwrap().len(), after_restart);
+
+    let input = json!({ "model": { "spec": anthropic } });
+    let mutation = json!({
+        "epoch": hello.mutation_epoch,
+        "counter": "1",
+        "operation": "chat.model",
+        "target": created["id"],
+        "inputDigest": format!("{:x}", Sha256::digest(serde_json::to_vec(&input).unwrap())),
+        "input": input,
+    })
+    .to_string();
+    let changed = raw(
+        restarted.port,
+        post(
+            "/client/v1/mutations",
+            &restarted_address,
+            None,
+            &auth,
+            &mutation,
+        ),
+    )
+    .await;
+    assert!(changed.starts_with("HTTP/1.1 200"), "{changed}");
+    assert!(changed.contains(r#""status":"completed""#), "{changed}");
+    let conversation = raw(
+        restarted.port,
+        format!(
+            "GET /client/v1/chats/{} HTTP/1.1\r\nHost: {restarted_address}\r\n{auth}\r\n",
+            created["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    let conversation: ark_protocol::ConversationSnapshot =
+        serde_json::from_str(conversation.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(
+        conversation.model.unwrap().selection.unwrap().spec,
+        anthropic
+    );
+
+    let device = format!("{:x}", Sha256::digest(phone.token.as_bytes()));
+    let mutation_id = format!("{device}:{}:1", hello.mutation_epoch);
+    let mut accepted = store
+        .get_record("client_mutation", &mutation_id)
+        .unwrap()
+        .expect("model mutation receipt");
+    accepted["receipt"]["status"] = Value::String("accepted".into());
+    accepted["receipt"]["display"] = Value::String("Accepted".into());
+    store
+        .put_record("client_mutation", &mutation_id, &device, &accepted)
+        .unwrap();
+    drop(_anthropic);
+
+    let (recovered_host, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let recovered = ClientListener::new(tokens)
+        .route_id("route-models")
+        .unwrap()
+        .serve(recovered_host, "127.0.0.1:0")
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let record = store
+                .get_record("client_mutation", &mutation_id)
+                .unwrap()
+                .expect("recovered model mutation");
+            if record["receipt"]["status"] == "completed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a durable model change reconciles its terminal receipt after restart");
+    let recovered_address = format!("127.0.0.1:{}", recovered.port);
+    let recovered_conversation = raw(
+        recovered.port,
+        format!(
+            "GET /client/v1/chats/{} HTTP/1.1\r\nHost: {recovered_address}\r\n{auth}\r\n",
+            created["id"].as_str().unwrap()
+        ),
+    )
+    .await;
+    let recovered_conversation: ark_protocol::ConversationSnapshot =
+        serde_json::from_str(recovered_conversation.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let recovered_model = recovered_conversation.model.unwrap();
+    assert!(recovered_model.selection.is_none());
+    assert_eq!(recovered_model.display, "Selected model unavailable");
 }
 
 #[tokio::test]
@@ -1202,6 +1870,31 @@ async fn hosted_workspace_pairs_the_exact_route_without_granting_owner_access() 
         hello.contains(r#""routeId":"route-cloud-workspace""#),
         "{hello}"
     );
+    assert!(hello.contains(r#""connections.authorize""#), "{hello}");
+    let signed_out_connections = raw(
+        served.port,
+        format!("GET /client/v1/connections HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+    )
+    .await;
+    assert!(
+        signed_out_connections.starts_with("HTTP/1.1 401"),
+        "{signed_out_connections}"
+    );
+    let wrong_route = raw(
+        served.port,
+        post(
+            "/client/v1/connections/claude/authorizations",
+            &address,
+            None,
+            &phone_auth,
+            r#"{"routeId":"another-route","requestId":"request-1"}"#,
+        ),
+    )
+    .await;
+    assert!(wrong_route.starts_with("HTTP/1.1 409"), "{wrong_route}");
+    let wrong_route: ark_protocol::ErrorEnvelope =
+        serde_json::from_str(wrong_route.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(wrong_route.code, "route_changed");
 
     let session = raw(
         served.port,
@@ -1219,8 +1912,242 @@ async fn hosted_workspace_pairs_the_exact_route_without_granting_owner_access() 
     assert!(phone_events.starts_with("HTTP/1.1 401"), "{phone_events}");
 
     let owner_auth = format!("Authorization: Bearer {owner}\r\n");
+    let owner_connections = raw(
+        served.port,
+        format!("GET /client/v1/connections HTTP/1.1\r\nHost: {address}\r\n{owner_auth}\r\n"),
+    )
+    .await;
+    assert!(
+        owner_connections.starts_with("HTTP/1.1 401"),
+        "{owner_connections}"
+    );
     let owner_rpc = raw(served.port, rpc(&address, &owner_auth, "hello")).await;
     assert!(owner_rpc.contains(r#""ok":true"#), "{owner_rpc}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn native_provider_authorization_is_typed_owned_and_recoverable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct ResetProviderEnvironment;
+    impl Drop for ResetProviderEnvironment {
+        fn drop(&mut self) {
+            std::env::remove_var("ARK_CLAUDE_BIN");
+        }
+    }
+
+    let _environment = PROVIDER_ENVIRONMENT.lock().await;
+    let _reset = ResetProviderEnvironment;
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("claude");
+    let ready = dir.path().join("ready");
+    let descendant = dir.path().join("descendant");
+    let url = "https://claude.com/cai/oauth/authorize?client_id=client&code=true&code_challenge=challenge&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&response_type=code&scope=account%3Aread&state=state";
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in\n\
+             'auth status') if [ -f '{}' ]; then echo '{{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}}'; else echo '{{\"loggedIn\":false}}'; exit 1; fi ;;\n\
+             'auth login --claudeai') sleep 30 & echo $! > '{}'; echo '{}'; IFS= read -r code; [ \"$code\" = good ] && : > '{}' ;;\n\
+             'auth logout') rm -f '{}' ;;\n\
+             *) exit 2 ;; esac\n",
+            ready.display(),
+            descendant.display(),
+            url,
+            ready.display(),
+            ready.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::env::set_var("ARK_CLAUDE_BIN", &script);
+
+    let tokens = Tokens::in_store(dir.path());
+    let phone = tokens
+        .issue_external_client("ARK Account", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let tablet = tokens
+        .issue_external_client("ARK Account", "Tablet", "tablet", Duration::from_secs(3600))
+        .unwrap();
+    let (host, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let pairing = AccountPairing::new(
+        "route-cloud",
+        "account-owner",
+        Arc::new(TestAccountVerifier),
+    )
+    .unwrap();
+    let served = ClientListener::new(tokens.clone())
+        .account_pairing(pairing.clone())
+        .serve(host.clone(), "127.0.0.1:0")
+        .await
+        .unwrap();
+    let address = format!("127.0.0.1:{}", served.port);
+    let phone_auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let tablet_auth = format!("Authorization: Bearer {}\r\n", tablet.token);
+
+    let connections = raw(
+        served.port,
+        format!("GET /client/v1/connections HTTP/1.1\r\nHost: {address}\r\n{phone_auth}\r\n"),
+    )
+    .await;
+    let connections: ark_protocol::ProviderConnectionsSnapshot =
+        serde_json::from_str(connections.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(connections.route_id, "route-cloud");
+    assert_eq!(connections.connections[0].state, "needs_authorization");
+
+    let begun = raw(
+        served.port,
+        post(
+            "/client/v1/connections/claude/authorizations",
+            &address,
+            None,
+            &phone_auth,
+            r#"{"routeId":"route-cloud","requestId":"request-1"}"#,
+        ),
+    )
+    .await;
+    assert!(begun.starts_with("HTTP/1.1 200"), "{begun}");
+    let begun: ark_protocol::ProviderAuthorizationAttempt =
+        serde_json::from_str(begun.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(begun.state, "waiting_for_code");
+    assert_eq!(begun.authorization_url.as_deref(), Some(url));
+
+    let elsewhere = raw(
+        served.port,
+        format!("GET /client/v1/connections HTTP/1.1\r\nHost: {address}\r\n{tablet_auth}\r\n"),
+    )
+    .await;
+    assert!(
+        elsewhere.contains(r#""state":"authorizing""#),
+        "{elsewhere}"
+    );
+    assert!(!elsewhere.contains("authorizationUrl"), "{elsewhere}");
+    let hidden = raw(
+        served.port,
+        format!(
+            "GET /client/v1/authorizations/{} HTTP/1.1\r\nHost: {address}\r\n{tablet_auth}\r\n",
+            begun.id
+        ),
+    )
+    .await;
+    assert!(hidden.starts_with("HTTP/1.1 404"), "{hidden}");
+
+    let submitted = raw(
+        served.port,
+        post(
+            &format!("/client/v1/authorizations/{}/code", begun.id),
+            &address,
+            None,
+            &phone_auth,
+            r#"{"code":"good"}"#,
+        ),
+    )
+    .await;
+    assert!(submitted.contains(r#""state":"verifying""#), "{submitted}");
+    let final_attempt = loop {
+        let response = raw(
+            served.port,
+            format!(
+                "GET /client/v1/authorizations/{} HTTP/1.1\r\nHost: {address}\r\n{phone_auth}\r\n",
+                begun.id
+            ),
+        )
+        .await;
+        let attempt: ark_protocol::ProviderAuthorizationAttempt =
+            serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        if attempt.state == "ready" {
+            break attempt;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(final_attempt.id, begun.id);
+    let repeated_code = raw(
+        served.port,
+        post(
+            &format!("/client/v1/authorizations/{}/code", begun.id),
+            &address,
+            None,
+            &phone_auth,
+            r#"{"code":"good"}"#,
+        ),
+    )
+    .await;
+    assert!(repeated_code.starts_with("HTTP/1.1 409"), "{repeated_code}");
+
+    let disconnected = raw(
+        served.port,
+        format!(
+            "DELETE /client/v1/connections/claude HTTP/1.1\r\nHost: {address}\r\n{phone_auth}Content-Length: 0\r\n\r\n"
+        ),
+    )
+    .await;
+    assert!(disconnected.starts_with("HTTP/1.1 200"), "{disconnected}");
+    assert!(
+        disconnected.contains(r#""state":"needs_authorization""#),
+        "{disconnected}"
+    );
+
+    let draining = raw(
+        served.port,
+        post(
+            "/client/v1/connections/claude/authorizations",
+            &address,
+            None,
+            &phone_auth,
+            r#"{"routeId":"route-cloud","requestId":"listener-drop"}"#,
+        ),
+    )
+    .await;
+    assert!(draining.starts_with("HTTP/1.1 200"), "{draining}");
+    let draining: ark_protocol::ProviderAuthorizationAttempt =
+        serde_json::from_str(draining.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let old_pid: u32 = std::fs::read_to_string(&descendant)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    drop(served);
+
+    let restarted = ClientListener::new(tokens)
+        .account_pairing(pairing)
+        .serve(host, "127.0.0.1:0")
+        .await
+        .unwrap();
+    let restarted_address = format!("127.0.0.1:{}", restarted.port);
+    let replacement = loop {
+        let response = raw(
+            restarted.port,
+            post(
+                "/client/v1/connections/claude/authorizations",
+                &restarted_address,
+                None,
+                &phone_auth,
+                r#"{"routeId":"route-cloud","requestId":"listener-restart"}"#,
+            ),
+        )
+        .await;
+        if response.starts_with("HTTP/1.1 200") {
+            break serde_json::from_str::<ark_protocol::ProviderAuthorizationAttempt>(
+                response.split("\r\n\r\n").nth(1).unwrap(),
+            )
+            .unwrap();
+        }
+        assert!(response.starts_with("HTTP/1.1 409"), "{response}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_ne!(replacement.id, draining.id);
+    assert!(!ark_os::process::alive(old_pid));
+    let cancelled = raw(
+        restarted.port,
+        format!(
+            "DELETE /client/v1/authorizations/{} HTTP/1.1\r\nHost: {restarted_address}\r\n{phone_auth}Content-Length: 0\r\n\r\n",
+            replacement.id
+        ),
+    )
+    .await;
+    assert!(cancelled.starts_with("HTTP/1.1 200"), "{cancelled}");
+    assert!(cancelled.contains(r#""state":"cancelled""#), "{cancelled}");
 }
 
 #[tokio::test]
@@ -1399,8 +2326,54 @@ fn model() -> Arc<MockProvider> {
     )
 }
 
+struct BusyTurnGate {
+    inner: Arc<MockProvider>,
+    release: tokio::sync::watch::Receiver<bool>,
+}
+
+#[async_trait::async_trait]
+impl ark_model::Provider for BusyTurnGate {
+    async fn complete(
+        &self,
+        system: &str,
+        messages: &[ark_model::Message],
+        tools: &[ark_model::ToolDef],
+    ) -> ark_model::Result<Completion> {
+        if messages
+            .iter()
+            .rev()
+            .find(|message| message.role == ark_model::Role::User)
+            .is_some_and(|message| message.content.contains("Hold this turn."))
+        {
+            let mut release = self.release.clone();
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                release.wait_for(|released| *released),
+            )
+            .await
+            .map_err(|_| ark_model::ProviderError::Api {
+                provider: "test gate".into(),
+                detail: "busy turn was not released".into(),
+            })?
+            .expect("test retains the provider gate sender");
+        }
+        self.inner.complete(system, messages, tools).await
+    }
+
+    fn describe(&self) -> String {
+        self.inner.describe()
+    }
+
+    fn model_id(&self) -> String {
+        self.inner.model_id()
+    }
+}
+
 fn app(dir: &std::path::Path) -> App {
-    let provider: Arc<dyn ark_model::Provider> = model();
+    app_with_provider(dir, model())
+}
+
+fn app_with_provider(dir: &std::path::Path, provider: Arc<dyn ark_model::Provider>) -> App {
     let ark = Ark::builder()
         .store_root(dir)
         .tool(Arc::new(Notes))

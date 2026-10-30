@@ -94,6 +94,9 @@ pub trait SessionBackend: Send + Sync {
     }
     /// The account whose capacity this backend draws on (`claude`, `codex`).
     fn account(&self) -> String;
+    fn account_revision(&self) -> u64 {
+        0
+    }
     /// Start a vendor session from a full request. Returns the vendor's session id.
     async fn open(
         &self,
@@ -304,6 +307,10 @@ pub struct SessionSnapshot {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct LaneRecord {
     pub model: String,
+    #[serde(default)]
+    pub account: String,
+    #[serde(default)]
+    pub account_revision: u64,
     pub vendor: Option<String>,
     /// The instructions and tools the vendor session opened with.
     #[serde(default)]
@@ -453,6 +460,10 @@ impl ManagedSession {
     /// Be told about every event on this lane (an orchestrator traces them).
     pub fn set_listener(&self, f: SessionListener) {
         *self.listener.lock().unwrap() = Some(f);
+    }
+
+    pub fn account_revision(&self) -> u64 {
+        self.backend.account_revision()
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
@@ -672,6 +683,8 @@ impl ManagedSession {
                 Ok((vendor, c)) => {
                     r.calls += 1;
                     r.model = self.backend.model();
+                    r.account = self.backend.account();
+                    r.account_revision = self.backend.account_revision();
                     let event = match plan {
                         Plan::Open(reason) => {
                             r.vendor = vendor.clone();
@@ -749,6 +762,9 @@ impl ManagedSession {
 
 #[async_trait]
 impl Provider for ManagedSession {
+    fn connection_revision(&self) -> u64 {
+        self.backend.account_revision()
+    }
     async fn complete(
         &self,
         system: &str,
@@ -989,7 +1005,10 @@ impl SubscriptionRuntime {
     ) -> Arc<ManagedSession> {
         let existing = self.inner.lanes.lock().unwrap().get(lane).cloned();
         if let Some(s) = existing {
-            if s.backend.model() == backend.model() {
+            if s.backend.model() == backend.model()
+                && s.backend.account() == backend.account()
+                && s.backend.account_revision() == backend.account_revision()
+            {
                 return s;
             }
             s.release("the lane moved to another model").await;
@@ -1005,7 +1024,11 @@ impl SubscriptionRuntime {
             record.context_tokens = 0;
             record.turns = 0;
         }
-        if !record.model.is_empty() && record.model != backend.model() {
+        if !record.model.is_empty()
+            && (record.model != backend.model()
+                || (!record.account.is_empty() && record.account != backend.account())
+                || record.account_revision != backend.account_revision())
+        {
             record = LaneRecord::default();
         }
         let s = Arc::new(ManagedSession {
@@ -1144,6 +1167,9 @@ struct OneShot {
 
 #[async_trait]
 impl Provider for OneShot {
+    fn connection_revision(&self) -> u64 {
+        self.backend.account_revision()
+    }
     fn reads_pictures(&self) -> bool {
         self.backend.reads_pictures()
     }
@@ -1393,6 +1419,46 @@ mod tests {
 
     fn runtime(policy: SessionPolicy) -> SubscriptionRuntime {
         SubscriptionRuntime::builder().policy(policy).build()
+    }
+
+    #[tokio::test]
+    async fn same_model_on_another_account_never_reuses_a_vendor_session() {
+        let ledger: Arc<dyn SessionLedger> = Arc::new(MemoryLedger::default());
+        let first = Arc::new(MockSessions::new(
+            "same-model",
+            "account-a",
+            vec![reply(10)],
+        ));
+        let second = Arc::new(MockSessions::new(
+            "same-model",
+            "account-b",
+            vec![reply(10)],
+        ));
+        let rt = SubscriptionRuntime::builder()
+            .ledger(ledger.clone())
+            .build();
+        let a = rt.session_with("same-lane", first).await;
+        a.complete("", &[Message::user("first")], &[])
+            .await
+            .unwrap();
+        let b = rt.session_with("same-lane", second.clone()).await;
+        assert!(!Arc::ptr_eq(&a, &b));
+        b.complete("", &[Message::user("second")], &[])
+            .await
+            .unwrap();
+        assert!(matches!(second.calls().first(), Some(Call::Open { .. })));
+        drop(rt);
+        let restarted = SubscriptionRuntime::builder().ledger(ledger).build();
+        let third = Arc::new(MockSessions::new(
+            "same-model",
+            "account-a",
+            vec![reply(10)],
+        ));
+        let a = restarted.session_with("same-lane", third.clone()).await;
+        a.complete("", &[Message::user("after restart")], &[])
+            .await
+            .unwrap();
+        assert!(matches!(third.calls().first(), Some(Call::Open { .. })));
     }
 
     #[tokio::test]

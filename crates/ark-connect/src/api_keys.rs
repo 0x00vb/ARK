@@ -38,6 +38,7 @@ fn known(provider: &str) -> Result<(), ConnectError> {
 #[derive(Clone)]
 pub struct ApiKeys {
     secrets: Arc<dyn Secrets>,
+    pub accounts: crate::ModelAccounts,
     index: PathBuf,
     cache: Arc<Mutex<HashMap<String, String>>>,
     /// Where keys are checked (tests point it at a local server).
@@ -47,6 +48,7 @@ pub struct ApiKeys {
 impl ApiKeys {
     pub fn open(root: &Path, secrets: Arc<dyn Secrets>) -> Self {
         ApiKeys {
+            accounts: crate::ModelAccounts::open(root, secrets.clone()),
             secrets,
             index: root.join(INDEX),
             cache: Arc::default(),
@@ -59,6 +61,62 @@ impl ApiKeys {
         self.bases
             .insert(provider.into(), base.trim_end_matches('/').into());
         self
+    }
+
+    pub async fn add_account(
+        &self,
+        provider: &str,
+        request: &str,
+        name: &str,
+        key: &str,
+    ) -> Result<ark_model::accounts::ModelAccount, ConnectError> {
+        if let Some(account) = self
+            .accounts
+            .list()?
+            .into_iter()
+            .find(|a| a.id == format!("{provider}~{request}"))
+        {
+            return Ok(account);
+        }
+        let subscription = ark_model::Cli::of(provider).is_some();
+        let key = key.trim();
+        self.validate_account_key(provider, key).await?;
+        self.accounts
+            .create(provider, request, name, (!subscription).then_some(key))
+    }
+
+    pub async fn validate_account_key(
+        &self,
+        provider: &str,
+        key: &str,
+    ) -> Result<(), ConnectError> {
+        let subscription = ark_model::Cli::of(provider).is_some();
+        let endpoint = ark_model::endpoints::endpoint(provider);
+        if !subscription && !PROVIDERS.iter().any(|p| p.0 == provider) && endpoint.is_none() {
+            return Err(ConnectError::Unknown(provider.into()));
+        }
+        let key = key.trim();
+        if !subscription {
+            if key.is_empty() || key.len() > 8192 || key.bytes().any(|b| !b.is_ascii_graphic()) {
+                return Err(ConnectError::Provider("Paste a valid key first.".into()));
+            }
+            if let Some(endpoint) = endpoint {
+                let response = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(15))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()?
+                    .get(format!("{}/models", endpoint.base_url))
+                    .bearer_auth(key)
+                    .send()
+                    .await?;
+                if !response.status().is_success() {
+                    return Err(ConnectError::Provider("That key was not accepted.".into()));
+                }
+            } else if provider != "opencode-go" {
+                self.check(provider, key).await?;
+            }
+        }
+        Ok(())
     }
 
     /// The providers with a saved key.
@@ -171,6 +229,34 @@ fn secret(provider: &str) -> String {
 }
 
 impl KeySource for ApiKeys {
+    fn model_accounts(&self) -> ark_model::Result<Vec<ark_model::accounts::ModelAccount>> {
+        self.accounts
+            .list()
+            .map_err(|e| ark_model::ProviderError::Api {
+                provider: "accounts".into(),
+                detail: e.to_string(),
+            })
+    }
+    fn account_directory(&self, id: &str) -> Option<PathBuf> {
+        self.accounts.directory(id).ok()
+    }
+    fn activate_account(
+        &self,
+        account: &ark_model::accounts::ModelAccount,
+        identity: Option<&str>,
+    ) -> ark_model::Result<()> {
+        self.accounts
+            .activate(account, identity)
+            .map(|_| ())
+            .map_err(|e| ark_model::ProviderError::Api {
+                provider: account.provider.clone(),
+                detail: e.to_string(),
+            })
+    }
+    fn account_key(&self, id: &str) -> Option<String> {
+        self.accounts.key(id).ok().flatten()
+    }
+
     fn key(&self, var: &str) -> Option<String> {
         let provider = provider_of_var(var)?;
         if let Some(k) = self.cache.lock().unwrap().get(provider) {

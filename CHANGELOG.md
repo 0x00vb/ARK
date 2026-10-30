@@ -1,11 +1,35 @@
 # Changelog
 
+## [0.28.0] - 2026-10-30
+
+### Added
+
+- Native client protocol1.9 combines optional agent identities with advertised `agents.conversations`, `models.select`, `connections.authorize` and `push.native` capabilities. Existing1.x clients can ignore the added optional fields. Provider authorization remains bound to the authenticated external client and account route. Native push remains optional and operator-configured for a finite private route; this release does not open public push service.
+
+- Agents can create persistent colleagues and start independent conversations with bounded briefs, inherited permissions and restart-safe handoffs. Chat-created agents can name their contacts.
+- Project agent identities can be searched without opening their conversations. The shared search accepts application sources.
+
+- View separate subscription usage and reset windows directly from the native status menu. Open model account settings from the same menu.
+
+- Keep multiple model-provider accounts with isolated credentials, sessions, capacity and usage. Existing model choices retain their original account. See [Provider accounts](docs/PROVIDER_ACCOUNTS.md).
+
+### Fixed
+
+- Preserve independent usage buckets and omit unmeasured allowance. Changing account or connection revision starts a new vendor session.
+
+### Breaking
+
+- Rust `Backend` literals need the new optional `identity` field. Catalog JSON includes provider-reported subscription identity when available.
+
+- Rust callers constructing `UsageWindow`, `CliStatus`, `LaneRecord` or `ManagedSession` literals must supply the added account, identity, bucket or revision fields. Stored legacy records use defaults.
+
 ## [0.27.4] - 2026-10-30
 
 - Add OpenCode Go coding models through a separate key-backed provider.
 - Keep simultaneous first Browser requests on one owned page.
 - Keep conversation identity stable across coding, auxiliary calls and retries without changing shared providers.
 - Saving a Go key reports configuration only. Public discovery does not verify subscription access.
+
 
 ## [0.27.3] - 2026-10-29
 
@@ -71,8 +95,15 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- Authenticated external clients on dedicated or account-bound headless listeners can opt into a fixed, content-free notification relay. Credentials, expiry and opaque tap resolution stay scoped to that device (ADR 0082).
+- Headless startup resumes the existing session instead of creating another empty chat. Native window startup is unchanged.
+
 - `ArkUi::account_pairing` lets a hosted workspace pair account-bound native clients and report
   its exact route id without granting those clients browser or generic RPC access.
+- Client protocol v1.7 lists the ready models owned by an addressed runtime, binds an optional
+  exact model to idempotent chat creation and changes an idle chat through a terminal mutation.
+- Account-bound clients can authorize and disconnect Claude Code or Codex through each program's
+  official browser flow. ARK never reads or stores the resulting provider credential.
 
 ## [0.25.3] - 2026-10-24
 

@@ -8,7 +8,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.27.4** adds explicit conversation-bound OpenCode Go support. |
+| Stable release | **v0.28.0** adds explicit conversation-bound OpenCode Go support. |
 | Consumers | Published ARK Desktop 0.9.8 pins v0.27.3. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
@@ -48,6 +48,7 @@ in this slice.
 | With qwen3:4b, `tool-lookup` and `approval` fail 3 of 3: the model picks a plausible neighbor tool, or files the note in its own working state | `bench/RESULTS.md` |
 | Time to first token rose 137 to 259 ms (median) with the working state last in the request; cause not proven | `bench/RESULTS.md` |
 | A subscription session's first call still pays the CLI's start-up and native context. The unreleased host path disables unused native tools and configured MCP servers through scoped overrides, with isolated exec fallback. Catalog discovery now skips optional usage telemetry while keeping its six-second deadline and strict advertised-effort checks. The bounded efficiency evaluation remains model-specific and configuration-confounded | `ark-model`, ADR 0012 |
+| Multiple model accounts have a local Core/Desktop candidate. Live second-account authentication and native management are not qualified. Design and status: [`docs/PROVIDER_ACCOUNTS.md`](docs/PROVIDER_ACCOUNTS.md) | `ark-connect`, `ark-model`, shared selection, Desktop and native clients |
 | `codex app-server` is experimental in Codex; a protocol change falls back to `codex exec` (a process per call, no streaming) | `ark-model` |
 | `claude:haiku` sometimes tries host tools natively; it recovered in 6 of 6 tasks in the last runs, and a check asks again when it gives up, but that check has only a scripted test | `bench/RESULTS.md` |
 | Orchestration is measured on one program, three runs per setting; managed sessions cut uncached input but not wall time | `bench/RESULTS.md` |
@@ -91,6 +92,19 @@ API trim for v0.8.0 (breaking), done: removed `Interaction::ark_mut`, `Harness::
 `ArkBuilder` built at open time), `Store::get_artifact` and `Store::get_session` (read by id
 after `put_*`), `ActionDescriptor::with_output_schema` and `SurfaceRef::with_title` (builder
 twins of `with_input_schema` and `new`).
+
+### Multiple accounts per model provider
+
+Requested 2026-10-30. Core/Desktop implementation is in qualification. A person can keep several Claude, Codex or
+other provider accounts connected and see each account's actual limits and reset times.
+Settings keeps one provider group with account rows and Add account. The picker makes the
+selected account visible without adding a step for a single account. Copy stays minimal.
+
+[`docs/PROVIDER_ACCOUNTS.md`](docs/PROVIDER_ACCOUNTS.md) records data shapes, states, migration,
+isolation requirements and checkable acceptance criteria. Account identity must scope
+credentials, running processes, session reuse/recovery, catalogs, capacity and usage. Old
+sign-ins keep working. No silent account switch or invented allowance after a reset.
+Core comes first, then Desktop and native clients through the shared protocol.
 
 ### Capabilities
 

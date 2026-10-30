@@ -12,7 +12,9 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod accounts;
 mod anthropic;
+pub mod authorization;
 pub mod capacity;
 mod catalog;
 pub mod cli;
@@ -461,6 +463,10 @@ pub trait Provider: Send + Sync {
     fn model_id(&self) -> String {
         self.describe()
     }
+    /// The account connection this provider was bound to. Zero for an unversioned provider.
+    fn connection_revision(&self) -> u64 {
+        0
+    }
 }
 
 /// Build a provider from the environment:
@@ -475,6 +481,12 @@ pub fn from_env() -> Result<Box<dyn Provider>> {
 }
 
 fn build_box(which: &str, model: Option<String>) -> Result<Box<dyn Provider>> {
+    if which.contains('~') {
+        let account = accounts::get(which)?.ok_or_else(|| {
+            ProviderError::MissingCredential("Choose an account in Models.".into())
+        })?;
+        return accounts::build(account, model.unwrap_or_default());
+    }
     match which {
         "ollama" => Ok(Box::new(Ollama::new(
             model.unwrap_or_else(|| "qwen3:4b-instruct".into()),

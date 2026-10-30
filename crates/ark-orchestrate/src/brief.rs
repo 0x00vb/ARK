@@ -175,6 +175,7 @@ mod tests {
 
     fn task(id: &str, owner: &str) -> TaskRecord {
         TaskRecord {
+            handoff_key: None,
             id: id.into(),
             project: "p".into(),
             owner: owner.into(),

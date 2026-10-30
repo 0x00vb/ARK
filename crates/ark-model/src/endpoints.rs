@@ -167,7 +167,15 @@ pub fn endpoint(name: &str) -> Option<Endpoint> {
 
 /// Whether a model spec may start with `name`: a built-in provider or an endpoint.
 pub fn is_provider(name: &str) -> bool {
-    PROVIDERS.contains(&name) || endpoint(name).is_some()
+    PROVIDERS.contains(&name)
+        || endpoint(name).is_some()
+        || name.split_once('~').is_some_and(|(provider, id)| {
+            !provider.is_empty()
+                && provider
+                    .bytes()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_')
+                && uuid::Uuid::parse_str(id).is_ok()
+        })
 }
 
 /// How long a model list is reused: long enough that opening a picker costs no request, short
@@ -181,7 +189,11 @@ static LISTED: Mutex<Option<HashMap<String, (Instant, Listing)>>> = Mutex::new(N
 /// The endpoint's models, from its `GET /models`, reused for a few minutes. An error says why
 /// it cannot be reached; it never takes longer than a few seconds.
 pub async fn models(e: &Endpoint) -> Listing {
-    let cache_key = format!("{}|{}", e.base_url, e.api_key().is_some());
+    let key_digest = e
+        .api_key()
+        .map(|key| blake3::hash(key.as_bytes()).to_hex().to_string())
+        .unwrap_or_default();
+    let cache_key = format!("{}|{}|{}", e.name, e.base_url, key_digest);
     if let Some((at, listing)) = LISTED
         .lock()
         .unwrap()
@@ -242,6 +254,7 @@ pub(crate) async fn backend(e: &Endpoint) -> crate::Backend {
     crate::Backend {
         provider: e.name.clone(),
         label: e.label.clone(),
+        identity: None,
         kind: crate::BackendKind::Endpoint,
         ready,
         detail,

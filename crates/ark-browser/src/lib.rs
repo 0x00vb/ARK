@@ -265,18 +265,17 @@ impl BrowserService {
             self.lease(owner).await?;
         }
         let chrome = self.chrome(signed).await?;
-        {
-            let st = self.state.lock().await;
-            let have = st.owners.get(owner).and_then(|p| {
-                if signed {
-                    p.signed.clone()
-                } else {
-                    p.fresh.clone()
-                }
-            });
-            if let Some(p) = have {
-                return Ok(p);
+        // Lookup, creation and publication must be one operation for a page owner.
+        let mut st = self.state.lock().await;
+        let have = st.owners.get(owner).and_then(|p| {
+            if signed {
+                p.signed.clone()
+            } else {
+                p.fresh.clone()
             }
+        });
+        if let Some(p) = have {
+            return Ok(p);
         }
         // A context of its own in the fresh browser; a tab in the signed-in one.
         let mut target = json!({ "url": "about:blank" });
@@ -313,7 +312,6 @@ impl BrowserService {
             target: target_id,
             context,
         };
-        let mut st = self.state.lock().await;
         let pages = st.owners.entry(owner.to_string()).or_default();
         if signed {
             pages.signed = Some(page.clone());
@@ -1126,6 +1124,33 @@ mod tests {
 
     fn url(u: &str) -> reqwest::Url {
         reqwest::Url::parse(u).unwrap()
+    }
+
+    #[tokio::test]
+    async fn simultaneous_first_requests_share_one_owned_page() {
+        for signed in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let service = BrowserService::new(dir.path()).signed_in_headless(true);
+            if service.bin.is_none() {
+                eprintln!("skipped: no installed Chromium-family browser");
+                return;
+            }
+            let (first, second) = tokio::join!(
+                service.page("same-owner", signed),
+                service.page("same-owner", signed),
+            );
+            let first = first.unwrap();
+            let second = second.unwrap();
+            if first.target != second.target {
+                let retained = dir.keep();
+                panic!("same owner received different tabs: {} and {}; signed={signed}; fixture retained at {}", first.target, second.target, retained.display());
+            }
+            let other = service.page("other-owner", false).await.unwrap();
+            assert_ne!(
+                first.target, other.target,
+                "different owners keep separate pages"
+            );
+        }
     }
 
     #[test]

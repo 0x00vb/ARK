@@ -3320,3 +3320,106 @@ async fn native_creation_is_route_qualified_idempotent_and_does_not_change_deskt
     let replay: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(replay, receipt);
 }
+
+#[tokio::test]
+async fn external_agent_summaries_keep_display_metadata_separate_from_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("Owner").unwrap();
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let (_runtime, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let client = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
+    let created = resource_call(&client, "project", "create_agent", "", json!({
+        "request_id":"composer-first", "spec":{"name":"chat-stable","title":"Launch review","description":"Reviews practical plans","tools":["notes.*"]}
+    })).await.unwrap();
+    resource_call(
+        &client,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"legacy","role":"Reads notes"}}),
+    )
+    .await
+    .unwrap();
+    let auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: runtime.example\r\n{auth}\r\n");
+    let parse = |response: String| -> Value {
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap()
+    };
+    let list = parse(raw(served.port, get("/client/v1/chats")).await);
+    let rows = list["chats"].as_array().unwrap();
+    let row = rows
+        .iter()
+        .find(|row| row["agent"]["name"] == "chat-stable")
+        .unwrap();
+    assert_eq!(row["title"], "Launch review");
+    assert_eq!(row["preview"], "Reviews practical plans");
+    assert_eq!(row["participants"], json!(["chat-stable"]));
+    assert_eq!(row["agent"]["role"], "");
+    let legacy = rows
+        .iter()
+        .find(|row| row["agent"]["name"] == "legacy")
+        .unwrap();
+    assert_eq!(legacy["title"], "legacy");
+    assert_eq!(legacy["preview"], "Reads notes");
+    let id = row["id"].as_str().unwrap().to_string();
+    let snapshot = parse(raw(served.port, get(&format!("/client/v1/chats/{id}"))).await);
+    assert_eq!(snapshot["chat"]["title"], "Launch review");
+    let task = resource_call(
+        &client,
+        "project",
+        "submit_task",
+        "",
+        json!({"agent":"chat-stable","task":{"objective":"Read the plan"}}),
+    )
+    .await
+    .unwrap();
+    let mut spec = created["spec"].clone();
+    spec["title"] = json!("Launch reviewer");
+    spec["description"] = json!("Updated description");
+    let renamed = resource_call(&client, "project", "spawn_agent", "", json!({"spec":spec}))
+        .await
+        .unwrap();
+    assert_eq!(renamed["scope"], created["scope"]);
+    let snapshot = parse(raw(served.port, get(&format!("/client/v1/chats/{id}"))).await);
+    assert_eq!(snapshot["chat"]["id"], id);
+    assert_eq!(snapshot["chat"]["title"], "Launch reviewer");
+    assert_eq!(snapshot["chat"]["preview"], "Updated description");
+    assert_eq!(snapshot["chat"]["agent"]["name"], "chat-stable");
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    let task_id = task["task"].as_str().unwrap();
+    assert_eq!(
+        store.get_record("orch_task", task_id).unwrap().unwrap()["owner"],
+        "chat-stable"
+    );
+    let mut session = None;
+    for _ in 0..100 {
+        let agents = resource_call(&client, "project", "agents", "", json!({}))
+            .await
+            .unwrap();
+        session = agents
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["name"] == "chat-stable")
+            .unwrap()["session"]
+            .as_str()
+            .map(str::to_string);
+        if session.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let session = session.expect("agent opened its conversation");
+    let alias = parse(raw(served.port, get(&format!("/client/v1/chats/{session}"))).await);
+    assert_eq!(alias["chat"]["id"], session);
+    assert_eq!(alias["chat"]["title"], "Launch reviewer");
+    assert_eq!(alias["chat"]["agent"]["name"], "chat-stable");
+}

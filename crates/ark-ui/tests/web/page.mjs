@@ -3699,19 +3699,18 @@ async function agentConversations(page, fromNewChat = false) {
   await page.locator("#app.ready").waitFor();
   if (fromNewChat) {
     await page.locator("#new-session").click();
-    await page.getByRole("button", { name: "New agent", exact: true }).click();
-    await page.getByRole("textbox", { name: "Agent name", exact: true }).fill("source");
-    await page.getByRole("textbox", { name: "Role (optional)", exact: true }).fill("Creates review conversations");
-    await page.getByRole("button", { name: "Create agent", exact: true }).click();
-    await page.getByRole("textbox", { name: "Ask source", exact: true }).waitFor();
+    await page.locator('#stage textarea').waitFor();
+    assert.equal(await page.getByRole("dialog").count(), 0);
+    assert.equal(await page.locator('textarea:visible').count(), 1);
     assert.equal((await page.evaluate(() => window.ark.call("graph"))).tasks.length, 0);
+    assert.equal((await page.evaluate(() => window.ark.call("agents"))).length, 0);
   } else {
     const composer = page.locator("#input");
     await finished(page, () => composer.fill("Create a source agent").then(() => composer.press("Enter")));
     await page.getByRole("button", { name: "Chat with source", exact: true }).click();
   }
-  const source = page.getByRole("textbox", { name: "Ask source", exact: true });
-  await source.fill("Create a colleague and send a review brief. PRIVATE SOURCE SECRET");
+  const source = fromNewChat ? page.locator('#stage textarea') : page.getByRole("textbox", { name: "Ask source", exact: true });
+  await source.fill(`${fromNewChat ? "source\n" : ""}Create a colleague and send a review brief. PRIVATE SOURCE SECRET`);
   await source.press("Enter");
   await page.getByRole("button", { name: "Chat with colleague", exact: true }).waitFor();
   await page.waitForFunction(async () => (await window.ark.call("graph")).tasks.some(task => task.owner === "colleague" && task.state === "done"));

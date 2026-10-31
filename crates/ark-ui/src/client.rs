@@ -90,9 +90,19 @@ async fn all_chats(host: &Arc<Host>) -> anyhow::Result<Vec<Value>> {
 }
 
 fn agent_item(entry: &ClientAgent) -> Value {
-    json!({ "id": entry.id(), "title": entry.agent.name, "project": entry.project.name,
+    let title = if entry.agent.spec.title.is_empty() {
+        &entry.agent.name
+    } else {
+        &entry.agent.spec.title
+    };
+    let preview = if entry.agent.spec.description.is_empty() {
+        &entry.agent.spec.role
+    } else {
+        &entry.agent.spec.description
+    };
+    json!({ "id": entry.id(), "title": title, "project": entry.project.name,
         "computer": "This computer", "updatedAt": rfc3339(entry.agent.updated_ms.max(entry.agent.created_ms)),
-        "preview": entry.agent.spec.role, "participants": [entry.agent.name], "unread": false,
+        "preview": preview, "participants": [entry.agent.name], "unread": false,
         "agent": { "name": entry.agent.name, "role": entry.agent.spec.role } })
 }
 

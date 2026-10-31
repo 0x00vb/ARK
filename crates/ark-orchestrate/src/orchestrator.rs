@@ -2015,6 +2015,9 @@ impl Inner {
         model_request: Option<&str>,
         chat_creation: Option<&serde_json::Value>,
     ) -> Result<AgentRecord, OrchError> {
+        if spec.title.chars().count() > 120 || spec.description.chars().count() > 500 {
+            return Err(OrchError::NotAllowed("display metadata is too long".into()));
+        }
         if !valid_name(&spec.name) {
             return Err(OrchError::NotAllowed(format!(
                 "`{}` is not a valid agent name (letters, digits, - _ .)",
@@ -4346,6 +4349,8 @@ impl Inner {
             }
         }
         spec.name = name.to_string();
+        spec.title.clear();
+        spec.description.clear();
         spec.role = role.to_string();
         spec.instructions = instructions.to_string();
         spec.parent = Some(from.to_string());

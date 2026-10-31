@@ -15,12 +15,13 @@ const TRIES = 3;
 /// One set of files on its way at a time, from a drop or a picker.
 let busy = null;
 
-export function acceptDrops(api, captureDraft, zone) {
+export function acceptDrops(api, captureDraft, zone, { accepts, captureOrigin } = {}) {
   let depth = 0;
   const hint = h("div.drop-hint", { hidden: true }, h("div.drop-hint-box", icon("plus"), h("span", "Drop to add to the project")));
   zone.append(hint);
   // A document open in the stage takes its own drops.
-  const ours = (e) => [...(e.dataTransfer?.types || [])].includes("Files") && !e.target.closest?.(".stage");
+  const ours = (e) => [...(e.dataTransfer?.types || [])].includes("Files")
+    && (accepts ? accepts() : !e.target.closest?.(".stage"));
   const show = (on) => {
     hint.hidden = !on;
     if (!on) depth = 0;
@@ -51,9 +52,11 @@ export function acceptDrops(api, captureDraft, zone) {
     // Entries see into folders. Files that have no place on a disk (made by a page) cannot be
     // read through them: then the files as dropped.
     const plain = () => files.map((file) => ({ path: file.name, file }));
-    const target = api.at(api.summary().location);
-    const complete = captureDraft(target.location);
-    once(target, async () => addToProject(target, complete, entries.length ? await walkAll(entries).catch(plain) : plain()));
+    const target = captureOrigin ? null : api.at(api.summary().location);
+    const origin = captureOrigin ? captureOrigin() : { uploadApi: target, appendDraft: captureDraft(target.location) };
+    if (!origin) return;
+    once(origin.uploadApi, async () => addToProject(origin.uploadApi, origin.appendDraft,
+      entries.length ? await walkAll(entries).catch(plain) : plain(), origin.progressTarget));
   });
 }
 

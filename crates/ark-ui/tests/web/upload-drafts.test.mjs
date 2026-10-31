@@ -41,7 +41,7 @@ async function fixture(run, outcome = "success", runtime = "fixture") {
     if (method === "resource") {
       const { ref, operation } = params;
       const key = `${ref.kind}:${operation.kind}`;
-      const results = { "project:grants": [], "project:skills": [], "project:board": null, "project:schedules": [], "process:processes": [] };
+      const results = { "project:grants": [], "project:skills": [], "project:board": null, "project:schedules": [], "process:processes": [], "project:focus": null };
       if (Object.hasOwn(results, key)) return results[key];
       if (key === "file:upload_parts" && outcome === "stop") await new Promise(resolve => { release = resolve; started(); });
       if (["file:upload_parts", "file:upload_cancel"].includes(key)) return null;
@@ -225,4 +225,69 @@ for (const runtime of ["fixture", "window"]) for (const state of ["mounted", "di
     assert.equal(await (state === "mounted" ? page.locator(".secondary textarea") : input).inputValue(), expected);
     if (runtime === "window") assert.equal(await page.evaluate(() => localStorage.getItem("ark-draft:fixture:chat-a")), null);
   }, "success", runtime));
+}
+
+for (const next of ["general", "other-project"]) {
+  test(`main conversation drop keeps captured origin after navigating to ${next}`, async () => fixture(async (page, upload) => {
+    await page.evaluate(() => {
+      window.mainConversations = [];
+      window.ark.view({ id: "project-chat", title: "New chat", resourceScoped: true, render(el, _params, api) {
+        const record = { location: api.location, text: "", disposed: false, sent: [] };
+        window.mainConversations.push(record);
+        const view = api.chatView(el, { submit: text => record.sent.push(text) });
+        view.render([], { empty: "What should we work on?" });
+        view.input.addEventListener("input", () => { record.text = view.input.value; });
+        return {
+          title: () => "Project conversation",
+          focusInput: () => view.focus(),
+          cancel: () => { record.cancels = (record.cancels || 0) + 1; },
+          captureUploadOrigin: () => ({ uploadApi: api, appendDraft(line) {
+            record.text = `${record.text}\n${line}`;
+            if (!record.disposed) view.set(record.text);
+          } }),
+          dispose() { record.disposed = true; view.dispose(); },
+        };
+      } });
+      window.ark.panel({ id: "details-test", title: "Details", render(el) { el.textContent = "Details"; return {}; } });
+      window.ark.openPanel("details-test");
+      document.querySelector('#close-pane').click();
+      window.ark.openView("project-chat");
+    });
+    const projected = page.locator('#stage textarea');
+    assert.equal(await page.locator('textarea:visible').count(), 1);
+    await projected.fill("Original draft");
+    await page.locator('#session-title').focus();
+    await page.keyboard.press('x');
+    assert.equal(await projected.evaluate(el => el === document.activeElement), true);
+    await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: "\\", metaKey: true, bubbles: true })));
+    await page.waitForFunction(() => document.querySelector('.app').dataset.pane === 'open');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.querySelector('.app').dataset.pane !== 'open');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => window.mainConversations[0].cancels), 1);
+    await page.evaluate(() => { document.querySelector('#stage .palette').hidden = false; });
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => window.mainConversations[0].cancels), 1, "dismissing slash suggestions does not cancel the agent");
+    await page.evaluate(() => {
+      const dataTransfer = new DataTransfer(); dataTransfer.items.add(new File(["origin only"], "notes.txt"));
+      document.querySelector("#stage textarea").dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true }));
+    });
+    await upload.waiting;
+    if (next === "other-project") {
+      await page.locator('.project-row', { hasText: 'Writing' }).click();
+      await page.waitForFunction(() => window.ark.summary().project.id === "b");
+      assert.equal(await page.evaluate(() => window.mainConversations[0].disposed), true);
+      await page.evaluate(() => window.ark.openView("project-chat"));
+      await page.locator('#stage textarea').fill("Unrelated draft");
+    } else {
+      await page.evaluate(() => window.ark.showConversation());
+      await page.locator('#input').fill("Unrelated draft");
+    }
+    upload.release();
+    await page.waitForFunction(() => window.mainConversations[0].text.includes("notes.txt"));
+    assert.equal(await page.locator('textarea:visible').inputValue(), "Unrelated draft");
+    assert.equal(upload.files[0].location.project, "a");
+    assert.equal(upload.files[0].location.session, "chat-a");
+    if (next === "other-project") assert.deepEqual(await page.evaluate(() => window.mainConversations.map(item=>item.location.project)), ["a", "b"]);
+  }));
 }

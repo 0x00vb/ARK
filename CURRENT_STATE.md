@@ -1,13 +1,6 @@
-## Sidebar disclosure candidate, 31 October 2026
+# Composer-first UX in progress
 
-Project folds update their own row and content. A 200 ms opening and 160 ms closing can
-reverse from the current height. Keyboard and reduced-motion changes finish immediately.
-Hidden controls become inert at once; extension controllers release after closing. Chat rows
-no longer replay entrance animations on refresh. Touch project actions stay visible.
-Qualification:25 focused WebKit and69 actual host-page cases (66 retained plus3 corrected
-reruns), full Rust/clippy, release build and unchanged simulated benchmark pass. Two independent
-reviews pass. Physical touch remains unverified. Evidence: `../board/evidence/sidebar-motion-20261031/`.
-Source is uncommitted. Installed Desktop and its release pins remain unchanged.
+Owner requested removal of the creation wizard, generated editable display metadata, model and reasoning in the composer, primary agent conversations, and consistent split headers. Work lives in ark-chat-first-ux on codex/chat-first-ux. Plan/design and implementation source QA pass. Actual Host/browser first-send and retained-panel flows pass with synthetic vendors and zero paid calls. The completed, source-bound sidebar-motion-20261031 donor is included. Full combined CI-v2 passed, including69 actual Host pages and zero-delta simulated benchmark. A final read-only external title/preview projection correction passes its actual HTTP regression; final-source full CI-v3 is running. Canonical main retains its donor working changes unchanged. No new client package or public promotion is claimed. Prior Core 0.30 and Cloud 0.9.13 are delivered; qualified Desktop 0.9.13 stays a frozen baseline. Native build 10 physical installation and Apple distribution restrictions remain separate. Evidence: ../board/evidence/chat-first-ux-20261031.
 
 ## Named agent chat entry, 31 October2026
 
@@ -486,7 +479,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.30.0 |
+| Latest tag | v0.31.0 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

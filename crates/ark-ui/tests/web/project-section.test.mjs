@@ -49,7 +49,7 @@ async function fixture(run, { boot = false, searchProjects = false, holdHello = 
     context: () => ({ total: 0, budget: 64000 }),
     resource: params => {
       const results = { "project:grants": [], "project:skills": [], "project:board": null,
-        "project:schedules": [], "process:processes": [], "project:agents": [
+        "project:schedules": [], "process:processes": [], "project:focus": null, "project:agents": [
           { name: "Archivist", role: "Keeps procurement decisions", state: "idle" },
           { name: "Removed", role: "Former reviewer", state: "terminated" },
         ] };
@@ -516,6 +516,26 @@ test("New chat waits for initial readiness before resolving its destination", ()
   assert.deepEqual(await page.evaluate(() => window.destinations), [{ runtime: "fixture", project: "a", session: "chat-a" }]);
   assert.equal(calls.filter(call => call.method === "new_session").length, 0);
 }, { boot: true, holdHello: true }));
+
+
+test("project panel keys do not remove the opening chat from resource authorization", () => fixture(async (page, { calls, settle }) => {
+  await page.waitForFunction(() => window.ark?.summary()?.location);
+  await page.evaluate(() => {
+    window.ark.panel({ id: "scoped-test", title: "Project details", projectScoped: true, render(el, _params, api) {
+      window.panelLocation = api.location;
+      el.append(api.h("div", "Project details"));
+      window.panelRead = api.call("agents");
+      api.setPanelTitle("scoped-test", "Captured project");
+      return {};
+    } });
+    window.ark.openPanel("scoped-test");
+  });
+  await page.evaluate(() => window.panelRead);
+  assert.deepEqual(await page.evaluate(() => window.panelLocation), {runtime:"fixture",project:"a",session:"chat-a"});
+  await settle();
+  const read = calls.find(call => call.method === "resource" && call.params.operation.kind === "agents");
+  assert.equal(read.params.ref.location.session, "chat-a");
+}, { boot: true }));
 
 
 test("project disclosure keeps its row and neighbors through reversals", () => fixture(async page => {

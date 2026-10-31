@@ -141,7 +141,9 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             if request.system.contains(r#"You are the agent "colleague""#) {
                 if child_step.fetch_add(1, Ordering::SeqCst) == 0 { say("BRIEF RECEIVED", false) }
                 else { say("FOLLOWUP RECEIVED", false) }
-            } else if request.system.contains(r#"You are the agent "source""#) {
+            } else if request.system.contains(r#"You are the agent "source""#)
+                || request.system.contains(r#"You are the agent "chat-"#)
+            {
                 match source_step.fetch_add(1, Ordering::SeqCst) {
                     0 => call("agents.create", json!({"name":"colleague","role":"Reviews incoming documents","instructions":"Review the supplied brief."})),
                     1 => call("agents.start", json!({"to":"colleague","objective":"Review this proposal","context":"NECESSARY BRIEF"})),

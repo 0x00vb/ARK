@@ -6,6 +6,9 @@ import { setAgentIdentity } from "./dom.js";
 //                      a view of the current project in the main column, in place of the
 //                      conversation; `nav` makes it a destination in the fixed workspace rail.
 //                      `command` optionally opens the view from an exact slash command.
+//                      resourceScoped views receive a captured opening API and are disposed on
+//                      project or runtime changes. projectScoped views keep the live API and update. Controllers may provide title(), menu(), rename(),
+//                      focusInput(), cancel(), show(), hide(), and captureUploadOrigin() for a primary conversation.
 //                      Choosing Chat brings the conversation back. A panel's `nav` lists it in
 //                      the title bar's + menu, after ARK's Terminal, Browser and Files.
 //   ark.setting({ id, title, icon, advanced, render(el, api) })
@@ -37,7 +40,7 @@ import { setAgentIdentity } from "./dom.js";
 //                      own view, so it looks and reads and behaves as a chat (ADR 0076).
 //                      Returns `{ render(turns, { empty }), reset(), input, actions, focus(),
 //                      set(text), addLine(text, { focus }), uploads,
-//                      setComposer({ placeholder, disabled, running, modelLabel, modelDisabled }), dispose() }`.
+//                      setComposer({ placeholder, disabled, running, modelLabel, modelDisabled, submitDisabled }), dispose() }`.
 //                      Optional `model.open(anchor)` opens the consumer's real model picker.
 //                      Optional `files.captureOrigin()` runs before the chooser opens and returns
 //                      `{ uploadApi, appendDraft, progressTarget }`, all bound to that origin.

@@ -18,7 +18,9 @@ const NEAR_END = 80;
 export function chatView(el, base, { submit, stop, call, placeholder = "", model = null, files = null } = {}) {
   if (typeof submit !== "function") throw new Error("ark.chatView needs `submit`");
   const api = Object.create(base);
-  api.submit = (text) => submit(text);
+  let submitDisabled = false;
+  let unavailable = false;
+  api.submit = (text) => submitDisabled ? composer.set(text) : submit(text);
   api.send = api.submit;
   api.steer = api.submit;
   api.cancel = () => {};
@@ -178,7 +180,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     set: (text) => composer.set(text),
     /// What the composer says while empty, whether it takes a message now, and whether the
     /// run goes on (with `stop`, the send button is Stop while nothing is typed).
-    setComposer({ placeholder: words, disabled, running: on, modelLabel, modelDisabled } = {}) {
+    setComposer({ placeholder: words, disabled, running: on, modelLabel, modelDisabled, submitDisabled: blocked } = {}) {
       if (elements.model) {
         if (modelLabel != null) elements.model.textContent = modelLabel;
         if (modelDisabled != null) elements.model.disabled = !!modelDisabled;
@@ -192,10 +194,12 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
         composer.placeholder = words;
         input.placeholder = words;
       }
+      if (blocked != null) submitDisabled = !!blocked;
+      if (disabled != null) unavailable = !!disabled;
+      send.disabled = unavailable || submitDisabled;
       if (disabled != null) {
         input.disabled = !!disabled;
         if (elements.attach) elements.attach.disabled = !!disabled;
-        send.disabled = !!disabled;
         form.dataset.unavailable = String(!!disabled);
       }
     },

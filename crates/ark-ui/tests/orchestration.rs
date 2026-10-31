@@ -829,3 +829,43 @@ async fn new_chat_agent_creation_is_origin_scoped_and_never_upserts() {
         1
     );
 }
+
+#[tokio::test]
+async fn chat_turn_request_retries_exact_payload_and_refuses_unsupported_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    host.call("spawn_agent", json!({"spec":{"name":"writer"}}))
+        .await
+        .unwrap();
+    let input = json!({"agent":"writer","request_id":"first-message","task":{"objective":"Review this","context":"original context"}});
+    let first = host.call("submit_task", input.clone()).await.unwrap();
+    let retry = host.call("submit_task", input.clone()).await.unwrap();
+    assert_eq!(first["task"], retry["task"]);
+    for field in ["objective", "context"] {
+        let mut changed = input.clone();
+        changed["task"][field] = json!("different");
+        assert!(host.call("submit_task", changed).await.is_err());
+    }
+    for field in ["artifacts", "after", "budget", "max_attempts", "unknown"] {
+        let mut changed = input.clone();
+        changed["task"][field] = json!(null);
+        assert!(host.call("submit_task", changed).await.is_err());
+    }
+    for task in [
+        json!(null),
+        json!([]),
+        json!("text"),
+        json!({"objective":""}),
+        json!({"objective":1}),
+        json!({"objective":"ok","context":false}),
+    ] {
+        let mut changed = input.clone();
+        changed["task"] = task;
+        assert!(host.call("submit_task", changed).await.is_err());
+    }
+    for request in [json!(null), json!(1), json!(""), json!("x".repeat(129))] {
+        let mut changed = input.clone();
+        changed["request_id"] = request;
+        assert!(host.call("submit_task", changed).await.is_err());
+    }
+}

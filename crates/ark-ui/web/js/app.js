@@ -202,7 +202,7 @@ const api = {
     const place = params && Object.hasOwn(params, "place") ? params.place : state.summary?.place?.name || "";
     const location = p.projectScoped ? { ...current, session: "" } : current;
     if (p.projectScoped) params = { ...(params || {}), project, place };
-    const ark = scopedApi(location);
+    const ark = scopedApi(current);
     const where = place || api.hereName() || "This computer";
     const title = p.projectScoped ? `${p.title} · ${project?.name || "Project"} · ${where}` : p.title;
     pane.openTab(resourceKey("panel", location, id), title, p.icon || "box", (el, prm) => p.render(el, prm, ark) || {}, params, {
@@ -242,6 +242,7 @@ const api = {
   },
   // Ask the window to reflect a view's focus again (after its selection changed).
   reportFocus: () => reportFocus(),
+  refreshViewTitle: () => showTitle(),
   _changed: (projectSections = false) => {
     state.extChanged = true;
     state.projectSectionsChanged ||= projectSections;
@@ -313,6 +314,7 @@ function scopedApi(location) {
   // one). A resource tab snapshots its location, not the API object's early boot values.
   const scoped = Object.create(window.ark || api);
   scoped.location = { ...location };
+  scoped.chatView = (el, options) => chatView(el, scoped, options);
   scoped.remoteResource = location.runtime !== state.runtime;
   scoped.destinationBrowser = scoped.remoteResource || transport.kind === "browser";
   scoped.online = () => resourceOnline.get(locationKey(location)) !== false;
@@ -364,13 +366,18 @@ function scopedApi(location) {
   scoped.openPanel = (id, params) => {
     const panel = registry.panels.get(id);
     if (!panel) return toast(`No panel named ${id}`);
-    if (panel.projectScoped) return api.openPanel(id, params);
+    if (panel.projectScoped) {
+      const current = currentLocation();
+      if (current.runtime !== location.runtime || current.project !== location.project) return toast("Return to the original project to open this panel");
+      return api.openPanel(id, params);
+    }
     pane.openTab(resourceKey("panel", location, id), panel.title, panel.icon || "box", (el, prm) => panel.render(el, prm, scoped) || {}, params, {
       wide: !!panel.wide, fill: !!panel.fill, api: scoped, closesWithProject: !!panel.closesWithProject, project: location.project,
     });
   };
-  scoped.setPanelTitle = (id, title) => retitle(resourceKey("panel", location, id), title);
-  scoped.closePanel = (id) => pane.remove(resourceKey("panel", location, id));
+  const panelLocation = id => registry.panels.get(id)?.projectScoped ? { ...location, session: "" } : location;
+  scoped.setPanelTitle = (id, title) => retitle(resourceKey("panel", panelLocation(id), id), title);
+  scoped.closePanel = (id) => pane.remove(resourceKey("panel", panelLocation(id), id));
   return scoped;
 }
 
@@ -1285,6 +1292,7 @@ function applySummary(s) {
   if (state.sessionId && s.session.id !== state.sessionId) saveDraft();
   const changed = s.session.id !== state.sessionId;
   const projectChanged = s.project?.id !== state.summary?.project?.id;
+  const runtimeChanged = !!state.summary && s.location?.runtime !== state.summary?.location?.runtime;
   if (state.summary && projectChanged) {
     if (visibleChats(chatLayout).length > 1) closeOtherPanes();
     chatTabs.ids = [];
@@ -1300,9 +1308,18 @@ function applySummary(s) {
   state.title = s.session.title || (s.session.turns ? "Untitled chat" : "");
   if (s.location) resourceOnline.set(locationKey(s.location), !s.place || s.place.state === "ok");
   showTitle();
-  if (projectChanged && state.view) {
+  if (projectChanged || runtimeChanged) {
+    for (const [id, entry] of views) {
+      if (!registry.views.get(id)?.resourceScoped) continue;
+      entry.ctl?.dispose?.();
+      entry.el.remove();
+      views.delete(id);
+    }
+  }
+  if ((projectChanged || runtimeChanged) && state.view) {
     const view = registry.views.get(state.view);
-    if (view?.projectScoped) views.get(state.view)?.ctl?.update?.({ project: s.project });
+    if (view?.resourceScoped) showConversation(false);
+    else if (view?.projectScoped) views.get(state.view)?.ctl?.update?.({ project: s.project });
   }
   composer.setModel(s.model);
   composer.setExecutionMode(s.execution_mode || "manual", s.execution_mode_revision || 0);
@@ -1624,15 +1641,22 @@ function showView(id, params) {
   // A project view owns the full main column. End the chat layout before showing it so the
   // top selector always remains a visible route back to Chat.
   if (visibleChats(chatLayout).length > 1) closeOtherPanes();
-  if (v.projectScoped && params === undefined) params = { project: api.project() };
+  if ((v.projectScoped || v.resourceScoped) && params === undefined) params = { project: api.project() };
+  const location = { ...currentLocation() };
   let entry = views.get(id);
+  if (entry && v.resourceScoped && (entry.location.runtime !== location.runtime || entry.location.project !== location.project)) {
+    entry.ctl?.dispose?.();
+    entry.el.remove();
+    views.delete(id);
+    entry = null;
+  }
   if (!entry) {
     const el = h("div.view", { "data-view": id });
     $("#stage").append(el);
-    entry = { el, ctl: null };
+    entry = { el, ctl: null, location };
     views.set(id, entry);
     try {
-      entry.ctl = v.render(el, params, window.ark) || {};
+      entry.ctl = v.render(el, params, v.resourceScoped ? scopedApi(location) : window.ark) || {};
     } catch (e) {
       console.error(e);
       el.append(h("div.insp-empty", String(e)));
@@ -1643,8 +1667,10 @@ function showView(id, params) {
   } else {
     entry.ctl.refresh?.();
   }
+  if (state.view && state.view !== id) views.get(state.view)?.ctl?.hide?.();
   for (const [k, x] of views) x.el.hidden = k !== id;
   state.view = id;
+  entry.ctl.show?.();
   if (id !== "schedules" && id !== SETTINGS) state.homeView = id;
   appEl.dataset.view = id;
   $("#stage").hidden = false;
@@ -1653,6 +1679,7 @@ function showView(id, params) {
   topbar.mark(id);
   destinations?.mark(id === "schedules" ? "schedules" : null);
   reportFocus();
+  entry.ctl.focusInput?.();
 }
 
 function showConversation(focusComposer = true) {
@@ -1661,6 +1688,7 @@ function showConversation(focusComposer = true) {
     destinations?.mark("home");
     return;
   }
+  views.get(state.view)?.ctl?.hide?.();
   state.view = null;
   delete appEl.dataset.view;
   $("#stage").hidden = true;
@@ -1717,7 +1745,17 @@ function openDestination(destination, { keyboard = false } = {}) {
 function showTitle() {
   const v = state.view && (state.view === SETTINGS ? settingsView : registry.views.get(state.view));
   const el = $("#session-title");
-  el.textContent = !v ? state.title || "" : v.nav === true ? state.summary?.project?.name || "" : v.title;
+  const controller = v && views.get(state.view)?.ctl;
+  el.textContent = !v ? state.title || "" : controller?.title?.() || (v.nav === true ? state.summary?.project?.name || "" : v.title);
+  let options = $("#view-options");
+  if (!options) {
+    options = h("button.icon-btn", { id: "view-options", type: "button", "aria-label": "Conversation options", "aria-haspopup": "menu", onclick: () => {
+      const entries = views.get(state.view)?.ctl?.menu?.();
+      if (entries?.length) popover(options, entries);
+    } }, icon("more"));
+    $(".top-actions").prepend(options);
+  }
+  options.hidden = !controller?.menu;
   // A chat that runs on another computer says where.
   const place = !v && state.summary?.place;
   if (place) el.append(h("span.place-mark", { title: `Runs on ${place.name}` }, icon("server"), place.name));
@@ -1978,6 +2016,7 @@ function menuKey(e) {
 }
 
 function keys(e) {
+  if (e.defaultPrevented) return;
   const mod = e.metaKey || e.ctrlKey;
   const key = e.key.toLowerCase();
   if (mod && Object.hasOwn(MENU_KEYS, key)) {
@@ -1990,7 +2029,16 @@ function keys(e) {
   for (const b of BUILTINS) {
     if (b.key(e) && registry.panels.get(b.id)?.builtin) { e.preventDefault(); return api.openPanel(b.id); }
   }
-  if (state.view) return;
+  if (state.view) {
+    if (mod && key === "\\") { e.preventDefault(); return pane.toggle(); }
+    if (e.key === "Escape") {
+      if (pane.isOpen && !document.activeElement?.closest("#pane")) return pane.close();
+      return views.get(state.view)?.ctl?.cancel?.();
+    }
+    if (!mod && e.key.length === 1 && !e.target.closest("input, textarea, [contenteditable], .pane, .popover")) views.get(state.view)?.ctl?.focusInput?.();
+    if (mod && key === "b") { e.preventDefault(); toggleSidebar(); }
+    return;
+  }
   if (mod && e.key.toLowerCase() === "b") { e.preventDefault(); return toggleSidebar(); }
   if (mod && e.key.toLowerCase() === "\\") { e.preventDefault(); return pane.toggle(); }
   if (e.key === "Escape") {
@@ -2010,6 +2058,7 @@ function keys(e) {
 
 function renameInline() {
   const el = $("#session-title");
+  if (state.view) return views.get(state.view)?.ctl?.rename?.();
   if (el.querySelector("input") || state.running) return;
   const before = el.textContent;
   const input = h("input.title-input", { value: state.summary?.session.title || "", "aria-label": "Session title" });
@@ -2227,7 +2276,14 @@ async function start() {
   thread = new Thread($("#thread"), $("#scroller"), api);
   composer = new Composer(api, { ...primaryElements, captureDraft });
   places = new Places(api);
-  acceptDrops(api, captureDraft, $(".main"));
+  acceptDrops(api, captureDraft, $(".main"), {
+    accepts: () => !state.view || !!views.get(state.view)?.ctl?.captureUploadOrigin,
+    captureOrigin: () => {
+      if (state.view) return views.get(state.view)?.ctl?.captureUploadOrigin?.();
+      const target = api.at(currentLocation());
+      return { uploadApi: target, appendDraft: captureDraft(target.location) };
+    },
+  });
   sidebar = new Sidebar(api);
   destinations = new Destinations(openDestination, (id) => showView(id));
   waiting = new Waiting(api, transport, () => state.sessionId);

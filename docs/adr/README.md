@@ -131,3 +131,5 @@ The test, script or review step that keeps it true.
 - [0087. Agent conversations start independent turns](0087-agent-conversations-start-independent-turns.md)
 
 - [0092. New chat chooses a durable conversation identity](0092-named-agent-chat-entry.md)
+
+- [0093. A conversation starts with the request](0093-composer-first-conversation-metadata.md)

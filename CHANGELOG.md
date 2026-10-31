@@ -1,10 +1,19 @@
 # Changelog
 
-## [Unreleased]
+## [0.31.0] - 2026-10-31
 
 ### Fixed
 
 - Project disclosure keeps sidebar rows stable, reverses smoothly and releases hidden controls after closing. Keyboard and reduced-motion toggles finish immediately. Chat lists no longer replay entrance animations on refresh. Project actions stay visible on touch screens.
+
+
+- Let a project conversation occupy the main column with scoped lifecycle, upload ownership, title actions and keyboard focus.
+- Keep an agent display title and description separate from its stable identity and behavioral instructions. External chat lists and snapshots use the same display metadata.
+- Accept exact, idempotent objective/context chat turns through an optional submit request identifier.
+
+### Breaking
+
+- AgentSpec, AgentNode and AgentContact expose defaulted display metadata fields. Rust struct literals must supply them. Stable identities and stored conversations remain compatible.
 
 ## [0.30.0] - 2026-10-31
 

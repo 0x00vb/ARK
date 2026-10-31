@@ -2981,6 +2981,31 @@ impl Host {
             }
             O::SubmitTask => {
                 let o = self.resource_orchestrator(&r).await?;
+                if let Some(request_id) = input.get("request_id") {
+                    let request_id = request_id.as_str().unwrap_or_default();
+                    anyhow::ensure!(
+                        !request_id.is_empty() && request_id.len() <= 128,
+                        "a bounded message request is required"
+                    );
+                    let task = input["task"]
+                        .as_object()
+                        .ok_or_else(|| anyhow::anyhow!("a chat turn needs an objective"))?;
+                    anyhow::ensure!(
+                        task.keys()
+                            .all(|key| matches!(key.as_str(), "objective" | "context")),
+                        "idempotent chat turns accept only objective and context"
+                    );
+                    let task: TaskSpec = serde_json::from_value(input["task"].clone())?;
+                    anyhow::ensure!(
+                        !task.objective.trim().is_empty(),
+                        "a task needs an objective"
+                    );
+                    let original = serde_json::to_vec(&(&r.location, request_id))?;
+                    let request = format!("chat-turn:{:x}", Sha256::digest(original));
+                    return Ok(
+                        json!({ "task": o.submit_once(&s("agent"), task, &request).await? }),
+                    );
+                }
                 let task: TaskSpec = serde_json::from_value(input["task"].clone())?;
                 match self
                     .control_on(

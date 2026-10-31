@@ -12,6 +12,11 @@ use serde::{Deserialize, Serialize};
 pub struct AgentSpec {
     /// Unique within the orchestrator: how other agents and the graph name it.
     pub name: String,
+    /// Display metadata. Does not change routing or the agent profile.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     /// One line on what it does, shown to agents that may delegate to it.
     #[serde(default)]
     pub role: String,
@@ -87,6 +92,8 @@ impl AgentSpec {
     pub fn new(name: impl Into<String>) -> Self {
         AgentSpec {
             name: name.into(),
+            title: String::new(),
+            description: String::new(),
             role: String::new(),
             instructions: String::new(),
             model: None,

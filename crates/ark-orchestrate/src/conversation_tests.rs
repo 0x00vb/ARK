@@ -528,6 +528,10 @@ async fn colleagues_snapshot_execution_and_retries_cannot_change_choices_or_late
     )
     .await
     .unwrap();
+    let mut titled = o.agent("source").unwrap().spec;
+    titled.title = "Parent conversation".into();
+    titled.description = "Parent one-time request".into();
+    o.spawn(titled).await.unwrap();
     let inherited = o
         .inner
         .create_colleague(
@@ -540,6 +544,8 @@ async fn colleagues_snapshot_execution_and_retries_cannot_change_choices_or_late
         )
         .await
         .unwrap();
+    assert!(inherited.spec.title.is_empty());
+    assert!(inherited.spec.description.is_empty());
     assert_eq!(
         inherited.spec.model.as_deref(),
         Some("provider-a~one:large@high")
@@ -696,4 +702,36 @@ async fn reasoning_without_model_closes_its_default_lookup_before_refusal_or_cre
     assert_eq!(created.spec.model.as_deref(), Some("provider-a:large@low"));
     assert_eq!(models.closed.load(std::sync::atomic::Ordering::SeqCst), 2);
     assert!(o.tasks().is_empty());
+}
+
+#[tokio::test]
+async fn display_metadata_survives_rename_without_becoming_instructions() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    let mut spec = AgentSpec::new("stable-id");
+    spec.title = "Review launch".into();
+    spec.description = "Only speak French for the first request".into();
+    let profile = o.inner.agent_profile(&spec, &[]);
+    assert!(!profile.prompts.instructions.contains(&spec.title));
+    assert!(!profile.prompts.instructions.contains(&spec.description));
+    let first = o.create_chat_agent(spec.clone(), "first").await.unwrap();
+    assert_eq!(o.graph().agents[0].title, spec.title);
+    let contacts = crate::agent_contacts(&ark.engine().store, project.id.as_str()).unwrap();
+    assert_eq!(contacts[0].description, spec.description);
+    spec.title = "Launch review".into();
+    let renamed = o.spawn(spec).await.unwrap();
+    assert_eq!(renamed.name, first.name);
+    assert_eq!(renamed.scope, first.scope);
+    assert_eq!(renamed.creation_request, first.creation_request);
+    let reopened = Orchestrator::builder(&ark, &project).build().unwrap();
+    assert_eq!(
+        reopened.agent("stable-id").unwrap().spec.title,
+        "Launch review"
+    );
+    let legacy: AgentSpec = serde_json::from_value(serde_json::json!({"name":"old"})).unwrap();
+    assert!(legacy.title.is_empty());
+    assert!(legacy.description.is_empty());
 }

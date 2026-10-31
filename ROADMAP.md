@@ -8,7 +8,7 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.30.0** adds named chat entry and optional model and reasoning choices for agent-created colleagues. |
+| Stable release | **v0.31.0** adds primary project conversations, display metadata, exact first-message retries and smoother sidebar disclosure. |
 | Consumers | Published ARK Desktop 0.9.8 pins v0.27.3. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |

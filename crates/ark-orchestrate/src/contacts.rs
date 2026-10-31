@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentContact {
     pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     pub role: String,
     pub state: AgentState,
     pub created_ms: u64,
@@ -25,6 +29,8 @@ pub fn agent_contacts(
         }
         contacts.push(AgentContact {
             name: record.name,
+            title: record.spec.title,
+            description: record.spec.description,
             role: record.spec.role,
             state: record.state,
             created_ms: record.created_ms,

@@ -900,7 +900,7 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 /* ---- views in the main column (ark.view) -------------------------------------------------- */
 
 .stage { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.app[data-view] .chat-tabs, .app[data-view] main .scroller, .app[data-view] main .dock { display: none; }
+.app[data-view] .chat-tabs, .app[data-view] .chat-workspace .scroller, .app[data-view] .chat-workspace .dock { display: none; }
 .app[data-view] .chat-workspace { position: absolute; inset: 0; z-index: 20; display: block; pointer-events: none; }
 .app[data-view] .chat-layout-leaf { width: 100%; height: 100%; overflow: visible; }
 .app[data-view] .chat-surface { position: static; }

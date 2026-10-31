@@ -1,6 +1,20 @@
-# Composer-first UX in progress
+# Core 0.31.0 published, 31 October 2026
 
-Owner requested removal of the creation wizard, generated editable display metadata, model and reasoning in the composer, primary agent conversations, and consistent split headers. Work lives in ark-chat-first-ux on codex/chat-first-ux. Plan/design and implementation source QA pass. Actual Host/browser first-send and retained-panel flows pass with synthetic vendors and zero paid calls. The completed, source-bound sidebar-motion-20261031 donor is included. Full combined CI-v2 passed, including69 actual Host pages and zero-delta simulated benchmark. A final read-only external title/preview projection correction passes its actual HTTP regression; final-source full CI-v3 is running. Canonical main retains its donor working changes unchanged. No new client package or public promotion is claimed. Prior Core 0.30 and Cloud 0.9.13 are delivered; qualified Desktop 0.9.13 stays a frozen baseline. Native build 10 physical installation and Apple distribution restrictions remain separate. Evidence: ../board/evidence/chat-first-ux-20261031.
+Immutable application source 8ca6976 is published on both remotes as v0.31.0. Final source CI
+and full fresh-public verification pass, including 69 actual Host page cases, optimized build
+and unchanged simulated benchmark results. Independent publication review passes.
+
+Display title and description stay separate from routing identity and behavioral instructions.
+Idempotent chat submissions retain captured resource authority. Explicit resourceScoped views
+support primary conversations while existing projectScoped views keep their live updates.
+External chat summaries project display metadata with legacy fallbacks. The completed,
+source-bound sidebar disclosure donor is included. No paid model call was made.
+
+Desktop 0.9.14 consumer qualification and matching Cloud delivery continue separately. Native
+build 10 remains its own signed artifact with physical installation pending. Canonical local
+main retains the original sidebar donor changes untouched. This documentation-only follow-up
+is separate from compiled release source 8ca6976; the immutable tag stays on that source.
+Evidence: ../board/evidence/chat-first-ux-20261031/.
 
 ## Named agent chat entry, 31 October2026
 

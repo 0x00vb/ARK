@@ -516,3 +516,137 @@ test("New chat waits for initial readiness before resolving its destination", ()
   assert.deepEqual(await page.evaluate(() => window.destinations), [{ runtime: "fixture", project: "a", session: "chat-a" }]);
   assert.equal(calls.filter(call => call.method === "new_session").length, 0);
 }, { boot: true, holdHello: true }));
+
+
+test("project disclosure keeps its row and neighbors through reversals", () => fixture(async page => {
+  await page.evaluate(() => {
+    window.originalProjectRows = [...document.querySelectorAll(".project-row")];
+  });
+  await page.locator('.project[data-id="a"] .project-chev').click();
+  await page.waitForFunction(() => document.querySelector('.project[data-id="a"] .project-row').getAttribute("aria-expanded") === "false");
+  assert.equal(await page.evaluate(() => window.originalProjectRows.every(row => row.isConnected)), true);
+  await page.locator('.project[data-id="a"] .project-chev').click();
+  await page.waitForFunction(() => document.querySelector('.project[data-id="a"] .session'));
+  await page.locator('.project[data-id="b"] .project-chev').click();
+  await page.waitForFunction(() => document.querySelector('.project[data-id="b"] .project-row').getAttribute("aria-expanded") === "true");
+  assert.equal(await page.evaluate(() => window.originalProjectRows.every(row => row.isConnected)), true);
+  assert.equal(await page.locator('.session').evaluate(el => getComputedStyle(el).animationName), "none");
+}));
+
+
+test("disclosure reverses from its current height and releases hidden focus", () => fixture(async page => {
+  const result = await page.evaluate(async () => {
+    const f = window.fixture;
+    f.register(); await f.sidebar.refresh();
+    const current = document.querySelector('.project[data-id="a"]');
+    current.querySelector('.session').focus();
+    await f.sidebar.fold(f.projects[0], false);
+    const closing = current.getAnimations()[0];
+    closing.pause(); closing.currentTime = 70;
+    const before = current.getBoundingClientRect().height;
+    const inert = [...current.children].slice(1).every(el => el.inert);
+    const focused = document.activeElement.matches('.project-row');
+    await f.sidebar.fold(f.projects[0], true);
+    const opening = current.getAnimations()[0];
+    opening.pause(); opening.currentTime = 0;
+    const after = current.getBoundingClientRect().height;
+    opening.finish();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return { before, after, inert, focused, disposed: f.events.filter(e => e[0] === 'dispose').length };
+  });
+  assert.ok(Math.abs(result.before - result.after) < 1, JSON.stringify(result));
+  assert.equal(result.inert, true);
+  assert.equal(result.focused, true);
+  assert.equal(result.disposed, 0);
+}));
+
+test("keyboard and reduced-motion disclosure finish immediately", () => fixture(async page => {
+  await page.locator('.project[data-id="a"] .project-row').press('Enter');
+  assert.equal(await page.locator('.project[data-id="a"] .session').count(), 0);
+  assert.equal(await page.locator('.project[data-id="a"]').evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect.target === el || a.transitionProperty === 'rotate').length), 0);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.locator('.project[data-id="a"] .project-chev').click();
+  await page.waitForFunction(() => document.querySelector('.project[data-id="a"] .session'));
+  assert.equal(await page.locator('.project[data-id="a"]').evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect.target === el || a.transitionProperty === 'rotate').length), 0);
+}));
+
+test("failed and stale first-open reads cannot leave a false expanded state", () => fixture(async page => {
+  const result = await page.evaluate(async () => {
+    const f = window.fixture, messages = [];
+    f.sidebar.api.toast = message => messages.push(message);
+    const call = f.sidebar.api.call;
+    f.sidebar.api.call = async () => { throw Error('Offline'); };
+    await f.sidebar.fold(f.projects[1], true);
+    const failed = document.querySelector('.project[data-id="b"] .project-row').getAttribute('aria-expanded');
+    let release;
+    f.sidebar.api.call = () => new Promise(resolve => { release = resolve; });
+    const pending = f.sidebar.fold(f.projects[1], true);
+    await f.sidebar.fold(f.projects[1], false, false);
+    release([{ id: 'stale', title: 'Stale', turns: 1 }]); await pending;
+    f.sidebar.api.call = call;
+    return { failed, messages, stale: !!document.querySelector('.session[data-id="stale"]') };
+  });
+  assert.deepEqual(result, { failed: 'false', messages: ['Offline'], stale: false });
+}));
+
+
+test("folded attention includes chats beyond Show more", () => fixture(async page => {
+  await page.evaluate(async () => {
+    const f = window.fixture;
+    f.sessions.a = Array.from({ length: 10 }, (_, i) => ({ id: `chat-${i}`, title: `Chat ${i}`, turns: 1 }));
+    f.sidebar.attention = [{ id: 'decision', session: 'chat-9' }];
+    await f.sidebar.refresh();
+    await f.sidebar.fold(f.projects[0], false, false);
+  });
+  assert.equal(await page.locator('.project-row .session-attention').getAttribute('aria-label'), '1 pending decision');
+}));
+
+
+test("an older refresh cannot erase a project opened during its reads", () => fixture(async page => {
+  const result = await page.evaluate(async () => {
+    const f = window.fixture, originalCall = f.sidebar.api.call;
+    f.sessions.b = [{ id: 'new-chat', title: 'New chat', turns: 1 }];
+    let release;
+    f.sidebar.api.call = (method, params) => method === 'sessions' && params.project === 'a'
+      ? new Promise(resolve => { release = value => { f.sidebar.api.call = originalCall; resolve(value); }; }) : originalCall(method, params);
+    const pending = f.sidebar.refresh();
+    while (!release) await Promise.resolve();
+    await f.sidebar.fold(f.projects[1], true, false);
+    release(f.sessions.a); await pending;
+    return !!document.querySelector('.project[data-id="b"] .session[data-id="new-chat"]');
+  });
+  assert.equal(result, true);
+}));
+
+
+test("touch users can discover project actions without hovering", () => fixture(async page => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const context = await browser.newContext({ viewport: { width: 390, height: 760 }, hasTouch: true, isMobile: true });
+  const pageTouch = await context.newPage();
+  await pageTouch.route('http://touch.test/**', async route => {
+    if (new URL(route.request().url()).pathname === '/app.css') return route.fulfill({ contentType: 'text/css', body: await readFile(resolve(root, 'app.css')) });
+    return route.fulfill({ contentType: 'text/html', body: '<link rel="stylesheet" href="/app.css"><div class="project-row"><button class="project-more">Options</button><button class="project-new-chat">New chat</button></div>' });
+  });
+  try {
+    await pageTouch.goto('http://touch.test/');
+    assert.deepEqual(await pageTouch.locator('button').evaluateAll(nodes => nodes.map(el => getComputedStyle(el).opacity)), ['1', '1']);
+  } finally { await context.close(); }
+}));
+
+
+test("fold during a pending project switch still delivers the current project", () => fixture(async page => {
+  const result = await page.evaluate(async () => {
+    const f = window.fixture, originalCall = f.sidebar.api.call;
+    const oldProject = structuredClone(f.projects[0]);
+    f.projects.forEach(project => { project.current = project.id === 'b'; });
+    let release;
+    f.sidebar.api.call = (method, params) => method === 'sessions' && params.project === 'b'
+      ? new Promise(resolve => { release = value => { f.sidebar.api.call = originalCall; resolve(value); }; }) : originalCall(method, params);
+    const pending = f.sidebar.refresh();
+    while (!release) await Promise.resolve();
+    await f.sidebar.fold(oldProject, false, false);
+    release(f.sessions.b); await pending;
+    return document.querySelector('.project-row[aria-current="true"]').closest('.project').dataset.id;
+  });
+  assert.equal(result, 'b');
+}));

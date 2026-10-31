@@ -1,3 +1,14 @@
+## Sidebar disclosure candidate, 31 October 2026
+
+Project folds update their own row and content. A 200 ms opening and 160 ms closing can
+reverse from the current height. Keyboard and reduced-motion changes finish immediately.
+Hidden controls become inert at once; extension controllers release after closing. Chat rows
+no longer replay entrance animations on refresh. Touch project actions stay visible.
+Qualification:25 focused WebKit and69 actual host-page cases (66 retained plus3 corrected
+reruns), full Rust/clippy, release build and unchanged simulated benchmark pass. Two independent
+reviews pass. Physical touch remains unverified. Evidence: `../board/evidence/sidebar-motion-20261031/`.
+Source is uncommitted. Installed Desktop and its release pins remain unchanged.
+
 ## Named agent chat entry, 31 October2026
 
 Version0.30 supports one primary New chat entry for consumer windows. Atomic CreateAgent

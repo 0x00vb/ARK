@@ -221,10 +221,25 @@ impl Store {
 
     pub fn put_project(&self, p: &Project) -> Result<()> {
         let db = self.db.lock().unwrap();
-        db.execute(
-            "INSERT OR REPLACE INTO projects(id, created_at, json) VALUES(?1, ?2, ?3)",
-            rusqlite::params![p.id.as_str(), rfc(p.created_at), serde_json::to_string(p)?],
+        let changed = db.execute(
+            "INSERT OR REPLACE INTO projects(id, created_at, json)
+             SELECT ?1, ?2, ?3 WHERE ?4 IS NOT NULL OR EXISTS (
+               SELECT 1 FROM projects WHERE id = ?1 AND json_extract(json, '$.name') = ?5
+               AND json_extract(json, '$.parent') IS ?4) OR NOT EXISTS (
+               SELECT 1 FROM projects WHERE id != ?1
+               AND json_extract(json, '$.parent') IS NULL
+               AND json_extract(json, '$.name') = ?5)",
+            rusqlite::params![
+                p.id.as_str(),
+                rfc(p.created_at),
+                serde_json::to_string(p)?,
+                p.parent.as_ref().map(|id| id.as_str()),
+                p.name
+            ],
         )?;
+        if changed == 0 {
+            return Err(StoreError::ProjectNameConflict);
+        }
         Ok(())
     }
 

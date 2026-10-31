@@ -98,6 +98,8 @@ fn agent_item(entry: &ClientAgent) -> Value {
 
 async fn agent_conversation(host: &Arc<Host>, entry: ClientAgent) -> anyhow::Result<Value> {
     let tasks = host.client_agent_tasks(&entry)?;
+    let schedules = host.client_agent_schedules(&entry)?;
+    let model = host.client_agent_model(&entry).await;
     let mut messages = Vec::new();
     for task in tasks.iter().skip(tasks.len().saturating_sub(50)) {
         let at = rfc3339(task.created_ms);
@@ -126,8 +128,10 @@ async fn agent_conversation(host: &Arc<Host>, entry: ClientAgent) -> anyhow::Res
         })
         .map(attention_item)
         .collect::<Vec<_>>();
+    let mut chat = agent_item(&entry);
+    chat["agent"]["schedules"] = json!(schedules);
     Ok(
-        json!({ "chat": agent_item(&entry), "messages": messages, "approvals": approvals,
+        json!({ "chat": chat, "model": model, "messages": messages, "approvals": approvals,
         "results": host.client_results(&entry.id()).map_err(|error| anyhow::anyhow!("could not read results: {error:?}"))?,
         "activeTurnId": tasks.iter().find(|task| !task.state.is_final()).map(|task| &task.id) }),
     )

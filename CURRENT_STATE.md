@@ -1,3 +1,13 @@
+## Native client parity, 31 October2026
+
+Protocol1.10 adds named project and idle agent creation through durable device mutations,
+read-only schedule details and idle agent model selection. Atomic creation provenance prevents
+retries from adopting another agent. Project names remain unique across creation entry points;
+legacy duplicates remain readable and can receive unchanged-name updates. Model effects retain
+atomic provenance so a lost receipt can converge even after catalog retirement.
+Native Simulator and final cross-client qualification are tracked in
+../board/evidence/iphone-native-flow-20261031/. Earlier entries below are historical.
+
 ## Coordinated release qualification, 30 October2026
 
 Version0.28.0 combines persistent agent conversations, provider account identities and the
@@ -455,7 +465,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.28.0 |
+| Latest tag | v0.29.0 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

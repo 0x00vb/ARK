@@ -926,6 +926,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     "chat.create",
                     "chat.create.idempotent",
                     "project.terminal",
+                    "project.create",
                 ]
                 .into_iter()
                 .map(str::to_string)
@@ -934,6 +935,14 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 .chain(
                     host.agent_conversations_enabled()
                         .then(|| "agents.conversations".to_string()),
+                )
+                .chain(
+                    host.agent_conversations_enabled()
+                        .then(|| "agents.create".to_string()),
+                )
+                .chain(
+                    host.agent_conversations_enabled()
+                        .then(|| "agents.profile".to_string()),
                 )
                 .chain(
                     (native_push_authed && host.notifier.native.enabled(route_id.as_deref()))

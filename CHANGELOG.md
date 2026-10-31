@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.29.0] - 2026-10-31
+
+### Added
+
+- Protocol1.10 lets external clients create scratch projects and idle agents with durable mutation receipts. Agent profiles include server-rendered schedule timing. Idle agents can select an available model and reasoning effort. Older clients can ignore the optional fields.
+
+### Fixed
+
+- Creation retries preserve exact agent provenance and later edits. Project names are checked atomically across writers while legacy records remain readable. Applied model changes survive receipt loss and later catalog retirement.
+
+### Breaking
+
+- Rust `AgentRecord` and `MutationReceipt` literals need their new optional provenance/resource fields. `ConversationAgent` literals add `schedules: None` when schedule data is unavailable.
+
 ## [0.28.0] - 2026-10-30
 
 ### Added

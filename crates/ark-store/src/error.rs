@@ -2,6 +2,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
+    #[error("a project with that name already exists")]
+    ProjectNameConflict,
+
     #[error("memory: {0}")]
     Memory(String),
 

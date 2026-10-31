@@ -25,6 +25,50 @@
       ],
       "type": "object"
     },
+    "AgentCreateInput": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role"
+      ],
+      "type": "object"
+    },
+    "AgentScheduleSummary": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "next": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "when": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "when",
+        "state"
+      ],
+      "type": "object"
+    },
     "ApprovalChoice": {
       "properties": {
         "destructive": {
@@ -282,6 +326,15 @@
         },
         "role": {
           "type": "string"
+        },
+        "schedules": {
+          "items": {
+            "$ref": "#/$defs/AgentScheduleSummary"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -702,6 +755,12 @@
         "id": {
           "type": "string"
         },
+        "resourceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "status": {
           "type": "string"
         }
@@ -924,6 +983,17 @@
         "expiresAt",
         "mutationEpoch",
         "nextMutationCounter"
+      ],
+      "type": "object"
+    },
+    "ProjectCreateInput": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
@@ -1438,6 +1508,9 @@
     "account_pair_request": {
       "$ref": "#/$defs/AccountPairRequest"
     },
+    "agent_create_input": {
+      "$ref": "#/$defs/AgentCreateInput"
+    },
     "bootstrap": {
       "$ref": "#/$defs/Bootstrap"
     },
@@ -1516,6 +1589,9 @@
     "pair_response": {
       "$ref": "#/$defs/PairResponse"
     },
+    "project_create_input": {
+      "$ref": "#/$defs/ProjectCreateInput"
+    },
     "projects": {
       "$ref": "#/$defs/ProjectsSnapshot"
     },
@@ -1572,6 +1648,8 @@
     "provider_authorization_begin",
     "provider_authorization_code",
     "provider_authorization_attempt",
+    "project_create_input",
+    "agent_create_input",
     "models",
     "model_provider",
     "model_summary",

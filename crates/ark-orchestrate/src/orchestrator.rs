@@ -226,6 +226,64 @@ impl Orchestrator {
         self.inner.spawn(spec).await
     }
 
+    /// Change only an idle agent's model without racing task admission or other edits.
+    pub async fn select_idle_model(
+        &self,
+        name: &str,
+        model: &str,
+        request: &str,
+    ) -> Result<AgentRecord, OrchError> {
+        let _guard = self.inner.conversations.lock().await;
+        let record = self
+            .agent(name)
+            .ok_or_else(|| OrchError::UnknownAgent(name.into()))?;
+        if let Some(effect) = self
+            .inner
+            .engine
+            .store
+            .get_record("orch_model_change", request)?
+        {
+            if effect["agent"] != name
+                || effect["project"] != self.project().id.as_str()
+                || effect["model"] != model
+            {
+                return Err(OrchError::NotAllowed(
+                    "model change request conflict".into(),
+                ));
+            }
+            return Ok(record);
+        }
+        if record.state != AgentState::Idle {
+            return Err(OrchError::NotAllowed("the agent is busy".into()));
+        }
+        let mut spec = record.spec;
+        spec.model = Some(model.to_string());
+        self.inner
+            .spawn_record(spec, None, None, Some(request))
+            .await
+    }
+
+    /// Create once without overwriting an unrelated agent or later edits.
+    pub async fn create_once(
+        &self,
+        spec: AgentSpec,
+        request: &str,
+    ) -> Result<AgentRecord, OrchError> {
+        let _guard = self.inner.conversations.lock().await;
+        if let Some(record) = self.agent(&spec.name) {
+            return if record.creation_request.as_deref() == Some(request) {
+                Ok(record)
+            } else {
+                Err(OrchError::NotAllowed(
+                    "an agent with that name already exists".into(),
+                ))
+            };
+        }
+        self.inner
+            .spawn_record(spec, None, Some(request), None)
+            .await
+    }
+
     pub(crate) async fn create_agent(&self, spec: AgentSpec) -> Result<AgentRecord, OrchError> {
         let _guard = self.inner.conversations.lock().await;
         if self
@@ -241,7 +299,7 @@ impl Orchestrator {
                 spec.name
             )));
         }
-        self.inner.spawn_record(spec, None).await
+        self.inner.spawn_record(spec, None, None, None).await
     }
 
     pub fn agent(&self, name: &str) -> Option<AgentRecord> {
@@ -1879,13 +1937,15 @@ impl Inner {
 
     async fn spawn(&self, spec: AgentSpec) -> Result<AgentRecord, OrchError> {
         let _guard = self.conversations.lock().await;
-        self.spawn_record(spec, None).await
+        self.spawn_record(spec, None, None, None).await
     }
 
     async fn spawn_record(
         &self,
         spec: AgentSpec,
         creation: Option<(&str, &str)>,
+        creation_request: Option<&str>,
+        model_request: Option<&str>,
     ) -> Result<AgentRecord, OrchError> {
         if !valid_name(&spec.name) {
             return Err(OrchError::NotAllowed(format!(
@@ -1956,6 +2016,7 @@ impl Inner {
                     Project::new(&spec.name, &spec.role).with_parent(self.project.id.clone());
                 self.engine.store.put_project(&scope)?;
                 AgentRecord {
+                    creation_request: creation_request.map(str::to_string),
                     name: spec.name.clone(),
                     project: self.project.id.to_string(),
                     scope: scope.id.to_string(),
@@ -1979,6 +2040,14 @@ impl Inner {
         };
         let publication = (|| -> Result<(), OrchError> {
             let mut st = self.state.lock().unwrap();
+            if model_request.is_some()
+                && !st
+                    .agents
+                    .get(&spec.name)
+                    .is_some_and(|a| a.record.state == AgentState::Idle)
+            {
+                return Err(OrchError::NotAllowed("the agent is busy".into()));
+            }
             if let Some((task, _)) = creation {
                 let active = st.tasks.get(task).is_some_and(|t| {
                     !t.record.state.is_final()
@@ -1997,12 +2066,27 @@ impl Inner {
                     ));
                 }
             }
-            self.engine.store.put_record(
-                AGENT,
-                &format!("{}/{}", self.project.id, record.name),
-                self.project.id.as_str(),
-                &serde_json::to_value(&record)?,
-            )?;
+            let saved_record = serde_json::to_value(&record)?;
+            let id = format!("{}/{}", self.project.id, record.name);
+            if let Some(request) = model_request {
+                let effect = serde_json::json!({ "agent": spec.name, "project": self.project.id, "model": spec.model });
+                self.engine.store.put_records(&[
+                    (AGENT, &id, self.project.id.as_str(), &saved_record),
+                    (
+                        "orch_model_change",
+                        request,
+                        self.project.id.as_str(),
+                        &effect,
+                    ),
+                ])?;
+            } else {
+                self.engine.store.put_record(
+                    AGENT,
+                    &id,
+                    self.project.id.as_str(),
+                    &saved_record,
+                )?;
+            }
             match st.agents.get_mut(&spec.name) {
                 Some(a) => {
                     a.record = record.clone();
@@ -4149,7 +4233,8 @@ impl Inner {
         spec.instructions = instructions.to_string();
         spec.parent = Some(from.to_string());
         spec.allow_mutate = false;
-        self.spawn_record(spec, Some((task, &root))).await
+        self.spawn_record(spec, Some((task, &root)), None, None)
+            .await
     }
 
     pub(crate) async fn start_conversation(

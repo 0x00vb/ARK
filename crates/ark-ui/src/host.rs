@@ -13,6 +13,7 @@
 //! window shows the current chat's and lists the others as working (`working`).
 
 pub(crate) mod agent_conversations;
+mod client_creation;
 
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
@@ -1434,6 +1435,7 @@ impl Host {
         request: &ark_protocol::MutationRequest,
     ) -> Result<ark_protocol::MutationReceipt, ClientMutationError> {
         match request.operation.as_str() {
+            "project.create" | "agent.create" if self.valid_client_creation(request) => {}
             "chat.send"
                 if request.input["body"]
                     .as_str()
@@ -1444,7 +1446,7 @@ impl Host {
                     request.input.clone(),
                 )
                 .is_ok() => {}
-            "chat.send" | "chat.model" | "attention.answer" => {
+            "project.create" | "agent.create" | "chat.send" | "chat.model" | "attention.answer" => {
                 return Err(ClientMutationError::Unsupported)
             }
             _ => return Err(ClientMutationError::Unsupported),
@@ -1478,6 +1480,18 @@ impl Host {
             }
             record
         } else {
+            if request.operation == "agent.create" {
+                let project = self
+                    .engine
+                    .store
+                    .get_project(&ProjectId(request.target.clone()))
+                    .map_err(|e| ClientMutationError::Store(e.into()))?;
+                if !self.agent_conversations_enabled()
+                    || !project.is_some_and(|p| p.parent.is_none())
+                {
+                    return Err(ClientMutationError::Unsupported);
+                }
+            }
             if request.operation == "chat.send" {
                 let regular_session = match self.client_agent(&request.target) {
                     Ok(Some(_)) => false,
@@ -1504,12 +1518,21 @@ impl Host {
                 let input: ark_protocol::ChatModelInput =
                     serde_json::from_value(request.input.clone())
                         .map_err(|_| ClientMutationError::Unsupported)?;
-                let conv = self
-                    .chat_conv(&request.target, "", false)
-                    .await
-                    .map_err(|_| ClientMutationError::ModelUnavailable)?;
-                if conv.is_running() {
-                    return Err(ClientMutationError::ChatBusy);
+                if let Some(agent) = self
+                    .client_agent(&request.target)
+                    .map_err(ClientMutationError::Store)?
+                {
+                    if agent.agent.state != ark_interact::ark_orchestrate::AgentState::Idle {
+                        return Err(ClientMutationError::ChatBusy);
+                    }
+                } else {
+                    let conv = self
+                        .chat_conv(&request.target, "", false)
+                        .await
+                        .map_err(|_| ClientMutationError::ModelUnavailable)?;
+                    if conv.is_running() {
+                        return Err(ClientMutationError::ChatBusy);
+                    }
                 }
                 prepared_model = Some(
                     self.prepare_client_model(&input.model)
@@ -1544,6 +1567,7 @@ impl Host {
                 .format(&time::format_description::well_known::Rfc3339)
                 .map_err(|error| ClientMutationError::Store(error.into()))?;
             let receipt = ark_protocol::MutationReceipt {
+                resource_id: None,
                 id: uuid::Uuid::new_v4().to_string(),
                 status: "accepted".into(),
                 accepted_at,
@@ -1575,7 +1599,13 @@ impl Host {
             record
         };
 
+        let mut resource_id = None;
         let (status, display) = match request.operation.as_str() {
+            "project.create" | "agent.create" => {
+                let result = self.apply_client_creation(&record_id, request).await?;
+                resource_id = result.2;
+                (result.0, result.1)
+            }
             "chat.send" => {
                 self.apply_client_send(&record_id, device, request, &mut record)
                     .await?
@@ -1601,38 +1631,66 @@ impl Host {
                 let input: ark_protocol::ChatModelInput =
                     serde_json::from_value(request.input.clone())
                         .map_err(|_| ClientMutationError::Unsupported)?;
-                let requested_model = requested_model_spec(&input.model);
-                let already_applied = self
+                if let Some(effect) = self
                     .engine
                     .store
-                    .get_session(&request.target)
-                    .map_err(|error| ClientMutationError::Store(error.into()))?
-                    .is_some_and(|session| {
-                        session["model"].as_str() == Some(requested_model.as_str())
-                    });
-                if already_applied {
-                    ("completed", "Model changed")
-                } else {
-                    if prepared_model.is_none() {
-                        prepared_model = self.prepare_client_model(&input.model).await.ok();
+                    .get_record("orch_model_change", &record_id)
+                    .map_err(|e| ClientMutationError::Store(e.into()))?
+                {
+                    let expected_target = format!(
+                        "agent:{}:{}",
+                        effect["project"].as_str().unwrap_or_default(),
+                        effect["agent"].as_str().unwrap_or_default()
+                    );
+                    if effect["model"] != requested_model_spec(&input.model)
+                        || (request.target.starts_with("agent:")
+                            && request.target != expected_target)
+                    {
+                        return Err(ClientMutationError::CounterConflict);
                     }
-                    match prepared_model {
-                        None => ("refused", "That model is no longer available"),
-                        Some(prepared) => {
-                            let _quiet = self.switching.lock().await;
-                            match self.chat_conv(&request.target, "", false).await {
-                                Err(_) => ("refused", "That chat is no longer available"),
-                                Ok(conv) if conv.is_running() => {
-                                    ("refused", "Wait for this reply to finish")
-                                }
-                                Ok(conv) => {
-                                    let mut ix = conv.ix.lock().await;
-                                    match ix.select_model(prepared.spec, prepared.router) {
-                                        Ok(_) => {
-                                            conv.note(&ix);
-                                            ("completed", "Model changed")
+                    ("completed", "Model changed")
+                } else if let Some(entry) = self
+                    .client_agent(&request.target)
+                    .map_err(ClientMutationError::Store)?
+                {
+                    self.apply_client_agent_model(&entry, &input.model, &record_id)
+                        .await?
+                } else {
+                    let requested_model = requested_model_spec(&input.model);
+                    let already_applied = self
+                        .engine
+                        .store
+                        .get_session(&request.target)
+                        .map_err(|error| ClientMutationError::Store(error.into()))?
+                        .is_some_and(|session| {
+                            session["model"].as_str() == Some(requested_model.as_str())
+                        });
+                    if already_applied {
+                        ("completed", "Model changed")
+                    } else {
+                        if prepared_model.is_none() {
+                            prepared_model = self.prepare_client_model(&input.model).await.ok();
+                        }
+                        match prepared_model {
+                            None => ("refused", "That model is no longer available"),
+                            Some(prepared) => {
+                                let _quiet = self.switching.lock().await;
+                                match self.chat_conv(&request.target, "", false).await {
+                                    Err(_) => ("refused", "That chat is no longer available"),
+                                    Ok(conv) if conv.is_running() => {
+                                        ("refused", "Wait for this reply to finish")
+                                    }
+                                    Ok(conv) => {
+                                        let mut ix = conv.ix.lock().await;
+                                        match ix.select_model(prepared.spec, prepared.router) {
+                                            Ok(_) => {
+                                                conv.note(&ix);
+                                                ("completed", "Model changed")
+                                            }
+                                            Err(_) => {
+                                                ("refused", "That model could not be changed")
+                                            }
                                         }
-                                        Err(_) => ("refused", "That model could not be changed"),
                                     }
                                 }
                             }
@@ -1645,6 +1703,7 @@ impl Host {
         let mut receipt: ark_protocol::MutationReceipt =
             serde_json::from_value(record["receipt"].clone())
                 .map_err(|error| ClientMutationError::Store(error.into()))?;
+        receipt.resource_id = resource_id;
         receipt.status = status.into();
         receipt.display = display.into();
         record["receipt"] = serde_json::to_value(&receipt)

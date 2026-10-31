@@ -347,3 +347,72 @@ fn forgetting_frees_capacity_and_replacement_at_capacity_does_not_disable_recall
         .unwrap();
     assert_eq!(store.project_memories(&p).unwrap().len(), 512);
 }
+
+#[test]
+fn top_level_names_are_atomic_across_connections_and_renames() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = Store::open(dir.path()).unwrap();
+    let second = Store::open(dir.path()).unwrap();
+    let mut one = Project::new("One", "");
+    first.put_project(&one).unwrap();
+    one.target = "updated".into();
+    second.put_project(&one).unwrap();
+    assert!(matches!(
+        second.put_project(&Project::new("One", "")),
+        Err(ark_store::StoreError::ProjectNameConflict)
+    ));
+    let mut two = Project::new("Two", "");
+    first.put_project(&two).unwrap();
+    two.name = "One".into();
+    assert!(second.put_project(&two).is_err());
+    assert_eq!(first.get_project(&two.id).unwrap().unwrap().name, "Two");
+    first
+        .put_project(&Project::new("One", "").with_parent(one.id.clone()))
+        .unwrap();
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = [first, second]
+        .into_iter()
+        .map(|store| {
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                store.put_project(&Project::new("Race", "")).is_ok()
+            })
+        })
+        .collect();
+    assert_eq!(
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|ok| *ok)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn legacy_duplicate_names_remain_readable_and_allow_unchanged_name_updates() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let mut one = Project::new("Legacy", "");
+    store.put_project(&one).unwrap();
+    let two = Project::new("Legacy", "");
+    let legacy = rusqlite::Connection::open(dir.path().join("meta.db")).unwrap();
+    legacy
+        .execute(
+            "INSERT INTO projects(id, created_at, json) VALUES(?1, ?2, ?3)",
+            rusqlite::params![
+                two.id.as_str(),
+                "2026-01-01T00:00:00Z",
+                serde_json::to_string(&two).unwrap()
+            ],
+        )
+        .unwrap();
+    one.target = "Updated without renaming".into();
+    store.put_project(&one).unwrap();
+    assert_eq!(store.list_projects().unwrap().len(), 2);
+    assert!(store.put_project(&Project::new("Legacy", "")).is_err());
+    one.name = "Renamed".into();
+    store.put_project(&one).unwrap();
+    assert_eq!(store.get_project(&two.id).unwrap().unwrap().name, "Legacy");
+}

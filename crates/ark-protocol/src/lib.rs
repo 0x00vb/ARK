@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_MAJOR: u16 = 1;
-pub const CURRENT_MINOR: u16 = 9;
+pub const CURRENT_MINOR: u16 = 10;
 pub const TERMINAL_WRITE_BYTES: u64 = 16 * 1024;
 pub const TERMINAL_REPLAY_BYTES: u64 = 256 * 1024;
 
@@ -362,9 +362,31 @@ wire!(
     }
 );
 wire!(
+    pub struct ProjectCreateInput {
+        name: String,
+    }
+);
+wire!(
+    pub struct AgentCreateInput {
+        name: String,
+        role: String,
+    }
+);
+wire!(
+    pub struct AgentScheduleSummary {
+        id: String,
+        title: String,
+        when: String,
+        next: Option<String>,
+        state: String,
+    }
+);
+wire!(
     pub struct ConversationAgent {
         name: String,
         role: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        schedules: Option<Vec<AgentScheduleSummary>>,
     }
 );
 wire!(
@@ -438,6 +460,8 @@ wire!(
 );
 wire!(
     pub struct MutationReceipt {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resource_id: Option<String>,
         id: String,
         status: String,
         accepted_at: String,
@@ -587,6 +611,8 @@ pub struct ProtocolSchema {
     provider_authorization_begin: ProviderAuthorizationBeginRequest,
     provider_authorization_code: ProviderAuthorizationCodeRequest,
     provider_authorization_attempt: ProviderAuthorizationAttempt,
+    project_create_input: ProjectCreateInput,
+    agent_create_input: AgentCreateInput,
     models: ModelsSnapshot,
     model_provider: ModelProvider,
     model_summary: ModelSummary,

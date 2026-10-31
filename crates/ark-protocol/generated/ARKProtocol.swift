@@ -63,6 +63,41 @@ public struct AccountPairRequest: Codable, Equatable, Sendable {
     }
 }
 
+public struct AgentCreateInput: Codable, Equatable, Sendable {
+    public let name: String
+    public let role: String
+
+    public init(
+        name: String,
+        role: String
+    ) {
+        self.name = name
+        self.role = role
+    }
+}
+
+public struct AgentScheduleSummary: Codable, Equatable, Sendable {
+    public let id: String
+    public let next: String?
+    public let state: String
+    public let title: String
+    public let when: String
+
+    public init(
+        id: String,
+        next: String? = nil,
+        state: String,
+        title: String,
+        when: String
+    ) {
+        self.id = id
+        self.next = next
+        self.state = state
+        self.title = title
+        self.when = when
+    }
+}
+
 public struct ApprovalChoice: Codable, Equatable, Sendable {
     public let destructive: Bool
     public let id: String
@@ -246,13 +281,16 @@ public struct ComputersSnapshot: Codable, Equatable, Sendable {
 public struct ConversationAgent: Codable, Equatable, Sendable {
     public let name: String
     public let role: String
+    public let schedules: [AgentScheduleSummary]?
 
     public init(
         name: String,
-        role: String
+        role: String,
+        schedules: [AgentScheduleSummary]? = nil
     ) {
         self.name = name
         self.role = role
+        self.schedules = schedules
     }
 }
 
@@ -510,17 +548,20 @@ public struct MutationReceipt: Codable, Equatable, Sendable {
     public let acceptedAt: String
     public let display: String
     public let id: String
+    public let resourceId: String?
     public let status: String
 
     public init(
         acceptedAt: String,
         display: String,
         id: String,
+        resourceId: String? = nil,
         status: String
     ) {
         self.acceptedAt = acceptedAt
         self.display = display
         self.id = id
+        self.resourceId = resourceId
         self.status = status
     }
 }
@@ -678,6 +719,16 @@ public struct PairResponse: Codable, Equatable, Sendable {
         self.expiresAt = expiresAt
         self.mutationEpoch = mutationEpoch
         self.nextMutationCounter = nextMutationCounter
+    }
+}
+
+public struct ProjectCreateInput: Codable, Equatable, Sendable {
+    public let name: String
+
+    public init(
+        name: String
+    ) {
+        self.name = name
     }
 }
 

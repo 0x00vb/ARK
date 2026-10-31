@@ -213,6 +213,8 @@ pub struct ArtifactRef {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_request: Option<String>,
     pub name: String,
     /// The orchestrator's project.
     pub project: String,

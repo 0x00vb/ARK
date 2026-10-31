@@ -116,6 +116,79 @@ impl Host {
         Ok(None)
     }
 
+    pub(crate) async fn client_agent_model(
+        &self,
+        entry: &ClientAgent,
+    ) -> ark_protocol::ConversationModel {
+        let providers = client_model_providers(ark_model::catalog().await);
+        let spec = entry
+            .agent
+            .spec
+            .model
+            .as_deref()
+            .unwrap_or(&entry.agent.model);
+        let selection = selection_for_canonical(&providers, spec);
+        let display = selection
+            .as_ref()
+            .and_then(|s| selection_display(&providers, s))
+            .unwrap_or_else(|| entry.agent.model.clone());
+        ark_protocol::ConversationModel {
+            selection,
+            display,
+            can_select: entry.agent.state == AgentState::Idle,
+        }
+    }
+
+    pub(crate) async fn apply_client_agent_model(
+        &self,
+        entry: &ClientAgent,
+        selection: &ark_protocol::ModelSelection,
+        request: &str,
+    ) -> Result<(&'static str, &'static str), ClientMutationError> {
+        let providers = client_model_providers(ark_model::catalog().await);
+        let Some(spec) = canonical_selection(&providers, selection) else {
+            return Ok(("refused", "That model is no longer available"));
+        };
+        let orchestrator = self
+            .siblings
+            .project_orchestrator(&entry.project.id)
+            .map_err(ClientMutationError::Store)?;
+        match orchestrator
+            .select_idle_model(&entry.agent.name, &spec, request)
+            .await
+        {
+            Ok(_) => {
+                self.emit(json!({ "kind": "sessions", "session": entry.id() }));
+                Ok(("completed", "Model changed"))
+            }
+            Err(OrchError::NotAllowed(reason)) if reason == "the agent is busy" => {
+                Ok(("refused", "Wait for this agent to finish"))
+            }
+            Err(OrchError::UnknownAgent(_)) => {
+                Ok(("no_longer_applicable", "That agent is no longer available"))
+            }
+            Err(error) => Err(ClientMutationError::Store(error.into())),
+        }
+    }
+
+    pub(crate) fn client_agent_schedules(
+        &self,
+        entry: &ClientAgent,
+    ) -> anyhow::Result<Vec<ark_protocol::AgentScheduleSummary>> {
+        let orchestrator = self.siblings.project_orchestrator(&entry.project.id)?;
+        Ok(ark_interact::orchestration::schedules(&orchestrator, None)
+            .into_iter()
+            .filter(|s| s.agent == entry.agent.name)
+            .map(|s| ark_protocol::AgentScheduleSummary {
+                id: s.id,
+                title: s.objective,
+                when: s.says,
+                next: s.next,
+                state: s.status,
+            })
+            .collect())
+    }
+
     pub(crate) fn client_agent_tasks(
         &self,
         entry: &ClientAgent,

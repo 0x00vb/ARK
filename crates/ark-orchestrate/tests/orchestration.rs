@@ -2677,3 +2677,85 @@ async fn a_persistent_agent_creates_and_starts_a_colleague_without_copying_its_c
     let later = format!("{:?}", colleague.seen.lock().unwrap().last().unwrap());
     assert!(later.contains("REVIEW-DECISION-ALPHA"), "{later}");
 }
+
+#[tokio::test]
+async fn client_creation_provenance_survives_restart_and_preserves_later_edits() {
+    let f = fixture();
+    let model = Script::new("model", vec![]);
+    let o = orch(&f, vec![("model", model.clone())], vec![]);
+    let created = o
+        .create_once(AgentSpec::new("writer"), "device:epoch:1")
+        .await
+        .unwrap();
+    assert_eq!(created.creation_request.as_deref(), Some("device:epoch:1"));
+    assert!(!created.spec.allow_mutate);
+    assert!(created.spec.delegates_to.is_empty());
+    let mut edited = created.spec.clone();
+    edited.role = "Later Desktop edit".into();
+    o.spawn(edited).await.unwrap();
+    drop(o);
+    let o = orch(&f, vec![("model", model.clone())], vec![]);
+    let replay = o
+        .create_once(AgentSpec::new("writer"), "device:epoch:1")
+        .await
+        .unwrap();
+    assert_eq!(replay.scope, created.scope);
+    assert_eq!(replay.spec.role, "Later Desktop edit");
+    assert!(o
+        .create_once(AgentSpec::new("writer"), "other:epoch:1")
+        .await
+        .is_err());
+    assert_eq!(o.agents().len(), 1);
+    assert!(o.tasks().is_empty());
+    assert!(model.seen.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn client_create_racing_ordinary_spawn_never_adopts_foreign_provenance() {
+    let f = fixture();
+    let model = Script::new("model", vec![]);
+    let o = orch(&f, vec![("model", model.clone())], vec![]);
+    let (created, ordinary) = tokio::join!(
+        o.create_once(AgentSpec::new("writer"), "client:1"),
+        o.spawn(AgentSpec::new("writer"))
+    );
+    ordinary.unwrap();
+    let record = o.agent("writer").unwrap();
+    if created.is_ok() {
+        assert_eq!(record.creation_request.as_deref(), Some("client:1"));
+    } else {
+        assert_eq!(record.creation_request, None);
+    }
+    assert!(o.tasks().is_empty());
+}
+
+#[tokio::test]
+async fn completed_model_effect_replay_preserves_newer_edits_and_busy_state() {
+    let f = fixture();
+    let model = Script::new("model", vec![]);
+    let o = orch(&f, vec![("model", model.clone())], vec![]);
+    o.spawn(AgentSpec::new("writer").model("model"))
+        .await
+        .unwrap();
+    o.select_idle_model("writer", "model", "phone:1")
+        .await
+        .unwrap();
+    let mut edited = o.agent("writer").unwrap().spec;
+    edited.role = "Desktop edit".into();
+    o.spawn(edited).await.unwrap();
+    o.suspend("writer").unwrap();
+    drop(o);
+    let o = orch(&f, vec![("model", model.clone())], vec![]);
+    let replay = o
+        .select_idle_model("writer", "model", "phone:1")
+        .await
+        .unwrap();
+    assert_eq!(replay.spec.role, "Desktop edit");
+    assert_eq!(replay.state, AgentState::Suspended);
+    assert!(o
+        .select_idle_model("writer", "model", "phone:2")
+        .await
+        .is_err());
+    assert!(o.tasks().is_empty());
+    assert!(model.seen.lock().unwrap().is_empty());
+}

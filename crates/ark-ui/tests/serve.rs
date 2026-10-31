@@ -3102,3 +3102,221 @@ async fn a_typed_code_signs_a_phone_in_and_its_notifications_end_with_its_sessio
         "signed out with what paired it"
     );
 }
+
+#[tokio::test]
+async fn native_creation_is_route_qualified_idempotent_and_does_not_change_desktop_selection() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("Owner").unwrap();
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let (_runtime, served) = ArkUi::new(app(dir.path()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let client = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
+    let before = client.call("hello", json!({})).await.unwrap();
+    let auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let address = format!("127.0.0.1:{}", served.port);
+    let get = |path: &str| format!("GET {path} HTTP/1.1\r\nHost: {address}\r\n{auth}\r\n");
+    let response = raw(served.port, get("/client/v1/hello")).await;
+    let hello: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert!(hello["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("project.create")));
+    let mutation = |counter: u64, operation: &str, target: &str, input: Value| {
+        json!({
+        "epoch": hello["mutationEpoch"], "counter": counter.to_string(), "operation": operation, "target": target,
+        "inputDigest": format!("{:x}", Sha256::digest(serde_json::to_vec(&input).unwrap())), "input": input,
+    }).to_string()
+    };
+    let first: u64 = hello["nextMutationCounter"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let create = mutation(first, "project.create", "", json!({"name":"Phone project"}));
+    let response = raw(
+        served.port,
+        post("/client/v1/mutations", &address, None, &auth, &create),
+    )
+    .await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let receipt: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(receipt["status"], "completed");
+    let project = receipt["resourceId"].as_str().unwrap();
+    let replay = raw(
+        served.port,
+        post("/client/v1/mutations", &address, None, &auth, &create),
+    )
+    .await;
+    let replay: Value = serde_json::from_str(replay.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(receipt, replay);
+    let create_agent = mutation(
+        first + 1,
+        "agent.create",
+        project,
+        json!({"name":"editor", "role":"Edits reports"}),
+    );
+    let response = raw(
+        served.port,
+        post("/client/v1/mutations", &address, None, &auth, &create_agent),
+    )
+    .await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let receipt: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(receipt["status"], "completed", "{receipt}");
+    assert_eq!(receipt["resourceId"], format!("agent:{project}:editor"));
+    let response = raw(
+        served.port,
+        get(&format!("/client/v1/chats/agent:{project}:editor")),
+    )
+    .await;
+    let conversation: Value =
+        serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(conversation["chat"]["agent"]["role"], "Edits reports");
+    assert_eq!(conversation["chat"]["agent"]["schedules"], json!([]));
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    assert!(store.list_records("orch_task", None).unwrap().is_empty());
+    let agents = store.list_records("orch_agent", Some(project)).unwrap();
+    assert_eq!(agents.len(), 1);
+    assert!(!agents[0]["creation_request"].is_null());
+    assert_eq!(agents[0]["spec"]["allow_mutate"], false);
+    assert_eq!(agents[0]["spec"]["delegates_to"], json!([]));
+    let after = client.call("hello", json!({})).await.unwrap();
+    assert!(!before["summary"]["project"]["id"].is_null());
+    assert_eq!(before["summary"]["project"], after["summary"]["project"]);
+    assert_eq!(
+        before["summary"]["session"]["id"],
+        after["summary"]["session"]["id"]
+    );
+    let conflict = mutation(
+        first + 2,
+        "agent.create",
+        project,
+        json!({"name":"editor", "role":"Different agent"}),
+    );
+    let response = raw(
+        served.port,
+        post("/client/v1/mutations", &address, None, &auth, &conflict),
+    )
+    .await;
+    assert!(response.contains("refused"), "{response}");
+    assert_eq!(
+        store.list_records("orch_agent", Some(project)).unwrap()[0]["spec"]["role"],
+        "Edits reports"
+    );
+    // Simulate publication surviving a crash before the receipt was committed.
+    let template = store
+        .list_records("client_mutation", None)
+        .unwrap()
+        .remove(0);
+    let device = template["device"].as_str().unwrap();
+    let pending = mutation(
+        first + 3,
+        "chat.model",
+        &format!("agent:{project}:editor"),
+        json!({"model":{"spec":"retired:gone"}}),
+    );
+    let request: Value = serde_json::from_str(&pending).unwrap();
+    let key = format!(
+        "{device}:{}:{}",
+        hello["mutationEpoch"].as_str().unwrap(),
+        first + 3
+    );
+    let mut journal = request.clone();
+    journal["device"] = json!(device);
+    journal["receipt"] = json!({"id":"interrupted-model-change","acceptedAt":"2026-10-31T00:00:00Z","display":"Accepted","status":"accepted"});
+    let effect = json!({"project":project,"agent":"editor","model":"retired:gone"});
+    let mut published = store
+        .list_records("orch_agent", Some(project))
+        .unwrap()
+        .remove(0);
+    published["spec"]["model"] = json!("retired:gone");
+    published["spec"]["role"] = json!("Newer Desktop edit");
+    store
+        .put_records(&[
+            (
+                "orch_agent",
+                &format!("{project}/editor"),
+                project,
+                &published,
+            ),
+            ("orch_model_change", &key, project, &effect),
+            ("client_mutation", &key, device, &journal),
+            (
+                "client_mutation_highwater",
+                &format!("{device}:{}", hello["mutationEpoch"].as_str().unwrap()),
+                device,
+                &json!({"counter":(first + 3).to_string()}),
+            ),
+        ])
+        .unwrap();
+    let (restarted_host, _) = ArkUi::new(app(dir.path())).open().await.unwrap();
+    let restarted = ClientListener::new(tokens)
+        .serve(restarted_host, "127.0.0.1:0")
+        .await
+        .unwrap();
+    let response = raw(
+        restarted.port,
+        post(
+            "/client/v1/mutations",
+            &format!("127.0.0.1:{}", restarted.port),
+            None,
+            &auth,
+            &create_agent,
+        ),
+    )
+    .await;
+    let replay: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(replay, receipt);
+    assert_eq!(
+        store
+            .list_records("orch_agent", Some(project))
+            .unwrap()
+            .len(),
+        1
+    );
+    let response = raw(
+        restarted.port,
+        post(
+            "/client/v1/mutations",
+            &format!("127.0.0.1:{}", restarted.port),
+            None,
+            &auth,
+            &pending,
+        ),
+    )
+    .await;
+    let model_replay: Value =
+        serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(model_replay["status"], "completed", "{response}");
+    let preserved = store
+        .list_records("orch_agent", Some(project))
+        .unwrap()
+        .remove(0);
+    assert_eq!(preserved["spec"]["role"], "Newer Desktop edit");
+    assert_eq!(preserved["spec"]["model"], "retired:gone");
+    let mut former_top_level = store
+        .get_project(&ProjectId(project.into()))
+        .unwrap()
+        .unwrap();
+    former_top_level.parent = Some(ProjectId("no-longer-top-level".into()));
+    store.put_project(&former_top_level).unwrap();
+    let response = raw(
+        restarted.port,
+        post(
+            "/client/v1/mutations",
+            &format!("127.0.0.1:{}", restarted.port),
+            None,
+            &auth,
+            &create_agent,
+        ),
+    )
+    .await;
+    let replay: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(replay, receipt);
+}

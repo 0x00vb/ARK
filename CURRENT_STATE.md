@@ -1,3 +1,13 @@
+## Named agent chat entry, 31 October2026
+
+Version0.30 supports one primary New chat entry for consumer windows. Atomic CreateAgent
+admission preserves duplicate identities and retry provenance. Agent tools accept optional
+model and reasoning, snapshot the creating turn's execution identity and validate explicit
+choices. The full source gate passes, including69actual host page cases and the reviewed
+simulated baseline. No live provider call was made.
+Consumer qualification and delivery receipts are tracked in
+../board/evidence/named-agent-new-chat-20261031/. Native10 remains a separate signed artifact.
+
 ## Native client parity, 31 October2026
 
 Protocol1.10 adds named project and idle agent creation through durable device mutations,
@@ -465,7 +475,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.29.0 |
+| Latest tag | v0.30.0 |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

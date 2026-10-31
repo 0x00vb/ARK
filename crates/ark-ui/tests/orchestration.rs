@@ -795,3 +795,37 @@ async fn agent_contact_search_reads_other_projects_without_opening_or_running_th
         json!([])
     );
 }
+
+#[tokio::test]
+async fn new_chat_agent_creation_is_origin_scoped_and_never_upserts() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = open(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let summary = host.call("hello", json!({})).await.unwrap()["summary"].clone();
+    let reference =
+        json!({"kind":"project", "id":summary["project"]["id"], "location":summary["location"]});
+    let input =
+        json!({"request_id":"creation-one", "spec":{"name":"growth","role":"Find opportunities"}});
+    let call = |input| json!({"ref":reference, "operation":{"kind":"create_agent","input":input}});
+    let first = host.call("resource", call(input.clone())).await.unwrap();
+    let again = host.call("resource", call(input.clone())).await.unwrap();
+    assert_eq!(first["scope"], again["scope"]);
+    let mut changed = input.clone();
+    changed["spec"]["role"] = json!("Replace role");
+    assert!(host.call("resource", call(changed)).await.is_err());
+    assert_eq!(
+        host.call("agents", json!({})).await.unwrap()[0]["spec"]["role"],
+        "Find opportunities"
+    );
+    let mut stale = reference.clone();
+    stale["location"]["project"] = json!("missing-project");
+    assert!(host.call("resource", json!({"ref":stale,"operation":{"kind":"create_agent","input":{"request_id":"two","spec":{"name":"other"}}}})).await.is_err());
+    assert_eq!(
+        host.call("agents", json!({}))
+            .await
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}

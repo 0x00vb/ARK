@@ -1996,6 +1996,7 @@ async function browserdown(page) {
 scenarios.browserdown = browserdown;
 
 async function destinationBrowserFixture(page, unavailable = false) {
+  await page.evaluate(() => window.ark.ready());
   const fixture = { calls: [], unavailable };
   await page.route("**/rpc", async route => {
     const { method, params } = route.request().postDataJSON();
@@ -3694,11 +3695,21 @@ async function computerSwitch(page) {
 }
 scenarios["computer-switch"] = computerSwitch;
 
-scenarios["agent-conversations-consumer"] = async page => {
+async function agentConversations(page, fromNewChat = false) {
   await page.locator("#app.ready").waitFor();
-  const composer = page.locator("#input");
-  await finished(page, () => composer.fill("Create a source agent").then(() => composer.press("Enter")));
-  await page.getByRole("button", { name: "Chat with source", exact: true }).click();
+  if (fromNewChat) {
+    await page.locator("#new-session").click();
+    await page.getByRole("button", { name: "New agent", exact: true }).click();
+    await page.getByRole("textbox", { name: "Agent name", exact: true }).fill("source");
+    await page.getByRole("textbox", { name: "Role (optional)", exact: true }).fill("Creates review conversations");
+    await page.getByRole("button", { name: "Create agent", exact: true }).click();
+    await page.getByRole("textbox", { name: "Ask source", exact: true }).waitFor();
+    assert.equal((await page.evaluate(() => window.ark.call("graph"))).tasks.length, 0);
+  } else {
+    const composer = page.locator("#input");
+    await finished(page, () => composer.fill("Create a source agent").then(() => composer.press("Enter")));
+    await page.getByRole("button", { name: "Chat with source", exact: true }).click();
+  }
   const source = page.getByRole("textbox", { name: "Ask source", exact: true });
   await source.fill("Create a colleague and send a review brief. PRIVATE SOURCE SECRET");
   await source.press("Enter");
@@ -3726,9 +3737,11 @@ scenarios["agent-conversations-consumer"] = async page => {
   assert.equal(await page.getByRole("textbox", { name: "Ask colleague", exact: true }).count(), 1);
   const records = await page.evaluate(async () => ({ agents: await window.ark.call("agents"), sessions: await window.ark.call("sessions") }));
   assert.equal(records.agents.length, 2);
-  assert.equal(records.sessions.filter(session => session.turns > 0).length, 1);
-  await shot(page, "persistent-agents-real-host");
-};
+  assert.equal(records.sessions.filter(session => session.turns > 0).length, fromNewChat ? 0 : 1);
+  await shot(page, fromNewChat ? "named-agent-chat-real-host" : "persistent-agents-real-host");
+}
+scenarios["agent-conversations-consumer"] = page => agentConversations(page);
+scenarios["named-agent-chat"] = page => agentConversations(page, true);
 
 const run = scenarios[scenario];
 if (!run) {

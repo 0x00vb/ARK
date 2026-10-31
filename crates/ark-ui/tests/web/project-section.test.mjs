@@ -11,7 +11,7 @@ let browser;
 before(async () => { browser = await (process.env.ARK_UI_BROWSER === "chromium" ? chromium : webkit).launch({ headless: true }); });
 after(async () => { await browser?.close(); });
 
-async function fixture(run, { boot = false, searchProjects = false } = {}) {
+async function fixture(run, { boot = false, searchProjects = false, holdHello = false } = {}) {
   const context = await browser.newContext({ viewport: { width: 1100, height: 760 } });
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
@@ -29,8 +29,10 @@ async function fixture(run, { boot = false, searchProjects = false } = {}) {
   const projects = [{ ...summary.project, current: true }];
   if (searchProjects) projects.push({ id: "b", name: "Writing", current: false });
   const sessions = [{ ...summary.session, updated_at: Date.now() }, { id: "chat-b", title: "Second draft", turns: 1, updated_at: Date.now() }];
+  let releaseHello;
+  const helloReady = holdHello ? new Promise(resolve => { releaseHello = resolve; }) : Promise.resolve();
   const rpc = {
-    hello: () => ({ summary, ui: {}, commands: [], seq: 0, working: [], approvals: [], runtime: "fixture" }),
+    hello: async () => { await helloReady; return { summary, ui: {}, commands: [], seq: 0, working: [], approvals: [], runtime: "fixture" }; },
     summary: () => summary,
     projects: () => projects,
     sessions: () => sessions,
@@ -121,7 +123,7 @@ async function fixture(run, { boot = false, searchProjects = false } = {}) {
     await route.fulfill({ contentType: path.endsWith(".css") ? "text/css" : "text/javascript", body: await readFile(path) });
   });
   try {
-    await page.goto("http://ark.test/index.html");
+    await page.goto("http://ark.test/index.html", { waitUntil: holdHello ? "commit" : "load" });
     if (!boot) await page.evaluate(async () => {
       const { Sidebar } = await import("./js/sidebar.js");
       const { installApi, registry } = await import("./js/ext.js");
@@ -167,7 +169,7 @@ async function fixture(run, { boot = false, searchProjects = false } = {}) {
       }
       throw Error("Fixture startup RPCs did not settle");
     };
-    await run(page, { calls, unexpected, errors, settle });
+    await run(page, { calls, unexpected, errors, settle, releaseHello });
     assert.deepEqual(errors, [], "uncaught page errors");
     assert.deepEqual(unexpected, [], "unexpected fixture requests");
   } catch (error) {
@@ -462,3 +464,55 @@ test("search waits for delayed project navigation before opening the exact agent
   await page.waitForFunction(() => window.openedSearch.length === 1);
   assert.deepEqual(await page.evaluate(() => window.openedSearch), [{ id: "Archivist", location: { runtime: "fixture", project: "b", session: "chat-b" } }]);
 }, { boot: true, searchProjects: true }));
+
+test("New chat interception is shared by project buttons and keyboard and creates nothing on open", () => fixture(async (page, { calls }) => {
+  await page.locator("#app.ready").waitFor();
+  await page.evaluate(() => {
+    window.destinations = [];
+    window.ark.newChat({ open({ project, location, createChat }) { window.destinations.push({ project, location }); window.createGeneral = createChat; } });
+    let rejected = false;
+    try { window.ark.newChat({open() {}}); } catch { rejected = true; }
+    if (!rejected) throw Error("duplicate New chat handler accepted");
+  });
+  await page.getByRole("button", {name: "New chat in Notes", exact: true}).click();
+  await page.waitForFunction(() => window.destinations.length === 1);
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+n" : "Control+n");
+  await page.waitForFunction(() => window.destinations.length === 2);
+  const destinations = await page.evaluate(() => window.destinations);
+  assert.equal(destinations[0].project, "a");
+  assert.equal(destinations[1].project, "a");
+  assert.equal(destinations[0].location.runtime, "fixture");
+  await page.evaluate(() => window.ark.command("/new"));
+  await page.waitForFunction(() => window.destinations.length === 3);
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
+  await page.getByRole("option", { name: /New chat/ }).click();
+  await page.waitForFunction(() => window.destinations.length === 4);
+  assert.equal(calls.filter(call => call.method === "new_session").length, 0);
+}, { boot: true }));
+
+
+test("New chat waits for the requested project's observed origin", () => fixture(async page => {
+  await page.locator("#app.ready").waitFor();
+  await page.evaluate(() => {
+    window.destinations = [];
+    window.ark.newChat({ open({ project, location }) { window.destinations.push({ project, location }); } });
+  });
+  await page.getByRole("button", {name: "New chat in Writing", exact: true}).click();
+  await page.waitForFunction(() => window.destinations.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.destinations), [{ project: "b", location: {runtime:"fixture", project:"b", session:"chat-b"} }]);
+}, { boot: true, searchProjects: true }));
+
+
+test("New chat waits for initial readiness before resolving its destination", () => fixture(async (page, { calls, releaseHello }) => {
+  await page.waitForFunction(() => window.ark?.newChat);
+  await page.evaluate(() => {
+    window.destinations = [];
+    window.ark.newChat({ open({ location }) { window.destinations.push(location); } });
+    void window.ark.newSession();
+  });
+  assert.deepEqual(await page.evaluate(() => window.destinations), []);
+  releaseHello();
+  await page.waitForFunction(() => window.destinations.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.destinations), [{ runtime: "fixture", project: "a", session: "chat-a" }]);
+  assert.equal(calls.filter(call => call.method === "new_session").length, 0);
+}, { boot: true, holdHello: true }));

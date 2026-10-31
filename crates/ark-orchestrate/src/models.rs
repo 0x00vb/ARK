@@ -44,6 +44,17 @@ pub trait ModelResolver: Send + Sync {
     /// The models for the agent on `lane` (unique per agent), asking for `spec` (`None`: the
     /// default model).
     async fn resolve(&self, lane: &str, spec: Option<&str>) -> Result<AgentModels, OrchError>;
+    /// The execution spec captured for a colleague created by this turn.
+    fn selection_spec(&self, models: &AgentModels) -> String {
+        models.model.clone()
+    }
+    /// Validate a new explicit selection without invoking a model. Custom resolvers must
+    /// implement their own admission policy before exposing explicit creation choices.
+    async fn validate_selection(&self, _spec: &str) -> Result<(), OrchError> {
+        Err(OrchError::NotAllowed(
+            "explicit model selection is not supported by this resolver".into(),
+        ))
+    }
     /// Changes whenever the default model changes. The orchestrator resolves an agent that has
     /// no model of its own again before its next task when this moved since it was resolved,
     /// so the agent follows the session's model. A resolver whose default never changes
@@ -229,10 +240,50 @@ pub fn account_of(model_id: &str) -> String {
 
 #[async_trait::async_trait]
 impl ModelResolver for Models {
+    fn selection_spec(&self, models: &AgentModels) -> String {
+        if self.named.contains_key(&models.model) {
+            models.model.clone()
+        } else {
+            models
+                .router
+                .provider(Role::Reason)
+                .describe()
+                .replacen(' ', ":", 1)
+        }
+    }
+
+    async fn validate_selection(&self, spec: &str) -> Result<(), OrchError> {
+        if self.named.contains_key(spec) {
+            return Ok(());
+        }
+        let catalog = ark_model::catalog().await;
+        validate_catalog_selection(&catalog, spec)
+    }
+
     async fn resolve(&self, lane: &str, spec: Option<&str>) -> Result<AgentModels, OrchError> {
-        let spec = match spec.or(self.default_spec.as_deref()) {
+        let captured = self
+            .default
+            .as_ref()
+            .map(CurrentModel::get)
+            .filter(|router| {
+                spec.is_some_and(|s| {
+                    !self.named.contains_key(s)
+                        && (router.model_id(Role::Reason) == s
+                            || router
+                                .provider(Role::Reason)
+                                .describe()
+                                .replacen(' ', ":", 1)
+                                == s)
+                })
+            });
+        let selected = if captured.is_some() {
+            None
+        } else {
+            spec.or(self.default_spec.as_deref())
+        };
+        let spec = match selected {
             Some(s) => s.to_string(),
-            None => match self.default.as_ref().map(CurrentModel::get) {
+            None => match captured.or_else(|| self.default.as_ref().map(CurrentModel::get)) {
                 Some(r) => {
                     let r = r.for_conversation(&format!("agent/{lane}"))?;
                     let id = r.model_id(Role::Reason);
@@ -343,5 +394,73 @@ impl ModelResolver for Models {
 
     async fn sweep_idle(&self) -> usize {
         self.subs.sweep_idle().await
+    }
+}
+
+fn validate_catalog_selection(catalog: &[ark_model::Backend], spec: &str) -> Result<(), OrchError> {
+    let accepted = spec.split_once(':').is_some_and(|(provider, selected)| {
+        let (model, effort) = selected
+            .split_once('@')
+            .map_or((selected, None), |(m, e)| (m, Some(e)));
+        catalog.iter().any(|backend| {
+            backend.provider == provider
+                && backend.ready
+                && backend.models.iter().any(|id| id == model)
+                && effort.is_none_or(|effort| {
+                    backend.model_options.iter().any(|option| {
+                        option.id == model && option.efforts.iter().any(|e| e == effort)
+                    })
+                })
+        })
+    });
+    if accepted {
+        Ok(())
+    } else {
+        Err(OrchError::NotAllowed(
+            "that model, account or reasoning effort is unavailable".into(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    #[test]
+    fn creation_catalog_rejects_missing_accounts_models_and_unsupported_effort() {
+        let catalog = vec![ark_model::Backend {
+            provider: "provider-a~one".into(),
+            label: "Codex".into(),
+            identity: None,
+            kind: ark_model::BackendKind::Subscription,
+            ready: true,
+            detail: String::new(),
+            fix: None,
+            models: vec!["large".into()],
+            model_options: vec![ark_model::ModelOption {
+                id: "large".into(),
+                label: "GPT".into(),
+                efforts: vec!["low".into(), "high".into()],
+                default_effort: Some("low".into()),
+            }],
+            step: None,
+        }];
+        for spec in ["provider-a~one:large", "provider-a~one:large@high"] {
+            assert!(validate_catalog_selection(&catalog, spec).is_ok());
+        }
+        for spec in [
+            "provider-a:large",
+            "provider-a~two:large",
+            "provider-a~one:retired",
+            "provider-a~one:large@max",
+            "provider-a~one:large@",
+        ] {
+            assert!(
+                validate_catalog_selection(&catalog, spec).is_err(),
+                "{spec}"
+            );
+        }
+        let mut offline = catalog;
+        offline[0].ready = false;
+        assert!(validate_catalog_selection(&offline, "provider-a~one:large").is_err());
     }
 }

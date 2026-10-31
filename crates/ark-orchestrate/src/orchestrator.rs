@@ -259,7 +259,7 @@ impl Orchestrator {
         let mut spec = record.spec;
         spec.model = Some(model.to_string());
         self.inner
-            .spawn_record(spec, None, None, Some(request))
+            .spawn_record(spec, None, None, Some(request), None)
             .await
     }
 
@@ -280,11 +280,58 @@ impl Orchestrator {
             };
         }
         self.inner
-            .spawn_record(spec, None, Some(request), None)
+            .spawn_record(spec, None, Some(request), None, None)
             .await
     }
 
-    pub(crate) async fn create_agent(&self, spec: AgentSpec) -> Result<AgentRecord, OrchError> {
+    /// Create a named chat agent once, validating an explicit catalog selection.
+    pub async fn create_chat_agent(
+        &self,
+        spec: AgentSpec,
+        request: &str,
+    ) -> Result<AgentRecord, OrchError> {
+        let _guard = self.inner.conversations.lock().await;
+        let digest = blake3::hash(&serde_json::to_vec(&spec)?)
+            .to_hex()
+            .to_string();
+        if let Some(effect) = self
+            .inner
+            .engine
+            .store
+            .get_record("orch_chat_creation", request)?
+        {
+            if effect["digest"] != digest || effect["project"] != self.project().id.as_str() {
+                return Err(OrchError::NotAllowed(
+                    "that creation request has different inputs".into(),
+                ));
+            }
+            let name = effect["agent"]
+                .as_str()
+                .ok_or_else(|| OrchError::NotAllowed("invalid creation receipt".into()))?;
+            return self
+                .agent(name)
+                .ok_or_else(|| OrchError::UnknownAgent(name.into()));
+        }
+        if self.agent(&spec.name).is_some() {
+            return Err(OrchError::NotAllowed(
+                "an agent with that name already exists".into(),
+            ));
+        }
+        if let Some(model) = &spec.model {
+            self.inner.models.validate_selection(model).await?;
+        }
+        let effect =
+            serde_json::json!({"agent":spec.name,"project":self.project().id,"digest":digest});
+        self.inner
+            .spawn_record(spec, None, Some(request), None, Some(&effect))
+            .await
+    }
+
+    pub(crate) async fn create_agent(
+        &self,
+        mut spec: AgentSpec,
+        selection: crate::execution::ExecutionSelection,
+    ) -> Result<AgentRecord, OrchError> {
         let _guard = self.inner.conversations.lock().await;
         if self
             .inner
@@ -299,7 +346,25 @@ impl Orchestrator {
                 spec.name
             )));
         }
-        self.inner.spawn_record(spec, None, None, None).await
+        if selection.explicit() {
+            let inherited = if selection.model.is_none() {
+                let resolved = self
+                    .inner
+                    .models
+                    .resolve(&self.inner.lane(&spec.name), None)
+                    .await?;
+                let inherited = self.inner.models.selection_spec(&resolved);
+                self.inner.models.close(&self.inner.lane(&spec.name)).await;
+                Some(inherited)
+            } else {
+                None
+            };
+            spec.model = selection.apply(inherited.as_deref())?;
+            if let Some(model) = &spec.model {
+                self.inner.models.validate_selection(model).await?;
+            }
+        }
+        self.inner.spawn_record(spec, None, None, None, None).await
     }
 
     pub fn agent(&self, name: &str) -> Option<AgentRecord> {
@@ -984,6 +1049,7 @@ pub(crate) struct AgentRt {
 
 pub(crate) struct TaskRt {
     pub record: TaskRecord,
+    execution_model: Option<String>,
     cancel: CancelToken,
     stop: Option<Stop>,
     done: watch::Sender<bool>,
@@ -1845,6 +1911,7 @@ impl Inner {
                 st.tasks.insert(
                     r.id.clone(),
                     TaskRt {
+                        execution_model: None,
                         record: r,
                         cancel: CancelToken::new(),
                         stop: None,
@@ -1937,7 +2004,7 @@ impl Inner {
 
     async fn spawn(&self, spec: AgentSpec) -> Result<AgentRecord, OrchError> {
         let _guard = self.conversations.lock().await;
-        self.spawn_record(spec, None, None, None).await
+        self.spawn_record(spec, None, None, None, None).await
     }
 
     async fn spawn_record(
@@ -1946,6 +2013,7 @@ impl Inner {
         creation: Option<(&str, &str)>,
         creation_request: Option<&str>,
         model_request: Option<&str>,
+        chat_creation: Option<&serde_json::Value>,
     ) -> Result<AgentRecord, OrchError> {
         if !valid_name(&spec.name) {
             return Err(OrchError::NotAllowed(format!(
@@ -2077,6 +2145,18 @@ impl Inner {
                         request,
                         self.project.id.as_str(),
                         &effect,
+                    ),
+                ])?;
+            } else if let Some(effect) = chat_creation {
+                let request = creation_request
+                    .ok_or_else(|| OrchError::NotAllowed("missing creation request".into()))?;
+                self.engine.store.put_records(&[
+                    (AGENT, &id, self.project.id.as_str(), &saved_record),
+                    (
+                        "orch_chat_creation",
+                        request,
+                        self.project.id.as_str(),
+                        effect,
                     ),
                 ])?;
             } else {
@@ -2402,6 +2482,7 @@ impl Inner {
             st.tasks.insert(
                 id.clone(),
                 TaskRt {
+                    execution_model: None,
                     record: record.clone(),
                     cancel: CancelToken::new(),
                     stop: None,
@@ -3336,6 +3417,9 @@ impl Inner {
             .done_before(done);
 
         let session_id = session.id().to_string();
+        if let Some(task) = self.state.lock().unwrap().tasks.get_mut(id) {
+            task.execution_model = Some(self.models.selection_spec(models));
+        }
         let attempt_no = {
             let rec = self.update_task(id, |t| {
                 t.state = TaskState::Running;
@@ -4167,7 +4251,20 @@ impl Inner {
         name: &str,
         role: &str,
         instructions: &str,
+        selection: crate::execution::ExecutionSelection,
     ) -> Result<AgentRecord, OrchError> {
+        let request = format!(
+            "colleague:{}",
+            blake3::hash(&serde_json::to_vec(&(
+                from,
+                task,
+                name,
+                role,
+                instructions,
+                &selection
+            ))?)
+            .to_hex()
+        );
         let _guard = self.conversations.lock().await;
         let (mut spec, root) = {
             let st = self.state.lock().unwrap();
@@ -4200,7 +4297,9 @@ impl Inner {
                 ));
             }
             if let Some(existing) = st.agents.get(name) {
-                if existing.record.creation_task.as_deref() == Some(task) {
+                if existing.record.creation_task.as_deref() == Some(task)
+                    && existing.record.creation_request.as_deref() == Some(&request)
+                {
                     return Ok(existing.record.clone());
                 }
                 return Err(OrchError::NotAllowed(format!(
@@ -4226,14 +4325,32 @@ impl Inner {
                     "this request may create {limit} agents"
                 )));
             }
-            (source.record.spec.clone(), root)
+            let mut spec = source.record.spec.clone();
+            let inherited = t
+                .execution_model
+                .clone()
+                .or_else(|| {
+                    source
+                        .models
+                        .as_ref()
+                        .map(|models| self.models.selection_spec(models))
+                })
+                .or_else(|| source.record.spec.model.clone())
+                .unwrap_or_else(|| source.record.model.clone());
+            spec.model = selection.apply(Some(&inherited))?;
+            (spec, root)
         };
+        if selection.explicit() {
+            if let Some(model) = &spec.model {
+                self.models.validate_selection(model).await?;
+            }
+        }
         spec.name = name.to_string();
         spec.role = role.to_string();
         spec.instructions = instructions.to_string();
         spec.parent = Some(from.to_string());
         spec.allow_mutate = false;
-        self.spawn_record(spec, Some((task, &root)), None, None)
+        self.spawn_record(spec, Some((task, &root)), Some(&request), None, None)
             .await
     }
 

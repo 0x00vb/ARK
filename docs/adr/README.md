@@ -129,3 +129,5 @@ The test, script or review step that keeps it true.
 - [0086. Model accounts have stable execution identities](0086-model-accounts-have-stable-execution-identities.md)
 
 - [0087. Agent conversations start independent turns](0087-agent-conversations-start-independent-turns.md)
+
+- [0092. New chat chooses a durable conversation identity](0092-named-agent-chat-entry.md)

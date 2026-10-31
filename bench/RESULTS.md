@@ -858,3 +858,24 @@ Live qwen3:4b, 7 workloads x 2, `main` (edbbd25) against this branch (`reliabili
 
 Simulated suite: ADR 0050 alone leaves 20 workloads unchanged and `workbooks` -1.5%; ADR 0049's
 typed Files schemas move `files-edit` +18% and `workbooks` +6.5% (baseline regenerated).
+
+## Named agent model options, 31 October 2026
+
+The simulated creation schema now includes optional model and reasoning. No live model call
+was made. All workload success and model-call counts remain unchanged. Shortening the two
+field descriptions reduced the initial board increase from333 to273 input tokens across
+six calls. Independent QA accepted this intentional capability cost before baseline refresh.
+
+| Board metric | Previous baseline | Current |
+| --- | ---: | ---: |
+| Input tokens | 16867 | 17140 |
+| Total tokens | 17009 | 17282 |
+| Uncached input tokens | 7489 | 7483 |
+| Peak context tokens | 2954 | 3000 |
+| Model calls | 6 | 6 |
+| Success | 1 | 1 |
+
+Before/candidate reports and comparison are preserved in the workspace evidence
+`board/evidence/named-agent-new-chat-20261031/`. Reference pricing in the simulated report
+is not observed billing. The separate intermittent cassette mismatch remains recorded;
+passing runs do not establish its cause.

@@ -428,3 +428,12 @@ To follow a run: load `graph()`, then apply events after its `seq`.
 | A schedule cannot be edited; its runs do not report into a chat | stop it and ask again; the runs are in the agent's work |
 | Codex adds about 5k input tokens to each resumed turn (mostly cached) | rotation keeps it bounded |
 | A vendor session still open when the app exits keeps its file | it is resumed next time, from the ledger |
+
+## Model choices for new colleagues
+
+`agents.create` accepts optional `model` and `reasoning` strings. Model uses the existing
+account-qualified provider:model form. Reasoning must be offered for that model.
+An agent-created colleague inherits the creating turn's resolved model, account and effort
+when both are omitted. An explicit model uses its own default effort; reasoning alone changes
+the inherited effort. A separate reasoning value cannot accompany a model with @effort.
+Unavailable choices are refused before the colleague is published. Creation starts no task.

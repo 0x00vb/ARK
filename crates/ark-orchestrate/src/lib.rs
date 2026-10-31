@@ -38,6 +38,7 @@ mod brief;
 mod contacts;
 mod cron;
 mod event;
+mod execution;
 mod graph;
 pub mod models;
 mod orchestrator;

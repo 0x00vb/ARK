@@ -103,6 +103,7 @@ pub enum ResourceOperationKind {
     OrchEvents,
     Agents,
     SpawnAgent,
+    CreateAgent,
     SubmitTask,
     CancelTask,
     RetryTask,
@@ -208,6 +209,7 @@ impl ResourceOperationKind {
             | O::TaskCall
             | O::OrchEvents
             | O::Agents
+            | O::CreateAgent
             | O::SpawnAgent
             | O::SubmitTask
             | O::CancelTask

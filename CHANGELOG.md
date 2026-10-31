@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.30.0] - 2026-10-31
+
+- Let window consumers choose a named agent directly from New chat. Atomic project-scoped creation does not overwrite an existing agent.
+- Agents can choose an optional model and reasoning effort when creating a colleague. Omitted choices preserve the creating turn's resolved account and model.
+
+### Breaking
+
+- ResourceOperationKind adds CreateAgent. Exhaustive Rust matches must handle the new operation. Custom model resolvers must implement selection validation to offer explicit creation choices.
+
 ## [0.29.0] - 2026-10-31
 
 ### Added

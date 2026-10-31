@@ -13,6 +13,19 @@ fn fixture() -> (tempfile::TempDir, Ark, Project) {
     (dir, ark, project)
 }
 
+fn test_models() -> Arc<dyn ModelResolver> {
+    let mut builder = crate::Models::builder().default_model("test");
+    for spec in [
+        "test",
+        "provider-a~one:large@high",
+        "provider-a~one:large@low",
+        "provider-b:small",
+    ] {
+        builder = builder.provider(spec, Arc::new(ark_model::MockProvider::new(spec, vec![])));
+    }
+    Arc::new(builder.build())
+}
+
 async fn source(o: &Orchestrator, tools: &[&str], budget: Option<crate::Budget>) -> String {
     o.spawn(AgentSpec::new("source").tools(tools.iter().copied()))
         .await
@@ -27,13 +40,28 @@ async fn source(o: &Orchestrator, tools: &[&str], budget: Option<crate::Budget>)
 #[tokio::test]
 async fn conversation_creation_is_serialized_and_keeps_permissions() {
     let (_dir, ark, project) = fixture();
-    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
     let task = source(&o, &["agents.create", "files.read"], None).await;
     let (a, b) = tokio::join!(
-        o.inner
-            .create_colleague("source", &task, "colleague", "review", "read carefully"),
-        o.inner
-            .create_colleague("source", &task, "colleague", "review", "read carefully")
+        o.inner.create_colleague(
+            "source",
+            &task,
+            "colleague",
+            "review",
+            "read carefully",
+            Default::default()
+        ),
+        o.inner.create_colleague(
+            "source",
+            &task,
+            "colleague",
+            "review",
+            "read carefully",
+            Default::default()
+        )
     );
     let a = a.unwrap();
     assert_eq!(a.scope, b.unwrap().scope);
@@ -56,7 +84,14 @@ async fn conversation_creation_is_serialized_and_keeps_permissions() {
         .unwrap();
     assert!(o
         .inner
-        .create_colleague("source", &another, "colleague", "replace", "overwrite")
+        .create_colleague(
+            "source",
+            &another,
+            "colleague",
+            "replace",
+            "overwrite",
+            Default::default()
+        )
         .await
         .is_err());
     assert_eq!(o.agent("colleague").unwrap().spec.role, "review");
@@ -65,11 +100,21 @@ async fn conversation_creation_is_serialized_and_keeps_permissions() {
 #[tokio::test]
 async fn conversation_creation_respects_allowlists_and_root_quota_after_reload() {
     let (_dir, ark, project) = fixture();
-    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
     let task = source(&o, &["files.read"], None).await;
     assert!(o
         .inner
-        .create_colleague("source", &task, "forbidden", "review", "")
+        .create_colleague(
+            "source",
+            &task,
+            "forbidden",
+            "review",
+            "",
+            Default::default()
+        )
         .await
         .is_err());
     o.spawn(AgentSpec::new("source")).await.unwrap();
@@ -84,7 +129,7 @@ async fn conversation_creation_respects_allowlists_and_root_quota_after_reload()
         .unwrap();
     let a = o
         .inner
-        .create_colleague("source", &task, "first", "review", "")
+        .create_colleague("source", &task, "first", "review", "", Default::default())
         .await
         .unwrap();
     let descendant = o
@@ -101,12 +146,19 @@ async fn conversation_creation_respects_allowlists_and_root_quota_after_reload()
         .unwrap();
     assert!(o
         .inner
-        .create_colleague("first", &descendant, "second", "review", "")
+        .create_colleague(
+            "first",
+            &descendant,
+            "second",
+            "review",
+            "",
+            Default::default()
+        )
         .await
         .is_err());
     assert_eq!(
         o.inner
-            .create_colleague("source", &task, "first", "review", "")
+            .create_colleague("source", &task, "first", "review", "", Default::default())
             .await
             .unwrap()
             .scope,
@@ -116,7 +168,7 @@ async fn conversation_creation_respects_allowlists_and_root_quota_after_reload()
     assert_eq!(reloaded.agent("first").unwrap().scope, a.scope);
     assert!(reloaded
         .inner
-        .create_colleague("source", &task, "second", "review", "")
+        .create_colleague("source", &task, "second", "review", "", Default::default())
         .await
         .is_err());
 }
@@ -124,10 +176,20 @@ async fn conversation_creation_respects_allowlists_and_root_quota_after_reload()
 #[tokio::test]
 async fn conversation_start_is_independent_idempotent_and_scoped() {
     let (_dir, ark, project) = fixture();
-    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
     let task = source(&o, &["*"], None).await;
     o.inner
-        .create_colleague("source", &task, "colleague", "review", "")
+        .create_colleague(
+            "source",
+            &task,
+            "colleague",
+            "review",
+            "",
+            Default::default(),
+        )
         .await
         .unwrap();
     let spec = TaskSpec::new("first brief").context("necessary context");
@@ -171,10 +233,20 @@ async fn conversation_start_is_independent_idempotent_and_scoped() {
 #[tokio::test]
 async fn conversation_start_enforces_the_external_root_limit_on_descendants() {
     let (_dir, ark, project) = fixture();
-    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
     let task = source(&o, &["*"], Some(crate::Budget::default().delegations(1))).await;
     o.inner
-        .create_colleague("source", &task, "colleague", "review", "")
+        .create_colleague(
+            "source",
+            &task,
+            "colleague",
+            "review",
+            "",
+            Default::default(),
+        )
         .await
         .unwrap();
     let id = o
@@ -238,7 +310,10 @@ impl ModelResolver for DelayedModels {
 #[tokio::test]
 async fn conversation_creation_cannot_publish_after_cancellation_during_model_resolution() {
     let (_dir, ark, project) = fixture();
-    let base = Orchestrator::builder(&ark, &project).build().unwrap();
+    let base = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
     let models = Arc::new(DelayedModels {
         base: base.models().clone(),
         entered: tokio::sync::Notify::new(),
@@ -255,7 +330,14 @@ async fn conversation_creation_cannot_publish_after_cancellation_during_model_re
         let task = task.clone();
         tokio::spawn(async move {
             o.inner
-                .create_colleague("source", &task, "colleague", "review", "")
+                .create_colleague(
+                    "source",
+                    &task,
+                    "colleague",
+                    "review",
+                    "",
+                    Default::default(),
+                )
                 .await
         })
     };
@@ -276,7 +358,10 @@ async fn conversation_creation_cannot_publish_after_cancellation_during_model_re
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn refused_concurrent_board_claims_leave_no_durable_tasks_to_recover() {
     let (_dir, ark, project) = fixture();
-    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
     o.spawn(AgentSpec::new("first")).await.unwrap();
     o.spawn(AgentSpec::new("second")).await.unwrap();
     for index in 0..16 {
@@ -392,7 +477,10 @@ fn conversation_discovery_does_not_displace_the_actions_needed_by_a_work_brief()
 #[tokio::test]
 async fn client_sends_keep_device_identity_across_restart_and_reject_conflicts() {
     let (_dir, ark, project) = fixture();
-    let o = Orchestrator::builder(&ark, &project).build().unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
     o.spawn(AgentSpec::new("reader")).await.unwrap();
     let (phone, duplicate, tablet) = tokio::join!(
         o.submit_once("reader", TaskSpec::new("same brief"), "phone:epoch:1"),
@@ -415,4 +503,197 @@ async fn client_sends_keep_device_identity_across_restart_and_reject_conflicts()
             .unwrap()
     );
     assert_eq!(reloaded.tasks().len(), 2);
+}
+
+#[tokio::test]
+async fn colleagues_snapshot_execution_and_retries_cannot_change_choices_or_later_edits() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    let task = source(&o, &["agents.create", "files.read"], None).await;
+    o.inner
+        .state
+        .lock()
+        .unwrap()
+        .tasks
+        .get_mut(&task)
+        .unwrap()
+        .execution_model = Some("provider-a~one:large@high".into());
+    o.spawn(
+        AgentSpec::new("source")
+            .tools(["agents.create", "files.read"])
+            .model("provider-b:small"),
+    )
+    .await
+    .unwrap();
+    let inherited = o
+        .inner
+        .create_colleague(
+            "source",
+            &task,
+            "inherited",
+            "review",
+            "",
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        inherited.spec.model.as_deref(),
+        Some("provider-a~one:large@high")
+    );
+    let selected =
+        crate::execution::ExecutionSelection::parse(&serde_json::json!({"reasoning":"low"}))
+            .unwrap();
+    let changed = o
+        .inner
+        .create_colleague("source", &task, "chosen", "review", "", selected.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        changed.spec.model.as_deref(),
+        Some("provider-a~one:large@low")
+    );
+    assert_eq!(changed.spec.tools, inherited.spec.tools);
+    assert!(!changed.spec.allow_mutate);
+    let mut edit = changed.spec.clone();
+    edit.role = "Later role".into();
+    edit.model = Some("provider-b:small".into());
+    o.spawn(edit).await.unwrap();
+    let retry = o
+        .inner
+        .create_colleague("source", &task, "chosen", "review", "", selected)
+        .await
+        .unwrap();
+    assert_eq!(retry.spec.role, "Later role");
+    assert_eq!(retry.spec.model.as_deref(), Some("provider-b:small"));
+    assert!(o
+        .inner
+        .create_colleague("source", &task, "chosen", "review", "", Default::default())
+        .await
+        .is_err());
+    let unavailable =
+        crate::execution::ExecutionSelection::parse(&serde_json::json!({"model":"missing:model"}))
+            .unwrap();
+    assert!(o
+        .inner
+        .create_colleague("source", &task, "refused", "review", "", unavailable)
+        .await
+        .is_err());
+    assert!(o.agent("refused").is_none());
+    assert!(o.tasks().iter().all(|t| t.owner == "source"));
+}
+
+#[tokio::test]
+async fn named_chat_creation_is_atomic_idempotent_and_never_updates_a_duplicate() {
+    let (_dir, ark, project) = fixture();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(test_models())
+        .build()
+        .unwrap();
+    let spec = AgentSpec::new("writer")
+        .role("Writes")
+        .model("provider-b:small");
+    let (a, b) = tokio::join!(
+        o.create_chat_agent(spec.clone(), "chat-create:first"),
+        o.create_chat_agent(spec.clone(), "chat-create:first")
+    );
+    assert_eq!(a.unwrap().scope, b.unwrap().scope);
+    assert!(o.tasks().is_empty());
+    assert!(o
+        .create_chat_agent(spec.clone(), "chat-create:changed")
+        .await
+        .is_err());
+    assert!(o
+        .create_chat_agent(AgentSpec::new("other-name"), "chat-create:first")
+        .await
+        .is_err());
+    assert!(o.agent("other-name").is_none());
+    let reopened = Orchestrator::builder(&ark, &project).build().unwrap();
+    assert_eq!(
+        reopened
+            .create_chat_agent(spec.clone(), "chat-create:first")
+            .await
+            .unwrap()
+            .name,
+        "writer"
+    );
+    let mut edited = spec.clone();
+    edited.role = "Edited".into();
+    o.spawn(edited).await.unwrap();
+    assert_eq!(
+        o.create_chat_agent(spec, "chat-create:first")
+            .await
+            .unwrap()
+            .spec
+            .role,
+        "Edited"
+    );
+    assert!(o
+        .create_chat_agent(
+            AgentSpec::new("bad").model("unavailable"),
+            "chat-create:bad"
+        )
+        .await
+        .is_err());
+    assert!(o.agent("bad").is_none());
+}
+
+struct SelectionLookupModels {
+    base: Arc<dyn ModelResolver>,
+    closed: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl ModelResolver for SelectionLookupModels {
+    async fn resolve(&self, lane: &str, spec: Option<&str>) -> Result<AgentModels, OrchError> {
+        self.base.resolve(lane, spec).await
+    }
+    async fn validate_selection(&self, spec: &str) -> Result<(), OrchError> {
+        self.base.validate_selection(spec).await
+    }
+    async fn close(&self, lane: &str) {
+        self.closed
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.base.close(lane).await;
+    }
+}
+
+#[tokio::test]
+async fn reasoning_without_model_closes_its_default_lookup_before_refusal_or_creation() {
+    let (_dir, ark, project) = fixture();
+    let mut builder = crate::Models::builder().default_model("provider-a:large@high");
+    for spec in ["provider-a:large@high", "provider-a:large@low"] {
+        builder = builder.provider(spec, Arc::new(ark_model::MockProvider::new(spec, vec![])));
+    }
+    let models = Arc::new(SelectionLookupModels {
+        base: Arc::new(builder.build()),
+        closed: Default::default(),
+    });
+    let o = Orchestrator::builder(&ark, &project)
+        .models(models.clone())
+        .build()
+        .unwrap();
+    let invalid = crate::execution::ExecutionSelection::parse(
+        &serde_json::json!({"reasoning":"unavailable"}),
+    )
+    .unwrap();
+    assert!(o
+        .create_agent(AgentSpec::new("invalid"), invalid)
+        .await
+        .is_err());
+    assert!(o.agent("invalid").is_none());
+    assert_eq!(models.closed.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let valid =
+        crate::execution::ExecutionSelection::parse(&serde_json::json!({"reasoning":"low"}))
+            .unwrap();
+    let created = o
+        .create_agent(AgentSpec::new("valid"), valid)
+        .await
+        .unwrap();
+    assert_eq!(created.spec.model.as_deref(), Some("provider-a:large@low"));
+    assert_eq!(models.closed.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert!(o.tasks().is_empty());
 }

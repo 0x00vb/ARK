@@ -2953,6 +2953,24 @@ impl Host {
             O::Agents => Ok(serde_json::to_value(
                 self.resource_orchestrator(&r).await?.agents(),
             )?),
+            O::CreateAgent => {
+                let o = self.resource_orchestrator(&r).await?;
+                let request_id = s("request_id");
+                anyhow::ensure!(
+                    !request_id.is_empty() && request_id.len() <= 128,
+                    "a creation request is required"
+                );
+                let spec: AgentSpec = serde_json::from_value(input["spec"].clone())?;
+                anyhow::ensure!(
+                    spec.name.len() <= 64 && spec.role.chars().count() <= 500,
+                    "name or role is too long"
+                );
+                let original = serde_json::to_vec(&(&r.location, request_id))?;
+                let request = format!("chat-create:{:x}", Sha256::digest(original));
+                Ok(serde_json::to_value(
+                    o.create_chat_agent(spec, &request).await?,
+                )?)
+            }
             O::SpawnAgent => {
                 let o = self.resource_orchestrator(&r).await?;
                 let spec: AgentSpec = serde_json::from_value(input["spec"].clone())?;

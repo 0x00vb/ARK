@@ -130,7 +130,10 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     }
     let mut model: Arc<dyn ark_model::Provider> =
         Arc::new(MockProvider::new("m", script).with_chunk_delay(chunk));
-    if scenario == "agent-conversations-consumer" {
+    if matches!(
+        scenario,
+        "agent-conversations-consumer" | "named-agent-chat"
+    ) {
         let source_step = std::sync::atomic::AtomicUsize::new(0);
         let child_step = std::sync::atomic::AtomicUsize::new(0);
         model = Arc::new(MockProvider::new("m", vec![]).with_fallback(move |request| {
@@ -314,7 +317,10 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
             )
             .extension_script("file-proof-entry.js");
     }
-    if scenario == "agent-conversations-consumer" {
+    if matches!(
+        scenario,
+        "agent-conversations-consumer" | "named-agent-chat"
+    ) {
         let root = PathBuf::from(
             std::env::var_os("ARK_UI_AGENT_CONSUMER")
                 .expect("ARK_UI_AGENT_CONSUMER must name the consumer ui folder"),
@@ -335,8 +341,13 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
                 }
             }
         }
-        ui = ui.asset("models.js", b"export const choice = {}; export const modelName = value => value;".as_slice())
-            .asset("agent-proof-entry.js", b"import './agents.js'; import './agent-chat.js'; window.ark.extensionReady('agent-proof-entry');".as_slice())
+        let entry: &[u8] = if scenario == "named-agent-chat" {
+            b"import './agents.js'; import './agent-chat.js'; import './new-chat.js'; window.ark.extensionReady('agent-proof-entry');"
+        } else {
+            b"import './agents.js'; import './agent-chat.js'; window.ark.extensionReady('agent-proof-entry');"
+        };
+        ui = ui.asset("models.js", b"export const choice = {}; export const modelName = value => value; export function picker() { throw Error('No model catalog in this fixture'); }".as_slice())
+            .asset("agent-proof-entry.js", entry)
             .stylesheet("desktop.css").stylesheet("product.css").stylesheet("brand.css")
             .extension_script("agent-proof-entry.js");
     }
@@ -1539,4 +1550,9 @@ async fn private_skills_and_schedule_calendar_work_through_the_real_page_and_sco
 #[tokio::test(flavor = "multi_thread")]
 async fn consumer_agent_creation_handoff_search_and_followup_use_real_host_records() {
     drive_app("agent-conversations-consumer", vec![], Duration::ZERO, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn new_chat_creates_a_named_agent_and_keeps_independent_colleague_conversations() {
+    drive_app("named-agent-chat", vec![], Duration::ZERO, true).await;
 }

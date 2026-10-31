@@ -29,6 +29,9 @@ import { setAgentIdentity } from "./dom.js";
 //   ark.action({ id, label, icon, where: "artifact" | "palette" | "project", when(ctx), run(ctx, api) })
 //                      `project`: an item in a project's menu in the projects list; `ctx` is
 //                      `{ project }` (`id`, `name`, `workspace`, `current`)
+//   ark.newChat({ open({ project, location, createChat }) })
+//     One consumer handler for explicit New chat actions. createChat keeps the captured origin.
+//
 //   ark.chatView(el, { submit(text), stop(), call(key, id), placeholder, model, files })
 //                      a conversation the app draws from its own records with the chat's
 //                      own view, so it looks and reads and behaves as a chat (ADR 0076).
@@ -114,6 +117,7 @@ export const registry = {
   sidebars: [],
   projectSections: new Map(),
   searchSources: new Map(),
+  newChat: null,
   modelPicker: null,
   submitHooks: [],
 };
@@ -218,6 +222,10 @@ export function installApi(api) {
     action(a) {
       need(a, ["id", "label", "run"], "action");
       registry.actions.push(a);
+    },
+    newChat(handler) {
+      if (!handler || typeof handler.open !== "function" || registry.newChat) throw new Error("Invalid or duplicate New chat handler");
+      registry.newChat = handler;
     },
     modelPicker(p) {
       need(p, ["label", "render"], "modelPicker");

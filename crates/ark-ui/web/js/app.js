@@ -125,10 +125,33 @@ const api = {
   steer,
   cancel: () => transport.call("cancel").catch(() => {}),
   command: (line) => (line.endsWith(" ") ? composer.set(line) : runCommand(line)),
-  newSession: (project) => {
-    showConversation();
-    if (detachedWindow) return newWindowSession(project);
-    return change("new_session", project ? { project } : undefined);
+  newSession: async (project) => {
+    await api.ready();
+    if (registry.newChat && project && project !== currentLocation().project) {
+      const runtime = currentLocation().runtime;
+      let off, timer;
+      const observed = new Promise((resolve, reject) => {
+        const inspect = () => {
+          const now = currentLocation();
+          if (now.runtime !== runtime) reject(new Error("The computer changed. Open New chat again."));
+          else if (now.project === project) resolve();
+        };
+        off = onExt("ark:summary", inspect);
+        timer = setTimeout(() => reject(new Error("The project did not open. Try again.")), 4000);
+        inspect();
+      });
+      try {
+        await Promise.all([observed, api.openProject(project).then(ok => { if (!ok) throw new Error("Could not open the project"); })]);
+      } catch (error) { toast(error.message); return false; }
+      finally { off?.(); clearTimeout(timer); }
+    }
+    const location = { ...currentLocation() };
+    const createChat = () => {
+      const current = currentLocation();
+      if (current.runtime !== location.runtime || current.project !== location.project) throw new Error("The project changed. Open New chat again.");
+      return createGeneralSession(project);
+    };
+    return registry.newChat ? registry.newChat.open({ project: project || location.project, location, createChat }) : createChat();
   },
   // A code to sign in another device (Settings › Devices, ADR 0047).
   pairCode: () => transport.pairCode(),
@@ -248,7 +271,7 @@ const RESOURCE_METHODS = {
   upload_parts: ["file", "upload_parts"], upload_add: ["file", "upload_add"], upload_cancel: ["file", "upload_cancel"], file_open: ["file", "file_open"],
   workspace: ["project", "workspace"], state: ["project", "state"],
   graph: ["project", "graph"], task_trace: ["project", "task_trace"], task: ["project", "task"], task_call: ["project", "task_call"], orch_events: ["project", "orch_events"],
-  agents: ["project", "agents"], spawn_agent: ["project", "spawn_agent"], submit_task: ["project", "submit_task"],
+  agents: ["project", "agents"], create_agent: ["project", "create_agent"], spawn_agent: ["project", "spawn_agent"], submit_task: ["project", "submit_task"],
   cancel_task: ["project", "cancel_task"], retry_task: ["project", "retry_task"],
   schedules: ["project", "schedules"], schedule: ["project", "schedule"], unschedule: ["project", "unschedule"],
   schedule_pause: ["project", "schedule_pause"], schedule_resume: ["project", "schedule_resume"], schedule_run: ["project", "schedule_run"],
@@ -497,7 +520,7 @@ async function closeChatTab(id) {
       pendingPrimary = { promote: next };
       await change("open_session", { id: next });
     }
-    else await api.newSession();
+    else await createGeneralSession();
   }
   if (!activeSession || activeSession === id) focusChat(state.sessionId, false);
   renderChatTabs();
@@ -1201,6 +1224,7 @@ async function steer(text) {
 }
 
 async function runCommand(line) {
+  if (registry.newChat && line.trim() === "/new") return api.newSession();
   const view = viewForCommand(line, api.project());
   if (view) return showView(view.id);
   if (state.running) return composer.enqueue(line);
@@ -1219,6 +1243,12 @@ async function runCommand(line) {
     setRunning(true);
   }
   thread.report(line, reply);
+}
+
+function createGeneralSession(project) {
+  showConversation();
+  if (detachedWindow) return newWindowSession(project);
+  return change("new_session", project ? { project } : undefined);
 }
 
 // Moving to another chat never waits: a chat that is working goes on in the background.
@@ -1729,6 +1759,7 @@ function palette() {
   const input = h("input.palette-input", { placeholder: "Search commands, views and actions", "aria-label": "Search" });
   const list = h("div.palette-list", { role: "listbox" });
   const items = [
+    { label: "New chat", hint: label("⌘N"), run: () => api.newSession() },
     ...[...registry.views.values()]
       .filter((v) => !v.when || v.when({ project: api.project() }))
       .map((v) => ({ label: v.title, hint: "view", run: () => showView(v.id) })),

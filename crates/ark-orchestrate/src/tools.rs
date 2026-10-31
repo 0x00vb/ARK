@@ -82,6 +82,8 @@ impl Adapter for AgentTools {
                 "properties": {
                     "name": { "type": "string", "description": "short lowercase name" },
                     "role": { "type": "string" },
+                    "model": { "type": "string", "description": "provider:model (account allowed); omitted inherits this turn" },
+                    "reasoning": { "type": "string", "description": "supported effort; omitted inherits unless model changes" },
                     "instructions": { "type": "string", "description": "role instructions only; no conversation transcript" }
                 }
             })));
@@ -178,7 +180,15 @@ impl Adapter for AgentTools {
                     return Err(AdapterError::bad_input(action, "name: at most 64 bytes; role: 1 to 500 characters; instructions: at most 16000 characters"));
                 }
                 let a = orch
-                    .create_colleague(&self.agent, &self.task, &name, s("role"), s("instructions"))
+                    .create_colleague(
+                        &self.agent,
+                        &self.task,
+                        &name,
+                        s("role"),
+                        s("instructions"),
+                        crate::execution::ExecutionSelection::parse(&input)
+                            .map_err(|e| AdapterError::bad_input(action, e.to_string()))?,
+                    )
                     .await
                     .map_err(|e| AdapterError::Tool(e.to_string()))?;
                 Ok(ActionOutput::json(
@@ -460,6 +470,8 @@ impl Adapter for ChatTools {
                     "name": { "type": "string", "description": "short, lowercase, e.g. reviewer" },
                     "role": { "type": "string", "description": "one line on what it does" },
                     "instructions": { "type": "string", "description": "how it works, as a system prompt" },
+                    "model": { "type": "string", "description": "provider:model (account allowed); omitted uses default" },
+                    "reasoning": { "type": "string", "description": "supported effort for the selected or default model" },
                     "contacts": { "type": "array", "items": { "type": "string" }, "description": "permitted names, including future agents; connect both directions for discussion" },
                     "skills": { "type": "array", "items": { "type": "string" }, "description": "allowed skill names from SKILLS" },
                     "capabilities": {
@@ -711,7 +723,14 @@ impl Adapter for ChatTools {
                 if !tools.is_empty() {
                     spec = spec.tools(tools);
                 }
-                let a = self.orch.create_agent(spec).await.map_err(fail)?;
+                let a = self
+                    .orch
+                    .create_agent(
+                        spec,
+                        crate::execution::ExecutionSelection::parse(&input).map_err(fail)?,
+                    )
+                    .await
+                    .map_err(fail)?;
                 Ok(ActionOutput::json(
                     json!({ "agent": a.name, "role": a.spec.role, "tools": a.spec.tools }),
                 ))

@@ -2,6 +2,7 @@
 
 ## [0.32.3] - 2026-11-01
 
+- Repeating an admitted task start preserves the live in-memory attempt when another start already owns execution. Observers no longer overwrite that attempt with an older stored snapshot.
 - Native Chats and Home hide internal workflow-step conversations. The canonical Work conversation, persistent agents and historical chats in ordinary child projects remain visible. This uses the existing execution marker without changing stored data or the client protocol.
 
 ## [0.32.2] - 2026-11-01

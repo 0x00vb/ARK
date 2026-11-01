@@ -1360,6 +1360,63 @@ impl ark_model::Provider for BlockingWorkProvider {
     }
 }
 
+#[tokio::test]
+async fn repeated_start_preserves_the_live_record_before_its_attempt_is_persisted() {
+    let dir = tempfile::tempdir().unwrap();
+    let provider = Arc::new(BlockingWorkProvider {
+        calls: Default::default(),
+        entered: Default::default(),
+        released: tokio::sync::Semaphore::new(0),
+    });
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(provider.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("project", "test").unwrap();
+    let models = Arc::new(
+        crate::Models::builder()
+            .default_model("blocked")
+            .provider("blocked", provider.clone())
+            .build(),
+    );
+    let o = Orchestrator::builder(&ark, &project)
+        .models(models)
+        .build()
+        .unwrap();
+    o.spawn(AgentSpec::new("reader")).await.unwrap();
+    let receipt = o
+        .admit_work(
+            crate::WorkTarget::Agent {
+                name: "reader".into(),
+            },
+            TaskSpec::new("one request"),
+            "desktop",
+            "one",
+        )
+        .await
+        .unwrap();
+    let id = receipt.task.as_deref().unwrap();
+    let (reserved, lease) = o.inner.reserve_execution(id).unwrap();
+    assert!(lease.is_some());
+    {
+        let mut state = o.inner.state.lock().unwrap();
+        let task = state.tasks.get_mut(id).unwrap();
+        task.record = reserved.clone();
+        task.record.state = TaskState::Running;
+        task.record.attempts = 1;
+    }
+    o.execute_work(&receipt.id).unwrap();
+    let observed = o.task(id).unwrap();
+    assert_eq!(observed.attempts, 1);
+    assert_eq!(observed.state, TaskState::Running);
+    assert_eq!(observed.execution_owner, reserved.execution_owner);
+    assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    drop(lease);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn live_work_has_one_executor_and_other_instances_observe_without_restarting_it() {
     let dir = tempfile::tempdir().unwrap();

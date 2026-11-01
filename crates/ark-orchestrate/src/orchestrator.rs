@@ -2773,11 +2773,11 @@ impl Inner {
                     Some(lease) => Some(lease),
                     None => {
                         let (record, lease) = self.reserve_execution(id)?;
-                        task.record = record;
-                        task.recovering |= task.record.attempts > 0;
                         if lease.is_none() {
                             return Ok(());
                         }
+                        task.record = record;
+                        task.recovering |= task.record.attempts > 0;
                         lease
                     }
                 }

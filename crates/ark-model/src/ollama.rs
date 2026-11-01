@@ -92,6 +92,9 @@ fn to_wire_message(m: &Message) -> Value {
 
 #[async_trait]
 impl Provider for Ollama {
+    fn host_controls_tools(&self) -> bool {
+        true
+    }
     fn describe(&self) -> String {
         format!("ollama {}", self.model)
     }

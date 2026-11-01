@@ -14,6 +14,7 @@ ark-store.workspace = true
 ark-tools.workspace = true
 ark-runtime.workspace = true
 jiff.workspace = true
+url.workspace = true
 ark-sdk.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -28,6 +29,7 @@ futures.workspace = true
 
 
 [dev-dependencies]
+rusqlite.workspace = true
 tempfile.workspace = true
 ark-acp.workspace = true
 ark-model.workspace = true

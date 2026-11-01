@@ -48,7 +48,26 @@ use crate::spec::{AgentSpec, TaskSpec};
 use crate::tools::{self, AgentTools};
 use crate::OrchError;
 
+mod admission;
+mod authority;
+mod automation_children;
+mod automation_reports;
+mod automation_schedule;
+mod automations;
 mod elsewhere;
+mod general;
+mod legacy_automation;
+mod runs;
+mod webhooks;
+pub use admission::{WorkReceipt, WorkTarget};
+pub use general::{GeneralWorkResult, GeneralWorkStart, GeneralWorkState};
+mod ownership;
+mod resolution;
+mod results;
+pub use resolution::{WorkFailure, WorkRunRef};
+mod work;
+mod work_snapshot;
+pub use work_snapshot::{WorkEntry, WorkPage, WorkTemplate};
 
 pub(crate) const AGENT: &str = "orch_agent";
 pub(crate) const TASK: &str = "orch_task";
@@ -142,6 +161,7 @@ impl<'a> OrchestratorBuilder<'a> {
         let settings = self.ark.settings();
         let (events, _) = broadcast::channel(1024);
         let project = self.project;
+        let ticks = ownership::schedule_lock(&engine, project.id.as_str())?;
         let inner = Arc::new_cyclic(|me| Inner {
             me: me.clone(),
             stream: format!("orch:{}", project.id),
@@ -165,8 +185,9 @@ impl<'a> OrchestratorBuilder<'a> {
             chat_waits: Mutex::new(Vec::new()),
             state: Mutex::new(State::default()),
             events,
-            ticks: Mutex::new(()),
+            ticks,
             conversations: tokio::sync::Mutex::new(()),
+            execution_token: uuid::Uuid::new_v4().to_string(),
         });
         let recover = inner.load()?;
         let orch = Orchestrator { inner };
@@ -175,6 +196,8 @@ impl<'a> OrchestratorBuilder<'a> {
         if tokio::runtime::Handle::try_current().is_ok() {
             orch.spawn_schedule_timer(SCHEDULE_TICK);
             orch.inner.recover(&recover);
+            orch.recover_automations()?;
+            orch.inner.deliver_automation_reports()?;
         }
         Ok(orch)
     }
@@ -233,6 +256,7 @@ impl Orchestrator {
         model: &str,
         request: &str,
     ) -> Result<AgentRecord, OrchError> {
+        self.inner.require_agent_control(name)?;
         let _guard = self.inner.conversations.lock().await;
         let record = self
             .agent(name)
@@ -450,7 +474,7 @@ impl Orchestrator {
         let id = self
             .inner
             .create_task(agent, spec, Origin::External, None)?;
-        self.inner.start(&id);
+        self.inner.start(&id)?;
         Ok(id)
     }
 
@@ -480,8 +504,8 @@ impl Orchestrator {
         }
         let id = self
             .inner
-            .create_run(agent, spec, Origin::External, None, None, Some(&key))?;
-        self.inner.start(&id);
+            .create_run(agent, spec, Origin::External, None, Some(&key))?;
+        self.inner.start(&id)?;
         Ok(id)
     }
 
@@ -493,10 +517,7 @@ impl Orchestrator {
 
     /// Wait for a task to end.
     pub async fn wait(&self, task: &str) -> Result<TaskRecord, OrchError> {
-        if !self.inner.state.lock().unwrap().tasks.contains_key(task) {
-            return Err(OrchError::UnknownTask(task.into()));
-        }
-        Ok(self.inner.wait_final(task).await)
+        self.inner.wait_record(task).await
     }
 
     /// [`wait`](Self::wait) in a turn of `chat`: a task that reports to it gets its result there
@@ -559,6 +580,25 @@ impl Orchestrator {
     /// gone (the process restarted), the answer is kept and the task runs again; when its agent
     /// asks the same call, this answers it. Grants the answer gives are kept either way.
     pub fn answer(&self, task: &str, decision: ApprovalDecision) -> Result<(), OrchError> {
+        self.answer_current(task, None, decision)
+    }
+
+    pub fn answer_question(
+        &self,
+        task: &str,
+        question: &str,
+        decision: ApprovalDecision,
+    ) -> Result<(), OrchError> {
+        self.answer_current(task, Some(question), decision)
+    }
+
+    fn answer_current(
+        &self,
+        task: &str,
+        expected: Option<&str>,
+        decision: ApprovalDecision,
+    ) -> Result<(), OrchError> {
+        self.inner.require_execution_control(task)?;
         let inner = &self.inner;
         let (live, question, answered) = {
             let mut st = inner.state.lock().unwrap();
@@ -572,6 +612,11 @@ impl Orchestrator {
                 .clone()
                 .filter(|q| q.open() && !t.record.state.is_final())
                 .ok_or_else(|| OrchError::NotAllowed(format!("task {task} waits for no answer")))?;
+            if expected.is_some_and(|expected| q.id != expected) {
+                return Err(OrchError::NotAllowed(
+                    "that approval is no longer pending".into(),
+                ));
+            }
             (t.answer.take(), q, t.answered.clone())
         };
         if let Some(tx) = live {
@@ -606,6 +651,7 @@ impl Orchestrator {
 
     /// Stop a task and every task it delegated that has not ended.
     pub fn cancel(&self, task: &str) -> Result<(), OrchError> {
+        self.inner.require_execution_control(task)?;
         if !self.inner.state.lock().unwrap().tasks.contains_key(task) {
             return Err(OrchError::UnknownTask(task.into()));
         }
@@ -616,16 +662,19 @@ impl Orchestrator {
     /// Stop scheduling work for `agent`. A task it is running stops at the next step and is
     /// suspended; it runs again, from the agent's working state, on [`resume`](Self::resume).
     pub fn suspend(&self, agent: &str) -> Result<(), OrchError> {
+        self.inner.require_agent_control(agent)?;
         self.inner.suspend(agent)
     }
 
     pub fn resume(&self, agent: &str) -> Result<(), OrchError> {
+        self.inner.require_agent_control(agent)?;
         self.inner.resume(agent)
     }
 
     /// Cancel everything `agent` has open, close its model session, and take no more work
     /// for it. Its records and store stay.
     pub async fn terminate(&self, agent: &str) -> Result<(), OrchError> {
+        self.inner.require_agent_control(agent)?;
         self.inner.terminate(agent).await?;
         // An ended agent runs nothing on a schedule either.
         let mine: Vec<String> = {
@@ -637,7 +686,7 @@ impl Orchestrator {
                 .collect()
         };
         for id in mine {
-            self.inner.drop_schedule(&id);
+            self.inner.drop_schedule(&id)?;
         }
         Ok(())
     }
@@ -650,6 +699,7 @@ impl Orchestrator {
     /// Send `agent` a message from the application (`from` names the sender, for example
     /// "user").
     pub fn message(&self, from: &str, agent: &str, text: &str) -> Result<bool, OrchError> {
+        self.inner.require_agent_control(agent)?;
         self.inner.send(from, agent, text, None)
     }
 
@@ -747,7 +797,7 @@ impl Orchestrator {
         }
         opts.policies(&mut rec);
         let _one = self.inner.ticks.lock().unwrap();
-        self.inner.save_schedule(&rec);
+        let rec = self.inner.save_schedule(&rec)?;
         self.inner
             .state
             .lock()
@@ -777,6 +827,34 @@ impl Orchestrator {
 
     /// Where a schedule is: scheduled, running, asking, retrying, succeeded, failed, paused.
     pub fn schedule_state(&self, s: &ScheduleRecord) -> crate::ScheduleState {
+        if s.target.is_some() {
+            use crate::{automation::RunPhase, ScheduleState};
+            let last = match s.last_task.as_deref() {
+                Some(id) => match self.automation_run(id) {
+                    Ok(run) => Some(run),
+                    Err(error) => {
+                        tracing::error!(schedule=%s.id, %error, "could not read the scheduled execution state");
+                        return ScheduleState::Failed;
+                    }
+                },
+                None => None,
+            };
+            if let Some(run) = &last {
+                match run.phase {
+                    RunPhase::Pending | RunPhase::Running => return ScheduleState::Running,
+                    RunPhase::WaitingApproval => return ScheduleState::Asking,
+                    _ => {}
+                }
+            }
+            if s.paused {
+                return ScheduleState::Paused;
+            }
+            return match last.map(|run| run.phase) {
+                Some(RunPhase::Completed) => ScheduleState::Succeeded,
+                Some(RunPhase::Failed | RunPhase::Interrupted) => ScheduleState::Failed,
+                _ => ScheduleState::Scheduled,
+            };
+        }
         let st = self.inner.state.lock().unwrap();
         let last = s
             .last_task
@@ -791,7 +869,7 @@ impl Orchestrator {
     pub fn unschedule(&self, id: &str) -> Result<ScheduleRecord, OrchError> {
         let rec = {
             let _one = self.inner.ticks.lock().unwrap();
-            let gone = self.inner.drop_schedule(id);
+            let gone = self.inner.drop_schedule(id)?;
             gone.ok_or_else(|| self.inner.no_schedule(id))?
         };
         self.inner.cancel_waiting_retry(&rec);
@@ -828,6 +906,7 @@ impl Orchestrator {
         let rec = self.inner.change(id, |s| {
             s.paused = true;
             s.next_ms = None;
+            s.admission_slot_ms = None;
             Ok(())
         })?;
         self.inner.cancel_waiting_retry(&rec);
@@ -840,7 +919,13 @@ impl Orchestrator {
         self.inner.change(id, |s| {
             s.paused = false;
             s.failures = 0;
-            s.next_ms = s.when.next_after(now_ms());
+            s.admission_error = None;
+            s.admission_failures = 0;
+            s.admission_retry_ms = None;
+            s.next_ms = s
+                .admission_slot_ms
+                .take()
+                .or_else(|| s.when.next_after(now_ms().max(s.last_ms.unwrap_or(0))));
             if s.next_ms.is_none() {
                 return Err(OrchError::NotAllowed(format!(
                     "{} has passed; change its time to run it again",
@@ -884,6 +969,10 @@ impl Orchestrator {
                 }
                 s.says = w.describe();
                 s.when = w;
+                s.admission_slot_ms = None;
+                s.admission_error = None;
+                s.admission_failures = 0;
+                s.admission_retry_ms = None;
                 if !s.paused {
                     s.next_ms = s.when.next_after(now_ms());
                 }
@@ -895,20 +984,91 @@ impl Orchestrator {
 
     /// Start a run now, outside the schedule's times; its next time stays. Refused while a run
     /// is open, unless the schedule allows overlap. A paused schedule stays paused.
-    pub fn run_schedule_now(&self, id: &str) -> Result<String, OrchError> {
-        let _one = self.inner.ticks.lock().unwrap();
-        let found = self.inner.state.lock().unwrap().schedules.get(id).cloned();
-        let mut s = found.ok_or_else(|| self.inner.no_schedule(id))?;
+    pub async fn run_schedule_now(&self, id: &str) -> Result<String, OrchError> {
+        self.run_schedule_now_inner(id, None).await
+    }
+
+    pub async fn run_schedule_now_with_key(
+        &self,
+        id: &str,
+        request: &str,
+    ) -> Result<String, OrchError> {
+        crate::schedule::manual_receipt_id(self.project().id.as_str(), id, request)?;
+        self.run_schedule_now_inner(id, Some(request)).await
+    }
+
+    async fn run_schedule_now_inner(
+        &self,
+        id: &str,
+        request: Option<&str>,
+    ) -> Result<String, OrchError> {
+        if let Some(request) = request {
+            if let Some(receipt) = self.schedule_run_receipt(id, request)? {
+                return Ok(receipt.execution);
+            }
+        }
+        let durable = self.inner.engine.store.transact_records::<_, OrchError>(
+            self.project().id.as_str(),
+            |tx| {
+                tx.get_record(SCHEDULE, id)?
+                    .map(serde_json::from_value::<ScheduleRecord>)
+                    .transpose()
+                    .map_err(Into::into)
+            },
+        )?;
+        if durable
+            .as_ref()
+            .is_some_and(|record| record.target.is_some())
+        {
+            let generated = uuid::Uuid::new_v4().to_string();
+            let run = self
+                .inner
+                .admit_manual_schedule_run(id, request.unwrap_or(&generated))?;
+            self.execute_automation_run(&run.id)?;
+            return Ok(run.id);
+        }
+        if let Some(request) = request {
+            if let Some(receipt) = self.schedule_run_receipt(id, request)? {
+                return Ok(receipt.execution);
+            }
+        }
+        let mut record = durable.ok_or_else(|| self.inner.no_schedule(id))?;
         let open = self.inner.open_runs(id);
-        if (open > 0 && !s.overlap) || open >= MAX_OPEN_RUNS {
+        if (open > 0 && !record.overlap) || open >= MAX_OPEN_RUNS {
             return Err(OrchError::NotAllowed(
                 "a run is still under way; wait for it to end".into(),
             ));
         }
         let now = now_ms();
-        let task = self.inner.start_run(&mut s, now, now)?;
-        self.inner.keep_schedule(s);
-        Ok(task)
+        self.inner
+            .start_run(&mut record, now, now, false, request)
+            .await
+    }
+
+    pub fn schedule_run_receipt(
+        &self,
+        id: &str,
+        request: &str,
+    ) -> Result<Option<crate::ScheduleRunReceipt>, OrchError> {
+        let key = crate::schedule::manual_receipt_id(self.project().id.as_str(), id, request)?;
+        self.inner
+            .engine
+            .store
+            .transact_records(self.project().id.as_str(), |tx| {
+                let receipt: Option<crate::ScheduleRunReceipt> = tx
+                    .get_record(crate::schedule::MANUAL_RECEIPT, &key)?
+                    .map(serde_json::from_value)
+                    .transpose()?;
+                if receipt
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.schedule != id || receipt.request != request)
+                {
+                    return Err(OrchError::NotAllowed(
+                        "the manual trigger key names another execution".into(),
+                    ));
+                }
+                Ok(receipt)
+            })
     }
 
     /// A schedule's runs, newest first: each is a task with its state, result, error, outputs
@@ -928,8 +1088,8 @@ impl Orchestrator {
 
     /// Start every schedule due at `now_ms`; returns the tasks started. The orchestrator's
     /// timer calls this; an app with its own clock (or a test) can too.
-    pub fn tick_schedules(&self, now_ms: u64) -> Vec<String> {
-        self.inner.tick_schedules(now_ms)
+    pub async fn tick_schedules(&self, now_ms: u64) -> Vec<String> {
+        self.inner.tick_schedules(now_ms).await
     }
 
     /// Run [`tick_schedules`](Self::tick_schedules) every `every` while the orchestrator lives.
@@ -939,7 +1099,7 @@ impl Orchestrator {
         tokio::spawn(async move {
             loop {
                 let Some(inner) = weak.upgrade() else { break };
-                inner.tick_schedules(now_ms());
+                inner.tick_schedules(now_ms()).await;
                 drop(inner);
                 tokio::time::sleep(every).await;
             }
@@ -1048,6 +1208,7 @@ pub(crate) struct AgentRt {
 }
 
 pub(crate) struct TaskRt {
+    execution_lease: Option<ownership::ExecutionLease>,
     pub record: TaskRecord,
     execution_model: Option<String>,
     cancel: CancelToken,
@@ -1103,8 +1264,9 @@ pub(crate) struct Inner {
     events: broadcast::Sender<OrchEvent>,
     stream: String,
     /// Held while schedules are ticked: one tick at a time.
-    ticks: Mutex<()>,
+    ticks: Arc<Mutex<()>>,
     conversations: tokio::sync::Mutex<()>,
+    execution_token: String,
     /// (task, chat): a turn of that chat waits for the task in this process and takes its
     /// result as its call's answer, so it is not posted too. Lost with the process, as the
     /// turn is: then the result is posted ([`ChatWait`]).
@@ -1188,6 +1350,10 @@ fn reports(t: &TaskRecord) -> Option<(bool, String)> {
 
 enum Attempt {
     Done(String),
+    SavedResultFailed {
+        answer: String,
+        error: String,
+    },
     Stopped(Stop),
     /// A failure another try may not hit (the model unreachable, a reply it could not get right).
     Failed(String),
@@ -1196,14 +1362,28 @@ enum Attempt {
 }
 
 struct Final {
+    _agent_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
     state: TaskState,
     result: Option<String>,
     error: Option<String>,
 }
 
 impl Final {
+    fn holding(mut self, guard: tokio::sync::OwnedMutexGuard<()>) -> Self {
+        self._agent_guard = Some(guard);
+        self
+    }
+    fn saved_result_failed(answer: String, error: String) -> Self {
+        Self {
+            _agent_guard: None,
+            state: TaskState::Failed,
+            result: Some(answer),
+            error: Some(error),
+        }
+    }
     fn done(r: String) -> Self {
         Final {
+            _agent_guard: None,
             state: TaskState::Done,
             result: Some(r),
             error: None,
@@ -1211,6 +1391,7 @@ impl Final {
     }
     fn failed(e: impl Into<String>) -> Self {
         Final {
+            _agent_guard: None,
             state: TaskState::Failed,
             result: None,
             error: Some(e.into()),
@@ -1218,6 +1399,7 @@ impl Final {
     }
     fn cancelled(why: impl Into<String>) -> Self {
         Final {
+            _agent_guard: None,
             state: TaskState::Cancelled,
             result: None,
             error: Some(why.into()),
@@ -1226,97 +1408,12 @@ impl Final {
     /// Not an end: the process is stopping and the task continues after the restart.
     fn left() -> Self {
         Final {
+            _agent_guard: None,
             state: TaskState::Queued,
             result: None,
             error: None,
         }
     }
-}
-
-/// The open task another agent runs for `item`, if any: then `owner` may not take it.
-fn claimable(st: &State, item: &str, owner: &str) -> Result<(), OrchError> {
-    let w = st
-        .work
-        .get(item)
-        .ok_or_else(|| OrchError::NotAllowed(format!("no board item `{item}`")))?;
-    let busy = w.tasks.iter().rev().find_map(|t| {
-        st.tasks
-            .get(t)
-            .filter(|t| !t.record.state.is_final() && t.record.owner != owner)
-            .map(|t| (t.record.owner.clone(), t.record.id.clone()))
-    });
-    match busy {
-        Some((other, task)) => Err(OrchError::NotAllowed(format!(
-            "{} is being worked on by {other} ({task}); wait for it or pick another item",
-            w.id
-        ))),
-        None => Ok(()),
-    }
-}
-
-/// The rank that puts `w` before `before` in its board's column, or at the column's end.
-fn column_rank(st: &State, w: &WorkItem, before: Option<&str>) -> f64 {
-    let mut column: Vec<&WorkItem> = st
-        .work
-        .values()
-        .filter(|o| o.board == w.board && o.state == w.state && o.id != w.id)
-        .collect();
-    column.sort_by(|a, b| {
-        a.rank
-            .partial_cmp(&b.rank)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    rank_before(&column, before)
-}
-
-/// Apply the fields of `c` other than state and place, checked.
-fn apply_change(st: &State, w: &mut WorkItem, by: &str, c: WorkChange) -> Result<(), OrchError> {
-    if let Some(t) = c.title {
-        let t = t.trim();
-        if t.is_empty() {
-            return Err(OrchError::NotAllowed("an item needs a title".into()));
-        }
-        w.title = clip(t, 200);
-    }
-    if let Some(n) = c.note {
-        w.note = clip(&n, 4000);
-    }
-    if let Some(o) = c.owner {
-        let o = o.trim();
-        let owner = match o {
-            "" => None,
-            PERSON | "you" | "person" => Some(PERSON.to_string()),
-            name => {
-                let live = st
-                    .agents
-                    .get(name)
-                    .is_some_and(|a| a.record.state != AgentState::Terminated);
-                if !live {
-                    return Err(OrchError::NotAllowed(format!("no agent named `{name}`")));
-                }
-                Some(name.to_string())
-            }
-        };
-        // The agent running a task for it keeps it until that task ends.
-        if owner != w.owner {
-            if let Some(t) = w.tasks.iter().rev().find_map(|t| {
-                st.tasks
-                    .get(t)
-                    .filter(|t| !t.record.state.is_final())
-                    .map(|t| (t.record.owner.clone(), t.record.id.clone()))
-            }) {
-                return Err(OrchError::NotAllowed(format!(
-                    "{} is working on it ({}); cancel that task first",
-                    t.0, t.1
-                )));
-            }
-        }
-        w.set_owner(by, owner);
-    }
-    if let Some(b) = c.blocked {
-        w.set_blocked(by, Some(b));
-    }
-    Ok(())
 }
 
 pub(crate) fn valid_name(n: &str) -> bool {
@@ -1415,68 +1512,60 @@ impl Inner {
         }
     }
 
-    fn save_schedule(&self, r: &ScheduleRecord) {
-        match serde_json::to_value(r) {
-            Ok(v) => {
-                if let Err(e) =
-                    self.engine
-                        .store
-                        .put_record(SCHEDULE, &r.id, self.project.id.as_str(), &v)
-                {
-                    tracing::warn!(schedule = %r.id, "could not save the schedule: {e}");
+    fn save_schedule(&self, record: &ScheduleRecord) -> Result<ScheduleRecord, OrchError> {
+        self.engine
+            .store
+            .transact_records(self.project.id.as_str(), |tx| {
+                let mut next = record.clone();
+                if let Some(value) = tx.get_record(SCHEDULE, &record.id)? {
+                    let current: ScheduleRecord = serde_json::from_value(value)?;
+                    if current.version != record.version || current.target != record.target {
+                        return Err(OrchError::NotAllowed(
+                            "the schedule changed; reload before saving".into(),
+                        ));
+                    }
+                    next.version = next.version.checked_add(1).ok_or_else(|| {
+                        OrchError::NotAllowed("the schedule version limit was reached".into())
+                    })?;
+                    tx.put_record(SCHEDULE, &record.id, &serde_json::to_value(&next)?)?;
+                } else {
+                    tx.insert_record(SCHEDULE, &record.id, &serde_json::to_value(&next)?)?;
                 }
-            }
-            Err(e) => tracing::warn!("could not encode a schedule: {e}"),
-        }
-    }
-
-    /// Store a board or an item of one.
-    fn put(&self, kind: &str, id: &str, value: &impl serde::Serialize) {
-        match serde_json::to_value(value) {
-            Ok(v) => {
-                if let Err(e) = self
-                    .engine
-                    .store
-                    .put_record(kind, id, self.project.id.as_str(), &v)
-                {
-                    tracing::warn!(%id, "could not save {kind}: {e}");
-                }
-            }
-            Err(e) => tracing::warn!(%id, "could not encode {kind}: {e}"),
-        }
-    }
-
-    fn save_board(&self, b: &Board, by: &str) {
-        self.put(BOARD, &b.id, b);
-        self.emit(EventKind::Board {
-            board: b.clone(),
-            by: by.to_string(),
-        });
-    }
-
-    fn save_work(&self, w: &WorkItem, by: &str) {
-        self.put(WORK, &w.id, w);
-        self.emit(EventKind::Work {
-            item: w.clone(),
-            by: by.to_string(),
-        });
+                Ok(next)
+            })
     }
 
     /// Remove a schedule, from memory and the store under one lock, so a tick running at the
     /// same moment cannot put it back.
-    fn drop_schedule(&self, id: &str) -> Option<ScheduleRecord> {
-        let rec = {
-            let mut st = self.state.lock().unwrap();
-            let rec = st.schedules.remove(id)?;
-            let _ = self.engine.store.delete_record(SCHEDULE, &rec.id);
-            rec
-        };
-        self.emit(EventKind::Unscheduled {
-            schedule: rec.id.clone(),
-            agent: rec.agent.clone(),
-            says: rec.says.clone(),
-        });
-        Some(rec)
+    fn drop_schedule(&self, id: &str) -> Result<Option<ScheduleRecord>, OrchError> {
+        let mut state = self.state.lock().unwrap();
+        let record = self
+            .engine
+            .store
+            .transact_records(self.project.id.as_str(), |tx| {
+                let record: Option<ScheduleRecord> = tx
+                    .get_record(SCHEDULE, id)?
+                    .map(serde_json::from_value)
+                    .transpose()?;
+                if let Some(record) = &record {
+                    if record.target.is_some() {
+                        return Err(OrchError::NotAllowed(
+                            "stop this schedule through its automation".into(),
+                        ));
+                    }
+                    tx.delete_record(SCHEDULE, id)?;
+                }
+                Ok::<_, OrchError>(record)
+            })?;
+        if let Some(record) = &record {
+            state.schedules.remove(id);
+            self.emit(EventKind::Unscheduled {
+                schedule: record.id.clone(),
+                agent: record.agent.clone(),
+                says: record.says.clone(),
+            });
+        }
+        Ok(record)
     }
 
     fn no_schedule(&self, id: &str) -> OrchError {
@@ -1503,11 +1592,27 @@ impl Inner {
         f: impl FnOnce(&mut ScheduleRecord) -> Result<(), OrchError>,
     ) -> Result<ScheduleRecord, OrchError> {
         let _one = self.ticks.lock().unwrap();
-        // The state lock is let go before `no_schedule` takes it again.
-        let found = self.state.lock().unwrap().schedules.get(id).cloned();
-        let mut s = found.ok_or_else(|| self.no_schedule(id))?;
-        f(&mut s)?;
-        self.keep_schedule(s.clone());
+        let unavailable = self.no_schedule(id);
+        let mut state = self.state.lock().unwrap();
+        let s = self
+            .engine
+            .store
+            .transact_records(self.project.id.as_str(), |tx| {
+                let mut s: ScheduleRecord =
+                    serde_json::from_value(tx.get_record(SCHEDULE, id)?.ok_or(unavailable)?)?;
+                if s.target.is_some() {
+                    return Err(OrchError::NotAllowed(
+                        "edit this schedule through its automation".into(),
+                    ));
+                }
+                f(&mut s)?;
+                s.version = s.version.checked_add(1).ok_or_else(|| {
+                    OrchError::NotAllowed("the schedule version limit was reached".into())
+                })?;
+                tx.put_record(SCHEDULE, id, &serde_json::to_value(&s)?)?;
+                Ok::<_, OrchError>(s)
+            })?;
+        state.schedules.insert(id.into(), s.clone());
         self.emit(EventKind::ScheduleChanged {
             schedule: s.id.clone(),
             agent: s.agent.clone(),
@@ -1530,12 +1635,40 @@ impl Inner {
             .as_ref()
             .and_then(|t| st.tasks.get(t))
             .is_some_and(|t| !t.record.state.is_final());
-        if s.kept() || running {
-            self.save_schedule(&s);
-            st.schedules.insert(s.id.clone(), s);
+        if s.target.is_some() || s.kept() || running {
+            match self.save_schedule(&s) {
+                Ok(s) => {
+                    st.schedules.insert(s.id.clone(), s);
+                }
+                Err(error) => {
+                    tracing::error!(schedule=%s.id, %error, "could not retain schedule change")
+                }
+            }
         } else {
-            let _ = self.engine.store.delete_record(SCHEDULE, &s.id);
-            st.schedules.remove(&s.id);
+            let deleted = self.engine.store.transact_records::<_, OrchError>(
+                self.project.id.as_str(),
+                |tx| {
+                    let current: ScheduleRecord =
+                        serde_json::from_value(tx.get_record(SCHEDULE, &s.id)?.ok_or_else(
+                            || OrchError::NotAllowed("the schedule is unavailable".into()),
+                        )?)?;
+                    if current.version != s.version || current.target != s.target {
+                        return Err(OrchError::NotAllowed(
+                            "the schedule changed before cleanup".into(),
+                        ));
+                    }
+                    tx.delete_record(SCHEDULE, &s.id)?;
+                    Ok(())
+                },
+            );
+            match deleted {
+                Ok(()) => {
+                    st.schedules.remove(&s.id);
+                }
+                Err(error) => {
+                    tracing::error!(schedule=%s.id, %error, "could not remove completed schedule")
+                }
+            }
         }
     }
 
@@ -1550,7 +1683,14 @@ impl Inner {
 
     /// Start one run of `s` for the time `slot`, at `now`. Its brief says which time it is for
     /// (and that it is late, when it is); it tries again after a failure that may pass.
-    fn start_run(&self, s: &mut ScheduleRecord, slot: u64, now: u64) -> Result<String, OrchError> {
+    async fn start_run(
+        &self,
+        s: &mut ScheduleRecord,
+        slot: u64,
+        now: u64,
+        due: bool,
+        request: Option<&str>,
+    ) -> Result<String, OrchError> {
         let mut spec = s.task.clone();
         let mut line = format!("This is the run scheduled for {}", s.when.label(slot));
         if let Some(tz) = s
@@ -1574,18 +1714,50 @@ impl Inner {
         };
         spec.max_attempts = Some(1 + s.retries);
         spec.retry_delay_ms = Some(crate::schedule::RETRY_DELAY_MS);
-        let id = self.create_run(
-            &s.agent,
-            spec,
-            Origin::External,
-            None,
-            Some((&s.id, slot)),
-            None,
-        )?;
-        self.start(&id);
-        s.runs += 1;
-        s.last_ms = Some(now);
-        s.last_task = Some(id.clone());
+        let request_key = if let Some(request) = request {
+            crate::schedule::manual_receipt_id(self.project.id.as_str(), &s.id, request)?
+        } else if due {
+            format!("{}/{slot}", s.id)
+        } else {
+            format!("{}/{}", s.id, uuid::Uuid::new_v4())
+        };
+        let receipt = self
+            .admit_work_context(
+                WorkTarget::Agent {
+                    name: s.agent.clone(),
+                },
+                spec,
+                "schedule",
+                &request_key,
+                Some(admission::ScheduleAdmission {
+                    expected: s,
+                    slot,
+                    now,
+                    due,
+                    request,
+                }),
+                None,
+            )
+            .await?;
+        let id = receipt.task.clone().ok_or_else(|| {
+            OrchError::NotAllowed("the scheduled execution has no agent task".into())
+        })?;
+        (Orchestrator { inner: self.arc() }).execute_work(&receipt.id)?;
+        *s =
+            self.engine
+                .store
+                .transact_records::<_, OrchError>(self.project.id.as_str(), |tx| {
+                    Ok(serde_json::from_value(
+                        tx.get_record(SCHEDULE, &s.id)?.ok_or_else(|| {
+                            OrchError::NotAllowed("the schedule was removed after admission".into())
+                        })?,
+                    )?)
+                })?;
+        self.state
+            .lock()
+            .unwrap()
+            .schedules
+            .insert(s.id.clone(), s.clone());
         self.prune_runs(&s.id);
         Ok(id)
     }
@@ -1600,7 +1772,7 @@ impl Inner {
                 .values()
                 .map(|t| &t.record)
                 .filter(|t| t.schedule.as_deref() == Some(id) && t.state.is_final())
-                .filter(|t| t.item.is_none() && t.children.is_empty())
+                .filter(|t| t.item.is_none() && t.children.is_empty() && t.handoff_key.is_none())
                 .collect();
             runs.sort_by_key(|t| std::cmp::Reverse(t.created_ms));
             runs.iter().skip(RUNS_KEPT).map(|t| t.id.clone()).collect()
@@ -1690,8 +1862,33 @@ impl Inner {
     /// Start the schedules due at `now`. One tick at a time, and every change to a schedule
     /// waits for it, so a pause or a change made meanwhile is never undone. See
     /// [`crate::schedule`] for the rules.
-    fn tick_schedules(&self, now: u64) -> Vec<String> {
-        let _one = self.ticks.lock().unwrap();
+    async fn tick_schedules(&self, now: u64) -> Vec<String> {
+        if let Err(error) = self.deliver_automation_reports() {
+            tracing::error!(%error,"could not recover pending automation result deliveries");
+        }
+        let fresh = self
+            .engine
+            .store
+            .list_records(SCHEDULE, Some(self.project.id.as_str()))
+            .and_then(|values| {
+                values
+                    .into_iter()
+                    .map(serde_json::from_value::<ScheduleRecord>)
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Into::into)
+            });
+        match fresh {
+            Ok(records) => {
+                self.state.lock().unwrap().schedules = records
+                    .into_iter()
+                    .map(|record| (record.id.clone(), record))
+                    .collect();
+            }
+            Err(error) => {
+                tracing::error!(%error, "could not read schedules before dispatch");
+                return vec![];
+            }
+        }
         let due: Vec<ScheduleRecord> = {
             let st = self.state.lock().unwrap();
             st.schedules
@@ -1702,6 +1899,24 @@ impl Inner {
         };
         let mut started = Vec::new();
         for mut s in due {
+            if s.target.is_some() {
+                match self.dispatch_due_automation(&s.id, now) {
+                    Ok(Some(run)) => {
+                        let id = run.id.clone();
+                        match (Orchestrator { inner: self.arc() }).execute_automation_run(&id) {
+                            Ok(_) => started.push(id),
+                            Err(error) => {
+                                tracing::error!(run=%id, %error, "could not dispatch admitted automation")
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::error!(schedule=%s.id, %error, "could not admit scheduled automation")
+                    }
+                }
+                continue;
+            }
             let Some(slot) = s.next_ms else { continue };
             let (last, open, made) = {
                 let st = self.state.lock().unwrap();
@@ -1760,11 +1975,27 @@ impl Inner {
             } else if (open > 0 && !s.overlap) || open >= MAX_OPEN_RUNS {
                 s.skipped += 1;
             } else {
-                match self.start_run(&mut s, slot, now) {
-                    Ok(id) => started.push(id),
-                    Err(e) => {
-                        tracing::warn!(schedule = %s.id, "a scheduled run could not start: {e}");
-                        s.skipped += 1;
+                match self.start_run(&mut s, slot, now, true, None).await {
+                    Ok(id) => {
+                        started.push(id);
+                        continue;
+                    }
+                    Err(error) => {
+                        tracing::warn!(schedule = %s.id, %error, "a scheduled run could not start");
+                        s.admission_slot_ms = Some(slot);
+                        s.admission_error = Some(error.to_string());
+                        s.admission_failures = s.admission_failures.saturating_add(1);
+                        s.admission_retry_ms = Some(now.saturating_add(
+                            crate::schedule::RETRY_DELAY_MS.saturating_mul(
+                                1u64 << s.admission_failures.saturating_sub(1).min(6),
+                            ),
+                        ));
+                        if s.admission_failures >= MAX_FAILURES {
+                            s.paused = true;
+                            s.next_ms = None;
+                        }
+                        self.keep_schedule(s);
+                        continue;
                     }
                 }
             }
@@ -1830,22 +2061,39 @@ impl Inner {
         let mut interrupted = Vec::new();
         let mut recover = Vec::new();
         let mut late = Vec::new();
+        let mut retired_leases = Vec::new();
         {
             let mut st = self.state.lock().unwrap();
             for v in store.list_records(AGENT, Some(self.project.id.as_str()))? {
                 let Ok(mut r) = serde_json::from_value::<AgentRecord>(v) else {
                     continue;
                 };
-                if matches!(r.state, AgentState::Running | AgentState::Waiting) {
-                    r.state = AgentState::Idle;
+                let live = match &r.current_task {
+                    Some(id) => store
+                        .get_record(TASK, id)?
+                        .map(serde_json::from_value::<TaskRecord>)
+                        .transpose()?
+                        .is_some_and(|task| {
+                            task.execution_owner.is_some()
+                                && task
+                                    .pid
+                                    .is_some_and(|pid| process::writer_alive(pid, task.pid_start))
+                        }),
+                    None => false,
+                };
+                if !live {
+                    if matches!(r.state, AgentState::Running | AgentState::Waiting) {
+                        r.state = AgentState::Idle;
+                    }
+                    r.current_task = None;
                 }
-                r.current_task = None;
                 let (status, _) = watch::channel(r.state);
+                let agent_lock = self.agent_execution_lock(&r.name)?;
                 st.agents.insert(
                     r.name.clone(),
                     AgentRt {
                         record: r,
-                        lock: Arc::new(tokio::sync::Mutex::new(())),
+                        lock: agent_lock,
                         status,
                         steering: None,
                         models: None,
@@ -1859,6 +2107,19 @@ impl Inner {
                 let Ok(mut r) = serde_json::from_value::<TaskRecord>(v) else {
                     continue;
                 };
+                let pending_result = r.submission.is_some()
+                    && r.state != TaskState::Done
+                    && store.get_record(results::RESULT, &r.id)?.is_some();
+                let mut execution_lease = None;
+                if r.run.is_none()
+                    && r.submission.is_some()
+                    && (!r.state.is_final() || pending_result)
+                    && tokio::runtime::Handle::try_current().is_ok()
+                {
+                    let reserved = self.reserve_execution(&r.id)?;
+                    r = reserved.0;
+                    execution_lease = reserved.1;
+                }
                 let mut recovering = false;
                 if r.state.is_final() {
                     if r.report_to.is_some() && !r.reported && reports(&r).is_some() {
@@ -1867,18 +2128,25 @@ impl Inner {
                 } else {
                     // Its result has not been anywhere yet.
                     r.reported = false;
-                    let alive = r
-                        .pid
-                        .is_some_and(|p| p != pid && process::writer_alive(p, r.pid_start));
+                    let alive = if r.run.is_some() {
+                        true
+                    } else if r.submission.is_some() {
+                        execution_lease.is_none()
+                    } else {
+                        r.pid
+                            .is_some_and(|p| p != pid && process::writer_alive(p, r.pid_start))
+                    };
                     if !alive {
-                        r.pid = None;
-                        r.pid_start = None;
+                        if execution_lease.is_none() {
+                            r.pid = None;
+                            r.pid_start = None;
+                        }
                         close_open_calls(&mut r);
                         carry_decisions(&mut r);
                         let asking = r.question.as_ref().is_some_and(Question::open);
                         let scope = st.agents.get(&r.owner).map(|a| a.record.scope.clone());
                         let unsure = match (scope, r.started_ms) {
-                            (Some(scope), Some(started)) if !asking => {
+                            (Some(scope), Some(started)) if !asking && !pending_result => {
                                 self.change_cut_short(&ProjectId(scope), started)
                             }
                             _ => None,
@@ -1907,10 +2175,14 @@ impl Inner {
                         }
                     }
                 }
+                if r.state.is_final() {
+                    retired_leases.extend(execution_lease.take());
+                }
                 let (done, _) = watch::channel(r.state.is_final());
                 st.tasks.insert(
                     r.id.clone(),
                     TaskRt {
+                        execution_lease,
                         execution_model: None,
                         record: r,
                         cancel: CancelToken::new(),
@@ -1939,7 +2211,7 @@ impl Inner {
                         .as_ref()
                         .and_then(|t| st.tasks.get(t))
                         .is_some_and(|t| !t.record.state.is_final());
-                    if s.kept() || open {
+                    if s.target.is_some() || s.kept() || open {
                         st.schedules.insert(s.id.clone(), s);
                     } else {
                         let _ = store.delete_record(SCHEDULE, &s.id);
@@ -1956,24 +2228,14 @@ impl Inner {
                     st.work.insert(w.id.clone(), w);
                 }
             }
-            // Items made before boards had goals, or whose board is gone, join one board.
-            let lost: Vec<String> = st
-                .work
-                .values()
-                .filter(|w| !st.boards.contains_key(&w.board))
-                .map(|w| w.id.clone())
-                .collect();
-            if !lost.is_empty() {
-                let first = Board::new(self.project.id.as_str(), PERSON, FIRST_GOAL, None);
-                self.put(BOARD, &first.id, &first);
-                for id in &lost {
-                    if let Some(w) = st.work.get_mut(id) {
-                        w.board = first.id.clone();
-                        self.put(WORK, id, &*w);
-                    }
-                }
-                st.boards.insert(first.id.clone(), first);
-            }
+            let (boards, items) =
+                store.transact_records::<_, OrchError>(self.project.id.as_str(), |tx| {
+                    let mut data = work::WorkData::load(tx)?;
+                    data.repair_boards(tx, self.project.id.as_str())?;
+                    Ok((data.boards, data.items))
+                })?;
+            st.boards = boards;
+            st.work = items;
         }
         for id in &recover {
             let st = self.state.lock().unwrap();
@@ -1991,12 +2253,20 @@ impl Inner {
                 usage: r.usage,
                 run_ms: r.run_ms,
             });
-            self.work_follows(&r);
+            self.work_follows(&r)?;
             self.report_back(&r);
         }
         for id in late {
             self.report_late(&id);
         }
+        for value in store.list_records(admission::SUBMISSION, Some(self.project.id.as_str()))? {
+            let submission: admission::Submission = serde_json::from_value(value)?;
+            if submission.receipt.turn.is_some() {
+                let orchestrator = Orchestrator { inner: self.arc() };
+                orchestrator.settle_general_work(&submission.receipt.id)?;
+            }
+        }
+        drop(retired_leases);
         Ok(recover)
     }
 
@@ -2015,6 +2285,7 @@ impl Inner {
         model_request: Option<&str>,
         chat_creation: Option<&serde_json::Value>,
     ) -> Result<AgentRecord, OrchError> {
+        self.require_agent_control(&spec.name)?;
         if spec.title.chars().count() > 120 || spec.description.chars().count() > 500 {
             return Err(OrchError::NotAllowed("display metadata is too long".into()));
         }
@@ -2184,7 +2455,7 @@ impl Inner {
                         spec.name.clone(),
                         AgentRt {
                             record: record.clone(),
-                            lock: Arc::new(tokio::sync::Mutex::new(())),
+                            lock: self.agent_execution_lock(&spec.name)?,
                             status,
                             steering: None,
                             models: Some(models.clone()),
@@ -2340,18 +2611,15 @@ impl Inner {
         origin: Origin,
         parent: Option<&str>,
     ) -> Result<String, OrchError> {
-        self.create_run(owner, spec, origin, parent, None, None)
+        self.create_run(owner, spec, origin, parent, None)
     }
 
-    /// [`create_task`](Self::create_task), and for a schedule's run its schedule and the time
-    /// it is for, in the same save: a crash can never leave a run its schedule does not know.
     fn create_run(
         &self,
         owner: &str,
         spec: TaskSpec,
         origin: Origin,
         parent: Option<&str>,
-        run: Option<(&str, u64)>,
         handoff_key: Option<&str>,
     ) -> Result<String, OrchError> {
         let (agent_budget, state) = {
@@ -2373,10 +2641,6 @@ impl Inner {
         if spec.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
         }
-        if let Some(item) = &spec.item {
-            let st = self.state.lock().unwrap();
-            claimable(&st, item, owner)?;
-        }
         let id = format!("t-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let source = match &origin {
             Origin::Agent { agent, .. } => self.scope_of(agent).unwrap_or(self.project.id.clone()),
@@ -2394,54 +2658,18 @@ impl Inner {
                 scope: RuleScope::Task(id.clone()),
             })?;
         }
-        let record = TaskRecord {
-            id: id.clone(),
-            project: self.project.id.to_string(),
-            owner: owner.to_string(),
-            handoff_key: handoff_key.map(str::to_string),
-            objective: spec.objective.clone(),
-            context: spec.context.clone(),
-            origin: origin.clone(),
-            parent: parent.map(str::to_string),
-            children: Vec::new(),
-            after: spec.after.clone(),
+        let mut record = TaskRecord::queued(
+            id.clone(),
+            self.project.id.to_string(),
+            owner.to_string(),
+            &spec,
+            origin.clone(),
+            spec.budget.clone().unwrap_or_default().or(&agent_budget),
             inputs,
-            state: if spec.after.is_empty() {
-                TaskState::Queued
-            } else {
-                TaskState::Pending
-            },
-            waiting_on: None,
-            attempts: 0,
-            max_attempts: spec.max_attempts.unwrap_or(1).max(1),
-            budget: spec.budget.clone().unwrap_or_default().or(&agent_budget),
-            usage: Usage::default(),
-            result: None,
-            error: None,
-            outputs: Vec::new(),
-            tool_calls: Vec::new(),
-            rules: Vec::new(),
-            rules_held_back: 0,
-            brief_tokens: 0,
-            model: String::new(),
-            created_ms: now_ms(),
-            started_ms: None,
-            finished_ms: None,
-            run_ms: 0,
-            pid: None,
-            pid_start: None,
-            schedule: run.map(|(s, _)| s.to_string()),
-            slot: run.map(|(_, at)| at),
-            retry_delay_ms: spec.retry_delay_ms,
-            retry_at_ms: None,
-            item: spec.item.clone(),
-            report_to: spec.report_to.clone(),
-            work: spec.work.clone(),
-            reported: false,
-            question: None,
-            decisions: Vec::new(),
-        };
-        let (parent_rec, linked) = {
+        );
+        record.handoff_key = handoff_key.map(str::to_string);
+        record.parent = parent.map(str::to_string);
+        {
             let mut st = self.state.lock().unwrap();
             if let (Some(_), Origin::Agent { agent, task }) = (handoff_key, &origin) {
                 let active = st.tasks.get(task).is_some_and(|t| {
@@ -2456,35 +2684,43 @@ impl Inner {
                     ));
                 }
             }
-            // Checked again under the lock that inserts the task: two agents never take one item.
-            if let Some(item) = &spec.item {
-                claimable(&st, item, owner)?;
-            }
-            self.engine.store.put_record(
-                TASK,
-                &record.id,
+            let linked = self.engine.store.transact_records::<_, OrchError>(
                 self.project.id.as_str(),
-                &serde_json::to_value(&record)?,
+                |tx| {
+                    let linked = if let Some(item) = &spec.item {
+                        let mut data = work::WorkData::load(tx)?;
+                        let w = data.items.get_mut(item).ok_or_else(|| {
+                            OrchError::NotAllowed(format!("no board item `{item}`"))
+                        })?;
+                        work::claimable(&data.tasks, w, owner)?;
+                        w.tasks.push(id.clone());
+                        w.owner = Some(owner.to_string());
+                        if w.state != WorkState::Doing {
+                            w.state = WorkState::Doing;
+                            w.done_ms = None;
+                        }
+                        w.blocked = None;
+                        w.step(
+                            owner,
+                            format!("started {id}: {}", clip(&spec.objective, 100)),
+                        );
+                        tx.put_record(WORK, &w.id, &serde_json::to_value(&w)?)?;
+                        Some(w.clone())
+                    } else {
+                        None
+                    };
+                    tx.insert_record(TASK, &record.id, &serde_json::to_value(&record)?)?;
+                    Ok(linked)
+                },
             )?;
-            let linked = spec.item.as_ref().and_then(|item| {
-                let w = st.work.get_mut(item)?;
-                w.tasks.push(id.clone());
-                w.owner = Some(owner.to_string());
-                if w.state != WorkState::Doing {
-                    w.state = WorkState::Doing;
-                    w.done_ms = None;
-                }
-                w.blocked = None;
-                w.step(
-                    owner,
-                    format!("started {id}: {}", clip(&spec.objective, 100)),
-                );
-                Some(w.clone())
-            });
+            if let Some(w) = &linked {
+                st.work.insert(w.id.clone(), w.clone());
+            }
             let (done, _) = watch::channel(false);
             st.tasks.insert(
                 id.clone(),
                 TaskRt {
+                    execution_lease: None,
                     execution_model: None,
                     record: record.clone(),
                     cancel: CancelToken::new(),
@@ -2498,43 +2734,93 @@ impl Inner {
                     recovering: false,
                 },
             );
-            let parent_rec = parent.and_then(|p| {
-                st.tasks.get_mut(p).map(|t| {
-                    t.record.children.push(id.clone());
-                    t.record.clone()
-                })
+            if let Some(parent) = parent.and_then(|p| st.tasks.get_mut(p)) {
+                parent.record.children.push(id.clone());
+                self.save_task(&parent.record);
+            }
+            if let Some(w) = linked {
+                self.emit(EventKind::Work {
+                    item: w,
+                    by: owner.to_string(),
+                });
+            }
+            self.emit(EventKind::TaskCreated {
+                task: id.clone(),
+                owner: owner.to_string(),
+                origin,
+                parent: parent.map(str::to_string),
+                objective: clip(&spec.objective, 300),
+                after: spec.after,
             });
-            (parent_rec, linked)
-        };
-        if let Some(p) = parent_rec {
-            self.save_task(&p);
         }
-        if let Some(w) = linked {
-            self.save_work(&w, owner);
-        }
-        self.emit(EventKind::TaskCreated {
-            task: id.clone(),
-            owner: owner.to_string(),
-            origin,
-            parent: parent.map(str::to_string),
-            objective: clip(&spec.objective, 300),
-            after: spec.after,
-        });
         Ok(id)
     }
 
-    fn start(&self, id: &str) {
+    fn start(&self, id: &str) -> Result<(), OrchError> {
+        let lease = {
+            let mut state = self.state.lock().unwrap();
+            let task = state
+                .tasks
+                .get_mut(id)
+                .ok_or_else(|| OrchError::UnknownTask(id.into()))?;
+            if task.record.submission.is_some() {
+                match task.execution_lease.take() {
+                    Some(lease) => Some(lease),
+                    None => {
+                        let (record, lease) = self.reserve_execution(id)?;
+                        task.record = record;
+                        task.recovering |= task.record.attempts > 0;
+                        if lease.is_none() {
+                            return Ok(());
+                        }
+                        lease
+                    }
+                }
+            } else {
+                None
+            }
+        };
         let me = self.arc();
         let id = id.to_string();
         tokio::spawn(async move {
-            let f = me.drive(&id).await;
-            // What an agent program changed is recorded once, when the task ends, however it
-            // ends (a cancel or a terminated agent never reach the run).
+            let _lease = lease;
+            let f = match me.restore_work_result(&id) {
+                Ok(Some(result)) => result,
+                Ok(None) => match me.check_work_recovery(&id) {
+                    Ok(()) => me.drive(&id).await,
+                    Err(error) => Final::failed(error.to_string()),
+                },
+                Err(error) => Final::failed(format!("could not read the retained result: {error}")),
+            };
             if f.state.is_final() {
                 me.end_work(&id).await;
             }
+            let task = me
+                .state
+                .lock()
+                .unwrap()
+                .tasks
+                .get(&id)
+                .map(|task| task.record.clone());
+            if let Some(task) = task {
+                match me.task_submission(&task) {
+                    Ok(Some(submission)) => {
+                        me.models
+                            .close(&me.submission_lane(&submission, &task.owner))
+                            .await
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::error!(task=%id, %error, "could not find the model lane to close")
+                    }
+                }
+            }
             me.finish(&id, f);
+            if let Err(error) = me.cleanup_work_result(&id) {
+                tracing::error!(task = %id, %error, "could not settle the retained work result");
+            }
         });
+        Ok(())
     }
 
     pub(crate) async fn wait_final(&self, id: &str) -> TaskRecord {
@@ -2589,55 +2875,8 @@ impl Inner {
     }
 
     fn retry(&self, id: &str) -> Result<(), OrchError> {
-        {
-            let mut st = self.state.lock().unwrap();
-            let t = st
-                .tasks
-                .get_mut(id)
-                .ok_or_else(|| OrchError::UnknownTask(id.into()))?;
-            if !matches!(t.record.state, TaskState::Failed | TaskState::Cancelled) {
-                return Err(OrchError::NotAllowed(format!(
-                    "task {id} is {}; only a failed or cancelled task runs again",
-                    t.record.state.as_str()
-                )));
-            }
-            t.record.state = TaskState::Queued;
-            t.record.error = None;
-            t.record.finished_ms = None;
-            // A run the person starts again is new work: what earlier runs did (a change cut
-            // short, a change made) is not this run's after a later restart.
-            t.record.started_ms = None;
-            t.record.reported = false;
-            t.record.max_attempts = t.record.attempts + 1;
-            t.stop = None;
-            t.cancel = CancelToken::new();
-            t.done.send_replace(false);
-        }
-        let rec = self.update_task(id, |_| {});
-        if let Some(r) = rec {
-            if let Some(item) = &r.item {
-                let w = {
-                    let mut st = self.state.lock().unwrap();
-                    st.work.get_mut(item).map(|w| {
-                        w.blocked = None;
-                        if w.state != WorkState::Doing {
-                            w.state = WorkState::Doing;
-                            w.done_ms = None;
-                        }
-                        w.step(&r.owner, format!("running {} again", r.id));
-                        w.clone()
-                    })
-                };
-                if let Some(w) = w {
-                    self.save_work(&w, &r.owner);
-                }
-            }
-            self.emit(EventKind::TaskQueued {
-                task: r.id,
-                reason: "retry".into(),
-            });
-        }
-        self.start(id);
+        self.retry_record(id)?;
+        self.start(id)?;
         Ok(())
     }
 
@@ -2689,7 +2928,7 @@ impl Inner {
             for d in &after {
                 let cancel = self.cancel_token(id);
                 let rec = tokio::select! {
-                    r = self.wait_final(d) => r,
+                    r = self.wait_record(d) => match r { Ok(record) => record, Err(error) => return Final::failed(error.to_string()) },
                     _ = cancel.cancelled() => return self.stopped_before_start(id),
                 };
                 if rec.state != TaskState::Done {
@@ -2765,16 +3004,16 @@ impl Inner {
                 drop(guard);
                 continue;
             }
-            let models = match self.models_for(&owner).await {
+            let models = match self.task_models_for(id, &owner).await {
                 Ok(m) => m,
-                Err(e) => return Final::failed(e.to_string()),
+                Err(e) => return Final::failed(e.to_string()).holding(guard),
             };
             if !self.acquire(id, &models.account).await {
-                return self.stopped_before_start(id);
+                return self.stopped_before_start(id).holding(guard);
             }
             if self.engine.is_stopping() {
                 self.release(id).await;
-                return Final::left();
+                return Final::left().holding(guard);
             }
             let attempt = self.attempt(id, &owner, &models, resumed).await;
             // Answers carry only into the run that continues one the process stopped in.
@@ -2782,9 +3021,11 @@ impl Inner {
                 self.update_task(id, |t| t.decisions.iter_mut().for_each(|d| d.carry = false));
             }
             self.release(id).await;
-            drop(guard);
             match attempt {
-                Attempt::Done(answer) => return Final::done(answer),
+                Attempt::Done(answer) => return Final::done(answer).holding(guard),
+                Attempt::SavedResultFailed { answer, error } => {
+                    return Final::saved_result_failed(answer, error).holding(guard)
+                }
                 Attempt::Stopped(Stop::Suspend) => {
                     // A question it was asking is asked again when it runs again.
                     self.update_task(id, |t| {
@@ -2793,12 +3034,14 @@ impl Inner {
                     });
                     continue;
                 }
-                Attempt::Stopped(Stop::Cancel) => return Final::cancelled("cancelled"),
-                Attempt::Stopped(Stop::Restart) => return Final::left(),
-                Attempt::Stopped(Stop::Limit(l)) => {
-                    return Final::failed(format!("budget exceeded: {l}"))
+                Attempt::Stopped(Stop::Cancel) => {
+                    return Final::cancelled("cancelled").holding(guard)
                 }
-                Attempt::Fatal(e) => return Final::failed(e),
+                Attempt::Stopped(Stop::Restart) => return Final::left().holding(guard),
+                Attempt::Stopped(Stop::Limit(l)) => {
+                    return Final::failed(format!("budget exceeded: {l}")).holding(guard)
+                }
+                Attempt::Fatal(e) => return Final::failed(e).holding(guard),
                 Attempt::Failed(e) => {
                     let (attempts, max, base) = {
                         let st = self.state.lock().unwrap();
@@ -2806,8 +3049,9 @@ impl Inner {
                         (t.attempts, t.max_attempts, t.retry_delay_ms)
                     };
                     if attempts >= max {
-                        return Final::failed(e);
+                        return Final::failed(e).holding(guard);
                     }
+                    drop(guard);
                     let delay = Duration::from_millis(match base {
                         Some(b) => b.saturating_mul(1 << attempts.saturating_sub(1).min(6)),
                         None => 500 * (1 << attempts.min(6)),
@@ -2851,9 +3095,24 @@ impl Inner {
             let label = crate::schedule::local_label(at);
             self.queued(id, TaskState::Queued, format!("trying again at {label}"));
             let cancel = self.cancel_token(id);
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_millis(wait)) => {}
-                _ = cancel.cancelled() => return false,
+            let deadline = tokio::time::sleep(Duration::from_millis(wait));
+            tokio::pin!(deadline);
+            let mut poll = tokio::time::interval(Duration::from_millis(250));
+            loop {
+                tokio::select! {
+                    _ = &mut deadline => break,
+                    _ = cancel.cancelled() => return false,
+                    _ = poll.tick() => {
+                        let schedule = self.state.lock().unwrap().tasks.get(id).and_then(|task| task.record.schedule.clone());
+                        if let Some(schedule) = schedule {
+                            match self.engine.store.get_record(SCHEDULE, &schedule).and_then(|value| value.map(serde_json::from_value::<ScheduleRecord>).transpose().map_err(Into::into)) {
+                                Ok(Some(schedule)) if !schedule.paused => {},
+                                Ok(_) => { self.stop(id, Stop::Cancel); return false; },
+                                Err(error) => { self.stop(id, Stop::Limit(format!("could not read the schedule before retry: {error}"))); return false; },
+                            }
+                        }
+                    }
+                }
             }
         }
         self.update_task(id, |t| t.retry_at_ms = None);
@@ -2910,7 +3169,9 @@ impl Inner {
                     reason: RESTARTED.into(),
                 });
             }
-            self.start(id);
+            if let Err(error) = self.start(id) {
+                tracing::error!(task = %id, %error, "could not recover work execution");
+            }
         }
     }
 
@@ -3197,7 +3458,7 @@ impl Inner {
         resumed: bool,
     ) -> Attempt {
         let worker;
-        let (task, agent, deps, children, inbox, cancel, roster, item) = {
+        let (task, mut agent, deps, children, inbox, cancel, roster, item) = {
             let mut st = self.state.lock().unwrap();
             let task = st.tasks[id].record.clone();
             let item = task.item.as_ref().and_then(|w| st.work.get(w).cloned());
@@ -3224,8 +3485,16 @@ impl Inner {
                 })
                 .collect();
             let a = st.agents.get_mut(owner).expect("the owner exists");
-            let inbox = std::mem::take(&mut a.record.inbox);
-            worker = a.worker.clone();
+            let inbox = if task.conversation.is_some() {
+                Vec::new()
+            } else {
+                std::mem::take(&mut a.record.inbox)
+            };
+            worker = if task.conversation.is_some() {
+                None
+            } else {
+                a.worker.clone()
+            };
             (
                 task,
                 a.record.clone(),
@@ -3237,6 +3506,45 @@ impl Inner {
                 item,
             )
         };
+        if task.submission.is_some() {
+            let durable = self
+                .engine
+                .store
+                .get_record(AGENT, &format!("{}/{}", self.project.id, owner));
+            match durable.and_then(|value| {
+                value
+                    .map(serde_json::from_value::<AgentRecord>)
+                    .transpose()
+                    .map_err(ark_store::StoreError::from)
+            }) {
+                Ok(Some(agent))
+                    if matches!(agent.state, AgentState::Suspended | AgentState::Terminated) =>
+                {
+                    return Attempt::Fatal("the selected agent is unavailable".into())
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => return Attempt::Fatal("the selected agent is missing".into()),
+                Err(error) => return Attempt::Fatal(error.to_string()),
+            }
+        }
+        let scope = ProjectId(
+            task.execution_scope
+                .clone()
+                .unwrap_or_else(|| agent.scope.clone()),
+        );
+        match self.prepare_submission(&task, &scope) {
+            Ok(Some(spec)) => agent.spec = spec,
+            Ok(None) => {}
+            Err(error) => return Attempt::Fatal(error.to_string()),
+        }
+        if agent
+            .spec
+            .profile_name
+            .as_ref()
+            .is_some_and(|name| !self.profiles.iter().any(|profile| &profile.name == name))
+        {
+            return Attempt::Fatal("the agent profile is unavailable".into());
+        }
         let spec = &agent.spec;
         let mut delegates: Vec<(String, String)> = roster
             .iter()
@@ -3253,11 +3561,11 @@ impl Inner {
 
         // Its tools: the allowed app actions, its agent tools, diagrams, rules.
         // The app's tools and the plugins connected now, as this agent may use them.
-        let mut registry: Registry = self
-            .engine
-            .tools()
-            .filtered(|a| spec.tools.iter().any(|p| action_matches(p, a)));
-        {
+        let mut registry: Registry = self.engine.tools().filtered(|a| {
+            spec.tools.iter().any(|p| action_matches(p, a))
+                && (task.run.is_none() || !a.starts_with("agents."))
+        });
+        if task.run.is_none() {
             registry.register(Arc::new(AgentTools {
                 orch: self.me.clone(),
                 agent: owner.to_string(),
@@ -3267,11 +3575,52 @@ impl Inner {
                 can_create: spec.tools.iter().any(|p| action_matches(p, tools::CREATE)),
             }));
         }
+        if let Some(run_id) = &task.run {
+            let run = match self.engine.store.transact_records::<_, OrchError>(
+                self.project.id.as_str(),
+                |tx| {
+                    Ok(serde_json::from_value::<crate::automation::Run>(
+                        tx.get_record(crate::automation::RUN, run_id)?
+                            .ok_or_else(|| {
+                                OrchError::NotAllowed("the execution is missing".into())
+                            })?,
+                    )?)
+                },
+            ) {
+                Ok(run) => run,
+                Err(error) => return Attempt::Fatal(error.to_string()),
+            };
+            let Some(step) = &task.execution_step else {
+                return Attempt::Fatal("the task has no execution step".into());
+            };
+            registry.register(Arc::new(automation_children::RunTools {
+                inner: self.arc(),
+                run,
+                step: step.clone(),
+                parent: Some(task.id.clone()),
+                capacity: None,
+            }));
+        }
         if spec.diagrams {
             registry.register(Arc::new(ark_tools::diagram::Diagrams));
         }
         // Its own web search and browser, as far as its `tools` allow.
-        let owner_name = format!("{}/{}", self.project.id, owner);
+        let owner_name = if self
+            .state
+            .lock()
+            .unwrap()
+            .tasks
+            .get(id)
+            .is_some_and(|task| task.record.submission.is_some())
+        {
+            format!(
+                "{}/{owner}/work/{}",
+                self.project.id,
+                task.conversation.as_deref().unwrap_or(id)
+            )
+        } else {
+            format!("{}/{owner}", self.project.id)
+        };
         let mut per_agent_actions: Vec<String> = Vec::new();
         let mut per_agent_distillers = Vec::new();
         // What it can ask to turn on mid-task (the Computer), as far as its `tools` allow.
@@ -3334,7 +3683,11 @@ impl Inner {
         if !skills.is_empty() {
             registry.register(Arc::new(skills::SkillsTool::new(skills)));
         }
-        let engine = self.engine.scoped(registry);
+        let engine = if task.submission.is_some() {
+            self.engine.for_work(id).scoped(registry)
+        } else {
+            self.engine.scoped(registry)
+        };
         let mut profile = self.agent_profile(spec, &delegates);
         if !turn_on.is_empty() {
             // The app's sources first (accounts, installs), then the agent's own.
@@ -3351,11 +3704,14 @@ impl Inner {
             profile.distillers.push(d);
         }
         profile.core_actions.extend(per_agent_actions);
-        let scope = ProjectId(agent.scope.clone());
-
         // A run that continues an interrupted one gets the changes it already made, so it does
         // not make them twice.
-        let done = if resumed {
+        let done = if resumed && task.submission.is_some() {
+            match self.engine.work_calls(&scope, id) {
+                Ok(calls) => calls,
+                Err(error) => return Attempt::Fatal(error.to_string()),
+            }
+        } else if resumed {
             self.done_before(id, &scope)
         } else {
             Vec::new()
@@ -3379,28 +3735,73 @@ impl Inner {
         }
         .render();
         let brief_tokens = estimate_tokens(&brief);
+        let conversation_input = if task.conversation.is_some() {
+            if task.context.trim().is_empty() {
+                task.objective.clone()
+            } else {
+                format!("{}\n\n{}", task.objective, task.context)
+            }
+        } else {
+            brief.clone()
+        };
 
-        // Its conversation: carry-over between its own tasks, never anyone else's.
-        let mut session = match agent
-            .session
-            .as_deref()
-            .and_then(|s| Session::open(&self.engine, s).ok().flatten())
-        {
-            Some(s) => s,
-            None => match Session::start(&self.engine, &scope) {
-                Ok(s) => s,
-                Err(e) => return Attempt::Failed(e.to_string()),
-            },
+        let mut session = if let Some(conversation) = &task.conversation {
+            let opened = if task.run.is_some() {
+                Session::open_for_execution(&self.engine, conversation)
+            } else {
+                Session::open(&self.engine, conversation)
+            };
+            match opened {
+                Ok(Some(session))
+                    if session.record().project == self.project.id
+                        || task.execution_scope.as_deref()
+                            == Some(session.record().project.as_str()) =>
+                {
+                    session
+                }
+                Ok(Some(_)) => {
+                    return Attempt::Fatal(
+                        "the work conversation belongs to another project".into(),
+                    )
+                }
+                Ok(None) => return Attempt::Fatal("the work conversation was deleted".into()),
+                Err(error) => return Attempt::Fatal(error.to_string()),
+            }
+        } else {
+            match agent
+                .session
+                .as_deref()
+                .and_then(|s| Session::open(&self.engine, s).ok().flatten())
+            {
+                Some(s) => s,
+                None => match Session::start(&self.engine, &scope) {
+                    Ok(s) => s,
+                    Err(e) => return Attempt::Failed(e.to_string()),
+                },
+            }
         };
         let steer = Steering::new();
         let budget = &task.budget;
-        let harness = Harness::new(models.router.clone_view())
-            .max_steps(budget.max_steps.unwrap_or(self.max_steps))
-            .budget_or_auto(self.context_budget)
-            .planner(spec.planner.unwrap_or(self.planner))
-            .critic(spec.critic.unwrap_or(self.critic))
-            .allow_mutate(spec.allow_mutate)
-            .approvals(match &self.approvals {
+        if task.submission.is_some() {
+            match session.execution_project(&self.engine) {
+                Ok(context)
+                    if context == scope
+                        && session.record().work_item.as_ref() == task.item.as_ref() => {}
+                Ok(_) => {
+                    return Attempt::Fatal(
+                        "the work conversation does not match its private context".into(),
+                    )
+                }
+                Err(error) => return Attempt::Fatal(error.to_string()),
+            }
+        }
+        let approvals = if let Some(run) = &task.run {
+            match self.automation_approvals(run, id) {
+                Ok(gate) => Some(gate),
+                Err(error) => return Attempt::Fatal(error.to_string()),
+            }
+        } else {
+            match &self.approvals {
                 Some(gate) if !spec.allow_mutate => {
                     Some(Arc::new(ApprovalGate::new(Arc::new(OnBehalf {
                         orch: self.clone(),
@@ -3410,7 +3811,15 @@ impl Inner {
                     }))))
                 }
                 _ => None,
-            })
+            }
+        };
+        let mut harness = Harness::new(models.router.clone_view())
+            .max_steps(budget.max_steps.unwrap_or(self.max_steps))
+            .budget_or_auto(self.context_budget)
+            .planner(spec.planner.unwrap_or(self.planner))
+            .critic(spec.critic.unwrap_or(self.critic))
+            .allow_mutate(spec.allow_mutate)
+            .approvals(approvals.clone())
             .cancel(Some(cancel.clone()))
             .stopping(Some(self.engine.stopping()))
             .steering(Some(steer.clone()))
@@ -3419,6 +3828,27 @@ impl Inner {
             .skills(catalog)
             .done_before(done);
 
+        if let Some(run) = &task.run {
+            match self.run_guard(run, false).and_then(|guard| {
+                guard.ensure_current()?;
+                Ok(guard)
+            }) {
+                Ok(guard) => {
+                    let Some(gate) = &approvals else {
+                        return Attempt::Fatal("the execution has no approval route".into());
+                    };
+                    let guarded = engine.guarded(guard.clone());
+                    match self
+                        .resume_automation_actions(&guarded, &scope, id, gate, &guard, &cancel)
+                        .await
+                    {
+                        Ok(calls) => harness = harness.guard(guard).done_before(calls),
+                        Err(error) => return Attempt::Fatal(error.to_string()),
+                    }
+                }
+                Err(error) => return Attempt::Fatal(error.to_string()),
+            }
+        }
         let session_id = session.id().to_string();
         if let Some(task) = self.state.lock().unwrap().tasks.get_mut(id) {
             task.execution_model = Some(self.models.selection_spec(models));
@@ -3448,7 +3878,9 @@ impl Inner {
         }
         self.update_agent(owner, |a| {
             a.current_task = Some(id.to_string());
-            a.session = Some(session_id.clone());
+            if task.conversation.is_none() {
+                a.session = Some(session_id.clone());
+            }
         });
         self.set_agent_state(owner, AgentState::Running);
         self.emit(EventKind::TaskStarted {
@@ -3506,7 +3938,13 @@ impl Inner {
             }
             return ran;
         }
-        if let Err(e) = session.begin_turn(&self.engine, &brief) {
+        if let Err(e) = session.begin_turn(&self.engine, &conversation_input) {
+            if task.conversation.is_some() {
+                if let Some(timer) = timer {
+                    timer.abort();
+                }
+                return Attempt::Fatal(format!("could not record the turn start: {e}"));
+            }
             tracing::warn!(task = %id, "could not record the turn start: {e}");
         }
         let started = std::time::Instant::now();
@@ -3540,13 +3978,39 @@ impl Inner {
         self.collect_outputs(id, owner, &scope);
         match result {
             Ok(outcome) if !outcome.cancelled => {
-                if let Err(e) = session.record_turn(&self.engine, &brief, &outcome) {
-                    tracing::warn!(task = %id, "could not record the turn: {e}");
+                if task.submission.is_some() {
+                    if let Err(error) =
+                        self.save_work_result(id, &mut session, &conversation_input, &outcome)
+                    {
+                        return Attempt::SavedResultFailed { answer: outcome.answer, error: format!("the answer is retained but its conversation could not be saved: {error}") };
+                    }
+                } else if let Err(error) =
+                    session.record_turn(&self.engine, &conversation_input, &outcome)
+                {
+                    tracing::warn!(task = %id, %error, "could not record the turn");
                 }
                 Attempt::Done(outcome.answer)
             }
             Ok(outcome) => {
-                let _ = session.record_turn(&self.engine, &brief, &outcome);
+                if task.submission.is_some() && !outcome.interrupted {
+                    if let Err(error) =
+                        self.save_work_result(id, &mut session, &conversation_input, &outcome)
+                    {
+                        return Attempt::SavedResultFailed {
+                            answer: outcome.answer,
+                            error: format!("the stopped turn could not be saved: {error}"),
+                        };
+                    }
+                } else if let Err(error) =
+                    session.record_turn(&self.engine, &conversation_input, &outcome)
+                {
+                    if task.submission.is_some() {
+                        return Attempt::Fatal(format!(
+                            "the interrupted turn could not be saved: {error}"
+                        ));
+                    }
+                    tracing::warn!(task = %id, %error, "could not record the stopped turn");
+                }
                 Attempt::Stopped(
                     self.stop_reason(id)
                         .unwrap_or(if self.engine.is_stopping() {
@@ -3557,7 +4021,16 @@ impl Inner {
                 )
             }
             Err(e) => {
-                let _ = session.fail_turn(&self.engine, &brief, &e.to_string());
+                if let Err(storage) =
+                    session.fail_turn(&self.engine, &conversation_input, &e.to_string())
+                {
+                    if task.submission.is_some() {
+                        return Attempt::Fatal(format!(
+                            "{e}; the failed turn could not be saved: {storage}"
+                        ));
+                    }
+                    tracing::warn!(task = %id, %storage, "could not record the failed turn");
+                }
                 match self.stop_reason(id) {
                     Some(s) => Attempt::Stopped(s),
                     None if self.engine.is_stopping() => Attempt::Stopped(Stop::Restart),
@@ -3757,8 +4230,10 @@ impl Inner {
             t.error = f.error.clone();
             t.waiting_on = None;
             t.finished_ms = Some(now_ms());
-            t.pid = None;
-            t.pid_start = None;
+            if t.submission.is_none() {
+                t.pid = None;
+                t.pid_start = None;
+            }
             t.question = None;
         });
         if let Some(t) = self.state.lock().unwrap().tasks.get_mut(id) {
@@ -3787,7 +4262,7 @@ impl Inner {
             self.set_agent_state(&owner, AgentState::Idle);
         }
         // Results go back up: the parent's agent can use what this task produced.
-        if let (Some(parent), true) = (&rec.parent, !rec.outputs.is_empty()) {
+        if let (Some(parent), true) = (&rec.parent, rec.run.is_none() && !rec.outputs.is_empty()) {
             let parent_owner = {
                 let st = self.state.lock().unwrap();
                 st.tasks.get(parent).map(|t| t.record.owner.clone())
@@ -3844,7 +4319,9 @@ impl Inner {
             usage: rec.usage,
             run_ms: rec.run_ms,
         });
-        self.work_follows(&rec);
+        if let Err(error) = self.work_follows(&rec) {
+            tracing::error!(task = %rec.id, %error, "could not update its work item");
+        }
         self.report_back(&rec);
         if rec.schedule.is_some() {
             self.run_ended(&rec);
@@ -3873,14 +4350,16 @@ impl Inner {
             return;
         }
         let post = Post::new(&t.owner, clip(&t.objective, 80), text, ok).work(&t.id);
-        match ark_runtime::session::post(&self.engine, chat, post.clone()) {
-            Ok(_) => {
+        match ark_runtime::session::post_once(&self.engine, chat, post.clone()) {
+            Ok((_, created)) => {
                 self.update_task(&t.id, |r| r.reported = true);
-                self.emit(EventKind::Posted {
-                    session: chat.clone(),
-                    task: t.id.clone(),
-                    post,
-                })
+                if created {
+                    self.emit(EventKind::Posted {
+                        session: chat.clone(),
+                        task: t.id.clone(),
+                        post,
+                    });
+                }
             }
             Err(e) => tracing::warn!(task = %t.id, "could not post into the chat: {e}"),
         }
@@ -3899,14 +4378,7 @@ impl Inner {
         else {
             return;
         };
-        let Some(chat) = &rec.report_to else { return };
-        match ark_runtime::session::posted(&self.engine, chat, id) {
-            Ok(true) => {
-                self.update_task(id, |r| r.reported = true);
-            }
-            Ok(false) => self.report_back(&rec),
-            Err(e) => tracing::warn!(task = %id, "could not read the chat's posts: {e}"),
-        }
+        self.report_back(&rec);
     }
 
     /// Wait in a turn of `chat` for a task it handed off: the result is that turn's, not posted.
@@ -3927,8 +4399,10 @@ impl Inner {
     /// process, as a restart leaves it ([`Inner::load`]), and is not failed.
     fn leave(&self, id: &str) {
         let rec = self.update_task(id, |t| {
-            t.pid = None;
-            t.pid_start = None;
+            if t.submission.is_none() {
+                t.pid = None;
+                t.pid_start = None;
+            }
             close_open_calls(t);
             carry_decisions(t);
             if t.question.as_ref().is_some_and(Question::open) {
@@ -3959,248 +4433,6 @@ impl Inner {
                 reason: RESTARTED.into(),
             });
         }
-    }
-
-    // ---- the board ------------------------------------------------------------------
-
-    /// A finished task moves its board item (see [`crate::board`]): the last open task done
-    /// makes it done; a failure blocks it; a cancel puts it back in To do.
-    fn work_follows(&self, t: &TaskRecord) {
-        let Some(item) = &t.item else { return };
-        let changed = {
-            let mut st = self.state.lock().unwrap();
-            let others_open = st.work.get(item).is_some_and(|w| {
-                w.tasks.iter().any(|x| {
-                    x != &t.id && st.tasks.get(x).is_some_and(|o| !o.record.state.is_final())
-                })
-            });
-            let Some(w) = st.work.get_mut(item) else {
-                return;
-            };
-            match t.state {
-                TaskState::Done => {
-                    let said = clip(t.result.as_deref().unwrap_or(""), 200);
-                    w.step(&t.owner, format!("finished {}: {said}", t.id));
-                    if !others_open && w.state != WorkState::Done {
-                        w.state = WorkState::Done;
-                        w.done_ms = Some(now_ms());
-                        w.blocked = None;
-                    }
-                }
-                TaskState::Failed => {
-                    let why = format!(
-                        "{} failed: {}",
-                        t.id,
-                        clip(t.error.as_deref().unwrap_or("no reason given"), 200)
-                    );
-                    w.step(&t.owner, why.clone());
-                    if w.state != WorkState::Done {
-                        w.blocked = Some(why);
-                    }
-                }
-                TaskState::Cancelled => {
-                    w.step(&t.owner, format!("{} was cancelled", t.id));
-                    if !others_open && w.state == WorkState::Doing {
-                        w.state = WorkState::Todo;
-                    }
-                }
-                _ => return,
-            }
-            w.clone()
-        };
-        self.save_work(&changed, &t.owner);
-    }
-
-    pub(crate) fn add_work(
-        &self,
-        by: &str,
-        title: &str,
-        change: WorkChange,
-    ) -> Result<WorkItem, OrchError> {
-        if title.trim().is_empty() {
-            return Err(OrchError::NotAllowed("an item needs a title".into()));
-        }
-        let board = match change.board.as_deref().map(str::trim) {
-            Some(id) if !id.is_empty() => self.known_board(id)?,
-            _ => self.latest_board(by)?,
-        };
-        let w = {
-            let mut st = self.state.lock().unwrap();
-            let mut w = WorkItem::new(self.project.id.as_str(), &board, by, title.trim());
-            let mut change = change;
-            change.title = None;
-            change.board = None;
-            // A new item goes at the end of its column unless placed.
-            let state = change.state.take().unwrap_or(WorkState::Todo);
-            w.state = state;
-            if state == WorkState::Done {
-                w.done_ms = Some(now_ms());
-            }
-            w.rank = column_rank(&st, &w, change.before.as_deref());
-            change.before = None;
-            apply_change(&st, &mut w, by, change)?;
-            st.work.insert(w.id.clone(), w.clone());
-            w
-        };
-        self.save_work(&w, by);
-        Ok(w)
-    }
-
-    pub(crate) fn change_work(
-        &self,
-        by: &str,
-        id: &str,
-        change: WorkChange,
-    ) -> Result<WorkItem, OrchError> {
-        let w = {
-            let mut st = self.state.lock().unwrap();
-            let mut w = st
-                .work
-                .get(id)
-                .cloned()
-                .ok_or_else(|| OrchError::NotAllowed(format!("no board item `{id}`")))?;
-            let mut change = change;
-            let to = change
-                .board
-                .take()
-                .map(|b| b.trim().to_string())
-                .filter(|b| !b.is_empty() && *b != w.board);
-            if let Some(to) = &to {
-                let goal = st
-                    .boards
-                    .get(to)
-                    .map(|b| b.goal.clone())
-                    .ok_or_else(|| OrchError::NotAllowed(format!("no board `{to}`")))?;
-                w.board = to.clone();
-                w.step(by, format!("moved it to the board \"{goal}\""));
-            }
-            let moved = change.state.is_some() || change.before.is_some() || to.is_some();
-            if let Some(s) = change.state.take() {
-                w.set_state(by, s);
-            }
-            if moved {
-                w.rank = column_rank(&st, &w, change.before.as_deref());
-            }
-            change.before = None;
-            apply_change(&st, &mut w, by, change)?;
-            w.updated_ms = now_ms();
-            st.work.insert(w.id.clone(), w.clone());
-            w
-        };
-        self.save_work(&w, by);
-        Ok(w)
-    }
-
-    pub(crate) fn remove_work(&self, id: &str) -> Result<WorkItem, OrchError> {
-        let w = {
-            let mut st = self.state.lock().unwrap();
-            let w = st
-                .work
-                .remove(id)
-                .ok_or_else(|| OrchError::NotAllowed(format!("no board item `{id}`")))?;
-            let _ = self.engine.store.delete_record(WORK, id);
-            w
-        };
-        self.emit(EventKind::WorkRemoved {
-            item: w.id.clone(),
-            title: w.title.clone(),
-        });
-        Ok(w)
-    }
-
-    /// `id` when it is one of the project's boards.
-    fn known_board(&self, id: &str) -> Result<String, OrchError> {
-        let st = self.state.lock().unwrap();
-        st.boards
-            .contains_key(id)
-            .then(|| id.to_string())
-            .ok_or_else(|| OrchError::NotAllowed(format!("no board `{id}`")))
-    }
-
-    /// The board with the latest activity; the project's first one when it has none.
-    fn latest_board(&self, by: &str) -> Result<String, OrchError> {
-        let latest = {
-            let st = self.state.lock().unwrap();
-            let items: Vec<WorkItem> = st.work.values().cloned().collect();
-            board::latest_first(st.boards.values().cloned().collect(), &items)
-                .into_iter()
-                .next()
-        };
-        match latest {
-            Some(b) => Ok(b.id),
-            None => Ok(self.add_board(by, FIRST_GOAL, None)?.id),
-        }
-    }
-
-    pub(crate) fn add_board(
-        &self,
-        by: &str,
-        goal: &str,
-        chat: Option<String>,
-    ) -> Result<Board, OrchError> {
-        if goal.trim().is_empty() {
-            return Err(OrchError::NotAllowed("a board needs a goal".into()));
-        }
-        let b = {
-            let mut st = self.state.lock().unwrap();
-            if let Some(b) = st.boards.values().find(|b| b.is_goal(goal)) {
-                return Ok(b.clone());
-            }
-            let b = Board::new(self.project.id.as_str(), by, goal, chat);
-            st.boards.insert(b.id.clone(), b.clone());
-            b
-        };
-        self.save_board(&b, by);
-        Ok(b)
-    }
-
-    pub(crate) fn change_board(&self, by: &str, id: &str, goal: &str) -> Result<Board, OrchError> {
-        let goal = goal.trim();
-        if goal.is_empty() {
-            return Err(OrchError::NotAllowed("a board needs a goal".into()));
-        }
-        let b = {
-            let mut st = self.state.lock().unwrap();
-            if st.boards.values().any(|b| b.id != id && b.is_goal(goal)) {
-                return Err(OrchError::NotAllowed(format!(
-                    "another board has the goal \"{goal}\""
-                )));
-            }
-            let b = st
-                .boards
-                .get_mut(id)
-                .ok_or_else(|| OrchError::NotAllowed(format!("no board `{id}`")))?;
-            b.goal = clip(goal, 120);
-            b.clone()
-        };
-        self.save_board(&b, by);
-        Ok(b)
-    }
-
-    pub(crate) fn remove_board(&self, id: &str) -> Result<Board, OrchError> {
-        let (b, items) = {
-            let mut st = self.state.lock().unwrap();
-            let b = st
-                .boards
-                .remove(id)
-                .ok_or_else(|| OrchError::NotAllowed(format!("no board `{id}`")))?;
-            let items: Vec<String> = st
-                .work
-                .values()
-                .filter(|w| w.board == id)
-                .map(|w| w.id.clone())
-                .collect();
-            (b, items)
-        };
-        for item in items {
-            self.remove_work(&item)?;
-        }
-        let _ = self.engine.store.delete_record(BOARD, id);
-        self.emit(EventKind::BoardRemoved {
-            board: b.id.clone(),
-            goal: b.goal.clone(),
-        });
-        Ok(b)
     }
 
     // ---- delegation and messages ---------------------------------------------------
@@ -4435,10 +4667,9 @@ impl Inner {
                 task: task.to_string(),
             },
             None,
-            None,
             Some(&key),
         )?;
-        self.start(&id);
+        self.start(&id)?;
         Ok(id)
     }
 
@@ -4503,7 +4734,7 @@ impl Inner {
             to_agent: to.to_string(),
             task: id.clone(),
         });
-        self.start(&id);
+        self.start(&id)?;
         Ok(id)
     }
 
@@ -4512,14 +4743,18 @@ impl Inner {
         this: &Arc<Inner>,
         parent: &str,
         ids: &[String],
-    ) -> Vec<TaskRecord> {
+    ) -> Result<Vec<TaskRecord>, OrchError> {
         this.park(parent, ids).await;
-        let mut out = Vec::new();
-        for id in ids {
-            out.push(this.wait_final(id).await);
+        let result = async {
+            let mut out = Vec::new();
+            for id in ids {
+                out.push(this.wait_record(id).await?);
+            }
+            Ok(out)
         }
+        .await;
         this.unpark(parent, ids).await;
-        out
+        result
     }
 
     async fn park(&self, parent: &str, ids: &[String]) {

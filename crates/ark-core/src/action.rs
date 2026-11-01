@@ -93,6 +93,8 @@ pub struct ActionDescriptor {
     /// person's computer).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ask_each_time: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub person_only: bool,
     /// What one "for this session" or "always" answer covers, when it is not the action name:
     /// the calls of a group with the same values of some input fields (every Computer action in
     /// one app). See [`GrantKey`].
@@ -159,9 +161,16 @@ impl ActionDescriptor {
             capabilities: Vec::new(),
             reuse: Reuse::Auto,
             ask_each_time: false,
+            person_only: false,
             grant: None,
             auto_eligible: false,
         }
+    }
+
+    pub fn person_only(mut self) -> Self {
+        self.person_only = true;
+        self.ask_each_time = true;
+        self
     }
 
     /// One answer covers the calls of `group` with the same values of `fields`

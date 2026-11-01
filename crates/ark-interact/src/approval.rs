@@ -185,6 +185,8 @@ mod tests {
 
     fn req() -> ApprovalRequest {
         ApprovalRequest {
+            invocation: None,
+            project: None,
             action: "notes.save".into(),
             summary: "save".into(),
             risk: RiskTier::Mutate,

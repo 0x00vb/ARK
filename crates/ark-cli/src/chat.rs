@@ -397,6 +397,8 @@ mod tests {
 
     fn request(agent: Option<&str>) -> ApprovalRequest {
         ApprovalRequest {
+            invocation: None,
+            project: None,
             action: "notes.save".into(),
             summary: "save".into(),
             risk: RiskTier::Mutate,

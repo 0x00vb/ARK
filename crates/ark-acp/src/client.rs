@@ -644,6 +644,8 @@ pub fn request(call: &Value, folder: &Path, by: &str) -> ApprovalRequest {
     let base =
         |action: &str, input: Value, class: Option<String>, preview: String, summary: String| {
             ApprovalRequest {
+                invocation: None,
+                project: None,
                 action: action.into(),
                 summary,
                 risk: RiskTier::Mutate,

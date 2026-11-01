@@ -60,7 +60,8 @@ export function calendarView(el, file, sourceLabel = 'Source', options = {}) {
     for (const [key, value] of [['When', when], ['Timezone', data.timezone], ['Delivery', DELIVERY[event.delivery]], ['State', STATES[event.state]], ['Account', event.account], ['Next action', event.next_action], ['Draft', event.draft], ['Receipt', event.receipt], ['Source', event.source_record], ['Revision', event.source_revision]]) {
       if (value) rows.append(h('dt', key), h('dd', value));
     }
-    body.append(h('section.cal-detail', { 'aria-label': 'Item details' }, back, heading, rows));
+    const open = options.open ? h('button.btn', { type: 'button', onclick: () => options.open(event) }, event.id.startsWith('run-') || event.id.startsWith('automation-ar-') ? 'Open work' : 'Open automation') : null;
+    body.append(h('section.cal-detail', { 'aria-label': 'Item details' }, back, heading, rows, open));
     heading.focus();
   }
 

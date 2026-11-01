@@ -2212,7 +2212,60 @@ async fn removing_a_computer_takes_its_chat_and_questions_away() {
         .any(|v| v["kind"] == "approval_closed"));
     assert!(a.links().state("vps").is_none());
     // An app that moved it here does not move it again.
-    assert!(ark_ui::computers::kept(dir_a.path(), "vps"));
+    assert!(ark_ui::computers::kept(dir_a.path(), "vps").unwrap());
     let rows = a.call("sessions", json!({ "all": true })).await.unwrap();
     assert!(!rows.to_string().contains(&s), "{rows}");
+}
+
+#[test]
+fn computer_kept_reports_a_store_held_by_another_process() {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+
+    const CHILD: &str = "ARK_KEPT_LOCK_TEST_CHILD";
+    if let Ok(root) = std::env::var(CHILD) {
+        let _store = ark_store::Store::open(root).unwrap();
+        println!("READY");
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).unwrap();
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let store = ark_store::Store::open(dir.path()).unwrap();
+        store
+            .put_record("computer", "kept", "", &json!({}))
+            .unwrap();
+        store
+            .put_record("computer_removed", "removed", "", &json!({}))
+            .unwrap();
+    }
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "computer_kept_reports_a_store_held_by_another_process",
+            "--nocapture",
+        ])
+        .env(CHILD, dir.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = std::io::BufReader::new(child.stdout.take().unwrap());
+    let mut line = String::new();
+    while !line.contains("READY") {
+        line.clear();
+        assert!(out.read_line(&mut line).unwrap() > 0);
+    }
+    for name in ["kept", "removed"] {
+        assert!(matches!(
+            ark_ui::computers::kept(dir.path(), name),
+            Err(ark_store::StoreError::Busy { .. })
+        ));
+    }
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success());
+    for name in ["kept", "removed"] {
+        assert!(ark_ui::computers::kept(dir.path(), name).unwrap());
+    }
 }

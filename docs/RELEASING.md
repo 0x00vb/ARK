@@ -46,6 +46,12 @@ flowchart LR
 | 9 | Verify as a consumer gets it: clone at the tag into an empty directory, check the tag matches the version, run every check | `scripts/verify-release.sh vX.Y.Z` |
 | 10 | Move ARK Desktop's pin (its `CURRENT_STATE.md`, ARK pin) | |
 
+Consumer integration page cases are optional when no consumer source is supplied. Release
+qualification for a consumer change sets `ARK_UI_AGENT_CONSUMER` and
+`ARK_UI_FILE_VIEWER_FIXTURE` to that consumer's `ui` directory, including during fresh-clone
+verification. A standalone Core checkout reports these cases skipped rather than depending
+on an unpublished consumer. Other page cases still run normally.
+
 `scripts/ci.sh` runs, in order: `cargo fmt --check`, the fast version and release-state check,
 clippy with `-D warnings`, normal tests with Cargo's available parallelism, WebKit tests serially, a release build, and the simulated benchmark compared with
 `bench/baseline.json`. A regression fails the run. Do not cap `CARGO_BUILD_JOBS` on a normal

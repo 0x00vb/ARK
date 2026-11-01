@@ -1116,3 +1116,1004 @@ async fn addressed_chat_reads_include_durable_delegated_participants() {
         .unwrap();
     assert!(read["summary"]["session"]["participants"].is_null());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn work_receipts_keep_models_attachments_and_retry_identity_through_the_host() {
+    use ark_interact::ark_orchestrate::{Models, Orchestrator};
+    let dir = tempfile::tempdir().unwrap();
+    let reply = |text: &str| Completion {
+        content: text.into(),
+        tool_calls: vec![],
+        usage: Usage::default(),
+    };
+    let a = Arc::new(MockProvider::new("a", vec![reply("answer A")]));
+    let b = Arc::new(MockProvider::new("b", vec![reply("answer B")]));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(a.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("work", "test").unwrap();
+    let engine = ark.shared_engine();
+    let artifact_id = engine.store.put_blob(b"attachment contents").unwrap();
+    let artifact = Artifact::new(
+        artifact_id.clone(),
+        ArtifactKind::Text,
+        "brief.txt",
+        19,
+        Provenance::Ingested {
+            path: "brief.txt".into(),
+        },
+    );
+    engine.store.put_artifact(&project.id, &artifact).unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(Arc::new(
+            Models::builder()
+                .default_model("a")
+                .provider("a", a.clone())
+                .provider("b", b.clone())
+                .build(),
+        ))
+        .build()
+        .unwrap();
+    let chosen = project.clone();
+    let app = App::new("work test")
+        .ark(ark)
+        .project(move |_| Ok(chosen.clone()))
+        .orchestrator(o.clone());
+    let host = ArkUi::new(app).open().await.unwrap().0;
+    let input = json!({"request_id":"one", "target":{"kind":"general","model":"a"},
+        "task":{"objective":"read the attachment", "artifacts":[artifact_id]}});
+    let receipt = project_call(&host, "work_admit", input.clone())
+        .await
+        .unwrap();
+    assert!(o.agents().is_empty());
+    assert!(a.calls.lock().unwrap().is_empty());
+    assert_eq!(
+        project_call(&host, "work_admit", input).await.unwrap(),
+        receipt
+    );
+    assert_eq!(
+        project_call(&host, "work_receipt", json!({"request_id":"one"}))
+            .await
+            .unwrap(),
+        receipt
+    );
+    assert!(host
+        .call(
+            "chat_send",
+            json!({"session":receipt["conversation"],"text":"different message"})
+        )
+        .await
+        .is_err());
+    let mut rx = host.subscribe();
+    project_call(&host, "work_execute", json!({"receipt":receipt["id"]}))
+        .await
+        .unwrap();
+    next(&mut rx, "turn_finished").await;
+    assert_eq!(a.calls.lock().unwrap().len(), 1);
+    let detail = project_call(&host, "work_get", json!({"work":receipt["work"]}))
+        .await
+        .unwrap();
+    assert_eq!(detail["template"]["objective"], "read the attachment");
+    assert_eq!(detail["template"]["artifacts"][0], artifact.id.0);
+    assert_eq!(detail["usage"].as_array().unwrap().len(), 1);
+    assert_eq!(detail["usage"][0]["usage"]["model_calls"], 1);
+    assert_eq!(detail["usage"][0]["usage"]["cost_micro_usd"], Value::Null);
+    let recorded = serde_json::to_string(&a.calls.lock().unwrap()[0].messages).unwrap();
+    assert!(recorded.contains(&artifact.id.0));
+    assert!(recorded.contains("brief.txt"));
+    let follow = project_call(
+        &host,
+        "work_admit",
+        json!({"request_id":"two",
+        "target":{"kind":"general","model":"b"},
+        "task":{"objective":"continue with B","item":receipt["work"]}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(follow["conversation"], receipt["conversation"]);
+    project_call(&host, "work_execute", json!({"receipt":follow["id"]}))
+        .await
+        .unwrap();
+    next(&mut rx, "turn_finished").await;
+    assert_eq!(b.calls.lock().unwrap().len(), 1);
+    assert_eq!(a.calls.lock().unwrap().len(), 1);
+    project_call(&host, "work_execute", json!({"receipt":follow["id"]}))
+        .await
+        .unwrap();
+    assert_eq!(b.calls.lock().unwrap().len(), 1);
+    let template = project_call(
+        &host,
+        "work_get",
+        json!({"work":receipt["work"],"receipt":follow["id"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(template["template"]["objective"], "read the attachment");
+    assert_eq!(template["template"]["artifacts"][0], artifact.id.0);
+    assert_eq!(template["template"]["target"]["model"], "a");
+    let list = project_call(&host, "work_list", json!({})).await.unwrap();
+    assert_eq!(list["items"][0]["state"], "completed");
+    project_call(&host, "work_archive", json!({"work":receipt["work"]}))
+        .await
+        .unwrap();
+    assert!(
+        project_call(&host, "work_list", json!({})).await.unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        project_call(&host, "work_list", json!({"archived":true}))
+            .await
+            .unwrap()["items"][0]["id"],
+        receipt["work"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn work_questions_keep_their_conversation_and_reads_do_not_interrupt_the_turn() {
+    use ark_interact::ark_orchestrate::{Models, Orchestrator};
+    let dir = tempfile::tempdir().unwrap();
+    let saves = Arc::new(AtomicUsize::new(0));
+    let provider = mock("notes.save");
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(provider.clone())
+        .tool(Arc::new(Notes {
+            saves: saves.clone(),
+        }))
+        .profile(AgentProfile::builder().core_actions(["notes.save"]).build())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("work", "test").unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(Arc::new(
+            Models::builder()
+                .default_model("test")
+                .provider("test", provider)
+                .build(),
+        ))
+        .build()
+        .unwrap();
+    let app = App::new("work approvals")
+        .ark(ark)
+        .project(move |_| Ok(project.clone()))
+        .orchestrator(o);
+    let host = ArkUi::new(app).open().await.unwrap().0;
+    let receipt = project_call(
+        &host,
+        "work_admit",
+        json!({"request_id":"one",
+        "target":{"kind":"general","model":null},"task":{"objective":"save these notes"}}),
+    )
+    .await
+    .unwrap();
+    let other = project_call(
+        &host,
+        "work_admit",
+        json!({"request_id":"two",
+        "target":{"kind":"general","model":null},"task":{"objective":"another work"}}),
+    )
+    .await
+    .unwrap();
+    project_call(&host, "work_cancel", json!({"work":other["work"]}))
+        .await
+        .unwrap();
+    let cancelled = project_call(&host, "work_get", json!({"work":other["work"]}))
+        .await
+        .unwrap();
+    assert_eq!(cancelled["item"]["state"], "cancelled");
+    assert!(cancelled["item"]["start_receipt"].is_null());
+    project_call(&host, "work_execute", json!({"receipt":other["id"]}))
+        .await
+        .unwrap();
+    assert_eq!(
+        project_call(&host, "work_get", json!({"work":other["work"]}))
+            .await
+            .unwrap()["item"]["state"],
+        "cancelled"
+    );
+    let pending = project_call(&host, "work_get", json!({"work":receipt["work"]}))
+        .await
+        .unwrap();
+    assert_eq!(pending["item"]["start_receipt"], receipt["id"]);
+    let mut rx = host.subscribe();
+    project_call(&host, "work_execute", json!({"receipt":receipt["id"]}))
+        .await
+        .unwrap();
+    let ask = next(&mut rx, "approval").await;
+    let current = project_call(&host, "work_get", json!({"work":receipt["work"]}))
+        .await
+        .unwrap();
+    assert_eq!(current["item"]["state"], "attention");
+    assert_eq!(current["item"]["questions"][0]["id"], ask["id"]);
+    assert!(project_call(
+        &host,
+        "work_answer",
+        json!({"work":other["work"],"id":ask["id"],"decision":"allow_once"})
+    )
+    .await
+    .is_err());
+    assert_eq!(saves.load(Ordering::SeqCst), 0);
+    project_call(
+        &host,
+        "work_answer",
+        json!({"work":receipt["work"],"id":ask["id"],"decision":"allow_once"}),
+    )
+    .await
+    .unwrap();
+    let end = next(&mut rx, "turn_finished").await;
+    assert_eq!(end["ok"], true, "{end}");
+    assert_eq!(saves.load(Ordering::SeqCst), 1);
+    let finished = project_call(&host, "work_get", json!({"work":receipt["work"]}))
+        .await
+        .unwrap();
+    assert_eq!(finished["item"]["state"], "completed");
+    assert_eq!(finished["transcript"][0]["interrupted"], Value::Null);
+    assert!(project_call(
+        &host,
+        "work_answer",
+        json!({"work":receipt["work"],"id":ask["id"],"decision":"allow_once"})
+    )
+    .await
+    .is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn signed_webhook_http_preview_delivery_and_rotation_use_real_transport_without_model_calls()
+{
+    use ark_interact::ark_orchestrate::{Models, Orchestrator};
+    use base64::Engine as _;
+    let dir = tempfile::tempdir().unwrap();
+    let provider = Arc::new(MockProvider::new("test", vec![]));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(provider.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("webhook protocol", "test").unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(Arc::new(
+            Models::builder()
+                .default_model("test")
+                .provider("test", provider.clone())
+                .build(),
+        ))
+        .build()
+        .unwrap();
+    let chosen = project.clone();
+    let app = App::new("Webhook protocol test")
+        .ark(ark)
+        .project(move |_| Ok(chosen.clone()))
+        .orchestrator(o.clone());
+    let (host, served) = ArkUi::new(app)
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let draft = json!({"name":"Retain verified input","trigger":{"kind":"webhook"},"inputs":[{"name":"message","port":"text","required":true}],"steps":[{"id":"result","name":"Result","action":{"kind":"result","inputs":[{"kind":"input","name":"message","port":"text"}]}}]});
+    let saved = project_call(
+        &host,
+        "automation_save",
+        json!({"request":"definition","draft":draft}),
+    )
+    .await
+    .unwrap();
+    let automation = saved["automation"].as_str().unwrap();
+    let base = format!("http://127.0.0.1:{}/", served.port);
+    let setup=project_call(&host,"webhook_setup",json!({"automation":automation,"expected":1,"request":"connection-one","base":base,"max_per_hour":5})).await.unwrap();
+    let endpoint = setup["receipt"]["endpoint"].as_str().unwrap().to_string();
+    let connection = setup["receipt"]["connection"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let secret = setup["secret"].as_str().unwrap().to_string();
+    assert!(project_call(
+        &host,
+        "automation_prepare",
+        json!({"automation":automation,"expected":1})
+    )
+    .await
+    .is_err());
+    let verified = project_call(
+        &host,
+        "webhook_probe",
+        json!({"endpoint":endpoint,"connection":connection}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(verified["draft"]["availability"], "local");
+    assert!(o
+        .work_page("person", false, None, 50)
+        .unwrap()
+        .entries
+        .is_empty());
+    assert_eq!(provider.calls.lock().unwrap().len(), 0);
+    let grant = project_call(
+        &host,
+        "automation_prepare",
+        json!({"automation":automation,"expected":1}),
+    )
+    .await
+    .unwrap();
+    project_call(
+        &host,
+        "automation_activate",
+        json!({"automation":automation,"activation":grant["id"],"digest":grant["digest"]}),
+    )
+    .await
+    .unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let oversized = client
+        .post(format!("{base}webhooks/v1/{endpoint}"))
+        .body(vec![b'x'; 64 * 1024 + 1])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(oversized.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
+    {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", served.port))
+            .await
+            .unwrap();
+        socket.write_all(format!("POST /webhooks/v1/{endpoint} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 1\r\n\r\n").as_bytes()).await.unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(35),
+            socket.read_to_end(&mut response),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(response.starts_with(b"HTTP/1.1 408 Request Timeout"));
+    }
+    let send = |connection: String, secret: String, event: &str, body: Vec<u8>| {
+        let client = client.clone();
+        let endpoint = endpoint.clone();
+        let event = event.to_string();
+        let base = base.clone();
+        async move {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                .to_string();
+            let mut bytes = format!(
+                "ark-webhook-v1\n{endpoint}\n{connection}\ndeliver\n{timestamp}\n{event}\n"
+            )
+            .into_bytes();
+            bytes.extend_from_slice(&body);
+            let signature = ring::hmac::sign(
+                &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret.as_bytes()),
+                &bytes,
+            );
+            client
+                .post(format!("{base}webhooks/v1/{endpoint}"))
+                .header("x-ark-connection", connection)
+                .header("x-ark-mode", "deliver")
+                .header("x-ark-timestamp", timestamp)
+                .header("x-ark-event", event)
+                .header(
+                    "x-ark-signature",
+                    format!(
+                        "v1={}",
+                        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(signature.as_ref())
+                    ),
+                )
+                .header("content-type", "application/json")
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let body = serde_json::to_vec(
+        &json!({"inputs":{"message":{"kind":"text","value":"verified source text"}}}),
+    )
+    .unwrap();
+    let response = send(
+        connection.clone(),
+        secret.clone(),
+        "event-one",
+        body.clone(),
+    )
+    .await;
+    assert_eq!(response.status(), 202);
+    let accepted: Value = response.json().await.unwrap();
+    assert_eq!(accepted["duplicate"], false);
+    let run = accepted["run"].as_str().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let state = o.automation_run(run).unwrap();
+            if state.phase.is_final() {
+                assert_eq!(
+                    state.phase,
+                    ark_interact::ark_orchestrate::automation::RunPhase::Completed
+                );
+                assert_eq!(state.output.text, "verified source text");
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let duplicate: Value = send(
+        connection.clone(),
+        secret.clone(),
+        "event-one",
+        body.clone(),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(duplicate["run"], run);
+    assert_eq!(duplicate["duplicate"], true);
+    let wrong = send(
+        connection.clone(),
+        "not-the-credential".into(),
+        "invalid-signature",
+        body.clone(),
+    )
+    .await;
+    assert_eq!(wrong.status(), 401);
+    let routing = serde_json::to_vec(&json!({"inputs":{},"project":"another-project"})).unwrap();
+    assert_eq!(
+        send(connection.clone(), secret.clone(), "bad-routing", routing)
+            .await
+            .status(),
+        400
+    );
+    let url = format!("{base}webhooks/v1/{endpoint}");
+    assert_eq!(
+        client
+            .post(&url)
+            .bearer_auth("a-native-device-token-is-not-a-webhook-key")
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    let replacement=project_call(&host,"webhook_setup",json!({"automation":automation,"expected":1,"request":"connection-two","base":base,"max_per_hour":5})).await.unwrap();
+    let replacement_connection = replacement["receipt"]["connection"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let replacement_secret = replacement["secret"].as_str().unwrap().to_string();
+    assert_eq!(replacement["receipt"]["endpoint"], endpoint);
+    assert_eq!(
+        send(
+            replacement_connection.clone(),
+            replacement_secret.clone(),
+            "pending-credential",
+            body.clone()
+        )
+        .await
+        .status(),
+        401
+    );
+    project_call(
+        &host,
+        "webhook_probe",
+        json!({"endpoint":endpoint,"connection":replacement_connection}),
+    )
+    .await
+    .unwrap();
+    let grant = project_call(
+        &host,
+        "automation_prepare",
+        json!({"automation":automation,"expected":1}),
+    )
+    .await
+    .unwrap();
+    project_call(
+        &host,
+        "automation_activate",
+        json!({"automation":automation,"activation":grant["id"],"digest":grant["digest"]}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        send(connection, secret, "event-one", body.clone())
+            .await
+            .status(),
+        401
+    );
+    let replay: Value = send(
+        replacement_connection.clone(),
+        replacement_secret.clone(),
+        "event-one",
+        body.clone(),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(replay["run"], run);
+    assert_eq!(replay["duplicate"], true);
+    project_call(&host, "automation_pause", json!({"automation":automation}))
+        .await
+        .unwrap();
+    let paused: Value = send(
+        replacement_connection.clone(),
+        replacement_secret.clone(),
+        "event-one",
+        body.clone(),
+    )
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(paused["run"], run);
+    assert_eq!(
+        send(
+            replacement_connection,
+            replacement_secret,
+            "paused-new-event",
+            body
+        )
+        .await
+        .status(),
+        409
+    );
+    assert_eq!(
+        o.work_page("person", false, None, 50)
+            .unwrap()
+            .entries
+            .len(),
+        1
+    );
+    assert_eq!(provider.calls.lock().unwrap().len(), 0);
+    assert!(o.agents().is_empty());
+    let visible = project_call(&host, "work_get", json!({"work":accepted["work"]}))
+        .await
+        .unwrap();
+    assert_eq!(visible["item"]["state"], "completed");
+    assert_eq!(visible["transcript"][0]["answer"], "verified source text");
+    let logs = project_call(&host, "webhook_get", json!({"automation":automation}))
+        .await
+        .unwrap();
+    assert!(logs["deliveries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["state"] == "duplicate"));
+    assert!(!logs.to_string().contains(setup["secret"].as_str().unwrap()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn default_general_followup_reuses_the_original_target_and_private_conversation() {
+    use ark_interact::ark_orchestrate::{Models, Orchestrator};
+    let dir = tempfile::tempdir().unwrap();
+    let provider = Arc::new(MockProvider::new(
+        "test",
+        ["First", "Followup"]
+            .into_iter()
+            .map(|text| Completion {
+                content: text.into(),
+                tool_calls: vec![],
+                usage: Default::default(),
+            })
+            .collect(),
+    ));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(provider.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("default General", "").unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(Arc::new(
+            Models::builder()
+                .default_model("test")
+                .provider("test", provider.clone())
+                .build(),
+        ))
+        .build()
+        .unwrap();
+    let app = App::new("General followup")
+        .ark(ark)
+        .project(move |_| Ok(project.clone()))
+        .orchestrator(o.clone());
+    let host = ArkUi::new(app).open().await.unwrap().0;
+    let first = project_call(&host, "work_admit", json!({"request_id":"first","target":{"kind":"general","model":null},"task":{"objective":"Start"}})).await.unwrap();
+    let mut events = host.subscribe();
+    project_call(&host, "work_execute", json!({"receipt":first["id"]}))
+        .await
+        .unwrap();
+    next(&mut events, "turn_finished").await;
+    let detail = project_call(&host, "work_get", json!({"work":first["work"]}))
+        .await
+        .unwrap();
+    assert_eq!(
+        detail["item"]["target"],
+        json!({"kind":"general","model":null})
+    );
+    let follow = project_call(&host,"work_admit",json!({"request_id":"follow","receipt":detail["active_receipt"],"target":detail["item"]["target"],"task":{"objective":"Continue","item":first["work"]}})).await.unwrap();
+    assert_eq!(follow["conversation"], first["conversation"]);
+    project_call(&host, "work_execute", json!({"receipt":follow["id"]}))
+        .await
+        .unwrap();
+    next(&mut events, "turn_finished").await;
+    let detail = project_call(&host, "work_get", json!({"work":first["work"]}))
+        .await
+        .unwrap();
+    assert_eq!(detail["transcript"].as_array().unwrap().len(), 2);
+    assert_eq!(detail["conversations"].as_array().unwrap().len(), 1);
+    assert_eq!(provider.calls.lock().unwrap().len(), 2);
+    assert!(o.agents().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_host_reads_each_scheduled_conversation_and_stop_only_cancels_the_selected_one() {
+    use ark_interact::ark_orchestrate::{
+        AgentSpec, Models, Orchestrator, ScheduleChange, TaskSpec, TaskState, When,
+    };
+    use ark_sdk::prelude::ark_model::{Message, Provider, ToolDef};
+    struct Held {
+        release: Arc<tokio::sync::Notify>,
+        calls: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl Provider for Held {
+        fn host_controls_tools(&self) -> bool {
+            true
+        }
+        fn describe(&self) -> String {
+            "held test".into()
+        }
+        async fn complete(
+            &self,
+            _: &str,
+            _: &[Message],
+            _: &[ToolDef],
+        ) -> ark_model::Result<Completion> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.release.notified().await;
+            Ok(Completion {
+                content: "First completed".into(),
+                tool_calls: vec![],
+                usage: Default::default(),
+            })
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = Arc::new(Held {
+        release: release.clone(),
+        calls: calls.clone(),
+    });
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(provider.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("shared scheduled item", "").unwrap();
+    let models = Arc::new(
+        Models::builder()
+            .default_model("test")
+            .provider("test", provider)
+            .build(),
+    );
+    let owner = Orchestrator::builder(&ark, &project)
+        .models(models.clone())
+        .build()
+        .unwrap();
+    owner
+        .spawn(AgentSpec::new("reviewer").model("test"))
+        .await
+        .unwrap();
+    let observer = Orchestrator::builder(&ark, &project)
+        .models(models)
+        .build()
+        .unwrap();
+    let make_app = |o, ark: Ark| {
+        let project = project.clone();
+        App::new("scheduled selection")
+            .ark(ark)
+            .project(move |_| Ok(project.clone()))
+            .orchestrator(o)
+    };
+    let owner_host = ArkUi::new(make_app(owner.clone(), ark.clone()))
+        .open()
+        .await
+        .unwrap()
+        .0;
+    let observer_host = ArkUi::new(make_app(observer, ark)).open().await.unwrap().0;
+    let item = owner
+        .add_work("person", "Repeated report", Default::default())
+        .unwrap();
+    let mut task = TaskSpec::new("Report");
+    task.item = Some(item.id.clone());
+    let schedule = owner
+        .schedule("reviewer", task, When::every_minutes(5))
+        .unwrap();
+    owner
+        .change_schedule(
+            &schedule.id,
+            ScheduleChange {
+                overlap: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let first = owner
+        .run_schedule_now_with_key(&schedule.id, "first")
+        .await
+        .unwrap();
+    let second = owner
+        .run_schedule_now_with_key(&schedule.id, "second")
+        .await
+        .unwrap();
+    let snapshot = owner.work_detail("person", &item.id).unwrap();
+    let receipts = &snapshot.entries[0].receipts;
+    let one = receipts
+        .iter()
+        .find(|receipt| receipt.task.as_ref() == Some(&first))
+        .unwrap();
+    let two = receipts
+        .iter()
+        .find(|receipt| receipt.task.as_ref() == Some(&second))
+        .unwrap();
+    for receipt in [one, two] {
+        let detail = project_call(
+            &observer_host,
+            "work_get",
+            json!({"work":item.id,"receipt":receipt.id}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(detail["item"]["conversation"], receipt.conversation);
+        assert_eq!(
+            detail["item"]["target"],
+            json!({"kind":"agent","name":"reviewer"})
+        );
+        assert_eq!(detail["item"]["tasks"].as_array().unwrap().len(), 1);
+    }
+    project_call(
+        &owner_host,
+        "work_cancel",
+        json!({"work":item.id,"receipt":two.id}),
+    )
+    .await
+    .unwrap();
+    let cancelled = tokio::time::timeout(Duration::from_secs(3), owner.wait(&second))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cancelled.state, TaskState::Cancelled);
+    assert!(!owner.task(&first).unwrap().state.is_final());
+    release.notify_one();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(3), owner.wait(&first))
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        TaskState::Done
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_manual_start_client_observes_the_last_receipt_before_repeating() {
+    use ark_interact::ark_orchestrate::{Models, Orchestrator};
+    let dir = tempfile::tempdir().unwrap();
+    let provider = Arc::new(MockProvider::new("test", vec![]));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(provider.clone())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let project = ark.create_project("manual receipts", "test").unwrap();
+    let o = Orchestrator::builder(&ark, &project)
+        .models(Arc::new(
+            Models::builder()
+                .default_model("test")
+                .provider("test", provider)
+                .build(),
+        ))
+        .build()
+        .unwrap();
+    let draft = serde_json::from_value(json!({"name":"Retained start","trigger":{"kind":"manual"},"inputs":[],"authority":{"actions":[],"max_calls":8,"max_mutations":0},"steps":[{"id":"result","name":"Result","action":{"kind":"result","inputs":[{"kind":"literal","text":"retained"}]}}]})).unwrap();
+    let saved = o.save_automation("create", None, None, draft).unwrap();
+    let host = ArkUi::new(
+        App::new("manual receipts")
+            .ark(ark)
+            .project(move |_| Ok(project.clone()))
+            .orchestrator(o),
+    )
+    .open()
+    .await
+    .unwrap()
+    .0;
+    let start = json!({"automation":saved.automation,"expected":1,"request":"direct-client","inputs":{},"previous":null});
+    let first = project_call(&host, "automation_run", start.clone())
+        .await
+        .unwrap();
+    let receipt = project_call(&host, "automation_acknowledge_start", start)
+        .await
+        .unwrap();
+    assert_eq!(receipt["run"], first["id"]);
+    let restored = project_call(
+        &host,
+        "automation_get",
+        json!({"automation":saved.automation}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(restored["entry"]["last_start"]["run"], first["id"]);
+    assert!(project_call(&host, "automation_run", json!({"automation":saved.automation,"expected":1,"request":"stale-editor","inputs":{},"previous":null})).await.is_err());
+    let repeat = project_call(&host, "automation_run", json!({"automation":saved.automation,"expected":1,"request":"explicit-repeat","inputs":{},"previous":first["id"]})).await.unwrap();
+    assert_ne!(repeat["id"], first["id"]);
+    let pending = project_call(
+        &host,
+        "automation_get",
+        json!({"automation":saved.automation}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        pending["entry"]["pending_start"]["request"],
+        "explicit-repeat"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn webhook_ingress_limits_invalid_signatures_and_slow_bodies_without_blocking_rpc() {
+    use tokio::io::AsyncWriteExt;
+    let dir = tempfile::tempdir().unwrap();
+    use ark_interact::ark_orchestrate::{Models, Orchestrator};
+    let model = Arc::new(MockProvider::new("test", vec![]));
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .provider(model.clone())
+        .build()
+        .unwrap();
+    let project = ark.create_project("ingress limits", "test").unwrap();
+    let orchestrator = Orchestrator::builder(&ark, &project)
+        .models(Arc::new(
+            Models::builder()
+                .default_model("test")
+                .provider("test", model.clone())
+                .build(),
+        ))
+        .build()
+        .unwrap();
+    let app = App::new("Ingress limits")
+        .ark(ark)
+        .project(move |_| Ok(project.clone()))
+        .orchestrator(orchestrator);
+    let (host, served) = ArkUi::new(app)
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let base = format!("http://127.0.0.1:{}/", served.port);
+    let saved = project_call(&host, "automation_save", json!({"request":"ingress-definition","draft":{"name":"Ingress test","trigger":{"kind":"webhook"},"steps":[{"id":"result","name":"Result","action":{"kind":"result","inputs":[]}}]}})).await.unwrap();
+    let preview = project_call(
+        &host,
+        "automation_preview_inputs",
+        json!({"automation":saved["automation"],"expected":1,"inputs":{}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(preview["revision"], 1);
+    assert_eq!(preview["bindings"], json!([]));
+    let oversized = project_call(&host, "automation_preview_inputs", json!({"automation":saved["automation"],"expected":1,"inputs":{"large":{"kind":"text","value":"x".repeat(64*1024)}}})).await.unwrap_err().to_string();
+    assert!(oversized.contains("64 KiB"));
+    let validation = project_call(&host, "automation_validate", json!({"draft":{"name":"Required scheduled input","trigger":{"kind":"schedule","when":{"at":"09:00","tz":"UTC"}},"inputs":[{"name":"message","port":"text","required":true}],"steps":[{"id":"result","name":"Result","action":{"kind":"result","inputs":[]}}]}})).await.unwrap();
+    assert_eq!(validation["can_save"], true);
+    assert_eq!(validation["issues"], json!([]));
+    assert_eq!(
+        validation["activation_issues"][0]["field"],
+        "Execution inputs"
+    );
+    assert!(project_call(
+        &host,
+        "automation_history",
+        json!({"automation":saved["automation"],"limit":10})
+    )
+    .await
+    .unwrap()["runs"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let setup = project_call(&host, "webhook_setup", json!({"automation":saved["automation"],"expected":1,"request":"ingress-key","base":base,"max_per_hour":5})).await.unwrap();
+    let endpoint = setup["receipt"]["endpoint"].as_str().unwrap();
+    let connection = setup["receipt"]["connection"]["id"].as_str().unwrap();
+    let url = format!("{base}webhooks/v1/{endpoint}");
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let invalid = || {
+        client
+            .post(&url)
+            .header("x-ark-mode", "preview")
+            .header("x-ark-connection", connection)
+            .header(
+                "x-ark-timestamp",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+                    .to_string(),
+            )
+            .header("x-ark-event", "invalid-ingress")
+            .header("x-ark-signature", format!("v1={}", "0".repeat(64)))
+            .body("{}")
+    };
+    let mut throttled = 0;
+    for _ in 0..40 {
+        let response = invalid().send().await.unwrap();
+        match response.status() {
+            reqwest::StatusCode::UNAUTHORIZED => {}
+            reqwest::StatusCode::TOO_MANY_REQUESTS => {
+                throttled += 1;
+                assert_eq!(response.headers()["retry-after"], "1");
+            }
+            status => panic!("unexpected invalid signature response: {status}"),
+        }
+    }
+    assert!(throttled > 0);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        invalid().send().await.unwrap().status(),
+        reqwest::StatusCode::UNAUTHORIZED
+    );
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let mut slow = Vec::new();
+    for _ in 0..8 {
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", served.port))
+            .await
+            .unwrap();
+        socket.write_all(format!("POST /webhooks/v1/{endpoint} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 1\r\n\r\n").as_bytes()).await.unwrap();
+        slow.push(socket);
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        invalid().send().await.unwrap().status(),
+        reqwest::StatusCode::TOO_MANY_REQUESTS
+    );
+    let served_url = reqwest::Url::parse(&served.url).unwrap();
+    let token = served_url
+        .query_pairs()
+        .find(|(key, _)| key == "token")
+        .unwrap()
+        .1
+        .into_owned();
+    let summary = client
+        .post(format!("{base}rpc"))
+        .bearer_auth(&token)
+        .json(&json!({"method":"summary","params":{}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(summary.status(), reqwest::StatusCode::OK);
+    assert_eq!(summary.json::<Value>().await.unwrap()["ok"], true);
+    drop(slow);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        invalid().send().await.unwrap().status(),
+        reqwest::StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(model.calls.lock().unwrap().len(), 0);
+}

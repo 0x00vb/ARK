@@ -649,7 +649,7 @@ async fn a_scheduled_run_posts_its_result_in_the_chat_and_the_window_shows_it() 
 
     let o = built.lock().unwrap().clone().unwrap();
     let next = o.schedules()[0].next_ms.unwrap();
-    let run = o.tick_schedules(next);
+    let run = o.tick_schedules(next).await;
     o.wait(&run[0]).await.unwrap();
     let post = wait_for(&mut rx, "the post", |v| v["kind"] == "post").await;
     assert_eq!(post["session"], json!(session));
@@ -867,5 +867,24 @@ async fn chat_turn_request_retries_exact_payload_and_refuses_unsupported_fields(
         let mut changed = input.clone();
         changed["request_id"] = request;
         assert!(host.call("submit_task", changed).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn work_and_automation_lists_subscribe_to_project_changes_without_opening_the_board() {
+    for method in ["work_list", "automations"] {
+        let dir = tempfile::tempdir().unwrap();
+        let host = open(dir.path(), Arc::default()).await;
+        let location = host.call("summary", json!({})).await.unwrap()["location"].clone();
+        host.0.call("resource",json!({"ref":{"location":location,"kind":"project","id":""},"operation":{"kind":method,"input":{}}})).await.unwrap();
+        let mut events = host.subscribe();
+        host.call("spawn_agent", json!({"spec":{"name":"new-helper"}}))
+            .await
+            .unwrap();
+        let event = wait_for(&mut events, "scoped project update", |event| {
+            orch_type(event, "agent_spawned") && event.get("ref").is_some()
+        })
+        .await;
+        assert_eq!(event["ref"]["location"], location);
     }
 }

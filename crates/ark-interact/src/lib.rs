@@ -37,6 +37,7 @@ pub mod remote;
 pub mod report;
 pub mod skills;
 pub mod trace;
+pub mod work;
 
 pub use activity::{Activity, ActivityKind};
 pub use approval::{approval_choices, approval_title, ChannelApprover, Choice, PendingApproval};

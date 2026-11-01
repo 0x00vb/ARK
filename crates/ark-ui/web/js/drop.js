@@ -55,8 +55,13 @@ export function acceptDrops(api, captureDraft, zone, { accepts, captureOrigin } 
     const target = captureOrigin ? null : api.at(api.summary().location);
     const origin = captureOrigin ? captureOrigin() : { uploadApi: target, appendDraft: captureDraft(target.location) };
     if (!origin) return;
-    once(origin.uploadApi, async () => addToProject(origin.uploadApi, origin.appendDraft,
-      entries.length ? await walkAll(entries).catch(plain) : plain(), origin.progressTarget));
+    once(origin.uploadApi, async () => {
+      origin.started?.();
+      try {
+        await addToProject(origin.uploadApi, origin.appendDraft,
+          entries.length ? await walkAll(entries).catch(plain) : plain(), origin.progressTarget);
+      } finally { origin.finished?.(); }
+    });
   });
 }
 
@@ -69,8 +74,13 @@ export function chooseFiles(api, captureDraft, { captureOrigin, progressTarget }
     progressTarget,
   };
   choose({ multiple: true }, (files) => {
-    once(origin.uploadApi, () => addToProject(origin.uploadApi, origin.appendDraft,
-      files.map((file) => ({ path: file.name, file })), origin.progressTarget));
+    once(origin.uploadApi, async () => {
+      origin.started?.();
+      try {
+        await addToProject(origin.uploadApi, origin.appendDraft,
+          files.map((file) => ({ path: file.name, file })), origin.progressTarget);
+      } finally { origin.finished?.(); }
+    });
   });
 }
 

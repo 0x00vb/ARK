@@ -38,6 +38,17 @@ pub struct AgentModels {
     pub session: Option<Arc<ManagedSession>>,
 }
 
+impl AgentModels {
+    pub(crate) fn require_host_tools(&self) -> Result<(), OrchError> {
+        for role in [Role::Plan, Role::Reason] {
+            if !self.router.provider(role).host_controls_tools() {
+                return Err(OrchError::NotAllowed("the selected model cannot verify that all actions pass through this execution's approvals".into()));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Resolves agents' model specs. Implement it to route agents your own way.
 #[async_trait::async_trait]
 pub trait ModelResolver: Send + Sync {

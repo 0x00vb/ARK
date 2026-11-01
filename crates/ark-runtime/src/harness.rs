@@ -262,6 +262,7 @@ pub struct Harness {
     focus: Option<Focus>,
     conversation: Option<String>,
     approvals: Option<Arc<ApprovalGate>>,
+    guard: Option<Arc<dyn crate::guard::CallGuard>>,
     cancel: Option<CancelToken>,
     /// The process is stopping ([`Engine::stop_soon`]): like a cancel, except that a batch with
     /// a state-changing call runs to its end.
@@ -350,6 +351,7 @@ impl Harness {
             focus: None,
             conversation: None,
             approvals: None,
+            guard: None,
             cancel: None,
             stopping: None,
             steer: None,
@@ -505,6 +507,11 @@ impl Harness {
         self.approvals = gate;
         self
     }
+    pub fn guard(mut self, guard: Arc<dyn crate::guard::CallGuard>) -> Self {
+        self.guard = Some(guard);
+        self
+    }
+
     /// Stop cooperatively when this token is cancelled.
     pub fn cancel(mut self, token: Option<CancelToken>) -> Self {
         self.cancel = token;
@@ -548,6 +555,12 @@ impl Harness {
         question: &str,
         mut on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, AgentError> {
+        let bound = self
+            .guard
+            .as_ref()
+            .map(|guard| engine.guarded(guard.clone()));
+        let engine = bound.as_ref().unwrap_or(engine);
+        let guard = engine.call_guard();
         // Counted, so a stopping process waits for this run to reach a safe point.
         let _run = engine.run_started();
         let mut metrics = Metrics::start();
@@ -960,6 +973,56 @@ impl Harness {
                     cancelled = true;
                     break;
                 }
+                let guarded = match &guard {
+                    Some(guard) => {
+                        let meta = catalog::is_meta_tool(&call.name);
+                        if meta && !crate::guard::safe_meta(&call.name) {
+                            flush!();
+                            round.push(Message::tool_result(
+                                call,
+                                "refused: this operation has no guarded effect contract",
+                            ));
+                            continue;
+                        }
+                        let descriptor = if meta {
+                            None
+                        } else {
+                            engine.registry.descriptor(&call.name)
+                        };
+                        let input = if meta {
+                            call.arguments.clone()
+                        } else {
+                            engine.canonical_input(project, call.arguments.clone())
+                        };
+                        match guard.check(&call.name, &input, descriptor.as_ref()) {
+                            crate::guard::Verdict::Refuse(reason) => {
+                                flush!();
+                                round.push(Message::tool_result(
+                                    call,
+                                    format!(
+                                        "refused: {reason}. This run cannot broaden its authority."
+                                    ),
+                                ));
+                                continue;
+                            }
+                            crate::guard::Verdict::Ask
+                                if meta
+                                    || descriptor.as_ref().is_none_or(|descriptor| {
+                                        descriptor.risk != RiskTier::Mutate
+                                    }) =>
+                            {
+                                flush!();
+                                round.push(Message::tool_result(
+                                    call,
+                                    "refused: this operation has no guarded approval route",
+                                ));
+                                continue;
+                            }
+                            verdict => Some(verdict),
+                        }
+                    }
+                    None => None,
+                };
                 if catalog::is_meta_tool(&call.name) {
                     flush!();
                     let repeat = !meta_seen.insert(call_digest(&call.name, &call.arguments));
@@ -1079,28 +1142,49 @@ impl Harness {
                 let auto = self.execution_mode == ExecutionMode::Auto
                     && desc.auto_eligible
                     && !desc.ask_each_time;
-                let mut approved = (self.allow_mutate || auto) && !again;
+                let mut pending_invocation = None;
+                let mut approved = match &guarded {
+                    Some(verdict) => {
+                        *verdict == crate::guard::Verdict::Allow && !again && !desc.person_only
+                    }
+                    None => (self.allow_mutate || auto) && !again && !desc.person_only,
+                };
                 if desc.risk == RiskTier::Mutate && !approved {
                     match self
-                        .request_approval(profile, &desc, call, again, &mut on_event)
-                        .await
+                        .request_approval(
+                            ApprovalContext {
+                                engine: &narrated,
+                                project,
+                                profile,
+                            },
+                            &desc,
+                            call,
+                            again,
+                            guarded.is_some(),
+                            &mut on_event,
+                        )
+                        .await?
                     {
-                        None => {
+                        ApprovalReply::Cancelled => {
                             cancelled = true;
                             break;
                         }
-                        Some(Some(ApprovalDecision::Deny)) => {
+                        ApprovalReply::Decided {
+                            decision: ApprovalDecision::Deny,
+                            ..
+                        } => {
                             round.push(Message::tool_result(
                                 call,
                                 "denied: the user declined this action. Do not retry it; continue from read-only evidence or ask the user.",
                             ));
                             continue;
                         }
-                        Some(Some(_)) => {
+                        ApprovalReply::Decided { invocation, .. } => {
                             approved = true;
+                            pending_invocation = Some(*invocation);
                             cut_short.remove(&digest);
                         }
-                        Some(None) => {
+                        ApprovalReply::Unavailable => {
                             on_event(HarnessEvent::NeedsApproval {
                                 action: call.name.clone(),
                             });
@@ -1154,10 +1238,15 @@ impl Harness {
                 if desc.risk == RiskTier::Mutate {
                     *changes_run.entry(digest.clone()).or_default() += 1;
                 }
+                let mut executed = call.clone();
+                if let Some(invocation) = &pending_invocation {
+                    executed.arguments = invocation.input.clone();
+                }
                 batch.push(Pending {
-                    call: call.clone(),
+                    call: executed,
                     risk: desc.risk,
                     approved,
+                    invocation: pending_invocation,
                     failed_before,
                     digest,
                 });
@@ -1554,16 +1643,26 @@ impl Harness {
     ) -> Result<bool, AgentError> {
         use futures::StreamExt;
         let pending = std::mem::take(batch);
-        let jobs: Vec<(String, serde_json::Value, bool)> = pending
+        let jobs: Vec<_> = pending
             .iter()
-            .map(|p| (p.call.name.clone(), p.call.arguments.clone(), p.approved))
+            .map(|p| {
+                (
+                    p.call.name.clone(),
+                    p.call.arguments.clone(),
+                    p.approved,
+                    p.invocation.clone(),
+                )
+            })
             .collect();
-        let runs =
-            futures::stream::iter(jobs.into_iter().map(|(name, input, approved)| async move {
-                engine.run_action(project, &name, input, approved).await
-            }))
-            .buffered(MAX_PARALLEL_TOOLS)
-            .collect::<Vec<_>>();
+        let runs = futures::stream::iter(jobs.into_iter().map(
+            |(name, input, approved, invocation)| async move {
+                engine
+                    .run_approved_action(project, &name, input, approved, invocation)
+                    .await
+            },
+        ))
+        .buffered(MAX_PARALLEL_TOOLS)
+        .collect::<Vec<_>>();
         // A stopping process lets a batch that changes something finish: dropped halfway, the
         // change may or may not have happened. Only a cancel drops it.
         let changes = pending.iter().any(|p| p.risk == RiskTier::Mutate);
@@ -1746,6 +1845,11 @@ impl Harness {
         memory: Option<&crate::memory::Snapshot<'_>>,
     ) -> Result<Option<Completion>, AgentError> {
         let provider = self.router.provider(role).clone();
+        if self.guard.is_some() && !provider.host_controls_tools() {
+            return Err(AgentError::NotAllowed(
+                "the selected model cannot enforce this execution's permissions".into(),
+            ));
+        }
         let mut repair = repair;
         let started = std::time::Instant::now();
         let mut retries = 0u32;
@@ -1870,34 +1974,44 @@ impl Harness {
         }
     }
 
-    /// Ask the approval gate about a `Mutate` call. `None`: cancelled while waiting.
-    /// `Some(None)`: no gate is configured (refuse as before). `Some(Some(d))`: the decision.
+    /// Persist the exact call before asking for its approval.
     async fn request_approval(
         &self,
-        profile: &AgentProfile,
+        context: ApprovalContext<'_>,
         desc: &ark_core::ActionDescriptor,
         call: &ark_model::ToolCall,
         cut_short: bool,
+        every_time: bool,
         on_event: &mut impl FnMut(HarnessEvent),
-    ) -> Option<Option<ApprovalDecision>> {
+    ) -> Result<ApprovalReply, AgentError> {
         let gate = match &self.approvals {
-            None => return Some(None),
+            None => return Ok(ApprovalReply::Unavailable),
             Some(g) => g.clone(),
         };
+        let invocation =
+            context
+                .engine
+                .pending_approval(context.project, &call.name, call.arguments.clone())?;
         let request = ApprovalRequest {
+            invocation: Some(invocation.id.clone()),
+            project: Some(context.project.clone()),
             action: call.name.clone(),
             summary: desc.summary.clone(),
             risk: desc.risk,
-            input: call.arguments.clone(),
+            input: invocation.input.clone(),
             class: desc
                 .grant
                 .as_ref()
-                .and_then(|g| g.class(&call.arguments))
-                .unwrap_or_else(|| profile.approval_class(&call.name, &call.arguments)),
-            preview: preview_call(&call.name, &call.arguments),
+                .and_then(|g| g.class(&invocation.input))
+                .unwrap_or_else(|| {
+                    context
+                        .profile
+                        .approval_class(&call.name, &invocation.input)
+                }),
+            preview: preview_call(&call.name, &invocation.input),
             agent: None,
             task: None,
-            ask_each_time: desc.ask_each_time || cut_short,
+            ask_each_time: desc.ask_each_time || cut_short || every_time,
             cut_short,
         };
         if request.ask_each_time || !gate.is_granted(&request.class) {
@@ -1905,13 +2019,21 @@ impl Harness {
                 request: request.clone(),
             });
         }
-        let decision = self.cancellable(gate.check(&request)).await?;
+        let Some(decision) = self.cancellable(gate.check(&request)).await else {
+            return Ok(ApprovalReply::Cancelled);
+        };
+        if decision == ApprovalDecision::Deny {
+            context.engine.deny_pending(context.project, &invocation)?;
+        }
         on_event(HarnessEvent::ApprovalResolved {
             action: request.action.clone(),
             class: request.class.clone(),
             decision,
         });
-        Some(Some(decision))
+        Ok(ApprovalReply::Decided {
+            decision,
+            invocation: Box::new(invocation),
+        })
     }
 
     fn tool_set(
@@ -2252,7 +2374,35 @@ impl Harness {
                     None => class,
                 }
             }));
-        matches!(self.request_approval(&profile, &desc, &call, false, on_event).await, Some(Some(d)) if d.allows())
+        let Some(gate) = &self.approvals else {
+            return false;
+        };
+        let request = ApprovalRequest {
+            invocation: None,
+            project: None,
+            action: call.name.clone(),
+            summary: desc.summary,
+            risk: desc.risk,
+            input: call.arguments.clone(),
+            class: profile.approval_class(&call.name, &call.arguments),
+            preview: preview_call(&call.name, &call.arguments),
+            agent: None,
+            task: None,
+            ask_each_time: true,
+            cut_short: false,
+        };
+        on_event(HarnessEvent::ApprovalRequested {
+            request: request.clone(),
+        });
+        let Some(decision) = self.cancellable(gate.check(&request)).await else {
+            return false;
+        };
+        on_event(HarnessEvent::ApprovalResolved {
+            action: request.action,
+            class: request.class,
+            decision,
+        });
+        decision.allows()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2510,10 +2660,26 @@ impl Harness {
 pub const MAX_PARALLEL_TOOLS: usize = 4;
 
 /// An adapter call waiting to run in the current batch.
+struct ApprovalContext<'a> {
+    engine: &'a Engine,
+    project: &'a ProjectId,
+    profile: &'a AgentProfile,
+}
+
+enum ApprovalReply {
+    Cancelled,
+    Unavailable,
+    Decided {
+        decision: ApprovalDecision,
+        invocation: Box<Invocation>,
+    },
+}
+
 struct Pending {
     call: ark_model::ToolCall,
     risk: RiskTier,
     approved: bool,
+    invocation: Option<Invocation>,
     failed_before: bool,
     digest: String,
 }

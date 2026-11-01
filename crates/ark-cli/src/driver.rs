@@ -210,6 +210,8 @@ mod tests {
         let (approver, mut rx) = ChannelApprover::channel();
         let approver = Arc::new(approver);
         let req = |n: &str| ApprovalRequest {
+            invocation: None,
+            project: None,
             action: n.into(),
             summary: n.into(),
             risk: RiskTier::Mutate,

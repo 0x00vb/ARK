@@ -1016,6 +1016,8 @@ async fn a_question_survives_a_restart_and_its_answer_runs_the_call_once() {
             .unwrap();
     }
     let request = ApprovalRequest {
+        invocation: None,
+        project: None,
         action: "doc.save".into(),
         summary: "save".into(),
         risk: RiskTier::Mutate,
@@ -1832,8 +1834,8 @@ async fn a_schedule_runs_its_task_at_its_times_and_survives_a_restart() {
         assert_eq!(s.says, "every 10 minutes");
         let next = s.next_ms.unwrap();
         // Not due yet.
-        assert!(o.tick_schedules(next - 1).is_empty());
-        let started = o.tick_schedules(next);
+        assert!(o.tick_schedules(next - 1).await.is_empty());
+        let started = o.tick_schedules(next).await;
         assert_eq!(started.len(), 1);
         let done = o.wait(&started[0]).await.unwrap();
         assert_eq!(done.result.as_deref(), Some("first digest"));
@@ -1852,9 +1854,9 @@ async fn a_schedule_runs_its_task_at_its_times_and_survives_a_restart() {
     let s = o.schedules();
     assert_eq!(s.len(), 1);
     let late = s[0].next_ms.unwrap() + 5 * 60 * 60_000;
-    let started = o.tick_schedules(late);
+    let started = o.tick_schedules(late).await;
     assert_eq!(started.len(), 1);
-    assert!(o.tick_schedules(late).is_empty());
+    assert!(o.tick_schedules(late).await.is_empty());
     o.wait(&started[0]).await.unwrap();
     assert_eq!(o.schedules()[0].next_ms, Some(late + 10 * 60_000));
     // Stopped for good, also after a restart.
@@ -1885,10 +1887,10 @@ async fn a_scheduled_run_is_skipped_while_the_last_one_is_still_open() {
         vec![f.project.id.to_string()]
     );
     let t0 = s.next_ms.unwrap();
-    let first = o.tick_schedules(t0);
+    let first = o.tick_schedules(t0).await;
     assert_eq!(first.len(), 1);
     // Still running at the next time: skipped, and the time moves on.
-    assert!(o.tick_schedules(t0 + 5 * 60_000).is_empty());
+    assert!(o.tick_schedules(t0 + 5 * 60_000).await.is_empty());
     let now = o.schedules()[0].clone();
     assert_eq!((now.runs, now.skipped), (1, 1));
     gate.notify_one();
@@ -1911,7 +1913,7 @@ async fn a_scheduled_run_is_skipped_while_the_last_one_is_still_open() {
         .schedule("w", TaskSpec::new("again"), When::every_minutes(5))
         .unwrap();
     o.unschedule(&due.id).unwrap();
-    assert!(o.tick_schedules(due.next_ms.unwrap()).is_empty());
+    assert!(o.tick_schedules(due.next_ms.unwrap()).await.is_empty());
     assert_eq!(o.schedules().len(), 1);
     o.terminate("w").await.unwrap();
     assert!(o.schedules().is_empty());
@@ -1973,7 +1975,7 @@ async fn a_scheduled_run_posts_its_result_in_the_chat_that_asked() {
     let s = o.schedules();
     assert_eq!(s[0].task.report_to.as_deref(), Some(id.as_str()));
 
-    let run = o.tick_schedules(s[0].next_ms.unwrap());
+    let run = o.tick_schedules(s[0].next_ms.unwrap()).await;
     let done = o.wait(&run[0]).await.unwrap();
     assert_eq!(done.report_to.as_deref(), Some(id.as_str()));
     let posts = ark_runtime::session::posts(ark.engine(), &id, 0, 10).unwrap();
@@ -2181,6 +2183,8 @@ async fn a_handoff_the_chat_does_not_wait_for_is_posted_in_it_once() {
 #[tokio::test]
 async fn a_result_that_never_reached_its_chat_is_posted_after_the_restart_once() {
     let r = Restarts::new();
+    let chat = ark_runtime::Session::start(r.ark.engine(), &r.project.id).unwrap();
+    let chat = chat.id().to_string();
     let m = Script::new("m", vec![answer("12 chapters")]);
     {
         let o = r.orch(&m, None);
@@ -2188,32 +2192,32 @@ async fn a_result_that_never_reached_its_chat_is_posted_after_the_restart_once()
     }
     let posts = |chat: &str| ark_runtime::session::posts(r.ark.engine(), chat, 0, 100).unwrap();
     // The chat waited for it in a process that stopped: it continues and reports here.
-    r.left_open("t-hand0001", "running", json!({ "report_to": "s-chat" }));
+    r.left_open("t-hand0001", "running", json!({ "report_to": chat }));
     // It ended, but the process stopped before its result reached the chat.
     r.left_open(
         "t-hand0002",
         "done",
-        json!({ "report_to": "s-chat", "reported": false, "result": "finished before" }),
+        json!({ "report_to": chat, "reported": false, "result": "finished before" }),
     );
     // Posted, and the process stopped before it marked that.
     r.left_open(
         "t-hand0003",
         "done",
-        json!({ "report_to": "s-chat", "reported": false, "result": "posted once" }),
+        json!({ "report_to": chat, "reported": false, "result": "posted once" }),
     );
     let post = ark_runtime::session::Post::new("w", "x", "posted once", true).work("t-hand0003");
-    ark_runtime::session::post(r.ark.engine(), "s-chat", post).unwrap();
+    ark_runtime::session::post(r.ark.engine(), &chat, post).unwrap();
     // Saved by a version without the mark: it was posted when it finished.
     r.left_open(
         "t-hand0004",
         "done",
-        json!({ "report_to": "s-chat", "result": "long ago" }),
+        json!({ "report_to": chat, "result": "long ago" }),
     );
 
     let o = r.orch(&m, None);
     let done = o.wait("t-hand0001").await.unwrap();
     assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
-    let texts: Vec<String> = posts("s-chat").into_iter().map(|(_, p)| p.text).collect();
+    let texts: Vec<String> = posts(&chat).into_iter().map(|(_, p)| p.text).collect();
     assert_eq!(texts.len(), 3, "{texts:?}");
     for t in ["posted once", "finished before", "12 chapters"] {
         assert_eq!(
@@ -2228,7 +2232,7 @@ async fn a_result_that_never_reached_its_chat_is_posted_after_the_restart_once()
     // Another restart posts nothing again.
     drop(o);
     let _o = r.orch(&m, None);
-    assert_eq!(posts("s-chat").len(), 3);
+    assert_eq!(posts(&chat).len(), 3);
 }
 
 /// A state-changing tool that takes a while, counting the runs that started and finished.

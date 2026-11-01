@@ -1,3 +1,36 @@
+# Core0.32.0 release candidate, 1 November 2026
+
+Owned branch codex/work-automations implements durable Work receipts, private execution
+scopes, invocation checkpoints, immutable eight-step sequences, schedules and authenticated
+webhooks. Scoped ownership, retained results, exact-question recovery and authority limits
+have executable coverage. Public release and fresh-clone verification are next.
+
+Full CIv14 passes on the frozen candidate: formatting, generated protocol, version checks,
+strict clippy, all Rust tests (including104 orchestration units), WebKit,69 actual Host page
+cases with the current consumer, optimized build and unchanged deterministic benchmark.
+Both final review rounds are complete. All actionable findings were fixed and verified.
+Source fingerprints and logs are in ../board/evidence/ux-implementation-p0-20261031/.
+
+Actual embedded Desktop used Claude Haiku and Sonnet for manual General, eight steps with
+three approvals and process restart, a due schedule and a signed webhook with an existing
+agent. Empty Work read an uploaded project file and continued its conversation. Changed-port
+recovery reopened one Run. Webhook input preview created zero Runs and preserved existing
+Work. Required scheduled inputs disable activation before preparation while manual values
+remain supported. Dark and390px layouts pass. The empty composer survives remote refresh
+and resets after a completed archived work item without losing pending drafts.
+
+The guarded internal-write live before/after case produced one forbidden marker Note before
+and zero after, in three model calls each. General benchmark suite results are8/8 on both
+recorded revisions. Methodology and limits: bench/work-automations-20261101/. Model preview
+qualification also fixed repeated-open memory growth; parsing remains isolated. Site EN/ES
+no-JS and reduced-motion keyboard cases pass4/4 locally.
+
+Webhook proof is local only. Public HTTPS needs the owner's existing endpoint. The locked
+Mac and unavailable physical phones prevent native/device observation. These remain
+explicitly unclaimed; no new public tunnel or native iPhone release is part of this change.
+Desktop0.9.15 still needs the verified Core pin, full consumer gate and signed delivery.
+No commit, push or tag has occurred yet for this candidate.
+
 # Core 0.31.0 published, 31 October 2026
 
 Immutable application source 8ca6976 is published on both remotes as v0.31.0. Final source CI
@@ -493,7 +526,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.31.0 |
+| Latest tag | v0.32.0 (release metadata prepared; publication not yet attempted) |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |
@@ -694,3 +727,9 @@ The owner requested focused
 critical checks instead of another full repository gate. No deploy, release or live provider
 login was performed by this Core session. Evidence: workspace
 `board/evidence/mobile-core-models-20261024/` and `/tmp/ark-core-model-codex-final-build-20261024.log`.
+
+Latest checkpoint: legacy schedules now use asynchronous Work admission with a separate
+conversation per occurrence and one item when TaskSpec.item is given. Explicit followup
+receipts preserve that conversation. Preparation failures retain the slot with durable
+backoff. Broader orchestration and app checks are running. The automation library/editor,
+full acceptance gates and release remain unfinished. No commit, push or release yet.

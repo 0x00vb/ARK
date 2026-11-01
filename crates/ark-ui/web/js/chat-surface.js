@@ -16,15 +16,16 @@ export function createChatSurface({ kind = "secondary", session, capabilities = 
   const dictationStatus = h("div.dictation-status", { ...id("dictation-status"), role: "status", "aria-live": "polite", hidden: true });
   const model = capabilities.model ? h("button.chip.model-chip", { ...id("model-chip"), type: "button", title: "Model", "aria-haspopup": "menu" }) : null;
   const mode = capabilities.mode ? h("button.chip.mode-chip", { ...id("mode-chip"), type: "button", title: "Execution mode (⇧Tab)", "aria-haspopup": "menu" }, "Manual") : null;
+  const controls = h("span.chat-view-controls");
   const actions = h("span.chat-view-actions");
   const place = primary ? h("button.chip.place-chip", { id: "place-chip", type: "button", hidden: true }) : null;
   const context = primary ? h("button.ctx-meter", { id: "ctx-ring", type: "button", title: "Context" }) : null;
   const send = h("button.send", { ...id("send"), type: "submit", "aria-label": "Send" });
   const form = h("form.composer", { ...id("composer"), autocomplete: "off" }, input, dictationStatus,
-    h("div.composer-bar", attach, mic, model, mode, place, context, actions, send));
+    h("div.composer-bar", attach, mic, model, mode, place, context, controls, actions, send));
   const placeLine = primary ? h("div.place-line", { id: "place-line", role: "status", hidden: true }) : null;
   const plans = primary ? h("div.plans", { id: "plans" }) : null;
   const dock = h("div.dock", placeLine, plans, uploads, queue, slash, form);
   const surface = h(`section.chat-surface.${kind}`, { "data-session": session, "data-active": String(primary) }, scroller, asks, dock);
-  return { surface, scroller, threadEl, asks, uploads, queue, slash, input, attach, mic, dictationStatus, model, mode, send, form, actions };
+  return { surface, scroller, threadEl, asks, uploads, queue, slash, input, attach, mic, dictationStatus, model, mode, send, form, actions, controls };
 }

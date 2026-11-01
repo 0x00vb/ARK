@@ -1,0 +1,850 @@
+{
+  "schema_version": 1,
+  "label": "run",
+  "ark_version": "0.31.0",
+  "created_at": "2026-11-01T09:48:31.098779Z",
+  "mode": "live",
+  "model": "claude:haiku",
+  "fast_model": null,
+  "reps": 2,
+  "pricing": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "cache_write": 2.5,
+    "output": 10.0,
+    "basis": "reference: claude-sonnet-5-5 list price per Mtok ($2 in, $2.50 cache write, $0.20 cache read, $10 out)"
+  },
+  "settings": {
+    "budget": "default",
+    "cassette": "record",
+    "critic": "true",
+    "env.ARK_SESSION_REUSE": "0",
+    "harness": "ark",
+    "planner": "false",
+    "turn_timeout_s": "90"
+  },
+  "workloads": [
+    {
+      "name": "simple",
+      "class": "simple",
+      "description": "say hello in French; no tool needed",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 1.0,
+        "input_tokens": 3248.0,
+        "cached_input_tokens": 1912.5,
+        "uncached_input_tokens": 1335.5,
+        "output_tokens": 136.0,
+        "total_tokens": 3384.0,
+        "cost_usd": 0.00508025,
+        "cost_per_success_usd": 0.00508025,
+        "tool_calls": 0.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 1.0,
+        "peak_context_tokens": 1219.0,
+        "mean_context_tokens": 1219.0,
+        "tool_schema_tokens": 550.0,
+        "prefix_reuse_tokens": 0.0,
+        "median_turn_ms": 1487.0,
+        "p95_turn_ms": 2014.0,
+        "median_first_token_ms": 1261.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "simple",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Bonjour !\n\nIn French, \"hello\" is **\"Bonjour\"** (used during the day), or **\"Salut\"** (informal, for friends).",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 3392
+          },
+          "calls_by_model": {
+            "claude:haiku": 1
+          },
+          "input_tokens": 3248,
+          "cached_input_tokens": 579,
+          "uncached_input_tokens": 2669,
+          "cache_write_tokens": 2667,
+          "output_tokens": 144,
+          "total_tokens": 3392,
+          "tokens_measured": true,
+          "request_metrics_complete": true,
+          "cost_usd": 0.0082273,
+          "wall_ms": 2014,
+          "turn_ms": [
+            2014
+          ],
+          "first_token_ms": [
+            1634
+          ],
+          "model_latency_ms": [
+            2012
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1219,
+          "mean_context_tokens": 1219,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 299,
+            "Model output": 0,
+            "Project": 95,
+            "Project memory": 0,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 550,
+          "tools_exposed_max": 5,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "simple",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Bonjour! That's \"hello\" in French. (Informally, you can also say \"Salut!\")",
+          "turns": 1,
+          "steps": 1,
+          "model_calls": 1,
+          "calls_by_role": {
+            "reason": 1
+          },
+          "tokens_by_role": {
+            "reason": 3376
+          },
+          "calls_by_model": {
+            "claude:haiku": 1
+          },
+          "input_tokens": 3248,
+          "cached_input_tokens": 3246,
+          "uncached_input_tokens": 2,
+          "cache_write_tokens": 0,
+          "output_tokens": 128,
+          "total_tokens": 3376,
+          "tokens_measured": true,
+          "request_metrics_complete": true,
+          "cost_usd": 0.0019332000000000002,
+          "wall_ms": 1487,
+          "turn_ms": [
+            1487
+          ],
+          "first_token_ms": [
+            1261
+          ],
+          "model_latency_ms": [
+            1486
+          ],
+          "tool_calls": 0,
+          "tool_ok": 0,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1219,
+          "mean_context_tokens": 1219,
+          "context_sources": {
+            "Capability index": 242,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 299,
+            "Model output": 0,
+            "Project": 95,
+            "Project memory": 0,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 17,
+            "Tool results": 0,
+            "Tool schemas": 550,
+            "Working state": 16,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 550,
+          "tools_exposed_max": 5,
+          "tools_used": 0,
+          "result_context_tokens": 0,
+          "result_raw_tokens": 0,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 0,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "multi-step",
+      "class": "multi-step",
+      "description": "find a customer, list her orders, add the amounts",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 5.0,
+        "input_tokens": 24712.5,
+        "cached_input_tokens": 18131.5,
+        "uncached_input_tokens": 6581.0,
+        "output_tokens": 1569.5,
+        "total_tokens": 26282.0,
+        "cost_usd": 0.0357673,
+        "cost_per_success_usd": 0.0357673,
+        "tool_calls": 3.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 5.0,
+        "peak_context_tokens": 1640.0,
+        "mean_context_tokens": 1502.0,
+        "tool_schema_tokens": 3150.0,
+        "prefix_reuse_tokens": 5633.0,
+        "median_turn_ms": 10671.0,
+        "p95_turn_ms": 14782.0,
+        "median_first_token_ms": 1585.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "multi-step",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Ada Lovelace's orders total **$565.74**.\n\n**Facts (from tool results):**\n- Customer lookup: Ada Lovelace is customer C-1042, tier gold [inv:f91801b0].\n- Orders for C-1042 [inv:0b40cad0]:\n  - O-1: $120.50\n  - O-2: $89.99\n  - O-3: $310.00\n  - O-4: $45.25\n- The calculator returned 565.74 for 120.5 + 89.99 + 310.0 + 45.25 [inv:53b2d54c]. I checked this by hand and it matches.\n\n**Inference:** The order",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 28331
+          },
+          "calls_by_model": {
+            "claude:haiku": 5
+          },
+          "input_tokens": 26651,
+          "cached_input_tokens": 18562,
+          "uncached_input_tokens": 8089,
+          "cache_write_tokens": 8075,
+          "output_tokens": 1680,
+          "total_tokens": 28331,
+          "tokens_measured": true,
+          "request_metrics_complete": true,
+          "cost_usd": 0.040727900000000004,
+          "wall_ms": 14782,
+          "turn_ms": [
+            14782
+          ],
+          "first_token_ms": [
+            2173,
+            3137,
+            3508,
+            1531,
+            2275
+          ],
+          "model_latency_ms": [
+            2525,
+            3137,
+            3508,
+            1918,
+            3689
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "load_action": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1640,
+          "mean_context_tokens": 1502,
+          "context_sources": {
+            "Capability index": 1365,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 1495,
+            "Model output": 222,
+            "Project": 475,
+            "Project memory": 0,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 190,
+            "Tool results": 428,
+            "Tool schemas": 3150,
+            "Working state": 185,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3150,
+          "tools_exposed_max": 7,
+          "tools_used": 3,
+          "result_context_tokens": 145,
+          "result_raw_tokens": 64,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5633,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "multi-step",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "**Total for Ada Lovelace: 565.74**\n\n**Facts (from tool results):**\n- Customer lookup: Ada Lovelace is customer C-1042, tier gold [inv:7620164d].\n- Orders for C-1042 [inv:e254a977]:\n  - O-1: 120.50\n  - O-2: 89.99\n  - O-3: 310.00\n  - O-4: 45.25\n- Calculator sum of those four amounts = 565.74 [inv:52b50400]. I also checked it by hand: 120.50 + 89.99 + 310.00 + 45.25 = 565.74.\n\n**Inference:** The tota",
+          "turns": 1,
+          "steps": 5,
+          "model_calls": 5,
+          "calls_by_role": {
+            "reason": 5
+          },
+          "tokens_by_role": {
+            "reason": 24233
+          },
+          "calls_by_model": {
+            "claude:haiku": 5
+          },
+          "input_tokens": 22774,
+          "cached_input_tokens": 17701,
+          "uncached_input_tokens": 5073,
+          "cache_write_tokens": 5061,
+          "output_tokens": 1459,
+          "total_tokens": 24233,
+          "tokens_measured": true,
+          "request_metrics_complete": true,
+          "cost_usd": 0.0308067,
+          "wall_ms": 10671,
+          "turn_ms": [
+            10671
+          ],
+          "first_token_ms": [
+            1169,
+            2874,
+            1155,
+            1447,
+            1585
+          ],
+          "model_latency_ms": [
+            1513,
+            2874,
+            1472,
+            1904,
+            2901
+          ],
+          "tool_calls": 3,
+          "tool_ok": 3,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "load_action": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1640,
+          "mean_context_tokens": 1502,
+          "context_sources": {
+            "Capability index": 1365,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 1495,
+            "Model output": 222,
+            "Project": 475,
+            "Project memory": 0,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 190,
+            "Tool results": 428,
+            "Tool schemas": 3150,
+            "Working state": 185,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 3150,
+          "tools_exposed_max": 7,
+          "tools_used": 3,
+          "result_context_tokens": 145,
+          "result_raw_tokens": 64,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 5633,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "duplicate",
+      "class": "repetition",
+      "description": "the model repeats an identical lookup three times",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 2.5,
+        "input_tokens": 14384.0,
+        "cached_input_tokens": 11299.5,
+        "uncached_input_tokens": 3084.5,
+        "output_tokens": 834.5,
+        "total_tokens": 15218.5,
+        "cost_usd": 0.01831215,
+        "cost_per_success_usd": 0.01831215,
+        "tool_calls": 1.0,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 2.5,
+        "peak_context_tokens": 1473.0,
+        "mean_context_tokens": 1396.0,
+        "tool_schema_tokens": 1575.0,
+        "prefix_reuse_tokens": 2001.0,
+        "median_turn_ms": 5409.0,
+        "p95_turn_ms": 8003.0,
+        "median_first_token_ms": 2854.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "duplicate",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Ada Lovelace's tier is **gold**.\n\n**Fact (cited):** The CRM lookup returned id `C-1042`, name `Ada Lovelace`, tier `gold` [inv:f0a8115e].\n\n**Next step:** If you need her order history alongside the tier, I can run `crm.orders` with customer ID `C-1042`.",
+          "turns": 1,
+          "steps": 2,
+          "model_calls": 2,
+          "calls_by_role": {
+            "reason": 2
+          },
+          "tokens_by_role": {
+            "reason": 11338
+          },
+          "calls_by_model": {
+            "claude:haiku": 2
+          },
+          "input_tokens": 10674,
+          "cached_input_tokens": 6683,
+          "uncached_input_tokens": 3991,
+          "cache_write_tokens": 3985,
+          "output_tokens": 664,
+          "total_tokens": 11338,
+          "tokens_measured": true,
+          "request_metrics_complete": true,
+          "cost_usd": 0.017951099999999998,
+          "wall_ms": 5409,
+          "turn_ms": [
+            5409
+          ],
+          "first_token_ms": [
+            3113,
+            1754
+          ],
+          "model_latency_ms": [
+            3113,
+            2293
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1413,
+          "mean_context_tokens": 1381,
+          "context_sources": {
+            "Capability index": 546,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 598,
+            "Model output": 23,
+            "Project": 190,
+            "Project memory": 0,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 54,
+            "Tool results": 40,
+            "Tool schemas": 1260,
+            "Working state": 52,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1260,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 40,
+          "result_raw_tokens": 13,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 1317,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "duplicate",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "Ada Lovelace's tier is **gold**.\n\n**Fact (cited):** The CRM lookup returned customer ID C-1042, name Ada Lovelace, tier gold [inv:bf51e825].\n\n**Next step:** If you need her order history, I can pull it with `crm.orders` using customer ID C-1042.",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 19099
+          },
+          "calls_by_model": {
+            "claude:haiku": 3
+          },
+          "input_tokens": 18094,
+          "cached_input_tokens": 15916,
+          "uncached_input_tokens": 2178,
+          "cache_write_tokens": 2168,
+          "output_tokens": 1005,
+          "total_tokens": 19099,
+          "tokens_measured": true,
+          "request_metrics_complete": true,
+          "cost_usd": 0.0186732,
+          "wall_ms": 8003,
+          "turn_ms": [
+            8003
+          ],
+          "first_token_ms": [
+            3085,
+            2854,
+            1537
+          ],
+          "model_latency_ms": [
+            3085,
+            2854,
+            2060
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {
+            "load_action": 1
+          },
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 0,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1473,
+          "mean_context_tokens": 1411,
+          "context_sources": {
+            "Capability index": 819,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 897,
+            "Model output": 67,
+            "Project": 285,
+            "Project memory": 0,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 81,
+            "Tool results": 116,
+            "Tool schemas": 1890,
+            "Working state": 78,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1890,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 40,
+          "result_raw_tokens": 13,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2685,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    },
+    {
+      "name": "approval",
+      "class": "approval",
+      "description": "save a note; the write goes through the approval gate",
+      "summary": {
+        "runs": 2,
+        "successes": 2,
+        "success_rate": 1.0,
+        "model_calls": 3.5,
+        "input_tokens": 14303.5,
+        "cached_input_tokens": 10185.5,
+        "uncached_input_tokens": 4118.0,
+        "output_tokens": 1579.0,
+        "total_tokens": 15882.5,
+        "cost_usd": 0.0281181,
+        "cost_per_success_usd": 0.0281181,
+        "tool_calls": 1.5,
+        "tool_failed": 0.0,
+        "deduplicated": 0.0,
+        "repeated_executions": 0.0,
+        "provider_retries": 0.0,
+        "provider_errors": 0.0,
+        "steps": 3.5,
+        "peak_context_tokens": 1546.0,
+        "mean_context_tokens": 1401.5,
+        "tool_schema_tokens": 2107.0,
+        "prefix_reuse_tokens": 3321.5,
+        "median_turn_ms": 7220.0,
+        "p95_turn_ms": 14252.0,
+        "median_first_token_ms": 2539.0,
+        "stall_stops": 0.0
+      },
+      "runs": [
+        {
+          "workload": "approval",
+          "rep": 0,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "The note is saved. One correction to the follow-up: my earlier reply did not say `notes.list` was run or that it saved anything. I only offered to run it as a check. No files were written in this task.\n\n**Facts (cited):**\n- `notes.write` was called with the text \"ship the release on Thursday\" and returned `saved=true, chars=28` [inv:615cc425].\n\n**Inference:**\n- The note should now be in your saved",
+          "turns": 1,
+          "steps": 3,
+          "model_calls": 3,
+          "calls_by_role": {
+            "reason": 3
+          },
+          "tokens_by_role": {
+            "reason": 11541
+          },
+          "calls_by_model": {
+            "claude:haiku": 3
+          },
+          "input_tokens": 10594,
+          "cached_input_tokens": 5787,
+          "uncached_input_tokens": 4807,
+          "cache_write_tokens": 4801,
+          "output_tokens": 947,
+          "total_tokens": 11541,
+          "tokens_measured": true,
+          "request_metrics_complete": true,
+          "cost_usd": 0.022641900000000003,
+          "wall_ms": 7220,
+          "turn_ms": [
+            7220
+          ],
+          "first_token_ms": [
+            1239,
+            1600,
+            2539
+          ],
+          "model_latency_ms": [
+            1509,
+            2107,
+            3601
+          ],
+          "tool_calls": 1,
+          "tool_ok": 1,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1466,
+          "mean_context_tokens": 1376,
+          "context_sources": {
+            "Capability index": 768,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 897,
+            "Model output": 101,
+            "Project": 285,
+            "Project memory": 0,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 78,
+            "Tool results": 122,
+            "Tool schemas": 1806,
+            "Working state": 72,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 1806,
+          "tools_exposed_max": 7,
+          "tools_used": 1,
+          "result_context_tokens": 34,
+          "result_raw_tokens": 7,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 2594,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        },
+        {
+          "workload": "approval",
+          "rep": 1,
+          "success": true,
+          "verdict": "all checks passed",
+          "answer": "I can't confirm the note is saved.\n\n**Facts (cited):**\n- `notes.write` returned `saved=true, chars=29` [inv:e2813ca1].\n- `notes.list` returned `count=0` [inv:c5f7c248], so the saved note does not appear in the list.\n\n**Correction:** My earlier message said `notes.list` was saved. That was wrong. `notes.list` is a read-only call and wrote nothing. The only write this session was `notes.write` [inv:",
+          "turns": 1,
+          "steps": 4,
+          "model_calls": 4,
+          "calls_by_role": {
+            "reason": 4
+          },
+          "tokens_by_role": {
+            "reason": 20224
+          },
+          "calls_by_model": {
+            "claude:haiku": 4
+          },
+          "input_tokens": 18013,
+          "cached_input_tokens": 14584,
+          "uncached_input_tokens": 3429,
+          "cache_write_tokens": 3419,
+          "output_tokens": 2211,
+          "total_tokens": 20224,
+          "tokens_measured": true,
+          "request_metrics_complete": true,
+          "cost_usd": 0.0335943,
+          "wall_ms": 14252,
+          "turn_ms": [
+            14252
+          ],
+          "first_token_ms": [
+            3340,
+            1574,
+            3148,
+            3593
+          ],
+          "model_latency_ms": [
+            3340,
+            2226,
+            3693,
+            4989
+          ],
+          "tool_calls": 2,
+          "tool_ok": 2,
+          "tool_failed": 0,
+          "deduplicated": 0,
+          "repeated_executions": 0,
+          "meta_calls": {},
+          "provider_errors": 0,
+          "provider_retries": 0,
+          "approvals_requested": 1,
+          "stall_nudges": 0,
+          "stall_stops": 0,
+          "peak_context_tokens": 1546,
+          "mean_context_tokens": 1427,
+          "context_sources": {
+            "Capability index": 1024,
+            "Conversation": 0,
+            "Earlier steps": 0,
+            "Instructions": 1196,
+            "Model output": 259,
+            "Project": 380,
+            "Project memory": 0,
+            "Retrieved context": 0,
+            "Rules": 0,
+            "Skills": 0,
+            "Task": 104,
+            "Tool results": 241,
+            "Tool schemas": 2408,
+            "Working state": 96,
+            "Workspace": 0
+          },
+          "tool_schema_tokens": 2408,
+          "tools_exposed_max": 7,
+          "tools_used": 2,
+          "result_context_tokens": 65,
+          "result_raw_tokens": 10,
+          "compressed_rounds_max": 0,
+          "prefix_reuse_tokens": 4049,
+          "faults_injected": 0,
+          "replay_diverged": 0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "runs": 8,
+    "successes": 8,
+    "success_rate": 1.0,
+    "model_calls": 3.0,
+    "input_tokens": 14162.0,
+    "cached_input_tokens": 10382.25,
+    "uncached_input_tokens": 3779.75,
+    "output_tokens": 1029.75,
+    "total_tokens": 15191.75,
+    "cost_usd": 0.021819449999999997,
+    "cost_per_success_usd": 0.021819449999999997,
+    "tool_calls": 1.375,
+    "tool_failed": 0.0,
+    "deduplicated": 0.0,
+    "repeated_executions": 0.0,
+    "provider_retries": 0.0,
+    "provider_errors": 0.0,
+    "steps": 3.0,
+    "peak_context_tokens": 1640.0,
+    "mean_context_tokens": 1379.625,
+    "tool_schema_tokens": 1845.5,
+    "prefix_reuse_tokens": 2738.875,
+    "median_turn_ms": 7220.0,
+    "p95_turn_ms": 14782.0,
+    "median_first_token_ms": 1754.0,
+    "stall_stops": 0.0
+  }
+}

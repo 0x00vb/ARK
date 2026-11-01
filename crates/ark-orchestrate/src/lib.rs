@@ -55,7 +55,9 @@ pub use event::{EventKind, OrchEvent};
 pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskNode};
 pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
 pub use orchestrator::{
-    NamedProfile, Orchestrator, OrchestratorBuilder, INTERRUPTED, RESTARTED, WAITING_PERSON,
+    GeneralWorkResult, GeneralWorkStart, GeneralWorkState, NamedProfile, Orchestrator,
+    OrchestratorBuilder, WorkEntry, WorkFailure, WorkPage, WorkReceipt, WorkRunRef, WorkTarget,
+    WorkTemplate, INTERRUPTED, RESTARTED, WAITING_PERSON,
 };
 pub use participants::chat_participants;
 pub use record::{
@@ -91,3 +93,7 @@ pub enum OrchError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
 }
+
+pub mod automation;
+
+pub use schedule::{ScheduleExecutionKind, ScheduleRunReceipt};

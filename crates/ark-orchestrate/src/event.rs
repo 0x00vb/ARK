@@ -23,6 +23,10 @@ pub struct OrchEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EventKind {
+    Automation {
+        automation: String,
+        run: Option<String>,
+    },
     AgentSpawned {
         agent: String,
         parent: Option<String>,

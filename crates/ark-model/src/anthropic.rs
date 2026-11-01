@@ -178,6 +178,9 @@ fn search_hits(reply: &Value, limit: usize) -> Vec<WebHit> {
 
 #[async_trait]
 impl Provider for Anthropic {
+    fn host_controls_tools(&self) -> bool {
+        true
+    }
     fn reads_pictures(&self) -> bool {
         true
     }

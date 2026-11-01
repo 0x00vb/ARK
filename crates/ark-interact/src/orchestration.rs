@@ -97,6 +97,10 @@ pub fn schedules_table(g: &Graph) -> Table {
 /// One schedule as both front-ends show it: what, when, the next run, how the last one went.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct ScheduleView {
+    pub target: Option<String>,
+    pub version: u64,
+    pub admission_error: Option<String>,
+    pub admission_retry_ms: Option<u64>,
     pub id: String,
     pub agent: String,
     pub objective: String,
@@ -177,16 +181,20 @@ pub fn schedule_calendar(
             .collect::<String>()
     };
     let mut events = Vec::new();
-    let tasks: Vec<_> = o
-        .tasks()
-        .into_iter()
-        .filter(|task| task.schedule.is_some())
-        .collect();
-    let occupied: std::collections::HashSet<_> = tasks
+    let snapshot = o.calendar_snapshot(from, to)?;
+    let tasks = snapshot.tasks;
+    let runs = snapshot.runs;
+    let mut occupied: std::collections::HashSet<_> = tasks
         .iter()
-        .filter_map(|task| Some((task.schedule.as_deref()?, task.slot?)))
+        .filter_map(|task| Some((task.schedule.clone()?, task.slot?)))
         .collect();
-    let records = o.schedules();
+    for run in &runs {
+        if let ark_orchestrate::automation::RunOrigin::Schedule { schedule, slot_ms } = &run.origin
+        {
+            occupied.insert((schedule.clone(), *slot_ms));
+        }
+    }
+    let records = snapshot.schedules;
     anyhow::ensure!(
         records.len() <= 1000,
         "Too many schedules for one calendar snapshot"
@@ -225,7 +233,7 @@ pub fn schedule_calendar(
                     };
                 }
                 while next < to {
-                    if !occupied.contains(&(record.id.as_str(), next)) {
+                    if !occupied.contains(&(record.id.clone(), next)) {
                         add(
                         format!("{}-{next}", record.id),
                         next,
@@ -274,6 +282,37 @@ pub fn schedule_calendar(
             "start": instant(start)?, "end": instant(end)?, "all_day":false, "end_known": task.finished_ms.is_some(), "state":state, "delivery":"agent_run",
             "source_record":task.schedule, "source_revision":revision, "next_action":"Recorded run. An open run has no recorded finish time."}));
     }
+    for run in runs {
+        use ark_orchestrate::automation::{RunOrigin, RunPhase};
+        let start = run.created_ms;
+        let end = if run.phase.is_final() {
+            run.updated_ms.max(start + 1)
+        } else {
+            start.saturating_add(60_000)
+        };
+        if start >= to || run.phase.is_final() && end <= from {
+            continue;
+        }
+        anyhow::ensure!(
+            events.len() < 1000,
+            "Calendar has more than 1000 occurrences; choose a shorter period"
+        );
+        let state = match run.phase {
+            RunPhase::Pending => "planned",
+            RunPhase::Running => "running",
+            RunPhase::WaitingApproval | RunPhase::Interrupted => "needs_you",
+            RunPhase::Completed => "completed",
+            RunPhase::Failed => "failed",
+            RunPhase::Cancelled => "cancelled",
+        };
+        let source = match &run.origin {
+            RunOrigin::Schedule { schedule, .. } | RunOrigin::ScheduleManual { schedule, .. } => {
+                schedule
+            }
+            _ => &run.automation,
+        };
+        events.push(json!({"id":format!("automation-{}",run.id),"title":title(&run.revision.draft.name),"start":instant(start)?,"end":instant(end.max(start+1))?,"all_day":false,"end_known":run.phase.is_final(),"state":state,"delivery":"agent_run","source_record":source,"source_revision":run.revision.digest,"next_action":"Recorded execution. Open Work for its conversation."}));
+    }
     events.sort_by(|a, b| {
         a["start"]
             .as_str()
@@ -320,6 +359,10 @@ pub fn schedule_view(
         },
     };
     ScheduleView {
+        target: s.target.clone(),
+        version: s.version,
+        admission_error: s.admission_error.clone(),
+        admission_retry_ms: s.admission_retry_ms,
         id: s.id.clone(),
         agent: s.agent.clone(),
         objective: s.task.objective.clone(),
@@ -795,7 +838,8 @@ pub fn event_line(k: &EventKind) -> Option<(String, Tone)> {
             format!("removed the board \"{}\"", clip(goal, 60)),
             Tone::Muted,
         ),
-        EventKind::AgentSpawned { .. }
+        EventKind::Automation { .. }
+        | EventKind::AgentSpawned { .. }
         | EventKind::AgentState { .. }
         | EventKind::Session { .. } => return None,
     })
@@ -958,6 +1002,11 @@ pub enum ControlOutcome {
     Submitted {
         task: String,
     },
+    AutomationSubmitted {
+        run: String,
+        work: String,
+        conversation: String,
+    },
     /// `delivered`: it reached a running task (else it waits for the next one).
     Messaged {
         agent: String,
@@ -976,6 +1025,9 @@ impl ControlOutcome {
             ControlOutcome::Submitted { task } => Report::new()
                 .success(format!("started task {task}"))
                 .note(format!("Follow it with /agents {task}")),
+            ControlOutcome::AutomationSubmitted { run, .. } => {
+                Report::new().success(format!("started execution {run}"))
+            }
             ControlOutcome::Messaged { agent, delivered } => Report::new().success(if *delivered {
                 format!("sent into {agent}'s running task")
             } else {
@@ -1051,9 +1103,19 @@ pub async fn control(
                 s.next_label().unwrap_or_default()
             ))
         }
-        Control::RunSchedule { schedule } => ControlOutcome::Submitted {
-            task: o.run_schedule_now(&schedule)?,
-        },
+        Control::RunSchedule { schedule } => {
+            let execution = o.run_schedule_now(&schedule).await?;
+            if o.task(&execution).is_some() {
+                ControlOutcome::Submitted { task: execution }
+            } else {
+                let run = o.automation_run(&execution)?;
+                ControlOutcome::AutomationSubmitted {
+                    run: run.id,
+                    work: run.work,
+                    conversation: run.conversation,
+                }
+            }
+        }
         Control::AddWork { title, change } => {
             ControlOutcome::Work(Box::new(o.add_work(PERSON, &title, change)?))
         }

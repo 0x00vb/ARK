@@ -244,6 +244,9 @@ struct AccountProvider {
 }
 #[async_trait]
 impl Provider for AccountProvider {
+    fn host_controls_tools(&self) -> bool {
+        self.inner.host_controls_tools()
+    }
     fn connection_revision(&self) -> u64 {
         self.account.revision
     }

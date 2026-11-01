@@ -135,6 +135,9 @@ fn failure(detail: &str) -> ProviderError {
 
 #[async_trait]
 impl Provider for OpenCodeGo {
+    fn host_controls_tools(&self) -> bool {
+        true
+    }
     fn for_conversation(&self, conversation: &str) -> Result<Option<Arc<dyn Provider>>> {
         if conversation.is_empty() {
             return Err(failure(

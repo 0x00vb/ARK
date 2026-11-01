@@ -438,7 +438,8 @@ fn transcript_page(
     let sid = session.id().as_str().to_string();
     let posts = ark_sdk::prelude::ark_runtime::session::posts(engine, &sid, 0, usize::MAX)?;
     let last = session.turn_count().checked_sub(1);
-    Ok(session
+    let execution_project = session.execution_project(engine)?;
+    session
         .transcript_page(engine, before, limit)?
         .iter()
         .map(|t| {
@@ -474,9 +475,7 @@ fn transcript_page(
                         _ => None,
                     })
                     .collect();
-                let calls = engine
-                    .work_calls(session.project(), &session.work_of(t.index))
-                    .unwrap_or_default();
+                let calls = engine.work_calls(&execution_project, &session.work_of(t.index))?;
                 activity::settle(&mut activity, &reported, &calls, labels, names);
             }
             let mut turn = TranscriptTurn::of(t, activity, rec.is_some());
@@ -487,9 +486,9 @@ fn transcript_page(
                 .filter(|(_, p)| p.after.unwrap_or(0) == t.index)
                 .map(|(_, p)| p.clone())
                 .collect();
-            turn
+            Ok(turn)
         })
-        .collect())
+        .collect::<anyhow::Result<Vec<_>>>()
 }
 
 /// The orchestrators of an app that runs agents in every project ([`App::orchestrate`]), one per
@@ -922,6 +921,8 @@ pub struct Summary {
     pub model: String,
     pub project: ProjectSummary,
     pub session: SessionSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work: Option<String>,
     pub grants: Vec<String>,
     pub detail: bool,
     pub execution_mode: ark_sdk::prelude::ark_core::ExecutionMode,
@@ -1140,6 +1141,7 @@ impl Interaction {
             model: self.ark.router().label(),
             project: self.project_summary(&self.project),
             session: SessionSummary::of(self.session.record(), &self.project.name, true),
+            work: self.session.record().work_item.clone(),
             grants: self.gate.grants(),
             detail: self.detail,
             execution_mode: self.session.execution_mode(),
@@ -1507,6 +1509,46 @@ impl Interaction {
             tools: self.turn_tools(),
             execution_mode: self.session.execution_mode(),
         };
+        let work_orchestrator = self.orchestrator.clone();
+        let context = self.session.refresh_context(self.ark.engine());
+        let admitted = if let Err(error) = context {
+            Err(error.to_string())
+        } else if self.session.record().work_item.is_some() {
+            match &work_orchestrator {
+                Some(orchestrator) => orchestrator
+                    .prepare_general_turn(
+                        self.session.id().as_str(),
+                        input,
+                        self.session.model().map(str::to_string),
+                    )
+                    .await
+                    .map(Some)
+                    .map_err(|error| error.to_string()),
+                None => Err("this conversation's work cannot run in this application".into()),
+            }
+        } else {
+            Ok(None)
+        };
+        let mut model_error = None;
+        if let (Some(orchestrator), Ok(Some(receipt))) = (&work_orchestrator, &admitted) {
+            match orchestrator.general_work_models(&receipt.id).await {
+                Ok(models) => {
+                    if let Err(error) = self.select_model(receipt.model.clone(), models.router) {
+                        model_error = Some(error.to_string());
+                    }
+                }
+                Err(error) => model_error = Some(error.to_string()),
+            }
+        }
+        if let (Some(orchestrator), Ok(Some(receipt))) = (&work_orchestrator, &admitted) {
+            match orchestrator.general_work_state(&receipt.id) {
+                Ok(ark_orchestrate::GeneralWorkState::Cancelled) => {
+                    model_error = Some("this message was cancelled before starting".into())
+                }
+                Ok(_) => {}
+                Err(error) => model_error = Some(error.to_string()),
+            }
+        }
         let mut last_context = None;
         let Interaction {
             ark,
@@ -1520,8 +1562,14 @@ impl Interaction {
         // The trace is saved as the turn runs, so a turn the app never finished (a crash, the
         // computer stopping) still shows what it did up to there.
         let mut journal = Journal::new(ark.shared_engine(), session.id().as_str(), turns_before);
-        let result = ark
-            .ask_session(session, input, opts, |ev| {
+        let result = if let Some(reason) = model_error {
+            Err(ark_sdk::ArkError::AdmissionRejected { reason })
+        } else if let Err(reason) = &admitted {
+            Err(ark_sdk::ArkError::AdmissionRejected {
+                reason: reason.clone(),
+            })
+        } else {
+            ark.ask_session(session, input, opts, |ev| {
                 rec.lock().unwrap().record(&ev);
                 journal.saw(&ev, &rec);
                 // The conversation's own requests; the planner's and critic's are separate.
@@ -1533,7 +1581,19 @@ impl Interaction {
                 let a = activity::describe(labels, names, &ev);
                 on_event(&ev, a.as_ref());
             })
-            .await;
+            .await
+        };
+        if let (Some(orchestrator), Ok(Some(receipt))) = (&work_orchestrator, &admitted) {
+            orchestrator
+                .close_general_work_models(&receipt.conversation)
+                .await;
+            if let Err(error) = orchestrator.end_general_work(&receipt.id) {
+                tracing::error!(work = %receipt.work, %error, "could not release General execution ownership");
+            }
+            if let Err(error) = orchestrator.settle_general_work(&receipt.id) {
+                tracing::error!(work = %receipt.work, %error, "could not retain General work result");
+            }
+        }
         let (cancelled, error) = match &result {
             Ok(o) => (o.cancelled, None),
             Err(e) => (false, Some(e.to_string())),
@@ -1665,7 +1725,7 @@ impl Interaction {
         // output to measure it made each turn slower as the project grew.
         let rec = self.session.record();
         let engine = self.engine();
-        let pid = &self.project.id;
+        let pid = &self.session.execution_project(engine)?;
         let stats = engine
             .store
             .project_stats(pid)
@@ -1723,12 +1783,13 @@ impl Interaction {
 
     pub fn state_view(&self) -> anyhow::Result<StateView> {
         let store = &self.engine().store;
+        let execution_project = self.session.execution_project(self.engine())?;
         let state = store
-            .get_research_state(&self.project.id)
+            .get_research_state(&execution_project)
             .map_err(ark_runtime::AgentError::from)?
             .unwrap_or_default();
         let artifacts = store
-            .list_artifacts(&self.project.id)
+            .list_artifacts(&execution_project)
             .map_err(ark_runtime::AgentError::from)?;
         Ok(StateView::build(state, STATE_DIGEST_ITEMS, &artifacts))
     }

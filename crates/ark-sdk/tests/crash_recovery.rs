@@ -317,14 +317,16 @@ async fn killed_while_waiting_for_approval() {
     let dir = crash("killed_while_waiting_for_approval", "approval");
     let ark = reopen_and_check(dir.path()).await;
     let p = ark.find_or_create_project("p", "").unwrap();
-    assert!(
-        ark.engine()
-            .store
-            .list_invocations(&p.id)
-            .unwrap()
-            .is_empty(),
-        "the change never ran and left nothing behind"
+    let invocations = ark.engine().store.list_invocations(&p.id).unwrap();
+    assert_eq!(invocations.len(), 1);
+    assert_eq!(
+        invocations[0].status,
+        ark_core::InvocationStatus::PendingApproval
     );
+    assert!(invocations[0].descriptor.is_some());
+    assert!(invocations[0].output.is_null());
+    assert!(invocations[0].finished_at.is_none());
+    assert_eq!(writes(dir.path()), 0, "the pending change must not execute");
 }
 
 /// The first request of the last turn `model` answered, as text.
@@ -433,6 +435,8 @@ async fn a_change_cut_short_by_a_crash_is_asked_again_whatever_was_granted() {
     let gate = Arc::new(ApprovalGate::new(no.clone()));
     gate.keep_in(ark.engine().store.clone(), p.id.as_str());
     let grant = ApprovalRequest {
+        invocation: None,
+        project: None,
         action: "slow.write".into(),
         summary: String::new(),
         risk: RiskTier::Mutate,

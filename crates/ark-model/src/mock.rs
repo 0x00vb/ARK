@@ -147,6 +147,9 @@ impl MockProvider {
 
 #[async_trait]
 impl Provider for MockProvider {
+    fn host_controls_tools(&self) -> bool {
+        true
+    }
     fn context_window(&self) -> Option<u32> {
         self.window
     }

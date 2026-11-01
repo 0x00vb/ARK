@@ -546,3 +546,5 @@ mod tests {
         assert!(arg_artifact("x.y", &serde_json::json!({})).is_err());
     }
 }
+
+pub mod events;

@@ -105,6 +105,36 @@ pub enum ResourceOperationKind {
     SpawnAgent,
     CreateAgent,
     SubmitTask,
+    Automations,
+    AutomationGet,
+    AutomationHistory,
+    AutomationPreview,
+    AutomationStart,
+    WebhookSetup,
+    WebhookGet,
+    WebhookProbe,
+    AutomationRevoke,
+    AutomationSave,
+    AutomationLayout,
+    AutomationPrepare,
+    AutomationActivate,
+    AutomationPause,
+    AutomationRun,
+    AutomationCancelStart,
+    AutomationValidate,
+    AutomationPreviewInputs,
+    AutomationBeginStart,
+    AutomationAcknowledgeStart,
+    AutomationExecution,
+    WorkAdmit,
+    WorkReceipt,
+    WorkExecute,
+    WorkList,
+    WorkGet,
+    WorkAnswer,
+    WorkCancel,
+    WorkArchive,
+    WorkResolve,
     CancelTask,
     RetryTask,
     Schedules,
@@ -132,6 +162,7 @@ pub enum ResourceOperationKind {
     SkillPackageInstall,
     SkillPackageRemove,
     Tools,
+    Models,
     Usage,
     Artifacts,
     Artifact,
@@ -211,6 +242,36 @@ impl ResourceOperationKind {
             | O::Agents
             | O::CreateAgent
             | O::SpawnAgent
+            | O::Automations
+            | O::AutomationHistory
+            | O::AutomationPreview
+            | O::WebhookSetup
+            | O::WebhookGet
+            | O::WebhookProbe
+            | O::AutomationRevoke
+            | O::AutomationStart
+            | O::AutomationGet
+            | O::AutomationSave
+            | O::AutomationLayout
+            | O::AutomationPrepare
+            | O::AutomationActivate
+            | O::AutomationPause
+            | O::AutomationRun
+            | O::AutomationBeginStart
+            | O::AutomationAcknowledgeStart
+            | O::AutomationValidate
+            | O::AutomationPreviewInputs
+            | O::AutomationCancelStart
+            | O::AutomationExecution
+            | O::WorkAdmit
+            | O::WorkReceipt
+            | O::WorkExecute
+            | O::WorkAnswer
+            | O::WorkCancel
+            | O::WorkGet
+            | O::WorkList
+            | O::WorkArchive
+            | O::WorkResolve
             | O::SubmitTask
             | O::CancelTask
             | O::RetryTask
@@ -239,6 +300,7 @@ impl ResourceOperationKind {
             | O::SkillPackageInstall
             | O::SkillPackageRemove
             | O::Tools
+            | O::Models
             | O::Usage
             | O::RunAction
             | O::Focus => kind == R::Project,

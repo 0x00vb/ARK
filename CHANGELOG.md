@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.32.0] - 2026-11-01
+
+### Breaking
+
+- `ActionDescriptor` gains defaulted `person_only`; Rust literals must supply it. `AgentError` and `ArkError` gain admission and persistence errors; exhaustive matches must handle them. `SessionRecord` and interaction `Summary` gain defaulted work bindings.
+
+- `TaskRecord` gains defaulted submission, conversation and execution ownership fields. `WorkItem` gains defaulted conversation and archive metadata. Rust struct literals must supply them.
+- `StoreError` adds `Busy`; exhaustive Rust matches must handle it. `ark_ui::computers::kept` returns `Result<bool>` so callers must handle store errors instead of treating them as absence.
+
+- `ApprovalRequest` gains defaulted invocation and project identity. `Invocation` gains a defaulted descriptor fingerprint. Rust literals must supply the new fields.
+- Schedule execution methods are async. Await `run_schedule_now`, `run_schedule_now_with_key` and `tick_schedules`. `ControlOutcome::AutomationSubmitted` distinguishes workflow executions from agent tasks.
+- Providers and session backends must certify host-controlled actions before an automation can use them. The default refuses certification. Existing ordinary chat remains supported.
+
+- `ResourceOperationKind` adds Work, automation and webhook operations. Exhaustive Rust matches must handle the new variants.
+
+- Manual automation admission requires a registered `ManualStart`. Use `admit_manual_automation_run`, retain the request receipt and acknowledge it. The low-level manual path refuses unregistered requests.
+
+### Changed
+
+- Work admission records a canonical request identity, work item, conversation and optional task in one scoped transaction. Duplicate requests recover the same receipt; conflicting payloads are rejected.
+- Work edits, claims, retries and board removal validate durable records inside one transaction. Saved answers can repair their conversation without repeating model calls.
+- Opening a store takes a cooperative process lock. A second current runtime cannot open the same store until the first closes it. Older binaries and direct database writers do not take this lock.
+
+- New chat starts Work with General or an existing agent, without creating an agent. Each execution has a private conversation and context. Work groups results and approvals, preserves retry receipts, and supports scoped cancellation, resolution and archive.
+- Automations combines a library, authoritative Agenda and an editor with Steps and Canvas. Definitions have immutable revisions. Canvas layouts use separate conflict checks. Up to eight sequential Agent, Approval and Result steps share typed text and file inputs.
+- Manual, scheduled and authenticated webhook starts use the same execution records. Activation freezes choices and authority. Pending approvals, saved answers and result delivery recover without repeating confirmed actions. Delegated tasks inherit frozen authority and shared quotas.
+- Existing schedules remain unchanged when read or saved as drafts. Explicit activation validates the source configuration, preserves policies and history, and switches the schedule to its frozen revision.
+- Webhooks use signed preview and delivery on existing listeners, bounded input, replay identity, quotas and cutover checks. Local verification is displayed separately from external HTTPS configuration.
+
 ## [0.31.0] - 2026-10-31
 
 ### Fixed

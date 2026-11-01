@@ -3,11 +3,10 @@
 // again, waits for you, paused, did not finish). The line opens the schedule in the side pane:
 // its runs with their results and files, Run now, Pause or Resume, Stop.
 //
-// Making and changing a schedule is asked in words; the page has no form for it.
 
 import { h, icon, clear, clip } from "./dom.js";
 import { markdown } from "./md.js";
-import { calendarView } from "./calendar.js";
+import { registerAutomations } from "./automations.js";
 
 const store = {
   ark: null,
@@ -50,180 +49,6 @@ function counters(s) {
   return out.join(" · ");
 }
 
-/// Every schedule in the current project. This is separate from `store`, whose compact lines
-/// intentionally follow only the open chat. A request generation keeps a late reply from one
-/// project out of the next project's view.
-function schedulesView(el, params, ark) {
-  el.classList.add("sv");
-  let project = params?.project?.id || ark.project?.()?.id || null;
-  let generation = 0;
-  let list = [];
-  let loading = true;
-  let error = "";
-  let stale = false;
-  let reloadTimer;
-  let alive = true;
-  let mode = 'list', calendar, calendarRequest = 0, calendarRange = null;
-  const calendarHost = h('div.sv-calendar');
-  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  const calendarStatus = h('div', { role: 'status' });
-  const calendarRead = async () => {
-    if (!alive || !calendarRange || mode !== 'calendar') return;
-    const request = ++calendarRequest, wanted = project;
-    calendarStatus.replaceChildren();
-    try {
-      const result = await ark.call('schedules', { calendar: { ...calendarRange, timezone: zone } });
-      if (!alive || request !== calendarRequest || wanted !== project || mode !== 'calendar') return;
-      calendar.update({ text: JSON.stringify(result) });
-    } catch (e) {
-      if (!alive || request !== calendarRequest || wanted !== project || mode !== 'calendar') return;
-      calendar.update({ text: JSON.stringify({ type:'ark.calendar', version:1, title:'Scheduled work', timezone:zone, generated_at:new Date().toISOString(), events:[] }) });
-      calendarStatus.replaceChildren(h('p', 'Calendar is unavailable'), h('p', String(e.message)), h('button.btn.small', { type:'button', onclick: () => { calendarHost.hidden = false; calendarRead(); } }, 'Retry'));
-    }
-  };
-  const controls = h('div.cal-modes', { role: 'group', 'aria-label': 'Schedules view' });
-  for (const value of ['list', 'calendar']) controls.append(h('button.btn.ghost.small', {
-    type: 'button', 'data-view': value, 'aria-pressed': String(mode === value), onclick: () => {
-      mode = value; calendarRequest++;
-      for (const button of controls.children) button.setAttribute('aria-pressed', String(button.dataset.view === mode));
-      draw();
-      if (mode === 'calendar') calendarRead();
-    },
-  }, value === 'list' ? 'List' : 'Calendar'));
-
-
-  const heading = h("h1.sv-title", { tabindex: "-1", "data-destination-heading": "" }, "Schedules");
-  const live = h("div.sr-only", { role: "status", "aria-live": "polite", "aria-atomic": "true" });
-  const body = h("div.sv-body");
-  el.append(h("header.sv-head", heading, controls), live, body);
-
-  function row(s) {
-    const count = counters(s);
-    const objective = s.objective || "Schedule";
-    const status = s.status || s.state || "Scheduled";
-    const says = s.says || "";
-    const agent = s.agent || "";
-    const last = s.last && !status.startsWith(s.last) ? s.last : "";
-    const label = [objective, status, last, count, says, agent].filter(Boolean).join(". ");
-    return h("li.sv-item",
-      h("button.sv-row", {
-        type: "button",
-        "data-state": s.state,
-        onclick: () => ark.openPanel("schedule", { id: s.id }),
-        "aria-label": label,
-      },
-      h("span.sv-mark", s.state === "running" ? h("span.working-dot") : icon("clock")),
-      h("span.sv-main",
-        h("span.sv-objective", objective),
-        h("span.sv-meta", h("span", says), agent ? h("span.sv-agent", agent) : null)),
-      h("span.sv-state", { "data-tone": TONE[s.state] || null },
-        h("span.sv-status", status),
-        last ? h("span.sv-last", last) : null,
-        count ? h("span.sv-count", count) : null)));
-  }
-
-  function draw({ announce = "" } = {}) {
-    clear(body);
-    live.textContent = announce;
-    if (mode === 'calendar') {
-      body.append(calendarStatus, calendarHost); calendarHost.hidden = false;
-      if (!calendar) calendar = calendarView(calendarHost, { text: JSON.stringify({ type:'ark.calendar', version:1, title:'Scheduled work', timezone:zone, generated_at:new Date().toISOString(), events:[] }) }, null, {
-        range(first, end) {
-          calendarRange = { from_ms: Date.parse(first+'T00:00:00Z') - 86400000, to_ms: Date.parse(end+'T00:00:00Z') + 86400000 };
-          queueMicrotask(calendarRead);
-        },
-      });
-      return;
-    }
-    el.setAttribute("aria-busy", String(loading));
-    if (loading && !list.length) {
-      body.append(h("div.sv-loading", { "aria-hidden": "true" },
-        h("span.sv-skeleton"), h("span.sv-skeleton"), h("span.sv-skeleton")));
-      return;
-    }
-    if (error && !list.length) {
-      body.append(h("div.sv-empty",
-        h("div.sv-empty-icon", icon("alert")),
-        h("h2", "Schedules are unavailable"),
-        h("p", "Nothing changed. Try again when the connection is back."),
-        h("button.btn.small", { type: "button", onclick: () => load() }, "Try again")));
-      return;
-    }
-    if (!list.length) {
-      body.append(h("div.sv-empty",
-        h("div.sv-empty-icon", icon("clock")),
-        h("h2", "No schedules"),
-        h("p", "Ask in a chat for work to run at a date or time.")));
-      return;
-    }
-    if (stale) {
-      body.append(h("div.sv-stale",
-        h("span", "Could not refresh. Showing the last update."),
-        h("button.btn.ghost.small", { type: "button", onclick: () => load() }, "Try again")));
-    }
-    body.append(h("ul.sv-list", list.map(row)));
-  }
-
-  async function load() {
-    const requestedProject = project;
-    const request = ++generation;
-    loading = true;
-    error = "";
-    draw({ announce: list.length ? "" : "Loading schedules" });
-    try {
-      const next = (await ark.call("schedules", {})) || [];
-      if (request !== generation || requestedProject !== project) return;
-      list = next;
-      stale = false;
-      loading = false;
-      draw();
-      if (mode === 'calendar') calendarRead();
-    } catch (e) {
-      if (request !== generation || requestedProject !== project) return;
-      error = String(e?.message || e || "unavailable");
-      stale = list.length > 0;
-      loading = false;
-      draw({ announce: stale ? "Schedules could not refresh" : "Schedules are unavailable" });
-    }
-  }
-
-  const reload = () => load();
-  const soon = () => {
-    clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(() => project && load(), 250);
-  };
-  const offs = [
-    ark.on("ark:orch", (m) => { if (!m.ref && MOVES.has(m.event?.type)) soon(); }),
-    ark.on("ark:orch_lagged", reload),
-    ark.on("ark:connected", reload),
-    ark.on("ark:post", soon),
-  ];
-  load();
-  return {
-    update(next) {
-      const id = next?.project?.id || ark.project?.()?.id || null;
-      if (id === project) return load();
-      generation++;
-      project = id;
-      calendarRequest++; calendar?.dispose(); calendar = null; calendarRange = null; calendarStatus.replaceChildren();
-      list = [];
-      error = "";
-      stale = false;
-      loading = true;
-      draw({ announce: "Loading schedules" });
-      load();
-    },
-    refresh: load,
-    focus: () => ({ surface: { kind_tag: "schedules", title: "Schedules" } }),
-    dispose() {
-      alive = false; calendarRequest++; calendar?.dispose();
-      generation++;
-      clearTimeout(reloadTimer);
-      for (const off of offs) off?.();
-    },
-  };
-}
-
 function draw() {
   const el = document.getElementById("plans");
   if (!el) return;
@@ -257,6 +82,7 @@ function schedulePanel(el, params, ark = store.ark) {
   el.classList.add("sc-panel");
   let id = params?.id;
   let data = null;
+  let runRequest = null, running = false;
   let stopping = null; // the Stop button asks once more before it stops
   const opened = new Set();
 
@@ -289,9 +115,24 @@ function schedulePanel(el, params, ark = store.ark) {
     const open = ["running", "asking", "retrying"].includes(s.state);
     const run = h("button.btn.small", {
       type: "button",
-      disabled: open ? true : null,
+      disabled: open || running ? true : null,
       title: open ? "A run is under way" : null,
-      onclick: () => act("schedule_run", id, undefined, ark).then(fetch),
+      onclick: async () => {
+        if (running) return;
+        runRequest ||= crypto.randomUUID(); running = true; draw();
+        try {
+          const result = await ark.call("schedule_run", { schedule: id, request: runRequest });
+          runRequest = null;
+          if (result.receipt.kind === "automation") {
+            const execution = await ark.call("automation_execution", { run: result.execution });
+            ark.openView("work-chat", { work: execution.work });
+          } else {
+            const execution = await ark.call("task", { task: result.task });
+            if (execution.task.item) ark.openView("work-chat", { work: execution.task.item });
+          }
+        } catch (error) { ark.toast(error.message); }
+        finally { running = false; await fetch(); }
+      },
     }, icon("play"), "Run now");
     const pause = s.paused
       ? h("button.btn.ghost.small", { type: "button", onclick: () => act("schedule_resume", id, undefined, ark).then(fetch) }, "Resume")
@@ -312,7 +153,7 @@ function schedulePanel(el, params, ark = store.ark) {
         h("div.sc-when", s.says, s.tz && s.tz !== here() ? h("span.sc-tz", s.tz) : null),
         h("div.sc-state", { "data-tone": TONE[s.state] || null }, s.state === "running" ? h("span.working-dot") : null, s.status),
         s.last && !s.status.startsWith(s.last) ? h("div.sc-last", s.last) : null),
-      h("div.sc-actions", run, pause, stop),
+      h("div.sc-actions", run, pause, s.target ? null : stop, h("button.btn.small", { type: "button", onclick: () => s.target ? ark.openView("automation-editor", { automation: s.target }) : ark.openView("automation-editor", { legacy_schedule: s.id }) }, "Edit automation")),
     );
     if (s.context) el.append(h("details.sc-context", h("summary", "What each run is told"), h("div.prose", { html: markdown(s.context) })));
 
@@ -366,7 +207,7 @@ function word(state) {
 export function registerSchedules(ark) {
   store.ark = ark;
   ark.panel({ id: "schedule", title: "Schedule", icon: "clock", builtin: true, render: (el, params, scoped) => schedulePanel(el, params, scoped || ark) });
-  ark.view({ id: "schedules", title: "Schedules", icon: "clock", projectScoped: true, render: (el, params, scoped) => schedulesView(el, params, scoped || ark) });
+  registerAutomations(ark);
   ark.on("ark:orch", (m) => {
     if (m.ref) return;
     if (MOVES.has(m.event?.type)) loadSoon();

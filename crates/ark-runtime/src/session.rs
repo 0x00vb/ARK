@@ -103,6 +103,13 @@ pub struct SessionRecord {
     pub project: ProjectId,
     /// The first message, clipped: a human handle for the session list.
     pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_item: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_scope: Option<ProjectId>,
+    /// Its coordinator settles begun turns from a separate execution journal.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub execution_managed: bool,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
@@ -133,6 +140,60 @@ pub struct SessionRecord {
     /// Changes whenever a client changes `execution_mode`.
     #[serde(default)]
     pub execution_mode_revision: u64,
+}
+
+impl SessionRecord {
+    pub fn empty(
+        id: SessionId,
+        project: ProjectId,
+        policy: CarryPolicy,
+        model: Option<String>,
+    ) -> Self {
+        let now = OffsetDateTime::now_utc();
+        Self {
+            id,
+            project,
+            title: String::new(),
+            work_item: None,
+            execution_scope: None,
+            execution_managed: false,
+            created_at: now,
+            updated_at: now,
+            turn_count: 0,
+            model,
+            gists: Vec::new(),
+            dropped_turns: 0,
+            usage: SessionUsage::default(),
+            compactions: 0,
+            policy,
+            posts_read: 0,
+            execution_mode: ExecutionMode::Manual,
+            execution_mode_revision: 0,
+        }
+    }
+}
+
+pub const PENDING_RESULT: &str = "session_result_pending";
+
+pub fn artifact_references(input: &str) -> Result<Vec<String>, AgentError> {
+    let mut refs = Vec::new();
+    for part in input.split("art:").skip(1) {
+        let reference: String = part
+            .chars()
+            .take_while(char::is_ascii_hexdigit)
+            .take(65)
+            .collect();
+        if !(8..=64).contains(&reference.len()) || refs.contains(&reference) {
+            continue;
+        }
+        refs.push(reference);
+        if refs.len() > 32 {
+            return Err(AgentError::NotAllowed(
+                "pass at most 32 files in one message".into(),
+            ));
+        }
+    }
+    Ok(refs)
 }
 
 /// Posts a turn carries at most; older unread ones are counted, not shown.
@@ -189,16 +250,79 @@ fn posts_stream(session: &str) -> String {
 }
 
 /// Post into the chat `session`, open or not. Returns the post's sequence number.
-pub fn post(engine: &Engine, session: &str, mut post: Post) -> Result<u64, AgentError> {
-    post.after = engine
+pub fn post(engine: &Engine, session: &str, post: Post) -> Result<u64, AgentError> {
+    post_once(engine, session, post).map(|(sequence, _)| sequence)
+}
+
+/// Retain one copy of a work result, including through concurrent publication and restart.
+/// A later result for the same work has a separate identity when its content changes.
+pub fn post_once(
+    engine: &Engine,
+    session: &str,
+    mut post: Post,
+) -> Result<(u64, bool), AgentError> {
+    let header = engine.store.get_session(session)?.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "the result's destination conversation is unavailable",
+        )
+    })?;
+    let header: SessionRecord = serde_json::from_value(header)?;
+    let key = format!(
+        "post-{}",
+        blake3::hash(&serde_json::to_vec(&(
+            session, &post.work, &post.text, post.ok
+        ))?)
+        .to_hex()
+    );
+    engine
         .store
-        .list_session_turns(session, Some(1))?
-        .first()
-        .and_then(|t| t["index"].as_u64())
-        .map(|i| i as u32);
-    Ok(engine
-        .store
-        .append_event(&posts_stream(session), &serde_json::to_value(&post)?)?)
+        .transact_records(header.project.as_str(), |tx| {
+            let header: SessionRecord =
+                serde_json::from_value(tx.get_session(session)?.ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "the result's destination conversation was deleted",
+                    )
+                })?)?;
+            if post.work.is_some() {
+                if let Some(receipt) = tx.get_record("session_post_receipt", &key)? {
+                    let sequence = receipt["sequence"].as_u64().ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "the result publication receipt is invalid",
+                        )
+                    })?;
+                    return Ok((sequence, false));
+                }
+            }
+            if post.work.is_some() {
+                let fields = [
+                    ("work", serde_json::to_value(&post.work)?),
+                    ("text", serde_json::to_value(&post.text)?),
+                    ("ok", serde_json::to_value(post.ok)?),
+                ];
+                if let Some(sequence) = tx.event_with_fields(&posts_stream(session), &fields)? {
+                    tx.insert_record(
+                        "session_post_receipt",
+                        &key,
+                        &serde_json::json!({"sequence":sequence}),
+                    )?;
+                    return Ok((sequence, false));
+                }
+            }
+            post.after = header.turn_count.checked_sub(1);
+            let sequence =
+                tx.append_event(&posts_stream(session), &serde_json::to_value(&post)?)?;
+            if post.work.is_some() {
+                tx.insert_record(
+                    "session_post_receipt",
+                    &key,
+                    &serde_json::json!({"sequence":sequence}),
+                )?;
+            }
+            Ok((sequence, true))
+        })
 }
 
 /// Whether `session` has a post about the work `work` ([`Post::work`]).
@@ -526,6 +650,7 @@ pub struct CompactReport {
 }
 
 /// A live handle on one conversation session.
+#[derive(Clone)]
 pub struct Session {
     record: SessionRecord,
     /// The last `policy.recent_turns` turns (the verbatim window), cached.
@@ -580,24 +705,7 @@ impl Session {
         policy: CarryPolicy,
         model: Option<String>,
     ) -> Result<Session, AgentError> {
-        let now = OffsetDateTime::now_utc();
-        let record = SessionRecord {
-            id,
-            project: project.clone(),
-            title: String::new(),
-            created_at: now,
-            updated_at: now,
-            turn_count: 0,
-            model,
-            gists: Vec::new(),
-            dropped_turns: 0,
-            usage: SessionUsage::default(),
-            compactions: 0,
-            policy,
-            posts_read: 0,
-            execution_mode: ExecutionMode::Manual,
-            execution_mode_revision: 0,
-        };
+        let record = SessionRecord::empty(id, project.clone(), policy, model);
         let s = Session {
             record,
             recent: Vec::new(),
@@ -619,7 +727,7 @@ impl Session {
         let Some(v) = engine.store.resolve_session(id)? else {
             return Ok(None);
         };
-        Self::load(engine, serde_json::from_value(v)?).map(Some)
+        Self::load(engine, serde_json::from_value(v)?, true).map(Some)
     }
 
     /// The most recently active session in `project`, if any.
@@ -631,7 +739,7 @@ impl Session {
             .next()
         {
             None => Ok(None),
-            Some(v) => Self::load(engine, serde_json::from_value(v)?).map(Some),
+            Some(v) => Self::load(engine, serde_json::from_value(v)?, true).map(Some),
         }
     }
 
@@ -648,13 +756,44 @@ impl Session {
             .collect()
     }
 
-    fn load(engine: &Engine, record: SessionRecord) -> Result<Session, AgentError> {
+    /// An admitted execution repairs its own result journal before advancing an unfinished turn.
+    pub fn open_for_execution(engine: &Engine, id: &str) -> Result<Option<Session>, AgentError> {
+        let Some(value) = engine.store.resolve_session(id)? else {
+            return Ok(None);
+        };
+        let record: SessionRecord = serde_json::from_value(value)?;
+        if record.work_item.is_none() {
+            return Err(AgentError::NotAllowed(
+                "execution recovery requires a work conversation".into(),
+            ));
+        }
+        Self::load(engine, record, false).map(Some)
+    }
+
+    fn load(
+        engine: &Engine,
+        record: SessionRecord,
+        close_interrupted: bool,
+    ) -> Result<Session, AgentError> {
         // Turns already folded into gists are excluded from the window; a turn at or past
         // `turn_count` was begun and never recorded.
+        let close_interrupted = close_interrupted && !record.execution_managed;
         let start = Self::window_start(&record);
         let count = record.turn_count;
         let read = Self::read_turns(engine, &record.id, Some(record.policy.recent_turns + 1))?;
-        let begun = read.iter().find(|t| t.index >= count).cloned();
+        let pending = if record.work_item.is_some() {
+            engine
+                .store
+                .transact_records::<_, AgentError>(record.project.as_str(), |tx| {
+                    Ok(tx
+                        .get_record(PENDING_RESULT, &format!("{}/{}", record.id, count))?
+                        .map(serde_json::from_value::<Turn>)
+                        .transpose()?)
+                })?
+        } else {
+            None
+        };
+        let begun = pending.or_else(|| read.iter().find(|t| t.index >= count).cloned());
         let recent = read
             .into_iter()
             .filter(|t| t.index as usize >= start && t.index < count)
@@ -680,7 +819,9 @@ impl Session {
                 }
                 // A turn begun by a process that is gone was interrupted: keep it, marked, so
                 // the person sees what they asked and the next turn continues it.
-                Some(pid) if !crate::process::writer_alive(pid, t.pid_start) => {
+                Some(pid)
+                    if close_interrupted && !crate::process::writer_alive(pid, t.pid_start) =>
+                {
                     t.index = count;
                     t.incomplete = true;
                     t.error = Some(INTERRUPTED.to_string());
@@ -732,6 +873,81 @@ impl Session {
     pub fn project(&self) -> &ProjectId {
         &self.record.project
     }
+
+    pub fn prepare_artifacts(&self, engine: &Engine, input: &str) -> Result<(), AgentError> {
+        let scope = self.execution_project(engine)?;
+        if scope == self.record.project {
+            return Ok(());
+        }
+        for reference in artifact_references(input)? {
+            if engine.store.resolve_artifact(&scope, &reference)?.is_some() {
+                continue;
+            }
+            let artifact = engine
+                .store
+                .resolve_artifact(&self.record.project, &reference)?
+                .ok_or_else(|| AgentError::ArtifactNotFound(reference.clone()))?;
+            engine.store.put_artifact(&scope, &artifact)?;
+        }
+        Ok(())
+    }
+
+    pub fn refresh_context(&mut self, engine: &Engine) -> Result<(), AgentError> {
+        let current: SessionRecord = serde_json::from_value(
+            engine
+                .store
+                .get_session(self.id().as_str())?
+                .ok_or_else(|| AgentError::NotAllowed("the conversation was deleted".into()))?,
+        )?;
+        if current.project != self.record.project
+            || self
+                .record
+                .execution_scope
+                .as_ref()
+                .is_some_and(|scope| current.execution_scope.as_ref() != Some(scope))
+            || self
+                .record
+                .work_item
+                .as_ref()
+                .is_some_and(|work| current.work_item.as_ref() != Some(work))
+        {
+            return Err(AgentError::NotAllowed(
+                "the conversation's work context changed".into(),
+            ));
+        }
+        self.record.execution_scope = current.execution_scope;
+        self.record.work_item = current.work_item;
+        self.execution_project(engine)?;
+        Ok(())
+    }
+
+    pub fn execution_project(&self, engine: &Engine) -> Result<ProjectId, AgentError> {
+        let Some(scope) = &self.record.execution_scope else {
+            return Ok(self.record.project.clone());
+        };
+        engine
+            .store
+            .transact_records::<_, AgentError>(self.record.project.as_str(), |tx| {
+                tx.validate_execution_project(scope.as_str())?;
+                let binding = tx
+                    .get_record("session_execution_scope", scope.as_str())?
+                    .ok_or_else(|| {
+                        AgentError::NotAllowed(
+                            "the conversation's work context is unavailable".into(),
+                        )
+                    })?;
+                if binding["session"] != self.id().as_str()
+                    || binding["work"].as_str() != self.record.work_item.as_deref()
+                    || self.record.work_item.is_none()
+                {
+                    return Err(AgentError::NotAllowed(
+                        "the conversation's work context belongs to another work item".into(),
+                    ));
+                }
+                Ok(scope.clone())
+            })
+    }
+
     pub fn record(&self) -> &SessionRecord {
         &self.record
     }
@@ -945,13 +1161,14 @@ impl Session {
         let mut turns: Vec<u32> = chain.iter().map(|t| t.index).collect();
         turns.reverse();
         let works: Vec<String> = turns.iter().map(|i| self.work_of(*i)).collect();
+        let execution_project = self.execution_project(engine)?;
         let mut calls = Vec::new();
         for w in &works {
-            calls.extend(engine.work_calls(&self.record.project, w)?);
+            calls.extend(engine.work_calls(&execution_project, w)?);
         }
         let lines = calls
             .iter()
-            .map(|c| call_line(engine, &self.record.project, c))
+            .map(|c| call_line(engine, &execution_project, c))
             .collect();
         Ok(Some(Unfinished {
             turns,
@@ -1057,11 +1274,10 @@ impl Session {
             error: interrupted.then(|| INTERRUPTED.to_string()),
             pid: None,
             pid_start: None,
-            goal: self.goal.take(),
+            goal: self.goal.clone(),
             ran_out: outcome.ran_out && !outcome.cancelled,
             execution_mode: self
                 .turn_execution_mode
-                .take()
                 .unwrap_or(self.record.execution_mode),
             // `outcome.steered` is what reached the model; it holds what `steered_now` kept.
         };
@@ -1078,14 +1294,13 @@ impl Session {
         let mut t = Turn::placeholder(self.record.turn_count, input);
         t.execution_mode = self
             .turn_execution_mode
-            .take()
             .unwrap_or(self.record.execution_mode);
         t.error = Some(error.to_string());
         t.pid = None;
         t.pid_start = None;
-        t.goal = self.goal.take();
+        t.goal = self.goal.clone();
         // What the person said while it ran stays with it: the next turn's goal has it.
-        t.steered = std::mem::take(&mut self.steered);
+        t.steered = self.steered.clone();
         self.push_turn(engine, t, &Metrics::default())
     }
 
@@ -1095,28 +1310,116 @@ impl Session {
         turn: Turn,
         metrics: &Metrics,
     ) -> Result<(), AgentError> {
-        self.turn_execution_mode = None;
-        engine.store.put_session_turn(
-            self.record.id.as_str(),
-            turn.index,
-            &serde_json::to_value(&turn)?,
-        )?;
-        if self.record.title.is_empty() {
-            self.record.title = clip(&turn.input, 60);
+        let mut next = self.clone();
+        next.turn_execution_mode = None;
+        next.goal = None;
+        if next.record.title.is_empty() {
+            next.record.title = clip(&turn.input, 60);
         }
-        self.record.turn_count += 1;
-        // The posts this turn carried are read now.
-        if let Some((seq, _)) = self.unread.last() {
-            self.record.posts_read = *seq;
-            self.unread.clear();
+        next.record.turn_count += 1;
+        if let Some((seq, _)) = next.unread.last() {
+            next.record.posts_read = *seq;
+            next.unread.clear();
         }
-        self.record.usage.add(metrics);
-        self.record.updated_at = OffsetDateTime::now_utc();
-        self.recent.push(turn);
-        let keep = self.record.policy.recent_turns;
-        let max_gists = self.record.policy.max_gists;
-        self.slide(keep, max_gists);
-        self.save(engine)
+        next.record.usage.add(metrics);
+        next.record.updated_at = OffsetDateTime::now_utc();
+        next.recent.push(turn.clone());
+        next.slide(
+            next.record.policy.recent_turns,
+            next.record.policy.max_gists,
+        );
+        let execution_project = self.execution_project(engine)?;
+        let pending_id = format!("{}/{}", self.record.id, turn.index);
+        let turn_value = serde_json::to_value(&turn)?;
+        if self.record.work_item.is_some() && turn.pid.is_none() {
+            engine
+                .store
+                .transact_records::<_, AgentError>(self.record.project.as_str(), |tx| {
+                    match tx.get_record(PENDING_RESULT, &pending_id)? {
+                        Some(existing) if existing != turn_value => {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::AlreadyExists,
+                                "this conversation already has a different retained result",
+                            )
+                            .into())
+                        }
+                        Some(_) => {}
+                        None => tx.insert_record(PENDING_RESULT, &pending_id, &turn_value)?,
+                    }
+                    Ok(())
+                })?;
+        }
+        engine
+            .store
+            .transact_records::<_, AgentError>(self.record.project.as_str(), |tx| {
+                let current: SessionRecord = serde_json::from_value(
+                    tx.get_session(self.record.id.as_str())?.ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "conversation was deleted",
+                        )
+                    })?,
+                )?;
+                if current.turn_count != turn.index {
+                    let existing = tx.get_session_turn(self.record.id.as_str(), turn.index)?;
+                    let same = existing.as_ref().is_some_and(|existing| {
+                        existing["input"] == turn_value["input"]
+                            && existing["answer"] == turn_value["answer"]
+                            && existing["cancelled"] == turn_value["cancelled"]
+                            && existing["error"] == turn_value["error"]
+                            && existing["incomplete"] == turn_value["incomplete"]
+                    });
+                    if current.turn_count == turn.index.saturating_add(1) && same {
+                        next.record = current;
+                        if self.record.work_item.is_some() {
+                            tx.delete_record(PENDING_RESULT, &pending_id)?;
+                        }
+                        return Ok(());
+                    }
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WouldBlock,
+                        "the conversation changed while its answer was being saved",
+                    )
+                    .into());
+                }
+                if current.title != self.record.title {
+                    next.record.title = current.title;
+                }
+                next.record.model = current.model;
+                next.record.execution_mode = current.execution_mode;
+                next.record.execution_mode_revision = current.execution_mode_revision;
+                if self.record.execution_scope.is_some() && turn.pid.is_none() {
+                    for invocation in tx.execution_invocations(
+                        execution_project.as_str(),
+                        &self.work_of(turn.index),
+                    )? {
+                        for id in invocation.produced {
+                            let artifact = tx
+                                .execution_artifact(execution_project.as_str(), id.as_str())?
+                                .ok_or_else(|| AgentError::ArtifactNotFound(id.to_string()))?;
+                            if artifact
+                                .meta
+                                .get("before")
+                                .and_then(serde_json::Value::as_bool)
+                                != Some(true)
+                            {
+                                tx.put_artifact(&artifact)?;
+                            }
+                        }
+                    }
+                }
+                tx.put_session_turn(self.record.id.as_str(), turn.index, &turn_value)?;
+                tx.put_session(
+                    self.record.id.as_str(),
+                    &serde_json::to_value(&next.record)?,
+                )?;
+                if self.record.work_item.is_some() {
+                    tx.delete_record(PENDING_RESULT, &pending_id)?;
+                }
+                Ok(())
+            })?;
+        *self = next;
+        Ok(())
     }
 
     /// Fold turns beyond `keep` into gists, and gists beyond `max_gists` into the dropped count.
@@ -1161,14 +1464,14 @@ impl Session {
 
         let mut state = engine
             .store
-            .get_research_state(&self.record.project)?
+            .get_research_state(&self.execution_project(engine)?)?
             .unwrap_or_default();
         report.state_before = estimate_tokens(&state.digest(crate::harness::STATE_DIGEST_ITEMS));
         report.state_items_removed = state.compact(6);
         report.state_after = estimate_tokens(&state.digest(crate::harness::STATE_DIGEST_ITEMS));
         engine
             .store
-            .put_research_state(&self.record.project, &state)?;
+            .put_research_state(&self.execution_project(engine)?, &state)?;
 
         self.record.compactions += 1;
         self.record.updated_at = OffsetDateTime::now_utc();
@@ -1296,6 +1599,7 @@ mod tests {
     use super::*;
     use ark_core::ResearchState;
     use ark_tools::Registry;
+    use std::sync::Arc;
 
     fn outcome(answer: &str) -> HarnessOutcome {
         HarnessOutcome {
@@ -1310,6 +1614,68 @@ mod tests {
             steered: vec![],
             ran_out: false,
         }
+    }
+
+    #[test]
+    fn work_result_publication_deduplicates_concurrent_and_legacy_posts() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Arc::new(Engine::open_with(dir.path(), Registry::new()).unwrap());
+        let project = engine.create_project("p", "").unwrap();
+        let session = Session::start(&engine, &project.id).unwrap();
+        let id = session.id().to_string();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let results = std::thread::scope(|scope| {
+            let mut calls = Vec::new();
+            for _ in 0..2 {
+                let engine = engine.clone();
+                let id = id.clone();
+                let barrier = barrier.clone();
+                calls.push(scope.spawn(move || {
+                    barrier.wait();
+                    post_once(
+                        &engine,
+                        &id,
+                        Post::new("agent", "Result", "retained answer", true).work("task-one"),
+                    )
+                    .unwrap()
+                }));
+            }
+            calls
+                .into_iter()
+                .map(|call| call.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(results[0].0, results[1].0);
+        assert_eq!(results.iter().filter(|(_, created)| *created).count(), 1);
+        assert_eq!(posts(&engine, &id, 0, 10).unwrap().len(), 1);
+        let retry = post_once(
+            &engine,
+            &id,
+            Post::new("agent", "Result", "retained answer", true).work("task-one"),
+        )
+        .unwrap();
+        assert!(!retry.1);
+        let changed = post_once(
+            &engine,
+            &id,
+            Post::new("agent", "Result", "new answer after retry", true).work("task-one"),
+        )
+        .unwrap();
+        assert!(changed.1);
+        let legacy =
+            Post::new("agent", "Older result", "saved before receipts", true).work("legacy-task");
+        let sequence = engine
+            .store
+            .append_event(&posts_stream(&id), &serde_json::to_value(&legacy).unwrap())
+            .unwrap();
+        let recovered = post_once(
+            &engine,
+            &id,
+            Post::new("agent", "Older result", "saved before receipts", true).work("legacy-task"),
+        )
+        .unwrap();
+        assert_eq!(recovered, (sequence, false));
+        assert_eq!(posts(&engine, &id, 0, 10).unwrap().len(), 3);
     }
 
     #[test]

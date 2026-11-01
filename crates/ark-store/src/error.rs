@@ -19,4 +19,9 @@ pub enum StoreError {
 
     #[error(transparent)]
     Core(#[from] ark_core::CoreError),
+    #[error("another ARK runtime{} is using the store at {}; stop the other writer before opening it", .pid.map(|p| format!(" (pid {p})")).unwrap_or_default(), .root.display())]
+    Busy {
+        root: std::path::PathBuf,
+        pid: Option<u32>,
+    },
 }

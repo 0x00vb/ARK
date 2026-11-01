@@ -100,3 +100,66 @@ async fn completed_runs_survive_their_removed_schedule_and_dense_ranges_refuse()
     assert_eq!(snapshot["events"][0]["source_record"], "s-removed");
     assert_eq!(snapshot["events"][0]["end"], "2026-11-01T05:30:30Z");
 }
+
+#[tokio::test]
+async fn automation_calendar_reads_other_writers_and_keeps_frozen_results_in_their_project() {
+    use ark_orchestrate::automation::*;
+    let dir = tempfile::tempdir().unwrap();
+    let ark = Ark::builder().store_root(dir.path()).build().unwrap();
+    let project = ark.create_project("Automations", "test").unwrap();
+    let observer = Orchestrator::builder(&ark, &project).build().unwrap();
+    let writer = Orchestrator::builder(&ark, &project).build().unwrap();
+    let draft: Draft = serde_json::from_value(serde_json::json!({
+        "name":"Frozen manual result","trigger":{"kind":"manual"},"inputs":[],
+        "steps":[{"id":"answer","name":"Result","action":{"kind":"result","inputs":[{"kind":"literal","text":"Saved answer"}]}}]
+    })).unwrap();
+    let saved = writer
+        .save_automation("calendar", None, None, draft.clone())
+        .unwrap();
+    let run = writer
+        .admit_manual_automation_run(ark_orchestrate::automation::ManualStart {
+            automation: saved.automation.clone(),
+            expected: 1,
+            previous: None,
+            request: "calendar-run".into(),
+            inputs: Default::default(),
+        })
+        .await
+        .unwrap();
+    let from = run.created_ms.saturating_sub(1);
+    let to = run.created_ms + 60_000;
+    let pending = schedule_calendar(&observer, from, to, "UTC").unwrap();
+    assert_eq!(pending["events"].as_array().unwrap().len(), 1);
+    assert_eq!(pending["events"][0]["id"], format!("automation-{}", run.id));
+    writer.execute_automation_run(&run.id).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while writer.automation_run(&run.id).unwrap().phase != RunPhase::Completed {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mut changed = draft;
+    changed.name = "Later draft name".into();
+    writer
+        .save_automation("rename", Some(&saved.automation), Some(1), changed)
+        .unwrap();
+    let completed = schedule_calendar(&observer, from, to, "UTC").unwrap();
+    assert_eq!(completed["events"][0]["title"], "Frozen manual result");
+    assert_eq!(completed["events"][0]["state"], "completed");
+    assert_eq!(completed["events"][0]["end_known"], true);
+    let other = ark.create_project("Other", "").unwrap();
+    let other = Orchestrator::builder(&ark, &other).build().unwrap();
+    assert!(
+        schedule_calendar(&other, from, to, "UTC").unwrap()["events"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        schedule_calendar(&observer, to, to + 60_000, "UTC").unwrap()["events"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}

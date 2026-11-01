@@ -832,6 +832,8 @@ mod tests {
     #[test]
     fn image_generation_approval_exposes_the_prompt() {
         let line = Labels::new(Vec::new()).approval_line(&ApprovalRequest {
+            invocation: None,
+            project: None,
             action: "image.generate".into(),
             summary: "generate one image".into(),
             risk: ark_sdk::prelude::RiskTier::Mutate,
@@ -850,6 +852,8 @@ mod tests {
     fn a_file_change_asks_with_what_it_writes() {
         let l = Labels::new(Vec::new());
         let req = ApprovalRequest {
+            invocation: None,
+            project: None,
             action: "files.edit".into(),
             summary: String::new(),
             risk: ark_sdk::prelude::RiskTier::Mutate,
@@ -887,6 +891,8 @@ mod tests {
         let l = Labels::new(Vec::new());
         let code = "import pandas as pd\n\ndf = pd.read_excel('sales.xlsx')\nprint(df.sum())";
         let req = ApprovalRequest {
+            invocation: None,
+            project: None,
             action: ark_exec::RUN.into(),
             summary: String::new(),
             risk: ark_sdk::prelude::RiskTier::Mutate,
@@ -943,6 +949,8 @@ mod tests {
         let l = Labels::new(vec![]);
         let input = json!({ "command": "npm  run dev", "folder": "./web/", "open": "/home" });
         let req = ApprovalRequest {
+            invocation: None,
+            project: None,
             action: "process.start".into(),
             summary: String::new(),
             risk: ark_sdk::prelude::RiskTier::Mutate,
@@ -984,6 +992,8 @@ mod tests {
     fn a_schedule_approval_shows_when_and_all_each_run_is_handed() {
         let l = Labels::new(Vec::new());
         let req = |input: Value| ApprovalRequest {
+            invocation: None,
+            project: None,
             action: ark_orchestrate::SCHEDULE.into(),
             summary: String::new(),
             risk: ark_sdk::prelude::RiskTier::Mutate,
@@ -1042,6 +1052,8 @@ mod tests {
         let l = Labels::new(Vec::new());
         assert_eq!(
             l.approval_line(&ApprovalRequest {
+                invocation: None,
+                project: None,
                 action: "computer.active_window".into(),
                 summary: String::new(),
                 risk: ark_sdk::prelude::RiskTier::Mutate,

@@ -251,7 +251,9 @@ impl Adapter for AgentTools {
                         json!({ "task": id, "agent": to, "state": "queued" }),
                     ));
                 }
-                let done = Inner::wait_children(&orch, &self.task, std::slice::from_ref(&id)).await;
+                let done = Inner::wait_children(&orch, &self.task, std::slice::from_ref(&id))
+                    .await
+                    .map_err(|error| AdapterError::Tool(error.to_string()))?;
                 Ok(ActionOutput::json(result_json(&done[0])))
             }
             WAIT => {
@@ -275,7 +277,9 @@ impl Adapter for AgentTools {
                         "name tasks you delegated from this task",
                     ));
                 }
-                let done = Inner::wait_children(&orch, &self.task, &mine).await;
+                let done = Inner::wait_children(&orch, &self.task, &mine)
+                    .await
+                    .map_err(|error| AdapterError::Tool(error.to_string()))?;
                 Ok(ActionOutput::json(json!({
                     "tasks": done.iter().map(result_json).collect::<Vec<_>>()
                 })))
@@ -766,7 +770,7 @@ impl Adapter for ChatTools {
                     }
                     let mut v = schedule_json(&rec);
                     if flag("run_now") == Some(true) {
-                        v["run"] = json!(self.orch.run_schedule_now(id).map_err(bad)?);
+                        v["run"] = json!(self.orch.run_schedule_now(id).await.map_err(bad)?);
                     }
                     v["state"] = json!(self.orch.schedule_state(&rec).as_str());
                     return Ok(ActionOutput::json(v));

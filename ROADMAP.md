@@ -8,8 +8,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.31.0** adds primary project conversations, display metadata, exact first-message retries and smoother sidebar disclosure. |
-| Consumers | Published ARK Desktop 0.9.8 pins v0.27.3. Examples use workspace versions. |
+| Stable release | **v0.32.0** release metadata adds Work conversations, immutable automation sequences and manual, schedule and signed webhook starts. Publication verification is pending. |
+| Consumers | Published ARK Desktop 0.9.14 pins v0.31.0. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 
@@ -428,3 +428,11 @@ per version: the `Breaking` sections of [`CHANGELOG.md`](CHANGELOG.md).
 | 0.3 | 0.4 | `ActionDescriptor::reusable: bool` becomes `reuse: Reuse`; `Selection` marks; new event variants `Retry`, `Stall` |
 | 0.2 | 0.3 | `ArkCli::new(app)` with an `ark_interact::App`; `Command::run` returns `Reply`; `ToolRenderer` becomes `ToolLabeler` |
 | 0.1 | 0.2 | `HarnessEvent` owned and serializable with new variants |
+
+## Work and automation limits
+
+Sequences have at most eight steps. Agent, Approval and Result are supported. Branches,
+loops and parallel graph editing are deferred. Codex subscription execution does not certify
+host-controlled actions and is refused for protected automation runs. Ordinary chat remains
+available. Public webhook use requires an existing HTTPS listener configuration; local
+connection evidence does not establish external reachability.

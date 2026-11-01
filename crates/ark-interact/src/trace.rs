@@ -801,6 +801,8 @@ mod tests {
             call("c1", "notes.save"),
             HarnessEvent::ApprovalRequested {
                 request: ark_sdk::prelude::ApprovalRequest {
+                    invocation: None,
+                    project: None,
                     action: "notes.save".into(),
                     summary: "save".into(),
                     risk: ark_sdk::prelude::RiskTier::Mutate,

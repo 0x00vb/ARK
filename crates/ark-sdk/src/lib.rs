@@ -213,6 +213,10 @@ pub enum ArkError {
     Provider(#[from] ark_model::ProviderError),
     #[error(transparent)]
     Runtime(#[from] ark_runtime::AgentError),
+    #[error("the answer could not be saved: {reason}")]
+    ResultNotStored { answer: String, reason: String },
+    #[error("{reason}")]
+    AdmissionRejected { reason: String },
 }
 
 /// Per-turn options for [`Ark::ask_session`]: the interactive seams a front-end supplies.
@@ -502,7 +506,10 @@ impl Ark {
         opts: TurnOptions,
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
+        session.refresh_context(&self.engine)?;
         let project = session.project().clone();
+        let execution_project = session.execution_project(&self.engine)?;
+        session.prepare_artifacts(&self.engine, input)?;
         let router = self.session_router(session).await?;
         // The turn before did not finish (the app stopped, it failed, the person stopped it):
         // this one continues it (ADR 0048). Its goal is that turn's goal with this message
@@ -567,7 +574,7 @@ impl Ark {
             let stored = &mut *session;
             let store = &self.engine;
             harness
-                .ask(&engine, &profile, &project, input, move |ev| {
+                .ask(&engine, &profile, &execution_project, input, move |ev| {
                     // What the person said while it ran is part of the goal: kept now, so a
                     // crash keeps it.
                     if let HarnessEvent::Steered { text } = &ev {
@@ -581,7 +588,12 @@ impl Ark {
         };
         match result {
             Ok(outcome) => {
-                session.record_turn(&self.engine, input, &outcome)?;
+                if let Err(error) = session.record_turn(&self.engine, input, &outcome) {
+                    return Err(ArkError::ResultNotStored {
+                        answer: outcome.answer,
+                        reason: error.to_string(),
+                    });
+                }
                 Ok(outcome)
             }
             Err(e) => {
@@ -885,6 +897,7 @@ impl Ark {
         tools: &[TurnTools],
         task: &str,
     ) -> Result<ContextReport, ArkError> {
+        let execution_project = session.execution_project(&self.engine)?;
         let unfinished = session.unfinished(&self.engine)?;
         let goal = session.goal_for(unfinished.as_ref(), task);
         let query = goal
@@ -910,7 +923,7 @@ impl Ark {
             .conversation(session.conversation_digest())
             .rules(rules)
             .skills(catalog)
-            .preview_context(&engine, &profile, session.project(), task)
+            .preview_context(&engine, &profile, &execution_project, task)
             .await?)
     }
 

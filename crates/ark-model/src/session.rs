@@ -80,6 +80,11 @@ pub struct Base<'a> {
 /// A model reached through a session the vendor keeps.
 #[async_trait]
 pub trait SessionBackend: Send + Sync {
+    /// Native tools are disabled for every open, resume and stateless call.
+    fn host_controls_tools(&self) -> bool {
+        false
+    }
+
     /// Human description, e.g. "claude sonnet".
     fn label(&self) -> String;
     /// The model identifier, e.g. "claude:sonnet".
@@ -762,6 +767,9 @@ impl ManagedSession {
 
 #[async_trait]
 impl Provider for ManagedSession {
+    fn host_controls_tools(&self) -> bool {
+        self.backend.host_controls_tools()
+    }
     fn connection_revision(&self) -> u64 {
         self.backend.account_revision()
     }
@@ -1167,6 +1175,9 @@ struct OneShot {
 
 #[async_trait]
 impl Provider for OneShot {
+    fn host_controls_tools(&self) -> bool {
+        self.backend.host_controls_tools()
+    }
     fn connection_revision(&self) -> u64 {
         self.backend.account_revision()
     }
@@ -1351,6 +1362,9 @@ pub mod mock {
 
     #[async_trait]
     impl SessionBackend for MockSessions {
+        fn host_controls_tools(&self) -> bool {
+            true
+        }
         fn label(&self) -> String {
             format!("mock-session {}", self.model)
         }

@@ -6,7 +6,7 @@ use ark_core::RuleRef;
 use ark_runtime::{ApprovalDecision, ApprovalRequest, ContextReport};
 use serde::{Deserialize, Serialize};
 
-use crate::spec::{AgentSpec, Budget};
+use crate::spec::{AgentSpec, Budget, TaskSpec};
 
 /// Unix time in milliseconds.
 pub fn now_ms() -> u64 {
@@ -271,6 +271,18 @@ pub struct TaskRecord {
     pub owner: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub handoff_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submission: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_step: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
     pub objective: String,
     #[serde(default)]
     pub context: String,
@@ -377,6 +389,70 @@ fn yes() -> bool {
 }
 
 impl TaskRecord {
+    pub(crate) fn queued(
+        id: String,
+        project: String,
+        owner: String,
+        spec: &TaskSpec,
+        origin: Origin,
+        budget: Budget,
+        inputs: Vec<ArtifactRef>,
+    ) -> Self {
+        Self {
+            id,
+            project,
+            owner,
+            handoff_key: None,
+            submission: None,
+            run: None,
+            execution_scope: None,
+            execution_step: None,
+            execution_owner: None,
+            conversation: None,
+            objective: spec.objective.clone(),
+            context: spec.context.clone(),
+            origin,
+            parent: None,
+            children: Vec::new(),
+            after: spec.after.clone(),
+            inputs,
+            state: if spec.after.is_empty() {
+                TaskState::Queued
+            } else {
+                TaskState::Pending
+            },
+            waiting_on: None,
+            attempts: 0,
+            max_attempts: spec.max_attempts.unwrap_or(1).max(1),
+            budget,
+            usage: Usage::default(),
+            result: None,
+            error: None,
+            outputs: Vec::new(),
+            tool_calls: Vec::new(),
+            rules: Vec::new(),
+            rules_held_back: 0,
+            brief_tokens: 0,
+            model: String::new(),
+            created_ms: now_ms(),
+            started_ms: None,
+            finished_ms: None,
+            run_ms: 0,
+            pid: None,
+            pid_start: None,
+            schedule: None,
+            slot: None,
+            retry_delay_ms: spec.retry_delay_ms,
+            retry_at_ms: None,
+            item: spec.item.clone(),
+            report_to: spec.report_to.clone(),
+            work: spec.work.clone(),
+            reported: false,
+            question: None,
+            decisions: Vec::new(),
+        }
+    }
+
     /// Milliseconds from start to finish (or to now, while it runs).
     pub fn elapsed_ms(&self) -> u64 {
         match (self.started_ms, self.finished_ms) {

@@ -1098,6 +1098,9 @@ impl CliModel {
 
 #[async_trait]
 impl Provider for CliModel {
+    fn host_controls_tools(&self) -> bool {
+        self.cli == Cli::Claude
+    }
     fn connection_revision(&self) -> u64 {
         self.account.as_ref().map_or(0, |a| a.revision)
     }
@@ -1306,6 +1309,9 @@ enum Mode<'a> {
 
 #[async_trait]
 impl SessionBackend for CliModel {
+    fn host_controls_tools(&self) -> bool {
+        Provider::host_controls_tools(self)
+    }
     fn reads_pictures(&self) -> bool {
         true
     }

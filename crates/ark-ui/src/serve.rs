@@ -78,6 +78,7 @@ impl AccountPairing {
 /// never opens another runtime.
 #[derive(Clone)]
 pub struct ClientListener {
+    webhook_origin: Option<String>,
     tokens: Tokens,
     route_id: Option<String>,
     account_pairing: Option<AccountPairing>,
@@ -86,6 +87,7 @@ pub struct ClientListener {
 impl ClientListener {
     pub fn new(tokens: Tokens) -> Self {
         Self {
+            webhook_origin: None,
             tokens,
             route_id: None,
             account_pairing: None,
@@ -98,6 +100,15 @@ impl ClientListener {
             anyhow::bail!("a client listener route id cannot be empty");
         }
         self.route_id = Some(route_id);
+        Ok(self)
+    }
+
+    pub fn webhook_origin(mut self, origin: &str) -> anyhow::Result<Self> {
+        self.webhook_origin = Some(
+            crate::host::webhooks::webhook_base(origin)?
+                .origin()
+                .ascii_serialization(),
+        );
         Ok(self)
     }
 
@@ -122,6 +133,7 @@ impl ClientListener {
             addr,
             ServeConfig {
                 assets: None,
+                webhook_origin: self.webhook_origin,
                 access: Access::Tokens(self.tokens),
                 entry: None,
                 surface: ListenerSurface::ClientOnly,
@@ -199,6 +211,7 @@ const PAIRED_SESSION_DAYS: u64 = 90;
 /// How long a client may take to send a request's head and body.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const CLIENT_CONNECTIONS: usize = 32;
+const FULL_CONNECTIONS: usize = 16;
 const CLIENT_BODY_BYTES: usize = 1024 * 1024;
 const CLIENT_PAIR_BODY_BYTES: usize = 16 * 1024;
 const CLIENT_RESULT_BYTES: u64 = 50 * 1024 * 1024;
@@ -216,6 +229,7 @@ enum ListenerSurface {
 }
 
 struct ServeConfig {
+    webhook_origin: Option<String>,
     assets: Option<Arc<Assets>>,
     access: Access,
     entry: Option<String>,
@@ -268,6 +282,7 @@ pub(crate) async fn serve(
         addr,
         ServeConfig {
             assets: Some(assets),
+            webhook_origin: None,
             access,
             entry,
             surface: ListenerSurface::Full,
@@ -284,6 +299,7 @@ async fn serve_with(
     config: ServeConfig,
 ) -> anyhow::Result<(Served, tokio::task::JoinHandle<()>)> {
     let ServeConfig {
+        webhook_origin,
         assets,
         access,
         entry,
@@ -337,7 +353,9 @@ async fn serve_with(
         provider_authorization: provider_authorization.clone(),
         provider_listener_id: provider_listener_id.clone(),
     };
+    let webhook_listener = host.register_webhook_listener(port, webhook_origin.as_deref())?;
     let task = tokio::spawn(async move {
+        let _webhook_listener = webhook_listener;
         let _provider_authorization_guard = provider_authorization
             .as_ref()
             .zip(provider_listener_id.as_ref())
@@ -347,8 +365,13 @@ async fn serve_with(
             });
         let mut mutations = tokio::time::interval(std::time::Duration::from_millis(250));
         let mut connections = tokio::task::JoinSet::new();
-        let connection_limit = (surface == ListenerSurface::ClientOnly)
-            .then(|| Arc::new(tokio::sync::Semaphore::new(CLIENT_CONNECTIONS)));
+        let connection_limit = Arc::new(tokio::sync::Semaphore::new(
+            if surface == ListenerSurface::ClientOnly {
+                CLIENT_CONNECTIONS
+            } else {
+                FULL_CONNECTIONS
+            },
+        ));
         loop {
             tokio::select! {
                 accepted = listener.accept() => {
@@ -357,12 +380,15 @@ async fn serve_with(
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                         continue;
                     };
-                    let permit = match connection_limit.as_ref() {
-                        Some(limit) => match Arc::clone(limit).try_acquire_owned() {
-                            Ok(permit) => Some(permit),
-                            Err(_) => continue,
-                        },
-                        None => None,
+                    let permit = match Arc::clone(&connection_limit).try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            if surface == ListenerSurface::Full {
+                                let mut sock = sock;
+                                let _ = tokio::time::timeout(std::time::Duration::from_millis(100), respond(&mut sock, "503 Service Unavailable", "text/plain", b"connection limit reached")).await;
+                            }
+                            continue;
+                        }
                     };
                     let request_context = request_context.clone();
                     connections.spawn(async move {
@@ -544,10 +570,28 @@ impl Request {
     }
 }
 
+#[derive(Debug)]
+enum RequestReadError {
+    BodyTooLarge,
+    HeaderTooLarge,
+    WebhookLimited,
+}
+impl std::fmt::Display for RequestReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::BodyTooLarge => "body too large",
+            Self::HeaderTooLarge => "header too large",
+            Self::WebhookLimited => "webhook traffic limit reached",
+        })
+    }
+}
+impl std::error::Error for RequestReadError {}
+
 async fn read_request<S: AsyncRead + Unpin>(
     sock: &mut S,
     surface: ListenerSurface,
-) -> anyhow::Result<Request> {
+    host: &Host,
+) -> anyhow::Result<(Request, Option<tokio::sync::OwnedSemaphorePermit>)> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
     let head_end = loop {
@@ -560,7 +604,7 @@ async fn read_request<S: AsyncRead + Unpin>(
             break i;
         }
         if buf.len() > 64 * 1024 {
-            anyhow::bail!("header too large");
+            return Err(RequestReadError::HeaderTooLarge.into());
         }
     };
     let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
@@ -581,14 +625,23 @@ async fn read_request<S: AsyncRead + Unpin>(
         .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
         .and_then(|(_, v)| v.parse().ok())
         .unwrap_or(0);
+    let webhook_permit = if path.starts_with("/webhooks/v1/") {
+        Some(
+            host.admit_webhook_http()
+                .ok_or(RequestReadError::WebhookLimited)?,
+        )
+    } else {
+        None
+    };
     let body_limit = match (surface, path.as_str()) {
+        (_, path) if path.starts_with("/webhooks/v1/") => crate::webhook::MAX_BODY,
         (ListenerSurface::ClientOnly, "/client/v1/pair")
         | (ListenerSurface::ClientOnly, "/client/v1/account-pair") => CLIENT_PAIR_BODY_BYTES,
         (ListenerSurface::ClientOnly, _) => CLIENT_BODY_BYTES,
         (ListenerSurface::Full, _) => 32 * 1024 * 1024,
     };
     if len > body_limit {
-        anyhow::bail!("body too large");
+        return Err(RequestReadError::BodyTooLarge.into());
     }
     let mut body = buf[head_end + 4..].to_vec();
     while body.len() < len {
@@ -599,13 +652,16 @@ async fn read_request<S: AsyncRead + Unpin>(
         body.extend_from_slice(&chunk[..n]);
     }
     body.truncate(len);
-    Ok(Request {
-        method,
-        path,
-        query,
-        headers,
-        body,
-    })
+    Ok((
+        Request {
+            method,
+            path,
+            query,
+            headers,
+            body,
+        },
+        webhook_permit,
+    ))
 }
 
 async fn respond<S: AsyncWrite + Unpin>(
@@ -708,7 +764,40 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
     let entry = entry.as_ref();
     let account_pairing = account_pairing.as_ref();
     let route_id = route_id.as_ref();
-    let req = tokio::time::timeout(READ_TIMEOUT, read_request(&mut sock, surface)).await??;
+    let (req, _webhook_permit) =
+        match tokio::time::timeout(READ_TIMEOUT, read_request(&mut sock, surface, &host)).await {
+            Ok(Ok(request)) => request,
+            Ok(Err(error)) => {
+                if matches!(
+                    error.downcast_ref::<RequestReadError>(),
+                    Some(RequestReadError::WebhookLimited)
+                ) {
+                    return respond_with(
+                        &mut sock,
+                        "429 Too Many Requests",
+                        "application/json",
+                        "Retry-After: 1\r\n",
+                        br#"{"error":"webhook traffic limit reached","retry_after_secs":1}"#,
+                    )
+                    .await;
+                }
+                let status = match error.downcast_ref::<RequestReadError>() {
+                    Some(RequestReadError::BodyTooLarge) => "413 Payload Too Large",
+                    Some(RequestReadError::HeaderTooLarge) => "431 Request Header Fields Too Large",
+                    _ => "400 Bad Request",
+                };
+                return respond(&mut sock, status, "text/plain", status.as_bytes()).await;
+            }
+            Err(_) => {
+                return respond(
+                    &mut sock,
+                    "408 Request Timeout",
+                    "text/plain",
+                    b"request timeout",
+                )
+                .await
+            }
+        };
     let token_authed = match check {
         Check::OneTime(token) => {
             let host_ok = matches!(
@@ -754,6 +843,42 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
     let authed = token_authed || session.is_some();
     if surface == ListenerSurface::ClientOnly && !client_listener_path(&req.path) {
         return respond(&mut sock, "404 Not Found", "text/plain", b"not found").await;
+    }
+    if let Some(endpoint) = req.path.strip_prefix("/webhooks/v1/") {
+        if req.method != "POST" {
+            return respond(
+                &mut sock,
+                "405 Method Not Allowed",
+                "application/json",
+                br#"{"error":"Use a signed POST request"}"#,
+            )
+            .await;
+        }
+        if !req.query.is_empty() {
+            return respond(
+                &mut sock,
+                "400 Bad Request",
+                "application/json",
+                br#"{"error":"Webhook parameters belong in signed inputs"}"#,
+            )
+            .await;
+        }
+        return match host
+            .receive_webhook(endpoint, &req.headers, &req.body)
+            .await
+        {
+            Ok(reply) => respond(&mut sock, reply.status, "application/json", &reply.body).await,
+            Err(error) => {
+                tracing::error!(%error,"webhook transport failed");
+                respond(
+                    &mut sock,
+                    "503 Service Unavailable",
+                    "application/json",
+                    br#"{"error":"Webhook is temporarily unavailable"}"#,
+                )
+                .await
+            }
+        };
     }
     if req.path.starts_with("/client/v1/") && !client_authed && !client_credential.is_empty() {
         host.forget_client_terminal_routes(&client_device_id(client_credential));
@@ -2106,22 +2231,25 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     write_resync_event(&mut sock, after).await?
                 }
             }
+            let (mut peer, mut output) = tokio::io::split(sock);
+            let mut unexpected = [0u8; 1];
             let mut credential_check = tokio::time::interval(std::time::Duration::from_millis(250));
             let mut ping = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
                 tokio::select! {
+                    closed = peer.read(&mut unexpected) => { closed?; return Ok(()); }
                     event = receiver.recv() => match event {
                         Ok(event) => {
                             if credential.0.check(&credential.1).is_none() {
                                 return Ok(());
                             }
-                            write_client_event(&mut sock, &host, &owner, &event).await?
+                            write_client_event(&mut output, &host, &owner, &event).await?
                         },
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                             if credential.0.check(&credential.1).is_none() {
                                 return Ok(());
                             }
-                            write_resync_event(&mut sock, after).await?
+                            write_resync_event(&mut output, after).await?
                         }
                         Err(_) => return Ok(()),
                     },
@@ -2131,7 +2259,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                         }
                     }
                     _ = ping.tick() => {
-                        sock.write_all(b": ping\n\n").await?;
+                        output.write_all(b": ping\n\n").await?;
                     }
                 }
             }
@@ -2328,17 +2456,20 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     .as_bytes(),
             )
             .await?;
+            let (mut peer, mut output) = tokio::io::split(sock);
+            let mut unexpected = [0u8; 1];
             let mut ping = tokio::time::interval(std::time::Duration::from_secs(15));
             loop {
                 tokio::select! {
+                    closed = peer.read(&mut unexpected) => { closed?; return Ok(()); }
                     ev = rx.recv() => {
                         if checked.elapsed() >= std::time::Duration::from_secs(1) && !still(&mut checked) {
                             return Ok(());
                         }
                         match ev {
-                            Ok(v) => sock.write_all(format!("data: {v}\n\n").as_bytes()).await?,
+                            Ok(v) => output.write_all(format!("data: {v}\n\n").as_bytes()).await?,
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                sock.write_all(b"data: {\"kind\":\"resync\"}\n\n").await?
+                                output.write_all(b"data: {\"kind\":\"resync\"}\n\n").await?
                             }
                             Err(_) => return Ok(()),
                         }
@@ -2347,7 +2478,7 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                         if !still(&mut checked) {
                             return Ok(());
                         }
-                        sock.write_all(b": ping\n\n").await?
+                        output.write_all(b": ping\n\n").await?
                     }
                 }
             }
@@ -2389,7 +2520,10 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
 }
 
 fn client_listener_path(path: &str) -> bool {
-    path == "/health" || path == "/client/bootstrap" || path.starts_with("/client/v1/")
+    path == "/health"
+        || path == "/client/bootstrap"
+        || path.starts_with("/client/v1/")
+        || path.starts_with("/webhooks/v1/")
 }
 
 fn client_pair_response(paired: &crate::access::Session) -> anyhow::Result<Vec<u8>> {

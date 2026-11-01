@@ -125,6 +125,8 @@ mod tests {
 
     fn start(command: &str) -> ApprovalRequest {
         ApprovalRequest {
+            invocation: None,
+            project: None,
             action: "process.start".into(),
             summary: "start a project process".into(),
             risk: RiskTier::Mutate,

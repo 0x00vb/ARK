@@ -74,6 +74,7 @@ impl Assets {
         }
     }
 
+    #[cfg(any(feature = "desktop", test))]
     pub(crate) fn versioned(&self, path: &str) -> String {
         format!("{VERSIONED_ROOT}/{}/{path}", self.current_namespace())
     }

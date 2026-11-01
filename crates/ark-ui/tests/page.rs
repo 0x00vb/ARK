@@ -138,6 +138,12 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         let child_step = std::sync::atomic::AtomicUsize::new(0);
         model = Arc::new(MockProvider::new("m", vec![]).with_fallback(move |request| {
             use std::sync::atomic::Ordering;
+            if request.messages.iter().any(|message| message.content.contains("GENERAL FOLLOWUP")) {
+                return say("GENERAL FOLLOWUP COMPLETE", false);
+            }
+            if request.messages.iter().any(|message| message.content.contains("GENERAL START")) {
+                return say("GENERAL WORK COMPLETE", false);
+            }
             if request.system.contains(r#"You are the agent "colleague""#) {
                 if child_step.fetch_add(1, Ordering::SeqCst) == 0 { say("BRIEF RECEIVED", false) }
                 else { say("FOLLOWUP RECEIVED", false) }
@@ -323,10 +329,10 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
         scenario,
         "agent-conversations-consumer" | "named-agent-chat"
     ) {
-        let root = PathBuf::from(
-            std::env::var_os("ARK_UI_AGENT_CONSUMER")
-                .expect("ARK_UI_AGENT_CONSUMER must name the consumer ui folder"),
-        );
+        let Some(root) = std::env::var_os("ARK_UI_AGENT_CONSUMER").map(PathBuf::from) else {
+            eprintln!("skipped: ARK_UI_AGENT_CONSUMER must name the consumer's ui folder");
+            return;
+        };
         let mut pending = vec![root.clone()];
         while let Some(dir) = pending.pop() {
             for entry in std::fs::read_dir(dir).unwrap() {
@@ -1555,6 +1561,6 @@ async fn consumer_agent_creation_handoff_search_and_followup_use_real_host_recor
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn new_chat_creates_a_named_agent_and_keeps_independent_colleague_conversations() {
+async fn new_chat_uses_general_without_creating_agents_and_keeps_work_conversations_private() {
     drive_app("named-agent-chat", vec![], Duration::ZERO, true).await;
 }

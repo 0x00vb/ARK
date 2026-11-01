@@ -144,6 +144,12 @@ pub struct WorkItem {
     /// Tasks run for it, oldest first.
     #[serde(default)]
     pub tasks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub archived_by: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
     /// Its place in its column (lower first).
     #[serde(default)]
     pub rank: f64,
@@ -172,6 +178,9 @@ impl WorkItem {
             owner: None,
             blocked: None,
             tasks: Vec::new(),
+            conversation: None,
+            archived_by: Vec::new(),
+            run: None,
             rank: 0.0,
             log: Vec::new(),
             by: by.to_string(),

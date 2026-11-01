@@ -29,9 +29,13 @@ use time::OffsetDateTime;
 mod error;
 mod index;
 mod memory;
+mod records;
+mod writer;
 pub use error::StoreError;
 pub use index::Hit;
 pub use memory::MemoryReview;
+pub use records::RecordTransaction;
+pub use writer::LOCK_FILE;
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 /// What a project holds, counted (see [`Store::project_stats`]).
@@ -51,6 +55,7 @@ pub struct Store {
     db: Mutex<Connection>,
     /// Full-text index. `None` if it failed to open (search then unavailable).
     search: Option<index::SearchIndex>,
+    _writer: std::sync::Arc<writer::WriterLock>,
 }
 
 impl Store {
@@ -58,6 +63,7 @@ impl Store {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         std::fs::create_dir_all(root.join("objects"))?;
+        let writer = writer::acquire(&root)?;
         sweep_temp_blobs(&root.join("objects"));
         let db = Connection::open(root.join("meta.db"))?;
         db.execute_batch(
@@ -99,6 +105,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS records(
                  kind TEXT NOT NULL, id TEXT NOT NULL, scope TEXT NOT NULL,
                  updated_at TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY(kind, id));
+             CREATE TABLE IF NOT EXISTS quota_windows(
+                 quota_key TEXT NOT NULL, window_start INTEGER NOT NULL, used INTEGER NOT NULL,
+                 PRIMARY KEY(quota_key, window_start));
              -- Append-only event streams. `seq` orders events across all streams.
              CREATE TABLE IF NOT EXISTS events(
                  seq INTEGER PRIMARY KEY AUTOINCREMENT, stream TEXT NOT NULL,
@@ -128,6 +137,7 @@ impl Store {
             root,
             db: Mutex::new(db),
             search,
+            _writer: writer,
         })
     }
 
@@ -298,9 +308,12 @@ impl Store {
     /// Resolve an artifact by full id, short id prefix, or exact name. When a name is
     /// ambiguous the most recently ingested match wins (list is newest-first).
     pub fn resolve_artifact(&self, project: &ProjectId, needle: &str) -> Result<Option<Artifact>> {
-        Ok(self.list_artifacts(project)?.into_iter().find(|a| {
-            a.id.as_str() == needle || a.id.as_str().starts_with(needle) || a.name == needle
-        }))
+        use rusqlite::OptionalExtension;
+        let db = self.db.lock().unwrap();
+        let value: Option<String> = db.query_row("SELECT json FROM artifacts WHERE project_id=?1 AND (id=?2 OR substr(id,1,length(?2))=?2 OR json_extract(json,'$.name')=?2) ORDER BY created_at DESC LIMIT 1", rusqlite::params![project.as_str(), needle], |row| row.get(0)).optional()?;
+        value
+            .map(|value| serde_json::from_str(&value).map_err(Into::into))
+            .transpose()
     }
 
     pub fn list_artifacts(&self, project: &ProjectId) -> Result<Vec<Artifact>> {
@@ -312,6 +325,56 @@ impl Store {
     }
 
     // ---- invocations ------------------------------------------------------
+
+    pub fn create_invocation(&self, project: &ProjectId, invocation: &Invocation) -> Result<()> {
+        let db = self.db.lock().unwrap();
+        db.execute("INSERT INTO invocations(project_id,id,action,status,created_at,json,output_len) VALUES(?1,?2,?3,?4,?5,?6,?7)", rusqlite::params![project.as_str(),invocation.id.as_str(),&invocation.action,serde_json::to_string(&invocation.status)?.trim_matches('"'),rfc(invocation.created_at),serde_json::to_string(invocation)?,serde_json::to_string(&invocation.output)?.len() as i64])?;
+        Ok(())
+    }
+
+    pub fn transition_invocation(
+        &self,
+        project: &ProjectId,
+        expected: &Invocation,
+        next: &Invocation,
+    ) -> Result<bool> {
+        use rusqlite::OptionalExtension;
+        if expected.id != next.id {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "an invocation transition cannot change identity",
+            )
+            .into());
+        }
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let stored: Option<String> = tx
+            .query_row(
+                "SELECT json FROM invocations WHERE project_id=?1 AND id=?2",
+                rusqlite::params![project.as_str(), expected.id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(stored) = stored else {
+            return Ok(false);
+        };
+        let current: Invocation = serde_json::from_str(&stored)?;
+        if serde_json::to_value(current)? != serde_json::to_value(expected)? {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE invocations SET status=?1,json=?2,output_len=?3 WHERE project_id=?4 AND id=?5",
+            rusqlite::params![
+                serde_json::to_string(&next.status)?.trim_matches('"'),
+                serde_json::to_string(next)?,
+                serde_json::to_string(&next.output)?.len() as i64,
+                project.as_str(),
+                next.id.as_str()
+            ],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
 
     pub fn put_invocation(&self, project: &ProjectId, inv: &Invocation) -> Result<()> {
         let db = self.db.lock().unwrap();

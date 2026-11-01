@@ -25,6 +25,7 @@ use crate::plugins::{PluginSpec, PluginStatus, Plugins};
 /// have happened.
 pub const INTERRUPTED_CALL: &str = "interrupted: the process stopped before this call finished";
 
+#[derive(Clone)]
 pub struct Engine {
     /// Shared with every engine made by [`scoped`](Engine::scoped).
     pub store: Arc<Store>,
@@ -54,12 +55,29 @@ pub struct Engine {
     continues: Vec<String>,
     /// What the agent said when it made the calls this engine runs ([`narrating`](Engine::narrating)).
     narration: Option<String>,
+    guard: Option<Arc<dyn crate::guard::CallGuard>>,
 }
 
 /// How many pictures stay for windows to show after the model got them.
 const SHOWN: usize = 12;
 
+fn descriptor_fingerprint(descriptor: &ark_core::ActionDescriptor) -> Result<String, AgentError> {
+    Ok(blake3::hash(&serde_json::to_vec(descriptor)?)
+        .to_hex()
+        .to_string())
+}
+
 impl Engine {
+    pub fn guarded(&self, guard: Arc<dyn crate::guard::CallGuard>) -> Self {
+        let mut engine = self.clone();
+        engine.guard = Some(crate::guard::narrow(engine.guard.take(), guard));
+        engine
+    }
+
+    pub fn call_guard(&self) -> Option<Arc<dyn crate::guard::CallGuard>> {
+        self.guard.clone()
+    }
+
     /// Apply trusted external-effect outcomes before any model answer is stored or shown. A
     /// tool can report an unconfirmed effect that must not be turned into a success claim by
     /// prose. A later confirmed marker for the same id supersedes it.
@@ -112,6 +130,7 @@ impl Engine {
             work: None,
             continues: Vec::new(),
             narration: None,
+            guard: None,
         }
     }
 
@@ -133,6 +152,7 @@ impl Engine {
             work: self.work.clone(),
             continues: self.continues.clone(),
             narration: self.narration.clone(),
+            guard: self.guard.clone(),
         }
     }
 
@@ -153,6 +173,7 @@ impl Engine {
             work: Some(work.into()),
             continues: self.continues.clone(),
             narration: self.narration.clone(),
+            guard: self.guard.clone(),
         }
     }
 
@@ -610,9 +631,157 @@ impl Engine {
 
     // ---- run actions ------------------------------------------------------
 
-    /// Run an action and record it. The approval gate: `Read`/`Observe` run immediately;
-    /// `Mutate` runs only if `allow_mutate` is true, otherwise the invocation is stored as
-    /// `PendingApproval` and nothing executes.
+    pub(crate) fn pending_approval(
+        &self,
+        project: &ProjectId,
+        action: &str,
+        input: serde_json::Value,
+    ) -> Result<Invocation, AgentError> {
+        let descriptor = self
+            .tools()
+            .descriptor(action)
+            .ok_or_else(|| AgentError::UnknownAction(action.into()))?;
+        if descriptor.risk != RiskTier::Mutate {
+            return Err(AgentError::NotAllowed(
+                "only a change can await approval".into(),
+            ));
+        }
+        let input = self.action_input(project, input)?;
+        if let Some(guard) = &self.guard {
+            if let crate::guard::Verdict::Refuse(reason) =
+                guard.check(action, &input, Some(&descriptor))
+            {
+                return Err(AgentError::NotAllowed(reason));
+            }
+        }
+        let mut invocation = Invocation::new(action, descriptor.risk, input);
+        invocation.status = InvocationStatus::PendingApproval;
+        invocation.descriptor = Some(descriptor_fingerprint(&descriptor)?);
+        invocation.work = self.work.clone();
+        invocation.narration = self.narration.clone();
+        self.store.create_invocation(project, &invocation)?;
+        Ok(invocation)
+    }
+
+    fn action_input(
+        &self,
+        project: &ProjectId,
+        mut input: serde_json::Value,
+    ) -> Result<serde_json::Value, AgentError> {
+        if self.guard.is_some() {
+            if let Some(needle) = input.get("artifact").and_then(serde_json::Value::as_str) {
+                let artifact = self
+                    .store
+                    .resolve_artifact(project, needle.trim_start_matches("art:"))?
+                    .ok_or_else(|| AgentError::ArtifactNotFound(needle.into()))?;
+                input["artifact"] = serde_json::Value::String(artifact.id.to_string());
+            }
+            Ok(input)
+        } else {
+            Ok(self.resolve_artifact_arg(project, input))
+        }
+    }
+
+    pub(crate) fn deny_pending(
+        &self,
+        project: &ProjectId,
+        pending: &Invocation,
+    ) -> Result<(), AgentError> {
+        let mut denied = pending.clone();
+        denied.status = InvocationStatus::Denied;
+        denied.finished_at = Some(time::OffsetDateTime::now_utc());
+        if !self
+            .store
+            .transition_invocation(project, pending, &denied)?
+        {
+            return Err(AgentError::NotAllowed(
+                "the approval's action changed before it was declined".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Resume an exact stored call through its approval gate. Running calls require review.
+    pub async fn run_pending_with_approval(
+        &self,
+        project: &ProjectId,
+        id: &InvocationId,
+        gate: &crate::approval::ApprovalGate,
+    ) -> Result<Invocation, AgentError> {
+        let pending = self
+            .store
+            .get_invocation(project, id.as_str())?
+            .ok_or_else(|| AgentError::NotAllowed("the pending action is unavailable".into()))?;
+        if pending.work != self.work {
+            return Err(AgentError::NotAllowed(
+                "the pending action belongs to another work item".into(),
+            ));
+        }
+        if matches!(
+            pending.status,
+            InvocationStatus::Ok | InvocationStatus::Failed | InvocationStatus::Denied
+        ) {
+            return Ok(pending);
+        }
+        if pending.status != InvocationStatus::PendingApproval {
+            return Err(AgentError::NotAllowed(
+                "this action may already have run; review its result before continuing".into(),
+            ));
+        }
+        let descriptor = self
+            .tools()
+            .descriptor(&pending.action)
+            .ok_or_else(|| AgentError::UnknownAction(pending.action.clone()))?;
+        if pending.descriptor.as_deref() != Some(descriptor_fingerprint(&descriptor)?.as_str()) {
+            return Err(AgentError::NotAllowed(
+                "the pending action changed since it was reviewed".into(),
+            ));
+        }
+        if let Some(guard) = &self.guard {
+            if let crate::guard::Verdict::Refuse(reason) =
+                guard.check(&pending.action, &pending.input, Some(&descriptor))
+            {
+                return Err(AgentError::NotAllowed(reason));
+            }
+        }
+        let request = crate::approval::ApprovalRequest {
+            invocation: Some(pending.id.clone()),
+            project: Some(project.clone()),
+            action: pending.action.clone(),
+            summary: descriptor.summary.clone(),
+            risk: pending.risk,
+            input: pending.input.clone(),
+            class: descriptor
+                .grant
+                .as_ref()
+                .and_then(|grant| grant.class(&pending.input))
+                .unwrap_or_else(|| pending.action.clone()),
+            preview: crate::approval::preview_call(&pending.action, &pending.input),
+            agent: None,
+            task: None,
+            ask_each_time: true,
+            cut_short: false,
+        };
+        if !gate.check(&request).await.allows() {
+            self.deny_pending(project, &pending)?;
+            return self
+                .store
+                .get_invocation(project, id.as_str())?
+                .ok_or_else(|| {
+                    AgentError::NotAllowed("the declined action is unavailable".into())
+                });
+        }
+        self.run_action_authorized(
+            project,
+            &pending.action.clone(),
+            pending.input.clone(),
+            true,
+            true,
+            Some(pending),
+        )
+        .await
+    }
+
     pub async fn run_action(
         &self,
         project: &ProjectId,
@@ -620,32 +789,108 @@ impl Engine {
         input: serde_json::Value,
         allow_mutate: bool,
     ) -> Result<Invocation, AgentError> {
+        self.run_action_authorized(project, action, input, allow_mutate, false, None)
+            .await
+    }
+
+    pub(crate) async fn run_approved_action(
+        &self,
+        project: &ProjectId,
+        action: &str,
+        input: serde_json::Value,
+        approved: bool,
+        pending: Option<Invocation>,
+    ) -> Result<Invocation, AgentError> {
+        self.run_action_authorized(project, action, input, approved, true, pending)
+            .await
+    }
+
+    async fn run_action_authorized(
+        &self,
+        project: &ProjectId,
+        action: &str,
+        input: serde_json::Value,
+        allow_mutate: bool,
+        guarded_approval: bool,
+        pending: Option<Invocation>,
+    ) -> Result<Invocation, AgentError> {
         // A turn's engine has its plugins in its registry already; the root engine adds them.
         let registry = self.tools();
         let desc = registry
             .descriptor(action)
             .ok_or_else(|| AgentError::UnknownAction(action.to_string()))?;
 
-        let input = self.resolve_artifact_arg(project, input);
-        let mut inv = Invocation::new(action, desc.risk, input.clone());
-        inv.work = self.work.clone();
-        inv.narration = self.narration.clone();
-
+        let mut inv = if let Some(pending) = &pending {
+            if pending.action != action
+                || pending.input != input
+                || pending.work != self.work
+                || pending.risk != desc.risk
+                || pending.descriptor.as_deref() != Some(descriptor_fingerprint(&desc)?.as_str())
+            {
+                return Err(AgentError::NotAllowed(
+                    "the reviewed action changed before execution".into(),
+                ));
+            }
+            pending.clone()
+        } else {
+            let input = self.action_input(project, input)?;
+            let mut invocation = Invocation::new(action, desc.risk, input);
+            invocation.descriptor = Some(descriptor_fingerprint(&desc)?);
+            invocation.work = self.work.clone();
+            invocation.narration = self.narration.clone();
+            invocation
+        };
+        let input = inv.input.clone();
         // record which artifact this call reads, if any, for the provenance graph
         if let Some(a) = input.get("artifact").and_then(|v| v.as_str()) {
             inv.consumed.push(ArtifactId(a.to_string()));
         }
 
+        let allow_mutate = match &self.guard {
+            Some(guard) => match guard.check(action, &input, Some(&desc)) {
+                crate::guard::Verdict::Refuse(reason) => {
+                    return Err(AgentError::NotAllowed(reason))
+                }
+                crate::guard::Verdict::Ask if desc.risk != RiskTier::Mutate => {
+                    return Err(AgentError::NotAllowed(
+                        "this operation has no guarded approval route".into(),
+                    ))
+                }
+                crate::guard::Verdict::Ask => guarded_approval && allow_mutate,
+                crate::guard::Verdict::Allow => {
+                    !desc.person_only || (guarded_approval && allow_mutate)
+                }
+            },
+            None => allow_mutate && !desc.person_only || guarded_approval && allow_mutate,
+        };
         if desc.risk == RiskTier::Mutate && !allow_mutate {
             inv.status = InvocationStatus::PendingApproval;
-            self.store.put_invocation(project, &inv)?;
+            self.store.create_invocation(project, &inv)?;
             return Ok(inv);
         }
         // Recorded before it runs: a crash mid-call leaves a trace that recovery can mark.
         inv.status = InvocationStatus::Running;
         inv.pid = Some(std::process::id());
         inv.pid_start = crate::process::own_start();
-        self.store.put_invocation(project, &inv)?;
+        let mut reservation = self
+            .guard
+            .clone()
+            .map(|guard| crate::guard::Reservation::new(guard, project.clone(), inv.clone()));
+        if let Some(reservation) = &mut reservation {
+            reservation.prepare().map_err(AgentError::NotAllowed)?;
+        }
+        if let Some(pending) = &pending {
+            if !self.store.transition_invocation(project, pending, &inv)? {
+                return Err(AgentError::NotAllowed(
+                    "another execution already claimed this approval".into(),
+                ));
+            }
+        } else {
+            self.store.create_invocation(project, &inv)?;
+        }
+        if let Some(reservation) = &mut reservation {
+            reservation.started().map_err(AgentError::NotAllowed)?;
+        }
 
         let blobs = StoreBlobs(&self.store);
         let ctx = RunCtx::new(&blobs)
@@ -670,6 +915,9 @@ impl Engine {
         }
 
         self.store.put_invocation(project, &inv)?;
+        if let Some(reservation) = &mut reservation {
+            reservation.finish(&inv).map_err(AgentError::NotAllowed)?;
+        }
         Ok(inv)
     }
 }
@@ -881,5 +1129,143 @@ mod effect_tests {
                 .unwrap(),
             "real answer"
         );
+    }
+}
+
+#[cfg(test)]
+mod pending_approval_tests {
+    use super::*;
+    use crate::{ApprovalDecision, ApprovalGate, Approver, FixedApprover};
+    use ark_core::ActionDescriptor;
+    use ark_tools::{ActionOutput, Adapter, RunCtx};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Change(Arc<AtomicUsize>);
+    #[async_trait::async_trait]
+    impl Adapter for Change {
+        fn name(&self) -> &str {
+            "pending"
+        }
+        fn actions(&self) -> Vec<ActionDescriptor> {
+            vec![ActionDescriptor::new(
+                "pending.write",
+                "write the reviewed value",
+                RiskTier::Mutate,
+            )]
+        }
+        async fn run(
+            &self,
+            _: &str,
+            input: serde_json::Value,
+            _: &RunCtx<'_>,
+        ) -> ark_tools::Result<ActionOutput> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            Ok(ActionOutput::json(input))
+        }
+    }
+    struct Together(Arc<tokio::sync::Barrier>);
+    #[async_trait::async_trait]
+    impl Approver for Together {
+        async fn decide(&self, request: &crate::ApprovalRequest) -> ApprovalDecision {
+            assert!(request.invocation.is_some());
+            assert!(request.project.is_some());
+            assert!(request.ask_each_time);
+            self.0.wait().await;
+            ApprovalDecision::AllowOnce
+        }
+    }
+    fn engine(root: &std::path::Path, calls: Arc<AtomicUsize>) -> Engine {
+        let mut registry = Registry::new();
+        registry.register(Arc::new(Change(calls)));
+        Engine::new(Store::open(root).unwrap(), registry).for_work("one-work")
+    }
+    #[tokio::test]
+    async fn recovered_pending_call_is_claimed_once_and_completed_result_is_reused() {
+        let root = tempfile::tempdir().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let original = engine(root.path(), calls.clone());
+        let project = original.create_project("pending", "").unwrap();
+        let pending = original
+            .pending_approval(
+                &project.id,
+                "pending.write",
+                serde_json::json!({"value": "exact"}),
+            )
+            .unwrap();
+        drop(original);
+        let restored = engine(root.path(), calls.clone());
+        let gate = ApprovalGate::new(Arc::new(Together(Arc::new(tokio::sync::Barrier::new(2)))));
+        let (first, second) = tokio::join!(
+            restored.run_pending_with_approval(&project.id, &pending.id, &gate),
+            restored.run_pending_with_approval(&project.id, &pending.id, &gate)
+        );
+        assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let gate = ApprovalGate::new(Arc::new(FixedApprover(ApprovalDecision::Deny)));
+        let completed = restored
+            .run_pending_with_approval(&project.id, &pending.id, &gate)
+            .await
+            .unwrap();
+        assert_eq!(completed.status, InvocationStatus::Ok);
+        assert_eq!(completed.output, serde_json::json!({"value": "exact"}));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+    #[tokio::test]
+    async fn denied_running_changed_and_foreign_calls_never_execute() {
+        let root = tempfile::tempdir().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let engine = engine(root.path(), calls.clone());
+        let project = engine.create_project("pending", "").unwrap();
+        let gate = ApprovalGate::new(Arc::new(FixedApprover(ApprovalDecision::Deny)));
+        let mut pending = engine
+            .pending_approval(&project.id, "pending.write", serde_json::json!({}))
+            .unwrap();
+        let denied = engine
+            .run_pending_with_approval(&project.id, &pending.id, &gate)
+            .await
+            .unwrap();
+        assert_eq!(denied.status, InvocationStatus::Denied);
+        let allow = ApprovalGate::new(Arc::new(FixedApprover(ApprovalDecision::AllowOnce)));
+        assert_eq!(
+            engine
+                .run_pending_with_approval(&project.id, &pending.id, &allow)
+                .await
+                .unwrap()
+                .status,
+            InvocationStatus::Denied
+        );
+        pending.id = InvocationId::new();
+        pending.status = InvocationStatus::Running;
+        engine
+            .store
+            .create_invocation(&project.id, &pending)
+            .unwrap();
+        assert!(engine
+            .run_pending_with_approval(&project.id, &pending.id, &allow)
+            .await
+            .is_err());
+        pending.id = InvocationId::new();
+        pending.status = InvocationStatus::PendingApproval;
+        pending.descriptor = Some("changed".into());
+        engine
+            .store
+            .create_invocation(&project.id, &pending)
+            .unwrap();
+        assert!(engine
+            .run_pending_with_approval(&project.id, &pending.id, &allow)
+            .await
+            .is_err());
+        pending.id = InvocationId::new();
+        pending.work = Some("another-work".into());
+        engine
+            .store
+            .create_invocation(&project.id, &pending)
+            .unwrap();
+        assert!(engine
+            .run_pending_with_approval(&project.id, &pending.id, &allow)
+            .await
+            .is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }

@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AgentError {
+    #[error("{0}")]
+    NotAllowed(String),
     #[error("project memory changed while waiting for the model; continue to use the current correction")]
     MemoryChanged,
 

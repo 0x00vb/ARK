@@ -218,6 +218,9 @@ impl Limited {
 
 #[async_trait]
 impl Provider for Limited {
+    fn host_controls_tools(&self) -> bool {
+        self.inner.host_controls_tools()
+    }
     fn connection_revision(&self) -> u64 {
         self.inner.connection_revision()
     }

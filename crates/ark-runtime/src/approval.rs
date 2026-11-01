@@ -14,13 +14,17 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use ark_core::RiskTier;
+use ark_core::{InvocationId, ProjectId, RiskTier};
 use ark_store::Store;
 use serde::{Deserialize, Serialize};
 
 /// What the agent wants to do, in a form a front-end can show.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApprovalRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invocation: Option<InvocationId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectId>,
     /// The action name, e.g. `manuscript.save`.
     pub action: String,
     /// The action's one-line description from its descriptor.
@@ -287,6 +291,8 @@ mod tests {
 
     fn req(class: &str) -> ApprovalRequest {
         ApprovalRequest {
+            invocation: None,
+            project: None,
             action: "doc.save".into(),
             summary: "save".into(),
             risk: RiskTier::Mutate,

@@ -400,6 +400,12 @@ pub type TextSink<'a> = &'a (dyn Fn(&str) + Send + Sync);
 /// A model backend. One required method; everything else is translation inside the impl.
 #[async_trait]
 pub trait Provider: Send + Sync {
+    /// All tool execution is returned to the host. Native provider tools cannot run.
+    /// Composite providers must require this from every possible execution branch.
+    fn host_controls_tools(&self) -> bool {
+        false
+    }
+
     /// An immutable view bound to this conversation. `None` keeps this provider unchanged.
     /// Wrappers forward binding and preserve their shared accounting state.
     fn for_conversation(

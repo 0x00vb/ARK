@@ -43,7 +43,11 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
 
   // The chat's Stop: the send button while the run goes on and nothing is typed. Typed text
   // still goes to `submit`; there is no queue.
-  const label = () => send.setAttribute("aria-label", running && !input.value.trim() ? "Stop" : "Send");
+  const label = () => {
+    const stopping = running && !input.value.trim();
+    send.setAttribute("aria-label", stopping ? "Stop" : "Send");
+    send.disabled = unavailable || (!stopping && submitDisabled);
+  };
   new MutationObserver(label).observe(form, { attributes: true, attributeFilter: ["data-empty"] });
   send.addEventListener("click", (e) => {
     if (!running || input.value.trim()) return;
@@ -171,6 +175,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
     reset,
     input,
     actions,
+    controls: elements.controls,
     uploads: elements.uploads,
     addLine: (text, options) => {
       composer.addLine(text, options);
@@ -196,7 +201,7 @@ export function chatView(el, base, { submit, stop, call, placeholder = "", model
       }
       if (blocked != null) submitDisabled = !!blocked;
       if (disabled != null) unavailable = !!disabled;
-      send.disabled = unavailable || submitDisabled;
+      label();
       if (disabled != null) {
         input.disabled = !!disabled;
         if (elements.attach) elements.attach.disabled = !!disabled;

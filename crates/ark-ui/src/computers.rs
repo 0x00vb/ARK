@@ -27,15 +27,9 @@ use serde_json::{json, Value};
 /// Whether the store at `store_root` keeps the computer `name`, or kept it and the person
 /// removed it since: an app that moved its own copy here ([`crate::ArkUi::keep_computer`])
 /// forgets that copy then, and never moves it again.
-pub fn kept(store_root: &std::path::Path, name: &str) -> bool {
-    ark_store::Store::open(store_root)
-        .ok()
-        .and_then(|s| {
-            let kept = s.get_record(KIND, name).ok().flatten();
-            let removed = s.get_record(REMOVED, name).ok().flatten();
-            kept.or(removed)
-        })
-        .is_some()
+pub fn kept(store_root: &std::path::Path, name: &str) -> ark_store::Result<bool> {
+    let store = ark_store::Store::open(store_root)?;
+    Ok(store.get_record(KIND, name)?.is_some() || store.get_record(REMOVED, name)?.is_some())
 }
 
 /// Computers the person removed, by name.

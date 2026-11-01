@@ -14,6 +14,7 @@
 
 pub(crate) mod agent_conversations;
 mod client_creation;
+pub(crate) mod webhooks;
 
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
@@ -677,6 +678,7 @@ pub struct Host {
     chat_skills: Vec<String>,
     /// What lists and connects capabilities while a turn holds the interaction.
     caps: ark_interact::capabilities::Parts,
+    webhooks: webhooks::State,
     labels: Labels,
     feed: Arc<Feed>,
     approvals: Mutex<HashMap<u64, (Value, oneshot::Sender<ApprovalDecision>)>>,
@@ -1101,6 +1103,7 @@ impl Host {
             engine: ix.ark().shared_engine(),
             chat_skills: ix.ark().skill_names().to_vec(),
             caps: ark_interact::capabilities::Parts::of(ix.ark()),
+            webhooks: Default::default(),
             labels: ix.labels().clone(),
             commands: serde_json::to_value(ix.commands()).unwrap_or_default(),
             siblings: ix.siblings(),
@@ -2286,6 +2289,17 @@ impl Host {
             .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))
     }
 
+    fn resource_execution_project(&self, r: &ResourceRef) -> anyhow::Result<ProjectId> {
+        let project = self.resource_project(r)?;
+        if r.location.session.is_empty() {
+            return Ok(project.id);
+        }
+        let session =
+            ark_sdk::prelude::ark_runtime::Session::open(&self.engine, &r.location.session)?
+                .ok_or_else(|| anyhow::anyhow!("the opening conversation is unavailable"))?;
+        Ok(session.execution_project(&self.engine)?)
+    }
+
     fn resource_path<'a>(&self, r: &'a ResourceRef, input: &'a Value) -> &'a str {
         if r.id.is_empty() {
             input["path"].as_str().unwrap_or("")
@@ -2836,12 +2850,13 @@ impl Host {
                 Ok(json!({ "path": dir, "chosen": refreshed.workspace.is_some() }))
             }
             O::State => {
+                let context = self.resource_execution_project(&r)?;
                 let state = self
                     .engine
                     .store
-                    .get_research_state(&project.id)?
+                    .get_research_state(&context)?
                     .unwrap_or_default();
-                let artifacts = self.engine.store.list_artifacts(&project.id)?;
+                let artifacts = self.engine.store.list_artifacts(&context)?;
                 Ok(serde_json::to_value(StateView::build(
                     state,
                     STATE_DIGEST_ITEMS,
@@ -2923,10 +2938,11 @@ impl Host {
                     .find(|c| c.id == wanted)
                     .cloned()
                     .ok_or_else(|| anyhow::anyhow!("no call `{wanted}` in task `{id}`"))?;
-                // The agent's evidence is kept in its own project (its scope).
-                let scope = o
-                    .agent(&task.owner)
-                    .map(|a| ProjectId(a.scope))
+                let scope = task
+                    .execution_scope
+                    .as_ref()
+                    .map(|scope| ProjectId(scope.clone()))
+                    .or_else(|| o.agent(&task.owner).map(|agent| ProjectId(agent.scope)))
                     .unwrap_or_else(|| project.id.clone());
                 let inv = match &call.invocation {
                     Some(inv) => self.engine.store.get_invocation(&scope, inv)?,
@@ -2979,6 +2995,516 @@ impl Host {
                     _ => Ok(json!({})),
                 }
             }
+            O::Automations => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.resource_subscribers.subscribe(
+                    ResourceKind::Project,
+                    project.id.as_str(),
+                    "orch",
+                    r.clone(),
+                );
+                Ok(serde_json::to_value(o.automation_page(
+                    input["cursor"].as_str(),
+                    n("limit").unwrap_or(50) as usize,
+                )?)?)
+            }
+            O::WebhookSetup => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.webhook_setup(&o, &input)
+            }
+            O::WebhookProbe => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(
+                    self.webhook_probe(&o, &s("endpoint"), &s("connection"))
+                        .await?,
+                )?)
+            }
+            O::WebhookGet => {
+                let o = self.resource_orchestrator(&r).await?;
+                let entry = o.automation(&s("automation"))?;
+                let endpoint = entry
+                    .definition
+                    .webhook
+                    .as_deref()
+                    .map(|id| o.webhook_endpoint(id))
+                    .transpose()?;
+                let deliveries = endpoint
+                    .as_ref()
+                    .map(|endpoint| o.webhook_deliveries(&endpoint.id))
+                    .transpose()?
+                    .unwrap_or_default();
+                Ok(
+                    json!({"endpoint":endpoint,"deliveries":deliveries,"connection":self.webhook_options()}),
+                )
+            }
+            O::AutomationRevoke => {
+                let o = self.resource_orchestrator(&r).await?;
+                o.revoke_automation_activation(&s("activation"), &s("digest"))?;
+                Ok(json!({}))
+            }
+            O::AutomationPreview => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.preview_automation(
+                    serde_json::from_value(input["draft"].clone())?,
+                )?)?)
+            }
+            O::AutomationHistory => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.resource_subscribers.subscribe(
+                    ResourceKind::Project,
+                    project.id.as_str(),
+                    "orch",
+                    r.clone(),
+                );
+                Ok(serde_json::to_value(o.automation_history(
+                    &s("automation"),
+                    input["cursor"].as_str(),
+                    n("limit").unwrap_or(20) as usize,
+                )?)?)
+            }
+            O::AutomationStart => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.execute_automation_run(&s("run"))?)?)
+            }
+            O::AutomationGet => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.resource_subscribers.subscribe(
+                    ResourceKind::Project,
+                    project.id.as_str(),
+                    "orch",
+                    r.clone(),
+                );
+                if let Some(schedule) = input["legacy_schedule"].as_str() {
+                    return Ok(json!({"legacy":o.legacy_automation(schedule)?}));
+                }
+                Ok(
+                    json!({"entry":o.automation(&s("automation"))?, "layout":o.automation_layout(&s("automation"))?, "activation":o.automation_active_permission(&s("automation"))?}),
+                )
+            }
+            O::AutomationSave => {
+                let o = self.resource_orchestrator(&r).await?;
+                if input["cancel"].as_bool() == Some(true) {
+                    return Ok(
+                        json!({"saved":o.cancel_automation_save_source(&s("request"), input["automation"].as_str(), n("expected"), serde_json::from_value(input["draft"].clone())?, input.get("legacy").filter(|value| !value.is_null()).cloned().map(serde_json::from_value).transpose()?)?}),
+                    );
+                }
+                let receipt = o.save_automation_source(
+                    &s("request"),
+                    input["automation"].as_str(),
+                    n("expected"),
+                    serde_json::from_value(input["draft"].clone())?,
+                    input
+                        .get("legacy")
+                        .filter(|value| !value.is_null())
+                        .cloned()
+                        .map(serde_json::from_value)
+                        .transpose()?,
+                )?;
+                Ok(serde_json::to_value(receipt)?)
+            }
+            O::AutomationLayout => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.save_automation_layout(
+                    &s("automation"),
+                    n("expected").unwrap_or(0),
+                    serde_json::from_value(input["layout"].clone())?,
+                )?)?)
+            }
+            O::AutomationPrepare => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(
+                    o.prepare_automation_activation(
+                        &s("automation"),
+                        n("expected").ok_or_else(|| anyhow::anyhow!("which revision?"))?,
+                    )
+                    .await?,
+                )?)
+            }
+            O::AutomationActivate => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.activate_automation(
+                    &s("automation"),
+                    &s("activation"),
+                    &s("digest"),
+                )?)?)
+            }
+            O::AutomationPause => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.pause_automation(&s("automation"))?)?)
+            }
+            O::AutomationPreviewInputs => {
+                let o = self.resource_orchestrator(&r).await?;
+                let payload = json!({"inputs": input["inputs"]});
+                anyhow::ensure!(
+                    serde_json::to_vec(&payload)?.len() <= crate::webhook::MAX_BODY,
+                    "the webhook body exceeds 64 KiB"
+                );
+                Ok(serde_json::to_value(o.preview_webhook_inputs(
+                    &s("automation"),
+                    n("expected").ok_or_else(|| anyhow::anyhow!("which revision?"))?,
+                    serde_json::from_value(input["inputs"].clone())?,
+                )?)?)
+            }
+            O::AutomationValidate => {
+                let o = self.resource_orchestrator(&r).await?;
+                let draft: ark_interact::ark_orchestrate::automation::Draft =
+                    serde_json::from_value(input["draft"].clone())?;
+                let mut issues = o.validate_automation_draft(&draft)?;
+                let activation_issues = draft.activation_issues();
+                let can_save = match draft.storage_validated() {
+                    Ok(_) => true,
+                    Err(message) => {
+                        issues.push(ark_interact::ark_orchestrate::automation::ValidationIssue {
+                            step: None,
+                            field: "Definition".into(),
+                            message,
+                        });
+                        false
+                    }
+                };
+                Ok(
+                    json!({"can_save":can_save,"issues":issues,"activation_issues":activation_issues}),
+                )
+            }
+            O::AutomationBeginStart => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.begin_automation_start(
+                    serde_json::from_value(input.clone())?,
+                )?)?)
+            }
+            O::AutomationAcknowledgeStart => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.acknowledge_automation_start(
+                    serde_json::from_value(input.clone())?,
+                )?)?)
+            }
+            O::AutomationCancelStart => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(
+                    json!({"run":o.cancel_automation_start(&s("automation"), n("expected").ok_or_else(|| anyhow::anyhow!("which revision?"))?, &s("request"), serde_json::from_value(input["inputs"].clone())?)?}),
+                )
+            }
+            O::AutomationRun => {
+                let o = self.resource_orchestrator(&r).await?;
+                let run = o
+                    .admit_manual_automation_run(serde_json::from_value(input.clone())?)
+                    .await?;
+                o.execute_automation_run(&run.id)?;
+                Ok(serde_json::to_value(run)?)
+            }
+            O::AutomationExecution => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(o.automation_run(&s("run"))?)?)
+            }
+            O::WorkAdmit => {
+                let o = self.resource_orchestrator(&r).await?;
+                let target = serde_json::from_value(input["target"].clone())?;
+                let task: TaskSpec = serde_json::from_value(input["task"].clone())?;
+                let receipt = if let Some(receipt) = input["receipt"].as_str() {
+                    o.admit_work_followup(target, task, "manual", &s("request_id"), receipt)
+                        .await?
+                } else {
+                    o.admit_work(target, task, "manual", &s("request_id"))
+                        .await?
+                };
+                Ok(serde_json::to_value(receipt)?)
+            }
+            O::WorkReceipt => {
+                let o = self.resource_orchestrator(&r).await?;
+                Ok(serde_json::to_value(
+                    o.work_receipt("manual", &s("request_id"))?,
+                )?)
+            }
+            O::WorkExecute => {
+                use ark_interact::ark_orchestrate::GeneralWorkState;
+                let o = self.resource_orchestrator(&r).await?;
+                let receipt = o
+                    .work_receipt_by_id(&s("receipt"))?
+                    .ok_or_else(|| anyhow::anyhow!("the admitted work is unavailable"))?;
+                if receipt.task.is_some() {
+                    return Ok(serde_json::to_value(o.execute_work(&receipt.id)?)?);
+                }
+                if o.general_work_state(&receipt.id)? == GeneralWorkState::Pending {
+                    let conv = self.chat_conv(&receipt.conversation, "", true).await?;
+                    anyhow::ensure!(!conv.is_running(), "this conversation is already working");
+                    self.start_turn_on(conv, o.general_work_input(&receipt.id)?, true)?;
+                }
+                Ok(serde_json::to_value(receipt)?)
+            }
+            O::WorkList | O::WorkGet => {
+                let o = self.resource_orchestrator(&r).await?;
+                self.resource_subscribers.subscribe(
+                    ResourceKind::Project,
+                    project.id.as_str(),
+                    "orch",
+                    r.clone(),
+                );
+                let questions = self
+                    .approvals
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|(id, (shown, _))| {
+                        let request = serde_json::from_value(shown["request"].clone()).ok()?;
+                        Some(ark_interact::work::ConversationQuestion {
+                            id: *id,
+                            session: shown["session"].as_str()?.to_string(),
+                            request,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let cursor = input["cursor"].as_str();
+                let mut page = if operation.kind == O::WorkGet {
+                    o.work_detail(ark_interact::ark_orchestrate::board::PERSON, &s("work"))?
+                } else {
+                    o.work_page(
+                        ark_interact::ark_orchestrate::board::PERSON,
+                        input["archived"].as_bool().unwrap_or(false),
+                        cursor,
+                        n("limit").unwrap_or(50).min(100) as usize,
+                    )?
+                };
+                let mut retained = if operation.kind == O::WorkGet {
+                    page.entries
+                        .first()
+                        .and_then(ark_interact::work::retained_answer)
+                } else {
+                    None
+                };
+                let mut conversations = Vec::new();
+                let mut selected = None;
+                if operation.kind == O::WorkGet {
+                    let entry = page
+                        .entries
+                        .first_mut()
+                        .ok_or_else(|| anyhow::anyhow!("the work item is unavailable"))?;
+                    let mut receipts = entry.receipts.iter().collect::<Vec<_>>();
+                    receipts.sort_by_key(|receipt| (receipt.sequence, receipt.created_ms));
+                    let mut unique = std::collections::BTreeMap::new();
+                    for receipt in &receipts {
+                        unique.insert(&receipt.conversation, *receipt);
+                    }
+                    let mut unique = unique.into_values().collect::<Vec<_>>();
+                    unique.sort_by_key(|receipt| (receipt.sequence, receipt.created_ms));
+                    conversations = unique.iter().map(|receipt| json!({"receipt":receipt.id,"conversation":receipt.conversation,"at_ms":receipt.created_ms})).collect();
+                    selected = if let Some(id) = input["receipt"].as_str() {
+                        Some(
+                            (*receipts
+                                .iter()
+                                .find(|receipt| receipt.id == id)
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "the selected execution belongs to another work item"
+                                    )
+                                })?)
+                            .clone(),
+                        )
+                    } else {
+                        unique.last().map(|receipt| (*receipt).clone())
+                    };
+                    if let Some(receipt) = selected.clone() {
+                        selected = Some(entry.select_conversation(&receipt.id)?);
+                        retained = if let Some(task) = &receipt.task {
+                            entry
+                                .tasks
+                                .iter()
+                                .find(|record| &record.id == task)
+                                .and_then(|record| record.result.clone())
+                        } else {
+                            entry
+                                .general
+                                .iter()
+                                .rev()
+                                .find(|(other, _, _)| other.conversation == receipt.conversation)
+                                .and_then(|(_, _, result)| {
+                                    result.as_ref().and_then(|result| result.answer.clone())
+                                })
+                        };
+                    }
+                }
+                let mut usage = Vec::new();
+                if operation.kind == O::WorkGet {
+                    if let Some(entry) = page.entries.first() {
+                        for task in &entry.tasks {
+                            usage.push(json!({"id":task.id,"label":task.objective,"model":task.model,"usage":task.usage}));
+                        }
+                        let mut sessions = std::collections::BTreeSet::new();
+                        for receipt in &entry.receipts {
+                            if receipt.task.is_none() {
+                                sessions.insert((
+                                    receipt.conversation.clone(),
+                                    entry.item.title.clone(),
+                                ));
+                            }
+                        }
+                        if let Some(run) = &entry.run {
+                            for step in &run.steps {
+                                if run.revision.draft.steps.iter().any(|definition| definition.id == step.id && matches!(definition.action, ark_interact::ark_orchestrate::automation::StepAction::Agent { target: ark_interact::ark_orchestrate::WorkTarget::General { .. }, .. })) {
+                                    sessions.insert((step.conversation.clone(), run.revision.draft.steps.iter().find(|definition| definition.id == step.id).map(|definition| definition.name.clone()).unwrap_or_else(|| step.id.clone())));
+                                }
+                            }
+                        }
+                        for (id, label) in sessions {
+                            if let Some(record) = self.engine.store.get_session(&id)? {
+                                if record["usage"]["model_calls"].as_u64().unwrap_or(0) > 0 {
+                                    usage.push(json!({"id":id,"label":label,"model":record["model"],"usage":record["usage"]}));
+                                }
+                            }
+                        }
+                    }
+                }
+                let page = ark_interact::work::project(page, &self.labels, &questions);
+                if operation.kind == O::WorkGet {
+                    let mut item = page
+                        .items
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("the work item is unavailable"))?;
+                    if let Some(receipt) = &selected {
+                        item.conversation = Some(receipt.conversation.clone());
+                        item.conversation_missing = self
+                            .engine
+                            .store
+                            .get_session(&receipt.conversation)?
+                            .is_none();
+                    }
+                    let transcript = match &item.conversation {
+                        Some(session) if !item.conversation_missing => {
+                            ark_interact::interaction::transcript(
+                                &self.engine,
+                                &self.labels,
+                                session,
+                                n("before").map(|n| n as u32),
+                                30,
+                            )?
+                        }
+                        _ => vec![],
+                    };
+                    let template =
+                        if item.run.is_none() && !item.conversation_missing && selected.is_some() {
+                            Some(o.work_template(
+                                &item.id,
+                                selected.as_ref().map(|receipt| receipt.id.as_str()),
+                            )?)
+                        } else {
+                            None
+                        };
+                    return Ok(
+                        json!({"item":item,"transcript":transcript,"retained":retained,"conversations":conversations,"usage":usage,"template":template,"active_receipt":selected.map(|receipt| receipt.id)}),
+                    );
+                }
+                Ok(serde_json::to_value(page)?)
+            }
+            O::WorkAnswer | O::WorkCancel => {
+                let o = self.resource_orchestrator(&r).await?;
+                let page =
+                    o.work_detail(ark_interact::ark_orchestrate::board::PERSON, &s("work"))?;
+                let mut entry = page
+                    .entries
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("the work item is unavailable"))?;
+                let selected = if let Some(receipt) = input["receipt"].as_str() {
+                    Some(entry.select_conversation(receipt)?)
+                } else {
+                    None
+                };
+                if operation.kind == O::WorkCancel {
+                    let conversations: std::collections::HashSet<_> = entry
+                        .receipts
+                        .iter()
+                        .map(|receipt| &receipt.conversation)
+                        .collect();
+                    anyhow::ensure!(conversations.len() <= 1, "choose the execution to stop");
+                    let conversation = entry.item.conversation.as_deref();
+                    if let Some(run) = entry.run.as_ref() {
+                        o.cancel_automation_run(&run.id)?;
+                    }
+                    for task in entry.tasks.iter().filter(|task| {
+                        !task.state.is_final()
+                            && (selected.is_none() || task.conversation.as_deref() == conversation)
+                    }) {
+                        o.cancel(&task.id)?;
+                    }
+                    if let Some(session) = conversation {
+                        if let Some(conv) = self.conv_of(session) {
+                            if let Some(running) = conv.running.lock().unwrap().as_ref() {
+                                running.ctl.cancel.cancel();
+                            }
+                        }
+                    }
+                    for (receipt, _, _) in entry.general.iter().filter(|(receipt, _, _)| {
+                        selected.is_none() || Some(receipt.conversation.as_str()) == conversation
+                    }) {
+                        o.cancel_unstarted_general_work(&receipt.id)?;
+                    }
+                    return Ok(json!({}));
+                }
+                let decision: ApprovalDecision = serde_json::from_value(input["decision"].clone())?;
+                if let Some(run) = input["id"]["run"].as_str() {
+                    anyhow::ensure!(
+                        entry.item.run.as_deref() == Some(run),
+                        "that approval belongs to another work item"
+                    );
+                    o.answer_automation_question(
+                        run,
+                        input["id"]["question"].as_str().unwrap_or_default(),
+                        input["id"]["digest"].as_str().unwrap_or_default(),
+                        decision,
+                    )?;
+                } else if let Some(question) = input["id"].as_str() {
+                    let task = entry
+                        .tasks
+                        .iter()
+                        .find(|task| {
+                            task.question
+                                .as_ref()
+                                .is_some_and(|q| q.id == question && q.open())
+                        })
+                        .ok_or_else(|| anyhow::anyhow!("that approval is no longer pending"))?;
+                    o.answer_question(&task.id, question, decision)?;
+                } else {
+                    let id = input["id"]
+                        .as_u64()
+                        .ok_or_else(|| anyhow::anyhow!("which approval?"))?;
+                    let mut approvals = self.approvals.lock().unwrap();
+                    let (shown, _) = approvals
+                        .get(&id)
+                        .ok_or_else(|| anyhow::anyhow!("that approval is no longer pending"))?;
+                    anyhow::ensure!(
+                        shown["session"].as_str() == entry.item.conversation.as_deref(),
+                        "that approval belongs to another conversation"
+                    );
+                    let (_, reply) = approvals
+                        .remove(&id)
+                        .ok_or_else(|| anyhow::anyhow!("that approval is no longer pending"))?;
+                    reply
+                        .send(decision)
+                        .map_err(|_| anyhow::anyhow!("that approval is no longer pending"))?;
+                }
+                self.emit(json!({"kind":"approval_closed","id":input["id"]}));
+                Ok(json!({}))
+            }
+            O::WorkArchive => {
+                let o = self.resource_orchestrator(&r).await?;
+                o.archive_work(
+                    ark_interact::ark_orchestrate::board::PERSON,
+                    &s("work"),
+                    input["archived"].as_bool().unwrap_or(true),
+                )?;
+                Ok(json!({}))
+            }
+            O::WorkResolve => {
+                let o = self.resource_orchestrator(&r).await?;
+                o.resolve_work_failure(
+                    ark_interact::ark_orchestrate::board::PERSON,
+                    &s("work"),
+                    serde_json::from_value(input["run"].clone())?,
+                    &s("digest"),
+                    input["resolved"].as_bool().unwrap_or(true),
+                )?;
+                Ok(json!({}))
+            }
             O::SubmitTask => {
                 let o = self.resource_orchestrator(&r).await?;
                 if let Some(request_id) = input.get("request_id") {
@@ -3018,6 +3544,11 @@ impl Host {
                     .await?
                 {
                     ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                    ControlOutcome::AutomationSubmitted {
+                        run,
+                        work,
+                        conversation,
+                    } => Ok(json!({"execution":run,"work":work,"conversation":conversation})),
                     _ => Ok(json!({})),
                 }
             }
@@ -3071,6 +3602,22 @@ impl Host {
             O::Unschedule | O::SchedulePause | O::ScheduleResume | O::ScheduleRun => {
                 let o = self.resource_orchestrator(&r).await?;
                 let schedule = s("schedule");
+                if operation.kind == O::ScheduleRun {
+                    if let Some(request) = input["request"].as_str() {
+                        let execution = o.run_schedule_now_with_key(&schedule, request).await?;
+                        let receipt = o
+                            .schedule_run_receipt(&schedule, request)?
+                            .ok_or_else(|| anyhow::anyhow!("the execution receipt is missing"))?;
+                        return Ok(match receipt.kind {
+                            ark_interact::ark_orchestrate::ScheduleExecutionKind::Task => {
+                                json!({"task":execution,"receipt":receipt})
+                            }
+                            ark_interact::ark_orchestrate::ScheduleExecutionKind::Automation => {
+                                json!({"execution":execution,"receipt":receipt})
+                            }
+                        });
+                    }
+                }
                 let control = match operation.kind {
                     O::Unschedule => Control::Unschedule { schedule },
                     O::SchedulePause => Control::PauseSchedule { schedule },
@@ -3080,6 +3627,11 @@ impl Host {
                 };
                 match self.control_on(&o, control).await? {
                     ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                    ControlOutcome::AutomationSubmitted {
+                        run,
+                        work,
+                        conversation,
+                    } => Ok(json!({"execution":run,"work":work,"conversation":conversation})),
                     _ => Ok(json!({})),
                 }
             }
@@ -3161,6 +3713,11 @@ impl Host {
                 };
                 match self.control_on(&o, control).await? {
                     ControlOutcome::Submitted { task } => Ok(json!({ "task": task })),
+                    ControlOutcome::AutomationSubmitted {
+                        run,
+                        work,
+                        conversation,
+                    } => Ok(json!({"execution":run,"work":work,"conversation":conversation})),
                     _ => Ok(json!({})),
                 }
             }
@@ -3245,6 +3802,9 @@ impl Host {
                 &project.id,
                 &self.chat_skills,
             ))?),
+            O::Models => Ok(serde_json::to_value(
+                ark_interact::ark_sdk::prelude::ark_model::catalog().await,
+            )?),
             O::Tools => {
                 let mut actions =
                     ark_sdk::offered_tools(&self.engine, &self.caps.per_agent).actions();
@@ -3254,7 +3814,7 @@ impl Host {
                         .iter()
                         .map(|d| {
                             json!({
-                                "name": d.name, "summary": d.summary, "risk": d.risk,
+                                "name": d.name, "summary": d.summary, "risk": d.risk, "input_schema": d.input_schema, "auto_eligible": d.auto_eligible, "person_only": d.person_only, "ask_each_time": d.ask_each_time,
                             })
                         })
                         .collect(),
@@ -3282,7 +3842,18 @@ impl Host {
                 ))
             }
             O::Artifact => {
-                let mut value = self.artifact_in(&project.id, &r.id, &input)?;
+                let context = self.resource_execution_project(&r)?;
+                let scope = if self
+                    .engine
+                    .store
+                    .resolve_artifact(&context, r.id.trim_start_matches("art:"))?
+                    .is_some()
+                {
+                    context
+                } else {
+                    project.id.clone()
+                };
+                let mut value = self.artifact_in(&scope, &r.id, &input)?;
                 value["ref"] = serde_json::to_value(&r)?;
                 if value["artifact"].is_object() {
                     value["artifact"]["ref"] = serde_json::to_value(&r)?;
@@ -3291,17 +3862,19 @@ impl Host {
             }
             O::Invocation => {
                 let id = r.id.trim_start_matches("inv:");
+                let context = self.resource_execution_project(&r)?;
                 Ok(serde_json::to_value(
-                    self.engine.store.resolve_invocation(&project.id, id)?,
+                    self.engine.store.resolve_invocation(&context, id)?,
                 )?)
             }
             O::Picture => {
                 use base64::Engine as _;
                 let id = r.id.trim_start_matches("inv:");
+                let context = self.resource_execution_project(&r)?;
                 anyhow::ensure!(
                     self.engine
                         .store
-                        .resolve_invocation(&project.id, id)?
+                        .resolve_invocation(&context, id)?
                         .is_some(),
                     "there is no invocation `{id}` in this project"
                 );
@@ -3969,7 +4542,7 @@ impl Host {
                                 Some((o, t.id))
                             })
                             .ok_or_else(|| anyhow::anyhow!("that approval is no longer pending"))?;
-                    o.answer(&task, decision)?;
+                    o.answer_question(&task, question, decision)?;
                     self.emit(json!({ "kind": "approval_closed", "id": question }));
                     return Ok(json!({}));
                 }
@@ -5431,10 +6004,14 @@ impl Host {
         if let Some(a) = store.resolve_artifact(pid, id)? {
             return Ok(a);
         }
-        for p in store.list_projects()? {
-            if p.parent.as_ref() == Some(pid) {
-                if let Some(a) = store.resolve_artifact(&p.id, id)? {
-                    return Ok(a);
+        if self.orchs.supports_agents()
+            && store
+                .get_project(pid)?
+                .is_some_and(|project| project.parent.is_none())
+        {
+            for agent in self.siblings.project_orchestrator(pid)?.agents() {
+                if let Some(artifact) = store.resolve_artifact(&ProjectId(agent.scope), id)? {
+                    return Ok(artifact);
                 }
             }
         }
@@ -5479,6 +6056,12 @@ impl Host {
         input: String,
         ask: bool,
     ) -> anyhow::Result<()> {
+        {
+            let about = conv.about.lock().unwrap();
+            if let Some(o) = &about.orch {
+                o.validate_general_input(&about.session, &input)?;
+            }
+        }
         let ctl = TurnControl {
             ask,
             ..TurnControl::new()
@@ -5522,6 +6105,9 @@ impl Host {
             .await;
         let (ok, cancelled, error, answer, steps) = match &end.result {
             Ok(o) => (true, o.cancelled, None, o.answer.clone(), o.steps),
+            Err(ArkError::ResultNotStored { answer, .. }) => {
+                (false, false, end.error_line(), answer.clone(), 0)
+            }
             Err(_) => (false, false, end.error_line(), String::new(), 0),
         };
         conv.note(&ix);

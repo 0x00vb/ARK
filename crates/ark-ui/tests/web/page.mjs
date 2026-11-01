@@ -48,7 +48,7 @@ const scenarios = {
   async "product-followups"(page) {
     const calls=[];page.on('request',request=>{if(request.method()==='POST'&&new URL(request.url()).pathname==='/rpc') calls.push(request.postDataJSON());});
     await page.evaluate(()=>window.ark.openView('schedules'));
-    await page.getByRole('button',{name:'Calendar',exact:true}).click();
+    await page.getByRole('button',{name:'Agenda',exact:true}).click();
     await page.getByRole('button',{name:/Review real schedule/}).first().waitFor();
     await page.getByRole('button',{name:/Review real schedule/}).first().click();
     assert.match(await page.locator('.cal-facts').innerText(),/s-fixture/);
@@ -188,7 +188,7 @@ const scenarios = {
     await page.getByRole('button', { name: 'Map', exact: true }).click();
     await frame.getByRole('button', { name: 'Fit', exact: true }).waitFor();
     await page.evaluate(() => window.ark.openFile('part.stl'));
-    const model = page.frameLocator('iframe[title="3D model"]');
+    const model = page.getByRole('region', { name: '3D model', exact: true });
     await model.getByRole('button', { name: 'Fit', exact: true }).waitFor();
     await model.getByRole('button', { name: 'Wireframe', exact: true }).click();
     await shot(page, 'consumer-file-viewer');
@@ -196,7 +196,7 @@ const scenarios = {
     await page.getByRole('button', { name: 'Retry', exact: true }).waitFor();
     await page.bringToFront();
     await page.waitForTimeout(200);
-    assert.equal(await page.locator('iframe[title="3D model"]').count(), 0, 'recovery must wait for Retry');
+    assert.equal(await page.getByRole('region', { name: '3D model', exact: true }).count(), 0, 'recovery must wait for Retry');
     const bookmark = await page.evaluate(() => JSON.parse(sessionStorage.getItem('ark-file-recovery')));
     assert.deepEqual(Object.keys(bookmark).sort(), ['location', 'path', 'version']);
     assert.equal(bookmark.path, 'part.stl');
@@ -634,7 +634,7 @@ const scenarios = {
     assert.equal(rail.divider, "none", "the fixed rail has no detached partial divider");
     assert.equal(rail.height, 800, "the fixed rail reaches the full window height");
     assert.equal(rail.sameSurface, false, "the fixed rail stays distinct from the project sidebar without a divider");
-    assert.deepEqual(rail.labels, [1, 1, 1, 1], "wide rail labels stay available to assistive technology only");
+    assert.deepEqual(rail.labels, [1, 1, 1, 1, 1], "wide rail labels stay available to assistive technology only");
     await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
     assert.equal(await page.locator(".destinations").evaluate((el) =>
       getComputedStyle(el).backgroundColor === getComputedStyle(document.querySelector(".sidebar")).backgroundColor), false,
@@ -667,7 +667,7 @@ const scenarios = {
     });
     assert.equal(open.destinations.height, 56, "compact destinations keep their own layout row");
     assert.equal(open.mainBottom, open.destinations.top, "the bar does not cover the workspace");
-    assert.equal(await page.locator(".destination").count(), 4);
+    assert.equal(await page.locator(".destination").count(), 5);
     for (const button of await page.locator(".destination").all()) {
       const box = await button.boundingBox();
       assert.ok(box.width >= 44 && box.height >= 44, JSON.stringify(box));
@@ -1089,9 +1089,9 @@ async function schedules(page) {
 
   const destinations = page.getByRole("navigation", { name: "Destinations" });
   assert.equal(await destinations.getByRole("button", { name: "Chat" }).getAttribute("aria-current"), "page");
-  await destinations.getByRole("button", { name: "Schedules" }).click();
+  await destinations.getByRole("button", { name: "Automations" }).click();
   await page.locator('.view[data-view="schedules"] .sv-row').waitFor();
-  assert.equal(await destinations.getByRole("button", { name: "Schedules" }).getAttribute("aria-current"), "page");
+  assert.equal(await destinations.getByRole("button", { name: "Automations" }).getAttribute("aria-current"), "page");
   assert.equal(await page.locator('.view[data-view="schedules"] .sv-row').count(), 1);
   await destinations.getByRole("button", { name: "Chat" }).click();
   assert.equal(await page.locator("#stage").isHidden(), true);
@@ -1102,6 +1102,8 @@ async function schedules(page) {
   const ran = page.evaluate(() => new Promise((ok) => window.ark.on("ark:orch", (m) => m.event.type === "task_finished" && ok(m.event.state))));
   await panel.locator("button", { hasText: "Run now" }).click();
   assert.equal(await ran, "done");
+  await page.locator('.view[data-view="work-chat"]').getByText("Counted 120 boxes; 3 are missing since yesterday.", { exact: true }).first().waitFor();
+  await destinations.getByRole("button", { name: "Chat", exact: true }).click();
   await panel.locator(".sc-run .sc-said", { hasText: "120 boxes" }).waitFor();
   // The line goes back to the next time; the panel says how the last run went.
   await panel.locator(".sc-last", { hasText: /^ran / }).waitFor();
@@ -1131,102 +1133,78 @@ scenarios.schedules = schedules;
 // The fixed destinations have one hierarchy, every schedule state, useful offline recovery and
 // no way for a late response from one project to appear in another.
 async function scheduleDestinationStates(page) {
+  const replies = [];
+  await page.route("**/rpc", async route => {
+    const request = route.request().postDataJSON();
+    if (request?.method !== "resource" || request.params?.operation?.kind !== "schedules" || request.params.operation.input?.session || request.params.operation.input?.calendar) return route.continue();
+    try {
+      const pending = replies.shift();
+      const result = await (typeof pending === "function" ? pending() : pending || []);
+      await route.fulfill({ json: { ok: true, result } });
+    } catch (error) {
+      await route.fulfill({ json: { ok: false, error: error.message } });
+    }
+  });
   await page.evaluate(() => {
-    const original = window.ark.call.bind(window.ark);
-    window.__scheduleReplies = [];
-    window.__scheduleReply = (reply) => window.__scheduleReplies.push(reply);
-    window.ark.call = (method, params = {}) => {
-      if (method !== "schedules" || params.session) return original(method, params);
-      const reply = window.__scheduleReplies.shift();
-      if (!reply) return Promise.resolve([]);
-      return typeof reply === "function" ? reply() : Promise.resolve(reply);
-    };
-    window.ark.view({
-      id: "home-proof", title: "Home proof", nav: true,
-      render(el) { el.innerHTML = '<h1 tabindex="-1" data-destination-heading>Home proof</h1>'; },
-    });
+    window.ark.view({ id: "home-proof", title: "Home proof", nav: true, render(el) { el.innerHTML = '<h1 tabindex="-1" data-destination-heading>Home proof</h1>'; } });
     window.ark.openView("home-proof");
   });
-  await page.locator('.view[data-view="home-proof"] h1').waitFor();
-
-  await page.evaluate(() => {
-    window.__scheduleReply(() => new Promise((resolve) => { window.__resolveSchedules = resolve; }));
-  });
-  const scheduleButton = page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Schedules" });
-  await scheduleButton.focus();
-  await page.keyboard.press("Enter");
+  let resolveInitial;
+  replies.push(new Promise(resolve => { resolveInitial = resolve; }));
+  const scheduleButton = page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Automations", exact: true });
+  await scheduleButton.focus(); await page.keyboard.press("Enter");
   const view = page.locator('.view[data-view="schedules"]');
-  await view.locator(".sv-loading").waitFor();
-  assert.equal(await view.getByRole("heading", { name: "Schedules" }).evaluate((el) => el === document.activeElement), true);
-
+  await view.locator('.work-status', { hasText: "Loading" }).waitFor();
+  assert.equal(await view.getByRole("heading", { name: "Automations", exact: true }).evaluate(el => el === document.activeElement), true);
   const rows = [
-    ["scheduled", "Upcoming", "next Fri 09:00"],
-    ["running", "Running", "running now"],
-    ["asking", "Waiting", "waits for you"],
-    ["retrying", "Retrying", "trying again at 09:10"],
-    ["succeeded", "Succeeded", "next Sat 09:00"],
-    ["failed", "Failed", "did not finish Thu 09:00"],
-    ["paused", "Paused", "paused"],
-  ].map(([state, objective, status], i) => ({
-    id: `s${i}`, agent: `agent-${i}`, objective, context: "", says: "every day at 09:00",
-    tz: "UTC", next_ms: 1, next: "Fri 09:00", paused: state === "paused", state, status,
-    last: state === "succeeded" ? "ran Thu 09:00" : null, chat: "chat", runs: i,
-    missed: i === 0 ? 2 : 0, skipped: i === 0 ? 1 : 0, last_task: null,
+    ["scheduled", "Upcoming", "next Fri 09:00"], ["running", "Running", "running now"],
+    ["asking", "Waiting", "waits for you"], ["retrying", "Retrying", "trying again at 09:10"],
+    ["succeeded", "Succeeded", "next Sat 09:00"], ["failed", "Failed", "did not finish Thu 09:00"], ["paused", "Paused", "paused"],
+  ].map(([state, objective, status], index) => ({
+    id: `s${index}`, agent: `agent-${index}`, objective, context: "", says: "every day at 09:00", tz: "UTC", next_ms: 1, next: "Fri 09:00", paused: state === "paused", state, status,
+    last: state === "succeeded" ? "ran Thu 09:00" : null, runs: index, missed: index === 0 ? 2 : 0, skipped: index === 0 ? 1 : 0,
   }));
-  await page.evaluate((value) => window.__resolveSchedules(value), rows);
+  resolveInitial(rows);
   await view.locator(".sv-row").first().waitFor();
   assert.equal(await view.locator(".sv-row").count(), 7);
-  for (const state of ["scheduled", "running", "asking", "retrying", "succeeded", "failed", "paused"]) {
-    assert.equal(await view.locator(`.sv-row[data-state="${state}"]`).count(), 1, state);
-  }
+  for (const row of rows) assert.equal(await view.locator(`.sv-row[data-state="${row.state}"]`).count(), 1, row.state);
   assert.equal((await view.locator('.sv-row[data-state="scheduled"] .sv-count').innerText()).trim(), "2 missed · 1 skipped");
   assert.match(await view.locator('.sv-row[data-state="succeeded"]').innerText(), /ran Thu 09:00/);
   assert.match(await view.locator('.sv-row[data-state="scheduled"]').getAttribute("aria-label"), /2 missed · 1 skipped/);
   assert.match(await view.locator('.sv-row[data-state="succeeded"]').getAttribute("aria-label"), /ran Thu 09:00/);
   await shot(page, "schedule-destination-states");
-
-  // Same-project refresh failure retains useful rows and offers recovery.
-  await page.evaluate(() => {
-    window.__scheduleReply(() => Promise.reject(new Error("offline")));
-    window.ark.openView("schedules");
-  });
-  await view.locator(".sv-stale").waitFor();
+  replies.push(() => Promise.reject(new Error("offline")));
+  await page.evaluate(() => window.ark.openView("schedules"));
+  await view.locator('.work-status', { hasText: "offline" }).waitFor();
   assert.equal(await view.locator(".sv-row").count(), 7);
-  assert.equal(await view.locator('.sv-stale[role="status"]').count(), 0, "one live region announces refresh failures");
-  assert.ok(await view.getByRole("button", { name: "Try again" }).isVisible());
-
-  // A project update clears old rows immediately and ignores the old request when it resolves.
-  await page.evaluate(() => {
-    window.__scheduleReply(() => new Promise((resolve) => { window.__resolveOldProject = resolve; }));
-    window.ark.openView("schedules");
-    window.__scheduleReply(() => new Promise((resolve) => { window.__resolveNewProject = resolve; }));
-    window.ark.openView("schedules", { project: { id: "other-project", name: "Other" } });
-  });
-  assert.equal(await view.locator(".sv-row").count(), 0, "old project rows clear before the new load");
-  await page.evaluate(() => window.__resolveOldProject([{ id: "old", agent: "old", objective: "Old project", says: "daily", state: "scheduled", status: "next tomorrow", runs: 0, missed: 0, skipped: 0 }]));
+  assert.equal(await view.locator('[role="status"]').count(), 1);
+  assert.ok(await view.getByRole("button", { name: "Refresh", exact: true }).isVisible());
+  let resolveOld, resolveNew;
+  const oldRequest = page.waitForRequest(request => request.method() === "POST" && request.postDataJSON()?.params?.operation?.kind === "schedules");
+  replies.push(new Promise(resolve => { resolveOld = resolve; }));
+  await page.evaluate(() => window.ark.openView("schedules"));
+  await oldRequest;
+  await page.evaluate(() => window.ark.call("switch_project", { name: "Other" }));
+  await page.waitForFunction(() => window.ark.summary().project.name === "Other");
+  replies.push(new Promise(resolve => { resolveNew = resolve; }));
+  await page.evaluate(() => window.ark.openView("schedules"));
+  assert.equal(await view.locator(".sv-row").count(), 0);
+  resolveOld([{ id: "old", objective: "Old project", says: "daily", state: "scheduled", status: "next tomorrow", missed: 0, skipped: 0 }]);
   await page.waitForTimeout(50);
   assert.equal(await view.getByText("Old project").count(), 0);
-  await page.evaluate(() => window.__resolveNewProject([{ id: "new", agent: "new", objective: "New project", says: "daily", state: "scheduled", status: "next tomorrow", runs: 0, missed: 0, skipped: 0 }]));
+  resolveNew([{ id: "new", objective: "New project", says: "daily", state: "scheduled", status: "next tomorrow", missed: 0, skipped: 0 }]);
   await view.getByText("New project").waitFor();
-
-  // Empty and offline-without-data are distinct, and Retry can recover to the empty state.
-  await page.evaluate(() => {
-    window.__scheduleReply([]);
-    window.ark.openView("schedules");
-  });
-  await view.getByRole("heading", { name: "No schedules" }).waitFor();
-  await page.evaluate(() => {
-    window.__scheduleReply(() => Promise.reject(new Error("offline")));
-    window.ark.openView("schedules");
-  });
-  await view.getByRole("heading", { name: "Schedules are unavailable" }).waitFor();
+  replies.push([]);
+  await page.evaluate(() => window.ark.openView("schedules"));
+  await view.getByRole("heading", { name: "No automations yet", exact: true }).waitFor();
+  replies.push(() => Promise.reject(new Error("offline")));
+  await page.evaluate(() => window.ark.openView("schedules"));
+  await view.locator('.work-status', { hasText: "offline" }).waitFor();
   await shot(page, "schedule-destination-offline");
-  await page.evaluate(() => window.__scheduleReply([]));
-  await view.getByRole("button", { name: "Try again" }).click();
-  await view.getByRole("heading", { name: "No schedules" }).waitFor();
-
-  // Chat always returns to the conversation from another project destination.
-  await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat" }).click();
+  replies.push([]);
+  await view.getByRole("button", { name: "Refresh", exact: true }).click();
+  await view.getByRole("heading", { name: "No automations yet", exact: true }).waitFor();
+  await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat", exact: true }).click();
   assert.equal(await page.locator("#scroller").isVisible(), true);
 }
 scenarios["schedule-destination-states"] = scheduleDestinationStates;
@@ -3699,17 +3677,42 @@ async function agentConversations(page, fromNewChat = false) {
   await page.locator("#app.ready").waitFor();
   if (fromNewChat) {
     await page.locator("#new-session").click();
-    await page.locator('#stage textarea').waitFor();
+    await page.locator('.view[data-view="agent-chat"]:visible textarea').waitFor();
     assert.equal(await page.getByRole("dialog").count(), 0);
     assert.equal(await page.locator('textarea:visible').count(), 1);
     assert.equal((await page.evaluate(() => window.ark.call("graph"))).tasks.length, 0);
     assert.equal((await page.evaluate(() => window.ark.call("agents"))).length, 0);
+    assert.equal(await page.getByRole("combobox", { name: "Responsible agent" }).inputValue(), "");
+    const composer = page.locator('.view[data-view="agent-chat"]:visible textarea');
+    await composer.fill("GENERAL START PRIVATE FIRST");
+    await composer.press("Enter");
+    const work = page.locator('.view[data-view="work-chat"]');
+    await work.getByText("GENERAL WORK COMPLETE", { exact: true }).first().waitFor();
+    await work.getByText("Completed", { exact: true }).waitFor();
+    const original = (await page.evaluate(() => window.ark.call("work_list"))).items[0];
+    await work.locator("textarea").fill("GENERAL FOLLOWUP");
+    await work.locator("textarea").press("Enter");
+    await work.getByText("GENERAL FOLLOWUP COMPLETE", { exact: true }).first().waitFor();
+    const continued = (await page.evaluate(() => window.ark.call("work_list"))).items[0];
+    assert.equal(continued.id, original.id);
+    assert.equal(continued.conversation, original.conversation);
+    await page.locator("#new-session").click();
+    await page.locator('.view[data-view="agent-chat"]:visible textarea').fill("GENERAL START SECOND");
+    await page.locator('.view[data-view="agent-chat"]:visible textarea').press("Enter");
+    await work.getByText("GENERAL WORK COMPLETE", { exact: true }).first().waitFor();
+    const items = (await page.evaluate(() => window.ark.call("work_list"))).items;
+    assert.equal(items.length, 2);
+    assert.equal(new Set(items.map(item => item.conversation)).size, 2);
+    assert.equal((await page.evaluate(() => window.ark.call("agents"))).length, 0);
+    assert.equal((await page.evaluate(() => window.ark.call("graph"))).tasks.length, 0);
+    await shot(page, "general-new-chat-real-host");
+    return;
   } else {
     const composer = page.locator("#input");
     await finished(page, () => composer.fill("Create a source agent").then(() => composer.press("Enter")));
     await page.getByRole("button", { name: "Chat with source", exact: true }).click();
   }
-  const source = fromNewChat ? page.locator('#stage textarea') : page.getByRole("textbox", { name: "Ask source", exact: true });
+  const source = fromNewChat ? page.locator('.view[data-view="agent-chat"]:visible textarea') : page.getByRole("textbox", { name: "Ask source", exact: true });
   await source.fill(`${fromNewChat ? "source\n" : ""}Create a colleague and send a review brief. PRIVATE SOURCE SECRET`);
   await source.press("Enter");
   await page.getByRole("button", { name: "Chat with colleague", exact: true }).waitFor();

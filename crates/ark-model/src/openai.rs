@@ -188,6 +188,9 @@ fn openai_window(model: &str) -> Option<u32> {
 
 #[async_trait]
 impl Provider for OpenAi {
+    fn host_controls_tools(&self) -> bool {
+        true
+    }
     fn generates_images(&self) -> bool {
         self.name == "openai" && supports_image_tool(&self.model)
     }

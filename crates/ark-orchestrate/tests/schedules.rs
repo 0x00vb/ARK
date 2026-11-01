@@ -203,7 +203,7 @@ async fn a_schedule_pauses_resumes_changes_and_runs_now_and_a_pause_survives_a_r
     assert!(p.paused && p.next_ms.is_none());
     assert_eq!(o.schedule_state(&p), ScheduleState::Paused);
     assert!(
-        o.tick_schedules(at).is_empty(),
+        o.tick_schedules(at).await.is_empty(),
         "a paused schedule runs nothing"
     );
     assert_eq!(o.graph().schedules.len(), 1, "it is kept");
@@ -248,12 +248,12 @@ async fn a_schedule_pauses_resumes_changes_and_runs_now_and_a_pause_survives_a_r
     assert_eq!(o.schedules()[0].says, "every day at 03:30");
 
     let next = o.schedules()[0].next_ms;
-    let run = o.run_schedule_now(&s.id).unwrap();
+    let run = o.run_schedule_now(&s.id).await.unwrap();
     let after = o.schedules()[0].clone();
     assert_eq!(after.next_ms, next, "run now keeps the next time");
     assert_eq!(after.last_task.as_deref(), Some(run.as_str()));
     // One at a time: a second run now is refused while the first is open.
-    let e = o.run_schedule_now(&s.id).unwrap_err();
+    let e = o.run_schedule_now(&s.id).await.unwrap_err();
     assert!(e.to_string().contains("still under way"), "{e}");
     assert_eq!(o.schedule_state(&after), ScheduleState::Running);
     gate.notify_one();
@@ -308,7 +308,10 @@ async fn a_run_started_before_a_crash_is_not_started_again() {
         )
         .unwrap();
     let o = app.orch(&m);
-    assert!(o.tick_schedules(slot + 1_000).is_empty(), "not made again");
+    assert!(
+        o.tick_schedules(slot + 1_000).await.is_empty(),
+        "not made again"
+    );
     let after = o.schedules()[0].clone();
     assert_eq!(after.runs, 1);
     assert_eq!(after.last_task.as_deref(), Some("t-made0001"));
@@ -369,7 +372,7 @@ async fn a_scheduled_run_waits_to_try_again_and_the_wait_survives_a_restart() {
     let s = o
         .schedule("w", TaskSpec::new("poll"), When::every_minutes(10))
         .unwrap();
-    let run = o.tick_schedules(s.next_ms.unwrap()).remove(0);
+    let run = o.tick_schedules(s.next_ms.unwrap()).await.remove(0);
     let rec = o.task(&run).unwrap();
     assert_eq!(rec.max_attempts, 1 + schedule::DEFAULT_RETRIES);
     assert_eq!(rec.retry_delay_ms, Some(schedule::RETRY_DELAY_MS));
@@ -428,7 +431,7 @@ async fn a_missed_run_runs_once_or_is_let_go_and_overlap_queues_one_more() {
         .unwrap();
     // The computer was off for two hours.
     let late = once.next_ms.unwrap().max(skip.next_ms.unwrap()) + 2 * 3_600_000;
-    let started = o.tick_schedules(late);
+    let started = o.tick_schedules(late).await;
     assert_eq!(started.len(), 1, "only the one that runs missed times");
     let s = o.schedule_record(&skip.id).unwrap();
     assert_eq!((s.runs, s.missed), (0, 1));
@@ -453,9 +456,16 @@ async fn a_missed_run_runs_once_or_is_let_go_and_overlap_queues_one_more() {
         )
         .unwrap();
     let t0 = both.next_ms.unwrap();
-    assert_eq!(o.tick_schedules(t0).len(), 1);
-    assert_eq!(o.tick_schedules(t0 + 10 * 60_000).len(), 1, "queues behind");
-    assert!(o.tick_schedules(t0 + 20 * 60_000).is_empty(), "not a third");
+    assert_eq!(o.tick_schedules(t0).await.len(), 1);
+    assert_eq!(
+        o.tick_schedules(t0 + 10 * 60_000).await.len(),
+        1,
+        "queues behind"
+    );
+    assert!(
+        o.tick_schedules(t0 + 20 * 60_000).await.is_empty(),
+        "not a third"
+    );
     assert_eq!(o.schedule_record(&both.id).unwrap().skipped, 1);
     for _ in 0..4 {
         gate.notify_one();
@@ -478,7 +488,7 @@ async fn three_failed_runs_in_a_row_pause_the_schedule_and_the_chat_is_told() {
         .unwrap();
     let mut at = s.next_ms.unwrap();
     for _ in 0..3 {
-        let run = o.tick_schedules(at);
+        let run = o.tick_schedules(at).await;
         assert_eq!(run.len(), 1);
         assert_eq!(o.wait(&run[0]).await.unwrap().state, TaskState::Failed);
         at += 10 * 60_000;
@@ -499,7 +509,7 @@ async fn three_failed_runs_in_a_row_pause_the_schedule_and_the_chat_is_told() {
 }
 
 #[tokio::test]
-async fn a_schedule_keeps_its_newest_runs() {
+async fn a_schedule_keeps_work_results_and_bounds_the_history_page() {
     let app = App::new();
     let m = Script::new(vec![]);
     let o = app.with_agent(&m).await;
@@ -509,24 +519,28 @@ async fn a_schedule_keeps_its_newest_runs() {
     let mut at = s.next_ms.unwrap();
     let mut first = None;
     for _ in 0..53 {
-        let run = o.tick_schedules(at).remove(0);
+        let run = o.tick_schedules(at).await.remove(0);
         first.get_or_insert(run.clone());
         o.wait(&run).await.unwrap();
         at += 5 * 60_000;
     }
-    let runs = o.schedule_runs(&s.id, 100);
-    assert!(runs.len() <= 51, "{}", runs.len());
-    assert!(
-        o.task(first.as_ref().unwrap()).is_none(),
-        "the oldest left the store"
-    );
+    let runs = o.schedule_runs(&s.id, 50);
+    assert_eq!(runs.len(), 50);
+    assert!(o.task(first.as_ref().unwrap()).is_some());
     assert!(app
         .ark
         .engine()
         .store
         .get_record("orch_task", first.as_ref().unwrap())
         .unwrap()
-        .is_none());
+        .is_some());
+    assert_eq!(
+        o.work_page("person", false, None, 100)
+            .unwrap()
+            .entries
+            .len(),
+        53
+    );
 }
 
 /// The person's conversation on one model, with the schedule tools.
@@ -699,6 +713,7 @@ async fn an_unknown_schedule_is_refused_at_once() {
         .unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     let oo = o.clone();
+    let runtime = tokio::runtime::Handle::current();
     std::thread::spawn(move || {
         let errs = [
             oo.pause_schedule("s-nope").unwrap_err().to_string(),
@@ -706,7 +721,10 @@ async fn an_unknown_schedule_is_refused_at_once() {
             oo.change_schedule("s-nope", ScheduleChange::default())
                 .unwrap_err()
                 .to_string(),
-            oo.run_schedule_now("s-nope").unwrap_err().to_string(),
+            runtime
+                .block_on(oo.run_schedule_now("s-nope"))
+                .unwrap_err()
+                .to_string(),
             oo.unschedule("s-nope").unwrap_err().to_string(),
         ];
         tx.send(errs).unwrap();
@@ -722,7 +740,7 @@ async fn an_unknown_schedule_is_refused_at_once() {
     }
     // The timer still runs.
     let next = o.schedules()[0].next_ms.unwrap();
-    assert_eq!(o.tick_schedules(next).len(), 1);
+    assert_eq!(o.tick_schedules(next).await.len(), 1);
 }
 
 #[tokio::test]
@@ -738,7 +756,7 @@ async fn a_one_time_schedule_stays_until_its_run_ends() {
             When::every_minutes(10).once(),
         )
         .unwrap();
-    let run = o.tick_schedules(s.next_ms.unwrap()).remove(0);
+    let run = o.tick_schedules(s.next_ms.unwrap()).await.remove(0);
     let kept = o.schedules();
     assert_eq!(kept.len(), 1, "shown while its run works");
     assert_eq!(o.schedule_state(&kept[0]), ScheduleState::Running);

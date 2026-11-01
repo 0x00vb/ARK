@@ -43,7 +43,7 @@ import { setAgentIdentity } from "./dom.js";
 //                      setComposer({ placeholder, disabled, running, modelLabel, modelDisabled, submitDisabled }), dispose() }`.
 //                      Optional `model.open(anchor)` opens the consumer's real model picker.
 //                      Optional `files.captureOrigin()` runs before the chooser opens and returns
-//                      `{ uploadApi, appendDraft, progressTarget }`, all bound to that origin.
+//                      `{ uploadApi, appendDraft, progressTarget, started?, finished? }`, all bound to that origin.
 //                      `uploads` is this view's upload container. Mode controls require a real
 //                      execution contract and are absent from projected task conversations.
 //                      `turns` take `chat_read`'s transcript shape plus `key`, `note`,
@@ -227,7 +227,7 @@ export function installApi(api) {
       registry.actions.push(a);
     },
     newChat(handler) {
-      if (!handler || typeof handler.open !== "function" || registry.newChat) throw new Error("Invalid or duplicate New chat handler");
+      if (!handler || typeof handler.open !== "function" || handler.render != null && typeof handler.render !== "function" || registry.newChat) throw new Error("Invalid or duplicate New chat handler");
       registry.newChat = handler;
     },
     modelPicker(p) {

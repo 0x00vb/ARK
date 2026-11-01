@@ -499,6 +499,20 @@ impl ScheduleState {
 /// A task an agent runs on a schedule. Stored per project; see the module docs.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScheduleRecord {
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub target_since_ms: u64,
+    #[serde(default)]
+    pub version: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_slot_ms: Option<u64>,
+    #[serde(default)]
+    pub admission_failures: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_retry_ms: Option<u64>,
     /// `s-` and eight hex digits.
     pub id: String,
     pub project: String,
@@ -553,6 +567,12 @@ fn default_retries() -> u32 {
     DEFAULT_RETRIES
 }
 
+pub struct CalendarSnapshot {
+    pub schedules: Vec<ScheduleRecord>,
+    pub tasks: Vec<crate::TaskRecord>,
+    pub runs: Vec<crate::automation::Run>,
+}
+
 /// What [`Orchestrator::change_schedule`](crate::Orchestrator::change_schedule) changes; `None`
 /// keeps it.
 #[derive(Clone, Debug, Default)]
@@ -588,6 +608,13 @@ impl ScheduleRecord {
             when.tz = system_zone();
         }
         ScheduleRecord {
+            target: None,
+            target_since_ms: 0,
+            version: 0,
+            admission_error: None,
+            admission_slot_ms: None,
+            admission_failures: 0,
+            admission_retry_ms: None,
             id: format!("s-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
             project: project.to_string(),
             agent: agent.to_string(),
@@ -622,7 +649,9 @@ impl ScheduleRecord {
     }
 
     pub fn due(&self, now_ms: u64) -> bool {
-        self.next_ms.is_some_and(|n| n <= now_ms)
+        !self.paused
+            && self.next_ms.is_some_and(|n| n <= now_ms)
+            && self.admission_retry_ms.is_none_or(|retry| retry <= now_ms)
     }
 
     /// The next run in words (`Thu 02:00`), in the schedule's zone.
@@ -906,4 +935,39 @@ mod tests {
         assert!(!s.paused && !s.overlap && s.if_missed == IfMissed::Once);
         assert_eq!(s.retries, DEFAULT_RETRIES);
     }
+}
+
+pub(crate) const MANUAL_RECEIPT: &str = "orch_schedule_manual_receipt";
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduleExecutionKind {
+    Task,
+    Automation,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ScheduleRunReceipt {
+    pub schedule: String,
+    pub request: String,
+    pub execution: String,
+    pub kind: ScheduleExecutionKind,
+    pub created_ms: u64,
+}
+
+pub(crate) fn manual_receipt_id(
+    project: &str,
+    schedule: &str,
+    request: &str,
+) -> Result<String, crate::OrchError> {
+    crate::automation::RunOrigin::ScheduleManual {
+        schedule: schedule.into(),
+        request: request.into(),
+    }
+    .validate()
+    .map_err(crate::OrchError::NotAllowed)?;
+    Ok(format!(
+        "sr-{}",
+        blake3::hash(&serde_json::to_vec(&(project, schedule, request))?).to_hex()
+    ))
 }

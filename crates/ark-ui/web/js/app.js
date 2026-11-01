@@ -24,6 +24,7 @@ import { registerSkills } from "./skills.js";
 import { registerBoard } from "./board.js";
 import { registerSchedules, schedulesFollow } from "./schedules.js";
 import { registerCalendar } from "./calendar.js";
+import { registerWork } from "./work.js";
 import { Waiting } from "./waiting.js";
 import { registerDevices, keepInStep, openItems, deviceName } from "./devices.js";
 import { os, label, relabel } from "./keys.js";
@@ -125,6 +126,7 @@ const api = {
   steer,
   cancel: () => transport.call("cancel").catch(() => {}),
   command: (line) => (line.endsWith(" ") ? composer.set(line) : runCommand(line)),
+  newChatView: el => renderNewChatView(el, currentLocation()),
   newSession: async (project) => {
     await api.ready();
     if (registry.newChat && project && project !== currentLocation().project) {
@@ -261,6 +263,12 @@ const api = {
 };
 
 const RESOURCE_METHODS = {
+  project_models: ["project", "models"],
+  automation_validate: ["project", "automation_validate"],
+  automation_preview_inputs: ["project", "automation_preview_inputs"],
+  automation_begin_start: ["project", "automation_begin_start"],
+  automation_acknowledge_start: ["project", "automation_acknowledge_start"],
+  automation_cancel_start: ["project", "automation_cancel_start"],
   term_open: ["terminal", "terminal_open"], term_read: ["terminal", "terminal_read"],
   term_write: ["terminal", "terminal_write"], term_resize: ["terminal", "terminal_resize"], term_close: ["terminal", "terminal_close"],
   procs: ["process", "processes"], proc_output: ["process", "process_output"], proc_stop: ["process", "process_stop"],
@@ -273,7 +281,28 @@ const RESOURCE_METHODS = {
   workspace: ["project", "workspace"], state: ["project", "state"],
   graph: ["project", "graph"], task_trace: ["project", "task_trace"], task: ["project", "task"], task_call: ["project", "task_call"], orch_events: ["project", "orch_events"],
   agents: ["project", "agents"], create_agent: ["project", "create_agent"], spawn_agent: ["project", "spawn_agent"], submit_task: ["project", "submit_task"],
+  work_admit: ["project", "work_admit"], work_receipt: ["project", "work_receipt"], work_execute: ["project", "work_execute"],
+  work_answer: ["project", "work_answer"], work_cancel: ["project", "work_cancel"],
+  work_get: ["project", "work_get"],
+  work_list: ["project", "work_list"], work_archive: ["project", "work_archive"], work_resolve: ["project", "work_resolve"],
   cancel_task: ["project", "cancel_task"], retry_task: ["project", "retry_task"],
+  automations: ["project", "automations"],
+  automation_get: ["project", "automation_get"],
+  automation_history: ["project", "automation_history"],
+  automation_preview: ["project", "automation_preview"],
+  automation_start: ["project", "automation_start"],
+  webhook_setup: ["project", "webhook_setup"],
+  webhook_get: ["project", "webhook_get"],
+  webhook_probe: ["project", "webhook_probe"],
+  automation_revoke: ["project", "automation_revoke"],
+
+  automation_save: ["project", "automation_save"],
+  automation_layout: ["project", "automation_layout"],
+  automation_prepare: ["project", "automation_prepare"],
+  automation_activate: ["project", "automation_activate"],
+  automation_pause: ["project", "automation_pause"],
+  automation_run: ["project", "automation_run"],
+  automation_execution: ["project", "automation_execution"],
   schedules: ["project", "schedules"], schedule: ["project", "schedule"], unschedule: ["project", "unschedule"],
   schedule_pause: ["project", "schedule_pause"], schedule_resume: ["project", "schedule_resume"], schedule_run: ["project", "schedule_run"],
   board: ["project", "board"], board_add: ["project", "board_add"], board_change: ["project", "board_change"],
@@ -309,12 +338,26 @@ function openFileTab(path, params, location, ark) {
     });
 }
 
+function renderNewChatView(el, location) {
+  return registry.newChat?.render?.(el, { location: { ...location }, api: scopedApi(location) }) || null;
+}
+
 function scopedApi(location) {
   // Consumer capabilities may be installed or replaced after boot (the Desktop Browser view is
   // one). A resource tab snapshots its location, not the API object's early boot values.
   const scoped = Object.create(window.ark || api);
   scoped.location = { ...location };
   scoped.chatView = (el, options) => chatView(el, scoped, options);
+  scoped.newChatView = el => renderNewChatView(el, location);
+  scoped.openView = (id, params) => {
+    const current = currentLocation();
+    if (registry.views.get(id)?.resourceScoped && (current.runtime !== location.runtime || current.project !== location.project)) {
+      toast("Open the original project to continue.");
+      return false;
+    }
+    showView(id, params);
+    return true;
+  };
   scoped.remoteResource = location.runtime !== state.runtime;
   scoped.destinationBrowser = scoped.remoteResource || transport.kind === "browser";
   scoped.online = () => resourceOnline.get(locationKey(location)) !== false;
@@ -1662,8 +1705,8 @@ function showView(id, params) {
       el.append(h("div.insp-empty", String(e)));
       entry.ctl = {};
     }
-  } else if (params !== undefined) {
-    entry.ctl.update?.(params);
+  } else if (params !== undefined && entry.ctl.update) {
+    entry.ctl.update(params);
   } else {
     entry.ctl.refresh?.();
   }
@@ -2205,6 +2248,7 @@ async function bootOnce(again) {
     });
     // The project's board, when the app runs agents.
     registerBoard(window.ark);
+    registerWork(window.ark);
     // What this chat runs on its own, above the composer.
     registerSchedules(window.ark);
     registerCalendar(window.ark);

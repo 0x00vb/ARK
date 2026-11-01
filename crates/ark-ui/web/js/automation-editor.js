@@ -1,0 +1,589 @@
+import { h } from "./dom.js";
+
+const drafts = new Map();
+const clone = value => structuredClone(value);
+const keyFor = (api, params) => `${api.location?.runtime || ""}:${api.location?.project || ""}:${params.automation || params.legacy_schedule || params.draft_key}`;
+const uid = () => `step-${crypto.randomUUID()}`;
+const initial = () => {
+  const first = uid();
+  return { name: "", trigger: { kind: "manual" }, inputs: [], authority: { actions: [], max_calls: 256, max_mutations: 32 }, steps: [
+    { id: first, name: "Work", action: { kind: "agent", target: { kind: "general", model: null }, prompt: "", inputs: [] } },
+    { id: uid(), name: "Result", action: { kind: "result", inputs: [{ kind: "step", step: first, port: "text" }, { kind: "step", step: first, port: "files" }] } },
+  ] };
+};
+export function automationExample(kind) {
+  const draft = initial();
+  draft.name = kind === "weekly" ? "Example: Weekly review" : "Example: Review and approve";
+  draft.steps[0].action.prompt = "Prepare a short plan for next week's priorities.";
+  if (kind === "weekly") draft.trigger = { kind: "schedule", when: { at: "09:00", tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", days: ["mon"], once: false } };
+  else {
+    const approval = { id: uid(), name: "Approval", action: { kind: "approval", title: "Keep this plan?", inputs: clone(draft.steps[1].action.inputs) } };
+    draft.steps.splice(1, 0, approval);
+    for (const input of draft.steps[2].action.inputs) input.step = approval.id;
+  }
+  return draft;
+}
+
+const button = (text, run, attrs = {}) => h("button.btn", { type: "button", onclick: run, ...attrs }, text);
+const label = (text, control) => h("label.auto-field", h("span", text), control);
+
+function editor(el, params, api) {
+  params.draft_key ||= crypto.randomUUID();
+  const key = keyFor(api, params);
+  const state = drafts.get(key) || { id: params.automation || null, draft: clone(params.draft || initial()), saved: null, revision: null, head: null, layout: { version: 0, positions: {} }, mode: "steps", selected: null, undo: [], redo: [], save: null, run: null };
+  drafts.set(key, state);
+  el.classList.add("auto-editor");
+  let alive = true, busy = false, loadError = false, loading = (!!state.id || !!params.legacy_schedule && !state.legacyLoaded), agents = [], artifacts = [], actions = [], models = [], previewTimer, previewGeneration = 0, historyCursor = null, historyRuns = [], validationTimer, validationGeneration = 0, validating = true, validationReady = false, canSave = true, issues = [], activationIssues = [], hook = null, hookSecret = null, zoom = 1;
+  const status = h("p.auto-status", { role: "status", "aria-live": "polite" });
+  const header = h("header.auto-head");
+  const validation = h("div.auto-validation", { "aria-live": "polite" });
+  const content = h("fieldset.auto-content");
+  const history = h("section.auto-history");
+  const changed = () => JSON.stringify(state.draft) !== state.saved;
+  function checkpoint() {
+    const value = { draft: clone(state.draft), positions: clone(state.layout.positions) };
+    if (JSON.stringify(state.undo.at(-1)) !== JSON.stringify(value)) state.undo.push(value);
+    if (state.undo.length > 50) state.undo.shift();
+    state.redo = [];
+  }
+  function edit(run, redraw = true) {
+    if (busy || loading || state.save || state.run) { status.textContent = state.run ? "Recover the pending start before editing" : "Retry the pending save before editing"; return; }
+    checkpoint(); run(); updateHeader(); queuePreview(); if (redraw) draw();
+  }
+  function field(text, value, set, type = "text", attrs = {}) {
+    const input = h(type === "textarea" ? "textarea" : "input", { ...(type === "textarea" ? { rows: 4 } : { type }), ...attrs, oninput: event => edit(() => set(event.target.value), false) });
+    input.value = value ?? ""; input.disabled = busy || loading || !!state.save || !!state.run;
+    return label(text, input);
+  }
+  function select(text, value, values, set) {
+    const input = h("select", { disabled: busy || loading || !!state.save || !!state.run, onchange: event => edit(() => set(event.target.value)) }, values.map(([id, name]) => h("option", { value: id }, name)));
+    input.value = value;
+    return label(text, input);
+  }
+  function check(text, value, set) {
+    return label(text, h("input", { type: "checkbox", checked: value, disabled: busy || loading || !!state.save || !!state.run, onchange: event => edit(() => set(event.target.checked)) }));
+  }
+  function updateHeader() {
+    const inputPreview = content.querySelector("[data-preview-inputs]");
+    if (inputPreview) inputPreview.disabled = busy || loading || validating || !validationReady || changed() || issues.length > 0;
+    const pending = state.run ? `Start pending · revision ${state.run.expected}` : state.save ? "Save pending" : changed() ? "Unsaved changes" : state.revision ? `Saved revision ${state.revision}` : "New automation";
+    const active = state.head?.enabled ? state.webhookAvailability === "local" ? `Local events enabled · revision ${state.head.active_revision}` : `Active revision ${state.head.active_revision}` : state.head?.active_revision ? "Paused" : "";
+    header.replaceChildren(button("Back", () => api.openView("schedules")), h("h1.sv-title", state.draft.name || "New automation"), h("span.auto-revision", [pending, active].filter(Boolean).join(" · ")),
+      button("Undo", () => undo(false), { disabled: !state.undo.length || busy || loading || !!state.save || !!state.run }), button("Redo", () => undo(true), { disabled: !state.redo.length || busy || loading || !!state.save || !!state.run }),
+      button(state.save ? "Retry saving" : "Save", () => void save(), { disabled: busy || loading || validating || !validationReady || !canSave || !!state.run || !changed() && !state.save }),
+      button(state.run ? "Retry starting" : state.lastStart ? "Run again" : "Run now", () => void runDialog(), { disabled: busy || loading || !state.run && (validating || !validationReady || issues.length > 0) || !state.id || changed() || !!state.save }),
+      button("Activate", () => void prepare(), { disabled: busy || loading || validating || !validationReady || issues.length > 0 || activationIssues.length > 0 || !state.id || changed() || !!state.save || !!state.run || state.head?.enabled && state.head.active_revision === state.revision }));
+    if (state.layoutDirty && !state.layoutError) header.append(h("span.auto-revision", state.layoutSaving ? "Saving canvas…" : "Canvas positions pending"));
+    if (state.layoutError) header.append(button("Recover canvas", () => void recoverLayout(), { disabled: busy }));
+    if (state.lastStart) header.append(button("Open last run", () => api.openView("work-chat", { work: state.lastStart.work })));
+    if (state.run) header.append(button("Recover start", () => void recoverStart(), { disabled: busy }));
+    if (state.save) header.append(button("Recover draft", () => void recoverSave(), { disabled: busy }));
+    if (state.head && state.head.revision !== state.revision) header.append(button("Review latest revision", () => void recoverSave(), { disabled: busy }));
+    if (loading || loadError) header.append(button("Retry loading", () => void hydrate(), { disabled: busy }));
+    if (state.head?.enabled) header.append(button("Pause", () => void perform(async () => { await api.call("automation_pause", { automation: state.id }); await reloadHead(); updateHeader(); })));
+    if (state.head?.activation) header.append(button("Revoke permission", () => void revokeDialog()));
+  }
+  function undo(redo) {
+    const from = redo ? state.redo : state.undo, to = redo ? state.undo : state.redo;
+    if (!from.length || busy || state.save || state.run) return;
+    to.push({ draft: clone(state.draft), positions: clone(state.layout.positions) });
+    const previous = from.pop(); state.draft = previous.draft; state.layout.positions = previous.positions; queueLayoutSave(); draw(); queuePreview();
+  }
+  async function perform(run) {
+    if (busy) return;
+    busy = true; content.disabled = true; status.textContent = "Working…"; updateHeader();
+    try { await run(); if (alive) status.textContent = ""; }
+    catch (error) { if (alive) status.textContent = error.message; }
+    finally { busy = false; if (alive) { content.disabled = !!state.save || !!state.run; draw(); } }
+  }
+  async function reloadHead() {
+    const data = await api.call("automation_get", { automation: state.id });
+    if (!alive) return;
+    state.lastStart = data.entry.last_start; state.head = data.entry.definition; state.webhookAvailability = data.entry.webhook_availability;
+  }
+  async function save() {
+    state.save ||= { request: crypto.randomUUID(), automation: state.id, expected: state.revision, draft: clone(state.draft), legacy: state.adoption || null };
+    await perform(async () => {
+      const receipt = await api.call("automation_save", state.save);
+      state.id = receipt.automation; state.revision = receipt.revision; state.saved = JSON.stringify(state.save.draft); state.save = null; state.adoption = null;
+      await reloadHead();
+      if (state.layoutDirty) void queueLayoutSave();
+      if (alive) { draw(); await loadHistory(); if (state.draft.trigger.kind === "webhook") await loadHook(); }
+    });
+  }
+  async function recoverSave() {
+    await perform(async () => {
+      if (state.save) {
+        const attempt = state.save;
+        const result = await api.call("automation_save", { ...attempt, cancel: true });
+        if (result.saved) { state.id = result.saved.automation; state.revision = result.saved.revision; state.saved = JSON.stringify(attempt.draft); state.adoption = null; }
+        state.save = null;
+      }
+      const source = state.adoption?.schedule || (!state.head?.active_revision && state.legacyPolicies?.schedule);
+      if (source) {
+        const data = await api.call("automation_get", { legacy_schedule: source });
+        if (!alive) return;
+        dialog("Review existing schedule", (body, controls, close) => {
+          body.append(h("h3", data.legacy.draft.name));
+          body.append(h("p", "Existing schedule policies will apply to your draft."));
+          controls.append(button("Keep reviewing", close), button("Keep my draft with these policies", () => {
+            state.adoption = { schedule: data.legacy.schedule, expected: data.legacy.version, config: data.legacy.policies.source_digest };
+            state.legacyPolicies = data.legacy.policies; close(); draw();
+          }));
+        });
+        return;
+      }
+      if (!state.id) return;
+      const data = await api.call("automation_get", { automation: state.id });
+      if (!alive) return;
+      if (data.entry.definition.revision === state.revision) { state.lastStart = data.entry.last_start; state.head = data.entry.definition; state.webhookAvailability = data.entry.webhook_availability; return; }
+      dialog(`Saved revision ${data.entry.revision.number}`, (body, controls, close) => {
+        body.append(h("h3", data.entry.revision.draft.name));
+        for (const step of data.entry.revision.draft.steps) body.append(h("p", step.name));
+        controls.append(button("Keep reviewing", close), button("Keep my draft on this revision", () => { state.revision = data.entry.revision.number; state.saved = JSON.stringify(data.entry.revision.draft); state.lastStart = data.entry.last_start; state.head = data.entry.definition; state.webhookAvailability = data.entry.webhook_availability; close(); draw(); }));
+      });
+    });
+  }
+  async function hydrate() {
+    await perform(loadInitial);
+  }
+  function move(index, direction) {
+    const next = index + direction;
+    if (next < 0 || next >= state.draft.steps.length) return;
+    edit(() => { [state.draft.steps[index], state.draft.steps[next]] = [state.draft.steps[next], state.draft.steps[index]]; });
+  }
+  function inputsFor(step, index) {
+    const area = h("fieldset.auto-bindings", h("legend", "Inputs"));
+    for (const [number, binding] of step.action.inputs.entries()) {
+      const source = binding.kind === "step" ? `previous:${binding.port}` : binding.kind === "input" ? `input:${binding.name}` : binding.kind;
+      const values = [["literal", "Text"], ["artifact", "Project file"], ...state.draft.inputs.map(input => [`input:${input.name}`, input.name])];
+      if (index) values.push(["previous:text", `Text from ${state.draft.steps[index - 1].name}`], ["previous:files", `Files from ${state.draft.steps[index - 1].name}`]);
+      const disconnected = binding.kind === "step" && (!index || binding.step !== state.draft.steps[index - 1].id);
+      if (disconnected) values.push(["disconnected", `Reconnect input from ${state.draft.steps.find(step => step.id === binding.step)?.name || "removed step"}`]);
+      const row = h("div.auto-binding", select("Source", disconnected ? "disconnected" : source, values, value => {
+        if (value === "disconnected") return;
+        step.action.inputs[number] = value.startsWith("previous:") ? { kind: "step", step: state.draft.steps[index - 1].id, port: value.split(":")[1] } : value.startsWith("input:") ? { kind: "input", name: value.slice(6), port: state.draft.inputs.find(input => input.name === value.slice(6)).port } : value === "artifact" ? { kind: "artifact", id: artifacts[0]?.id || "" } : { kind: "literal", text: "" };
+      }));
+      if (binding.kind === "literal") row.append(field("Text", binding.text, value => { binding.text = value; }, "textarea"));
+      if (binding.kind === "artifact") row.append(select("File", binding.id, [["", "Choose file"], ...artifacts.map(file => [file.id, file.name])], value => { binding.id = value; }));
+      row.append(button("Remove input", () => edit(() => step.action.inputs.splice(number, 1)))); area.append(row);
+    }
+    area.append(button("Add input", () => edit(() => step.action.inputs.push(index ? { kind: "step", step: state.draft.steps[index - 1].id, port: "text" } : { kind: "literal", text: "" })), { disabled: step.action.inputs.length >= 32 }));
+    return area;
+  }
+  function stepForm(step, index) {
+    const inherited = state.legacyPolicies?.step === step.id;
+    const controls = h("div.auto-step-controls", button("Move up", () => move(index, -1), { disabled: !index || index === 1 && state.legacyPolicies?.step === state.draft.steps[0].id }), button("Move down", () => move(index, 1), { disabled: inherited || index === state.draft.steps.length - 1 }), button("Remove step", () => edit(() => { state.draft.steps.splice(index, 1); }), { disabled: inherited || state.draft.steps.length === 1 }));
+    const form = h("section.auto-step", { dataset: { step: step.id } }, h("header", h("h2", `${index + 1}. ${step.name}`), controls), field("Name", step.name, value => { step.name = value; }), h("span.auto-kind", { role: "status" }, { agent: "Agent", approval: "Approval", result: "Result" }[step.action.kind]));
+    if (step.action.kind === "agent") {
+      form.append(select("Responsible", step.action.target.kind === "general" ? "" : step.action.target.name, [...(inherited ? [] : [["", "General"]]), ...agents.filter(agent => agent.state !== "terminated").map(agent => [agent.name, agent.title || agent.name])], value => { step.action.target = value ? { kind: "agent", name: value } : { kind: "general", model: null }; }), field("Task", step.action.prompt, value => { step.action.prompt = value; }, "textarea"));
+    }
+    if (step.action.kind === "agent" && step.action.target.kind === "general") {
+      const current = step.action.target.model || "";
+      const choices = [["", "Default"], ...models.filter(backend => backend.ready).flatMap(backend => (backend.models || []).map(model => [`${backend.provider}:${model}`, `${backend.label} · ${model}`]))];
+      if (current && !choices.some(([value]) => value === current)) choices.push([current, current]);
+      form.append(select("Model", current, choices, value => { step.action.target.model = value || null; }));
+    }
+    if (step.action.kind === "approval") form.append(field("Question", step.action.title, value => { step.action.title = value; }));
+    form.append(inputsFor(step, index), h("div.auto-step-issues", { role: "status" })); return form;
+  }
+  function drawValidation() {
+    const activationBox = content.querySelector(".auto-activation-issues");
+    if (activationBox) activationBox.replaceChildren(...activationIssues.map(issue => h("p.auto-issue", issue.message)));
+    validation.replaceChildren(...issues.filter(issue => !issue.step).map(issue => h("p.auto-issue", `${issue.field}: ${issue.message}`)));
+    for (const form of content.querySelectorAll(".auto-step")) {
+      const own = issues.filter(issue => issue.step === form.dataset.step);
+      form.setAttribute("aria-invalid", String(own.length > 0));
+      const box = form.querySelector(".auto-step-issues");
+      const text = own.map(issue => `${issue.field}: ${issue.message}`).join("\n");
+      if (box.textContent !== text) box.textContent = text;
+    }
+    if (state.mode === "canvas") for (const issue of issues.filter(issue => issue.step && issue.step !== state.selected)) validation.append(button(`Review ${state.draft.steps.find(step => step.id === issue.step)?.name || "step"}: ${issue.message}`, () => { state.selected = issue.step; draw(); }));
+  }
+  function queueValidation() {
+    clearTimeout(validationTimer); const own = ++validationGeneration;
+    validating = true; updateHeader();
+    validationTimer = setTimeout(async () => {
+      try {
+        const result = await api.call("automation_validate", { draft: clone(state.draft) });
+        if (!alive || own !== validationGeneration) return;
+        issues = result.issues; activationIssues = result.activation_issues || []; canSave = result.can_save; validationReady = true;
+      } catch (error) {
+        if (!alive || own !== validationGeneration) return;
+        validationReady = false; issues = [{ step: null, field: "Validation", message: error.message }];
+      } finally { if (alive && own === validationGeneration) { validating = false; drawValidation(); updateHeader(); } }
+    }, 300);
+  }
+  const nextDates = h("ol.auto-next", { "aria-label": "Next three occurrences", "aria-live": "polite" });
+  function queuePreview() {
+    queueValidation();
+    clearTimeout(previewTimer); const own = ++previewGeneration;
+    if (state.draft.trigger.kind !== "schedule") { nextDates.replaceChildren(); return; }
+    nextDates.replaceChildren(h("li", "Calculating…"));
+    previewTimer = setTimeout(async () => {
+      try {
+        const draft = clone(state.draft); draft.name ||= "Preview";
+        for (const step of draft.steps) { step.name ||= "Step"; if (step.action.kind === "agent") step.action.prompt ||= "Preview"; }
+        const preview = await api.call("automation_preview", { draft });
+        if (alive && own === previewGeneration) nextDates.replaceChildren(...(preview.next.length ? preview.next.map(occurrence => h("li", occurrence.label)) : [h("li", "No future occurrences")]));
+      } catch (error) { if (alive && own === previewGeneration) nextDates.replaceChildren(h("li", error.message)); }
+    }, 300);
+  }
+  function triggerForm() {
+    const trigger = state.draft.trigger;
+    const section = h("section.auto-section", h("h2", "Start"), select("Start", trigger.kind, [["manual", "Manual"], ["schedule", "Schedule"], ["webhook", "Webhook"]], value => { state.draft.trigger = value === "schedule" ? { kind: value, when: { at: "09:00", tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", days: [], once: false } } : { kind: value }; if (value === "webhook" && state.id) void loadHook(); }));
+    if (trigger.kind === "schedule") {
+      const when = trigger.when, mode = when.every_minutes != null ? "interval" : when.cron ? "cron" : when.date ? "date" : "daily";
+      section.append(select("Frequency", mode, [["daily", "Days and time"], ["interval", "Interval"], ["date", "Once"], ["cron", "Advanced: cron"]], value => { trigger.when = value === "interval" ? { every_minutes: 60, tz: when.tz } : value === "cron" ? { cron: "0 9 * * *", tz: when.tz } : { at: "09:00", tz: when.tz, days: [], ...(value === "date" ? { date: new Date().toISOString().slice(0, 10), once: true } : {}) }; }));
+      if (mode === "interval") section.append(field("Every minutes", when.every_minutes, value => { when.every_minutes = Number(value); }, "number", { min: 5 }));
+      else if (mode === "cron") section.append(field("Cron", when.cron, value => { when.cron = value; }));
+      else {
+        section.append(field("Time", when.at, value => { when.at = value; }, "time"));
+        if (mode === "date") section.append(field("Date", when.date, value => { when.date = value; }, "date"));
+        else { const days = h("fieldset.auto-days", h("legend", "Days")); for (const day of ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]) days.append(check(day, when.days?.includes(day), checked => { const set = new Set(when.days || []); checked ? set.add(day) : set.delete(day); when.days = [...set]; })); section.append(days); }
+      }
+      section.append(field("Time zone", when.tz || "UTC", value => { when.tz = value; }), nextDates, h("div.auto-activation-issues", { role: "status" }));
+    }
+    if (trigger.kind === "webhook") section.append(hookForm());
+    return section;
+  }
+  function externalInputs() {
+    const section = h("details.auto-section", h("summary", "Execution inputs"));
+    for (const [index, input] of state.draft.inputs.entries()) section.append(h("div.auto-input-row", field("Name", input.name, value => { const old = input.name; input.name = value; for (const step of state.draft.steps) for (const binding of step.action.inputs) if (binding.kind === "input" && binding.name === old) binding.name = value; }), select("Type", input.port, [["text", "Text"], ["files", "Files"]], value => { input.port = value; for (const step of state.draft.steps) for (const binding of step.action.inputs) if (binding.kind === "input" && binding.name === input.name) binding.port = value; }), check("Required", input.required, value => { input.required = value; }), button("Remove", () => edit(() => { state.draft.inputs.splice(index, 1); for (const step of state.draft.steps) step.action.inputs = step.action.inputs.filter(binding => binding.kind !== "input" || binding.name !== input.name); }))));
+    section.append(button("Add execution input", () => edit(() => state.draft.inputs.push({ name: `input_${state.draft.inputs.length + 1}`, port: "text", required: true })), { disabled: state.draft.inputs.length >= 32 })); return section;
+  }
+  function inheritedPolicies() {
+    const policies = state.legacyPolicies;
+    if (!policies) return null;
+    const section = h("details.auto-section", h("summary", "Original task policies"), h("p", `${policies.max_attempts} attempts · ${Math.round(policies.retry_delay_ms / 60000)} minutes before retry`));
+    if (policies.report_to) section.append(h("p", "Final result returns to the original conversation."));
+    for (const [name, value] of Object.entries(policies.budget || {})) if (value != null) section.append(h("p", `${{max_steps:"Maximum steps",max_tokens:"Maximum tokens",max_model_calls:"Maximum model calls",timeout_secs:"Time limit in seconds",max_delegations:"Maximum delegations"}[name] || name}: ${value}`));
+    for (const rule of policies.rules) section.append(h("p", `${rule.ruleset} · revision ${rule.version}`));
+    if (policies.after.length) section.append(h("p", `Waits for ${policies.after.length} existing work items`));
+    return section;
+  }
+  function permissions() {
+    const section = h("details.auto-section", h("summary", "Permissions"), field("Maximum calls", state.draft.authority.max_calls, value => { state.draft.authority.max_calls = Number(value); }, "number", { min: 1, max: 1000 }), field("Maximum changes", state.draft.authority.max_mutations, value => { state.draft.authority.max_mutations = Number(value); }, "number", { min: 0, max: 1000 }));
+    for (const [index, allowed] of state.draft.authority.actions.entries()) {
+      const descriptor = actions.find(action => action.name === allowed.action);
+      const row = h("fieldset.auto-permission", h("legend", descriptor?.summary || allowed.action), field("Maximum per execution", allowed.per_run, value => { allowed.per_run = Number(value); }, "number", { min: 1, max: 1000 }), field("Maximum per hour", allowed.quota.count, value => { allowed.quota.count = Number(value); allowed.quota.window_ms = 3600000; }, "number", { min: 1, max: 1000 }));
+      if (descriptor?.auto_eligible && !descriptor.person_only && !descriptor.ask_each_time) row.append(check("Allow changes without asking", allowed.unattended, value => { allowed.unattended = value; }));
+      for (const [name, bound] of Object.entries(allowed.inputs)) {
+        row.append(select(name, bound.kind, [["free", "Any value"], ["literal", "Exact value"], ...(state.draft.inputs.some(input => input.port === "text") ? [["input", "Execution input"]] : [])], value => { allowed.inputs[name] = value === "literal" ? { kind: value, value: "" } : value === "input" ? { kind: value, name: state.draft.inputs.find(input => input.port === "text").name } : { kind: value }; }));
+        if (bound.kind === "literal") row.append(field("Exact value", typeof bound.value === "string" ? bound.value : JSON.stringify(bound.value), value => { const type = descriptor?.input_schema?.properties?.[name]?.type; bound.value = type === "number" || type === "integer" ? Number(value) : type === "boolean" ? value === "true" : value; }));
+        if (bound.kind === "input") row.append(select("Execution input", bound.name, state.draft.inputs.filter(input => input.port === "text").map(input => [input.name, input.name]), value => { bound.name = value; }));
+      }
+      row.append(button("Remove permission", () => edit(() => state.draft.authority.actions.splice(index, 1)))); section.append(row);
+    }
+    const picker = h("select", { "aria-label": "Add permission" }, h("option", { value: "" }, "Choose action"), actions.filter(action => !action.person_only && !state.draft.authority.actions.some(allowed => allowed.action === action.name)).map(action => h("option", { value: action.name }, action.summary)));
+    section.append(picker, button("Add permission", () => { const descriptor = actions.find(action => action.name === picker.value); if (descriptor) edit(() => state.draft.authority.actions.push({ action: descriptor.name, inputs: Object.fromEntries(Object.keys(descriptor.input_schema?.properties || {}).map(name => [name, { kind: "free" }])), unattended: false, per_run: 8, quota: { count: 60, window_ms: 3600000 } })); })); return section;
+  }
+  async function queueLayoutSave() {
+    state.layoutDirty = true;
+    if (!state.id || changed() || state.layoutSaving || state.layoutError) return;
+    state.layoutSaving = true;
+    try {
+      while (state.layoutDirty) {
+        state.layoutDirty = false;
+        const positions = Object.fromEntries(Object.entries(state.layout.positions).filter(([id]) => state.draft.steps.some(step => step.id === id)));
+        const result = await api.call("automation_layout", { automation: state.id, expected: state.layout.version, layout: { version: state.layout.version, positions } });
+        state.layout.version = result.version;
+      }
+    } catch (error) {
+      state.layoutError = error.message; state.layoutDirty = true;
+      if (alive) status.textContent = error.message;
+    } finally { state.layoutSaving = false; if (alive) updateHeader(); }
+  }
+  async function recoverLayout() {
+    await perform(async () => {
+      const current = await api.call("automation_get", { automation: state.id });
+      if (!alive) return;
+      dialog("Recover canvas positions", (body, controls, close) => {
+        body.append(h("p", `Saved layout ${current.layout.version}`));
+        controls.append(button("Use saved positions", () => { state.layout = current.layout; state.layoutError = null; state.layoutDirty = false; close(); draw(); }), button("Keep my positions", () => { state.layout.version = current.layout.version; state.layoutError = null; close(); void queueLayoutSave(); draw(); }));
+      });
+    });
+  }
+  function canvas() {
+    const viewport = h("div.auto-canvas-viewport", { tabindex: "0", "aria-label": "Automation canvas" });
+    const plane = h("div.auto-canvas-plane", { style: { transform: `scale(${zoom})` } }); viewport.append(plane);
+    const positions = state.layout.positions;
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("auto-connections"); svg.setAttribute("aria-hidden", "true"); plane.append(svg);
+    const coords = (step, index) => positions[step.id] || { x: 40 + index % 2 * 300, y: 40 + Math.floor(index / 2) * 200 };
+    function edges() {
+      plane.style.width = `${Math.max(640, ...state.draft.steps.map((step,index) => coords(step,index).x + 280))}px`;
+      plane.style.height = `${Math.max(400, ...state.draft.steps.map((step,index) => coords(step,index).y + 150))}px`;
+      svg.replaceChildren();
+      state.draft.steps.slice(1).forEach((step, index) => {
+        const before = coords(state.draft.steps[index], index), after = coords(step, index + 1);
+        const path = document.createElementNS(svg.namespaceURI, "path");
+        path.setAttribute("d", `M ${before.x + 120} ${before.y + 104} C ${before.x + 120} ${before.y + 160}, ${after.x + 120} ${after.y - 55}, ${after.x + 120} ${after.y}`);
+        svg.append(path);
+      });
+    }
+    state.draft.steps.forEach((step, index) => {
+      const position = coords(step, index);
+      const node = h("section.auto-node", { style: { left: `${position.x}px`, top: `${position.y}px` }, dataset: { selected: String(state.selected === step.id) } });
+      const handle = button(`${index + 1}. ${step.name}`, () => { state.selected = step.id; draw(); }, { "aria-label": `Select ${step.name}`, "aria-pressed": String(state.selected === step.id), class: "auto-node-handle" });
+      let drag;
+      handle.addEventListener("pointerdown", event => {
+        if (event.button !== 0) return;
+        const current = coords(step, index); drag = { pointer: event.pointerId, x: event.clientX, y: event.clientY, start: { ...current }, moved: false };
+        handle.setPointerCapture(event.pointerId);
+      });
+      handle.addEventListener("pointermove", event => {
+        if (!drag || drag.pointer !== event.pointerId) return;
+        const dx = (event.clientX - drag.x) / zoom, dy = (event.clientY - drag.y) / zoom;
+        if (Math.abs(dx) + Math.abs(dy) < 4 && !drag.moved) return;
+        if (!drag.moved) checkpoint();
+        drag.moved = true; positions[step.id] = { x: Math.max(0, Math.min(5000, drag.start.x + dx)), y: Math.max(0, Math.min(5000, drag.start.y + dy)) };
+        node.style.left = `${positions[step.id].x}px`; node.style.top = `${positions[step.id].y}px`; edges();
+      });
+      handle.addEventListener("pointerup", event => {
+        if (!drag) return;
+        const moved = drag.moved; drag = null;
+        if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+        if (moved) { event.preventDefault(); void queueLayoutSave(); }
+      });
+      handle.addEventListener("pointercancel", () => { if (drag?.moved) { positions[step.id] = drag.start; node.style.left = `${drag.start.x}px`; node.style.top = `${drag.start.y}px`; edges(); } drag = null; });
+      handle.addEventListener("keydown", event => {
+        const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+        if (!delta || !event.altKey) return;
+        event.preventDefault(); checkpoint(); const current = coords(step, index), distance = event.shiftKey ? 50 : 10;
+        positions[step.id] = { x: Math.max(0, Math.min(5000, current.x + delta[0] * distance)), y: Math.max(0, Math.min(5000, current.y + delta[1] * distance)) };
+        node.style.left = `${positions[step.id].x}px`; node.style.top = `${positions[step.id].y}px`; edges(); void queueLayoutSave();
+      });
+      node.append(handle, h("span.auto-kind", { agent: "Agent", approval: "Approval", result: "Result" }[step.action.kind]), h("span.auto-node-ports", "Text · Files")); plane.append(node);
+    });
+    edges();
+    const toolbar = h("div.auto-canvas-tools", button("Zoom out", () => { zoom = Math.max(.5, zoom - .1); plane.style.transform = `scale(${zoom})`; }), button("Zoom in", () => { zoom = Math.min(1.5, zoom + .1); plane.style.transform = `scale(${zoom})`; }), button("Fit", () => { const width = Math.max(...state.draft.steps.map((step, index) => coords(step, index).x + 280)); zoom = Math.min(1, Math.max(.25, viewport.clientWidth / width)); plane.style.transform = `scale(${zoom})`; viewport.scrollTo({ left: 0, top: 0 }); }));
+    return h("div.auto-canvas", toolbar, viewport);
+  }
+  function draw() {
+    if (!alive) return;
+    const active = document.activeElement;
+    const focusIndex = content.contains(active) ? [...content.querySelectorAll("input,textarea,select,button,summary")].indexOf(active) : -1;
+    const headerLabel = header.contains(active) ? active.textContent : null;
+    const selection = active?.tagName === "TEXTAREA" || active?.tagName === "INPUT" && ["text", "search", "url"].includes(active.type) ? [active.selectionStart, active.selectionEnd] : null;
+    updateHeader(); content.disabled = busy || loading || !!state.save || !!state.run; content.replaceChildren(field("Name", state.draft.name, value => { state.draft.name = value; }), triggerForm(), externalInputs());
+    const modes = h("div.cal-modes", { role: "group", "aria-label": "Automation editor" });
+    for (const mode of ["steps", "canvas"]) modes.append(button(mode === "steps" ? "Steps" : "Canvas", () => { state.mode = mode; draw(); }, { "aria-pressed": String(state.mode === mode) }));
+    content.append(modes);
+    if (state.mode === "steps") state.draft.steps.forEach((step, index) => content.append(stepForm(step, index)));
+    else {
+      content.append(canvas());
+      const index = state.draft.steps.findIndex(step => step.id === state.selected);
+      if (index >= 0) content.append(stepForm(state.draft.steps[index], index));
+    }
+    const add = h("div.auto-add", { role: "group", "aria-label": "Add step" });
+    for (const kind of ["agent", "approval", "result"]) add.append(button(`Add ${kind === "agent" ? "agent" : kind}`, () => edit(() => {
+      const previous = state.draft.steps.at(-1), inputs = previous ? [{ kind: "step", step: previous.id, port: "text" }, { kind: "step", step: previous.id, port: "files" }] : [];
+      const step = { id: uid(), name: { agent: "Work", approval: "Approval", result: "Result" }[kind], action: { kind, inputs, ...(kind === "agent" ? { target: { kind: "general", model: null }, prompt: "" } : kind === "approval" ? { title: "Continue?" } : {}) } };
+      state.draft.steps.push(step); state.selected = step.id;
+    }), { disabled: state.draft.steps.length >= 8 || busy || loading || !!state.save || !!state.run }));
+    content.append(add);
+    const inherited = inheritedPolicies();
+    if (inherited) content.append(inherited);
+    content.append(permissions());
+    drawValidation();
+    if (focusIndex >= 0) {
+      const control = content.querySelectorAll("input,textarea,select,button,summary")[focusIndex];
+      control?.focus({ preventScroll: true });
+      if (selection && control?.setSelectionRange && (control.tagName === "TEXTAREA" || ["text", "search", "url"].includes(control.type))) control.setSelectionRange(...selection);
+    } else if (headerLabel) [...header.querySelectorAll("button")].find(button => button.textContent === headerLabel)?.focus({ preventScroll: true });
+  }
+  function dialog(title, render) {
+    const dialog = h("dialog.auto-dialog"), heading = h("h2", title), body = h("div.auto-dialog-body"), actions = h("div.auto-dialog-actions");
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.addEventListener("close", () => dialog.remove(), { once: true });
+    dialog.append(heading, body, actions); el.append(dialog); render(body, actions, close); dialog.showModal(); return dialog;
+  }
+  async function prepare() {
+    await perform(async () => {
+      const activation = await api.call("automation_prepare", { automation: state.id, expected: state.revision });
+      if (!alive) return;
+      dialog(`Activate revision ${activation.revision}`, (body, controls, close) => {
+        for (const [step, selected] of Object.entries(activation.selections)) body.append(h("p", `${state.draft.steps.find(value => value.id === step)?.name || step}: ${selected.model}`));
+        if (state.legacyPolicies) body.append(inheritedPolicies());
+        body.append(h("p", `Maximum ${state.draft.authority.max_calls} calls and ${state.draft.authority.max_mutations} changes per execution`));
+        for (const allowed of state.draft.authority.actions) {
+          const descriptor = activation.descriptors[allowed.action];
+          const bounds = Object.entries(allowed.inputs).map(([name, bound]) => `${name}: ${bound.kind === "literal" ? JSON.stringify(bound.value) : bound.kind === "input" ? bound.name : bound.kind === "workspace_path" ? bound.prefix : "any value"}`).join(", ");
+          body.append(h("section.auto-grant", h("h3", descriptor.summary), h("p", bounds), h("p", `${allowed.per_run} per execution · ${allowed.quota.count} per ${Math.round(allowed.quota.window_ms / 60000)} minutes`), h("strong", allowed.unattended ? "Changes allowed without asking" : "Changes require approval")));
+        }
+        controls.append(button("Cancel", close), button(`Activate revision ${activation.revision}`, () => { close(); void perform(async () => { await api.call("automation_activate", { automation: state.id, activation: activation.id, digest: activation.digest }); await reloadHead(); }); }, { class: "primary" }));
+      });
+    });
+  }
+  function revokeDialog() {
+    dialog("Revoke permission", (body, controls, close) => {
+      body.append(h("p", "This stops new actions in executions using the active permission."));
+      controls.append(button("Cancel", close), button("Revoke", () => { close(); void perform(async () => {
+        const current = await api.call("automation_get", { automation: state.id });
+        const activation = current.activation;
+        if (!activation || activation.id !== state.head.activation) throw new Error("Reload the active permission before revoking it");
+        await api.call("automation_revoke", { activation: activation.id, digest: activation.digest }); await reloadHead();
+      }); }));
+    });
+  }
+  async function runDialog() {
+    if (state.run) return perform(start);
+    if (!state.draft.inputs.length) { state.run = { previous: state.lastStart?.run || null, request: crypto.randomUUID(), automation: state.id, expected: state.revision, inputs: {} }; return perform(start); }
+    dialog("Run automation", (body, controls, close) => {
+      const fields = new Map();
+      for (const input of state.draft.inputs) {
+        const control = input.port === "text" ? h("textarea", { rows: 3, required: input.required }) : h("select", { multiple: true, required: input.required }, artifacts.map(file => h("option", { value: file.id }, file.name)));
+        fields.set(input.name, control); body.append(label(input.name, control));
+      }
+      controls.append(button("Cancel", close), button("Run now", () => {
+        const inputs = {};
+        for (const input of state.draft.inputs) {
+          const control = fields.get(input.name);
+          if (!control.reportValidity()) return;
+          inputs[input.name] = input.port === "text" ? { kind: "text", value: control.value } : { kind: "files", ids: [...control.selectedOptions].map(option => option.value) };
+        }
+        state.run = { previous: state.lastStart?.run || null, request: crypto.randomUUID(), automation: state.id, expected: state.revision, inputs }; close(); void perform(start);
+      }, { class: "primary" }));
+    });
+  }
+  async function recoverStart() {
+    await perform(async () => {
+      if (!state.run) return;
+      const result = await api.call("automation_cancel_start", state.run);
+      state.run = null;
+      if (alive && result.run) api.openView("work-chat", { work: result.run.work });
+    });
+  }
+  async function start() {
+    const pending = await api.call("automation_begin_start", state.run);
+    const same = pending.request === state.run.request && pending.automation === state.run.automation && pending.expected === state.run.expected && Object.keys(pending.inputs).length === Object.keys(state.run.inputs).length && Object.entries(pending.inputs).every(([key, value]) => JSON.stringify(value) === JSON.stringify(state.run.inputs[key]));
+    state.run = pending;
+    if (!same) throw new Error("Another start is pending. Recover it before starting again.");
+    const run = await api.call("automation_run", state.run);
+    state.lastStart = await api.call("automation_acknowledge_start", state.run);
+    state.run = null;
+    if (alive) api.openView("work-chat", { work: run.work });
+  }
+  function testWebhookInputs() {
+    const automation = state.id, expected = state.revision;
+    dialog("Test webhook inputs", (body, controls, close) => {
+      const fields = new Map(), result = h("div", { "aria-live": "polite" });
+      for (const input of state.draft.inputs) {
+        const control = input.port === "text" ? h("textarea", { rows: 3, required: input.required }) : h("select", { multiple: true, required: input.required }, artifacts.map(file => h("option", { value: file.id }, file.name)));
+        fields.set(input.name, control); body.append(label(input.name, control));
+      }
+      body.append(result);
+      const preview = button("Preview inputs", async () => {
+        const inputs = {};
+        for (const input of state.draft.inputs) {
+          const control = fields.get(input.name);
+          if (!control.reportValidity()) return;
+          inputs[input.name] = input.port === "text" ? { kind: "text", value: control.value } : { kind: "files", ids: [...control.selectedOptions].map(option => option.value) };
+        }
+        preview.disabled = true;
+        try {
+          const checked = await api.call("automation_preview_inputs", { automation, expected, inputs });
+          if (!alive || !result.isConnected) return;
+          const payload = h("textarea", { rows: 8, readonly: true });
+          payload.value = JSON.stringify({ inputs: checked.inputs }, null, 2);
+          result.replaceChildren(h("p", "Inputs valid · no execution started"), label("Delivery payload", payload), h("h3", "Input bindings"), ...checked.bindings.map(binding => h("p", `${state.draft.steps.find(step => step.id === binding.step)?.name || binding.step}: ${binding.input} (${binding.port})`)));
+        } catch (error) { if (alive && result.isConnected) result.replaceChildren(h("p.auto-issue", error.message)); }
+        finally { if (alive && preview.isConnected) preview.disabled = false; }
+      });
+      controls.append(button("Close", close), preview);
+    });
+  }
+  function hookForm() {
+    if (!state.id) return h("p", "Save this automation to configure its webhook.");
+    const section = h("div.auto-hook", button("Test inputs", testWebhookInputs, { dataset: { previewInputs: "true" }, disabled: busy || loading || validating || !validationReady || changed() || issues.length > 0 }));
+    if (!hook) { section.append(button("Configure webhook", () => void loadHook())); return section; }
+    if (!hook.connection.available) { section.append(h("p", { role: "status" }, "No webhook connection is available.")); return section; }
+    const endpoint = hook.endpoint, draft = endpoint?.draft;
+    const base = h("input", { type: "url", value: hook.connection.bases[0] || "", "aria-label": "Webhook address" });
+    section.append(label("Connection address", base), button(draft ? "New signing key" : "Set up webhook", () => void perform(async () => {
+      state.hookSetup ||= { automation: state.id, expected: state.revision, request: crypto.randomUUID(), base: base.value, max_per_hour: 60 };
+      const result = await api.call("webhook_setup", state.hookSetup); state.hookSetup = null; hookSecret = result.secret; await loadHook();
+    }), { disabled: changed() }));
+    if (draft) {
+      section.append(h("p", draft.availability === "local" ? "Local connection" : draft.availability === "verified" ? "Connection verified from this app" : "Connection not verified"), fieldRead("Webhook URL", draft.url), button("Verify connection", () => void perform(async () => { await api.call("webhook_probe", { endpoint: endpoint.id, connection: draft.id }); await loadHook(); })));
+      if (hookSecret) {
+        const secret = h("input", { type: "password", readonly: true, value: hookSecret });
+        section.append(label("Signing key", secret), button("Show signing key", () => { secret.type = secret.type === "password" ? "text" : "password"; }), button("Copy signing key", () => void navigator.clipboard.writeText(hookSecret).catch(error => { status.textContent = error.message; })));
+      }
+      section.append(fieldRead("Connection ID", draft.id));
+      for (const delivery of hook.deliveries || []) section.append(h("p", `${new Date(delivery.at_ms).toLocaleString()} · ${delivery.state}`));
+    }
+    return section;
+  }
+  function fieldRead(text, value) { return label(text, h("input", { value, readonly: true })); }
+  async function loadHook() {
+    try { const result = await api.call("webhook_get", { automation: state.id }); if (alive) { hook = result; draw(); } }
+    catch (error) { if (alive) status.textContent = error.message; }
+  }
+  async function loadHistory(cursor = null) {
+    if (!state.id) return;
+    const page = await api.call("automation_history", { automation: state.id, cursor, limit: 20 });
+    if (!alive) return;
+    historyCursor = page.next; historyRuns = cursor ? [...historyRuns, ...page.runs] : page.runs;
+    history.replaceChildren(h("h2", "History"));
+    for (const run of historyRuns) history.append(h("div.auto-history-row", button(`${new Date(run.created_ms).toLocaleString()} · revision ${run.revision} · ${run.phase}`, () => void perform(async () => {
+      const execution = await api.call("automation_execution", { run: run.id });
+      if (!alive) return;
+      dialog(`Revision ${execution.revision.number} · ${execution.phase}`, (body, controls, close) => {
+        for (const step of execution.revision.draft.steps) {
+          const recorded = execution.steps.find(value => value.id === step.id), selected = execution.selections[step.id];
+          body.append(h("section.auto-recorded-step", h("h3", step.name), selected ? h("p", selected.model) : null, h("p", recorded.phase), recorded.output?.text ? h("pre", recorded.output.text) : null));
+          for (const file of recorded.output?.files || []) body.append(button(file.name, () => api.openArtifact(file.id)));
+        }
+        controls.append(button("Close", close), button("Open work", () => { close(); api.openView("work-chat", { work: execution.work }); }));
+      });
+    })), button("Open work", () => api.openView("work-chat", { work: run.work }))));
+    if (historyCursor) history.append(button("Load more", () => void perform(() => loadHistory(historyCursor))));
+  }
+  const keydown = event => {
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z" || event.target.closest("input,textarea,[contenteditable]")) return;
+    event.preventDefault(); undo(event.shiftKey);
+  };
+  let historyTimer;
+  const off = api.on("ark:orch", () => {
+    clearTimeout(historyTimer);
+    historyTimer = setTimeout(() => { if (alive && state.id && !busy) void loadHistory().catch(error => { if (alive) status.textContent = error.message; }); }, 250);
+  });
+  el.addEventListener("keydown", keydown); el.append(header, status, validation, content, history); draw(); queuePreview();
+  async function loadInitial() {
+    loadError = false;
+    try {
+      const [roster, files, offered, catalog] = await Promise.all([api.call("agents", {}), api.call("artifacts", {}), api.call("tools", {}), api.call("project_models", {})]);
+      if (!alive) return;
+      agents = roster; artifacts = files; actions = offered; models = catalog;
+      if (params.legacy_schedule && !state.legacyLoaded && state.saved === null && !state.id) {
+        const data = await api.call("automation_get", { legacy_schedule: params.legacy_schedule });
+        if (!alive) return;
+        state.draft = data.legacy.draft; state.adoption = { schedule: data.legacy.schedule, expected: data.legacy.version, config: data.legacy.policies.source_digest }; state.legacyPolicies = data.legacy.policies; state.legacyLoaded = true; loading = false;
+      }
+      if (state.id) {
+        const data = await api.call("automation_get", { automation: state.id });
+        if (!alive) return;
+        loading = false;
+        state.run = data.entry.pending_start || state.run;
+        if (state.saved !== null) { state.lastStart = data.entry.last_start; state.head = data.entry.definition; state.webhookAvailability = data.entry.webhook_availability; }
+        else { state.draft = data.entry.revision.draft; state.revision = data.entry.revision.number; state.saved = JSON.stringify(state.draft); state.lastStart = data.entry.last_start; state.head = data.entry.definition; state.webhookAvailability = data.entry.webhook_availability; state.layout = data.layout; state.legacyPolicies = data.entry.revision.legacy; }
+      }
+      draw(); queuePreview(); if (state.layoutDirty && !state.layoutError) void queueLayoutSave(); await loadHistory(); if (state.draft.trigger.kind === "webhook" && state.id) await loadHook();
+    } catch (error) { loadError = true; if (alive) updateHeader(); throw error; }
+  }
+  void loadInitial().catch(error => { if (alive) status.textContent = error.message; });
+  return { focus: () => content.querySelector("input")?.focus(), dispose() { alive = false; off?.(); clearTimeout(historyTimer); clearTimeout(previewTimer); clearTimeout(validationTimer); validationGeneration++; previewGeneration++; hookSecret = null; el.removeEventListener("keydown", keydown); } };
+}
+
+export function registerAutomationEditor(api) {
+  api.view({ id: "automation-editor", title: "Automation", icon: "clock", projectScoped: true, resourceScoped: true, render: (el, params, scoped) => {
+    const bound = scoped || api;
+    let controller = editor(el, params, bound);
+    return {
+      update(next) { controller.dispose(); el.replaceChildren(); controller = editor(el, next, bound); },
+      focusInput: () => controller.focus(),
+      dispose: () => controller.dispose(),
+    };
+  } });
+}

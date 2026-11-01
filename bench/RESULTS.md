@@ -879,3 +879,22 @@ Before/candidate reports and comparison are preserved in the workspace evidence
 `board/evidence/named-agent-new-chat-20261031/`. Reference pricing in the simulated report
 is not observed billing. The separate intermittent cassette mismatch remains recorded;
 passing runs do not establish its cause.
+
+## Work and automations, 2026-11-01
+
+Before: Core f87618c (0.31.0). After: work-automations implementation before release.
+Reports and recorded synthetic-task provider replies: `work-automations-20261101/`.
+Both builds used the development profile with optimizations, no incremental output and
+stripped debug information. Live runs used Claude Haiku, stateless subscription mode
+(`ARK_SESSION_REUSE=0`), two repetitions each of simple, multi-step, duplicate and approval,
+and a90second turn limit. No application dogfood calls overlapped either live run.
+
+The complete deterministic simulated suite has identical metrics before and after: success1,
+72.455 model calls,123727.5 total tokens and cost per success$0.082755 (simulated USD).
+Live success was8/8 before and8/8 after. Mean reference cost per successful live case was
+$0.02182 before and$0.01560 after. These use the benchmark's fixed reference rates from the reports, not Haiku billing. Cache conditions and model choices varied. This small
+sample checks behavior; it does not establish a general latency or cost improvement.
+
+## Guarded internal writes, 1 November 2026
+
+A targeted real-provider before/after test found one unauthorized marker note before the review fix and zero after it, with the same zero-mutation automation. Both runs completed in three model calls. See [protocol and limits](work-automations-20261101/guarded-meta-comparison.md) and the measured JSON files. This is one safety case per candidate, not a general performance claim.

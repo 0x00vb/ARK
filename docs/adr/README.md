@@ -133,3 +133,5 @@ The test, script or review step that keeps it true.
 - [0092. New chat chooses a durable conversation identity](0092-named-agent-chat-entry.md)
 
 - [0093. A conversation starts with the request](0093-composer-first-conversation-metadata.md)
+
+- [0094. Work conversations and automation sequences](0094-work-conversations-and-automation-sequences.md)

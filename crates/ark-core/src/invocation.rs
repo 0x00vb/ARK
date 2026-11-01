@@ -43,6 +43,8 @@ pub struct Invocation {
     pub id: InvocationId,
     /// Namespaced action name, e.g. `fs.read`.
     pub action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor: Option<String>,
     pub risk: RiskTier,
     /// The exact input the action was called with.
     pub input: serde_json::Value,
@@ -97,6 +99,7 @@ impl Invocation {
         Invocation {
             id: InvocationId::new(),
             action: action.into(),
+            descriptor: None,
             risk,
             input,
             command: None,

@@ -152,6 +152,8 @@ mod tests {
 
     fn request() -> ApprovalRequest {
         ApprovalRequest {
+            invocation: None,
+            project: None,
             action: "manuscript.save".into(),
             summary: "write text to a chapter".into(),
             risk: RiskTier::Mutate,

@@ -1,3 +1,21 @@
+## Core0.32.2 published and verified, 1 November 2026
+
+Immutable tagv0.32.2 points to dd1fb336bb5e1f3fa5372cf597d88d2a7c075280 on both
+origin and github. Exact-source CIv28 and a fresh GitHub clone pass every required check,
+including69 actual Host pages with the Desktop consumer, optimized build and unchanged
+benchmark. Core target output was cleaned after verification.
+
+Board and Work use the shared ticket shell. A conversation-bound board card opens the same
+Work ticket. Menus, compact controls and Canvas actions pass scoped independent QA, keyboard
+regressions and actual local app checks at1197px and390px. Native Work replies preserve
+assigned targets, durable retry identity and temporary busy states. Their TCP contracts pass.
+Desktop0.9.15 signing, physical iPhone and public webhook acceptance remain separate delivery
+gates. This record does not claim those gates or Desktop promotion.
+
+Evidence: ../board/evidence/ux-implementation-p0-20261031/core-release-v0322.json,
+core-ci-v28-passed.log and core-fresh-public-v0322-passed.log. The release-source checkpoint
+below records what was known before publication.
+
 # Core0.32.2 release source, 1 November 2026
 
 Public Core0.32.1 commit0eaa7b1 passed full exact-source CIv22 and fresh GitHub clone

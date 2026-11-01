@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.2] - 2026-11-01
+
+- Native replies to Work conversations preserve the admitted General or agent target and create one durable followup. They no longer test an assigned agent against General model readiness.
+- Retrying a native reply after admission or receipt loss recovers the same Work receipt. Completed agent tasks are acknowledged without execution after the agent is retired. Invalid cross-project work bindings are refused. Retired or unavailable targets return a terminal refusal so the device can continue using its ordered mutation counter.
+
 ## [0.32.1] - 2026-11-01
 
 ### Changed

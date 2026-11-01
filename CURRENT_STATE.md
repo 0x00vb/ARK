@@ -1,3 +1,21 @@
+# Core0.32.2 native Work reply qualification, 1 November 2026
+
+Public Core0.32.1 commit0eaa7b1 passed full exact-source CIv22 and fresh GitHub clone
+verification. A scoped native contract check then reproduced a reply to assigned Work being
+classified as General. The native request returned409 model_unavailable although the same
+provider had completed the assigned agent's initial task. A ready General could instead
+accept the request before its later target guard refused it.
+
+The private transport helper now resolves the existing conversation's scoped Work receipt
+and frozen target. The native mutation key recovers its Work admission before any readmission.
+General preserves its conversation; an agent keeps its task target. Completed tasks are not
+executed again while recovering an acknowledgement, even after the agent is retired.
+Five focused native tests pass, including fresh Host recovery, terminal refusal after agent
+retirement and an actual foreign-project binding refusal. Full exact-source CIv24 passes:
+format, protocol, version, clippy, Rust tests, focused WebKit,69 actual Host pages, release
+build and unchanged simulated benchmark. Protocol/schema1.10 stays unchanged. Immutable tag
+and fresh-public verification remain release gates. Desktop publication is held separately.
+
 # Core0.32.1 release source, 1 November 2026
 
 Core0.32.0 commit7be988e is published on origin and github with an immutable tag.
@@ -528,7 +546,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.32.1 (release metadata prepared; last verified public tag is v0.32.0) |
+| Latest tag | v0.32.2 (release metadata prepared; last verified public tag is v0.32.1) |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

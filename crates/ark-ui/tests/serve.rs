@@ -3628,3 +3628,347 @@ async fn sequence_approvals_and_results_use_the_existing_phone_protocol_and_reta
         .is_empty());
     assert_eq!(provider.calls.lock().unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn native_work_followups_keep_the_assigned_agent_and_retry_one_durable_effect() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("Owner").unwrap();
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let provider = Arc::new(MockProvider::new(
+        "m",
+        vec![
+            Completion {
+                content: "Initial result".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+            Completion {
+                content: "Followup result".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+        ],
+    ));
+    let (_host, served) = ArkUi::new(app_with_provider(dir.path(), provider.clone()))
+        .access(Access::Tokens(tokens.clone()))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let owner = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
+    resource_call(
+        &owner,
+        "project",
+        "spawn_agent",
+        "",
+        json!({"spec":{"name":"researcher","role":"Research","tools":["notes.read"]}}),
+    )
+    .await
+    .unwrap();
+    let admitted = resource_call(&owner, "project", "work_admit", "", json!({"request_id":"initial-agent-work","target":{"kind":"agent","name":"researcher"},"task":{"objective":"Initial agent work"}})).await.unwrap();
+    resource_call(
+        &owner,
+        "project",
+        "work_execute",
+        "",
+        json!({"receipt":admitted["id"]}),
+    )
+    .await
+    .unwrap();
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if store
+                .get_record("orch_task", admitted["task"].as_str().unwrap())
+                .unwrap()
+                .unwrap()["state"]
+                == "done"
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://127.0.0.1:{}/client/v1", served.port);
+    let hello: Value = client
+        .get(format!("{base}/hello"))
+        .bearer_auth(&phone.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let input = json!({"body":"Continue this assigned work","attachmentIds":[]});
+    let mutation = json!({"epoch":hello["mutationEpoch"],"counter":"1","operation":"chat.send","target":admitted["conversation"],"inputDigest":format!("{:x}",Sha256::digest(serde_json::to_vec(&input).unwrap())),"input":input});
+    let send = || {
+        client
+            .post(format!("{base}/mutations"))
+            .bearer_auth(&phone.token)
+            .json(&mutation)
+            .send()
+    };
+    let (first, replay) = tokio::join!(send(), send());
+    let first = first.unwrap();
+    let status = first.status();
+    let first = first.text().await.unwrap();
+    assert_eq!(status, reqwest::StatusCode::OK, "{first}");
+    let replay = replay.unwrap();
+    assert_eq!(replay.status(), reqwest::StatusCode::OK);
+    let replay = replay.text().await.unwrap();
+    assert_eq!(first, replay);
+    let mut tasks = Vec::new();
+    for _ in 0..100 {
+        tasks = store
+            .list_records("orch_task", None)
+            .unwrap()
+            .into_iter()
+            .filter(|task| task["item"] == admitted["work"])
+            .collect();
+        if tasks.len() == 2 && tasks.iter().all(|task| task["state"] == "done") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        tasks.len(),
+        2,
+        "the native followup must create one more task for the same work: {first}"
+    );
+    assert!(tasks.iter().all(|task| task["owner"] == "researcher"));
+    assert!(tasks
+        .iter()
+        .all(|task| task["conversation"] == admitted["conversation"]));
+    assert!(first.contains("completed"), "{first}");
+    assert_eq!(provider.calls.lock().unwrap().len(), 2);
+    resource_call(
+        &owner,
+        "project",
+        "terminate_agent",
+        "",
+        json!({"agent":"researcher"}),
+    )
+    .await
+    .unwrap();
+    let device = format!("{:x}", Sha256::digest(phone.token.as_bytes()));
+    let record_id = format!("{device}:{}:1", hello["mutationEpoch"].as_str().unwrap());
+    let mut pending = store
+        .get_record("client_mutation", &record_id)
+        .unwrap()
+        .unwrap();
+    pending["receipt"]["status"] = json!("accepted");
+    pending.as_object_mut().unwrap().remove("effect");
+    store
+        .put_record("client_mutation", &record_id, &device, &pending)
+        .unwrap();
+    let restarted_provider = Arc::new(MockProvider::new("m", vec![]));
+    let (restarted, _) = ArkUi::new(app_with_provider(dir.path(), restarted_provider.clone()))
+        .open()
+        .await
+        .unwrap();
+    let listener = ClientListener::new(tokens)
+        .serve(restarted, "127.0.0.1:0")
+        .await
+        .unwrap();
+    let replay = client
+        .post(format!(
+            "http://127.0.0.1:{}/client/v1/mutations",
+            listener.port
+        ))
+        .bearer_auth(&phone.token)
+        .json(&mutation)
+        .send()
+        .await
+        .unwrap();
+    let status = replay.status();
+    let replay = replay.text().await.unwrap();
+    assert_eq!(status, reqwest::StatusCode::OK, "{replay}");
+    assert!(replay.contains("completed"), "{replay}");
+    assert_eq!(store.list_records("orch_task", None).unwrap().len(), 2);
+    assert_eq!(restarted_provider.calls.lock().unwrap().len(), 0);
+    let mut retired_reply = mutation.clone();
+    retired_reply["counter"] = json!("2");
+    let refused = client
+        .post(format!(
+            "http://127.0.0.1:{}/client/v1/mutations",
+            listener.port
+        ))
+        .bearer_auth(&phone.token)
+        .json(&retired_reply)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), reqwest::StatusCode::OK);
+    let refused: Value = refused.json().await.unwrap();
+    assert_eq!(refused["status"], "no_longer_applicable");
+    assert_eq!(
+        store
+            .list_records("orch_work_submission", None)
+            .unwrap()
+            .len(),
+        2
+    );
+    let conversation = admitted["conversation"].as_str().unwrap();
+    let original_header = store.get_session(conversation).unwrap().unwrap();
+    owner
+        .call("switch_project", json!({"name":"Other work project"}))
+        .await
+        .unwrap();
+    let foreign_work = resource_call(&owner, "project", "work_admit", "", json!({"request_id":"foreign-work","target":{"kind":"general","model":null},"task":{"objective":"Other project's pending work"}})).await.unwrap();
+    assert_ne!(foreign_work["project"], admitted["project"]);
+    let mut corrupted = original_header.clone();
+    corrupted["work_item"] = foreign_work["work"].clone();
+    store
+        .put_session(
+            conversation,
+            &ProjectId(original_header["project"].as_str().unwrap().into()),
+            &corrupted,
+        )
+        .unwrap();
+    let mut foreign = mutation.clone();
+    foreign["counter"] = json!("3");
+    let refused = client
+        .post(format!(
+            "http://127.0.0.1:{}/client/v1/mutations",
+            listener.port
+        ))
+        .bearer_auth(&phone.token)
+        .json(&foreign)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        store
+            .list_records("orch_work_submission", None)
+            .unwrap()
+            .len(),
+        3
+    );
+    store
+        .put_session(
+            conversation,
+            &ProjectId(original_header["project"].as_str().unwrap().into()),
+            &original_header,
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn native_general_work_followups_keep_the_same_conversation_and_admission() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("Owner").unwrap();
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let provider = Arc::new(MockProvider::new(
+        "m",
+        vec![
+            Completion {
+                content: "First".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+            Completion {
+                content: "Second".into(),
+                tool_calls: vec![],
+                usage: Usage::default(),
+            },
+        ],
+    ));
+    let (_host, served) = ArkUi::new(app_with_provider(dir.path(), provider.clone()))
+        .access(Access::Tokens(tokens))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let owner = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
+    let receipt = resource_call(&owner,"project","work_admit","",json!({"request_id":"initial-general-work","target":{"kind":"general","model":null},"task":{"objective":"Initial general work"}})).await.unwrap();
+    resource_call(
+        &owner,
+        "project",
+        "work_execute",
+        "",
+        json!({"receipt":receipt["id"]}),
+    )
+    .await
+    .unwrap();
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let view = resource_call(
+                &owner,
+                "project",
+                "work_get",
+                "",
+                json!({"work":receipt["work"]}),
+            )
+            .await
+            .unwrap();
+            if view["item"]["state"] == "completed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://127.0.0.1:{}/client/v1", served.port);
+    let hello: Value = client
+        .get(format!("{base}/hello"))
+        .bearer_auth(&phone.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let input = json!({"body":"Follow up general work","attachmentIds":[]});
+    let mutation = json!({"epoch":hello["mutationEpoch"],"counter":"1","operation":"chat.send","target":receipt["conversation"],"inputDigest":format!("{:x}",Sha256::digest(serde_json::to_vec(&input).unwrap())),"input":input});
+    let response = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&mutation)
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let response: Value = response.json().await.unwrap();
+    assert_eq!(status, reqwest::StatusCode::OK, "{response}");
+    assert_eq!(response["status"], "completed", "{response}");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let view = resource_call(
+                &owner,
+                "project",
+                "work_get",
+                "",
+                json!({"work":receipt["work"]}),
+            )
+            .await
+            .unwrap();
+            if view["item"]["state"] == "completed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let admissions = store.list_records("orch_work_submission", None).unwrap();
+    assert_eq!(admissions.len(), 2);
+    assert!(admissions
+        .iter()
+        .all(|entry| entry["receipt"]["conversation"] == receipt["conversation"]));
+    assert!(admissions
+        .iter()
+        .all(|entry| entry["receipt"]["work"] == receipt["work"]));
+    assert_eq!(provider.calls.lock().unwrap().len(), 2);
+    assert!(store.list_records("orch_agent", None).unwrap().is_empty());
+}

@@ -14,6 +14,7 @@
 
 pub(crate) mod agent_conversations;
 mod client_creation;
+mod client_work;
 pub(crate) mod webhooks;
 
 use std::collections::{HashMap, VecDeque};
@@ -1516,7 +1517,11 @@ impl Host {
                     Err(error) if error.is::<agent_conversations::AgentUnavailable>() => false,
                     Err(error) => return Err(ClientMutationError::Store(error)),
                 };
-                if regular_session {
+                if regular_session
+                    && !self
+                        .client_has_work_binding(&request.target)
+                        .map_err(ClientMutationError::Store)?
+                {
                     let conv = self
                         .chat_conv(&request.target, "", true)
                         .await
@@ -1754,6 +1759,12 @@ impl Host {
         request: &ark_protocol::MutationRequest,
         record: &mut Value,
     ) -> Result<(&'static str, &'static str), ClientMutationError> {
+        if let Some(result) = self
+            .apply_client_work_send(record_id, device, request, record)
+            .await?
+        {
+            return Ok(result);
+        }
         match self.client_agent(&request.target) {
             Ok(Some(agent)) => {
                 return self

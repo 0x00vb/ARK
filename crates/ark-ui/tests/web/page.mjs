@@ -1009,6 +1009,17 @@ async function board(page) {
   const panel = page.locator(".bd-detail .bd-panel");
   await panel.waitFor();
   assert.equal(await panel.locator(".bd-p-title").inputValue(), "Draft chapter 3");
+  await panel.getByRole("button", { name: "Status: In progress", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "To do", exact: true }).click();
+  await panel.getByRole("button", { name: "Status: To do", exact: true }).waitFor();
+  await page.waitForFunction(async () => (await window.ark.call("board")).items.some(item => item.title === "Draft chapter 3" && item.state === "todo"));
+  await panel.getByRole("button", { name: "Status: To do", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "In progress", exact: true }).click();
+  const assignee = panel.getByRole("button", { name: "Assigned to: No owner", exact: true });
+  await assignee.click();
+  await page.getByRole("menuitemradio", { name: "You", exact: true }).press("Escape");
+  assert.equal(await assignee.evaluate(element => element === document.activeElement), true);
+
   await panel.locator(".bd-p-note").fill("Under 2,000 words.");
   await panel.locator(".bd-p-title").click();
   await page.waitForFunction(async () => (await window.ark.call("board")).items.some((w) => w.note === "Under 2,000 words."));
@@ -1095,6 +1106,7 @@ async function schedules(page) {
   assert.equal(await page.locator('.view[data-view="schedules"] .auto-gallery-card').count(), 1);
   await page.locator('.view[data-view="schedules"] .auto-gallery-card').click();
   await page.getByRole("button", { name: "Select Start", exact: true }).waitFor();
+  await page.getByLabel("More automation actions").click();
   await page.getByRole("button", { name: "Current schedule", exact: true }).click();
   await page.locator(".sc-panel .sc-what", { hasText: "Recount the stock" }).waitFor();
   await destinations.getByRole("button", { name: "Chat" }).click();
@@ -3695,6 +3707,20 @@ async function agentConversations(page, fromNewChat = false) {
     await work.getByText("GENERAL WORK COMPLETE", { exact: true }).first().waitFor();
     await work.getByRole("complementary", { name: "Work properties" }).getByText("Completed", { exact: true }).waitFor();
     const original = (await page.evaluate(() => window.ark.call("work_list"))).items[0];
+    await page.locator('.project-section[data-id="boards"] .bd-row').click();
+    await page.locator('.pane-view.bd .bd-card', { hasText: original.title }).click();
+    await work.getByRole("heading", { name: original.title, exact: true }).waitFor();
+    assert.equal(await page.locator(".bd-detail:visible").count(), 0, "the board opens the same Work conversation");
+    assert.equal(await work.getByRole("complementary", { name: "Work properties" }).count(), 1);
+    const actions = work.getByRole("button", { name: "More ticket actions", exact: true });
+    await actions.press("Enter");
+    await page.waitForFunction(() => document.activeElement?.textContent === "Save as automation");
+    await page.keyboard.press("ArrowDown");
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Archive");
+    await page.keyboard.press("Escape");
+    assert.equal(await actions.evaluate(element => element === document.activeElement), true);
+
+
     await work.locator("textarea").fill("GENERAL FOLLOWUP");
     await work.locator("textarea").press("Enter");
     await work.getByText("GENERAL FOLLOWUP COMPLETE", { exact: true }).first().waitFor();

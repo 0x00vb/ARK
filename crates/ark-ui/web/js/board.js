@@ -14,6 +14,7 @@
 import { h, icon, clear, clip } from "./dom.js";
 import { markdown } from "./md.js";
 import { registry } from "./ext.js";
+import { ticketShell, ticketProperty } from "./ticket.js";
 
 const COLUMNS = [
   { state: "todo", label: "To do" },
@@ -490,6 +491,11 @@ function boardView(el, params) {
 
   /// The item, in place of the board; Back or Escape returns to its card.
   function open(w) {
+    if (w.conversation && registry.views.has("work-chat")) {
+      ark.openView("work-chat", { work: w.id });
+      ark.closePanel("board");
+      return;
+    }
     close();
     store.openItem = w.id;
     const back = h("button.bd-back", { type: "button" }, icon("arrow-left"), h("span", boardOf(v.board)?.goal || "Board"));
@@ -793,13 +799,16 @@ function itemPanel(el, params, ark, gone) {
     const w = item(id);
     if (w && note.value !== (w.note || "")) change(id, { note: note.value });
   });
-  const segs = h("div.segs.bd-p-states", { role: "group", "aria-label": "Column" });
+  const segs = h("div.bd-p-states");
   const meta = h("div.bd-p-meta");
   const blocked = h("div.bd-p-blocked");
   const work = h("div.bd-p-work");
   const history = h("details.bd-p-history");
   const del = h("button.btn.ghost.small.bd-p-delete", { type: "button" }, "Delete");
-  el.append(title, segs, meta, blocked, note, work, history, del);
+  const shell = ticketShell(el);
+  shell.head.append(title);
+  shell.content.append(blocked, note, work, history);
+  shell.properties.append(h("h2", "Properties"), segs, meta, del);
   // The pane can change width: the text boxes follow.
   const resized = new ResizeObserver(() => { fitTitle(); fitNote(); });
   resized.observe(el);
@@ -825,21 +834,16 @@ function itemPanel(el, params, ark, gone) {
     if (editing !== "note") { note.value = w.note || ""; fitNote(); }
 
     clear(segs);
-    for (const c of COLUMNS) {
-      segs.append(h("button.seg", { type: "button", "aria-pressed": w.state === c.state ? "true" : "false", onclick: () => w.state !== c.state && change(id, { state: c.state }) }, c.label));
-    }
+    segs.append(ticketProperty(ark, { label: "Status", value: COLUMNS.find(column => column.state === w.state)?.label || w.state, mark: statusMark(w.state), entries: COLUMNS.map(column => ({ label: column.label, current: w.state === column.state, run: () => w.state !== column.state && change(id, { state: column.state }) })) }));
 
     // Who has it, and handing it to an agent: the one action here that starts work.
     clear(meta);
     const busy = openTask(w);
-    const ownerBtn = h("button.bd-p-owner", { type: "button", disabled: busy ? true : null, title: busy ? `${busy[1].owner} is working on it` : "Change owner" },
-      avatar(w.owner) || h("span.bd-avatar.none"), h("span", w.owner ? ownerName(w.owner) : "No owner"));
-    ownerBtn.onclick = () => menu(ownerBtn, [
+    meta.append(ticketProperty(ark, { label: "Assigned to", value: w.owner ? ownerName(w.owner) : "No owner", mark: avatar(w.owner) || h("span.bd-avatar.none"), disabled: !!busy, title: busy ? `${busy[1].owner} is working on it` : "Change owner", entries: [
       { label: "No owner", current: !w.owner, run: () => change(id, { owner: "" }) },
       { label: "You", current: w.owner === PERSON, run: () => change(id, { owner: PERSON }) },
-      ...panel.agents.map((a) => ({ label: a.name, sub: clip(a.role, 40), current: w.owner === a.name, run: () => change(id, { owner: a.name }) })),
-    ]);
-    meta.append(ownerBtn);
+      ...panel.agents.map(agent => ({ label: agent.name, sub: clip(agent.role, 40), current: w.owner === agent.name, run: () => change(id, { owner: agent.name }) })),
+    ] }));
     if (busy) {
       const [tid, t] = busy;
       meta.append(h("span.bd-p-busy", running(w) ? h("span.bd-live") : null, t.state === "running" ? "Working" : t.state === "waiting" ? "Waiting on its helpers" : "Queued"),

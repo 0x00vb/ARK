@@ -2,8 +2,11 @@
 
 ## [0.32.2] - 2026-11-01
 
+- Work and board tickets share their detail shell and properties. Board cards with a conversation open the same Work ticket. Board status and assignee use the same keyboard menu. Controls use compact desktop spacing and retain touch targets.
+- Canvas keeps Save and Run visible, with secondary actions and step types in contextual menus. Zoom, close and reorder use accessible icon controls. Menu focus survives validation and layout saves.
+
 - Native replies to Work conversations preserve the admitted General or agent target and create one durable followup. They no longer test an assigned agent against General model readiness.
-- Retrying a native reply after admission or receipt loss recovers the same Work receipt. Completed agent tasks are acknowledged without execution after the agent is retired. Invalid cross-project work bindings are refused. Retired or unavailable targets return a terminal refusal so the device can continue using its ordered mutation counter.
+- Retrying a native reply after admission or receipt loss recovers the same Work receipt. Completed agent tasks are acknowledged without execution after the agent is retired. Invalid cross-project work bindings are refused. Retired or deleted agents return a terminal refusal so the device can continue using its ordered mutation counter. Temporarily blocked admissions stay accepted for retry without discarding the message.
 
 ## [0.32.1] - 2026-11-01
 

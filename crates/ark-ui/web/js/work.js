@@ -1,6 +1,7 @@
 import { h, icon } from "./dom.js";
 import { markdown } from "./md.js";
 import { boardColumn, boardCard } from "./board.js";
+import { ticketShell, ticketProperty, ticketMenu } from "./ticket.js";
 
 const workDrafts = new Map();
 const listStates = new Map();
@@ -105,16 +106,21 @@ function workChat(el, params, api) {
   const draft = workDrafts.get(key) || { text: "", attempt: null, uploads: 0 };
   workDrafts.set(key, draft);
   let alive = true, generation = 0, data = null, sending = false;
-  const head = h("div.work-page-head");
-  const status = h("p.work-status", { role: "status" });
+  const shell = ticketShell(el);
+  const head = shell.head;
+  head.classList.add("work-page-head");
+  const status = shell.status;
   const decisions = h("div.work-questions");
   const files = h("div.work-files");
   const usageBody = h("div.work-usage-body");
   const usage = h("details.work-usage", { hidden: true }, h("summary", "Usage"), usageBody);
   const retained = h("section.work-retained", { hidden: true, tabindex: "0", "aria-label": "Saved answer" });
-  const conversation = h("div.work-ticket-conversation", decisions, retained);
-  const properties = h("aside.work-properties", { "aria-label": "Work properties" });
-  el.append(head, status, h("div.work-ticket-body", conversation, properties));
+  const conversation = shell.content;
+  conversation.classList.add("work-ticket-conversation");
+  conversation.append(decisions, retained);
+  const properties = shell.properties;
+  properties.classList.add("work-properties");
+  properties.setAttribute("aria-label", "Work properties");
   const view = api.chatView(conversation, { submit: send, stop, files: { captureOrigin: () => {
     const progressTarget = h("div"); view.uploads.append(progressTarget);
     return { uploadApi: api, progressTarget,
@@ -171,10 +177,15 @@ function workChat(el, params, api) {
   function draw() {
     if (!data || !alive) return;
     const item = data.item;
-    head.replaceChildren(h("button.btn.ghost", { type: "button", onclick: () => api.openView("work") }, "Work"), h("span.work-card-id", item.id.slice(0, 8).toUpperCase()), h("h1.sv-title", item.title));
-    properties.replaceChildren(h("h2", "Properties"), h("dl", h("dt", "Status"), h("dd", item.status), h("dt", "Assigned to"), h("dd", item.target?.kind === "agent" ? item.target.name : item.run ? "Automation" : "General"), h("dt", "Source"), h("dd", item.origin), h("dt", "Updated"), h("dd", new Date(item.updated_ms).toLocaleString())),
-      h("button.btn", { type: "button", onclick: () => void act("work_archive", { work: item.id, archived: !params.archived }).then(ok => { if (ok) { params.archived = !params.archived; if (alive) draw(); } }) }, params.archived ? "Unarchive" : "Archive"), files, usage);
-    head.append(h("button.btn", { type: "button", disabled: !item.run && !data.template, title: !item.run && !data.template ? "Original request unavailable" : null, onclick: async () => {
+    head.replaceChildren(h("button.btn.ghost.ticket-back", { type: "button", title: "Back to Work", "aria-label": "Back to Work", onclick: () => api.openView("work") }, icon("arrow-left")), h("span.work-card-id", item.id.slice(0, 8).toUpperCase()), h("h1.sv-title", item.title));
+    properties.replaceChildren(h("h2", "Properties"),
+      ticketProperty(api, { label: "Status", value: item.status, mark: icon(item.state === "completed" ? "check" : "clock") }),
+      ticketProperty(api, { label: "Assigned to", value: item.target?.kind === "agent" ? item.target.name : item.run ? "Automation" : "General" }),
+      ticketProperty(api, { label: "Source", value: item.origin }),
+      ticketProperty(api, { label: "Updated", value: new Date(item.updated_ms).toLocaleString() }),
+      files, usage);
+    const archiveAction = h("button.menu-item", { type: "button", onclick: () => void act("work_archive", { work: item.id, archived: !params.archived }).then(ok => { if (ok) { params.archived = !params.archived; if (alive) draw(); } }) }, params.archived ? "Unarchive" : "Archive");
+    const automationAction = h("button.menu-item", { type: "button", disabled: !item.run && !data.template, title: !item.run && !data.template ? "Original request unavailable" : null, onclick: async () => {
       if (item.run) {
         try { const run = await api.call("automation_execution", { run: item.run }); if (alive) api.openView("automation-editor", { automation: run.automation }); }
         catch (error) { if (alive) status.textContent = error.message; }
@@ -185,7 +196,11 @@ function workChat(el, params, api) {
         { id: first, name: "Work", action: { kind: "agent", target: data.template?.target || item.target || { kind: "general", model: null }, prompt: data.template?.objective || item.title, inputs: (data.template?.artifacts || []).map(id => ({ kind: "artifact", id })) } },
         { id: `step-${crypto.randomUUID()}`, name: "Result", action: { kind: "result", inputs: [{ kind: "step", step: first, port: "text" }, { kind: "step", step: first, port: "files" }] } },
       ] } });
-    } }, item.run ? "Edit automation" : "Save as automation"));
+    } }, item.run ? "Edit automation" : "Save as automation");
+    const more = h("button.btn.ghost", { type: "button", title: "More actions", "aria-label": "More ticket actions", onclick: () => {
+      ticketMenu(api, more, [automationAction, archiveAction]);
+    } }, icon("more"));
+    head.append(more);
     if (data.conversations?.length > 1) {
       const executions = h("select", { "aria-label": "Execution", onchange: event => api.openView("work-chat", { ...params, receipt: event.target.value }) }, data.conversations.map(conversation => h("option", { value: conversation.receipt, selected: conversation.conversation === item.conversation }, new Date(conversation.at_ms).toLocaleString())));
       head.append(executions);
@@ -229,7 +244,7 @@ function workChat(el, params, api) {
       const next = await api.call("work_get", { work: params.work, receipt: params.receipt || null });
       if (!alive || own !== generation) return;
       if (JSON.stringify(data) === JSON.stringify(next)) return;
-      data = next; status.textContent = next.item.delivery_error ? `${next.item.status}. Result delivery: ${next.item.delivery_error}` : next.item.status; draw();
+      data = next; status.textContent = next.item.delivery_error ? `${next.item.status}. Result delivery: ${next.item.delivery_error}` : ""; draw();
     } catch (error) { if (alive && own === generation) status.textContent = error.message; }
   }
   const timer = setInterval(() => { if (alive && !el.hidden && !document.hidden) void load(); }, 1500);

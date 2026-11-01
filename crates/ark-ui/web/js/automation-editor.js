@@ -1,4 +1,4 @@
-import { h } from "./dom.js";
+import { h, icon } from "./dom.js";
 
 const drafts = new Map();
 const clone = value => structuredClone(value);
@@ -24,7 +24,8 @@ export function automationExample(kind) {
   return draft;
 }
 
-const button = (text, run, attrs = {}) => h("button.btn", { type: "button", onclick: event => { event.currentTarget.focus({ preventScroll: true }); run(event); }, ...attrs }, text);
+const button = (text, run, attrs = {}) => h("button.btn", { type: "button", "data-action": text, onclick: event => { event.currentTarget.focus({ preventScroll: true }); run(event); }, ...attrs }, text);
+const compact = (text, glyph, run, attrs = {}) => button(glyph instanceof Node ? glyph : icon(glyph), run, { "data-action": text, "aria-label": text, title: text, class: "auto-icon", ...attrs });
 const label = (text, control) => h("label.auto-field", h("span", text), control);
 
 function editor(el, params, api) {
@@ -64,14 +65,17 @@ function editor(el, params, api) {
     return label(text, h("input", { type: "checkbox", checked: value, disabled: busy || loading || !!state.save || !!state.run, onchange: event => edit(() => set(event.target.checked)) }));
   }
   function updateHeader() {
+    const focusedElement = document.activeElement;
+    const focused = header.contains(focusedElement) ? focusedElement.dataset.action || focusedElement.getAttribute("aria-label") : null;
+    const menuOpen = !!header.querySelector(".auto-more[open]");
     const inputPreview = content.querySelector("[data-preview-inputs]");
     if (inputPreview) inputPreview.disabled = busy || loading || validating || !validationReady || changed() || issues.length > 0;
     const pending = state.run ? `Start pending · revision ${state.run.expected}` : state.save ? "Save pending" : changed() ? "Unsaved changes" : state.revision ? `Saved revision ${state.revision}` : "New automation";
     const active = state.head?.enabled ? state.webhookAvailability === "local" ? `Local events enabled · revision ${state.head.active_revision}` : `Active revision ${state.head.active_revision}` : state.head?.active_revision ? "Paused" : "";
-    header.replaceChildren(button("Back", () => api.openView("schedules")), h("h1.sv-title", state.draft.name || "New automation"), h("span.auto-revision", [pending, active].filter(Boolean).join(" · ")),
-      button("Undo", () => undo(false), { disabled: !state.undo.length || busy || loading || !!state.save || !!state.run }), button("Redo", () => undo(true), { disabled: !state.redo.length || busy || loading || !!state.save || !!state.run }),
-      button(state.save ? "Retry saving" : "Save", () => void save(), { disabled: busy || loading || validating || !validationReady || !canSave || !!state.run || !changed() && !state.save }),
-      button(state.run ? "Retry starting" : state.lastStart ? "Run again" : "Run now", () => void runDialog(), { disabled: busy || loading || !state.run && (validating || !validationReady || issues.length > 0) || !state.id || changed() || !!state.save }),
+    header.replaceChildren(compact("Back", "arrow-left", () => api.openView("schedules")), h("h1.sv-title", state.draft.name || "New automation"), h("span.auto-revision", [pending, active].filter(Boolean).join(" · ")),
+      compact("Undo", "undo", () => undo(false), { disabled: !state.undo.length || busy || loading || !!state.save || !!state.run }), compact("Redo", h("span.auto-flip", icon("undo")), () => undo(true), { disabled: !state.redo.length || busy || loading || !!state.save || !!state.run }),
+      button(state.save ? "Retry saving" : "Save", () => void save(), { "data-action": "save", class: changed() ? "primary" : "", disabled: busy || loading || validating || !validationReady || !canSave || !!state.run || !changed() && !state.save }),
+      button(state.run ? "Retry starting" : state.lastStart ? "Run again" : "Run now", () => void runDialog(), { "data-action": "run", class: changed() ? "" : "primary", disabled: busy || loading || !state.run && (validating || !validationReady || issues.length > 0) || !state.id || changed() || !!state.save }),
       button("Activate", () => void prepare(), { disabled: busy || loading || validating || !validationReady || issues.length > 0 || activationIssues.length > 0 || !state.id || changed() || !!state.save || !!state.run || state.head?.enabled && state.head.active_revision === state.revision }));
     if (params.legacy_schedule) header.append(button("Current schedule", () => api.openPanel("schedule", { id: params.legacy_schedule })));
     if (state.layoutDirty && !state.layoutError) header.append(h("span.auto-revision", state.layoutSaving ? "Saving canvas…" : "Canvas positions pending"));
@@ -80,9 +84,18 @@ function editor(el, params, api) {
     if (state.run) header.append(button("Recover start", () => void recoverStart(), { disabled: busy }));
     if (state.save) header.append(button("Recover draft", () => void recoverSave(), { disabled: busy }));
     if (state.head && state.head.revision !== state.revision) header.append(button("Review latest revision", () => void recoverSave(), { disabled: busy }));
-    if (loading || loadError) header.append(button("Retry loading", () => void hydrate(), { disabled: busy }));
+    if (loadError) header.append(button("Retry loading", () => void hydrate(), { disabled: busy }));
     if (state.head?.enabled) header.append(button("Pause", () => void perform(async () => { await api.call("automation_pause", { automation: state.id }); await reloadHead(); updateHeader(); })));
     if (state.head?.activation) header.append(button("Revoke permission", () => void revokeDialog()));
+    const secondary = [...header.querySelectorAll(":scope > button")].filter(control => ["Activate", "Current schedule", "Open last run", "Pause", "Revoke permission"].includes(control.dataset.action));
+    if (secondary.length) {
+      const more = h("details.auto-more", h("summary.btn.ghost", { "aria-label": "More automation actions", title: "More actions" }, icon("more")), h("div.auto-more-actions", secondary));
+      more.open = menuOpen;
+      more.addEventListener("click", event => { if (event.target.closest("button")) more.open = false; });
+      more.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); more.open = false; more.querySelector("summary").focus(); } });
+      header.append(more);
+    }
+    if (focused) [...header.querySelectorAll("button,summary")].find(control => (control.dataset.action || control.getAttribute("aria-label")) === focused)?.focus({ preventScroll: true });
   }
   function undo(redo) {
     const from = redo ? state.redo : state.undo, to = redo ? state.undo : state.redo;
@@ -168,14 +181,14 @@ function editor(el, params, api) {
       }));
       if (binding.kind === "literal") row.append(field("Text", binding.text, value => { binding.text = value; }, "textarea"));
       if (binding.kind === "artifact") row.append(select("File", binding.id, [["", "Choose file"], ...artifacts.map(file => [file.id, file.name])], value => { binding.id = value; }));
-      row.append(button("Remove input", () => edit(() => step.action.inputs.splice(number, 1)))); area.append(row);
+      row.append(compact("Remove input", "x", () => edit(() => step.action.inputs.splice(number, 1)))); area.append(row);
     }
     area.append(button("Add input", () => edit(() => step.action.inputs.push(index ? { kind: "step", step: state.draft.steps[index - 1].id, port: "text" } : { kind: "literal", text: "" })), { disabled: step.action.inputs.length >= 32 }));
     return area;
   }
   function stepForm(step, index) {
     const inherited = state.legacyPolicies?.step === step.id;
-    const controls = h("div.auto-step-controls", button("Move up", () => move(index, -1), { disabled: !index || index === 1 && state.legacyPolicies?.step === state.draft.steps[0].id }), button("Move down", () => move(index, 1), { disabled: inherited || index === state.draft.steps.length - 1 }), button("Remove step", () => edit(() => { state.draft.steps.splice(index, 1); }), { disabled: inherited || state.draft.steps.length === 1 }));
+    const controls = h("div.auto-step-controls", compact("Move up", "arrow-up", () => move(index, -1), { disabled: !index || index === 1 && state.legacyPolicies?.step === state.draft.steps[0].id }), compact("Move down", h("span.auto-flip-down", icon("arrow-up")), () => move(index, 1), { disabled: inherited || index === state.draft.steps.length - 1 }), compact("Remove step", "x", () => edit(() => { state.draft.steps.splice(index, 1); }), { disabled: inherited || state.draft.steps.length === 1 }));
     const form = h("section.auto-step", { dataset: { step: step.id } }, h("header", h("h2", `${index + 1}. ${step.name}`), controls), field("Name", step.name, value => { step.name = value; }), h("span.auto-kind", { role: "status" }, { agent: "Agent", approval: "Approval", result: "Result" }[step.action.kind]));
     if (step.action.kind === "agent") {
       form.append(select("Responsible", step.action.target.kind === "general" ? "" : step.action.target.name, [...(inherited ? [] : [["", "General"]]), ...agents.filter(agent => agent.state !== "terminated").map(agent => [agent.name, agent.title || agent.name])], value => { step.action.target = value ? { kind: "agent", name: value } : { kind: "general", model: null }; }), field("Task", step.action.prompt, value => { step.action.prompt = value; }, "textarea"));
@@ -449,7 +462,7 @@ function editor(el, params, api) {
       viewport.scrollTo({ left: fit ? 0 : Math.max(0, x * zoom - viewport.clientWidth / 2), top: fit ? 0 : Math.max(0, y * zoom - viewport.clientHeight / 2) });
       state.pan = { left: viewport.scrollLeft, top: viewport.scrollTop };
     }
-    const toolbar = h("div.auto-canvas-tools", button("Zoom out", () => zoomTo(Math.max(.05, zoom - .1))), button("Zoom in", () => zoomTo(Math.min(1.5, zoom + .1))), button("Fit", () => {
+    const toolbar = h("div.auto-canvas-tools", compact("Zoom out", h("span.auto-minus", "−"), () => zoomTo(Math.max(.05, zoom - .1))), compact("Zoom in", "plus", () => zoomTo(Math.min(1.5, zoom + .1))), button("Fit", () => {
       const width = Number.parseFloat(plane.style.width), height = Number.parseFloat(plane.style.height);
       zoomTo(Math.min(1, Math.max(.05, Math.min(viewport.clientWidth / width, viewport.clientHeight / height))), true);
     }));
@@ -468,7 +481,7 @@ function editor(el, params, api) {
     const focused = content.contains(active) ? controlKey(active) : null;
     const selectedNode = content.querySelector(".auto-node[data-selected=true]");
     const returnFocus = selectedNode?.classList.contains("auto-start") ? ".auto-start .auto-node-handle" : selectedNode?.dataset.step ? `.auto-node[data-step="${CSS.escape(selectedNode.dataset.step)}"] .auto-node-handle` : null;
-    const headerLabel = header.contains(active) ? active.textContent : null;
+    const headerLabel = header.contains(active) ? active.dataset.action || active.getAttribute("aria-label") || active.textContent : null;
     const selection = active?.tagName === "TEXTAREA" || active?.tagName === "INPUT" && ["text", "search", "url"].includes(active.type) ? [active.selectionStart, active.selectionEnd] : null;
     updateHeader(); content.disabled = busy || loading || !!state.save || !!state.run; content.replaceChildren();
     const modes = h("div.cal-modes", { role: "group", "aria-label": "Automation editor" });
@@ -486,10 +499,14 @@ function editor(el, params, api) {
       if (state.selected === "@start") inspector.append(field("Name", state.draft.name, value => { state.draft.name = value; }), triggerForm(), externalInputs());
       else if (index >= 0) inspector.append(stepForm(state.draft.steps[index], index));
       else inspector.hidden = true;
-      if (!inspector.hidden) inspector.prepend(button("Close inspector", () => { state.selected = null; draw(); }, { class: "ghost" }));
+      if (!inspector.hidden) inspector.prepend(compact("Close inspector", "x", () => { state.selected = null; draw(); }, { class: "auto-inspector-close ghost" }));
     }
-    const add = h("div.auto-add", { role: "group", "aria-label": "Add step" });
-    for (const kind of ["agent", "approval", "result"]) add.append(button(`Add ${kind === "agent" ? "agent" : kind}`, () => edit(() => {
+    const addDisabled = state.draft.steps.length >= 8 || busy || loading || !!state.save || !!state.run;
+    const addChoices = h("div.auto-more-actions");
+    const add = h("details.auto-add.auto-more", h("summary.btn", { "aria-label": "Add step", "aria-disabled": String(addDisabled), onclick: event => { if (addDisabled) event.preventDefault(); } }, icon("plus"), "Add step"), addChoices);
+    add.addEventListener("click", event => { if (event.target.closest("button")) add.open = false; });
+    add.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); add.open = false; add.querySelector("summary").focus(); } });
+    for (const kind of ["agent", "approval", "result"]) addChoices.append(button(`Add ${kind === "agent" ? "agent" : kind}`, () => edit(() => {
       const previous = state.draft.steps.at(-1), inputs = previous ? [{ kind: "step", step: previous.id, port: "text" }, { kind: "step", step: previous.id, port: "files" }] : [];
       const step = { id: uid(), name: { agent: "Work", approval: "Approval", result: "Result" }[kind], action: { kind, inputs, ...(kind === "agent" ? { target: { kind: "general", model: null }, prompt: "" } : kind === "approval" ? { title: "Continue?" } : {}) } };
       state.draft.steps.push(step); state.selected = step.id;
@@ -512,7 +529,7 @@ function editor(el, params, api) {
         || (returnFocus ? content.querySelector(returnFocus) : null);
       control?.focus({ preventScroll: true });
       if (selection && control?.setSelectionRange && (control.tagName === "TEXTAREA" || ["text", "search", "url"].includes(control.type))) control.setSelectionRange(...selection);
-    } else if (headerLabel) [...header.querySelectorAll("button")].find(button => button.textContent === headerLabel)?.focus({ preventScroll: true });
+    } else if (headerLabel) [...header.querySelectorAll("button,summary")].find(button => (button.dataset.action || button.getAttribute("aria-label") || button.textContent) === headerLabel)?.focus({ preventScroll: true });
   }
   function dialog(title, render) {
     const dialog = h("dialog.auto-dialog"), heading = h("h2", title), body = h("div.auto-dialog-body"), actions = h("div.auto-dialog-actions");
@@ -671,6 +688,10 @@ function editor(el, params, api) {
     clearTimeout(historyTimer);
     historyTimer = setTimeout(() => { if (alive && state.id && !busy) void loadHistory().catch(error => { if (alive) status.textContent = error.message; }); }, 250);
   });
+  const outsideActions = event => {
+    for (const more of el.querySelectorAll(".auto-more[open]")) if (!more.contains(event.target)) more.open = false;
+  };
+  document.addEventListener("pointerdown", outsideActions);
   el.addEventListener("keydown", keydown); el.append(header, status, validation, content, history); draw(); queuePreview();
   async function loadInitial() {
     loadError = false;
@@ -695,7 +716,7 @@ function editor(el, params, api) {
     } catch (error) { loadError = true; if (alive) updateHeader(); throw error; }
   }
   void loadInitial().catch(error => { if (alive) status.textContent = error.message; });
-  return { focus: () => content.querySelector("input")?.focus(), dispose() { alive = false; off?.(); clearTimeout(historyTimer); clearTimeout(previewTimer); clearTimeout(validationTimer); validationGeneration++; previewGeneration++; hookSecret = null; el.removeEventListener("keydown", keydown); } };
+  return { focus: () => content.querySelector("input")?.focus(), dispose() { alive = false; off?.(); clearTimeout(historyTimer); clearTimeout(previewTimer); clearTimeout(validationTimer); validationGeneration++; previewGeneration++; hookSecret = null; el.removeEventListener("keydown", keydown); document.removeEventListener("pointerdown", outsideActions); } };
 }
 
 export function registerAutomationEditor(api) {

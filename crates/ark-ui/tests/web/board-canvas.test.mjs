@@ -72,7 +72,7 @@ test('work board opens scoped tickets without changing execution states; canvas 
     await page.getByRole('button', { name: 'Connect input to Finish', exact: true }).click();
     assert.equal(await page.locator('.auto-canvas-viewport').evaluate(el => el.scrollLeft), pan);
     assert.equal(await page.getByRole('button', { name: 'Select Finish', exact: true }).getAttribute('aria-pressed'), 'true');
-    assert.equal(await page.getByRole('button', { name: 'Add agent', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByLabel('Add step', { exact: true }).getAttribute('aria-disabled'), 'true');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     const saved = await page.evaluate(() => window.fixture.calls.find(call => call.method === 'automation_save').input.draft);
     assert.deepEqual(saved.steps[1].action.inputs, [{ kind: 'step', step: 'source', port: 'text' }]);

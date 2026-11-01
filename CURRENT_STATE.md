@@ -1,4 +1,4 @@
-# Core0.32.2 native Work reply qualification, 1 November 2026
+# Core0.32.2 release source, 1 November 2026
 
 Public Core0.32.1 commit0eaa7b1 passed full exact-source CIv22 and fresh GitHub clone
 verification. A scoped native contract check then reproduced a reply to assigned Work being
@@ -10,11 +10,30 @@ The private transport helper now resolves the existing conversation's scoped Wor
 and frozen target. The native mutation key recovers its Work admission before any readmission.
 General preserves its conversation; an agent keeps its task target. Completed tasks are not
 executed again while recovering an acknowledgement, even after the agent is retired.
-Five focused native tests pass, including fresh Host recovery, terminal refusal after agent
-retirement and an actual foreign-project binding refusal. Full exact-source CIv24 passes:
+Five focused native tests passed, including fresh Host recovery, terminal refusal after agent
+retirement and an actual foreign-project binding refusal. Scoped review caught a pending
+General turn being treated as a terminal refusal. The new regression fails on the prior
+implementation and passes with retryable admissions preserved as accepted. Missing artifact
+references are terminal and allow the next corrected native counter. A shared structural
+check detects another agent working on the same item. Its regression passes after the
+competing task ends. CIv25 was stopped for review corrections. CIv26 failed one consumer
+fixture before launch because its environment supplied a missing directory. CIv27 caught a
+regression assertion counting a cancelled task's retained turn. The corrected test measures
+one added followup and exact model-call counts. Exact-source CIv28 passes:
+
 format, protocol, version, clippy, Rust tests, focused WebKit,69 actual Host pages, release
 build and unchanged simulated benchmark. Protocol/schema1.10 stays unchanged. Immutable tag
 and fresh-public verification remain release gates. Desktop publication is held separately.
+
+The owner requested the same ticket screen from Work and board, matching property selectors,
+compact buttons and fewer Canvas actions. A shared shell/property/menu module serves both
+views; conversation-bound board cards open the canonical Work ticket. Status and assignee
+use the same menu in the legacy board. Work values remain derived. Desktop controls use28px
+and coarse-pointer controls44px. Canvas has Save/Run, one Add step menu, icon controls and
+secondary actions under More. Independent scoped design QA approved the approach and focus
+corrections. Actual Host board state/keyboard and General board-to-Work tests pass; deferred
+validation focus and Canvas regression checks pass. All69 actual Host page cases pass. Real local screenshots are
+retained. These additions are not published yet.
 
 # Core0.32.1 release source, 1 November 2026
 

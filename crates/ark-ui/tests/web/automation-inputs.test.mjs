@@ -24,7 +24,7 @@ test('webhook input preview is inert and scheduled required inputs disable activ
     await page.evaluate(async()=>{
       const {registerAutomationEditor}=await import('/js/automation-editor.js');const views=new Map(),calls=[];
       const draft=kind=>({name:'Input acceptance',trigger:kind==='schedule'?{kind,when:{at:'09:00',tz:'UTC',days:[]}}:{kind},inputs:[{name:'message',port:'text',required:true}],authority:{actions:[],max_calls:8,max_mutations:0},steps:[{id:'result',name:'Result',action:{kind:'result',inputs:[{kind:'input',name:'message',port:'text'}]}}]});
-      const api={location:{runtime:'local',project:'p'},view:view=>views.set(view.id,view),on:()=>()=>{},openView(){},async call(method,input){calls.push({method,input});if(['agents','artifacts','tools','project_models'].includes(method))return [];if(method==='automation_get')return {entry:{definition:{id:input.automation,revision:1,enabled:false},revision:{number:1,draft:draft(input.automation==='schedule'?'schedule':'webhook')}},layout:{version:0,positions:{}}};if(method==='automation_validate')return {can_save:true,issues:[],activation_issues:input.draft.trigger.kind==='schedule'?[{field:'Execution inputs',message:'Schedules cannot supply required inputs'}]:[]};if(method==='automation_history')return {runs:[],next:null};if(method==='automation_preview')return {next:[]};if(method==='webhook_get')return {connection:{available:false,bases:[]}};if(method==='automation_preview_inputs')return {revision:1,inputs:input.inputs,bindings:[{step:'result',input:'message',port:'text'}]};throw Error(method);}};
+      const api={location:{runtime:'local',project:'p'},view:view=>views.set(view.id,view),on:()=>()=>{},openView(){},async call(method,input){calls.push({method,input});if(['agents','artifacts','tools','project_models'].includes(method))return [];if(method==='automation_get')return {entry:{definition:{id:input.automation,revision:1,enabled:false},revision:{number:1,draft:draft(input.automation==='schedule'?'schedule':'webhook')}},layout:{version:0,positions:{}}};if(method==='automation_validate'){if(window.fixture?.holdValidation)await new Promise(done=>window.fixture.releaseValidation=done);return {can_save:true,issues:[],activation_issues:input.draft.trigger.kind==='schedule'?[{field:'Execution inputs',message:'Schedules cannot supply required inputs'}]:[]};}if(method==='automation_history')return {runs:[],next:null};if(method==='automation_preview')return {next:[]};if(method==='webhook_get')return {connection:{available:false,bases:[]}};if(method==='automation_preview_inputs')return {revision:1,inputs:input.inputs,bindings:[{step:'result',input:'message',port:'text'}]};throw Error(method);}};
       registerAutomationEditor(api);window.fixture={calls,controller:views.get('automation-editor').render(document.querySelector('#stage'),{automation:'webhook'},api)};
     });
     await page.getByRole('button',{name:'Select Start',exact:true}).click();
@@ -39,9 +39,20 @@ test('webhook input preview is inert and scheduled required inputs disable activ
     assert.equal(await page.locator('html').evaluate(el=>el.scrollWidth<=innerWidth),true);
     assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>['automation_run','automation_begin_start','automation_activate','work_admit'].includes(c.method))),false);
     await page.getByRole('button',{name:'Close',exact:true}).click();
+    await page.evaluate(()=>window.fixture.holdValidation=true);
+    await page.getByRole('textbox',{name:'Name',exact:true}).fill('Compact header focus');
+    await page.waitForFunction(()=>typeof window.fixture.releaseValidation==='function');
+    await page.getByLabel('More automation actions').click();
+    await page.getByLabel('More automation actions').focus();
+    await page.evaluate(()=>{window.fixture.focusBefore=document.activeElement;window.fixture.holdValidation=false;window.fixture.releaseValidation();});
+    await page.waitForFunction(()=>document.activeElement!==window.fixture.focusBefore && document.activeElement?.getAttribute('aria-label')==='More automation actions' && document.querySelector('.auto-head > .auto-more')?.open);
+    await page.getByLabel('More automation actions').press('Escape');
+    assert.equal(await page.locator('.auto-head > .auto-more').evaluate(element=>element.open),false);
+
     await page.evaluate(()=>window.fixture.controller.update({automation:'schedule'}));
     await page.getByRole('button',{name:'Select Start',exact:true}).click();
     await page.getByText('Schedules cannot supply required inputs',{exact:true}).waitFor();
+    await page.getByLabel('More automation actions').click();
     assert.equal(await page.getByRole('button',{name:'Activate',exact:true}).isDisabled(),true);
     assert.equal(await page.getByRole('button',{name:'Run now',exact:true}).isEnabled(),true);
     assert.deepEqual(errors,[]);await page.evaluate(()=>window.fixture.controller.dispose());

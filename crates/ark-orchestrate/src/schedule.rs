@@ -677,17 +677,25 @@ impl ScheduleRecord {
 /// Projects with schedules that still run, so an app can open their orchestrators when it starts
 /// and the schedules fire with no window open.
 pub fn scheduled_projects(store: &ark_store::Store) -> Vec<String> {
+    try_scheduled_projects(store).unwrap_or_else(|error| {
+        tracing::error!(%error, "could not read scheduled projects");
+        Vec::new()
+    })
+}
+
+pub fn try_scheduled_projects(store: &ark_store::Store) -> Result<Vec<String>, crate::OrchError> {
     let mut out: Vec<String> = store
-        .list_records(SCHEDULE, None)
-        .unwrap_or_default()
+        .list_records(SCHEDULE, None)?
         .into_iter()
-        .filter_map(|v| serde_json::from_value::<ScheduleRecord>(v).ok())
+        .map(serde_json::from_value::<ScheduleRecord>)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
         .filter(ScheduleRecord::active)
         .map(|s| s.project)
         .collect();
     out.sort();
     out.dedup();
-    out
+    Ok(out)
 }
 
 /// Every task in the store, in every project, oldest update first. Read without opening an
@@ -702,28 +710,48 @@ pub fn tasks_where(
     store: &ark_store::Store,
     keep: impl Fn(&serde_json::Value) -> bool,
 ) -> Vec<crate::TaskRecord> {
+    try_tasks_where(store, keep).unwrap_or_else(|error| {
+        tracing::error!(%error, "could not read retained tasks");
+        Vec::new()
+    })
+}
+
+pub fn try_tasks_where(
+    store: &ark_store::Store,
+    keep: impl Fn(&serde_json::Value) -> bool,
+) -> Result<Vec<crate::TaskRecord>, crate::OrchError> {
     store
-        .list_records(crate::orchestrator::TASK, None)
-        .unwrap_or_default()
+        .list_records(crate::orchestrator::TASK, None)?
         .into_iter()
         .filter(|v| keep(v))
-        .filter_map(|v| serde_json::from_value(v).ok())
+        .map(|v| serde_json::from_value(v).map_err(crate::OrchError::from))
         .collect()
 }
 
 /// Projects whose orchestrators should open when an app starts, so their work goes on with no
 /// window: schedules that still run, and tasks a stopped process left open (ADR 0036).
 pub fn projects_with_work(store: &ark_store::Store) -> Vec<String> {
-    let mut out = scheduled_projects(store);
+    match try_projects_with_work(store) {
+        Ok(projects) => projects,
+        Err(error) => {
+            tracing::error!(%error, "could not discover projects with retained work");
+            scheduled_projects(store)
+        }
+    }
+}
+
+pub fn try_projects_with_work(store: &ark_store::Store) -> Result<Vec<String>, crate::OrchError> {
+    let mut out = try_scheduled_projects(store)?;
+    out.extend(crate::automation_projects_with_work(store)?);
     out.extend(
-        all_tasks(store)
+        try_tasks_where(store, |_| true)?
             .into_iter()
             .filter(|t| !t.state.is_final())
             .map(|t| t.project),
     );
     out.sort();
     out.dedup();
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -970,4 +998,37 @@ pub(crate) fn manual_receipt_id(
         "sr-{}",
         blake3::hash(&serde_json::to_vec(&(project, schedule, request))?).to_hex()
     ))
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+
+    #[test]
+    fn discovery_refuses_partial_task_or_schedule_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ark_store::Store::open(dir.path()).unwrap();
+        assert!(try_projects_with_work(&store).unwrap().is_empty());
+        store
+            .put_record(
+                "orch_task",
+                "corrupt-task",
+                "elsewhere",
+                &serde_json::json!({"question":{}}),
+            )
+            .unwrap();
+        assert!(try_tasks_where(&store, |value| !value["question"].is_null()).is_err());
+        assert!(try_projects_with_work(&store).is_err());
+        store.delete_record("orch_task", "corrupt-task").unwrap();
+        store
+            .put_record(
+                SCHEDULE,
+                "corrupt-schedule",
+                "elsewhere",
+                &serde_json::json!({"paused":false}),
+            )
+            .unwrap();
+        assert!(try_scheduled_projects(&store).is_err());
+        assert!(try_projects_with_work(&store).is_err());
+    }
 }

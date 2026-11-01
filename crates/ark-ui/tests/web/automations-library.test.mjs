@@ -28,7 +28,8 @@ test('library separates the current draft from its active immutable trigger', as
         {definition:{id:'a',enabled:true,revision:2,active_revision:1,schedule:'s'},revision:{draft:draft('New schedule draft','webhook')},active:{draft:draft('Published schedule','schedule')}},
         {definition:{id:'b',enabled:true,revision:2,active_revision:1},revision:{draft:draft('New webhook draft','manual')},active:{draft:draft('Published hook','webhook')},webhook_availability:'local'},
       ];
-      const api={location:{runtime:'local',project:'p'},view:view=>views.set(view.id,view),on:()=>()=>{},openView(){},async call(method){if(method==='automations')return {entries,next:null};if(method==='schedules')return [{id:'s',target:{automation:'a'},next_ms:null}];throw Error(method);}};
+      window.opened=[];
+      const api={location:{runtime:'local',project:'p'},view:view=>views.set(view.id,view),on:()=>()=>{},openView(...args){window.opened.push(args);},async call(method){if(method==='automations')return {entries,next:null};if(method==='schedules')return [{id:'s',target:{automation:'a'},next_ms:null},{id:'legacy',objective:'Existing routine',says:'Monday09:00',state:'scheduled',status:'Active'}];throw Error(method);}};
       registerAutomations(api);window.controller=views.get('schedules').render(document.querySelector('#stage'),{},api);
     });
     const schedule=page.getByRole('button',{name:/New schedule draft/});await schedule.waitFor();
@@ -39,6 +40,8 @@ test('library separates the current draft from its active immutable trigger', as
     assert.match(await hook.innerText(),/Draft revision 2: Manual/);
     assert.match(await hook.innerText(),/Active revision 1: Webhook/);
     assert.match(await hook.innerText(),/Local events enabled/);
+    await page.getByRole('button',{name:/Existing routine/}).click();
+    assert.deepEqual(await page.evaluate(()=>window.opened),[['automation-editor',{legacy_schedule:'legacy'}]]);
     assert.equal(await page.locator('html').evaluate(el=>el.scrollWidth<=innerWidth),true);
     assert.deepEqual(errors,[]);await page.evaluate(()=>window.controller.dispose());
   } finally { await browser.close();server.closeAllConnections();await new Promise(done=>server.close(done)); }

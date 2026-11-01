@@ -45,6 +45,21 @@ pub(crate) async fn home(host: &Arc<Host>) -> anyhow::Result<Value> {
             );
         }
     }
+    let now = (OffsetDateTime::now_utc().unix_timestamp().max(0) as u64).saturating_mul(1000);
+    for run in ark_interact::ark_orchestrate::automation_attention_runs(
+        &host.engine_for_client().store,
+        now.saturating_sub(ark_interact::attention::KEPT_MS),
+    )? {
+        if run.phase.is_final()
+            || run.phase == ark_interact::ark_orchestrate::automation::RunPhase::Interrupted
+        {
+            continue;
+        }
+        let step = run.steps.iter().find(|step| {
+            step.phase != ark_interact::ark_orchestrate::automation::StepPhase::Completed
+        });
+        active.push(json!({ "id":run.id,"title":run.revision.draft.name,"step":step.and_then(|current|run.revision.draft.steps.iter().find(|step|step.id==current.id)).map(|step|step.name.as_str()).unwrap_or("Working"),"teammate":"ARK","computer":"This computer","elapsedSeconds":now.saturating_sub(run.created_ms)/1000,"phase":"working","chatId":run.conversation }));
+    }
     Ok(json!({
         "sequence": decimal(hello["seq"].as_u64().unwrap_or(0)),
         "attention": needs,
@@ -201,12 +216,26 @@ pub(crate) async fn conversation(host: &Arc<Host>, id: &str) -> anyhow::Result<V
             }));
         }
     }
-    let approvals = read["approvals"]
+    let mut approvals = read["approvals"]
         .as_array()
         .into_iter()
         .flatten()
         .map(attention_item)
         .collect::<Vec<_>>();
+    let shared = host.call("attention_all", json!({})).await?;
+    for item in shared["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            item["kind"] == "question" && item["runtime"].is_null() && item["chat"] == id
+        })
+    {
+        let projected = attention_item(item);
+        if !approvals.iter().any(|prior| prior["id"] == projected["id"]) {
+            approvals.push(projected);
+        }
+    }
     let results = host
         .client_results(id)
         .map_err(|error| anyhow::anyhow!("could not read results: {error:?}"))?;

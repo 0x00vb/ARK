@@ -306,7 +306,7 @@ impl App {
         // Projects with scheduled work get their orchestrator now, so it runs with no window
         // or chat open there.
         if let Some(o) = &ix.orchs {
-            o.wake_scheduled(&ix.ark);
+            o.wake_scheduled(&ix.ark)?;
         }
         Ok(Opened {
             interaction: ix,
@@ -521,18 +521,17 @@ impl Orchestrators {
 
     /// Open the orchestrators of the projects that have schedules still running or work a
     /// stopped process left open, so that work goes on with no window.
-    fn wake_scheduled(&self, ark: &Ark) {
+    fn wake_scheduled(&self, ark: &Ark) -> anyhow::Result<()> {
         let store = &ark.engine().store;
-        for id in ark_orchestrate::projects_with_work(store) {
-            match store.get_project(&ProjectId(id.clone())) {
-                Ok(Some(p)) => {
-                    if let Err(e) = self.get(ark, &p) {
-                        tracing::warn!(project = %id, "its work cannot run: {e:#}");
-                    }
+        for id in ark_orchestrate::try_projects_with_work(store)? {
+            match store.get_project(&ProjectId(id.clone()))? {
+                Some(p) => {
+                    self.get(ark, &p)?;
                 }
-                _ => tracing::warn!(project = %id, "work names a project that is gone"),
+                None => tracing::warn!(project = %id, "work names a project that is gone"),
             }
         }
+        Ok(())
     }
 }
 
@@ -566,6 +565,45 @@ impl OrchestratorSet {
         }
     }
 
+    pub fn answer_with_engine(
+        &self,
+        engine: &Engine,
+        question: &str,
+        decision: ApprovalDecision,
+    ) -> anyhow::Result<()> {
+        if let Some((run, retained)) =
+            ark_orchestrate::automation_question(&engine.store, question)?
+        {
+            anyhow::ensure!(
+                matches!(
+                    decision,
+                    ApprovalDecision::AllowOnce | ApprovalDecision::Deny
+                ),
+                "this approval applies only to this question"
+            );
+            if let Some(prior) = retained.decision {
+                anyhow::ensure!(
+                    prior == decision,
+                    "this question already has another answer"
+                );
+                return Ok(());
+            }
+            let orchestrator = self
+                .list()
+                .into_iter()
+                .find(|o| o.project().id.as_str() == run.project)
+                .ok_or_else(|| anyhow::anyhow!("the original project's work is unavailable"))?;
+            orchestrator.answer_automation_question(
+                &run.id,
+                question,
+                &retained.digest,
+                decision,
+            )?;
+            return Ok(());
+        }
+        self.answer(question, decision)
+    }
+
     /// Answer the question a task keeps, in whichever project it waits. Errs when no task
     /// waits on that question any more.
     pub fn answer(&self, question: &str, decision: ApprovalDecision) -> anyhow::Result<()> {
@@ -580,7 +618,7 @@ impl OrchestratorSet {
                 Some((o, t.id))
             })
             .ok_or_else(|| anyhow::anyhow!("that question is no longer waiting"))?;
-        o.answer(&task, decision)?;
+        o.answer_question(&task, question, decision)?;
         Ok(())
     }
 }

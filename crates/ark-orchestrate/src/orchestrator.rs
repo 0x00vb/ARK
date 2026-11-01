@@ -50,7 +50,12 @@ use crate::OrchError;
 
 mod admission;
 mod authority;
+mod automation_attention;
 mod automation_children;
+pub use automation_attention::{
+    automation_attention_runs, automation_projects_with_work, automation_question,
+    stored_automation_run,
+};
 mod automation_reports;
 mod automation_schedule;
 mod automations;

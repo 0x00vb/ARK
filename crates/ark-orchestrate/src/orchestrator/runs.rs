@@ -905,6 +905,7 @@ impl Orchestrator {
                             "the approval changed; reload it before answering".into(),
                         )
                     })?;
+                super::automation_attention::retain_question(tx, &run, prior)?;
                 if let Some(prior) = prior.decision {
                     return if prior == decision {
                         Ok(run)
@@ -1242,7 +1243,7 @@ impl Inner {
                             Ok(())
                         })?,
                         None => {
-                            self.automation_change(id, |run, _| {
+                            self.automation_change(id, |run, tx| {
                                 if run.steps[index].question.is_none() {
                                     let digest = format!(
                                         "v1:{}",
@@ -1263,6 +1264,11 @@ impl Inner {
                                         files: input.files.clone(),
                                     });
                                 }
+                                super::automation_attention::retain_question(
+                                    tx,
+                                    run,
+                                    run.steps[index].question.as_ref().ok_or_else(unavailable)?,
+                                )?;
                                 run.steps[index].phase = StepPhase::WaitingApproval;
                                 run.phase = RunPhase::WaitingApproval;
                                 Ok(())
@@ -1820,6 +1826,7 @@ impl Approver for RunApprover {
                     "this execution's approval limit was reached".into(),
                 ));
             }
+            super::automation_attention::retain_question(tx, run, &question)?;
             run.questions.insert(id.clone(), question);
             run.phase = RunPhase::WaitingApproval;
             Ok(id)

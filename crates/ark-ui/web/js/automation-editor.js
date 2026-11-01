@@ -24,16 +24,16 @@ export function automationExample(kind) {
   return draft;
 }
 
-const button = (text, run, attrs = {}) => h("button.btn", { type: "button", onclick: run, ...attrs }, text);
+const button = (text, run, attrs = {}) => h("button.btn", { type: "button", onclick: event => { event.currentTarget.focus({ preventScroll: true }); run(event); }, ...attrs }, text);
 const label = (text, control) => h("label.auto-field", h("span", text), control);
 
 function editor(el, params, api) {
   params.draft_key ||= crypto.randomUUID();
   const key = keyFor(api, params);
-  const state = drafts.get(key) || { id: params.automation || null, draft: clone(params.draft || initial()), saved: null, revision: null, head: null, layout: { version: 0, positions: {} }, mode: "steps", selected: null, undo: [], redo: [], save: null, run: null };
+  const state = drafts.get(key) || { id: params.automation || null, draft: clone(params.draft || initial()), saved: null, revision: null, head: null, layout: { version: 0, positions: {} }, mode: "canvas", selected: null, undo: [], redo: [], save: null, run: null };
   drafts.set(key, state);
   el.classList.add("auto-editor");
-  let alive = true, busy = false, loadError = false, loading = (!!state.id || !!params.legacy_schedule && !state.legacyLoaded), agents = [], artifacts = [], actions = [], models = [], previewTimer, previewGeneration = 0, historyCursor = null, historyRuns = [], validationTimer, validationGeneration = 0, validating = true, validationReady = false, canSave = true, issues = [], activationIssues = [], hook = null, hookSecret = null, zoom = 1;
+  let alive = true, busy = false, loadError = false, loading = (!!state.id || !!params.legacy_schedule && !state.legacyLoaded), agents = [], artifacts = [], actions = [], models = [], previewTimer, previewGeneration = 0, historyCursor = null, historyRuns = [], validationTimer, validationGeneration = 0, validating = true, validationReady = false, canSave = true, issues = [], activationIssues = [], hook = null, hookSecret = null, zoom = state.zoom ?? 1;
   const status = h("p.auto-status", { role: "status", "aria-live": "polite" });
   const header = h("header.auto-head");
   const validation = h("div.auto-validation", { "aria-live": "polite" });
@@ -73,6 +73,7 @@ function editor(el, params, api) {
       button(state.save ? "Retry saving" : "Save", () => void save(), { disabled: busy || loading || validating || !validationReady || !canSave || !!state.run || !changed() && !state.save }),
       button(state.run ? "Retry starting" : state.lastStart ? "Run again" : "Run now", () => void runDialog(), { disabled: busy || loading || !state.run && (validating || !validationReady || issues.length > 0) || !state.id || changed() || !!state.save }),
       button("Activate", () => void prepare(), { disabled: busy || loading || validating || !validationReady || issues.length > 0 || activationIssues.length > 0 || !state.id || changed() || !!state.save || !!state.run || state.head?.enabled && state.head.active_revision === state.revision }));
+    if (params.legacy_schedule) header.append(button("Current schedule", () => api.openPanel("schedule", { id: params.legacy_schedule })));
     if (state.layoutDirty && !state.layoutError) header.append(h("span.auto-revision", state.layoutSaving ? "Saving canvas…" : "Canvas positions pending"));
     if (state.layoutError) header.append(button("Recover canvas", () => void recoverLayout(), { disabled: busy }));
     if (state.lastStart) header.append(button("Open last run", () => api.openView("work-chat", { work: state.lastStart.work })));
@@ -106,6 +107,7 @@ function editor(el, params, api) {
     await perform(async () => {
       const receipt = await api.call("automation_save", state.save);
       state.id = receipt.automation; state.revision = receipt.revision; state.saved = JSON.stringify(state.save.draft); state.save = null; state.adoption = null;
+      drafts.set(keyFor(api, { automation: state.id }), state);
       await reloadHead();
       if (state.layoutDirty) void queueLayoutSave();
       if (alive) { draw(); await loadHistory(); if (state.draft.trigger.kind === "webhook") await loadHook(); }
@@ -160,7 +162,7 @@ function editor(el, params, api) {
       if (index) values.push(["previous:text", `Text from ${state.draft.steps[index - 1].name}`], ["previous:files", `Files from ${state.draft.steps[index - 1].name}`]);
       const disconnected = binding.kind === "step" && (!index || binding.step !== state.draft.steps[index - 1].id);
       if (disconnected) values.push(["disconnected", `Reconnect input from ${state.draft.steps.find(step => step.id === binding.step)?.name || "removed step"}`]);
-      const row = h("div.auto-binding", select("Source", disconnected ? "disconnected" : source, values, value => {
+      const row = h("div.auto-binding", { dataset: { binding: number } }, select("Source", disconnected ? "disconnected" : source, values, value => {
         if (value === "disconnected") return;
         step.action.inputs[number] = value.startsWith("previous:") ? { kind: "step", step: state.draft.steps[index - 1].id, port: value.split(":")[1] } : value.startsWith("input:") ? { kind: "input", name: value.slice(6), port: state.draft.inputs.find(input => input.name === value.slice(6)).port } : value === "artifact" ? { kind: "artifact", id: artifacts[0]?.id || "" } : { kind: "literal", text: "" };
       }));
@@ -306,24 +308,73 @@ function editor(el, params, api) {
   }
   function canvas() {
     const viewport = h("div.auto-canvas-viewport", { tabindex: "0", "aria-label": "Automation canvas" });
-    const plane = h("div.auto-canvas-plane", { style: { transform: `scale(${zoom})` } }); viewport.append(plane);
+    viewport.addEventListener("scroll", () => { state.pan = { left: viewport.scrollLeft, top: viewport.scrollTop }; }, { passive: true });
+    const plane = h("div.auto-canvas-plane", { style: { transform: `scale(${zoom})` } });
+    const bounds = h("div.auto-canvas-bounds", plane); viewport.append(bounds);
+    function sizeBounds() {
+      bounds.style.width = `${Number.parseFloat(plane.style.width) * zoom}px`;
+      bounds.style.height = `${Number.parseFloat(plane.style.height) * zoom}px`;
+    }
     const positions = state.layout.positions;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("auto-connections"); svg.setAttribute("aria-hidden", "true"); plane.append(svg);
-    const coords = (step, index) => positions[step.id] || { x: 40 + index % 2 * 300, y: 40 + Math.floor(index / 2) * 200 };
+    const coords = (step, index) => positions[step.id] || { x: 40 + index * 320, y: 220 };
+    let connecting = null;
+    function connect(target) {
+      if (!connecting) return;
+      const source = connecting; connecting = null;
+      for (const control of plane.querySelectorAll("[data-port]")) control.setAttribute("aria-pressed", "false");
+      const index = state.draft.steps.findIndex(step => step.id === target);
+      const step = state.draft.steps[index];
+      if (!step || index < 1 || state.draft.steps[index - 1].id !== source.step) {
+        status.textContent = "Connect to the next step"; return;
+      }
+      if (step.action.inputs.some(input => input.kind === "step" && input.step === source.step && input.port === source.port)) {
+        status.textContent = "Already connected"; return;
+      }
+      if (step.action.inputs.length >= 32) { status.textContent = "This step has 32 inputs"; return; }
+      edit(() => { step.action.inputs.push({ kind: "step", ...source }); state.selected = target; });
+      status.textContent = "Connected";
+    }
+    viewport.addEventListener("keydown", event => {
+      if (event.key === "Escape" && connecting) {
+        connecting = null; status.textContent = "Connection cancelled";
+        for (const control of plane.querySelectorAll("[data-port]")) control.setAttribute("aria-pressed", "false");
+        event.preventDefault(); event.stopPropagation();
+      }
+    });
+    const startPosition = Array.from({ length: state.draft.steps.length * 2 + 1 }, (_, index) => ({ x: 40 + index * 320, y: 30 })).find(position => !state.draft.steps.some((step, index) => {
+      const node = coords(step, index);
+      return node.x < position.x + 240 && node.x + 240 > position.x && node.y < position.y + 100 && node.y + 208 > position.y;
+    }));
+    const start = h("section.auto-node.auto-start", { style: { left: `${startPosition.x}px`, top: `${startPosition.y}px` }, dataset: { selected: String(state.selected === "@start") } },
+      button("Start", () => { state.selected = "@start"; draw(); }, { class: "auto-node-handle", "aria-label": "Select Start", "aria-pressed": String(state.selected === "@start") }),
+      h("span.auto-kind", { manual: "Manual", schedule: "Schedule", webhook: "Webhook" }[state.draft.trigger.kind]));
+    plane.append(start);
     function edges() {
-      plane.style.width = `${Math.max(640, ...state.draft.steps.map((step,index) => coords(step,index).x + 280))}px`;
-      plane.style.height = `${Math.max(400, ...state.draft.steps.map((step,index) => coords(step,index).y + 150))}px`;
+      plane.style.width = `${Math.max(640, startPosition.x + 280, ...state.draft.steps.map((step,index) => coords(step,index).x + 280))}px`;
+      plane.style.height = `${Math.max(400, ...state.draft.steps.map((step,index) => coords(step,index).y + 220))}px`;
+      sizeBounds();
       svg.replaceChildren();
-      state.draft.steps.slice(1).forEach((step, index) => {
-        const before = coords(state.draft.steps[index], index), after = coords(step, index + 1);
+      state.draft.steps.forEach((step, index) => {
+        const before = index ? coords(state.draft.steps[index - 1], index - 1) : startPosition, after = coords(step, index);
         const path = document.createElementNS(svg.namespaceURI, "path");
-        path.setAttribute("d", `M ${before.x + 120} ${before.y + 104} C ${before.x + 120} ${before.y + 160}, ${after.x + 120} ${after.y - 55}, ${after.x + 120} ${after.y}`);
+        path.setAttribute("class", "auto-sequence-edge");
+        path.setAttribute("d", index ? `M ${before.x + 240} ${before.y + 45} C ${before.x + 280} ${before.y + 45}, ${after.x - 40} ${after.y + 45}, ${after.x} ${after.y + 45}` : `M ${before.x + 120} ${before.y + 100} C ${before.x + 120} ${before.y + 150}, ${after.x + 120} ${after.y - 50}, ${after.x + 120} ${after.y}`);
         svg.append(path);
+        for (const input of step.action.inputs.filter(input => input.kind === "step")) {
+          const sourceIndex = state.draft.steps.findIndex(source => source.id === input.step);
+          if (sourceIndex < 0) continue;
+          const source = coords(state.draft.steps[sourceIndex], sourceIndex);
+          const outputY = source.y + (input.port === "text" ? 137 : 177);
+          const edge = document.createElementNS(svg.namespaceURI, "path");
+          edge.setAttribute("d", `M ${source.x + 240} ${outputY} C ${source.x + 280} ${outputY}, ${after.x - 40} ${after.y + 137}, ${after.x} ${after.y + 137}`);
+          edge.dataset.port = input.port; svg.append(edge);
+        }
       });
     }
     state.draft.steps.forEach((step, index) => {
       const position = coords(step, index);
-      const node = h("section.auto-node", { style: { left: `${position.x}px`, top: `${position.y}px` }, dataset: { selected: String(state.selected === step.id) } });
+      const node = h("section.auto-node", { style: { left: `${position.x}px`, top: `${position.y}px` }, dataset: { step: step.id, selected: String(state.selected === step.id) } });
       const handle = button(`${index + 1}. ${step.name}`, () => { state.selected = step.id; draw(); }, { "aria-label": `Select ${step.name}`, "aria-pressed": String(state.selected === step.id), class: "auto-node-handle" });
       let drag;
       handle.addEventListener("pointerdown", event => {
@@ -353,27 +404,89 @@ function editor(el, params, api) {
         positions[step.id] = { x: Math.max(0, Math.min(5000, current.x + delta[0] * distance)), y: Math.max(0, Math.min(5000, current.y + delta[1] * distance)) };
         node.style.left = `${positions[step.id].x}px`; node.style.top = `${positions[step.id].y}px`; edges(); void queueLayoutSave();
       });
-      node.append(handle, h("span.auto-kind", { agent: "Agent", approval: "Approval", result: "Result" }[step.action.kind]), h("span.auto-node-ports", "Text · Files")); plane.append(node);
+      const ports = h("div.auto-node-ports");
+      if (index) ports.append(button("Inputs", () => connect(step.id), { class: "auto-port-input", "data-input-step": step.id, "aria-label": `Connect input to ${step.name}` }));
+      for (const port of ["text", "files"]) {
+        let dragged = false, pointerStart, preview;
+        const control = button(port === "text" ? "Text" : "Files", () => {
+          if (dragged) { dragged = false; return; }
+          connecting = { step: step.id, port }; control.setAttribute("aria-pressed", "true"); status.textContent = "Choose the next step's input";
+        }, { class: "auto-port-output", "data-port": port, "aria-pressed": "false", "aria-label": `Connect ${port} from ${step.name}` });
+        control.addEventListener("pointerdown", event => {
+          if (event.button !== 0 || !event.isPrimary) return;
+          dragged = false; pointerStart = { x: event.clientX, y: event.clientY }; connecting = { step: step.id, port }; control.setPointerCapture(event.pointerId);
+        });
+        control.addEventListener("pointermove", event => {
+          if (!control.hasPointerCapture(event.pointerId)) return;
+          if (!dragged && Math.abs(event.clientX - pointerStart.x) + Math.abs(event.clientY - pointerStart.y) < 4) return;
+          dragged = true;
+          if (!preview) { preview = document.createElementNS(svg.namespaceURI, "path"); svg.append(preview); }
+          const bounds = plane.getBoundingClientRect(), current = coords(step, index);
+          const x = (event.clientX - bounds.left) / zoom, y = (event.clientY - bounds.top) / zoom;
+          preview.setAttribute("d", `M ${current.x + 240} ${current.y + (port === "text" ? 137 : 177)} C ${current.x + 280} ${y}, ${x - 40} ${y}, ${x} ${y}`);
+        });
+        control.addEventListener("pointerup", event => {
+          if (!control.hasPointerCapture(event.pointerId)) return;
+          control.releasePointerCapture(event.pointerId);
+          preview?.remove(); preview = null;
+          if (dragged) {
+            const input = document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-input-step]");
+            if (input) { input.focus({ preventScroll: true }); connect(input.dataset.inputStep); }
+            else { connecting = null; status.textContent = "Connection cancelled"; }
+          }
+        });
+        control.addEventListener("pointercancel", () => { connecting = null; dragged = false; preview?.remove(); preview = null; });
+        ports.append(control);
+      }
+      node.append(handle, h("span.auto-kind", { agent: "Agent", approval: "Approval", result: "Result" }[step.action.kind]), h("span.auto-node-summary", step.action.prompt || step.action.title || ""), ports); plane.append(node);
     });
     edges();
-    const toolbar = h("div.auto-canvas-tools", button("Zoom out", () => { zoom = Math.max(.5, zoom - .1); plane.style.transform = `scale(${zoom})`; }), button("Zoom in", () => { zoom = Math.min(1.5, zoom + .1); plane.style.transform = `scale(${zoom})`; }), button("Fit", () => { const width = Math.max(...state.draft.steps.map((step, index) => coords(step, index).x + 280)); zoom = Math.min(1, Math.max(.25, viewport.clientWidth / width)); plane.style.transform = `scale(${zoom})`; viewport.scrollTo({ left: 0, top: 0 }); }));
+    function zoomTo(value, fit = false) {
+      const width = Number.parseFloat(plane.style.width), height = Number.parseFloat(plane.style.height);
+      const x = width * zoom <= viewport.clientWidth ? width / 2 : (viewport.scrollLeft + viewport.clientWidth / 2) / zoom;
+      const y = height * zoom <= viewport.clientHeight ? height / 2 : (viewport.scrollTop + viewport.clientHeight / 2) / zoom;
+      zoom = value; state.zoom = zoom; plane.style.transform = `scale(${zoom})`; sizeBounds();
+      viewport.scrollTo({ left: fit ? 0 : Math.max(0, x * zoom - viewport.clientWidth / 2), top: fit ? 0 : Math.max(0, y * zoom - viewport.clientHeight / 2) });
+      state.pan = { left: viewport.scrollLeft, top: viewport.scrollTop };
+    }
+    const toolbar = h("div.auto-canvas-tools", button("Zoom out", () => zoomTo(Math.max(.05, zoom - .1))), button("Zoom in", () => zoomTo(Math.min(1.5, zoom + .1))), button("Fit", () => {
+      const width = Number.parseFloat(plane.style.width), height = Number.parseFloat(plane.style.height);
+      zoomTo(Math.min(1, Math.max(.05, Math.min(viewport.clientWidth / width, viewport.clientHeight / height))), true);
+    }));
     return h("div.auto-canvas", toolbar, viewport);
   }
   function draw() {
     if (!alive) return;
     const active = document.activeElement;
-    const focusIndex = content.contains(active) ? [...content.querySelectorAll("input,textarea,select,button,summary")].indexOf(active) : -1;
+    const viewport = content.querySelector(".auto-canvas-viewport");
+    const viewportWidth = viewport?.clientWidth;
+    if (viewport) state.pan = { left: viewport.scrollLeft, top: viewport.scrollTop };
+    const controlKey = control => JSON.stringify([
+      control.closest("[data-step]")?.dataset.step || "", control.closest("[data-binding]")?.dataset.binding || "",
+      control.tagName, control.getAttribute("aria-label") || control.closest("label")?.firstElementChild?.textContent || control.textContent,
+    ]);
+    const focused = content.contains(active) ? controlKey(active) : null;
+    const selectedNode = content.querySelector(".auto-node[data-selected=true]");
+    const returnFocus = selectedNode?.classList.contains("auto-start") ? ".auto-start .auto-node-handle" : selectedNode?.dataset.step ? `.auto-node[data-step="${CSS.escape(selectedNode.dataset.step)}"] .auto-node-handle` : null;
     const headerLabel = header.contains(active) ? active.textContent : null;
     const selection = active?.tagName === "TEXTAREA" || active?.tagName === "INPUT" && ["text", "search", "url"].includes(active.type) ? [active.selectionStart, active.selectionEnd] : null;
-    updateHeader(); content.disabled = busy || loading || !!state.save || !!state.run; content.replaceChildren(field("Name", state.draft.name, value => { state.draft.name = value; }), triggerForm(), externalInputs());
+    updateHeader(); content.disabled = busy || loading || !!state.save || !!state.run; content.replaceChildren();
     const modes = h("div.cal-modes", { role: "group", "aria-label": "Automation editor" });
-    for (const mode of ["steps", "canvas"]) modes.append(button(mode === "steps" ? "Steps" : "Canvas", () => { state.mode = mode; draw(); }, { "aria-pressed": String(state.mode === mode) }));
+    for (const mode of ["canvas", "steps"]) modes.append(button(mode === "steps" ? "Steps" : "Canvas", () => { state.mode = mode; draw(); }, { "aria-pressed": String(state.mode === mode) }));
     content.append(modes);
-    if (state.mode === "steps") state.draft.steps.forEach((step, index) => content.append(stepForm(step, index)));
+    let inspector;
+    if (state.mode === "steps") {
+      content.append(field("Name", state.draft.name, value => { state.draft.name = value; }), triggerForm(), externalInputs());
+      state.draft.steps.forEach((step, index) => content.append(stepForm(step, index)));
+    }
     else {
-      content.append(canvas());
+      inspector = h("aside.auto-inspector", { "aria-label": "Selected node" });
+      content.append(h("div.auto-workspace", canvas(), inspector));
       const index = state.draft.steps.findIndex(step => step.id === state.selected);
-      if (index >= 0) content.append(stepForm(state.draft.steps[index], index));
+      if (state.selected === "@start") inspector.append(field("Name", state.draft.name, value => { state.draft.name = value; }), triggerForm(), externalInputs());
+      else if (index >= 0) inspector.append(stepForm(state.draft.steps[index], index));
+      else inspector.hidden = true;
+      if (!inspector.hidden) inspector.prepend(button("Close inspector", () => { state.selected = null; draw(); }, { class: "ghost" }));
     }
     const add = h("div.auto-add", { role: "group", "aria-label": "Add step" });
     for (const kind of ["agent", "approval", "result"]) add.append(button(`Add ${kind === "agent" ? "agent" : kind}`, () => edit(() => {
@@ -381,13 +494,22 @@ function editor(el, params, api) {
       const step = { id: uid(), name: { agent: "Work", approval: "Approval", result: "Result" }[kind], action: { kind, inputs, ...(kind === "agent" ? { target: { kind: "general", model: null }, prompt: "" } : kind === "approval" ? { title: "Continue?" } : {}) } };
       state.draft.steps.push(step); state.selected = step.id;
     }), { disabled: state.draft.steps.length >= 8 || busy || loading || !!state.save || !!state.run }));
-    content.append(add);
+    modes.append(add);
     const inherited = inheritedPolicies();
-    if (inherited) content.append(inherited);
-    content.append(permissions());
+    const settings = permissions();
+    if (inherited) settings.append(inherited);
+    content.append(settings);
     drawValidation();
-    if (focusIndex >= 0) {
-      const control = content.querySelectorAll("input,textarea,select,button,summary")[focusIndex];
+    const nextViewport = content.querySelector(".auto-canvas-viewport");
+    if (nextViewport && state.pan) { nextViewport.scrollLeft = state.pan.left; nextViewport.scrollTop = state.pan.top; }
+    if (nextViewport && viewportWidth != null && viewportWidth !== nextViewport.clientWidth) {
+      nextViewport.querySelector(".auto-node[data-selected=true]")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+      state.pan = { left: nextViewport.scrollLeft, top: nextViewport.scrollTop };
+    }
+    if (focused) {
+      const controls = [...content.querySelectorAll("input,textarea,select,button,summary")];
+      const control = controls.find(control => controlKey(control) === focused)
+        || (returnFocus ? content.querySelector(returnFocus) : null);
       control?.focus({ preventScroll: true });
       if (selection && control?.setSelectionRange && (control.tagName === "TEXTAREA" || ["text", "search", "url"].includes(control.type))) control.setSelectionRange(...selection);
     } else if (headerLabel) [...header.querySelectorAll("button")].find(button => button.textContent === headerLabel)?.focus({ preventScroll: true });

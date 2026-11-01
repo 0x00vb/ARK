@@ -1090,9 +1090,13 @@ async function schedules(page) {
   const destinations = page.getByRole("navigation", { name: "Destinations" });
   assert.equal(await destinations.getByRole("button", { name: "Chat" }).getAttribute("aria-current"), "page");
   await destinations.getByRole("button", { name: "Automations" }).click();
-  await page.locator('.view[data-view="schedules"] .sv-row').waitFor();
+  await page.locator('.view[data-view="schedules"] .auto-gallery-card').waitFor();
   assert.equal(await destinations.getByRole("button", { name: "Automations" }).getAttribute("aria-current"), "page");
-  assert.equal(await page.locator('.view[data-view="schedules"] .sv-row').count(), 1);
+  assert.equal(await page.locator('.view[data-view="schedules"] .auto-gallery-card').count(), 1);
+  await page.locator('.view[data-view="schedules"] .auto-gallery-card').click();
+  await page.getByRole("button", { name: "Select Start", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Current schedule", exact: true }).click();
+  await page.locator(".sc-panel .sc-what", { hasText: "Recount the stock" }).waitFor();
   await destinations.getByRole("button", { name: "Chat" }).click();
   assert.equal(await page.locator("#stage").isHidden(), true);
 
@@ -1165,18 +1169,18 @@ async function scheduleDestinationStates(page) {
     last: state === "succeeded" ? "ran Thu 09:00" : null, runs: index, missed: index === 0 ? 2 : 0, skipped: index === 0 ? 1 : 0,
   }));
   resolveInitial(rows);
-  await view.locator(".sv-row").first().waitFor();
-  assert.equal(await view.locator(".sv-row").count(), 7);
-  for (const row of rows) assert.equal(await view.locator(`.sv-row[data-state="${row.state}"]`).count(), 1, row.state);
-  assert.equal((await view.locator('.sv-row[data-state="scheduled"] .sv-count').innerText()).trim(), "2 missed · 1 skipped");
-  assert.match(await view.locator('.sv-row[data-state="succeeded"]').innerText(), /ran Thu 09:00/);
-  assert.match(await view.locator('.sv-row[data-state="scheduled"]').getAttribute("aria-label"), /2 missed · 1 skipped/);
-  assert.match(await view.locator('.sv-row[data-state="succeeded"]').getAttribute("aria-label"), /ran Thu 09:00/);
+  await view.locator(".auto-gallery-card").first().waitFor();
+  assert.equal(await view.locator(".auto-gallery-card").count(), 7);
+  for (const row of rows) assert.equal(await view.locator(`.auto-gallery-card[data-state="${row.state}"]`).count(), 1, row.state);
+  assert.equal((await view.locator('.auto-gallery-card[data-state="scheduled"] .sv-count').innerText()).trim(), "2 missed · 1 skipped");
+  assert.match(await view.locator('.auto-gallery-card[data-state="succeeded"]').innerText(), /ran Thu 09:00/);
+  assert.match(await view.locator('.auto-gallery-card[data-state="scheduled"]').getAttribute("aria-label"), /2 missed · 1 skipped/);
+  assert.match(await view.locator('.auto-gallery-card[data-state="succeeded"]').getAttribute("aria-label"), /ran Thu 09:00/);
   await shot(page, "schedule-destination-states");
   replies.push(() => Promise.reject(new Error("offline")));
   await page.evaluate(() => window.ark.openView("schedules"));
   await view.locator('.work-status', { hasText: "offline" }).waitFor();
-  assert.equal(await view.locator(".sv-row").count(), 7);
+  assert.equal(await view.locator(".auto-gallery-card").count(), 7);
   assert.equal(await view.locator('[role="status"]').count(), 1);
   assert.ok(await view.getByRole("button", { name: "Refresh", exact: true }).isVisible());
   let resolveOld, resolveNew;
@@ -1188,7 +1192,7 @@ async function scheduleDestinationStates(page) {
   await page.waitForFunction(() => window.ark.summary().project.name === "Other");
   replies.push(new Promise(resolve => { resolveNew = resolve; }));
   await page.evaluate(() => window.ark.openView("schedules"));
-  assert.equal(await view.locator(".sv-row").count(), 0);
+  assert.equal(await view.locator(".auto-gallery-card").count(), 0);
   resolveOld([{ id: "old", objective: "Old project", says: "daily", state: "scheduled", status: "next tomorrow", missed: 0, skipped: 0 }]);
   await page.waitForTimeout(50);
   assert.equal(await view.getByText("Old project").count(), 0);
@@ -2688,8 +2692,9 @@ scenarios.dictation = async (page) => {
 // chat's name, the sidebar marks it, the new chat runs its own turn, and the first one's answer
 // is there when the person goes back.
 async function background(page) {
+  await page.locator("#app.ready").waitFor();
   await page.locator("#input").fill("Save the notes for later, please");
-  await page.keyboard.press("Enter");
+  await page.locator("#input").press("Enter");
   const question = page.locator("#thread .approval");
   await question.waitFor();
   const first = await page.evaluate(() => window.ark.summary().session.id);
@@ -3688,7 +3693,7 @@ async function agentConversations(page, fromNewChat = false) {
     await composer.press("Enter");
     const work = page.locator('.view[data-view="work-chat"]');
     await work.getByText("GENERAL WORK COMPLETE", { exact: true }).first().waitFor();
-    await work.getByText("Completed", { exact: true }).waitFor();
+    await work.getByRole("complementary", { name: "Work properties" }).getByText("Completed", { exact: true }).waitFor();
     const original = (await page.evaluate(() => window.ark.call("work_list"))).items[0];
     await work.locator("textarea").fill("GENERAL FOLLOWUP");
     await work.locator("textarea").press("Enter");

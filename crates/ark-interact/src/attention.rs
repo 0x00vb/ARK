@@ -195,21 +195,63 @@ pub fn list(engine: &Engine, labels: &Labels) -> Vec<Item> {
     list_at(engine, labels, now_ms())
 }
 
+pub fn try_list(engine: &Engine, labels: &Labels) -> anyhow::Result<Vec<Item>> {
+    try_list_at(engine, labels, now_ms())
+}
+
+pub fn try_everywhere(
+    engine: &Engine,
+    labels: &Labels,
+    links: &crate::links::Links,
+) -> anyhow::Result<Vec<Item>> {
+    let mut items = try_list(engine, labels)?;
+    items.extend(links.items());
+    items.sort_by(|a, b| {
+        b.is_question()
+            .cmp(&a.is_question())
+            .then(b.at_ms.cmp(&a.at_ms))
+    });
+    Ok(items)
+}
+
 fn list_at(engine: &Engine, labels: &Labels, now: u64) -> Vec<Item> {
+    match try_list_at(engine, labels, now) {
+        Ok(items) => items,
+        Err(error) => {
+            tracing::error!(%error, "could not read pending work");
+            vec![Item {
+                id: "attention-unavailable".into(),
+                runtime: None,
+                kind: Kind::Failed,
+                project: String::new(),
+                chat: None,
+                task: None,
+                agent: None,
+                title: "Could not load pending work".into(),
+                place: "This computer".into(),
+                line: error.to_string(),
+                at_ms: now,
+                choices: vec![],
+            }]
+        }
+    }
+}
+
+fn try_list_at(engine: &Engine, labels: &Labels, now: u64) -> anyhow::Result<Vec<Item>> {
     // Only tasks that can make an item are read in full: an open question, a finish in the
     // window, or a schedule's runs (its latest run decides).
-    let tasks = ark_orchestrate::tasks_where(&engine.store, |v| {
+    let tasks = ark_orchestrate::try_tasks_where(&engine.store, |v| {
         !v["question"].is_null()
             || !v["schedule"].is_null()
             || v["finished_ms"]
                 .as_u64()
                 .is_some_and(|f| now.saturating_sub(f) <= KEPT_MS)
-    });
+    })?;
     let cleared = cleared(engine, now);
     let mut names = Names::new(engine);
     let mut items = Vec::new();
 
-    for t in &tasks {
+    for t in tasks.iter().filter(|task| task.run.is_none()) {
         let Some(q) = t.question.as_ref().filter(|q| q.open()) else {
             continue;
         };
@@ -237,7 +279,7 @@ fn list_at(engine: &Engine, labels: &Labels, now: u64) -> Vec<Item> {
         }
     }
     let mut posted = Posted::new(engine);
-    for t in &tasks {
+    for t in tasks.iter().filter(|task| task.run.is_none()) {
         let Some(finished) = t.finished_ms.filter(|f| now.saturating_sub(*f) <= KEPT_MS) else {
             continue;
         };
@@ -292,12 +334,90 @@ fn list_at(engine: &Engine, labels: &Labels, now: u64) -> Vec<Item> {
             choices: Vec::new(),
         });
     }
+    for run in
+        ark_orchestrate::automation_attention_runs(&engine.store, now.saturating_sub(KEPT_MS))?
+    {
+        let Some(place) = names.place(&run.project, Some(&run.conversation), None) else {
+            continue;
+        };
+        if !run.cancel_requested
+            && run.phase == ark_orchestrate::automation::RunPhase::WaitingApproval
+        {
+            for pending in run
+                .steps
+                .iter()
+                .filter_map(|step| step.question.as_ref())
+                .chain(run.questions.values())
+                .filter(|question| question.decision.is_none())
+            {
+                let mut detail = pending.detail.clone();
+                if !pending.files.is_empty() {
+                    detail.push_str(&format!(
+                        "\nFiles: {}",
+                        pending
+                            .files
+                            .iter()
+                            .map(|file| file.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                items.push(Item {
+                    runtime: None,
+                    id: pending.id.clone(),
+                    kind: Kind::Question,
+                    project: run.project.clone(),
+                    chat: Some(run.conversation.clone()),
+                    task: None,
+                    agent: None,
+                    title: pending.title.clone(),
+                    place: place.clone(),
+                    line: detail,
+                    at_ms: run.updated_ms,
+                    choices: vec![
+                        Choice {
+                            label: "Approve".into(),
+                            decision: ark_sdk::prelude::ApprovalDecision::AllowOnce,
+                            hint: None,
+                        },
+                        Choice {
+                            label: "Deny".into(),
+                            decision: ark_sdk::prelude::ApprovalDecision::Deny,
+                            hint: None,
+                        },
+                    ],
+                });
+            }
+        } else if run.phase.is_final()
+            || run.phase == ark_orchestrate::automation::RunPhase::Interrupted
+        {
+            let id = format!("automation-result/{}/{}", run.id, run.updated_ms);
+            if cleared.contains(&id) {
+                continue;
+            }
+            let failed = run.phase != ark_orchestrate::automation::RunPhase::Completed;
+            items.push(Item {
+                runtime: None,
+                id,
+                kind: if failed { Kind::Failed } else { Kind::Finished },
+                project: run.project.clone(),
+                chat: Some(run.conversation.clone()),
+                task: None,
+                agent: None,
+                title: run.revision.draft.name.clone(),
+                place,
+                line: clip(run.error.as_deref().unwrap_or(&run.output.text), 500),
+                at_ms: run.updated_ms,
+                choices: vec![],
+            });
+        }
+    }
     items.sort_by(|a, b| {
         b.is_question()
             .cmp(&a.is_question())
             .then(b.at_ms.cmp(&a.at_ms))
     });
-    items
+    Ok(items)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -540,6 +660,22 @@ pub fn opened(engine: &Engine, item: &Item, n: usize) -> Report {
 
 /// What the work said: its result, or why it failed.
 pub fn text(engine: &Engine, item: &Item) -> Option<String> {
+    if let Some(reference) = item.id.strip_prefix("automation-result/") {
+        let (id, at) = reference.rsplit_once('/')?;
+        return match ark_orchestrate::stored_automation_run(&engine.store, id) {
+            Ok(Some(run)) if Some(run.updated_ms) == at.parse::<u64>().ok() => {
+                Some(run.error.unwrap_or(run.output.text))
+            }
+            Ok(_) => None,
+            Err(error) => {
+                tracing::error!(%error, "could not read saved work");
+                Some("Could not load the saved result".into())
+            }
+        };
+    }
+    if item.task.is_none() {
+        return Some(item.line.clone());
+    }
     let id = item.task.as_deref()?;
     let t = ark_orchestrate::all_tasks(&engine.store)
         .into_iter()

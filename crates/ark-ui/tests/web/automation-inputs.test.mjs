@@ -27,7 +27,8 @@ test('webhook input preview is inert and scheduled required inputs disable activ
       const api={location:{runtime:'local',project:'p'},view:view=>views.set(view.id,view),on:()=>()=>{},openView(){},async call(method,input){calls.push({method,input});if(['agents','artifacts','tools','project_models'].includes(method))return [];if(method==='automation_get')return {entry:{definition:{id:input.automation,revision:1,enabled:false},revision:{number:1,draft:draft(input.automation==='schedule'?'schedule':'webhook')}},layout:{version:0,positions:{}}};if(method==='automation_validate')return {can_save:true,issues:[],activation_issues:input.draft.trigger.kind==='schedule'?[{field:'Execution inputs',message:'Schedules cannot supply required inputs'}]:[]};if(method==='automation_history')return {runs:[],next:null};if(method==='automation_preview')return {next:[]};if(method==='webhook_get')return {connection:{available:false,bases:[]}};if(method==='automation_preview_inputs')return {revision:1,inputs:input.inputs,bindings:[{step:'result',input:'message',port:'text'}]};throw Error(method);}};
       registerAutomationEditor(api);window.fixture={calls,controller:views.get('automation-editor').render(document.querySelector('#stage'),{automation:'webhook'},api)};
     });
-    await page.waitForFunction(()=>!document.querySelector('[data-preview-inputs]')?.disabled);
+    await page.getByRole('button',{name:'Select Start',exact:true}).click();
+    await page.waitForFunction(()=>!!document.querySelector('[data-preview-inputs]') && !document.querySelector('[data-preview-inputs]').disabled);
     await page.getByRole('button',{name:'Test inputs',exact:true}).click();
     await page.getByLabel('message',{exact:true}).fill('Synthetic owned event');
     await page.getByRole('button',{name:'Preview inputs',exact:true}).click();
@@ -39,6 +40,7 @@ test('webhook input preview is inert and scheduled required inputs disable activ
     assert.equal(await page.evaluate(()=>window.fixture.calls.some(c=>['automation_run','automation_begin_start','automation_activate','work_admit'].includes(c.method))),false);
     await page.getByRole('button',{name:'Close',exact:true}).click();
     await page.evaluate(()=>window.fixture.controller.update({automation:'schedule'}));
+    await page.getByRole('button',{name:'Select Start',exact:true}).click();
     await page.getByText('Schedules cannot supply required inputs',{exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'Activate',exact:true}).isDisabled(),true);
     assert.equal(await page.getByRole('button',{name:'Run now',exact:true}).isEnabled(),true);

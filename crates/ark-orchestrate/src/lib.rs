@@ -55,9 +55,10 @@ pub use event::{EventKind, OrchEvent};
 pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskNode};
 pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
 pub use orchestrator::{
-    GeneralWorkResult, GeneralWorkStart, GeneralWorkState, NamedProfile, Orchestrator,
-    OrchestratorBuilder, WorkEntry, WorkFailure, WorkPage, WorkReceipt, WorkRunRef, WorkTarget,
-    WorkTemplate, INTERRUPTED, RESTARTED, WAITING_PERSON,
+    automation_attention_runs, automation_projects_with_work, automation_question,
+    stored_automation_run, GeneralWorkResult, GeneralWorkStart, GeneralWorkState, NamedProfile,
+    Orchestrator, OrchestratorBuilder, WorkEntry, WorkFailure, WorkPage, WorkReceipt, WorkRunRef,
+    WorkTarget, WorkTemplate, INTERRUPTED, RESTARTED, WAITING_PERSON,
 };
 pub use participants::chat_participants;
 pub use record::{
@@ -65,8 +66,9 @@ pub use record::{
     ToolCallRecord, Usage,
 };
 pub use schedule::{
-    all_tasks, projects_with_work, scheduled_projects, tasks_where, IfMissed, ScheduleChange,
-    ScheduleRecord, ScheduleState, When,
+    all_tasks, projects_with_work, scheduled_projects, tasks_where, try_projects_with_work,
+    try_scheduled_projects, try_tasks_where, IfMissed, ScheduleChange, ScheduleRecord,
+    ScheduleState, When,
 };
 pub use spec::{AgentSpec, Budget, TaskSpec};
 pub use tools::{

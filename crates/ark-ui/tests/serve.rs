@@ -3423,3 +3423,208 @@ async fn external_agent_summaries_keep_display_metadata_separate_from_identity()
     assert_eq!(alias["chat"]["title"], "Launch reviewer");
     assert_eq!(alias["chat"]["agent"]["name"], "chat-stable");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sequence_approvals_and_results_use_the_existing_phone_protocol_and_retain_answers() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    let owner = tokens.create("Owner").unwrap();
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let provider = Arc::new(MockProvider::new("m", vec![]));
+    let (_host, served) = ArkUi::new(app_with_provider(dir.path(), provider.clone()))
+        .access(Access::Tokens(tokens))
+        .serve_background("127.0.0.1:0")
+        .await
+        .unwrap();
+    let owner = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://127.0.0.1:{}/client/v1", served.port);
+    let get = |path: String| {
+        client
+            .get(format!("{base}/{path}"))
+            .bearer_auth(&phone.token)
+            .send()
+    };
+    let saved = resource_call(&owner, "project", "automation_save", "", json!({"request":"phone-sequence","draft":{"name":"Phone sequence","trigger":{"kind":"manual"},"authority":{"actions":[],"max_calls":8,"max_mutations":0},"steps":[{"id":"result","name":"Result","action":{"kind":"result","inputs":[{"kind":"literal","text":"OWNED PHONE PROTOCOL RESULT"}]}},{"id":"approve","name":"Approval","action":{"kind":"approval","title":"Keep this result?","inputs":[{"kind":"step","step":"result","port":"text"}]}}]}})).await.unwrap();
+    let start = json!({"automation":saved["automation"],"expected":1,"request":"phone-start","inputs":{},"previous":null});
+    let admitted = resource_call(&owner, "project", "automation_run", "", start.clone())
+        .await
+        .unwrap();
+    resource_call(&owner, "project", "automation_acknowledge_start", "", start)
+        .await
+        .unwrap();
+    let run = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let run = resource_call(
+                &owner,
+                "project",
+                "automation_execution",
+                "",
+                json!({"run":admitted["id"]}),
+            )
+            .await
+            .unwrap();
+            if run["phase"] == "waiting_approval" {
+                break run;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let question = run["steps"][1]["question"]["id"].as_str().unwrap();
+    let home: Value = get("home".into()).await.unwrap().json().await.unwrap();
+    serde_json::from_value::<ark_protocol::HomeSnapshot>(home.clone()).unwrap();
+    let attention = home["attention"].as_array().unwrap();
+    assert_eq!(attention.len(), 1);
+    assert_eq!(attention[0]["id"], question);
+    assert_eq!(attention[0]["detail"], "OWNED PHONE PROTOCOL RESULT");
+    assert_eq!(attention[0]["choices"].as_array().unwrap().len(), 2);
+    assert_eq!(home["working"][0]["chatId"], run["conversation"]);
+    let chat: Value = get(format!("chats/{}", run["conversation"].as_str().unwrap()))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(chat["approvals"][0]["id"], question);
+    let hello: Value = get("hello".into()).await.unwrap().json().await.unwrap();
+    let input = json!({"choiceId":"allow_once"});
+    let mutation = |counter: &str, input: Value| json!({"epoch":hello["mutationEpoch"],"counter":counter,"operation":"attention.answer","target":question,"inputDigest":format!("{:x}",Sha256::digest(serde_json::to_vec(&input).unwrap())),"input":input});
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    let retained = store
+        .get_record("automation_question_index", question)
+        .unwrap()
+        .unwrap();
+    store
+        .put_record(
+            "automation_question_index",
+            question,
+            run["project"].as_str().unwrap(),
+            &json!({"malformed":true}),
+        )
+        .unwrap();
+    let answer = mutation("1", input.clone());
+    let failed = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&answer)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(failed.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    let unchanged = resource_call(
+        &owner,
+        "project",
+        "automation_execution",
+        "",
+        json!({"run":run["id"]}),
+    )
+    .await
+    .unwrap();
+    assert!(unchanged["steps"][1]["question"]["decision"].is_null());
+    store
+        .delete_record("automation_question_index", question)
+        .unwrap();
+    let applied = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&answer)
+        .send()
+        .await
+        .unwrap();
+    assert!(applied.status().is_success());
+    let applied: Value = applied.json().await.unwrap();
+    assert_eq!(applied["status"], "completed");
+    let retry: Value = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&answer)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(retry, applied);
+    assert_eq!(
+        store
+            .get_record("automation_question_index", question)
+            .unwrap()
+            .unwrap(),
+        retained
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let observed = resource_call(
+                &owner,
+                "project",
+                "automation_execution",
+                "",
+                json!({"run":run["id"]}),
+            )
+            .await
+            .unwrap();
+            if observed["phase"] == "completed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let recovered: Value = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&mutation("2", input))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        recovered["status"], "completed",
+        "an answered question survives loss of the phone receipt"
+    );
+    let conflict: Value = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&mutation("3", json!({"choiceId":"deny"})))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(conflict["status"], "no_longer_applicable");
+    let finished: Value = get("home".into()).await.unwrap().json().await.unwrap();
+    assert!(finished["attention"].as_array().unwrap().is_empty());
+    assert!(finished["working"].as_array().unwrap().is_empty());
+    assert_eq!(finished["recent"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        finished["recent"][0]["previewText"],
+        "OWNED PHONE PROTOCOL RESULT"
+    );
+    let chat: Value = get(format!("chats/{}", run["conversation"].as_str().unwrap()))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(chat["approvals"].as_array().unwrap().is_empty());
+    assert!(chat["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| message["body"] == "OWNED PHONE PROTOCOL RESULT"));
+    assert!(resource_call(&owner, "project", "agents", "", json!({}))
+        .await
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(provider.calls.lock().unwrap().len(), 0);
+}

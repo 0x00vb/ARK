@@ -24,6 +24,17 @@ const PERSON = "user";
 const DONE_SHOWN = 5;
 const UNDO_MS = 5000;
 
+export function boardColumn(state, label, count = h("span.bd-count")) {
+  const list = h("div.bd-list", { "data-state": state });
+  const element = h("section.bd-col", { "data-state": state, "aria-label": label },
+    h("header.bd-col-head", h("span", label), count), list);
+  return { element, list, count };
+}
+
+export function boardCard(attrs, ...children) {
+  return h("div.bd-card", { tabindex: "0", role: "button", ...attrs }, ...children);
+}
+
 // ---- the shared state: the view and the panel draw from it ------------------------------------
 
 const store = {
@@ -303,12 +314,10 @@ function boardView(el, params) {
   const lists = new Map(); // state -> list element
   const counts = new Map(); // state -> count element
   for (const c of COLUMNS) {
-    const list = h("div.bd-list", { "data-state": c.state });
-    const count = h("span.bd-count");
+    const { element, list, count } = boardColumn(c.state, c.label);
     lists.set(c.state, list);
     counts.set(c.state, count);
-    cols.append(h("section.bd-col", { "data-state": c.state, "aria-label": c.label },
-      h("header.bd-col-head", h("span", c.label), count), list));
+    cols.append(element);
   }
   const more = h("button.bd-more", { type: "button", onclick: () => { v.allDone = !v.allDone; render({ animate: false }); } });
   const addBtn = h("button.bd-add", { type: "button", onclick: () => { v.adding = true; render({ animate: false }); input.focus(); } }, icon("plus"), "Add");
@@ -333,7 +342,7 @@ function boardView(el, params) {
     if (needs) tags.push(h("span.bd-tag.you", "Needs you"));
     else if (w.blocked && w.state !== "done") tags.push(h("span.bd-tag.blocked", { title: w.blocked }, "Blocked"));
     const who = avatar(w.owner);
-    const node = h("div.bd-card", {
+    const node = boardCard({
       tabindex: "0",
       role: "button",
       "data-id": id,

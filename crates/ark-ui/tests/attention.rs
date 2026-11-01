@@ -467,3 +467,54 @@ async fn a_post_waits_until_a_window_shows_its_chat() {
         .unwrap();
     assert!(list(&host).await.is_empty(), "the window showed it");
 }
+
+#[test]
+fn a_sequence_in_another_project_wakes_after_restart_and_keeps_its_exact_question() {
+    let dir = tempfile::tempdir().unwrap();
+    let saves = Arc::new(AtomicUsize::new(0));
+    let question = {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let host = open(dir.path(), saves.clone()).await;
+            host.call("switch_project", json!({"name":"sequence elsewhere"})).await.unwrap();
+            let saved = project_call(&host, "automation_save", json!({"request":"restart-sequence", "draft":{"name":"Retained sequence", "trigger":{"kind":"manual"}, "authority":{"actions":[],"max_calls":8,"max_mutations":0}, "steps":[{"id":"result","name":"Result","action":{"kind":"result","inputs":[{"kind":"literal","text":"RETAINED SEQUENCE RESULT"}]}},{"id":"approval","name":"Approval","action":{"kind":"approval","title":"Keep the retained result?","inputs":[{"kind":"step","step":"result","port":"text"}]}}]}})).await.unwrap();
+            let start = json!({"automation":saved["automation"],"expected":1,"request":"restart-start","inputs":{},"previous":null});
+            let admitted = project_call(&host,"automation_run",start.clone()).await.unwrap();
+            project_call(&host,"automation_acknowledge_start",start).await.unwrap();
+            let question = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let run = project_call(&host,"automation_execution",json!({"run":admitted["id"]})).await.unwrap();
+                    if let Some(id) = run["steps"][1]["question"]["id"].as_str() { break id.to_string(); }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }).await.unwrap();
+            host.call("switch_project",json!({"name":"Test"})).await.unwrap();
+            question
+        })
+    };
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let host = open(dir.path(), saves.clone()).await;
+        let summary = host.call("summary", json!({})).await.unwrap();
+        assert_eq!(summary["project"]["name"], "test");
+        let items = list(&host).await;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], question);
+        assert_eq!(items[0]["title"], "Keep the retained result?");
+        command(&host, "/waiting").await;
+        assert!(command(&host, "/waiting 1 once").await.contains("Answered"));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let items = list(&host).await;
+                if items.len() == 1 && items[0]["kind"] == "finished" {
+                    assert_eq!(items[0]["line"], "RETAINED SEQUENCE RESULT");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+    });
+    assert_eq!(saves.load(Ordering::SeqCst), 0);
+}

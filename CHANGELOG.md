@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.32.1] - 2026-11-01
+
+### Changed
+
+- Work reuses the board columns and cards. Each card opens a dedicated ticket with conversation, approvals, results and properties. Its admitted agent remains the responsible party for followups.
+- Automations opens a diagram gallery and Canvas editor. Selecting Start or a step opens its inspector. Text and file ports create the actual bindings between consecutive steps. Steps remains a keyboard alternative.
+
+### Fixed
+
+- Native clients and the terminal see sequence approvals and results through the existing attention protocol. Retained question identities support retries after completion without repeating execution.
+- Startup discovers active manual sequences in other projects. Task and schedule read failures propagate instead of hiding pending work behind an empty list.
+- Work-bound agent conversations remain separate from the persistent agent conversation.
+
 ## [0.32.0] - 2026-11-01
 
 ### Breaking

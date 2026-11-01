@@ -247,7 +247,11 @@ impl Command for Waiting {
                             Err(e) => return Ok(Report::new().warning(e).into()),
                         };
                         match runtime {
-                            None => ix.orchestrators().answer(&item.id, decision)?,
+                            None => ix.orchestrators().answer_with_engine(
+                                ix.engine(),
+                                &item.id,
+                                decision,
+                            )?,
                             Some(r) => links.answer(r, &item.id, decision).await?,
                         }
                         Ok(Report::new()

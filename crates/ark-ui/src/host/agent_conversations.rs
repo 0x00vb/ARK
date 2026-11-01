@@ -204,7 +204,7 @@ impl Host {
                 task.project == entry.project.id.as_str(),
                 "task belongs to another project"
             );
-            if task.owner == entry.agent.name {
+            if task.owner == entry.agent.name && task.conversation.is_none() {
                 tasks.push(task);
             }
         }

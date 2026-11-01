@@ -1,5 +1,6 @@
 import { h, icon } from "./dom.js";
 import { markdown } from "./md.js";
+import { boardColumn, boardCard } from "./board.js";
 
 const workDrafts = new Map();
 const listStates = new Map();
@@ -12,12 +13,12 @@ const groups = [
 ];
 
 function workList(el, _params, api) {
-  el.classList.add("sv");
+  el.classList.add("sv", "work-board");
   const key = placeKey(api);
   const saved = listStates.get(key) || { archived: false, origin: "", pages: 1, scroll: 0 };
   listStates.set(key, saved);
-  let alive = true, generation = 0, archived = saved.archived, items = [], next = null, starter = null, starterControl = null;
-  const body = h("div.sv-body");
+  let alive = true, generation = 0, archived = saved.archived, items = [], next = null, starter = null, starterControl = null, listReady = false;
+  const body = h("div.bd-cols.work-columns", { "aria-label": "Work board" });
   const startArea = h("div.work-start-area", { hidden: true });
   const status = h("p.work-status", { role: "status" });
   const archive = h("button.btn", { type: "button", "aria-pressed": "false", onclick: () => {
@@ -26,13 +27,15 @@ function workList(el, _params, api) {
   const origin = h("select.work-source", { "aria-label": "Work source", onchange: () => { saved.origin = origin.value; void load(); } }, [["", "All sources"], ["manual", "Manual"], ["schedule", "Schedule"], ["webhook", "Webhook"]].map(([value, text]) => h("option", { value }, text)));
   origin.value = saved.origin || "";
   const more = h("button.btn", { type: "button", hidden: true, onclick: () => void load(next) }, "Load more");
-  el.append(h("header.sv-head.work-list-head", h("h1.sv-title", { tabindex: "-1", "data-destination-heading": true }, "Work"), origin, archive), status, body, more, startArea);
+  el.append(h("header.sv-head.work-list-head", h("h1.sv-title", { tabindex: "-1", "data-destination-heading": true }, "Work"), origin, archive,
+    h("button.btn.primary", { type: "button", onclick: () => api.newSession() }, icon("plus"), "New work")), status, body, more, startArea);
   async function load(cursor = null) {
     const own = ++generation;
     status.textContent = "Loading…";
     try {
       const focused = document.activeElement?.closest("[data-work]")?.dataset.work;
-      const scroll = el.scrollTop || saved.scroll;
+      const boardScroll = listReady ? body.scrollLeft : saved.boardScroll || 0;
+      const scroll = listReady ? el.scrollTop : saved.scroll;
       let page = await api.call("work_list", { archived, cursor, limit: 50 });
       let loaded = page.items;
       if (!cursor) {
@@ -48,12 +51,18 @@ function workList(el, _params, api) {
       body.replaceChildren();
       for (const [state, label] of groups) {
         const rows = items.filter(item => item.state === state && (!saved.origin || item.origin === saved.origin));
-        if (!rows.length) continue;
-        body.append(h("h2.work-group", label), h("ul.sv-list", rows.map(item => h("li.sv-item",
-          h("button.sv-row", { type: "button", "data-work": item.id, onclick: () => api.openView("work-chat", { work: item.id, archived }) },
-            h("span.sv-mark", icon(item.state === "attention" ? "help" : "check")),
-            h("span.sv-main", h("span.sv-objective", item.title), h("span.sv-detail", (item.reason || item.error || item.summary) === item.status ? "" : item.reason || item.error || item.summary || "")),
-            h("span.sv-state", item.status))))));
+        if (!rows.length && !["attention", "in_progress", "waiting", "completed"].includes(state)) continue;
+        const column = boardColumn(state, label);
+        column.count.textContent = String(rows.length);
+        for (const item of rows) {
+          const open = () => api.openView("work-chat", { work: item.id, archived });
+          column.list.append(boardCard({ "data-work": item.id, "data-state": state, "aria-label": item.title,
+            onclick: open, onkeydown: event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } },
+            h("div.bd-body", h("span.work-card-id", item.id.slice(0, 8).toUpperCase()), h("div.bd-title", item.title),
+              h("div.work-card-meta", h("span", item.target?.kind === "agent" ? item.target.name : item.run ? "Automation" : "General"), h("span", item.origin)),
+              item.reason || item.error ? h("span.bd-tag.you", item.reason || item.error) : null)));
+        }
+        body.append(column.element);
       }
       status.textContent = items.some(item => !saved.origin || item.origin === saved.origin) ? "" : next ? "No matching work in loaded results" : archived ? "No archived work" : "No work yet";
       if (!archived && !saved.origin && !next && (!items.length || starter)) {
@@ -74,6 +83,8 @@ function workList(el, _params, api) {
         if (!items.length) status.textContent = "";
       } else startArea.hidden = true;
       more.hidden = !next;
+      body.scrollLeft = boardScroll;
+      listReady = true;
       if (focused) body.querySelector(`[data-work="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
       el.scrollTop = scroll;
     } catch (error) { if (alive && own === generation) status.replaceChildren(document.createTextNode(error.message), h("button.btn", { type: "button", onclick: () => void load() }, "Refresh")); }
@@ -85,10 +96,11 @@ function workList(el, _params, api) {
     refreshTimer = setTimeout(() => { if (alive) void load(); }, 250);
   });
   void load();
-  return { refresh: () => load(), dispose() { saved.scroll = el.scrollTop; starterControl?.dispose(); alive = false; generation++; clearTimeout(refreshTimer); off?.(); } };
+  return { refresh: () => load(), dispose() { saved.scroll = el.scrollTop; saved.boardScroll = body.scrollLeft; starterControl?.dispose(); alive = false; generation++; clearTimeout(refreshTimer); off?.(); } };
 }
 
 function workChat(el, params, api) {
+  el.classList.add("work-ticket");
   const key = `${placeKey(api)}:${params.work}:${params.receipt || ""}`;
   const draft = workDrafts.get(key) || { text: "", attempt: null, uploads: 0 };
   workDrafts.set(key, draft);
@@ -100,8 +112,10 @@ function workChat(el, params, api) {
   const usageBody = h("div.work-usage-body");
   const usage = h("details.work-usage", { hidden: true }, h("summary", "Usage"), usageBody);
   const retained = h("section.work-retained", { hidden: true, tabindex: "0", "aria-label": "Saved answer" });
-  el.append(head, status, decisions, usage, files, retained);
-  const view = api.chatView(el, { submit: send, stop, files: { captureOrigin: () => {
+  const conversation = h("div.work-ticket-conversation", decisions, retained);
+  const properties = h("aside.work-properties", { "aria-label": "Work properties" });
+  el.append(head, status, h("div.work-ticket-body", conversation, properties));
+  const view = api.chatView(conversation, { submit: send, stop, files: { captureOrigin: () => {
     const progressTarget = h("div"); view.uploads.append(progressTarget);
     return { uploadApi: api, progressTarget,
       started() { draft.uploads++; if (alive) draw(); },
@@ -157,7 +171,9 @@ function workChat(el, params, api) {
   function draw() {
     if (!data || !alive) return;
     const item = data.item;
-    head.replaceChildren(h("h1.sv-title", item.title), h("button.btn", { type: "button", onclick: () => void act("work_archive", { work: item.id, archived: !params.archived }).then(ok => { if (ok) { params.archived = !params.archived; if (alive) draw(); } }) }, params.archived ? "Unarchive" : "Archive"));
+    head.replaceChildren(h("button.btn.ghost", { type: "button", onclick: () => api.openView("work") }, "Work"), h("span.work-card-id", item.id.slice(0, 8).toUpperCase()), h("h1.sv-title", item.title));
+    properties.replaceChildren(h("h2", "Properties"), h("dl", h("dt", "Status"), h("dd", item.status), h("dt", "Assigned to"), h("dd", item.target?.kind === "agent" ? item.target.name : item.run ? "Automation" : "General"), h("dt", "Source"), h("dd", item.origin), h("dt", "Updated"), h("dd", new Date(item.updated_ms).toLocaleString())),
+      h("button.btn", { type: "button", onclick: () => void act("work_archive", { work: item.id, archived: !params.archived }).then(ok => { if (ok) { params.archived = !params.archived; if (alive) draw(); } }) }, params.archived ? "Unarchive" : "Archive"), files, usage);
     head.append(h("button.btn", { type: "button", disabled: !item.run && !data.template, title: !item.run && !data.template ? "Original request unavailable" : null, onclick: async () => {
       if (item.run) {
         try { const run = await api.call("automation_execution", { run: item.run }); if (alive) api.openView("automation-editor", { automation: run.automation }); }

@@ -1,35 +1,37 @@
-# Core0.32.0 release candidate, 1 November 2026
+# Core0.32.1 release source, 1 November 2026
 
-Owned branch codex/work-automations implements durable Work receipts, private execution
-scopes, invocation checkpoints, immutable eight-step sequences, schedules and authenticated
-webhooks. Scoped ownership, retained results, exact-question recovery and authority limits
-have executable coverage. Public release and fresh-clone verification are next.
+Core0.32.0 commit7be988e is published on origin and github with an immutable tag.
+Full source CIv14 and fresh public clone verification passed. Do not move that tag.
 
-Full CIv14 passes on the frozen candidate: formatting, generated protocol, version checks,
-strict clippy, all Rust tests (including104 orchestration units), WebKit,69 actual Host page
-cases with the current consumer, optimized build and unchanged deterministic benchmark.
-Both final review rounds are complete. All actionable findings were fixed and verified.
-Source fingerprints and logs are in ../board/evidence/ux-implementation-p0-20261031/.
+After publication, a real compatibility check found sequence approvals missing from native
+attention and active manual Runs in other projects missing from startup discovery. The
+correction retains question identity for retries after completion, propagates read failures,
+and separates Work-bound conversations from persistent agent chats. Focused TCP protocol
+recovery and selective corrupt-record discovery tests pass. Full CIv19 and v20 passed. Later Canvas viewport corrections passed focused WebKit checks.
+CIv21 exposed two obsolete library selectors; the corrected legacy Canvas/control route passes
+all three focused schedule cases. Exact-source CIv22 passes, including69 actual Host page cases, optimized build and the
+unchanged simulated benchmark. Scoped independent QA confirms the Canvas viewport fix.
 
-Actual embedded Desktop used Claude Haiku and Sonnet for manual General, eight steps with
-three approvals and process restart, a due schedule and a signed webhook with an existing
-agent. Empty Work read an uploaded project file and continued its conversation. Changed-port
-recovery reopened one Run. Webhook input preview created zero Runs and preserved existing
-Work. Required scheduled inputs disable activation before preparation while manual values
-remain supported. Dark and390px layouts pass. The empty composer survives remote refresh
-and resets after a completed archived work item without losing pending drafts.
+The owner changed the UI direction: Work now reuses board columns/cards and opens a dedicated
+ticket with conversation and properties. Automations has diagram cards, Canvas first editing,
+Start/step inspectors and drawable bindings between consecutive steps. Design QA gave GO.
+WebKit coverage for board ticket activation, invalid/valid connections, saved bindings and
+390px overflow passes. A real Claude sequence created through Canvas reached approval and completed after approval.
+Its first revision did not follow an echo instruction, which is retained as a failed check.
+A separate saved revision returned4, then a followup returned8 in the same ticket. Usage
+measured one model call for each. Drawing a Text connection with the pointer saved its actual
+binding. The eight-step pan/focus regression passes.
 
-The guarded internal-write live before/after case produced one forbidden marker Note before
-and zero after, in three model calls each. General benchmark suite results are8/8 on both
-recorded revisions. Methodology and limits: bench/work-automations-20261101/. Model preview
-qualification also fixed repeated-open memory growth; parsing remains isolated. Site EN/ES
-no-JS and reduced-motion keyboard cases pass4/4 locally.
+Earlier real evidence covers General and existing agents, uploaded files, eight steps with
+three approvals and process restart, a due schedule and a signed local webhook. The two
+final global reviews were completed before this new UI steering and native compatibility fix.
+Evidence: ../board/evidence/ux-implementation-p0-20261031/.
 
-Webhook proof is local only. Public HTTPS needs the owner's existing endpoint. The locked
-Mac and unavailable physical phones prevent native/device observation. These remain
-explicitly unclaimed; no new public tunnel or native iPhone release is part of this change.
-Desktop0.9.15 still needs the verified Core pin, full consumer gate and signed delivery.
-No commit, push or tag has occurred yet for this candidate.
+The wired paired iPhone has the signed ARK1.0 build10 installed, verified independently.
+Physical native QA and public webhook proof remain. The owner delegated the endpoint choice.
+The existing private HTTPS runtime is stopped, with its store backed up and independently
+verified. A bounded two-hour qualification window starts only after the candidate is ready. Desktop0.9.15 still needs the final immutable
+Core pin, complete consumer gate, signing, installation and delivery. Site publishes last.
 
 # Core 0.31.0 published, 31 October 2026
 
@@ -526,7 +528,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.32.0 (release metadata prepared; publication not yet attempted) |
+| Latest tag | v0.32.1 (release metadata prepared; last verified public tag is v0.32.0) |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

@@ -2003,7 +2003,16 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     )
                     .await
                 }
-                Err(crate::host::ClientMutationError::Store(error)) => Err(error),
+                Err(crate::host::ClientMutationError::Store(error)) => {
+                    tracing::error!(%error, "could not retain the client change");
+                    client_error(
+                        &mut sock,
+                        "mutation_unavailable",
+                        "Could not confirm this change. Retry the same request.",
+                        "503 Service Unavailable",
+                    )
+                    .await
+                }
             }
         }
         ("PUT", "/client/v1/push") => {

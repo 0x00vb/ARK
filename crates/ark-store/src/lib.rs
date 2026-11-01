@@ -911,6 +911,30 @@ impl Store {
         }
     }
 
+    /// Records in the selected states, optionally restricted to a recent numeric timestamp.
+    pub fn records_in_states(
+        &self,
+        kind: &str,
+        field: &str,
+        states: &[&str],
+        time_field: &str,
+        since_ms: u64,
+    ) -> Result<Vec<serde_json::Value>> {
+        let db = self.db.lock().unwrap();
+        let mut statement = db.prepare("SELECT json FROM records WHERE kind=?1 AND json_extract(json,?2) IN (SELECT value FROM json_each(?3)) AND json_extract(json,?4)>=?5 ORDER BY updated_at,id")?;
+        let rows = statement.query_map(
+            rusqlite::params![
+                kind,
+                format!("$.{field}"),
+                serde_json::to_string(states)?,
+                format!("$.{time_field}"),
+                since_ms.min(i64::MAX as u64) as i64
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        collect(rows)
+    }
+
     /// Remove a record. Returns whether one existed.
     pub fn delete_record(&self, kind: &str, id: &str) -> Result<bool> {
         let db = self.db.lock().unwrap();

@@ -224,6 +224,15 @@ async fn forward_attention(
                 host.emit(json!({ "kind": "approval_closed", "id": question }));
             }
             EventKind::Posted { .. } => {}
+            EventKind::Automation { run: Some(id), .. } => {
+                match ark_interact::ark_orchestrate::stored_automation_run(&host.engine.store, id) {
+                    Ok(Some(run)) => {
+                        host.emit(json!({ "kind": "sessions", "session": run.conversation }))
+                    }
+                    Ok(None) => {}
+                    Err(error) => tracing::error!(%error, "could not refresh execution attention"),
+                }
+            }
             _ => continue,
         }
         host.notify_soon();
@@ -1627,7 +1636,27 @@ impl Host {
                     .await
                 {
                     Ok(_) => ("completed", "Recorded"),
-                    Err(_) => ("no_longer_applicable", "Nothing changed"),
+                    Err(error)
+                        if error.chain().any(|cause| {
+                            cause.is::<ark_store::StoreError>()
+                                || cause.is::<serde_json::Error>()
+                                || cause
+                                    .downcast_ref::<ark_interact::ark_orchestrate::OrchError>()
+                                    .is_some_and(|error| {
+                                        matches!(
+                                            error,
+                                            ark_interact::ark_orchestrate::OrchError::Store(_)
+                                                | ark_interact::ark_orchestrate::OrchError::Json(_)
+                                        )
+                                    })
+                        }) =>
+                    {
+                        return Err(ClientMutationError::Store(error))
+                    }
+                    Err(error) => {
+                        tracing::info!(%error, "approval answer was no longer applicable");
+                        ("no_longer_applicable", "Nothing changed")
+                    }
                 }
             }
             "chat.model" => {
@@ -1889,6 +1918,10 @@ impl Host {
             "background_color": "#ffffff",
             "icons": icons,
         })
+    }
+
+    pub(crate) fn engine_for_client(&self) -> &Arc<Engine> {
+        &self.engine
     }
 
     #[cfg(test)]
@@ -4427,10 +4460,10 @@ impl Host {
                 Ok(json!({}))
             }
             // What waits for the person in any project (ADR 0043): the same list as `/waiting`.
-            "attention" => Ok(serde_json::to_value(ark_interact::attention::list(
+            "attention" => Ok(serde_json::to_value(ark_interact::attention::try_list(
                 &self.engine,
                 &self.labels,
-            ))?),
+            )?)?),
             // Notifications to this device (ADR 0047). `_by` and `_origin` come from the server:
             // the token or session that asked, and the address the page has.
             "push_key" => Ok(json!({ "key": self.notifier.public_key() })),
@@ -4464,7 +4497,7 @@ impl Host {
             "attention_all" => {
                 let links = self.links();
                 Ok(json!({
-                    "items": ark_interact::attention::everywhere(&self.engine, &self.labels, &links),
+                    "items": ark_interact::attention::try_everywhere(&self.engine, &self.labels, &links)?,
                     "notes": ark_interact::attention::link_notes(&links, false),
                     "away": ark_interact::attention::away(&links),
                 }))
@@ -4531,18 +4564,8 @@ impl Host {
                     serde_json::from_value(params["decision"].clone())?;
                 // A question a task kept, whose run is gone (a restart): its id is a string.
                 if let Some(question) = params["id"].as_str() {
-                    let (o, task) =
-                        self.orchs
-                            .list()
-                            .into_iter()
-                            .find_map(|o| {
-                                let t = o.questions().into_iter().find(|t| {
-                                    t.question.as_ref().is_some_and(|q| q.id == question)
-                                })?;
-                                Some((o, t.id))
-                            })
-                            .ok_or_else(|| anyhow::anyhow!("that approval is no longer pending"))?;
-                    o.answer_question(&task, question, decision)?;
+                    self.orchs
+                        .answer_with_engine(&self.engine, question, decision)?;
                     self.emit(json!({ "kind": "approval_closed", "id": question }));
                     return Ok(json!({}));
                 }

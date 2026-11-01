@@ -150,19 +150,25 @@ pub(super) fn claimable(
     item: &WorkItem,
     owner: &str,
 ) -> Result<(), OrchError> {
-    if let Some(task) = item
-        .tasks
-        .iter()
-        .rev()
-        .filter_map(|id| tasks.get(id))
-        .find(|task| !task.state.is_final() && task.owner != owner)
-    {
+    if let Some(task) = blocking_task(tasks, item, owner) {
         return Err(OrchError::NotAllowed(format!(
             "{} is being worked on by {} ({}); wait for it or pick another item",
             item.id, task.owner, task.id
         )));
     }
     Ok(())
+}
+
+pub(super) fn blocking_task<'a>(
+    tasks: &'a HashMap<String, TaskRecord>,
+    item: &WorkItem,
+    owner: &str,
+) -> Option<&'a TaskRecord> {
+    item.tasks
+        .iter()
+        .rev()
+        .filter_map(|id| tasks.get(id))
+        .find(|task| !task.state.is_final() && task.owner != owner)
 }
 
 fn changed(item: &WorkItem, by: &str) -> EventKind {

@@ -98,6 +98,21 @@ impl Orchestrator {
             .await
     }
 
+    /// Admit a followup, returning `None` while its conversation or automation is busy.
+    /// Rejections remain errors and do not create an admission.
+    pub async fn try_admit_work_followup(
+        &self,
+        target: WorkTarget,
+        spec: TaskSpec,
+        origin: &str,
+        request: &str,
+        receipt: &str,
+    ) -> Result<Option<WorkReceipt>, OrchError> {
+        self.inner
+            .try_admit_work_context(target, spec, origin, request, None, Some(receipt))
+            .await
+    }
+
     pub fn work_receipt_by_id(&self, id: &str) -> Result<Option<WorkReceipt>, OrchError> {
         self.inner
             .engine
@@ -403,6 +418,20 @@ impl Inner {
         scheduled: Option<ScheduleAdmission<'_>>,
         selected_receipt: Option<&str>,
     ) -> Result<WorkReceipt, OrchError> {
+        self.try_admit_work_context(target, spec, origin, request, scheduled, selected_receipt)
+            .await?
+            .ok_or_else(|| OrchError::NotAllowed("this work is busy; wait for its answer".into()))
+    }
+
+    async fn try_admit_work_context(
+        &self,
+        target: WorkTarget,
+        spec: TaskSpec,
+        origin: &str,
+        request: &str,
+        scheduled: Option<ScheduleAdmission<'_>>,
+        selected_receipt: Option<&str>,
+    ) -> Result<Option<WorkReceipt>, OrchError> {
         let project = self.project.id.as_str();
         let id = identity(project, origin, request)?;
         let digest = if let Some(receipt) = selected_receipt {
@@ -421,7 +450,7 @@ impl Inner {
             if scheduled.is_none() {
                 check(&submission, project, &digest)?;
             }
-            return Ok(submission.receipt);
+            return Ok(Some(submission.receipt));
         }
         if spec.objective.trim().is_empty() {
             return Err(OrchError::NotAllowed("a task needs an objective".into()));
@@ -507,7 +536,7 @@ impl Inner {
                 if let Some(value) = tx.get_record(SUBMISSION, &id)? {
                     let existing: Submission = serde_json::from_value(value)?;
                     if scheduled.is_none() { check(&existing, project, &digest)?; }
-                    return Ok::<_, OrchError>((existing, false, None, None, None));
+                    return Ok::<_, OrchError>((Some(existing), false, None, None, None));
                 }
                 if let Some(agent) = &agent {
                     let current = tx
@@ -559,9 +588,7 @@ impl Inner {
                         })?,
                     )?;
                     if !run.phase.is_final() {
-                        return Err(OrchError::NotAllowed(
-                            "this automation is still running".into(),
-                        ));
+                        return Ok((None, false, None, None, None));
                     }
                 }
                 let selected_conversation = if let Some(receipt) = selected_receipt {
@@ -624,10 +651,7 @@ impl Inner {
                 }
                 let slot_id = format!("{conversation}/{}", header.turn_count);
                 if tx.get_record(general::GENERAL_SLOT, &slot_id)?.is_some() {
-                    return Err(OrchError::NotAllowed(
-                        "this conversation has an unfinished General turn; open it to continue"
-                            .into(),
-                    ));
+                    return Ok((None, false, None, None, None));
                 }
                 let turn = if agent.is_none() {
                     if item
@@ -636,9 +660,7 @@ impl Inner {
                         .filter_map(|id| data.tasks.get(id))
                         .any(|task| !task.state.is_final())
                     {
-                        return Err(OrchError::NotAllowed(
-                            "this work already has an agent running; wait for its answer".into(),
-                        ));
+                        return Ok((None, false, None, None, None));
                     }
                     tx.insert_record(
                         general::GENERAL_SLOT,
@@ -653,7 +675,9 @@ impl Inner {
                     None
                 };
                 let task = if let Some(agent) = &agent {
-                    work::claimable(&data.tasks, &item, &agent.name)?;
+                    if work::blocking_task(&data.tasks, &item, &agent.name).is_some() {
+                        return Ok((None, false, None, None, None));
+                    }
                     let task_id = format!("t-{}", uuid::Uuid::new_v4().simple());
                     let inputs = artifacts
                         .iter()
@@ -774,8 +798,11 @@ impl Inner {
                 };
                 tx.put_record(WORK, &item.id, &serde_json::to_value(&item)?)?;
                 tx.insert_record(SUBMISSION, &id, &serde_json::to_value(&submission)?)?;
-                Ok((submission, true, Some(item), new_board, task))
+                Ok((Some(submission), true, Some(item), new_board, task))
             })?;
+        let Some(submission) = submission else {
+            return Ok(None);
+        };
         if created {
             if let Some(board) = board {
                 state.boards.insert(board.id.clone(), board.clone());
@@ -820,6 +847,6 @@ impl Inner {
                 });
             }
         }
-        Ok(submission.receipt)
+        Ok(Some(submission.receipt))
     }
 }

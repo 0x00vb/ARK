@@ -5364,7 +5364,7 @@ async fn legacy_schedule_runs_keep_one_item_and_independent_conversations_with_e
         .models(Arc::new(
             crate::Models::builder()
                 .default_model("test")
-                .provider("test", provider)
+                .provider("test", provider.clone())
                 .build(),
         ))
         .build()
@@ -5421,6 +5421,48 @@ async fn legacy_schedule_runs_keep_one_item_and_independent_conversations_with_e
         .iter()
         .find(|receipt| receipt.task.as_deref() == Some(&first))
         .unwrap();
+    o.spawn(AgentSpec::new("other").model("test"))
+        .await
+        .unwrap();
+    let occupied = o
+        .admit_work(
+            WorkTarget::Agent {
+                name: "other".into(),
+            },
+            TaskSpec::new("Other agent owns the next turn").item(item.id.clone()),
+            "manual",
+            "other-agent-hold",
+        )
+        .await
+        .unwrap();
+    let blocked = o
+        .try_admit_work_followup(
+            WorkTarget::Agent {
+                name: "scheduled".into(),
+            },
+            TaskSpec::new("Continue the first execution").item(item.id.clone()),
+            "manual",
+            "followup-first",
+            &receipt.id,
+        )
+        .await
+        .unwrap();
+    assert!(blocked.is_none());
+    assert!(o
+        .work_receipt("manual", "followup-first")
+        .unwrap()
+        .is_none());
+    o.execute_work(&occupied.id).unwrap();
+    o.cancel(occupied.task.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        o.wait(occupied.task.as_ref().unwrap()).await.unwrap().state,
+        TaskState::Cancelled
+    );
+    let before_followup_turns = Session::open(ark.engine(), one.conversation.as_ref().unwrap())
+        .unwrap()
+        .unwrap()
+        .turn_count();
+    assert_eq!(provider.calls.lock().unwrap().len(), 2);
     let mut followup = TaskSpec::new("Continue the first execution");
     followup.item = Some(item.id.clone());
     let followup = o
@@ -5440,12 +5482,13 @@ async fn legacy_schedule_runs_keep_one_item_and_independent_conversations_with_e
     let continued = o.wait(followup.task.as_ref().unwrap()).await.unwrap();
     assert_eq!(continued.state, TaskState::Done, "{:?}", continued.error);
     assert_eq!(continued.execution_scope, one.execution_scope);
+    assert_eq!(provider.calls.lock().unwrap().len(), 3);
     assert_eq!(
         Session::open(ark.engine(), one.conversation.as_ref().unwrap())
             .unwrap()
             .unwrap()
             .turn_count(),
-        2
+        before_followup_turns + 1
     );
     assert_eq!(
         Session::open(ark.engine(), two.conversation.as_ref().unwrap())

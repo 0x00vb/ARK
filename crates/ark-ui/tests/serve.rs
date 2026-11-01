@@ -3889,6 +3889,61 @@ async fn native_general_work_followups_keep_the_same_conversation_and_admission(
         .unwrap();
     let owner = Client::new(&format!("http://127.0.0.1:{}", served.port), &owner);
     let receipt = resource_call(&owner,"project","work_admit","",json!({"request_id":"initial-general-work","target":{"kind":"general","model":null},"task":{"objective":"Initial general work"}})).await.unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let base = format!("http://127.0.0.1:{}/client/v1", served.port);
+    let hello: Value = client
+        .get(format!("{base}/hello"))
+        .bearer_auth(&phone.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let invalid_input = json!({"body":"Read art:deadbeef","attachmentIds":[]});
+    let invalid = json!({"epoch":hello["mutationEpoch"],"counter":"1","operation":"chat.send","target":receipt["conversation"],"inputDigest":format!("{:x}",Sha256::digest(serde_json::to_vec(&invalid_input).unwrap())),"input":invalid_input});
+    let rejected = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&invalid)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), reqwest::StatusCode::OK);
+    let rejected: Value = rejected.json().await.unwrap();
+    assert_eq!(rejected["status"], "no_longer_applicable", "{rejected}");
+    let input = json!({"body":"Follow up general work","attachmentIds":[]});
+    let mutation = json!({"epoch":hello["mutationEpoch"],"counter":"2","operation":"chat.send","target":receipt["conversation"],"inputDigest":format!("{:x}",Sha256::digest(serde_json::to_vec(&input).unwrap())),"input":input});
+    let pending = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&mutation)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pending.status(), reqwest::StatusCode::OK);
+    let pending: Value = pending.json().await.unwrap();
+    assert_eq!(pending["status"], "accepted", "{pending}");
+    let store = ark_store::Store::open(dir.path()).unwrap();
+    assert_eq!(
+        store
+            .list_records("orch_work_submission", None)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(provider.calls.lock().unwrap().is_empty());
+    let replay: Value = client
+        .post(format!("{base}/mutations"))
+        .bearer_auth(&phone.token)
+        .json(&mutation)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(replay, pending);
     resource_call(
         &owner,
         "project",
@@ -3898,7 +3953,6 @@ async fn native_general_work_followups_keep_the_same_conversation_and_admission(
     )
     .await
     .unwrap();
-    let store = ark_store::Store::open(dir.path()).unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let view = resource_call(
@@ -3918,19 +3972,6 @@ async fn native_general_work_followups_keep_the_same_conversation_and_admission(
     })
     .await
     .unwrap();
-    let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    let base = format!("http://127.0.0.1:{}/client/v1", served.port);
-    let hello: Value = client
-        .get(format!("{base}/hello"))
-        .bearer_auth(&phone.token)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let input = json!({"body":"Follow up general work","attachmentIds":[]});
-    let mutation = json!({"epoch":hello["mutationEpoch"],"counter":"1","operation":"chat.send","target":receipt["conversation"],"inputDigest":format!("{:x}",Sha256::digest(serde_json::to_vec(&input).unwrap())),"input":input});
     let response = client
         .post(format!("{base}/mutations"))
         .bearer_auth(&phone.token)

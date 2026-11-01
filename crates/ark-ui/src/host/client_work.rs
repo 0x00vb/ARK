@@ -75,7 +75,7 @@ impl Host {
             Some(receipt) => receipt,
             None => match work
                 .orchestrator
-                .admit_work_followup(
+                .try_admit_work_followup(
                     work.target,
                     TaskSpec::new(request.input["body"].as_str().unwrap_or_default())
                         .item(work.previous.work.clone()),
@@ -85,7 +85,8 @@ impl Host {
                 )
                 .await
             {
-                Ok(receipt) => receipt,
+                Ok(Some(receipt)) => receipt,
+                Ok(None) => return Ok(Some(("accepted", "Accepted"))),
                 Err(
                     OrchError::Terminated(_)
                     | OrchError::UnknownAgent(_)

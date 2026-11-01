@@ -1,3 +1,17 @@
+## Native workflow chat projection fix, 1 November 2026
+
+Actual iPhone build10 showed empty internal Approval/Result conversations beside the
+canonical automation conversation. Commitc5fabf0 filters the existing durable
+execution_managed marker in Native Chats/Home through a crate-private Host helper.
+No public or persisted data shape changes. Ordinary historical child-project chats remain.
+
+The TCP regression failed before the fix with an internal Result conversation in Native
+Chats. It now passes, together with all23serve tests. Scoped independent QA found no
+blockers. Core0.32.3 release metadata is prepared; full release CI and fresh public tag
+verification remain in progress. Desktop0.9.15 is staged but not promoted; the fix needs a
+new Desktop0.9.16 artifact. The private QA window keeps its original21:47:23Z deadline.
+The physical approval succeeded; the owner's follow-up send is being verified.
+
 ## Core0.32.2 published and verified, 1 November 2026
 
 Immutable tagv0.32.2 points to dd1fb336bb5e1f3fa5372cf597d88d2a7c075280 on both
@@ -583,7 +597,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.32.2 (release metadata prepared; last verified public tag is v0.32.1) |
+| Latest tag | v0.32.3 (release metadata prepared; last verified public tag is v0.32.2) |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

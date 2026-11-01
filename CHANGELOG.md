@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.32.3] - 2026-11-01
+
+- Native Chats and Home hide internal workflow-step conversations. The canonical Work conversation, persistent agents and historical chats in ordinary child projects remain visible. This uses the existing execution marker without changing stored data or the client protocol.
+
 ## [0.32.2] - 2026-11-01
 
 - Work and board tickets share their detail shell and properties. Board cards with a conversation open the same Work ticket. Board status and assignee use the same keyboard menu. Controls use compact desktop spacing and retain touch targets.

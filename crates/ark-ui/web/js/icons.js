@@ -1,4 +1,5 @@
 export const ICONS = {
+  "trash": '<g fill="none" stroke="currentColor" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"><path d="M40 64h176M96 64V40h64v24M64 64l8 152h112l8-152M104 104v72M152 104v72"/></g>',
   "home": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 10 12 3l9 7v10H3Z M9 20v-7h6v7\"/></g>",
   "chat": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 4h16v13H9l-5 4Z M8 9h8 M8 13h5\"/></g>",
   "users": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M2 21v-2a6 6 0 0 1 12 0v2 M16 5a4 4 0 0 1 0 8 M18 16a5 5 0 0 1 4 5\"/></g>",

@@ -1,3 +1,26 @@
+## Real board and canvas polish, 1 November 2026
+
+The owner requested literal board reuse. Work now renders boardView with scoped project
+state and opens the existing itemPanel. Manual creation and pointer dragging persist in
+the real Desktop server after reload. A compact message field opens the exact admitted
+conversation and keeps request identity through response loss and panel reopening.
+Automation editing is canvas-only, with corner controls and one aligned inspector header.
+
+All106 orchestrator library tests pass, including refusal to complete pending General
+work. The focused WebKit regression covers board detail, lost admission and execution
+responses, same-target retries, canvas bindings, zoom and small windows. Actual screenshots
+are in ../board/evidence/ux-implementation-p0-20261031/work-real-board-ticket.png,
+work-real-board-drag-persisted.png and canvas-only-corner-controls-inspector.png.
+CIv32 passed all69Host pages, workspace tests, optimized build and unchanged benchmark.
+The final Escape handler and scoped ticket refresh regression passed focused WebKit checks.
+Fresh scoped review reproduced stale completion state with a delayed work_list response;
+the fixed listener now refreshes the open ticket and is removed on disposal. Independent
+reproduction confirms completed state and enabled Send. The final gate also exposed an existing duplicate-start race: an unacquired execution
+lease could replace its live attempt with an older snapshot. A deterministic regression
+reproduced0 versus1; the minimal ownership reorder passes all106 library tests and scoped
+independent review. Final exact-source CI, packaging and publication remain pending. The UI dogfood uses
+current source assets on signed0.9.15; it does not qualify the new backend binary.
+
 ## Native workflow chat projection fix, 1 November 2026
 
 Actual iPhone build10 showed empty internal Approval/Result conversations beside the
@@ -10,7 +33,8 @@ Chats. It now passes, together with all23serve tests. Scoped independent QA foun
 blockers. Core0.32.3 release metadata is prepared; full release CI and fresh public tag
 verification remain in progress. Desktop0.9.15 is staged but not promoted; the fix needs a
 new Desktop0.9.16 artifact. The private QA window keeps its original21:47:23Z deadline.
-The physical approval succeeded; the owner's follow-up send is being verified.
+The physical approval and follow-up to8 succeeded. The original private QA window expired
+and stopped runtime/sidecar; final Nativebuild11 qualification is in progress.
 
 ## Core0.32.2 published and verified, 1 November 2026
 

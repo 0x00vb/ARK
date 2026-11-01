@@ -1804,6 +1804,19 @@ async fn general_work_records_a_real_sdk_turn_and_keeps_its_result_after_convers
         )
         .await
         .unwrap();
+    let before = o.work_item(&receipt.work).unwrap();
+    let refused = o
+        .change_work(
+            crate::board::PERSON,
+            &receipt.work,
+            crate::board::WorkChange {
+                state: Some(WorkState::Done),
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+    assert!(refused.to_string().contains("wait for this execution"));
+    assert_eq!(o.work_item(&receipt.work).unwrap().state, before.state);
     let crate::GeneralWorkStart::Ready { input, .. } = o.begin_general_work(&receipt.id).unwrap()
     else {
         panic!("expected one initial turn");

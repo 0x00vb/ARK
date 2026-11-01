@@ -431,6 +431,42 @@ impl Inner {
                 .get(id)
                 .cloned()
                 .ok_or_else(|| OrchError::NotAllowed(format!("no board item `{id}`")))?;
+            if by == PERSON && change.state.is_some_and(|state| state != item.state) {
+                let active_task = item.tasks.iter().any(|id| {
+                    data.tasks
+                        .get(id)
+                        .is_some_and(|task| !task.state.is_final())
+                });
+                let active_run = if let Some(run) = &item.run {
+                    let value = tx.get_record(crate::automation::RUN, run)?.ok_or_else(|| {
+                        OrchError::NotAllowed("the automation execution is missing".into())
+                    })?;
+                    !serde_json::from_value::<crate::automation::Run>(value)?
+                        .phase
+                        .is_final()
+                } else {
+                    false
+                };
+                let mut active_general = false;
+                for value in tx.list_records(admission::SUBMISSION)? {
+                    let submission: admission::Submission = serde_json::from_value(value)?;
+                    if submission.receipt.work == item.id
+                        && matches!(submission.target, WorkTarget::General { .. })
+                    {
+                        active_general |= matches!(
+                            general::state(tx, &submission.receipt)?,
+                            GeneralWorkState::Pending
+                                | GeneralWorkState::Starting
+                                | GeneralWorkState::Running
+                        );
+                    }
+                }
+                if active_task || active_run || active_general {
+                    return Err(OrchError::NotAllowed(
+                        "wait for this execution to finish before changing its status".into(),
+                    ));
+                }
+            }
             let to = change
                 .board
                 .take()

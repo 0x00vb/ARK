@@ -3709,8 +3709,10 @@ async function agentConversations(page, fromNewChat = false) {
     const original = (await page.evaluate(() => window.ark.call("work_list"))).items[0];
     await page.locator('.project-section[data-id="boards"] .bd-row').click();
     await page.locator('.pane-view.bd .bd-card', { hasText: original.title }).click();
+    await page.locator(".bd-detail:visible").getByRole("textbox", { name: "Title", exact: true }).waitFor();
+    assert.equal(await page.locator(".bd-detail:visible").count(), 1, "the board opens its shared ticket detail");
+    await page.locator(".bd-detail:visible").getByRole("button", { name: /Conversation/ }).click();
     await work.getByRole("heading", { name: original.title, exact: true }).waitFor();
-    assert.equal(await page.locator(".bd-detail:visible").count(), 0, "the board opens the same Work conversation");
     assert.equal(await work.getByRole("complementary", { name: "Work properties" }).count(), 1);
     const actions = work.getByRole("button", { name: "More ticket actions", exact: true });
     await actions.press("Enter");

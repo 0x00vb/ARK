@@ -22,6 +22,7 @@ const COLUMNS = [
   { state: "done", label: "Done" },
 ];
 const PERSON = "user";
+const ticketDrafts = new Map();
 const DONE_SHOWN = 5;
 const UNDO_MS = 5000;
 
@@ -38,7 +39,7 @@ export function boardCard(attrs, ...children) {
 
 // ---- the shared state: the view and the panel draw from it ------------------------------------
 
-const store = {
+const sharedStore = {
   ark: null,
   boards: [],
   items: [],
@@ -52,6 +53,8 @@ const store = {
   },
 };
 
+const store = sharedStore;
+const loadShared = () => load();
 const item = (id) => store.items.find((w) => w.id === id);
 const task = (id) => store.tasks[id];
 const openTask = (w) => [...(w.tasks || [])].reverse().map((t) => [t, task(t)]).find(([, t]) => t && !["done", "failed", "cancelled"].includes(t.state));
@@ -256,7 +259,22 @@ function autosize(t) {
 
 // ---- the board --------------------------------------------------------------------------------
 
-function boardView(el, params) {
+export function boardView(el, params, context = null) {
+  const store = context || sharedStore;
+  const aggregate = !!params?.aggregate;
+  const item = id => store.items.find(w => w.id === id);
+  const task = id => store.tasks[id];
+  const running = w => w.tasks.some(id => task(id)?.state === "running");
+  const asking = w => w.tasks.some(id => { const t = task(id); return t?.question && !t.question.answer && !["done", "failed", "cancelled"].includes(t.state); });
+  const needsYou = w => store.derived?.get(w.id)?.state === "attention" || w.state !== "done" && (asking(w) || !!w.blocked && w.owner === PERSON);
+  const boardOf = id => store.boards.find(b => b.id === id);
+  const itemsOn = id => store.items.filter(w => w.board === id);
+  const upsert = w => { const at = store.items.findIndex(x => x.id === w.id); if (at < 0) store.items.push(w); else store.items[at] = w; };
+  const load = context ? context.load : loadShared;
+  const change = async (id, update) => {
+    try { upsert(await store.ark.call("board_change", { item: id, change: update })); store.changed({ quiet: true }); }
+    catch (error) { store.ark.toast(error.message); await load(); }
+  };
   const ark = store.ark;
   el.classList.add("bd");
   const v = {
@@ -301,7 +319,7 @@ function boardView(el, params) {
       } }, h("span", n ? `Delete the board and its ${n === 1 ? "item" : `${n} items`}` : "Delete the board")),
     ], { end: true });
   };
-  const head = h("div.bd-head", goal, needsChip, moreBtn);
+  const head = h("div.bd-head", aggregate ? h("h1.sv-title", "Work") : goal, needsChip, aggregate ? null : moreBtn);
   const cols = h("div.bd-cols");
   const undo = h("div.bd-undo", { role: "status" });
   undo.hidden = true;
@@ -374,9 +392,9 @@ function boardView(el, params) {
       fitInput();
       v.adding = true;
       try {
-        const added = await ark.call("board_add", { title, board: v.board || undefined, owner: v.filter ? PERSON : undefined });
+        const added = await ark.call("board_add", { title, board: aggregate ? undefined : v.board || undefined, owner: v.filter ? PERSON : undefined });
         upsert(added);
-        if (!v.board) { v.board = added.board; load(); }
+        if (!aggregate && !v.board) { v.board = added.board; load(); }
         v.mine = title;
         render();
       } catch (err) {
@@ -407,15 +425,15 @@ function boardView(el, params) {
     const typing = document.activeElement === input;
     const b = boardOf(v.board);
     // Removed by someone else: nothing is left to show.
-    if (v.board && !b && v.known) return ark.closePanel("board");
+    if (!aggregate && v.board && !b && v.known) return ark.closePanel("board");
     v.known ||= !!b;
-    if (store.shown !== (b?.id || null)) {
+    if (!aggregate && store.shown !== (b?.id || null)) {
       store.shown = b?.id || null;
       queueMicrotask(() => store.changed());
     }
     if (document.activeElement !== goal) goal.value = b?.goal || "";
-    if (b) ark.setPanelTitle("board", clip(b.goal, 28));
-    const visible = store.items.filter((w) => w.board === v.board && !store.removing.has(w.id));
+    if (!aggregate && b) ark.setPanelTitle("board", clip(b.goal, 28));
+    const visible = store.items.filter((w) => (aggregate || w.board === v.board) && !store.removing.has(w.id));
     const mine = visible.filter(needsYou);
     needsChip.hidden = !mine.length;
     if (!mine.length) v.filter = false;
@@ -440,7 +458,7 @@ function boardView(el, params) {
         more.textContent = v.allDone ? "Show less" : `${total - DONE_SHOWN} more`;
         nodes.push(more);
       }
-      if (c.state === "todo" && !v.filter) {
+      if (c.state === "todo" && !v.filter && !store.archived) {
         // An empty board offers the input at once.
         nodes.push(v.adding || !visible.length ? input : addBtn);
       }
@@ -491,18 +509,13 @@ function boardView(el, params) {
 
   /// The item, in place of the board; Back or Escape returns to its card.
   function open(w) {
-    if (w.conversation && registry.views.has("work-chat")) {
-      ark.openView("work-chat", { work: w.id });
-      ark.closePanel("board");
-      return;
-    }
     close();
     store.openItem = w.id;
-    const back = h("button.bd-back", { type: "button" }, icon("arrow-left"), h("span", boardOf(v.board)?.goal || "Board"));
+    const back = h("button.bd-back", { type: "button" }, icon("arrow-left"), h("span", aggregate ? "Work" : boardOf(v.board)?.goal || "Board"));
     back.onclick = () => close({ refocus: true });
     const body = h("div.bd-detail-body");
     detail.replaceChildren(back, body);
-    v.detail = itemPanel(body, { id: w.id }, ark, () => close());
+    v.detail = itemPanel(body, { id: w.id }, ark, () => close(), store);
     main.hidden = true;
     detail.hidden = false;
     back.focus({ preventScroll: true });
@@ -533,6 +546,7 @@ function boardView(el, params) {
 
   /// Move `w` to column `state`, before item `before` (or at the end; Done at the top).
   function move(w, state, before, { animate = true, from = null } = {}) {
+    if (w.conversation && ["attention", "in_progress", "waiting"].includes(store.derived?.get(w.id)?.state) || running(w)) { ark.toast("Wait for this execution to finish before moving it"); return; }
     const rest = store.items.filter((x) => x.id !== w.id);
     const moved = { ...w, state, done_ms: state === "done" ? (w.state === "done" ? w.done_ms : Date.now()) : null };
     let at = before ? rest.findIndex((x) => x.id === before) : -1;
@@ -740,7 +754,7 @@ function boardView(el, params) {
 
 // ---- one item, in the board's place ------------------------------------------------------------
 
-function itemPanel(el, params, ark, gone) {
+function itemPanel(el, params, ark, gone, store = sharedStore) {
   const panel = { items: store.items, tasks: store.tasks, agents: store.agents };
   const item = (key) => panel.items.find((work) => work.id === key);
   const task = (key) => panel.tasks[key];
@@ -753,14 +767,16 @@ function itemPanel(el, params, ark, gone) {
   });
   const byName = (by) => (by === PERSON ? "You" : by === "chat" ? "Chat" : by);
   async function loadPanel() {
+    const own = ++generation;
     try {
       const board = await ark.call("board");
+      if (!alive || own !== generation) return;
       panel.items = board?.items || [];
       panel.tasks = board?.tasks || {};
       panel.agents = board?.agents || [];
       draw();
     } catch (error) {
-      ark.toast(error.message);
+      if (alive && own === generation) ark.toast(error.message);
     }
   }
   async function change(key, update) {
@@ -776,6 +792,7 @@ function itemPanel(el, params, ark, gone) {
     }
   }
   el.classList.add("bd-panel");
+  let alive = true, generation = 0;
   let id = params?.id;
   let editing = null; // a field being typed in keeps its text while the item changes
   const opened = new Set(); // runs whose whole answer the person opened
@@ -807,7 +824,8 @@ function itemPanel(el, params, ark, gone) {
   const del = h("button.btn.ghost.small.bd-p-delete", { type: "button" }, "Delete");
   const shell = ticketShell(el);
   shell.head.append(title);
-  shell.content.append(blocked, note, work, history);
+  const chat = h("section.bd-p-chat");
+  shell.content.append(blocked, note, work, chat, history);
   shell.properties.append(h("h2", "Properties"), segs, meta, del);
   // The pane can change width: the text boxes follow.
   const resized = new ResizeObserver(() => { fitTitle(); fitNote(); });
@@ -824,6 +842,9 @@ function itemPanel(el, params, ark, gone) {
   }
 
   function draw() {
+    if (!alive) return;
+    const focusedMessage = document.activeElement?.matches(".bd-p-message") && el.contains(document.activeElement);
+    const messageSelection = focusedMessage ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     const w = item(id);
     if (!w) {
       for (const x of [segs, meta, blocked, work, history]) clear(x);
@@ -885,12 +906,54 @@ function itemPanel(el, params, ark, gone) {
           h("button.bd-p-file", { type: "button", title: a.name, onclick: () => ark.openArtifact(a.id) }, icon("file"), clip(a.name, 32)))) : null));
     }
 
+    clear(chat);
+    const detail = store.derived?.get(w.id);
+    const openChat = () => ark.openView("work-chat", { work: w.id });
+    const draftKey = `${ark.location?.runtime || ""}:${ark.location?.project || w.project}:${w.id}`;
+    const draft = ticketDrafts.get(draftKey) || { text: "", attempt: null, receipt: null, sending: false };
+    ticketDrafts.set(draftKey, draft);
+    const message = h("textarea.bd-p-message", { rows: 1, "aria-label": "Message", placeholder: "Message…", oninput: event => { draft.text = event.target.value; } });
+    message.value = draft.text;
+    const send = h("button.btn.ghost", { type: "submit", "aria-label": "Send message", title: "Send message" }, icon("arrow-up"));
+    const form = h("form.bd-p-chat-compose", message, send);
+    send.disabled = draft.sending || !draft.attempt && !!w.conversation && ["attention", "in_progress", "waiting"].includes(detail?.state);
+    if (draft.attempt) { message.readOnly = true; send.setAttribute("aria-label", "Retry sending"); send.title = "Retry sending"; }
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const text = message.value.trim();
+      if (!text || send.disabled) return;
+      if (draft.attempt && text !== draft.attempt.task.objective) { shell.status.textContent = "Retry the pending message before changing it"; return; }
+      send.disabled = true; draft.sending = true;
+      try {
+        if (!draft.attempt) {
+          const selected = await ark.call("work_get", { work: w.id, receipt: null });
+          draft.attempt = { request_id: crypto.randomUUID(), receipt: selected.active_receipt || null, target: selected.item.target || (w.owner && w.owner !== PERSON ? { kind: "agent", name: w.owner } : { kind: "general", model: null }), task: { objective: text, item: w.id } };
+        }
+        draft.receipt ||= await ark.call("work_admit", draft.attempt);
+        await ark.call("work_execute", { receipt: draft.receipt.id });
+        ticketDrafts.delete(draftKey);
+        if (alive) ark.openView("work-chat", { work: w.id, receipt: draft.receipt.id });
+      } catch (error) { shell.status.textContent = error.message; }
+      finally { draft.sending = false; if (alive) draw(); }
+    };
+    if (w.conversation) chat.append(h("button.bd-p-chat-open", { type: "button", onclick: openChat }, icon("chat"), h("span", "Conversation"), detail ? h("span.bd-p-state", detail.status) : null));
+    chat.append(form);
+    if (focusedMessage) { message.focus({ preventScroll: true }); message.setSelectionRange(...messageSelection); }
+
     clear(history);
     const steps = [...(w.log || [])].reverse();
     history.append(h("summary", `History · ${steps.length}`),
       steps.map((s) => h("div.bd-p-step", h("span.bd-p-by", byName(s.by)), h("span", s.text), h("span.bd-p-ago", ago(s.at_ms)))));
   }
 
+  const sync = () => {
+    generation++;
+    panel.items = store.items;
+    panel.tasks = store.tasks;
+    panel.agents = store.agents;
+    draw();
+  };
+  store.listeners.add(sync);
   const off = ark.on("ark:orch", () => loadPanel());
   draw();
   loadPanel();
@@ -909,6 +972,9 @@ function itemPanel(el, params, ark, gone) {
       return w ? { surface: { kind_tag: "board", title: w.title, locator: w.id } } : null;
     },
     dispose() {
+      alive = false;
+      generation++;
+      store.listeners.delete(sync);
       resized.disconnect();
       off?.();
     },

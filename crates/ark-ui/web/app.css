@@ -2369,8 +2369,9 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
 .auto-dialog-actions { justify-content: flex-end; margin-top: 24px; }
 .auto-grant, .auto-recorded-step { border-top: 1px solid var(--hair); padding-block: 12px; }
 .auto-recorded-step pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40dvh; overflow: auto; font: inherit; }
-.auto-canvas { min-width: 0; }
-.auto-canvas-tools { margin-bottom: 8px; }
+.auto-canvas { position: relative; min-width: 0; }
+.auto-canvas-tools { position: absolute; z-index: 2; bottom: 12px; left: 12px; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--hair); border-radius: 8px; background: var(--bg); box-shadow: 0 2px 8px rgb(0 0 0 / .08); }
+.auto-canvas-tools .auto-more-actions { top: auto; bottom: calc(100% + 8px); left: 0; right: auto; }
 .auto-canvas-viewport { height: min(65dvh, 600px); min-height: 300px; overflow: auto; border: 1px solid var(--hair); border-radius: 12px; background: var(--bg); overscroll-behavior: contain; }
 .auto-canvas-plane { position: relative; width: 5400px; height: 5400px; transform-origin: 0 0; }
 .auto-canvas-bounds { position: relative; overflow: hidden; }
@@ -2523,3 +2524,26 @@ button.ticket-property:hover { background: var(--hover); }
 
 .auto-add > summary { width: auto; gap: 6px; padding-inline: 8px; }
 .auto-add > summary[aria-disabled="true"] { opacity: .5; cursor: default; }
+
+.auto-inspector-head { display: flex; align-items: center; gap: 8px; padding: 0 12px 12px; border-bottom: 1px solid var(--hair); }
+.auto-inspector-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.auto-inspector-head .auto-inspector-close { margin: 0; flex: none; }
+.auto-inspector .auto-step > header h2 { display: none; }
+.auto-inspector .auto-step > header { justify-content: flex-end; gap: 4px; }
+.auto-inspector .auto-step-controls { gap: 4px; }
+.auto-inspector .auto-field input:not([type=checkbox]), .auto-inspector .auto-field select { min-height: 32px; padding: 6px 8px; }
+.auto-inspector .auto-field textarea { padding: 8px; }
+@media (pointer: coarse) { .auto-canvas-tools button, .auto-canvas-tools summary, .auto-inspector button, .auto-inspector .auto-field input:not([type=checkbox]), .auto-inspector .auto-field select { min-height: 44px; } }
+
+.work-real-board { height: 100%; min-height: 0; }
+.bd-p-chat { display: grid; gap: 8px; margin-block: 16px; }
+.bd-p-chat-open { display: flex; align-items: center; gap: 8px; padding: 0; min-height: 32px; text-align: left; color: var(--text); background: none; border: 0; cursor: pointer; }
+.bd-p-chat-open .bd-p-state { margin-left: auto; }
+.bd-p-chat-compose { display: flex; align-items: flex-end; gap: 8px; border: 1px solid var(--hair); border-radius: 8px; padding: 8px; }
+.bd-p-message { flex: 1; min-width: 0; resize: vertical; background: none; border: 0; color: inherit; font: inherit; line-height: 1.5; }
+
+.auto-inspector-head .auto-step-menu { margin: 0; }
+.auto-step-menu .auto-step-controls { display: none; }
+.auto-step-menu[open] .auto-step-controls { display: grid; position: absolute; z-index: 3; right: 0; top: calc(100% + 4px); min-width: 152px; padding: 4px; background: var(--bg); border: 1px solid var(--hair); border-radius: 8px; box-shadow: 0 4px 16px rgb(0 0 0 / .08); }
+.auto-step-menu .auto-step-controls .auto-icon { width: auto; justify-content: flex-start; gap: 8px; font-size: 12px; }
+.auto-inspector .auto-kind { display: none; }

@@ -1,103 +1,40 @@
 import { h, icon } from "./dom.js";
 import { markdown } from "./md.js";
-import { boardColumn, boardCard } from "./board.js";
+import { boardView } from "./board.js";
 import { ticketShell, ticketProperty, ticketMenu } from "./ticket.js";
 
 const workDrafts = new Map();
-const listStates = new Map();
 const placeKey = api => `${api.location?.runtime || ""}:${api.location?.project || ""}`;
 
-const groups = [
-  ["attention", "Needs your attention"], ["in_progress", "In progress"],
-  ["waiting", "Waiting"], ["failed", "Could not finish"],
-  ["interrupted", "Interrupted"], ["completed", "Completed"], ["resolved", "Resolved"], ["cancelled", "Cancelled"],
-];
-
 function workList(el, _params, api) {
-  el.classList.add("sv", "work-board");
-  const key = placeKey(api);
-  const saved = listStates.get(key) || { archived: false, origin: "", pages: 1, scroll: 0 };
-  listStates.set(key, saved);
-  let alive = true, generation = 0, archived = saved.archived, items = [], next = null, starter = null, starterControl = null, listReady = false;
-  const body = h("div.bd-cols.work-columns", { "aria-label": "Work board" });
-  const startArea = h("div.work-start-area", { hidden: true });
+  let alive = true, generation = 0, archived = false;
   const status = h("p.work-status", { role: "status" });
-  const archive = h("button.btn", { type: "button", "aria-pressed": "false", onclick: () => {
-    archived = !archived; saved.archived = archived; saved.pages = 1; archive.setAttribute("aria-pressed", String(archived)); void load();
-  } }, "Archived");
-  const origin = h("select.work-source", { "aria-label": "Work source", onchange: () => { saved.origin = origin.value; void load(); } }, [["", "All sources"], ["manual", "Manual"], ["schedule", "Schedule"], ["webhook", "Webhook"]].map(([value, text]) => h("option", { value }, text)));
-  origin.value = saved.origin || "";
-  const more = h("button.btn", { type: "button", hidden: true, onclick: () => void load(next) }, "Load more");
-  el.append(h("header.sv-head.work-list-head", h("h1.sv-title", { tabindex: "-1", "data-destination-heading": true }, "Work"), origin, archive,
-    h("button.btn.primary", { type: "button", onclick: () => api.newSession() }, icon("plus"), "New work")), status, body, more, startArea);
-  async function load(cursor = null) {
+  const body = h("div.work-real-board");
+  const archive = h("button.btn.ghost.work-archive", { type: "button", "aria-pressed": "false", onclick: () => { archived = !archived; archive.setAttribute("aria-pressed", String(archived)); void load(); } }, "Archived");
+  el.append(status, body);
+  const context = { ark: api, boards: [], items: [], tasks: {}, agents: [], derived: new Map(), removing: new Set(), listeners: new Set(), changed(options = {}) { for (const listener of this.listeners) listener(options); }, load };
+  const controller = boardView(body, { aggregate: true }, context);
+  body.querySelector(".bd-head").append(archive);
+  async function load() {
     const own = ++generation;
-    status.textContent = "Loading…";
     try {
-      const focused = document.activeElement?.closest("[data-work]")?.dataset.work;
-      const boardScroll = listReady ? body.scrollLeft : saved.boardScroll || 0;
-      const scroll = listReady ? el.scrollTop : saved.scroll;
-      let page = await api.call("work_list", { archived, cursor, limit: 50 });
-      let loaded = page.items;
-      if (!cursor) {
-        for (let index = 1; index < saved.pages && page.next; index++) {
-          page = await api.call("work_list", { archived, cursor: page.next, limit: 50 });
-          loaded.push(...page.items);
-        }
-      }
+      const [board, first] = await Promise.all([api.call("board"), api.call("work_list", { archived, limit: 50 })]);
+      const items = [...first.items];
+      let next = first.next;
+      while (next) { const page = await api.call("work_list", { archived, limit: 50, cursor: next }); items.push(...page.items); next = page.next; }
       if (!alive || own !== generation) return;
-      if (cursor) saved.pages++;
-      items = cursor ? [...items, ...loaded] : loaded;
-      next = page.next;
-      body.replaceChildren();
-      for (const [state, label] of groups) {
-        const rows = items.filter(item => item.state === state && (!saved.origin || item.origin === saved.origin));
-        if (!rows.length && !["attention", "in_progress", "waiting", "completed"].includes(state)) continue;
-        const column = boardColumn(state, label);
-        column.count.textContent = String(rows.length);
-        for (const item of rows) {
-          const open = () => api.openView("work-chat", { work: item.id, archived });
-          column.list.append(boardCard({ "data-work": item.id, "data-state": state, "aria-label": item.title,
-            onclick: open, onkeydown: event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } } },
-            h("div.bd-body", h("span.work-card-id", item.id.slice(0, 8).toUpperCase()), h("div.bd-title", item.title),
-              h("div.work-card-meta", h("span", item.target?.kind === "agent" ? item.target.name : item.run ? "Automation" : "General"), h("span", item.origin)),
-              item.reason || item.error ? h("span.bd-tag.you", item.reason || item.error) : null)));
-        }
-        body.append(column.element);
-      }
-      status.textContent = items.some(item => !saved.origin || item.origin === saved.origin) ? "" : next ? "No matching work in loaded results" : archived ? "No archived work" : "No work yet";
-      if (!archived && !saved.origin && !next && (!items.length || starter)) {
-        if (!items.length && starterControl?.isComplete?.()) {
-          starterControl.dispose?.();
-          starter.remove();
-          starter = null;
-          starterControl = null;
-        }
-        if (!starter) {
-          starter = h("div.work-empty-chat");
-          starterControl = api.newChatView?.(starter);
-          queueMicrotask(() => { if (alive && !archived && !items.length) starterControl?.focusInput?.(); });
-          if (!starterControl) starter.append(h("button.btn", { type: "button", onclick: () => api.newSession() }, "New chat"));
-        }
-        if (!starter.parentNode) startArea.append(starter);
-        startArea.hidden = false;
-        if (!items.length) status.textContent = "";
-      } else startArea.hidden = true;
-      more.hidden = !next;
-      body.scrollLeft = boardScroll;
-      listReady = true;
-      if (focused) body.querySelector(`[data-work="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
-      el.scrollTop = scroll;
-    } catch (error) { if (alive && own === generation) status.replaceChildren(document.createTextNode(error.message), h("button.btn", { type: "button", onclick: () => void load() }, "Refresh")); }
+      context.archived = archived;
+      context.boards = board?.boards || [];
+      context.tasks = board?.tasks || {};
+      context.agents = board?.agents || [];
+      context.derived = new Map(items.map(item => [item.id, item]));
+      context.items = (board?.items || []).filter(item => (item.archived_by || []).includes("user") === archived);
+      context.changed(); status.textContent = "";
+    } catch (error) { if (alive && own === generation) status.textContent = error.message; }
   }
-  archive.setAttribute("aria-pressed", String(archived));
-  let refreshTimer;
-  const off = api.on("ark:orch", () => {
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => { if (alive) void load(); }, 250);
-  });
+  const off = api.on("ark:orch", () => void load());
   void load();
-  return { refresh: () => load(), dispose() { saved.scroll = el.scrollTop; saved.boardScroll = body.scrollLeft; starterControl?.dispose(); alive = false; generation++; clearTimeout(refreshTimer); off?.(); } };
+  return { refresh: load, dispose() { alive = false; generation++; off?.(); controller.dispose(); } };
 }
 
 function workChat(el, params, api) {

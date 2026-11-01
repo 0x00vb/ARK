@@ -2,6 +2,9 @@
 
 ## [0.32.3] - 2026-11-01
 
+- Work uses the existing board controller and ticket detail, including pointer and keyboard moves and manual ticket creation. The compact message field preserves the assigned target, selected conversation and retry identity. Active executions refuse manual status changes.
+- Automations uses one canvas editor. Add, zoom and fit controls stay in its lower corner. The inspector has one close control, aligned fields and contextual step actions.
+
 - Repeating an admitted task start preserves the live in-memory attempt when another start already owns execution. Observers no longer overwrite that attempt with an older stored snapshot.
 - Native Chats and Home hide internal workflow-step conversations. The canonical Work conversation, persistent agents and historical chats in ordinary child projects remain visible. This uses the existing execution marker without changing stored data or the client protocol.
 

@@ -8,6 +8,18 @@ struct ClientWork {
 }
 
 impl Host {
+    pub(crate) fn client_internal_execution_sessions(
+        &self,
+    ) -> anyhow::Result<std::collections::HashSet<String>> {
+        Ok(
+            ark_sdk::prelude::ark_runtime::session::Session::list(&self.engine, None)?
+                .into_iter()
+                .filter(|session| session.execution_managed)
+                .map(|session| session.id.to_string())
+                .collect(),
+        )
+    }
+
     fn client_work(&self, conversation: &str) -> anyhow::Result<Option<ClientWork>> {
         let Some(header) = self.engine.store.get_session(conversation)? else {
             return Ok(None);

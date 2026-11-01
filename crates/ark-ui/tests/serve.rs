@@ -3474,9 +3474,44 @@ async fn sequence_approvals_and_results_use_the_existing_phone_protocol_and_reta
     })
     .await
     .unwrap();
+    let retained_store = ark_store::Store::open(dir.path()).unwrap();
+    let child = Project::new("Historical child", "")
+        .with_parent(ProjectId(run["project"].as_str().unwrap().into()));
+    retained_store.put_project(&child).unwrap();
+    let mut historical = ark_runtime::session::SessionRecord::empty(
+        ark_sdk::prelude::ark_core::SessionId::new(),
+        child.id.clone(),
+        Default::default(),
+        None,
+    );
+    historical.title = "Historical ordinary child chat".into();
+    retained_store
+        .create_session(
+            historical.id.as_str(),
+            &child.id,
+            &serde_json::to_value(&historical).unwrap(),
+        )
+        .unwrap();
+    let listed: Value = get("chats".into()).await.unwrap().json().await.unwrap();
+    let chats = listed["chats"].as_array().unwrap();
+    assert!(chats.iter().any(|chat| chat["id"] == run["conversation"]));
+    assert!(chats
+        .iter()
+        .any(|chat| chat["id"] == historical.id.as_str()));
+    for step in run["steps"].as_array().unwrap() {
+        assert!(
+            chats.iter().all(|chat| chat["id"] != step["conversation"]),
+            "internal workflow step appeared in Native Chats: {}",
+            step["id"]
+        );
+    }
     let question = run["steps"][1]["question"]["id"].as_str().unwrap();
     let home: Value = get("home".into()).await.unwrap().json().await.unwrap();
     serde_json::from_value::<ark_protocol::HomeSnapshot>(home.clone()).unwrap();
+    for step in run["steps"].as_array().unwrap() {
+        assert_ne!(home["mostRecentChat"]["id"], step["conversation"]);
+    }
+
     let attention = home["attention"].as_array().unwrap();
     assert_eq!(attention.len(), 1);
     assert_eq!(attention[0]["id"], question);

@@ -83,6 +83,7 @@ async fn all_chats(host: &Arc<Host>) -> anyhow::Result<Vec<Value>> {
         .map(|entry| entry.agent.scope.as_str())
         .collect();
     let sessions = host.call("sessions", json!({ "all": true })).await?;
+    let internal = host.client_internal_execution_sessions()?;
     let mut rows = sessions
         .as_array()
         .into_iter()
@@ -91,6 +92,7 @@ async fn all_chats(host: &Arc<Host>) -> anyhow::Result<Vec<Value>> {
             !row["project"]
                 .as_str()
                 .is_some_and(|project| scopes.contains(project))
+                && !row["id"].as_str().is_some_and(|id| internal.contains(id))
         })
         .map(chat_item)
         .collect::<Vec<_>>();

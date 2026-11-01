@@ -1,3 +1,23 @@
+## Core0.32.3 published and verified, 1 November 2026
+
+Immutable tagv0.32.3 points to6934606e5fc028d6474d3e024e447e6911598466 on both
+origin and github. Exact-source CIv34 passes106orchestrator tests,69actualHost pages,
+workspace checks, optimized build and unchanged benchmark. A fresh GitHub clone passes
+all checks with the Desktop consumer fixtures and four concurrent Rust tests.
+
+The first fresh run hit an unchanged authentication test's2second wall-clock assertion.
+Its isolated run passed in0.28seconds; the subsequent fresh run passed all127model tests
+with the original limits. Failed and passing receipts are retained. No tag or limit moved.
+
+Desktop0.9.16 sourcec6baa35 pins all22resolved ARK packages to this tag. Its signed release
+wrapper is running. Nativebuild11 passed its full gate, strict development signing and
+profile validation; the actual iPhone reports installedbuild11. Final functional phone
+qualification, Desktop staging/promotion/OTA and Site publication remain pending. The
+original private QA window expired and runtime/sidecar are stopped; no extension is approved.
+
+Evidence: ../board/evidence/ux-implementation-p0-20261031/core-v0323-source-release.json,
+core-ci-v34-passed.log and core-fresh-public-v0323-passed.log.
+
 ## Real board and canvas polish, 1 November 2026
 
 The owner requested literal board reuse. Work now renders boardView with scoped project

@@ -9,7 +9,7 @@ const placeKey = api => `${api.location?.runtime || ""}:${api.location?.project 
 function workList(el, _params, api) {
   let alive = true, generation = 0, archived = false;
   const status = h("p.work-status", { role: "status" });
-  const body = h("div.work-real-board");
+  const body = h("div.work-real-board", { "aria-label": "Tasks" });
   const archive = h("button.btn.ghost.work-archive", { type: "button", "aria-pressed": "false", onclick: () => { archived = !archived; archive.setAttribute("aria-pressed", String(archived)); void load(); } }, "Archived");
   el.append(status, body);
   const context = { ark: api, boards: [], items: [], tasks: {}, agents: [], derived: new Map(), removing: new Set(), listeners: new Set(), changed(options = {}) { for (const listener of this.listeners) listener(options); }, load };
@@ -115,7 +115,7 @@ function workChat(el, params, api) {
     if (!data || !alive) return;
     const item = data.item;
     head.replaceChildren(h("button.btn.ghost.ticket-back", { type: "button", title: "Back to Work", "aria-label": "Back to Work", onclick: () => api.openView("work") }, icon("arrow-left")), h("span.work-card-id", item.id.slice(0, 8).toUpperCase()), h("h1.sv-title", item.title));
-    properties.replaceChildren(h("h2", "Properties"),
+    properties.replaceChildren(
       ticketProperty(api, { label: "Status", value: item.status, mark: icon(item.state === "completed" ? "check" : "clock") }),
       ticketProperty(api, { label: "Assigned to", value: item.target?.kind === "agent" ? item.target.name : item.run ? "Automation" : "General" }),
       ticketProperty(api, { label: "Source", value: item.origin }),

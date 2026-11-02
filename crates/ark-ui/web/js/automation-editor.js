@@ -1,4 +1,5 @@
 import { h, icon } from "./dom.js";
+import { canvasScene, canvasTools } from "./canvas-tools.js";
 
 const drafts = new Map();
 const clone = value => structuredClone(value);
@@ -11,29 +12,17 @@ const initial = () => {
     { id: uid(), name: "Result", action: { kind: "result", inputs: [{ kind: "step", step: first, port: "text" }, { kind: "step", step: first, port: "files" }] } },
   ] };
 };
-export function automationExample(kind) {
-  const draft = initial();
-  draft.name = kind === "weekly" ? "Example: Weekly review" : "Example: Review and approve";
-  draft.steps[0].action.prompt = "Prepare a short plan for next week's priorities.";
-  if (kind === "weekly") draft.trigger = { kind: "schedule", when: { at: "09:00", tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", days: ["mon"], once: false } };
-  else {
-    const approval = { id: uid(), name: "Approval", action: { kind: "approval", title: "Keep this plan?", inputs: clone(draft.steps[1].action.inputs) } };
-    draft.steps.splice(1, 0, approval);
-    for (const input of draft.steps[2].action.inputs) input.step = approval.id;
-  }
-  return draft;
-}
-
 const button = (text, run, attrs = {}) => h("button.btn", { type: "button", "data-action": text, onclick: event => { event.currentTarget.focus({ preventScroll: true }); run(event); }, ...attrs }, text);
 const compact = (text, glyph, run, attrs = {}) => button(glyph instanceof Node ? glyph : icon(glyph), run, { "data-action": text, "aria-label": text, title: text, class: "auto-icon", ...attrs });
 const label = (text, control) => h("label.auto-field", h("span", text), control);
 
-function editor(el, params, api) {
+export function editor(el, params, api) {
   params.draft_key ||= crypto.randomUUID();
   const key = keyFor(api, params);
-  const state = drafts.get(key) || { id: params.automation || null, draft: clone(params.draft || initial()), saved: null, revision: null, head: null, layout: { version: 0, positions: {} }, selected: null, undo: [], redo: [], save: null, run: null };
+  const state = drafts.get(key) || { id: params.automation || null, draft: clone(params.draft || initial()), saved: null, revision: null, head: null, layout: { version: 0, positions: {} }, selected: params.selected || null, undo: [], redo: [], save: null, run: null };
   drafts.set(key, state);
   el.classList.add("auto-editor");
+  let canvasObserver;
   let alive = true, busy = false, loadError = false, loading = (!!state.id || !!params.legacy_schedule && !state.legacyLoaded), agents = [], artifacts = [], actions = [], models = [], previewTimer, previewGeneration = 0, historyCursor = null, historyRuns = [], validationTimer, validationGeneration = 0, validating = true, validationReady = false, canSave = true, issues = [], activationIssues = [], hook = null, hookSecret = null, zoom = state.zoom ?? 1;
   const status = h("p.auto-status", { role: "status", "aria-live": "polite" });
   const header = h("header.auto-head");
@@ -117,9 +106,11 @@ function editor(el, params, api) {
   }
   async function save() {
     state.save ||= { request: crypto.randomUUID(), automation: state.id, expected: state.revision, draft: clone(state.draft), legacy: state.adoption || null };
+    const attempt = state.save;
     await perform(async () => {
-      const receipt = await api.call("automation_save", state.save);
-      state.id = receipt.automation; state.revision = receipt.revision; state.saved = JSON.stringify(state.save.draft); state.save = null; state.adoption = null;
+      const receipt = await api.call("automation_save", attempt);
+      if (state.save !== attempt) return;
+      state.id = receipt.automation; state.revision = receipt.revision; state.saved = JSON.stringify(attempt.draft); state.save = null; state.adoption = null;
       drafts.set(keyFor(api, { automation: state.id }), state);
       await reloadHead();
       if (state.layoutDirty) void queueLayoutSave();
@@ -131,6 +122,7 @@ function editor(el, params, api) {
       if (state.save) {
         const attempt = state.save;
         const result = await api.call("automation_save", { ...attempt, cancel: true });
+        if (state.save !== attempt) return;
         if (result.saved) { state.id = result.saved.automation; state.revision = result.saved.revision; state.saved = JSON.stringify(attempt.draft); state.adoption = null; }
         state.save = null;
       }
@@ -246,7 +238,7 @@ function editor(el, params, api) {
   }
   function triggerForm() {
     const trigger = state.draft.trigger;
-    const section = h("section.auto-section", h("h2", "Start"), select("Start", trigger.kind, [["manual", "Manual"], ["schedule", "Schedule"], ["webhook", "Webhook"]], value => { state.draft.trigger = value === "schedule" ? { kind: value, when: { at: "09:00", tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", days: [], once: false } } : { kind: value }; if (value === "webhook" && state.id) void loadHook(); }));
+    const section = h("section.auto-section", select("Trigger", trigger.kind, [["manual", "Manual"], ["schedule", "Schedule"], ["webhook", "Webhook"]], value => { state.draft.trigger = value === "schedule" ? { kind: value, when: { at: "09:00", tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", days: [], once: false } } : { kind: value }; if (value === "webhook" && state.id) void loadHook(); }));
     if (trigger.kind === "schedule") {
       const when = trigger.when, mode = when.every_minutes != null ? "interval" : when.cron ? "cron" : when.date ? "date" : "daily";
       section.append(select("Frequency", mode, [["daily", "Days and time"], ["interval", "Interval"], ["date", "Once"], ["cron", "Advanced: cron"]], value => { trigger.when = value === "interval" ? { every_minutes: 60, tz: when.tz } : value === "cron" ? { cron: "0 9 * * *", tz: when.tz } : { at: "09:00", tz: when.tz, days: [], ...(value === "date" ? { date: new Date().toISOString().slice(0, 10), once: true } : {}) }; }));
@@ -330,7 +322,13 @@ function editor(el, params, api) {
     }
     const positions = state.layout.positions;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.classList.add("auto-connections"); svg.setAttribute("aria-hidden", "true"); plane.append(svg);
-    const coords = (step, index) => positions[step.id] || { x: 40 + index * 320, y: 220 };
+    const portPoint = (id, selector, fallback) => {
+      const dot = plane.querySelector(`[data-step="${CSS.escape(id)}"] ${selector}`);
+      if (!dot?.isConnected) return fallback;
+      const rect = dot.getBoundingClientRect(), origin = plane.getBoundingClientRect();
+      return { x: (rect.left + rect.width / 2 - origin.left) / zoom, y: (rect.top + rect.height / 2 - origin.top) / zoom };
+    };
+    const coords = (step, index) => positions[step.id] || { x: 40 + index * 320, y: 180 };
     let connecting = null;
     function connect(target) {
       if (!connecting) return;
@@ -357,7 +355,7 @@ function editor(el, params, api) {
     });
     const startPosition = Array.from({ length: state.draft.steps.length * 2 + 1 }, (_, index) => ({ x: 40 + index * 320, y: 30 })).find(position => !state.draft.steps.some((step, index) => {
       const node = coords(step, index);
-      return node.x < position.x + 240 && node.x + 240 > position.x && node.y < position.y + 100 && node.y + 208 > position.y;
+      return node.x < position.x + 240 && node.x + 240 > position.x && node.y < position.y + 100 && node.y + 172 > position.y;
     }));
     const start = h("section.auto-node.auto-start", { style: { left: `${startPosition.x}px`, top: `${startPosition.y}px` }, dataset: { selected: String(state.selected === "@start") } },
       button("Start", () => { state.selected = "@start"; draw(); }, { class: "auto-node-handle", "aria-label": "Select Start", "aria-pressed": String(state.selected === "@start") }),
@@ -365,22 +363,23 @@ function editor(el, params, api) {
     plane.append(start);
     function edges() {
       plane.style.width = `${Math.max(640, startPosition.x + 280, ...state.draft.steps.map((step,index) => coords(step,index).x + 280))}px`;
-      plane.style.height = `${Math.max(400, ...state.draft.steps.map((step,index) => coords(step,index).y + 220))}px`;
+      plane.style.height = `${Math.max(400, ...state.draft.steps.map((step,index) => coords(step,index).y + (plane.querySelector(`[data-step="${CSS.escape(step.id)}"]`)?.offsetHeight || 220) + 20))}px`;
       sizeBounds();
       svg.replaceChildren();
       state.draft.steps.forEach((step, index) => {
         const before = index ? coords(state.draft.steps[index - 1], index - 1) : startPosition, after = coords(step, index);
         const path = document.createElementNS(svg.namespaceURI, "path");
         path.setAttribute("class", "auto-sequence-edge");
-        path.setAttribute("d", index ? `M ${before.x + 240} ${before.y + 45} C ${before.x + 280} ${before.y + 45}, ${after.x - 40} ${after.y + 45}, ${after.x} ${after.y + 45}` : `M ${before.x + 120} ${before.y + 100} C ${before.x + 120} ${before.y + 150}, ${after.x + 120} ${after.y - 50}, ${after.x + 120} ${after.y}`);
+        path.setAttribute("d", index ? `M ${before.x + 240} ${before.y + 26} C ${before.x + 280} ${before.y + 26}, ${after.x - 40} ${after.y + 26}, ${after.x} ${after.y + 26}` : `M ${before.x + 120} ${before.y + 84} C ${before.x + 120} ${before.y + 134}, ${after.x + 120} ${after.y - 50}, ${after.x + 120} ${after.y}`);
         svg.append(path);
         for (const input of step.action.inputs.filter(input => input.kind === "step")) {
           const sourceIndex = state.draft.steps.findIndex(source => source.id === input.step);
           if (sourceIndex < 0) continue;
           const source = coords(state.draft.steps[sourceIndex], sourceIndex);
-          const outputY = source.y + (input.port === "text" ? 137 : 177);
+          const output = portPoint(input.step, `[data-port="${input.port}"] .auto-port-dot`, { x: source.x + 240, y: source.y + (input.port === "text" ? 114 : 146) });
+          const target = portPoint(step.id, ".auto-port-input .auto-port-dot", { x: after.x, y: after.y + 114 });
           const edge = document.createElementNS(svg.namespaceURI, "path");
-          edge.setAttribute("d", `M ${source.x + 240} ${outputY} C ${source.x + 280} ${outputY}, ${after.x - 40} ${after.y + 137}, ${after.x} ${after.y + 137}`);
+          edge.setAttribute("d", `M ${output.x} ${output.y} C ${output.x + 40} ${output.y}, ${target.x - 40} ${target.y}, ${target.x} ${target.y}`);
           edge.dataset.port = input.port; svg.append(edge);
         }
       });
@@ -418,13 +417,17 @@ function editor(el, params, api) {
         node.style.left = `${positions[step.id].x}px`; node.style.top = `${positions[step.id].y}px`; edges(); void queueLayoutSave();
       });
       const ports = h("div.auto-node-ports");
-      if (index) ports.append(button("Inputs", () => connect(step.id), { class: "auto-port-input", "data-input-step": step.id, "aria-label": `Connect input to ${step.name}` }));
+      if (index) {
+        const input = button("Inputs", () => connect(step.id), { class: "auto-port-input", "data-input-step": step.id, "aria-label": `Connect input to ${step.name}` });
+        input.prepend(h("span.auto-port-dot", { "aria-hidden": "true" })); ports.append(input);
+      }
       for (const port of ["text", "files"]) {
         let dragged = false, pointerStart, preview;
         const control = button(port === "text" ? "Text" : "Files", () => {
           if (dragged) { dragged = false; return; }
           connecting = { step: step.id, port }; control.setAttribute("aria-pressed", "true"); status.textContent = "Choose the next step's input";
         }, { class: "auto-port-output", "data-port": port, "aria-pressed": "false", "aria-label": `Connect ${port} from ${step.name}` });
+        control.append(h("span.auto-port-dot", { "aria-hidden": "true" }));
         control.addEventListener("pointerdown", event => {
           if (event.button !== 0 || !event.isPrimary) return;
           dragged = false; pointerStart = { x: event.clientX, y: event.clientY }; connecting = { step: step.id, port }; control.setPointerCapture(event.pointerId);
@@ -436,7 +439,8 @@ function editor(el, params, api) {
           if (!preview) { preview = document.createElementNS(svg.namespaceURI, "path"); svg.append(preview); }
           const bounds = plane.getBoundingClientRect(), current = coords(step, index);
           const x = (event.clientX - bounds.left) / zoom, y = (event.clientY - bounds.top) / zoom;
-          preview.setAttribute("d", `M ${current.x + 240} ${current.y + (port === "text" ? 137 : 177)} C ${current.x + 280} ${y}, ${x - 40} ${y}, ${x} ${y}`);
+          const output = portPoint(step.id, `[data-port="${port}"] .auto-port-dot`, { x: current.x + 240, y: current.y + (port === "text" ? 114 : 146) });
+          preview.setAttribute("d", `M ${output.x} ${output.y} C ${output.x + 40} ${y}, ${x - 40} ${y}, ${x} ${y}`);
         });
         control.addEventListener("pointerup", event => {
           if (!control.hasPointerCapture(event.pointerId)) return;
@@ -454,11 +458,13 @@ function editor(el, params, api) {
       node.append(handle, h("span.auto-kind", { agent: "Agent", approval: "Approval", result: "Result" }[step.action.kind]), h("span.auto-node-summary", step.action.prompt || step.action.title || ""), ports); plane.append(node);
     });
     edges();
+    canvasObserver?.disconnect(); canvasObserver = new ResizeObserver(edges); canvasObserver.observe(viewport);
+    queueMicrotask(() => { if (alive && viewport.isConnected) edges(); });
     function zoomTo(value, fit = false) {
       const width = Number.parseFloat(plane.style.width), height = Number.parseFloat(plane.style.height);
       const x = width * zoom <= viewport.clientWidth ? width / 2 : (viewport.scrollLeft + viewport.clientWidth / 2) / zoom;
       const y = height * zoom <= viewport.clientHeight ? height / 2 : (viewport.scrollTop + viewport.clientHeight / 2) / zoom;
-      zoom = value; state.zoom = zoom; plane.style.transform = `scale(${zoom})`; sizeBounds();
+      zoom = value; state.zoom = zoom; plane.style.transform = `scale(${zoom})`; sizeBounds(); edges();
       viewport.scrollTo({ left: fit ? 0 : Math.max(0, x * zoom - viewport.clientWidth / 2), top: fit ? 0 : Math.max(0, y * zoom - viewport.clientHeight / 2) });
       state.pan = { left: viewport.scrollLeft, top: viewport.scrollTop };
     }
@@ -466,7 +472,14 @@ function editor(el, params, api) {
       const width = Number.parseFloat(plane.style.width), height = Number.parseFloat(plane.style.height);
       zoomTo(Math.min(1, Math.max(.05, Math.min(viewport.clientWidth / width, viewport.clientHeight / height))), true);
     }));
-    return h("div.auto-canvas", toolbar, viewport);
+    const notice = h("p.canvas-notice", { role: "status" });
+    const scene = canvasScene(`editor:${key}`, message => { notice.textContent = message; });
+    canvasTools({ viewport, plane, scene, toolbar, scale: () => zoom, create: point => {
+      state.insertPoint = point;
+      const add = content.querySelector(".auto-add");
+      if (add && add.querySelector("summary").getAttribute("aria-disabled") !== "true") { add.open = true; add.querySelector("button")?.focus(); }
+    } });
+    return h("div.auto-canvas", toolbar, viewport, notice);
   }
   function draw() {
     if (!alive) return;
@@ -506,15 +519,15 @@ function editor(el, params, api) {
     }
     const addDisabled = state.draft.steps.length >= 8 || busy || loading || !!state.save || !!state.run;
     const addChoices = h("div.auto-more-actions");
-    const add = h("details.auto-add.auto-more", h("summary.btn", { "aria-label": "Add step", "aria-disabled": String(addDisabled), onclick: event => { if (addDisabled) event.preventDefault(); } }, icon("plus"), "Add step"), addChoices);
+    const add = h("details.auto-add.auto-more", h("summary.btn", { "aria-label": "Add step", "aria-disabled": String(addDisabled), onclick: event => { if (addDisabled) event.preventDefault(); } }, icon("plus"), "Add node"), addChoices);
     add.addEventListener("click", event => { if (event.target.closest("button")) add.open = false; });
     add.addEventListener("keydown", event => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); add.open = false; add.querySelector("summary").focus(); } });
     for (const kind of ["agent", "approval", "result"]) addChoices.append(button(`Add ${kind === "agent" ? "agent" : kind}`, () => edit(() => {
       const previous = state.draft.steps.at(-1), inputs = previous ? [{ kind: "step", step: previous.id, port: "text" }, { kind: "step", step: previous.id, port: "files" }] : [];
       const step = { id: uid(), name: { agent: "Work", approval: "Approval", result: "Result" }[kind], action: { kind, inputs, ...(kind === "agent" ? { target: { kind: "general", model: null }, prompt: "" } : kind === "approval" ? { title: "Continue?" } : {}) } };
-      state.draft.steps.push(step); state.selected = step.id;
+      state.draft.steps.push(step); state.selected = step.id; if (state.insertPoint) { state.layout.positions[step.id] = state.insertPoint; state.insertPoint = null; state.layoutDirty = true; }
     }), { disabled: state.draft.steps.length >= 8 || busy || loading || !!state.save || !!state.run }));
-    content.querySelector(".auto-canvas-tools").prepend(add);
+    content.querySelector(".auto-canvas-tools").append(add);
     const inherited = inheritedPolicies();
     const settings = permissions();
     if (inherited) settings.append(inherited);
@@ -592,19 +605,25 @@ function editor(el, params, api) {
   async function recoverStart() {
     await perform(async () => {
       if (!state.run) return;
-      const result = await api.call("automation_cancel_start", state.run);
+      const attempt = state.run;
+      const result = await api.call("automation_cancel_start", attempt);
+      if (state.run?.request !== attempt.request) return;
       state.run = null;
       if (alive && result.run) api.openView("work-chat", { work: result.run.work });
     });
   }
   async function start() {
-    const pending = await api.call("automation_begin_start", state.run);
-    const same = pending.request === state.run.request && pending.automation === state.run.automation && pending.expected === state.run.expected && Object.keys(pending.inputs).length === Object.keys(state.run.inputs).length && Object.entries(pending.inputs).every(([key, value]) => JSON.stringify(value) === JSON.stringify(state.run.inputs[key]));
+    const attempt = state.run;
+    const pending = await api.call("automation_begin_start", attempt);
+    if (state.run?.request !== attempt.request) return;
+    const same = pending.request === attempt.request && pending.automation === attempt.automation && pending.expected === attempt.expected && Object.keys(pending.inputs).length === Object.keys(attempt.inputs).length && Object.entries(pending.inputs).every(([key, value]) => JSON.stringify(value) === JSON.stringify(attempt.inputs[key]));
     state.run = pending;
     if (!same) throw new Error("Another start is pending. Recover it before starting again.");
-    const run = await api.call("automation_run", state.run);
-    state.lastStart = await api.call("automation_acknowledge_start", state.run);
-    state.run = null;
+    const run = await api.call("automation_run", pending);
+    if (state.run?.request !== pending.request) return;
+    const acknowledged = await api.call("automation_acknowledge_start", pending);
+    if (state.run?.request !== pending.request) return;
+    state.lastStart = acknowledged; state.run = null;
     if (alive) api.openView("work-chat", { work: run.work });
   }
   function testWebhookInputs() {
@@ -720,7 +739,7 @@ function editor(el, params, api) {
     } catch (error) { loadError = true; if (alive) updateHeader(); throw error; }
   }
   void loadInitial().catch(error => { if (alive) status.textContent = error.message; });
-  return { focus: () => content.querySelector("input")?.focus(), dispose() { alive = false; off?.(); clearTimeout(historyTimer); clearTimeout(previewTimer); clearTimeout(validationTimer); validationGeneration++; previewGeneration++; hookSecret = null; el.removeEventListener("keydown", keydown); document.removeEventListener("pointerdown", outsideActions); } };
+  return { summary: () => ({ name: state.draft.name }), focus: () => content.querySelector("input")?.focus(), dispose() { alive = false; canvasObserver?.disconnect(); off?.(); clearTimeout(historyTimer); clearTimeout(previewTimer); clearTimeout(validationTimer); validationGeneration++; previewGeneration++; hookSecret = null; el.removeEventListener("keydown", keydown); document.removeEventListener("pointerdown", outsideActions); } };
 }
 
 export function registerAutomationEditor(api) {

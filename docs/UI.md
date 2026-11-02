@@ -335,3 +335,25 @@ messages byte for byte (invocation ids aside), and the tool list, which differs 
   `/grants`); "for this session" grants end with the process, as in the shell.
 - There is no macOS WebDriver for the native window; its page is tested in WebKit instead,
   and an app's bundle can be checked through its browser transport.
+
+## Automations canvas
+
+Automations opens the project canvas. Click empty space or choose Add automation to create
+and configure a draft. Back or Escape returns to the canvas. A pending draft keeps its
+original save identity when reopened. Saved revisions, activation and execution authority
+use the existing runtime protocol.
+
+The lower toolbar selects, pans, draws, adds rectangles and changes zoom. Undo drawing
+removes the last visual mark. Visual marks do not execute. The editor adds supported Agent,
+Approval and Result steps through Add node. Empty-space clicks open that same menu. The
+existing eight-step limit and validation apply.
+
+Overview positions and drawings use version1 local storage, scoped by runtime and project.
+Editor drawings are also local. They persist on this browser origin or native device, not
+across devices. Unsaved drafts survive section navigation within the current page; save a
+draft before reloading the page. Storage failures appear over the canvas. Step positions
+continue to use the runtime's revisioned automation_layout record.
+
+Drag overview cards to arrange them. Alt plus an arrow moves a focused card. Enter on the
+canvas creates a draft; all tools are also reachable with Tab. Escape restores selection.
+Tasks uses the same boardView, itemPanel and ticketShell as an ordinary project board.

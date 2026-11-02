@@ -319,7 +319,7 @@ export function boardView(el, params, context = null) {
       } }, h("span", n ? `Delete the board and its ${n === 1 ? "item" : `${n} items`}` : "Delete the board")),
     ], { end: true });
   };
-  const head = h("div.bd-head", aggregate ? h("h1.sv-title", "Work") : goal, needsChip, aggregate ? null : moreBtn);
+  const head = h("div.bd-head", aggregate ? null : goal, needsChip, aggregate ? null : moreBtn);
   const cols = h("div.bd-cols");
   const undo = h("div.bd-undo", { role: "status" });
   undo.hidden = true;
@@ -826,7 +826,7 @@ function itemPanel(el, params, ark, gone, store = sharedStore) {
   shell.head.append(title);
   const chat = h("section.bd-p-chat");
   shell.content.append(blocked, note, work, chat, history);
-  shell.properties.append(h("h2", "Properties"), segs, meta, del);
+  shell.properties.append(segs, meta, del);
   // The pane can change width: the text boxes follow.
   const resized = new ResizeObserver(() => { fitTitle(); fitNote(); });
   resized.observe(el);

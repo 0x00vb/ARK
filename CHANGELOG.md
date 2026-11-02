@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.32.4] - 2026-11-02
+
+- Open Automations as a canvas. Create in empty space, configure within the section and
+  arrange automations with drawing, shapes, pan and zoom controls.
+- Keep pending automation drafts available on the canvas. Preserve save and start attempts
+  when configuration is closed and reopened.
+- Remove the repeated Tasks heading. Simplify shared board cards and ticket properties.
+- Compact vertical spacing, desktop fields and Start nodes. Connector lines follow actual
+  port centers in compact and touch layouts.
+
 ## [0.32.3] - 2026-11-01
 
 - Work uses the existing board controller and ticket detail, including pointer and keyboard moves and manual ticket creation. The compact message field preserves the assigned target, selected conversation and retry identity. Active executions refuse manual status changes.

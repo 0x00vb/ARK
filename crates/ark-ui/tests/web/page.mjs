@@ -48,14 +48,13 @@ const scenarios = {
   async "product-followups"(page) {
     const calls=[];page.on('request',request=>{if(request.method()==='POST'&&new URL(request.url()).pathname==='/rpc') calls.push(request.postDataJSON());});
     await page.evaluate(()=>window.ark.openView('schedules'));
-    await page.getByRole('button',{name:'Agenda',exact:true}).click();
     await page.getByRole('button',{name:/Review real schedule/}).first().waitFor();
     await page.getByRole('button',{name:/Review real schedule/}).first().click();
-    assert.match(await page.locator('.cal-facts').innerText(),/s-fixture/);
-    const when = await page.locator('.cal-facts dt').filter({hasText:/^When$/}).evaluate(el=>el.nextElementSibling.textContent);
-    assert.ok(!when.includes(' to '),when);
+    await page.getByLabel('More automation actions',{exact:true}).click();
+    await page.getByRole('button',{name:'Current schedule',exact:true}).click();
+    await page.locator('.sc-panel').getByRole('button',{name:'Run now',exact:true}).waitFor();
     await shot(page,'real-schedule-details');
-    await page.evaluate(()=>window.ark.openView('marketplace'));
+    await page.evaluate(()=>{window.ark.closePanel('schedule');window.ark.openView('marketplace');});
     await page.getByRole('tab',{name:'Skills',exact:true}).click();
     const data={id:'private.notes',name:'Private notes',summary:'Private workflow',publisher:'Local author',version:'1',skills:[{name:'private-notes',files:{'SKILL.md':'---\nname: private-notes\ndescription: Keep private notes\n---\nRead references/checklist.md.','references/checklist.md':'Use actual evidence. '+ 'x'.repeat(500)}}]};
     await page.getByLabel('Skill package file').setInputFiles({name:'private.skills.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});
@@ -942,6 +941,7 @@ async function agentChat(page) {
   await send.click();
   await pane.locator(".turn:last-child .notice", { hasText: /Stopped/ }).waitFor();
   assert.equal(await page.evaluate(() => window.probe.stops), 1);
+  await page.waitForFunction(() => document.querySelector(".chat-view .composer")?.dataset.running === "false", null, { timeout: 5000 });
   assert.equal(await pane.locator(".composer").getAttribute("data-running"), "false");
 }
 scenarios["agent-chat"] = agentChat;
@@ -1171,7 +1171,7 @@ async function scheduleDestinationStates(page) {
   await scheduleButton.focus(); await page.keyboard.press("Enter");
   const view = page.locator('.view[data-view="schedules"]');
   await view.locator('.work-status', { hasText: "Loading" }).waitFor();
-  assert.equal(await view.getByRole("heading", { name: "Automations", exact: true }).evaluate(el => el === document.activeElement), true);
+  assert.equal(await view.getByLabel("Automations canvas", { exact: true }).evaluate(el => el === document.activeElement), true);
   const rows = [
     ["scheduled", "Upcoming", "next Fri 09:00"], ["running", "Running", "running now"],
     ["asking", "Waiting", "waits for you"], ["retrying", "Retrying", "trying again at 09:10"],
@@ -1193,7 +1193,7 @@ async function scheduleDestinationStates(page) {
   await page.evaluate(() => window.ark.openView("schedules"));
   await view.locator('.work-status', { hasText: "offline" }).waitFor();
   assert.equal(await view.locator(".auto-gallery-card").count(), 7);
-  assert.equal(await view.locator('[role="status"]').count(), 1);
+  assert.equal(await view.locator('.work-status[role="status"]').count(), 1);
   assert.ok(await view.getByRole("button", { name: "Refresh", exact: true }).isVisible());
   let resolveOld, resolveNew;
   const oldRequest = page.waitForRequest(request => request.method() === "POST" && request.postDataJSON()?.params?.operation?.kind === "schedules");
@@ -1212,14 +1212,18 @@ async function scheduleDestinationStates(page) {
   await view.getByText("New project").waitFor();
   replies.push([]);
   await page.evaluate(() => window.ark.openView("schedules"));
-  await view.getByRole("heading", { name: "No automations yet", exact: true }).waitFor();
+  await view.getByRole("button", { name: "Add automation", exact: true }).waitFor();
+  await page.waitForFunction(() => !document.querySelector(".automations-library .work-status")?.textContent);
+  assert.equal(await view.locator(".auto-gallery-card").count(), 0);
   replies.push(() => Promise.reject(new Error("offline")));
   await page.evaluate(() => window.ark.openView("schedules"));
   await view.locator('.work-status', { hasText: "offline" }).waitFor();
   await shot(page, "schedule-destination-offline");
   replies.push([]);
   await view.getByRole("button", { name: "Refresh", exact: true }).click();
-  await view.getByRole("heading", { name: "No automations yet", exact: true }).waitFor();
+  await view.getByRole("button", { name: "Add automation", exact: true }).waitFor();
+  await page.waitForFunction(() => !document.querySelector(".automations-library .work-status")?.textContent);
+  assert.equal(await view.locator(".auto-gallery-card").count(), 0);
   await page.getByRole("navigation", { name: "Destinations" }).getByRole("button", { name: "Chat", exact: true }).click();
   assert.equal(await page.locator("#scroller").isVisible(), true);
 }

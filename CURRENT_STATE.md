@@ -1,3 +1,17 @@
+## Automations canvas and shared Tasks polish, 2 November 2026
+
+Local candidate in this tree. Automations opens a canvas with direct empty-space creation,
+retained draft nodes and configuration inside the section. Selection, pan, drawing, shapes
+and zoom share the lower toolbar. Overview positions and drawings are local to this device,
+runtime and project; executable revisions and step positions retain their existing protocol.
+Tasks still uses boardView and itemPanel. Shared cards and ticket surfaces are quieter.
+Verification and independent review: ../board/evidence/automations-canvas-clean-ui-20261102/.
+The owner requested compact vertical density and authorized deployment, then waived timing-only
+blockers. Native publication is being qualified for Desktop0.9.17/Core0.32.4. The installed
+Desktop0.9.16 has page updates disabled, so the native updater carries this change.
+Functional, signature, compatibility and public-byte gates remain required. Physical touch
+is unverified.
+
 ## Core0.32.3 published and verified, 1 November 2026
 
 Immutable tagv0.32.3 points to6934606e5fc028d6474d3e024e447e6911598466 on both
@@ -646,7 +660,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.32.3 (release metadata prepared; last verified public tag is v0.32.2) |
+| Latest tag | v0.32.4 (release preparation; publication qualification in progress) |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

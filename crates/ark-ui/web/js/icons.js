@@ -1,4 +1,8 @@
 export const ICONS = {
+  "square": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4Z"/></g>',
+  "pencil": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m4 16 12-12 4 4L8 20H4Z M13 7l4 4"/></g>',
+  "hand": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12V6a2 2 0 0 1 4 0v5-7a2 2 0 0 1 4 0v7-4a2 2 0 0 1 4 0v8c0 4-3 7-7 7h-1c-3 0-4-2-6-5l-2-3a2 2 0 0 1 3-2l1 1"/></g>',
+  "cursor": '<g transform="scale(10.666666667)" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3 20 12l-7 2-3 7Z"/></g>',
   "trash": '<g fill="none" stroke="currentColor" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"><path d="M40 64h176M96 64V40h64v24M64 64l8 152h112l8-152M104 104v72M152 104v72"/></g>',
   "home": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 10 12 3l9 7v10H3Z M9 20v-7h6v7\"/></g>",
   "chat": "<g transform=\"scale(10.666666667)\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 4h16v13H9l-5 4Z M8 9h8 M8 13h5\"/></g>",

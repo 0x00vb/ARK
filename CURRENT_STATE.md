@@ -1,23 +1,25 @@
-## Canvas review follow-up, 2 November 2026
+## Compact canvas delivered, 2 November 2026
 
-Two fresh reviewers reproduced keyboard movement/focus loss on pending cards and duplicate
-cards after recovering a committed save. Version0.32.5 fixes both before Desktop delivery.
-Published0.32.4 remains immutable. Red/green WebKit evidence is retained in the canvas
-qualification folder. Desktop0.9.17 will pin0.32.5 after publication and fresh verification.
+Corev0.32.5 is published at immutable26d08b47bdbb3629b54a8a6e65cfc6b9dccb4c65.
+Exact-source and fresh public qualification passed every stage. Receipts retain two unchanged
+flaky fixture failures, their isolated passes and complete continuation gates. Two independent
+fresh model reviews found pending-card keyboard/focus and recovered-save duplication; both
+have red/green regressions and final reviewer approval.
 
-## Automations canvas and shared Tasks polish, 2 November 2026
+Desktop0.9.17 compiledsourceec6e35f pins all9direct and22resolved ARK crates to this tag.
+Its full gate passes97Rust and160UI tests. The first unchanged IFC RSS failure is retained;
+the complete rerun passes with the original memory limit. Both Linux builds, app/DMG signing,
+Apple acceptance, stapling and Gatekeeper pass. Public bytes and updater signatures match.
+The actual installed0.9.16 received the signed OTA and restarted into0.9.17/Core0.32.5.
+Its executable matches the candidate SHA256 and passes strict codesign and Gatekeeper.
+Native Automations canvas/tools and shared Tasks are visible; projects and chats remain.
 
-Local candidate in this tree. Automations opens a canvas with direct empty-space creation,
-retained draft nodes and configuration inside the section. Selection, pan, drawing, shapes
-and zoom share the lower toolbar. Overview positions and drawings are local to this device,
-runtime and project; executable revisions and step positions retain their existing protocol.
-Tasks still uses boardView and itemPanel. Shared cards and ticket surfaces are quieter.
-Verification and independent review: ../board/evidence/automations-canvas-clean-ui-20261102/.
-The owner requested compact vertical density and authorized deployment, then waived timing-only
-blockers. Native publication is being qualified for Desktop0.9.17/Core0.32.4. The installed
-Desktop0.9.16 has page updates disabled, so the native updater carries this change.
-Functional, signature, compatibility and public-byte gates remain required. Physical touch
-is unverified.
+Automations opens a project canvas with empty-space creation and inline configuration.
+Positions and drawings are local to this device/runtime/project. Tasks reuses boardView and
+itemPanel. Desktop fields are30px; coarse-pointer targets remain44px. The owner authorized
+native deployment and removing the120second page-release rejection. All functional and
+signature checks remain. Physical touch, Cloud and iOS delivery are not claimed.
+Evidence: ../board/evidence/automations-canvas-clean-ui-20261102/.
 
 ## Core0.32.3 published and verified, 1 November 2026
 

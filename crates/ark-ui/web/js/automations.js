@@ -38,7 +38,14 @@ function library(el, _params, api) {
       else api.openView(id, next);
     }, async call(method, input) {
       const result = await api.call(method, input);
-      if (method === "automation_save" && point && result.automation) { scene.data.positions[result.automation] = point; scene.save(); saved.drafts = (saved.drafts || []).filter(draft => draft !== pendingDraft); }
+      if (method === "automation_save" && point) {
+        const receipt = result.automation ? result : result.saved;
+        if (receipt?.automation) {
+          scene.data.positions[receipt.automation] = { ...(pendingDraft?.point || point) };
+          if (pendingDraft) delete scene.data.positions[`draft:${pendingDraft.key}`];
+          saved.drafts = (saved.drafts || []).filter(draft => draft !== pendingDraft); scene.save();
+        }
+      }
       return result;
     } };
     const controller = editor(element, { ...params, selected: "@start" }, bound);
@@ -85,8 +92,6 @@ function library(el, _params, api) {
         h("div.auto-gallery-diagram", { "aria-hidden": "true" }, ["Schedule", "Agent", "Result"].map(name => h("span.auto-mini-node", name))),
         h("span.sv-main", h("span.sv-objective", schedule.objective), h("span.sv-meta", schedule.says), schedule.last ? h("span.sv-last", schedule.last) : null, counts ? h("span.sv-count", counts) : null), h("span.sv-state", schedule.admission_error || schedule.status))));
     }
-    if (focus) [...body.querySelectorAll("button[data-automation]")].find(button => button.dataset.automation === focus)?.focus({ preventScroll: true });
-    el.scrollTop = scroll;
     for (const draft of saved.drafts || []) {
       const id = `draft:${draft.key}`;
       scene.data.positions[id] = draft.point;
@@ -126,12 +131,17 @@ function library(el, _params, api) {
         if (!event.altKey || !delta) return;
         event.preventDefault();
         const current = scene.data.positions[id] || position;
-        scene.data.positions[id] = { x: Math.max(0, Math.min(5000, current.x + delta[0])), y: Math.max(0, Math.min(5000, current.y + delta[1])) }; scene.save(); draw();
+        scene.data.positions[id] = { x: Math.max(0, Math.min(5000, current.x + delta[0])), y: Math.max(0, Math.min(5000, current.y + delta[1])) };
+        const draft = saved.drafts?.find(draft => `draft:${draft.key}` === id);
+        if (draft) draft.point = scene.data.positions[id];
+        scene.save(); draw();
       });
     }
     const positions = Object.values(scene.data.positions);
     plane.style.width = `${Math.max(2000, ...positions.map(p => p.x + 400))}px`;
     plane.style.height = `${Math.max(1400, ...positions.map(p => p.y + 320), 64 + Math.ceil(list.children.length / 3) * 280)}px`;
+    if (focus) [...body.querySelectorAll("button[data-automation]")].find(button => button.dataset.automation === focus)?.focus({ preventScroll: true });
+    el.scrollTop = scroll;
   }
   async function load() {
     const own = ++generation; status.textContent = "Loading…";

@@ -77,10 +77,13 @@ test('canvas creates in place, separates drawing from execution, and preserves p
         if(method==='automation_history')return {runs:[],next:null};
         if(method==='automation_validate')return {can_save:true,issues:[],activation_issues:[]};
         if(method==='automation_save') {
+          if(input.cancel)return {saved:window.fixture.commitReceipt || null};
           if(window.fixture.holdSave) await new Promise(resolve=>(window.fixture.saves ||= []).push(resolve));
           if(window.fixture.loseSave){ window.fixture.loseSave=false; throw Error('Save response lost'); }
           const entry={definition:{id:'saved',revision:1,enabled:false},revision:{number:1,draft:input.draft}};
-          entries.splice(0,entries.length,entry);return {automation:'saved',revision:1};
+          entries.splice(0,entries.length,entry);
+          if(window.fixture.commitThenLose){window.fixture.commitThenLose=false;window.fixture.commitReceipt={automation:'saved',revision:1};throw Error('Committed receipt lost');}
+          return {automation:'saved',revision:1};
         }
         if(method==='automation_get')return {entry:entries[0],layout:{version:0,positions:{}}};
         throw Error(method);
@@ -109,7 +112,11 @@ test('canvas creates in place, separates drawing from execution, and preserves p
     await page.getByRole('button',{name:'Save',exact:true}).click();
     await page.getByText('Save response lost',{exact:true}).waitFor();
     await page.getByRole('button',{name:'Back',exact:true}).click();
-    await page.getByRole('button',{name:/Weekly review/}).click();
+    const pending=page.getByRole('button',{name:/Weekly review/});
+    await pending.focus();await pending.press('Alt+ArrowRight');
+    assert.equal(await pending.evaluate(el=>el.parentElement.style.left),'510px');
+    assert.equal(await pending.evaluate(el=>el===document.activeElement),true);
+    await pending.click();
     await page.getByRole('button',{name:'Retry saving',exact:true}).click();
     await page.getByRole('button',{name:'Back',exact:true}).click();
     await page.getByRole('button',{name:/Weekly review/}).waitFor();
@@ -117,7 +124,7 @@ test('canvas creates in place, separates drawing from execution, and preserves p
     assert.equal(attempts.length,2);
     assert.deepEqual(attempts[0].input,attempts[1].input);
     const position = await page.evaluate(()=>JSON.parse(localStorage.getItem('ark.canvas:overview:local:canvas-a')).positions.saved);
-    assert.ok(Math.abs(position.x-500)<1);
+    assert.ok(Math.abs(position.x-510)<1);
     assert.ok(Math.abs(position.y-300)<1);
     await page.evaluate(()=>window.fixture.mount());
     assert.equal(await page.locator('.canvas-marks path').count(),1);
@@ -138,6 +145,21 @@ test('canvas creates in place, separates drawing from execution, and preserves p
     const overlapping=await page.evaluate(()=>window.fixture.calls.filter(call=>call.method==='automation_save').slice(-2));
     assert.deepEqual(overlapping[0].input,overlapping[1].input);
     await page.getByRole('button',{name:'Back',exact:true}).click();
+    await page.evaluate(()=>{window.fixture.holdSave=false;window.fixture.commitThenLose=true;});
+    await page.getByRole('button',{name:'Add automation',exact:true}).click();
+    await page.getByLabel('Name',{exact:true}).fill('Recovered draft');
+    await page.getByRole('button',{name:'Save',exact:true}).click();
+    await page.getByText('Committed receipt lost',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Back',exact:true}).click();
+    const recovery=page.locator('[data-automation^="draft:"]',{hasText:'Recovered draft'});
+    await recovery.focus();await recovery.press('Alt+ArrowRight');await recovery.click();
+    await page.getByRole('button',{name:'Recover draft',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('.auto-revision')?.textContent.includes('Saved revision'),null,{timeout:5000});
+    await page.getByRole('button',{name:'Back',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('.auto-gallery-card').length===1,null,{timeout:5000});
+    assert.equal(await page.locator('[data-automation^="draft:"]').count(),0);
+    const recovered=await page.evaluate(()=>JSON.parse(localStorage.getItem('ark.canvas:overview:local:canvas-a')).positions.saved);
+    assert.deepEqual(recovered,{x:90,y:80});
     await page.evaluate(()=>window.fixture.mount('canvas-b'));
     assert.equal(await page.locator('.canvas-marks path').count(),0);
     assert.deepEqual(errors,[]);

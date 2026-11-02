@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.5] - 2026-11-02
+
+- Keep keyboard movement and focus on unsaved automation cards.
+- Reconcile recovered save receipts into one automation card at its latest canvas position.
+
 ## [0.32.4] - 2026-11-02
 
 - Open Automations as a canvas. Create in empty space, configure within the section and

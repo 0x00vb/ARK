@@ -1,3 +1,10 @@
+## Canvas review follow-up, 2 November 2026
+
+Two fresh reviewers reproduced keyboard movement/focus loss on pending cards and duplicate
+cards after recovering a committed save. Version0.32.5 fixes both before Desktop delivery.
+Published0.32.4 remains immutable. Red/green WebKit evidence is retained in the canvas
+qualification folder. Desktop0.9.17 will pin0.32.5 after publication and fresh verification.
+
 ## Automations canvas and shared Tasks polish, 2 November 2026
 
 Local candidate in this tree. Automations opens a canvas with direct empty-space creation,
@@ -660,7 +667,7 @@ Last updated: 2026-10-28 (v0.27.1, a Mac as a computer)
 
 | | |
 |---|---|
-| Latest tag | v0.32.4 (release preparation; publication qualification in progress) |
+| Latest tag | v0.32.5 (release preparation; publication qualification in progress) |
 | Release branch | `codex/settings-ui-release`, isolated from unpublished hosted changes on main. |
 | v0.14.0 | ADR 0048 (chat turns survive a crash and continue), ADR 0049 (typed Codex tool arguments, retry after shown text), ADR 0050 (an agent never loses its task), and `ark-os` from `ci/windows` (ADR 0022, merged; Windows not yet run on a machine). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit |
 | v0.15.0 | ADR 0051 (a turn ends on its answer, the project's `AGENTS.md` in each turn, code coloured in the editor), ADR 0052 (a chat runs on the computer the person picks, over SSH; new crate `ark-reach`; rustls), ADR 0053 (scheduled work; renumbered from the branch's 0051). `ARK_UI_PAGE_TESTS=1 scripts/ci.sh` passed on the release commit. No live Claude run before the tag (the owner's choice, 2026-10-08; ROADMAP › Deferred) |

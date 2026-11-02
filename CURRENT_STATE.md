@@ -9,11 +9,16 @@ The first fresh run hit an unchanged authentication test's2second wall-clock ass
 Its isolated run passed in0.28seconds; the subsequent fresh run passed all127model tests
 with the original limits. Failed and passing receipts are retained. No tag or limit moved.
 
-Desktop0.9.16 sourcec6baa35 pins all22resolved ARK packages to this tag. Its signed release
-wrapper is running. Nativebuild11 passed its full gate, strict development signing and
-profile validation; the actual iPhone reports installedbuild11. Final functional phone
-qualification, Desktop staging/promotion/OTA and Site publication remain pending. The
-original private QA window expired and runtime/sidecar are stopped; no extension is approved.
+Desktop0.9.16 compiledsource4952567 pins all22resolved ARK packages to this tag.
+Its stable release is published and the actual installed0.9.14 updated through the signed
+updater, restarted into0.9.16/Core0.32.3 and passed installedhash/codesign/Gatekeeper.
+Sitec9f6a9d is deployed; public EN/ES HTML matches committed source exactly.
+Nativebuild11 passed its full gate, strict development signing/profile and physical install.
+The owner explicitly deferred iOSpublication and chose Desktopdelivery. Final physical
+16/no-refresh-warning is unconfirmed; the user reportedOffline and both bounded test
+windows had expired at observation. No mobile completion or App Store upload is claimed.
+The server-image registry CI issue is tracked separately in Desktop for future SSH/server
+work; published client and Linux binaries remain qualified. Public Cloud/Fly remains onhold.
 
 Evidence: ../board/evidence/ux-implementation-p0-20261031/core-v0323-source-release.json,
 core-ci-v34-passed.log and core-fresh-public-v0323-passed.log.

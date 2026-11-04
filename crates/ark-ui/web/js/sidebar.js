@@ -211,7 +211,7 @@ export class Sidebar {
     // A chat shows once it has a turn, or while its first one runs.
     const shown = sessions.filter((s) => s.turns > 0 || s.working || this.working.has(s.id) || this.attention.some((item) => item.session === s.id));
     if (!shown.length) return null;
-    const box = h("div.chats", { role: "group" });
+    const box = h("div.chats", { role: "group", "aria-label": "Chats" });
     const all = this.all.has(p.id);
     (all ? shown : shown.slice(0, SHOWN)).forEach((s, i) => box.append(this.chat(s, i)));
     if (shown.length > SHOWN) {

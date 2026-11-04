@@ -35,6 +35,7 @@
 
 pub mod board;
 mod brief;
+mod contacts;
 mod cron;
 mod event;
 mod graph;
@@ -48,6 +49,7 @@ mod tools;
 
 pub use board::{WorkChange, WorkItem, WorkState, WorkStep};
 pub use brief::Brief;
+pub use contacts::{agent_contacts, AgentContact};
 pub use event::{EventKind, OrchEvent};
 pub use graph::{AgentNode, ContextUse, Edge, EdgeKind, Graph, MessageEdge, TaskNode};
 pub use models::{AgentModels, ModelResolver, Models, ModelsBuilder, StoreLedger};
@@ -65,8 +67,8 @@ pub use schedule::{
 };
 pub use spec::{AgentSpec, Budget, TaskSpec};
 pub use tools::{
-    BOARD_ADD, BOARD_LIST, BOARD_UPDATE, CHAT, CREATE, DELEGATE, MESSAGE, SCHEDULE, UNSCHEDULE,
-    WAIT,
+    BOARD_ADD, BOARD_LIST, BOARD_UPDATE, CHAT, CREATE, DELEGATE, MESSAGE, SCHEDULE, START,
+    UNSCHEDULE, WAIT,
 };
 
 #[derive(Debug, thiserror::Error)]

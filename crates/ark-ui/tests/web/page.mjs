@@ -2138,7 +2138,7 @@ scenarios.search = async (page) => {
   await composer.fill("Keep this draft");
   await composer.focus();
   await page.keyboard.press("Meta+Shift+f");
-  const search = page.getByRole("combobox", { name: "Search chats" });
+  const search = page.getByRole("combobox", { name: "Search chats and agents" });
   await search.waitFor();
   assert.equal(await search.getAttribute("aria-controls"), "chat-search-results");
   await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
@@ -3689,6 +3689,42 @@ async function computerSwitch(page) {
   await row.getByRole("button", { name: "Turn off" }).waitFor();
 }
 scenarios["computer-switch"] = computerSwitch;
+
+scenarios["agent-conversations-consumer"] = async page => {
+  await page.locator("#app.ready").waitFor();
+  const composer = page.locator("#input");
+  await finished(page, () => composer.fill("Create a source agent").then(() => composer.press("Enter")));
+  await page.getByRole("button", { name: "Chat with source", exact: true }).click();
+  const source = page.getByRole("textbox", { name: "Ask source", exact: true });
+  await source.fill("Create a colleague and send a review brief. PRIVATE SOURCE SECRET");
+  await source.press("Enter");
+  await page.getByRole("button", { name: "Chat with colleague", exact: true }).waitFor();
+  await page.waitForFunction(async () => (await window.ark.call("graph")).tasks.some(task => task.owner === "colleague" && task.state === "done"));
+  assert.equal(await page.getByRole("button", { name: "Chat with source", exact: true }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: "Chat with colleague", exact: true }).count(), 1);
+  assert.equal(await page.locator('.dk-kept-row').count(), 0);
+  const original = await page.evaluate(async () => (await window.ark.call("agents")).find(agent => agent.name === "colleague"));
+  await page.getByRole("button", { name: "Chat with colleague", exact: true }).click();
+  await page.locator('.dk-agent-chat .answer').filter({ hasText: "BRIEF RECEIVED" }).waitFor();
+  const child = page.getByRole("textbox", { name: "Ask colleague", exact: true });
+  await child.fill("Continue this review tomorrow");
+  await child.press("Enter");
+  await page.locator('.dk-agent-chat .answer').filter({ hasText: "FOLLOWUP RECEIVED" }).waitFor();
+  const current = await page.evaluate(async () => (await window.ark.call("agents")).find(agent => agent.name === "colleague"));
+  assert.equal(current.scope, original.scope);
+  assert.equal(current.session, original.session);
+  await page.keyboard.press("Meta+Shift+f");
+  const search = page.getByRole("combobox", { name: "Search chats and agents" });
+  await search.fill("incoming documents");
+  await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
+  assert.equal(await page.getByRole("option").count(), 1);
+  await search.press("Enter");
+  assert.equal(await page.getByRole("textbox", { name: "Ask colleague", exact: true }).count(), 1);
+  const records = await page.evaluate(async () => ({ agents: await window.ark.call("agents"), sessions: await window.ark.call("sessions") }));
+  assert.equal(records.agents.length, 2);
+  assert.equal(records.sessions.filter(session => session.turns > 0).length, 1);
+  await shot(page, "persistent-agents-real-host");
+};
 
 const run = scenarios[scenario];
 if (!run) {

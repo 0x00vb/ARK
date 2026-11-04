@@ -130,6 +130,27 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
     }
     let mut model: Arc<dyn ark_model::Provider> =
         Arc::new(MockProvider::new("m", script).with_chunk_delay(chunk));
+    if scenario == "agent-conversations-consumer" {
+        let source_step = std::sync::atomic::AtomicUsize::new(0);
+        let child_step = std::sync::atomic::AtomicUsize::new(0);
+        model = Arc::new(MockProvider::new("m", vec![]).with_fallback(move |request| {
+            use std::sync::atomic::Ordering;
+            if request.system.contains(r#"You are the agent "colleague""#) {
+                if child_step.fetch_add(1, Ordering::SeqCst) == 0 { say("BRIEF RECEIVED", false) }
+                else { say("FOLLOWUP RECEIVED", false) }
+            } else if request.system.contains(r#"You are the agent "source""#) {
+                match source_step.fetch_add(1, Ordering::SeqCst) {
+                    0 => call("agents.create", json!({"name":"colleague","role":"Reviews incoming documents","instructions":"Review the supplied brief."})),
+                    1 => call("agents.start", json!({"to":"colleague","objective":"Review this proposal","context":"NECESSARY BRIEF"})),
+                    _ => say("Colleague has its own conversation.", false),
+                }
+            } else if request.messages.iter().any(|message| message.tool_call_id.is_some()) {
+                say("Source is ready.", false)
+            } else {
+                call("agents.create", json!({"name":"source","role":"Organizes document reviews"}))
+            }
+        }));
+    }
     if scenario == "withdrawn" {
         model = Arc::new(CutOff {
             inner: model,
@@ -292,6 +313,32 @@ async fn drive_app(scenario: &str, script: Vec<Completion>, chunk: Duration, age
                     .as_slice(),
             )
             .extension_script("file-proof-entry.js");
+    }
+    if scenario == "agent-conversations-consumer" {
+        let root = PathBuf::from(
+            std::env::var_os("ARK_UI_AGENT_CONSUMER")
+                .expect("ARK_UI_AGENT_CONSUMER must name the consumer ui folder"),
+        );
+        let mut pending = vec![root.clone()];
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    if path.file_name().unwrap() != "tests" {
+                        pending.push(path);
+                    }
+                } else {
+                    ui = ui.asset(
+                        path.strip_prefix(&root).unwrap().to_str().unwrap(),
+                        std::fs::read(&path).unwrap(),
+                    );
+                }
+            }
+        }
+        ui = ui.asset("models.js", b"export const choice = {}; export const modelName = value => value;".as_slice())
+            .asset("agent-proof-entry.js", b"import './agents.js'; import './agent-chat.js'; window.ark.extensionReady('agent-proof-entry');".as_slice())
+            .stylesheet("desktop.css").stylesheet("product.css").stylesheet("brand.css")
+            .extension_script("agent-proof-entry.js");
     }
     if scenario == "advanced-files" {
         // The same worker as a registered WASM worker and as an ordinary asset.
@@ -1481,4 +1528,9 @@ async fn a_process_shows_its_output_and_opens_its_page() {
 #[tokio::test(flavor = "multi_thread")]
 async fn private_skills_and_schedule_calendar_work_through_the_real_page_and_scoped_host() {
     drive_app("product-followups", vec![], Duration::ZERO, true).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn consumer_agent_creation_handoff_search_and_followup_use_real_host_records() {
+    drive_app("agent-conversations-consumer", vec![], Duration::ZERO, true).await;
 }

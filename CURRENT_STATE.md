@@ -1,3 +1,19 @@
+## Persistent conversations qualified candidate, 30 October 2026
+
+Uncommitted work in ../ark-persistent-conversations adds persistent colleague creation,
+independent bounded handoffs and project-qualified agent conversations. Protocol1.6 shares
+agent history, origin, full results and produced files with native clients. Durable device sends
+survive retries and restart. Validated legacy aliases preserve their requested read identity.
+Agent events reach phone-only clients. Desktop and browser group Agents/Chats and search roles;
+native iPhone has a compact agent list and stable search. No model transcript is copied on handoff.
+
+Core full CI, benchmark comparison, authenticated headless HTTP and real Host/WebKit consumer
+checks pass. Desktop full check passes144UI cases; native full gate and narrow dark supplement
+pass. Cloud's four service checks pass against isolated test databases. Independent source review
+passes. Evidence: ../board/evidence/persistent-conversations-20261030/result.json.
+No commit, release, pin bump, deployment or physical-phone install. Matching Core/consumer releases
+and the Cloud runtime image remain the delivery step when the owner requests them.
+
 ## Desktop0.9.8 published, 29 October2026
 
 Desktopv0.9.8 e9d76d84549e15c9ca412c0d0a1edf67f007eee7 is public on the Mac download

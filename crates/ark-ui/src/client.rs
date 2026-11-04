@@ -5,13 +5,15 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+use crate::host::agent_conversations::{task_display, task_sender, ClientAgent};
 use crate::host::Host;
 use crate::resource::{ResourceOperation, ResourceOperationKind};
+use ark_interact::ark_orchestrate::{AgentState, TaskState};
 
 pub(crate) async fn home(host: &Arc<Host>) -> anyhow::Result<Value> {
     let hello = host.call("hello", json!({})).await?;
     let attention = host.call("attention_all", json!({})).await?;
-    let sessions = host.call("sessions", json!({ "all": true })).await?;
+    let sessions = all_chats(host).await?;
     let working = host.call("working", json!({})).await?;
 
     let mut needs = Vec::new();
@@ -24,25 +26,120 @@ pub(crate) async fn home(host: &Arc<Host>) -> anyhow::Result<Value> {
         }
     }
 
+    let mut active = working
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(working_item)
+        .collect::<Vec<_>>();
+    for entry in host.client_agents()? {
+        for task in host
+            .client_agent_tasks(&entry)?
+            .iter()
+            .filter(|task| !task.state.is_final() && task.state != TaskState::Suspended)
+        {
+            active.push(
+                json!({ "id": task.id, "title": task.objective, "step": task_display(task),
+                "teammate": entry.agent.name, "computer": "This computer", "elapsedSeconds": 0,
+                "phase": "working", "chatId": entry.id() }),
+            );
+        }
+    }
     Ok(json!({
         "sequence": decimal(hello["seq"].as_u64().unwrap_or(0)),
         "attention": needs,
-        "working": working.as_array().into_iter().flatten().map(working_item).collect::<Vec<_>>(),
+        "working": active,
         "recent": recent,
-        "mostRecentChat": sessions.as_array().and_then(|rows| rows.first()).map(chat_item),
+        "mostRecentChat": sessions.first(),
     }))
 }
 
 pub(crate) async fn chats(host: &Arc<Host>) -> anyhow::Result<Value> {
     let hello = host.call("hello", json!({})).await?;
+    Ok(
+        json!({ "sequence": decimal(hello["seq"].as_u64().unwrap_or(0)), "chats": all_chats(host).await? }),
+    )
+}
+
+async fn all_chats(host: &Arc<Host>) -> anyhow::Result<Vec<Value>> {
+    let agents = host.client_agents()?;
+    let scopes: std::collections::HashSet<&str> = agents
+        .iter()
+        .map(|entry| entry.agent.scope.as_str())
+        .collect();
     let sessions = host.call("sessions", json!({ "all": true })).await?;
-    Ok(json!({
-        "sequence": decimal(hello["seq"].as_u64().unwrap_or(0)),
-        "chats": sessions.as_array().into_iter().flatten().map(chat_item).collect::<Vec<_>>(),
-    }))
+    let mut rows = sessions
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|row| {
+            !row["project"]
+                .as_str()
+                .is_some_and(|project| scopes.contains(project))
+        })
+        .map(chat_item)
+        .collect::<Vec<_>>();
+    rows.extend(
+        agents
+            .iter()
+            .filter(|entry| entry.agent.state != AgentState::Terminated)
+            .map(agent_item),
+    );
+    rows.sort_by(|a, b| b["updatedAt"].as_str().cmp(&a["updatedAt"].as_str()));
+    Ok(rows)
+}
+
+fn agent_item(entry: &ClientAgent) -> Value {
+    json!({ "id": entry.id(), "title": entry.agent.name, "project": entry.project.name,
+        "computer": "This computer", "updatedAt": rfc3339(entry.agent.updated_ms.max(entry.agent.created_ms)),
+        "preview": entry.agent.spec.role, "participants": [entry.agent.name], "unread": false,
+        "agent": { "name": entry.agent.name, "role": entry.agent.spec.role } })
+}
+
+async fn agent_conversation(host: &Arc<Host>, entry: ClientAgent) -> anyhow::Result<Value> {
+    let tasks = host.client_agent_tasks(&entry)?;
+    let mut messages = Vec::new();
+    for task in tasks.iter().skip(tasks.len().saturating_sub(50)) {
+        let at = rfc3339(task.created_ms);
+        messages.push(json!({ "id": format!("{}-input", task.id), "role": "person", "author": task_sender(task),
+            "body": task.objective, "createdAt": at, "delivery": "sent" }));
+        if task.state.is_final() || task.state == TaskState::Suspended {
+            messages.push(json!({ "id": format!("{}-answer", task.id), "role": "teammate", "author": entry.agent.name,
+                "body": task_display(task), "createdAt": rfc3339(task.finished_ms.unwrap_or(task.created_ms)) }));
+        }
+    }
+    let attention = host.call("attention_all", json!({})).await?;
+    let task_ids: std::collections::HashSet<&str> =
+        tasks.iter().map(|task| task.id.as_str()).collect();
+    let approvals = attention["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| {
+            item["kind"] == "question"
+                && item["runtime"].is_null()
+                && item["project"] == entry.project.id.as_str()
+                && item["agent"] == entry.agent.name
+                && item["task"]
+                    .as_str()
+                    .is_some_and(|id| task_ids.contains(id))
+        })
+        .map(attention_item)
+        .collect::<Vec<_>>();
+    Ok(
+        json!({ "chat": agent_item(&entry), "messages": messages, "approvals": approvals,
+        "results": host.client_results(&entry.id()).map_err(|error| anyhow::anyhow!("could not read results: {error:?}"))?,
+        "activeTurnId": tasks.iter().find(|task| !task.state.is_final()).map(|task| &task.id) }),
+    )
 }
 
 pub(crate) async fn conversation(host: &Arc<Host>, id: &str) -> anyhow::Result<Value> {
+    if let Some(entry) = host.client_agent(id)? {
+        let mut conversation = agent_conversation(host, entry).await?;
+        conversation["chat"]["id"] = json!(id);
+        return Ok(conversation);
+    }
+
     let sessions = host.call("sessions", json!({ "all": true })).await?;
     let chat = sessions
         .as_array()

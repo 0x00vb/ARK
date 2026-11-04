@@ -11,7 +11,7 @@ let browser;
 before(async () => { browser = await (process.env.ARK_UI_BROWSER === "chromium" ? chromium : webkit).launch({ headless: true }); });
 after(async () => { await browser?.close(); });
 
-async function fixture(run, { boot = false } = {}) {
+async function fixture(run, { boot = false, searchProjects = false } = {}) {
   const context = await browser.newContext({ viewport: { width: 1100, height: 760 } });
   const page = await context.newPage();
   page.setDefaultTimeout(5000);
@@ -27,12 +27,18 @@ async function fixture(run, { boot = false } = {}) {
     execution_mode: "manual", execution_mode_revision: 0,
   };
   const projects = [{ ...summary.project, current: true }];
+  if (searchProjects) projects.push({ id: "b", name: "Writing", current: false });
   const sessions = [{ ...summary.session, updated_at: Date.now() }, { id: "chat-b", title: "Second draft", turns: 1, updated_at: Date.now() }];
   const rpc = {
     hello: () => ({ summary, ui: {}, commands: [], seq: 0, working: [], approvals: [], runtime: "fixture" }),
     summary: () => summary,
     projects: () => projects,
     sessions: () => sessions,
+    agent_contacts: params => {
+      assert.ok(projects.some(project => project.id === params.project));
+      return [{ name: "Archivist", role: params.project === "b" ? "Separate project specialist" : "Keeps procurement decisions", state: "idle" },
+        { name: "Removed", role: "Former reviewer", state: "terminated" }];
+    },
     transcript: () => [],
     places: () => ({ here: "This computer", places: [] }),
     attention_all: () => ({ items: [], notes: [], away: [] }),
@@ -41,14 +47,27 @@ async function fixture(run, { boot = false } = {}) {
     context: () => ({ total: 0, budget: 64000 }),
     resource: params => {
       const results = { "project:grants": [], "project:skills": [], "project:board": null,
-        "project:schedules": [], "process:processes": [] };
+        "project:schedules": [], "process:processes": [], "project:agents": [
+          { name: "Archivist", role: "Keeps procurement decisions", state: "idle" },
+          { name: "Removed", role: "Former reviewer", state: "terminated" },
+        ] };
       const key = `${params.ref?.kind}:${params.operation?.kind}`;
       if (!Object.hasOwn(results, key)) throw Error(`Unknown fixture resource ${key}`);
       const location = params.ref?.location;
-      if (location?.runtime !== "fixture" || location.project !== "a" || !["chat-a", "chat-b"].includes(location.session)) {
+      if (location?.runtime !== "fixture" || !["a", ...(searchProjects ? ["b"] : [])].includes(location.project) || !["chat-a", "chat-b"].includes(location.session)) {
         throw Error(`Unexpected fixture resource location ${JSON.stringify(location)}`);
       }
       return results[key];
+    },
+    open_project: params => {
+      assert.equal(params.id, "b");
+      summary.project = { id: "b", name: "Writing" };
+      summary.location.project = "b";
+      summary.session = { ...sessions[1] };
+      summary.location.session = "chat-b";
+      projects.forEach(project => { project.current = project.id === "b"; });
+      setTimeout(() => void events.fulfill({ contentType: "text/event-stream", body: `data: ${JSON.stringify({ kind: "summary", summary })}\n\n` }), 180);
+      return null;
     },
     open_session: async params => {
       assert.equal(params.id, "chat-b");
@@ -372,3 +391,74 @@ test("project content fits light, dark and narrow sidebar layouts", () => fixtur
     }
   }
 }));
+
+
+test("shared search discovers zero-turn agents by role, preserves chats, and opens the scoped identity", () => fixture(async page => {
+  await page.locator("#app.ready").waitFor();
+  await page.evaluate(() => {
+    window.openedSearch = [];
+    window.ark.searchSource({ id: "agents", label: "Agent", async load(project, api) {
+      return (await api.call("agent_contacts", { project: project.id })).filter(agent => agent.state !== "terminated").map(agent => ({ id: agent.name, title: agent.name, description: agent.role }));
+    }, open(entry, scoped) { window.openedSearch.push({ id: entry.id, location: scoped.location }); } });
+  });
+  await page.locator("#input").fill("Keep my unsent draft");
+  await page.locator("#search-chats").click();
+  const input = page.getByRole("combobox", { name: "Search chats and agents" });
+  await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
+  assert.match(await page.locator("#chat-search-results").innerText(), /Second draft/);
+  assert.match(await page.locator("#chat-search-results").innerText(), /Archivist/);
+  assert.doesNotMatch(await page.locator("#chat-search-results").innerText(), /Removed/);
+  await input.fill("PROCUREMENT");
+  assert.equal(await page.getByRole("option").count(), 1);
+  await input.press("Enter");
+  assert.deepEqual(await page.evaluate(() => window.openedSearch), [{ id: "Archivist", location: { runtime: "fixture", project: "a", session: "chat-a" } }]);
+  assert.equal(await page.locator("#input").inputValue(), "Keep my unsent draft");
+}, { boot: true }));
+
+test("partial search failure retains successful results and exposes retry", () => fixture(async page => {
+  await page.locator("#app.ready").waitFor();
+  await page.evaluate(() => {
+    window.ark.searchSource({ id: "away", load() { throw Error("offline"); }, open() {} });
+  });
+  await page.locator("#search-chats").click();
+  await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
+  assert.match(await page.locator("#chat-search-results").innerText(), /Second draft/);
+  assert.match(await page.locator("#chat-search-results").innerText(), /Some results are not available/);
+  assert.equal(await page.getByRole("button", { name: "Try again", exact: true }).count(), 1);
+  await page.keyboard.press("Escape");
+}, { boot: true }));
+
+test("search rejects stale computer identity before opening an agent", () => fixture(async page => {
+  await page.locator("#app.ready").waitFor();
+  await page.evaluate(() => {
+    window.openedSearch = [];
+    window.ark.searchSource({ id: "agents", load() { return [{ id: "Archivist", title: "Archivist" }]; }, open(entry) { window.openedSearch.push(entry.id); } });
+  });
+  await page.locator("#search-chats").click();
+  const input = page.getByRole("combobox", { name: "Search chats and agents" });
+  await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
+  await input.fill("Archivist");
+  await page.evaluate(() => { window.ark.summary().location.runtime = "another-computer"; });
+  await input.press("Enter");
+  assert.deepEqual(await page.evaluate(() => window.openedSearch), []);
+  await page.getByText("The computer changed. Search again.", { exact: true }).waitFor();
+}, { boot: true }));
+
+
+test("search waits for delayed project navigation before opening the exact agent", () => fixture(async page => {
+  await page.locator("#app.ready").waitFor();
+  await page.evaluate(() => {
+    window.openedSearch = [];
+    window.ark.searchSource({ id: "agents", async load(project, api) {
+      return (await api.call("agent_contacts", { project: project.id })).filter(agent => agent.state !== "terminated")
+        .map(agent => ({ id: agent.name, title: agent.name, description: agent.role }));
+    }, open(entry, scoped) { window.openedSearch.push({ id: entry.id, location: scoped.location }); } });
+  });
+  await page.locator("#search-chats").click();
+  const input = page.getByRole("combobox", { name: "Search chats and agents" });
+  await page.locator('#chat-search-results[aria-busy="false"]').waitFor();
+  await input.fill("Separate project specialist");
+  await input.press("Enter");
+  await page.waitForFunction(() => window.openedSearch.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.openedSearch), [{ id: "Archivist", location: { runtime: "fixture", project: "b", session: "chat-b" } }]);
+}, { boot: true, searchProjects: true }));

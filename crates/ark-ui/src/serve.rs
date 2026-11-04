@@ -886,6 +886,10 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 .into_iter()
                 .map(str::to_string)
                 .chain(account_pairing.as_ref().map(|_| "account.pair".to_string()))
+                .chain(
+                    host.agent_conversations_enabled()
+                        .then(|| "agents.conversations".to_string()),
+                )
                 .collect(),
                 limits: ark_protocol::Limits {
                     page_size: 50,
@@ -1949,6 +1953,14 @@ fn client_event(
         "sessions" | "turn_started" | "turn_finished"
     ) {
         affects.push("chats".into());
+        if event_type == "sessions"
+            && (value["session"].is_null()
+                || value["session"]
+                    .as_str()
+                    .is_some_and(|id| id.starts_with("agent:")))
+        {
+            affects.push("openChat".into());
+        }
     }
     if let Some(session) = value["session"].as_str() {
         affects.push(format!("chat:{session}"));

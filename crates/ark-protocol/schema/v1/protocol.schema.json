@@ -151,6 +151,16 @@
     },
     "ChatSummary": {
       "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConversationAgent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "computer": {
           "type": "string"
         },
@@ -251,6 +261,21 @@
       "required": [
         "here",
         "computers"
+      ],
+      "type": "object"
+    },
+    "ConversationAgent": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "role"
       ],
       "type": "object"
     },

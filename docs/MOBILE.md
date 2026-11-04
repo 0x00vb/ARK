@@ -394,3 +394,13 @@ every other core job without help. Nobody may cause an unintended mutation.
 
 
 Protocol1.5 adds optional `ChatSummary.participants`, the sorted names of agents assigned work for the chat through durable reporting and delegation links. Missing/null means unknown; an empty list is known empty. It does not prove an agent contributed a message or grant authority. Clients may show up to three faces with an overflow count, and expose all assigned names to accessibility. Legacy runtimes retain the neutral identity. The minimum supported minor version stays unchanged.
+
+Protocol1.6 adds optional `ChatSummary.agent` with name and role. The runtime advertises
+`agents.conversations` when it supports persistent agents. Agent chats use a project-qualified
+ID on the existing chat read, result and mutation endpoints. An underlying agent session ID
+resolves to the same agent route. Sends use the agent's profile and durable device mutation
+identity. They do not use the app-default chat loop. Agent task results retain their full text,
+originating author, approvals and produced output access. Agent creation and completion invalidate
+phone snapshots even without a desktop listener. Feed lag invalidates chats and open conversations.
+The native client groups Agents and Chats and searches roles. Missing metadata preserves ordinary
+chat behavior. A matching runtime release is required; this change does not deploy a Cloud image.

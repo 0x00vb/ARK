@@ -50,7 +50,7 @@ use crate::OrchError;
 
 mod elsewhere;
 
-const AGENT: &str = "orch_agent";
+pub(crate) const AGENT: &str = "orch_agent";
 pub(crate) const TASK: &str = "orch_task";
 const MESSAGE: &str = "orch_message";
 
@@ -166,6 +166,7 @@ impl<'a> OrchestratorBuilder<'a> {
             state: Mutex::new(State::default()),
             events,
             ticks: Mutex::new(()),
+            conversations: tokio::sync::Mutex::new(()),
         });
         let recover = inner.load()?;
         let orch = Orchestrator { inner };
@@ -223,6 +224,24 @@ impl Orchestrator {
     /// Add an agent, or update the spec of an existing one (a terminated agent comes back).
     pub async fn spawn(&self, spec: AgentSpec) -> Result<AgentRecord, OrchError> {
         self.inner.spawn(spec).await
+    }
+
+    pub(crate) async fn create_agent(&self, spec: AgentSpec) -> Result<AgentRecord, OrchError> {
+        let _guard = self.inner.conversations.lock().await;
+        if self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .agents
+            .contains_key(&spec.name)
+        {
+            return Err(OrchError::NotAllowed(format!(
+                "agent `{}` already exists",
+                spec.name
+            )));
+        }
+        self.inner.spawn_record(spec, None).await
     }
 
     pub fn agent(&self, name: &str) -> Option<AgentRecord> {
@@ -308,6 +327,37 @@ impl Orchestrator {
         let id = self
             .inner
             .create_task(agent, spec, Origin::External, None)?;
+        self.inner.start(&id);
+        Ok(id)
+    }
+
+    /// Submit a client turn once, including retry after its receipt was lost.
+    pub async fn submit_once(
+        &self,
+        agent: &str,
+        spec: TaskSpec,
+        request: &str,
+    ) -> Result<String, OrchError> {
+        let _guard = self.inner.conversations.lock().await;
+        let key = format!("client:{}/{agent}/{request}", self.project().id);
+        if let Some(task) = self
+            .tasks()
+            .into_iter()
+            .find(|task| task.handoff_key.as_deref() == Some(&key))
+        {
+            if task.owner != agent
+                || task.objective != spec.objective
+                || task.context != spec.context
+            {
+                return Err(OrchError::NotAllowed(
+                    "the request already names another message".into(),
+                ));
+            }
+            return Ok(task.id);
+        }
+        let id = self
+            .inner
+            .create_run(agent, spec, Origin::External, None, None, Some(&key))?;
         self.inner.start(&id);
         Ok(id)
     }
@@ -930,6 +980,7 @@ pub(crate) struct Inner {
     stream: String,
     /// Held while schedules are ticked: one tick at a time.
     ticks: Mutex<()>,
+    conversations: tokio::sync::Mutex<()>,
     /// (task, chat): a turn of that chat waits for the task in this process and takes its
     /// result as its call's answer, so it is not posted too. Lost with the process, as the
     /// turn is: then the result is posted ([`ChatWait`]).
@@ -1144,7 +1195,7 @@ fn apply_change(st: &State, w: &mut WorkItem, by: &str, c: WorkChange) -> Result
     Ok(())
 }
 
-fn valid_name(n: &str) -> bool {
+pub(crate) fn valid_name(n: &str) -> bool {
     !n.is_empty()
         && n.len() <= 64
         && n.chars()
@@ -1399,7 +1450,14 @@ impl Inner {
         };
         spec.max_attempts = Some(1 + s.retries);
         spec.retry_delay_ms = Some(crate::schedule::RETRY_DELAY_MS);
-        let id = self.create_run(&s.agent, spec, Origin::External, None, Some((&s.id, slot)))?;
+        let id = self.create_run(
+            &s.agent,
+            spec,
+            Origin::External,
+            None,
+            Some((&s.id, slot)),
+            None,
+        )?;
         self.start(&id);
         s.runs += 1;
         s.last_ms = Some(now);
@@ -1820,6 +1878,15 @@ impl Inner {
     // ---- agents ------------------------------------------------------------------
 
     async fn spawn(&self, spec: AgentSpec) -> Result<AgentRecord, OrchError> {
+        let _guard = self.conversations.lock().await;
+        self.spawn_record(spec, None).await
+    }
+
+    async fn spawn_record(
+        &self,
+        spec: AgentSpec,
+        creation: Option<(&str, &str)>,
+    ) -> Result<AgentRecord, OrchError> {
         if !valid_name(&spec.name) {
             return Err(OrchError::NotAllowed(format!(
                 "`{}` is not a valid agent name (letters, digits, - _ .)",
@@ -1892,6 +1959,8 @@ impl Inner {
                     name: spec.name.clone(),
                     project: self.project.id.to_string(),
                     scope: scope.id.to_string(),
+                    creation_task: creation.map(|(task, _)| task.to_string()),
+                    creation_root: creation.map(|(_, root)| root.to_string()),
                     spec: spec.clone(),
                     state: AgentState::Idle,
                     current_task: None,
@@ -1908,8 +1977,32 @@ impl Inner {
                 }
             }
         };
-        {
+        let publication = (|| -> Result<(), OrchError> {
             let mut st = self.state.lock().unwrap();
+            if let Some((task, _)) = creation {
+                let active = st.tasks.get(task).is_some_and(|t| {
+                    !t.record.state.is_final()
+                        && !t.cancel.is_cancelled()
+                        && t.stop.is_none()
+                        && st.agents.get(&t.record.owner).is_some_and(|agent| {
+                            !matches!(
+                                agent.record.state,
+                                AgentState::Terminated | AgentState::Suspended
+                            )
+                        })
+                });
+                if !active {
+                    return Err(OrchError::NotAllowed(
+                        "the creating turn is no longer active".into(),
+                    ));
+                }
+            }
+            self.engine.store.put_record(
+                AGENT,
+                &format!("{}/{}", self.project.id, record.name),
+                self.project.id.as_str(),
+                &serde_json::to_value(&record)?,
+            )?;
             match st.agents.get_mut(&spec.name) {
                 Some(a) => {
                     a.record = record.clone();
@@ -1935,8 +2028,15 @@ impl Inner {
                     );
                 }
             }
+            Ok(())
+        })();
+        if let Err(error) = publication {
+            if creation.is_some() {
+                self.models.close(&self.lane(&spec.name)).await;
+            }
+            return Err(error);
         }
-        self.save_agent(&record);
+
         self.emit(EventKind::AgentSpawned {
             agent: spec.name.clone(),
             parent: spec.parent.clone(),
@@ -2070,7 +2170,7 @@ impl Inner {
         origin: Origin,
         parent: Option<&str>,
     ) -> Result<String, OrchError> {
-        self.create_run(owner, spec, origin, parent, None)
+        self.create_run(owner, spec, origin, parent, None, None)
     }
 
     /// [`create_task`](Self::create_task), and for a schedule's run its schedule and the time
@@ -2082,6 +2182,7 @@ impl Inner {
         origin: Origin,
         parent: Option<&str>,
         run: Option<(&str, u64)>,
+        handoff_key: Option<&str>,
     ) -> Result<String, OrchError> {
         let (agent_budget, state) = {
             let st = self.state.lock().unwrap();
@@ -2127,6 +2228,7 @@ impl Inner {
             id: id.clone(),
             project: self.project.id.to_string(),
             owner: owner.to_string(),
+            handoff_key: handoff_key.map(str::to_string),
             objective: spec.objective.clone(),
             context: spec.context.clone(),
             origin: origin.clone(),
@@ -2171,10 +2273,29 @@ impl Inner {
         };
         let (parent_rec, linked) = {
             let mut st = self.state.lock().unwrap();
+            if let (Some(_), Origin::Agent { agent, task }) = (handoff_key, &origin) {
+                let active = st.tasks.get(task).is_some_and(|t| {
+                    t.record.owner == *agent
+                        && !t.record.state.is_final()
+                        && !t.cancel.is_cancelled()
+                        && t.stop.is_none()
+                });
+                if !active || !Self::contact_allowed_in(&st, agent, owner) {
+                    return Err(OrchError::NotAllowed(
+                        "the sending turn stopped or its contact changed".into(),
+                    ));
+                }
+            }
             // Checked again under the lock that inserts the task: two agents never take one item.
             if let Some(item) = &spec.item {
                 claimable(&st, item, owner)?;
             }
+            self.engine.store.put_record(
+                TASK,
+                &record.id,
+                self.project.id.as_str(),
+                &serde_json::to_value(&record)?,
+            )?;
             let linked = spec.item.as_ref().and_then(|item| {
                 let w = st.work.get_mut(item)?;
                 w.tasks.push(id.clone());
@@ -2217,7 +2338,6 @@ impl Inner {
         if let Some(p) = parent_rec {
             self.save_task(&p);
         }
-        self.save_task(&record);
         if let Some(w) = linked {
             self.save_work(&w, owner);
         }
@@ -2871,18 +2991,13 @@ impl Inner {
         if !spec.role.trim().is_empty() {
             who.push_str(&format!(" ({})", spec.role.trim()));
         }
-        who.push_str(
-            ". Each request is one task; its first message says what it is and who asked.",
-        );
+        who.push_str(". Each request is one task; its brief names the requester.");
         if !delegates.is_empty() {
-            who.push_str("\nYou can delegate with agents.delegate to:\n");
+            who.push_str("\nYour contacts:\n");
             for (n, r) in delegates {
                 who.push_str(&format!("- {n}: {}\n", if r.is_empty() { "-" } else { r }));
             }
-            who.push_str(
-                "An agent you delegate to sees only the objective, context and artifacts you give it, not this conversation. \
-Delegate independent pieces in the same reply so they run in parallel, then combine their results.",
-            );
+            who.push_str("Colleagues receive your brief and artifacts, never this conversation. Use agents.start for an independent conversation and return immediately. Use agents.delegate only when this turn needs its result; delegate independent subtasks together.");
         }
         p.prompts.instructions.push_str(&who);
         let mut preload: Vec<&str> = Vec::new();
@@ -2960,7 +3075,7 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
         delegates.sort();
         let mut contacts: Vec<String> = roster
             .iter()
-            .filter(|(n, _, s)| spec.may_contact(n) && *s != AgentState::Terminated)
+            .filter(|(n, _, s)| self.contact_allowed(owner, n) && *s != AgentState::Terminated)
             .map(|(n, _, _)| n.clone())
             .collect();
         contacts.sort();
@@ -2971,13 +3086,14 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             .engine
             .tools()
             .filtered(|a| spec.tools.iter().any(|p| action_matches(p, a)));
-        if !delegates.is_empty() || !contacts.is_empty() {
+        {
             registry.register(Arc::new(AgentTools {
                 orch: self.me.clone(),
                 agent: owner.to_string(),
                 task: id.to_string(),
                 delegates: delegates.clone(),
                 contacts,
+                can_create: spec.tools.iter().any(|p| action_matches(p, tools::CREATE)),
             }));
         }
         if spec.diagrams {
@@ -3922,6 +4038,200 @@ Delegate independent pieces in the same reply so they run in parallel, then comb
             .is_some_and(|t| t.record.parent.as_deref() == Some(parent))
     }
 
+    fn conversation_root(st: &State, task: &str) -> Result<String, OrchError> {
+        let mut id = task;
+        for _ in 0..=st.tasks.len() {
+            let t = st
+                .tasks
+                .get(id)
+                .ok_or_else(|| OrchError::UnknownTask(id.into()))?;
+            match &t.record.origin {
+                Origin::External => return Ok(id.to_string()),
+                Origin::Agent { task, .. } => id = task,
+            }
+        }
+        Err(OrchError::NotAllowed("cyclic conversation origin".into()))
+    }
+
+    pub(crate) fn contact_allowed(&self, from: &str, to: &str) -> bool {
+        let st = self.state.lock().unwrap();
+        Self::contact_allowed_in(&st, from, to)
+    }
+
+    fn contact_allowed_in(st: &State, from: &str, to: &str) -> bool {
+        let Some(a) = st.agents.get(from) else {
+            return false;
+        };
+        let Some(b) = st.agents.get(to) else {
+            return false;
+        };
+        a.record.state != AgentState::Terminated
+            && b.record.state != AgentState::Terminated
+            && from != to
+            && (a.record.spec.may_contact(to)
+                || (b.record.creation_task.is_some()
+                    && b.record.spec.parent.as_deref() == Some(from)))
+    }
+
+    pub(crate) async fn create_colleague(
+        &self,
+        from: &str,
+        task: &str,
+        name: &str,
+        role: &str,
+        instructions: &str,
+    ) -> Result<AgentRecord, OrchError> {
+        let _guard = self.conversations.lock().await;
+        let (mut spec, root) = {
+            let st = self.state.lock().unwrap();
+            let source = st
+                .agents
+                .get(from)
+                .ok_or_else(|| OrchError::UnknownAgent(from.into()))?;
+            if !source
+                .record
+                .spec
+                .tools
+                .iter()
+                .any(|p| action_matches(p, tools::CREATE))
+            {
+                return Err(OrchError::NotAllowed(
+                    "this agent may not create agents".into(),
+                ));
+            }
+            let t = st
+                .tasks
+                .get(task)
+                .ok_or_else(|| OrchError::UnknownTask(task.into()))?;
+            if t.record.owner != from
+                || t.record.state.is_final()
+                || t.cancel.is_cancelled()
+                || t.stop.is_some()
+            {
+                return Err(OrchError::NotAllowed(
+                    "the creating turn is no longer active".into(),
+                ));
+            }
+            if let Some(existing) = st.agents.get(name) {
+                if existing.record.creation_task.as_deref() == Some(task) {
+                    return Ok(existing.record.clone());
+                }
+                return Err(OrchError::NotAllowed(format!(
+                    "agent `{name}` already exists; use agents.start"
+                )));
+            }
+            let root = Self::conversation_root(&st, task)?;
+            let limit = t
+                .record
+                .budget
+                .max_delegations
+                .unwrap_or(8)
+                .min(st.tasks[&root].record.budget.max_delegations.unwrap_or(8))
+                .min(8) as usize;
+            if st
+                .agents
+                .values()
+                .filter(|a| a.record.creation_root.as_deref() == Some(&root))
+                .count()
+                >= limit
+            {
+                return Err(OrchError::NotAllowed(format!(
+                    "this request may create {limit} agents"
+                )));
+            }
+            (source.record.spec.clone(), root)
+        };
+        spec.name = name.to_string();
+        spec.role = role.to_string();
+        spec.instructions = instructions.to_string();
+        spec.parent = Some(from.to_string());
+        spec.allow_mutate = false;
+        self.spawn_record(spec, Some((task, &root))).await
+    }
+
+    pub(crate) async fn start_conversation(
+        &self,
+        from: &str,
+        task: &str,
+        to: &str,
+        spec: TaskSpec,
+    ) -> Result<String, OrchError> {
+        let _guard = self.conversations.lock().await;
+        if !self.contact_allowed(from, to) {
+            return Err(OrchError::NotAllowed(format!(
+                "{from} may not contact {to}"
+            )));
+        }
+        let request = serde_json::to_vec(&(task, to, &spec.objective, &spec.context))?;
+        let key = blake3::hash(&request).to_hex().to_string();
+        {
+            let st = self.state.lock().unwrap();
+            if let Some(existing) = st
+                .tasks
+                .values()
+                .find(|t| t.record.handoff_key.as_deref() == Some(&key))
+            {
+                if existing.record.owner != to
+                    || existing.record.objective != spec.objective
+                    || existing.record.context != spec.context
+                {
+                    return Err(OrchError::NotAllowed(
+                        "the handoff key already names a different request".into(),
+                    ));
+                }
+                return Ok(existing.record.id.clone());
+            }
+            let source = st
+                .tasks
+                .get(task)
+                .ok_or_else(|| OrchError::UnknownTask(task.into()))?;
+            if source.record.owner != from
+                || source.record.state.is_final()
+                || source.cancel.is_cancelled()
+                || source.stop.is_some()
+            {
+                return Err(OrchError::NotAllowed(
+                    "the sending turn is no longer active".into(),
+                ));
+            }
+            let root = Self::conversation_root(&st, task)?;
+            let limit = source
+                .record
+                .budget
+                .max_delegations
+                .unwrap_or(8)
+                .min(st.tasks[&root].record.budget.max_delegations.unwrap_or(8))
+                .min(8) as usize;
+            let starts = st
+                .tasks
+                .values()
+                .filter(|t| {
+                    t.record.handoff_key.is_some()
+                        && matches!(t.record.origin, Origin::Agent { .. })
+                        && Self::conversation_root(&st, &t.record.id).is_ok_and(|r| r == root)
+                })
+                .count();
+            if starts >= limit {
+                return Err(OrchError::NotAllowed(format!(
+                    "this request may start {limit} independent turns"
+                )));
+            }
+        }
+        let id = self.create_run(
+            to,
+            spec,
+            Origin::Agent {
+                agent: from.to_string(),
+                task: task.to_string(),
+            },
+            None,
+            None,
+            Some(&key),
+        )?;
+        self.start(&id);
+        Ok(id)
+    }
+
     pub(crate) fn delegate(
         &self,
         from_agent: &str,
@@ -4346,3 +4656,7 @@ mod allowed_tests {
         assert!(a.asks_a_person("computer"));
     }
 }
+
+#[cfg(test)]
+#[path = "conversation_tests.rs"]
+mod conversation_tests;

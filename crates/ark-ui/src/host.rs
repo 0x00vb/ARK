@@ -12,6 +12,8 @@
 //! coming back finds it. Each turn's events, and each question it asks, carry its `session`, so a
 //! window shows the current chat's and lists the others as working (`working`).
 
+pub(crate) mod agent_conversations;
+
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -167,7 +169,7 @@ async fn forward_attention(
             Ok(ev) => ev,
             Err(broadcast::error::RecvError::Lagged(_)) => {
                 let Some(host) = host.upgrade() else { return };
-                host.emit(json!({ "kind": "attention" }));
+                host.emit(json!({ "kind": "sessions" }));
                 continue;
             }
             Err(broadcast::error::RecvError::Closed) => return,
@@ -192,6 +194,23 @@ async fn forward_attention(
             out["session"] = json!(reference.location.session);
             out["ref"] = json!(reference);
             host.emit(out);
+        }
+        let changed_agent = match &ev.kind {
+            EventKind::AgentSpawned { agent, .. } | EventKind::AgentState { agent, .. } => {
+                Some(agent.clone())
+            }
+            EventKind::TaskCreated { owner, .. } => Some(owner.clone()),
+            EventKind::TaskFinished { task, .. } => host
+                .orchs
+                .list()
+                .iter()
+                .find_map(|o| o.task(task).map(|task| task.owner)),
+            _ => None,
+        };
+        if let Some(agent) = changed_agent {
+            host.emit(
+                json!({ "kind": "sessions", "session": format!("agent:{}:{agent}", ev.project) }),
+            );
         }
         match &ev.kind {
             // A retry takes a failed task out of the list (`TaskQueued`).
@@ -1397,6 +1416,18 @@ impl Host {
         request: &ark_protocol::MutationRequest,
         record: &mut Value,
     ) -> Result<(&'static str, &'static str), ClientMutationError> {
+        match self.client_agent(&request.target) {
+            Ok(Some(agent)) => {
+                return self
+                    .apply_client_agent_send(record_id, device, request, record, agent)
+                    .await
+            }
+            Ok(None) => {}
+            Err(error) if error.is::<agent_conversations::AgentUnavailable>() => {
+                return Ok(("no_longer_applicable", "Nothing changed"))
+            }
+            Err(error) => return Err(ClientMutationError::Store(error)),
+        }
         let body = request.input["body"].as_str().unwrap_or_default();
         if let Some(index) = record["effect"]["turnIndex"].as_u64() {
             let turns = self
@@ -3492,6 +3523,19 @@ impl Host {
             }
             // Read from the store, so lists stay current while turns run. A chat running a turn
             // now says `working: true`.
+            "agent_contacts" => {
+                let project = s("project");
+                anyhow::ensure!(
+                    self.engine
+                        .store
+                        .get_project(&ProjectId(project.clone()))?
+                        .is_some(),
+                    "there is no project `{project}` here"
+                );
+                Ok(serde_json::to_value(
+                    ark_interact::ark_orchestrate::agent_contacts(&self.engine.store, &project)?,
+                )?)
+            }
             "sessions" => {
                 use ark_interact::interaction::{list_sessions, project_sessions};
                 let current = self.session_id();
@@ -4172,7 +4216,7 @@ impl Host {
         Ok(self.summary_of(&conv))
     }
 
-    pub(crate) fn client_results(
+    fn client_session_results(
         &self,
         session: &str,
     ) -> Result<Vec<ark_protocol::ResultSummary>, ClientResultError> {
@@ -4247,7 +4291,7 @@ impl Host {
         Ok(results)
     }
 
-    pub(crate) fn client_result_file(
+    fn client_session_result_file(
         &self,
         session: &str,
         result: &str,
@@ -4268,19 +4312,36 @@ impl Host {
         }
         let requested = ArtifactId(result.to_string());
         let allowed = self
-            .client_results(session)?
+            .client_session_results(session)?
             .into_iter()
             .any(|summary| summary.id == result);
         if !allowed {
             return Err(ClientResultError::ResultMissing);
         }
+        self.client_artifact_file(&ProjectId(project_id.to_string()), &requested, max_bytes)
+    }
+
+    fn client_artifact_file(
+        &self,
+        project: &ProjectId,
+        requested: &ArtifactId,
+        max_bytes: u64,
+    ) -> Result<ClientResultFile, ClientResultError> {
+        if requested.as_str().len() != 64
+            || !requested
+                .as_str()
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(ClientResultError::ResultMissing);
+        }
         let artifact = self
             .engine
             .store
-            .get_artifact(&ProjectId(project_id.to_string()), &requested)
+            .get_artifact(project, requested)
             .map_err(|error| ClientResultError::Store(error.into()))?
             .ok_or(ClientResultError::ResultMissing)?;
-        if artifact.id != requested || artifact.size > max_bytes {
+        if &artifact.id != requested || artifact.size > max_bytes {
             return Err(ClientResultError::TooLarge);
         }
         let path = self.engine.store.blob_path(&artifact.id);

@@ -542,6 +542,10 @@ pub struct OrchestratorSet {
 }
 
 impl OrchestratorSet {
+    pub fn supports_agents(&self) -> bool {
+        self.all.is_some() || self.one.is_some()
+    }
+
     pub fn list(&self) -> Vec<ark_orchestrate::Orchestrator> {
         match &self.all {
             Some(all) => all.built.lock().unwrap().values().cloned().collect(),
@@ -619,6 +623,26 @@ pub struct Siblings {
 type Zone = Arc<std::sync::Mutex<Option<String>>>;
 
 impl Siblings {
+    /// Resolve the shared project executor without creating or selecting a chat.
+    pub fn project_orchestrator(
+        &self,
+        project: &ProjectId,
+    ) -> anyhow::Result<ark_orchestrate::Orchestrator> {
+        let project = self
+            .ark
+            .engine()
+            .store
+            .get_project(project)?
+            .ok_or_else(|| anyhow::anyhow!("project no longer exists"))?;
+        match (&self.orchs, &self.orchestrator) {
+            (Some(all), _) => all.get(&self.ark, &project),
+            (None, Some(one)) if one.project().id == project.id => Ok(one.clone()),
+            _ => Err(anyhow::anyhow!(
+                "this project does not support agent conversations"
+            )),
+        }
+    }
+
     /// The person's time zone, for every conversation of the app ([`Interaction::set_zone`]).
     pub fn set_zone(&self, tz: Option<&str>) {
         let known = tz.filter(|t| {

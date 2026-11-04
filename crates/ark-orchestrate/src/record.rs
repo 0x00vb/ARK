@@ -218,6 +218,10 @@ pub struct AgentRecord {
     pub project: String,
     /// The agent's own project: its working state, evidence and conversation.
     pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_task: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creation_root: Option<String>,
     pub spec: AgentSpec,
     pub state: AgentState,
     #[serde(default)]
@@ -263,6 +267,8 @@ pub struct TaskRecord {
     pub id: String,
     pub project: String,
     pub owner: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_key: Option<String>,
     pub objective: String,
     #[serde(default)]
     pub context: String,

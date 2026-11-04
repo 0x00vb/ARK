@@ -155,6 +155,7 @@ public struct ChatMessage: Codable, Equatable, Sendable {
 }
 
 public struct ChatSummary: Codable, Equatable, Sendable {
+    public let agent: ConversationAgent?
     public let computer: String
     public let id: String
     public let participants: [String]?
@@ -165,6 +166,7 @@ public struct ChatSummary: Codable, Equatable, Sendable {
     public let updatedAt: String
 
     public init(
+        agent: ConversationAgent? = nil,
         computer: String,
         id: String,
         participants: [String]? = nil,
@@ -174,6 +176,7 @@ public struct ChatSummary: Codable, Equatable, Sendable {
         unread: Bool,
         updatedAt: String
     ) {
+        self.agent = agent
         self.computer = computer
         self.id = id
         self.participants = participants
@@ -227,6 +230,19 @@ public struct ComputersSnapshot: Codable, Equatable, Sendable {
     ) {
         self.computers = computers
         self.here = here
+    }
+}
+
+public struct ConversationAgent: Codable, Equatable, Sendable {
+    public let name: String
+    public let role: String
+
+    public init(
+        name: String,
+        role: String
+    ) {
+        self.name = name
+        self.role = role
     }
 }
 

@@ -35,6 +35,7 @@ pub const DELEGATE: &str = "agents.delegate";
 pub const WAIT: &str = "agents.wait";
 pub const MESSAGE: &str = "agents.message";
 pub const CREATE: &str = "agents.create";
+pub const START: &str = "agents.start";
 pub const SCHEDULE: &str = "agents.schedule";
 pub const UNSCHEDULE: &str = "agents.unschedule";
 pub const BOARD_LIST: &str = "board.list";
@@ -60,6 +61,7 @@ pub(crate) struct AgentTools {
     pub delegates: Vec<(String, String)>,
     /// Agents it may message.
     pub contacts: Vec<String>,
+    pub can_create: bool,
 }
 
 #[async_trait::async_trait]
@@ -70,6 +72,34 @@ impl Adapter for AgentTools {
 
     fn actions(&self) -> Vec<ActionDescriptor> {
         let mut v = Vec::new();
+        if self.can_create {
+            v.push(ActionDescriptor::new(
+                CREATE,
+                "create a persistent colleague with inherited permissions; use agents.start for its first brief",
+                RiskTier::Observe,
+            ).volatile().with_input_schema(json!({
+                "type": "object", "required": ["name", "role"],
+                "properties": {
+                    "name": { "type": "string", "description": "short lowercase name" },
+                    "role": { "type": "string" },
+                    "instructions": { "type": "string", "description": "role instructions only; no conversation transcript" }
+                }
+            })));
+        }
+        if self.can_create || !self.contacts.is_empty() {
+            v.push(ActionDescriptor::new(
+            START,
+            "start an independent conversation with a colleague",
+            RiskTier::Observe,
+        ).volatile().with_input_schema(json!({
+            "type": "object", "required": ["to", "objective"],
+            "properties": {
+                "to": { "type": "string", "description": format!("permitted contacts: {}; also agents you created", self.contacts.join(", ")) },
+                "objective": { "type": "string", "maxLength": 8000, "description": "self-contained brief; returns immediately, no waiting or automatic reply" },
+                "context": { "type": "string", "maxLength": 16000, "description": "necessary information only; the recipient does not see your transcript" }
+            }
+        })));
+        }
         if !self.delegates.is_empty() {
             let names: Vec<&str> = self.delegates.iter().map(|(n, _)| n.as_str()).collect();
             v.push(
@@ -105,7 +135,7 @@ impl Adapter for AgentTools {
                 })),
             );
         }
-        if !self.contacts.is_empty() {
+        if self.can_create || !self.contacts.is_empty() {
             v.push(
                 ActionDescriptor::new(
                     MESSAGE,
@@ -117,7 +147,7 @@ impl Adapter for AgentTools {
                     "type": "object",
                     "required": ["to", "text"],
                     "properties": {
-                        "to": { "type": "string", "enum": self.contacts },
+                        "to": if self.can_create { json!({ "type": "string", "description": "a permitted contact, including an agent you just created" }) } else { json!({ "type": "string", "enum": self.contacts }) },
                         "text": { "type": "string" }
                     }
                 })),
@@ -138,6 +168,46 @@ impl Adapter for AgentTools {
             .ok_or_else(|| AdapterError::Tool("the orchestrator is gone".into()))?;
         let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").trim();
         match action {
+            CREATE => {
+                let name = s("name").to_lowercase().replace(' ', "-");
+                if name.len() > 64
+                    || s("role").is_empty()
+                    || s("role").chars().count() > 500
+                    || s("instructions").chars().count() > 16000
+                {
+                    return Err(AdapterError::bad_input(action, "name: at most 64 bytes; role: 1 to 500 characters; instructions: at most 16000 characters"));
+                }
+                let a = orch
+                    .create_colleague(&self.agent, &self.task, &name, s("role"), s("instructions"))
+                    .await
+                    .map_err(|e| AdapterError::Tool(e.to_string()))?;
+                Ok(ActionOutput::json(
+                    json!({ "agent": a.name, "role": a.spec.role, "state": a.state }),
+                ))
+            }
+            START => {
+                if s("objective").is_empty()
+                    || s("objective").chars().count() > 8000
+                    || s("context").chars().count() > 16000
+                {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        "objective: 1 to 8000 characters; context: at most 16000 characters",
+                    ));
+                }
+                let id = orch
+                    .start_conversation(
+                        &self.agent,
+                        &self.task,
+                        s("to"),
+                        TaskSpec::new(s("objective")).context(s("context")),
+                    )
+                    .await
+                    .map_err(|e| AdapterError::Tool(e.to_string()))?;
+                Ok(ActionOutput::json(
+                    json!({ "task": id, "agent": s("to"), "independent": true }),
+                ))
+            }
             DELEGATE => {
                 let to = s("to");
                 if !self.delegates.iter().any(|(n, _)| n == to) {
@@ -202,7 +272,7 @@ impl Adapter for AgentTools {
             }
             MESSAGE => {
                 let to = s("to");
-                if !self.contacts.iter().any(|c| c == to) {
+                if !orch.contact_allowed(&self.agent, to) {
                     return Err(AdapterError::bad_input(
                         action,
                         format!("you may not message `{to}`"),
@@ -379,7 +449,7 @@ impl Adapter for ChatTools {
             })),
             ActionDescriptor::new(
                 CREATE,
-                "create an agent when the work needs a role no agent has. It keeps its own context between tasks; actions that change anything still ask the person",
+                "create a persistent specialist with its own context; changes still need approval",
                 RiskTier::Observe,
             )
             .volatile()
@@ -390,10 +460,11 @@ impl Adapter for ChatTools {
                     "name": { "type": "string", "description": "short, lowercase, e.g. reviewer" },
                     "role": { "type": "string", "description": "one line on what it does" },
                     "instructions": { "type": "string", "description": "how it works, as a system prompt" },
-                    "skills": { "type": "array", "items": { "type": "string" }, "description": "skills it may read, by name from the SKILLS list" },
+                    "contacts": { "type": "array", "items": { "type": "string" }, "description": "permitted names, including future agents; connect both directions for discussion" },
+                    "skills": { "type": "array", "items": { "type": "string" }, "description": "allowed skill names from SKILLS" },
                     "capabilities": {
                         "type": "array", "items": { "type": "string" },
-                        "description": format!("what it may use, only what its role needs; default: all. One of: {}", self.orch.capabilities().join(", "))
+                        "description": format!("capabilities this role needs; omitted: all; choose: {}", self.orch.capabilities().join(", "))
                     }
                 }
             })),
@@ -611,14 +682,36 @@ impl Adapter for ChatTools {
                     }
                     tools.push(format!("{c}.*"));
                 }
+                let contacts = input
+                    .get("contacts")
+                    .map(|value| {
+                        serde_json::from_value::<Vec<String>>(value.clone()).map_err(|_| {
+                            AdapterError::bad_input(
+                                action,
+                                "contacts must be a list of agent names",
+                            )
+                        })
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
+                if contacts
+                    .iter()
+                    .any(|name| !crate::orchestrator::valid_name(name))
+                {
+                    return Err(AdapterError::bad_input(
+                        action,
+                        "contacts must be valid agent names",
+                    ));
+                }
                 let mut spec = AgentSpec::new(&name)
                     .role(s("role"))
                     .instructions(s("instructions"))
-                    .skills(skills);
+                    .skills(skills)
+                    .delegates_to(contacts);
                 if !tools.is_empty() {
                     spec = spec.tools(tools);
                 }
-                let a = self.orch.spawn(spec).await.map_err(fail)?;
+                let a = self.orch.create_agent(spec).await.map_err(fail)?;
                 Ok(ActionOutput::json(
                     json!({ "agent": a.name, "role": a.spec.role, "tools": a.spec.tools }),
                 ))
@@ -1159,6 +1252,14 @@ pub(crate) fn distiller() -> Distiller {
         };
         match action {
             DELEGATE => Some(one(out, "result")),
+            START => Some((
+                format!(
+                    "started independent turn {} for {}; do not wait",
+                    out.get("task").and_then(Value::as_str).unwrap_or(""),
+                    out.get("agent").and_then(Value::as_str).unwrap_or("")
+                ),
+                Vec::new(),
+            )),
             WAIT => {
                 let mut lines = Vec::new();
                 let mut ids = Vec::new();

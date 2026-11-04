@@ -1780,7 +1780,9 @@ async function searchChats() {
   if (!overlay.hidden) return closePalette();
   const restore = document.activeElement;
   const generation = ++searchGeneration;
-  const input = h("input.palette-input", { placeholder: "Search chats", "aria-label": "Search chats", role: "combobox", "aria-autocomplete": "list", "aria-controls": "chat-search-results", "aria-expanded": "true" });
+  const location = { ...currentLocation() };
+  const searchRuntime = state.runtime;
+  const input = h("input.palette-input", { placeholder: "Search chats and agents", "aria-label": "Search chats and agents", role: "combobox", "aria-autocomplete": "list", "aria-controls": "chat-search-results", "aria-expanded": "true" });
   const list = h("div.palette-list", { id: "chat-search-results", role: "listbox", "aria-busy": "true" }, h("div.palette-empty", "Searching…"));
   let items = [];
   let failedProjects = 0;
@@ -1795,12 +1797,37 @@ async function searchChats() {
   };
   const open = async (item) => {
     close();
-    if (!item.project.current) await api.openProject(item.project.id);
-    await api.openSession(item.session.id);
+    try {
+      if (state.runtime !== searchRuntime || currentLocation()?.runtime !== location.runtime) throw new Error("The computer changed. Search again.");
+      if (currentLocation()?.project !== item.project.id || currentLocation()?.runtime !== searchRuntime) {
+        let off, timer;
+        const observed = new Promise((resolve, reject) => {
+          const inspect = () => {
+            const now = currentLocation();
+            if (now?.runtime !== location.runtime && now?.runtime !== searchRuntime) reject(new Error("The computer changed. Search again."));
+            else if (now?.project === item.project.id && now?.runtime === searchRuntime) resolve();
+          };
+          off = onExt("ark:summary", inspect);
+          timer = setTimeout(() => reject(new Error("The project did not open. Try again.")), 4000);
+          inspect();
+        });
+        try {
+          await Promise.all([observed, api.openProject(item.project.id).then(ok => {
+            if (!ok) throw new Error("Could not open the project");
+          })]);
+        } finally { off?.(); clearTimeout(timer); }
+      }
+      const now = currentLocation();
+      if (now?.runtime !== searchRuntime || now?.project !== item.project.id) throw new Error("The project changed. Search again.");
+      if (item.source) await item.source.open(item.entry, api.at(now));
+      else await api.openSession(item.session.id);
+    } catch (error) {
+      api.toast(error.message || "Could not open the result");
+    }
   };
   const paint = () => {
     const query = input.value.trim().toLocaleLowerCase();
-    const shown = items.filter((item) => !query || item.session.title?.toLocaleLowerCase().includes(query) || item.project.name.toLocaleLowerCase().includes(query)).slice(0, 100);
+    const shown = items.filter((item) => !query || [item.title, item.description, item.project.name].some(text => text?.toLocaleLowerCase().includes(query))).slice(0, 100);
     selected = Math.min(selected, Math.max(0, shown.length - 1));
     clear(list);
     list.setAttribute("aria-busy", String(loadState === "loading"));
@@ -1814,17 +1841,17 @@ async function searchChats() {
       input.removeAttribute("aria-activedescendant");
       return [];
     }
-    if (failedProjects) list.append(h("div.palette-note", "Some projects are not available", h("button.dk-btn.ghost", { type: "button", onclick: () => void loadResults() }, "Try again")));
+    if (failedProjects) list.append(h("div.palette-note", "Some results are not available", h("button.dk-btn.ghost", { type: "button", onclick: () => void loadResults() }, "Try again")));
     if (!shown.length) {
       const message = failedProjects
-        ? (items.length ? "No matches in the chats that are available" : "Some chats could not be searched")
-        : (items.length ? "No matching chats" : "No chats yet");
+        ? (items.length ? "No matching available results" : "Some results could not be searched")
+        : (items.length ? "No matching chats or agents" : "No chats or agents yet");
       list.append(h("div.palette-empty", message));
     }
     shown.forEach((item, index) => {
       const row = h("div.palette-item", { id: `chat-search-${index}`, role: "option", "aria-selected": String(index === selected) },
-        h("span.palette-item-main", h("span", item.session.title || "Untitled"), h("span.palette-hint", item.project.name)),
-        h("span.palette-hint", ago(item.session.updated_at)));
+        h("span.palette-item-main", h("span", item.title || "Untitled"), h("span.palette-hint", [item.project.name, item.description].filter(Boolean).join(" · "))),
+        h("span.palette-hint", item.source ? (item.source.label || "") : ago(item.session.updated_at)));
       row.addEventListener("mousedown", (event) => { event.preventDefault(); void open(item); });
       list.append(row);
     });
@@ -1854,18 +1881,28 @@ async function searchChats() {
     paint();
     try {
       const projects = await api.call("projects");
-      const sessions = await Promise.all(projects.map(async (project) => {
-        try {
-          return await api.call("sessions", { project: project.id });
-        } catch {
-          failedProjects++;
-          return [];
-        }
+      const sources = [...registry.searchSources.values()];
+      const groups = await Promise.all(projects.map(async (project) => {
+        const results = await Promise.allSettled([
+          api.call("sessions", { project: project.id }),
+          ...sources.map(source => Promise.resolve().then(() => source.load(project, api))),
+        ]);
+        const rows = [];
+        results.forEach((result, index) => {
+          if (result.status === "rejected") { failedProjects++; return; }
+          if (!Array.isArray(result.value)) { failedProjects++; return; }
+          for (const entry of result.value) {
+            if (index === 0) {
+              if (entry.turns > 0) rows.push({ project, session: entry, title: entry.title, updated_at: entry.updated_at });
+            } else if (typeof entry?.id === "string" && typeof entry.title === "string") {
+              rows.push({ project, entry, source: sources[index - 1], title: entry.title, description: entry.description, updated_at: entry.updated_at });
+            }
+          }
+        });
+        return rows;
       }));
       if (generation !== searchGeneration) return;
-      items = projects.flatMap((project, index) => sessions[index].map((session) => ({ project, session })))
-        .filter((item) => item.session.turns > 0)
-        .sort((a, b) => new Date(b.session.updated_at) - new Date(a.session.updated_at));
+      items = groups.flat().sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
       loadState = "ready";
       paint();
     } catch (error) {

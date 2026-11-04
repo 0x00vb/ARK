@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Agents can create persistent colleagues and start independent conversations with bounded briefs, inherited permissions and restart-safe handoffs. Chat-created agents can name their contacts.
+- Project agent identities can be searched without opening their conversations. The shared search accepts application sources.
+
 ## [0.27.3] - 2026-10-29
 
 - View authoritative scheduled starts and actual run states in Calendar.

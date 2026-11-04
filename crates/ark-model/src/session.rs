@@ -99,8 +99,13 @@ pub trait SessionBackend: Send + Sync {
     }
     /// The account whose capacity this backend draws on (`claude`, `codex`).
     fn account(&self) -> String;
+    /// Durable account configuration revision used to admit and restore a lane.
     fn account_revision(&self) -> u64 {
         0
+    }
+    /// Execution connection identity used by protected model grants.
+    fn connection_revision(&self) -> u64 {
+        self.account_revision()
     }
     /// Start a vendor session from a full request. Returns the vendor's session id.
     async fn open(
@@ -771,7 +776,7 @@ impl Provider for ManagedSession {
         self.backend.host_controls_tools()
     }
     fn connection_revision(&self) -> u64 {
-        self.backend.account_revision()
+        self.backend.connection_revision()
     }
     async fn complete(
         &self,
@@ -1179,7 +1184,7 @@ impl Provider for OneShot {
         self.backend.host_controls_tools()
     }
     fn connection_revision(&self) -> u64 {
-        self.backend.account_revision()
+        self.backend.connection_revision()
     }
     fn reads_pictures(&self) -> bool {
         self.backend.reads_pictures()
@@ -1433,6 +1438,112 @@ mod tests {
 
     fn runtime(policy: SessionPolicy) -> SubscriptionRuntime {
         SubscriptionRuntime::builder().policy(policy).build()
+    }
+
+    struct QualifiedBackend {
+        inner: MockSessions,
+        connection: std::sync::atomic::AtomicU64,
+    }
+
+    impl QualifiedBackend {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                inner: MockSessions::new("same-model", "default-account", vec![reply(10)]),
+                connection: std::sync::atomic::AtomicU64::new(0),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl SessionBackend for QualifiedBackend {
+        fn label(&self) -> String {
+            self.inner.label()
+        }
+        fn model(&self) -> String {
+            self.inner.model()
+        }
+        fn account(&self) -> String {
+            self.inner.account()
+        }
+        fn connection_revision(&self) -> u64 {
+            self.connection.load(std::sync::atomic::Ordering::SeqCst)
+        }
+        async fn open(
+            &self,
+            system: &str,
+            tools: &[ToolDef],
+            messages: &[Message],
+        ) -> Result<(String, Completion)> {
+            self.connection
+                .store(42, std::sync::atomic::Ordering::SeqCst);
+            self.inner.open(system, tools, messages).await
+        }
+        async fn resume(&self, vendor: &str, base: Base<'_>, delta: &Delta) -> Result<Completion> {
+            self.inner.resume(vendor, base, delta).await
+        }
+        async fn discard(&self, vendor: &str) {
+            self.inner.discard(vendor).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn lazy_connection_identity_preserves_same_account_lane_and_restart() {
+        let ledger: Arc<dyn SessionLedger> = Arc::new(MemoryLedger::default());
+        let rt = SubscriptionRuntime::builder()
+            .ledger(ledger.clone())
+            .build();
+        let first = QualifiedBackend::new();
+        let a = rt.session_with("same-lane", first.clone()).await;
+        a.complete("", &[Message::user("first")], &[])
+            .await
+            .unwrap();
+        assert_eq!(Provider::connection_revision(a.as_ref()), 42);
+        assert_eq!(SessionBackend::account_revision(first.as_ref()), 0);
+        let fresh = QualifiedBackend::new();
+        let b = rt.session_with("same-lane", fresh.clone()).await;
+        assert!(Arc::ptr_eq(&a, &b));
+        assert_eq!(Provider::connection_revision(b.as_ref()), 42);
+        first
+            .connection
+            .store(43, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(Provider::connection_revision(b.as_ref()), 43);
+        assert_eq!(SessionBackend::account_revision(first.as_ref()), 0);
+        first
+            .connection
+            .store(42, std::sync::atomic::Ordering::SeqCst);
+        assert!(fresh.inner.calls().is_empty());
+        assert!(!first
+            .inner
+            .calls()
+            .iter()
+            .any(|c| matches!(c, Call::Discard { .. })));
+        let restarted = SubscriptionRuntime::builder().ledger(ledger).build();
+        let third = QualifiedBackend::new();
+        let c = restarted.session_with("same-lane", third.clone()).await;
+        c.complete("", &[Message::user("first"), Message::user("second")], &[])
+            .await
+            .unwrap();
+        assert!(matches!(
+            third.inner.calls().first(),
+            Some(Call::Resume { .. })
+        ));
+    }
+
+    #[test]
+    fn stateless_provider_forwards_execution_connection_identity() {
+        let backend = QualifiedBackend::new();
+        backend
+            .connection
+            .store(42, std::sync::atomic::Ordering::SeqCst);
+        let one_shot = OneShot {
+            backend: backend.clone(),
+        };
+        assert_eq!(Provider::connection_revision(&one_shot), 42);
+        backend
+            .connection
+            .store(43, std::sync::atomic::Ordering::SeqCst);
+        assert_ne!(Provider::connection_revision(&one_shot), 42);
+        assert_eq!(SessionBackend::account_revision(backend.as_ref()), 0);
     }
 
     #[tokio::test]

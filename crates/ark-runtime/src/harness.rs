@@ -621,7 +621,13 @@ impl Harness {
         // Plan (non-trivial only, when enabled).
         if !trivial && self.planner {
             match self
-                .cancellable(self.draft_plan(profile, question, &mut metrics, &mut on_event))
+                .cancellable(self.draft_plan(
+                    profile,
+                    question,
+                    &mut metrics,
+                    &mut on_event,
+                    guard.as_deref(),
+                ))
                 .await
             {
                 None => cancelled = true,
@@ -819,6 +825,7 @@ impl Harness {
                         budget,
                         selected: &first.memory,
                     }),
+                    guard.as_deref(),
                 )
                 .await;
             let Some(mut completion) = (match called {
@@ -1379,6 +1386,7 @@ impl Harness {
                         budget,
                         selected: &first.memory,
                     },
+                    guard.as_deref(),
                 )
                 .await
             {
@@ -1435,6 +1443,7 @@ impl Harness {
                     &detail,
                     &mut metrics,
                     &mut on_event,
+                    guard.as_deref(),
                 )
                 .await
             {
@@ -1879,9 +1888,10 @@ impl Harness {
         on_event: &mut impl FnMut(HarnessEvent),
         repair: Option<&mut String>,
         memory: Option<&crate::memory::Snapshot<'_>>,
+        guard: Option<&dyn crate::guard::CallGuard>,
     ) -> Result<Option<Completion>, AgentError> {
         let provider = self.router.provider(role).clone();
-        if self.guard.is_some() && !provider.host_controls_tools() {
+        if guard.is_some() && !provider.host_controls_tools() {
             return Err(AgentError::NotAllowed(
                 "the selected model cannot enforce this execution's permissions".into(),
             ));
@@ -1892,6 +1902,11 @@ impl Harness {
         // When this call first failed: an unreachable model is waited for that long.
         let mut failing_since: Option<std::time::Instant> = None;
         loop {
+            if let Some(guard) = guard {
+                guard
+                    .check_model(&provider.model_id(), provider.connection_revision())
+                    .map_err(AgentError::NotAllowed)?;
+            }
             if let Some(memory) = memory {
                 memory.check()?;
             }
@@ -2333,6 +2348,7 @@ impl Harness {
         question: &str,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
+        guard: Option<&dyn crate::guard::CallGuard>,
     ) -> Option<Vec<String>> {
         let msgs = [Message::user(format!("Goal: {question}"))];
         let instructions = estimate_tokens(&profile.prompts.plan_system);
@@ -2358,6 +2374,7 @@ impl Harness {
                 on_event,
                 None,
                 None,
+                guard,
             )
             .await
             .ok()??;
@@ -2452,6 +2469,7 @@ impl Harness {
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
         memory: &crate::memory::Snapshot<'_>,
+        guard: Option<&dyn crate::guard::CallGuard>,
     ) -> Result<Option<String>, AgentError> {
         // Same system prompt and rounds as the reasoning steps, so the cached prefix carries
         // over; only the state and the instruction to stop differ.
@@ -2494,6 +2512,7 @@ impl Harness {
                 on_event,
                 None,
                 Some(memory),
+                guard,
             )
             .await?
             .map(|c| c.content.trim().to_string()))
@@ -2547,6 +2566,7 @@ impl Harness {
         issue: &str,
         metrics: &mut Metrics,
         on_event: &mut impl FnMut(HarnessEvent),
+        guard: Option<&dyn crate::guard::CallGuard>,
     ) -> Option<String> {
         let sys = format!(
             "{system}\n\n{} (the check that failed: {issue})",
@@ -2585,6 +2605,7 @@ impl Harness {
                 on_event,
                 None,
                 None,
+                guard,
             )
             .await
             .ok()??;

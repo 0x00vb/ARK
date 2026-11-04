@@ -3,6 +3,42 @@
 Every number here comes from a recorded report in this directory (`README.md` lists them).
 `bench/results.py` prints the before/after tables from two reports.
 
+## Daily-use candidate (2026-11-04, incomplete)
+
+Recorded summary: [daily-use/2026-11-04.json](daily-use/2026-11-04.json).
+The reference is native Codex CLI0.166, not Codex Desktop. The model is GPT-6.1 Sol at
+medium effort on the same account. The latest completed eight-case ARK condition retains
+its strict6/8 result against8/8 native references. Both failures concern CSV BOM/header
+compatibility. Actual coding tests, failure/retry recovery and restart retention passed
+both repetitions. Original failed conditions are retained.
+
+| Latest condition | Input plus output | Cached input | Uncached input |
+| --- | ---: | ---: | ---: |
+| ARK | 613,740 | 349,952 | 258,301 |
+| Retained native reference | 834,807 | 691,584 | 137,271 |
+
+Total tokens are26.48% lower, but uncached input is1.88times higher. Neither general
+quality parity nor lower billing is established. A separately preregistered composite
+functional suite still needs four explicit-format CSV calls. A post-hoc BOM-aware analysis
+and the actual ARK reader establish compatibility with that reader without changing the
+original grades.
+
+The22-workload simulated suite retains full success, model calls, output and tool counts.
+The proportional-verification instruction adds about55prompt tokens per request, raising
+mean total tokens3.2% and uncached input0.6%. This is an intentional prompt cost increase.
+The old baseline and exact comparison are retained in workspace evidence.
+
+Live validation has2,364,310 known input/output tokens and four cancelled requests with
+unknown usage. The latest manual schedule generated partial native response notifications
+but did not complete within180seconds. No effect or approval occurred. The captured data
+does not establish the cause. Further inference is on hold for the owner's quota choice.
+The account metadata reports96% weekly usage, resetting9November; it does not prove
+throttling. Final Core and Desktop checks pass. Native visual acceptance and actual
+manual/timer/refusal/restart acceptance remain incomplete. Do not use this record as a
+migration-ready or release qualification claim.
+
+Workspace evidence: `board/evidence/ark-daily-use-20261104/`.
+
 ## Codex catalog startup (2026-10-15)
 
 A read-only diagnosis of failed explicit-effort starts measured initialize, optional usage

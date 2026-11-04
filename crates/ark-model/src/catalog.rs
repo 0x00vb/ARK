@@ -28,6 +28,13 @@ pub enum BackendKind {
     Endpoint,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CatalogState {
+    Current,
+    Unavailable,
+}
+
 /// A model the provider advertised, with the effort choices it accepts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ModelOption {
@@ -62,6 +69,8 @@ pub struct Backend {
     /// Rich picker data when the provider exposes it. `models` remains for old clients.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub model_options: Vec<ModelOption>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_state: Option<CatalogState>,
     /// A subscription's program not ready: the step it needs, `install` or `sign_in`, which a
     /// window can run on the computer it lists (ADR 0052).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,15 +81,18 @@ pub struct Backend {
 /// seconds and never fails the listing.
 pub async fn catalog() -> Vec<Backend> {
     let named = crate::endpoints::endpoints();
-    let (claude, codex, codex_models, ollama, named) = tokio::join!(
+    let (claude, codex, codex_models, claude_models, ollama, named, anthropic, openai) = tokio::join!(
         cli::status(Cli::Claude),
         cli::status(Cli::Codex),
         cli::codex_models(),
+        crate::discovery::claude(None),
         ollama_models(),
-        futures::future::join_all(named.iter().map(crate::endpoints::backend))
+        futures::future::join_all(named.iter().map(crate::endpoints::backend)),
+        api_backend("anthropic", "Anthropic API", None),
+        api_backend("openai", "OpenAI API", None)
     );
     let mut out = vec![
-        subscription(claude, None),
+        subscription(claude, claude_models.ok()),
         subscription(codex, codex_models),
     ];
     out.push(match ollama {
@@ -100,6 +112,7 @@ pub async fn catalog() -> Vec<Backend> {
                 .then(|| "ollama pull qwen3:4b-instruct".into()),
             models,
             model_options: vec![],
+            catalog_state: Some(CatalogState::Current),
             step: None,
         },
         Err(detail) => Backend {
@@ -112,36 +125,11 @@ pub async fn catalog() -> Vec<Backend> {
             fix: Some("ollama serve".into()),
             models: vec![],
             model_options: vec![],
+            catalog_state: Some(CatalogState::Unavailable),
             step: None,
         },
     });
-    for (provider, label, key, model) in [
-        (
-            "anthropic",
-            "Anthropic API",
-            "ANTHROPIC_API_KEY",
-            "claude-sonnet-5-5",
-        ),
-        ("openai", "OpenAI API", "OPENAI_API_KEY", "gpt-5"),
-    ] {
-        let ready = crate::keys::has_api_key(key);
-        out.push(Backend {
-            provider: provider.into(),
-            label: label.into(),
-            identity: None,
-            kind: BackendKind::Api,
-            ready,
-            detail: if ready {
-                "key set".into()
-            } else {
-                "no key".into()
-            },
-            fix: None,
-            models: vec![model.into()],
-            model_options: vec![],
-            step: None,
-        });
-    }
+    out.extend([anthropic, openai]);
     out.push(crate::opencode_go::backend().await);
     out.extend(named);
     match crate::accounts::list() {
@@ -152,8 +140,11 @@ pub async fn catalog() -> Vec<Backend> {
                     let mut backend = base?;
                     if let Some(cli) = Cli::of(&account.provider) {
                         let status = cli::status_for(cli, Some(&account)).await;
-                        let models = if cli == Cli::Codex && status.signed_in {
-                            cli::codex_models_for(Some(&account)).await
+                        let models = if status.signed_in {
+                            match cli {
+                                Cli::Codex => cli::codex_models_for(Some(&account)).await,
+                                Cli::Claude => crate::discovery::claude(Some(&account)).await.ok(),
+                            }
                         } else {
                             None
                         };
@@ -164,6 +155,13 @@ pub async fn catalog() -> Vec<Backend> {
                         backend.detail = "key saved".into();
                         backend.step = None;
                         backend.fix = None;
+                    }
+                    if matches!(account.provider.as_str(), "openai" | "anthropic") {
+                        backend =
+                            api_backend(&account.provider, &account.name, Some(&account)).await;
+                    }
+                    if account.provider == "opencode-go" {
+                        backend = crate::opencode_go::backend_for(Some(&account)).await;
                     }
                     if let Some(mut endpoint) = crate::endpoints::endpoint(&account.provider) {
                         match account.key() {
@@ -190,6 +188,15 @@ pub async fn catalog() -> Vec<Backend> {
                             }
                             .into();
                     }
+                    if crate::accounts::get(&account.id)
+                        .ok()
+                        .flatten()
+                        .is_none_or(|current| {
+                            current.revision != account.revision || current.state != account.state
+                        })
+                    {
+                        return None;
+                    }
                     Some(backend)
                 }
             }));
@@ -209,30 +216,26 @@ pub async fn catalog() -> Vec<Backend> {
 
 fn subscription(st: cli::CliStatus, advertised: Option<Vec<ModelOption>>) -> Backend {
     let cli = st.cli;
-    let model_options = advertised.unwrap_or_else(|| {
-        cli.suggested_models()
-            .iter()
-            .map(|model| ModelOption {
-                id: (*model).into(),
-                label: cli.model_label(model),
-                // Codex efforts are model-specific. If live discovery failed, Default still
-                // works but the picker must not advertise unverified effort choices.
-                efforts: if cli == Cli::Codex {
-                    vec![]
-                } else {
-                    cli.efforts().iter().map(|e| (*e).into()).collect()
-                },
-                default_effort: None,
-            })
-            .collect()
+    let connected = st.installed && st.signed_in;
+    let catalog_state = connected.then_some(if advertised.is_some() {
+        CatalogState::Current
+    } else {
+        CatalogState::Unavailable
     });
+    let model_options = advertised.unwrap_or_default();
     Backend {
         provider: cli.name().into(),
         label: cli.label().into(),
         identity: st.identity,
         kind: BackendKind::Subscription,
-        ready: st.installed && st.signed_in,
-        detail: st.detail,
+        ready: connected && !model_options.is_empty(),
+        detail: if connected && catalog_state == Some(CatalogState::Unavailable) {
+            "Could not load models. Try again.".into()
+        } else if connected && model_options.is_empty() {
+            "No models available".into()
+        } else {
+            st.detail
+        },
         fix: if !st.installed {
             Some(cli.install_hint().into())
         } else if !st.signed_in {
@@ -242,6 +245,7 @@ fn subscription(st: cli::CliStatus, advertised: Option<Vec<ModelOption>>) -> Bac
         },
         models: model_options.iter().map(|m| m.id.clone()).collect(),
         model_options,
+        catalog_state,
         step: if !st.installed {
             Some("install")
         } else if !st.signed_in {
@@ -249,6 +253,67 @@ fn subscription(st: cli::CliStatus, advertised: Option<Vec<ModelOption>>) -> Bac
         } else {
             None
         },
+    }
+}
+
+async fn api_backend(
+    provider: &str,
+    label: &str,
+    account: Option<&crate::accounts::ModelAccount>,
+) -> Backend {
+    let key_name = format!("{}_API_KEY", provider.to_uppercase());
+    let present = account.map_or_else(
+        || crate::keys::has_api_key(&key_name),
+        |a| a.state == crate::accounts::AccountState::Active,
+    );
+    let listing = if present {
+        let key = match account {
+            Some(a) => a
+                .key()
+                .map_err(|_| "Could not read account key".to_string()),
+            None => {
+                crate::keys::api_key(&key_name).ok_or_else(|| "Could not read API key".to_string())
+            }
+        };
+        match key {
+            Ok(key) => {
+                let base = if provider == "anthropic" {
+                    std::env::var("ANTHROPIC_BASE_URL")
+                        .unwrap_or_else(|_| "https://api.anthropic.com/v1".into())
+                } else {
+                    std::env::var("OPENAI_BASE_URL")
+                        .unwrap_or_else(|_| "https://api.openai.com/v1".into())
+                };
+                crate::discovery::api(&base, &key, provider == "anthropic").await
+            }
+            Err(error) => Err(error),
+        }
+    } else {
+        Ok(vec![])
+    };
+    let catalog_state = present.then_some(if listing.is_ok() {
+        CatalogState::Current
+    } else {
+        CatalogState::Unavailable
+    });
+    let (detail, options) = match listing {
+        Ok(models) if !present => ("No key".into(), models),
+        Ok(models) if models.is_empty() => ("No models available".into(), models),
+        Ok(models) => ("Key set".into(), models),
+        Err(detail) => (detail, vec![]),
+    };
+    Backend {
+        provider: provider.into(),
+        label: label.into(),
+        identity: None,
+        kind: BackendKind::Api,
+        ready: present && !options.is_empty(),
+        detail,
+        fix: None,
+        models: options.iter().map(|m| m.id.clone()).collect(),
+        model_options: options,
+        catalog_state,
+        step: None,
     }
 }
 
@@ -270,4 +335,38 @@ async fn ollama_models() -> std::result::Result<Vec<String>, String> {
         .collect();
     names.sort();
     Ok(names)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status() -> cli::CliStatus {
+        cli::CliStatus {
+            cli: Cli::Codex,
+            installed: true,
+            signed_in: true,
+            detail: "Connected".into(),
+            identity: None,
+        }
+    }
+
+    #[test]
+    fn empty_and_unavailable_catalogs_never_reintroduce_suggested_models() {
+        let empty = subscription(status(), Some(vec![]));
+        assert_eq!(empty.catalog_state, Some(CatalogState::Current));
+        assert_eq!(empty.detail, "No models available");
+        assert!(!empty.ready);
+        assert!(empty.models.is_empty());
+        assert_eq!(empty.step, None);
+        let unavailable = subscription(status(), None);
+        assert_eq!(unavailable.catalog_state, Some(CatalogState::Unavailable));
+        assert!(unavailable.models.is_empty());
+        assert_eq!(unavailable.step, None);
+        let mut absent = status();
+        absent.installed = false;
+        let absent = subscription(absent, None);
+        assert_eq!(absent.catalog_state, None);
+        assert_eq!(absent.step, Some("install"));
+    }
 }

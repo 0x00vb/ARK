@@ -506,8 +506,10 @@ impl Adapter for Exec {
              Runtimes: {}. The program reads and writes files only in the project folder \
              (paths relative to it) and has no network. It is contained: the person's own \
              programs (cargo, npm, git and the rest) are not there, so do not start them from \
-             it. A project's own commands (its tests, a build) run with `process.start` when \
-             it is offered; when it is not, say they cannot be run here.",
+             it. The provided runtime can execute standalone project source compatible with \
+             its installed packages. Commands requiring other programs or the project's own \
+             environment need `process.start`; when it is not offered, report that limitation. \
+             All execution remains subject to this tool's sandbox and permissions.",
             runtimes.join("; ")
         );
         if !self.shows.is_empty() {

@@ -1,5 +1,45 @@
 # Changelog
 
+## [Unreleased]
+
+- Fail automated work after a frozen-authority refusal. Stop later actions and model
+  requests while retaining the first reason. Permitted metadata query corrections remain
+  recoverable. A later answer cannot turn an authority denial into a successful run.
+- Show automated agents only their existing actions covered by the frozen grant. Remove
+  unavailable skill and capability acquisition hints. Keep ordinary chat discovery unchanged.
+
+### Breaking
+
+- FrozenSelection includes a connections map. Rust struct literals must set it; existing
+  saved JSON omits it and retains its original activation digest.
+
+- Backend includes optional catalog_state. Rust struct literals must set it. Existing JSON
+  clients and stored model selections remain compatible.
+
+### Changed
+
+- Distinguish compatible standalone source in a provided execution runtime from commands
+  requiring the project environment. Ask for proportional outcome checks after changes.
+
+- Clarify that Codex native sandbox status describes its disabled tools. ARK host tools
+  retain their own permissions, execution mode and approval checks.
+
+- Include the release correction that launches a stopped application after an initial
+  AppNotFound inventory result. Permission and post-launch errors remain errors.
+
+- Bind saved automation grants to model connection revisions. Refuse changed accounts on
+  every request and after restart. Existing grants retain their digests; account-bound
+  models require activation again.
+
+- Qualify supported Codex model calls through a tool-free app-server transport. Protected
+  automations require a verified build, account, explicit model and effort. Refuse unqualified
+  fallback and foreign conversations. Count all responses within a Codex turn without
+  counting prior turns again after resume.
+
+- Discover models from connected provider catalogs instead of fixed picker lists. Distinguish
+  complete empty catalogs from discovery failures. Reject incomplete pagination and discard
+  results from changed account revisions.
+
 ## [0.33.1] - 2026-11-04
 
 - Isolate the pinned Computer native bridge build target from the consuming application.

@@ -5,6 +5,7 @@ produced by the same bench code: older runtimes are measured with `bench/at-comm
 
 | File | What |
 |---|---|
+| `daily-use/2026-11-04.json` | Incomplete Codex migration qualification. Original strict6/8 is preserved; all known usage and four unknown cancellations are disclosed. No parity or release-ready claim |
 | `baseline.json` | the simulated report of `main` (18 workloads since `claimed-schedule`; the older ones did not move with it); `scripts/ci.sh` compares against it. Regenerate it in the commit that moves the numbers on purpose |
 | `reliability/failed-call-guard-sim-2026-10-11.json`, `reliability/failed-call-guard-qwen3-4b-2026-10-11.json` | an identical failed read or observation stops after one retry: the 22-workload simulated suite and live `failure-recovery` plus `web`, 3 repetitions on qwen3:4b-instruct |
 | `live-codex-terra-medium-2026-10-09.json`, `live-claude-sonnet-medium-2026-10-09.json` | live release smoke test of explicit subscription model and medium effort selection: `simple`, `tool-lookup` and `multi-step`, one repetition each; request and event lines are in the matching `-traces/` folders |

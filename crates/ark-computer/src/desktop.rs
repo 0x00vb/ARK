@@ -67,6 +67,23 @@ fn deadline() -> Reply<ad::Deadline> {
     ad::Deadline::after(8000).map_err(error)
 }
 
+fn windows_for_open<T>(
+    mut list: impl FnMut() -> Result<Vec<T>, Box<ad::AdapterError>>,
+    launch: impl FnOnce() -> Result<(), Box<ad::AdapterError>>,
+) -> Result<Vec<T>, Box<ad::AdapterError>> {
+    let windows = match list() {
+        Ok(windows) => windows,
+        Err(error) if error.code == ad::ErrorCode::AppNotFound => Vec::new(),
+        Err(error) => return Err(error),
+    };
+    if windows.is_empty() {
+        launch()?;
+        list()
+    } else {
+        Ok(windows)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct Desktop {
     sender: mpsc::SyncSender<Job>,
@@ -840,24 +857,27 @@ impl Screen for Desktop {
                 app: Some(app.clone()),
                 focused_only: false,
             };
-            let mut windows = adapter
-                .list_windows(&filter, lease.deadline())
-                .map_err(error)?;
-            if windows.is_empty() {
-                adapter
-                    .launch_app(
-                        &app,
-                        &ad::system::launch_options::LaunchOptions {
-                            activate: true,
-                            ..Default::default()
-                        },
-                        &lease,
-                    )
-                    .map_err(error)?;
-                windows = adapter
-                    .list_windows(&filter, lease.deadline())
-                    .map_err(error)?;
-            }
+            let windows = windows_for_open(
+                || {
+                    adapter
+                        .list_windows(&filter, lease.deadline())
+                        .map_err(Box::new)
+                },
+                || {
+                    adapter
+                        .launch_app(
+                            &app,
+                            &ad::system::launch_options::LaunchOptions {
+                                activate: true,
+                                ..Default::default()
+                            },
+                            &lease,
+                        )
+                        .map(|_| ())
+                        .map_err(Box::new)
+                },
+            )
+            .map_err(|err| error(*err))?;
             let window = choose_window(windows)?;
             adapter.focus_window(&window, &lease).map_err(error)?;
             if worker.target.as_ref().is_some_and(|previous| {

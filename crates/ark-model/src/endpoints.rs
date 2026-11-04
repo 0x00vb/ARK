@@ -7,9 +7,7 @@
 //! An endpoint is the [`OpenAi`](crate::OpenAi) provider with another base URL, key and name,
 //! so it gets the same streaming, retries and usage. Its models come from its `GET /models`.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, RwLock};
-use std::time::{Duration, Instant};
+use std::sync::RwLock;
 
 use crate::{ProviderError, Result, PROVIDERS};
 
@@ -180,71 +178,23 @@ pub fn is_provider(name: &str) -> bool {
 
 /// How long a model list is reused: long enough that opening a picker costs no request, short
 /// enough that a model the endpoint adds shows up the same session.
-const LISTED_FOR: Duration = Duration::from_secs(300);
-const FAILED_FOR: Duration = Duration::from_secs(20);
-
 type Listing = std::result::Result<Vec<String>, String>;
-static LISTED: Mutex<Option<HashMap<String, (Instant, Listing)>>> = Mutex::new(None);
 
-/// The endpoint's models, from its `GET /models`, reused for a few minutes. An error says why
-/// it cannot be reached; it never takes longer than a few seconds.
 pub async fn models(e: &Endpoint) -> Listing {
-    let key_digest = e
-        .api_key()
-        .map(|key| blake3::hash(key.as_bytes()).to_hex().to_string())
-        .unwrap_or_default();
-    let cache_key = format!("{}|{}|{}", e.name, e.base_url, key_digest);
-    if let Some((at, listing)) = LISTED
-        .lock()
-        .unwrap()
-        .get_or_insert_with(HashMap::new)
-        .get(&cache_key)
-    {
-        let fresh = if listing.is_ok() {
-            LISTED_FOR
-        } else {
-            FAILED_FOR
-        };
-        if at.elapsed() < fresh {
-            return listing.clone();
-        }
-    }
-    let listing = fetch_models(e).await;
-    LISTED
-        .lock()
-        .unwrap()
-        .get_or_insert_with(HashMap::new)
-        .insert(cache_key, (Instant::now(), listing.clone()));
-    listing
-}
-
-async fn fetch_models(e: &Endpoint) -> Listing {
-    let mut req = reqwest::Client::new()
-        .get(format!("{}/models", e.base_url))
-        .timeout(Duration::from_secs(3));
-    if let Some(key) = e.api_key() {
-        req = req.bearer_auth(key);
-    }
-    let resp = req.send().await.map_err(|_| "not reachable".to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("models: HTTP {}", resp.status().as_u16()));
-    }
-    let v: serde_json::Value = resp
-        .json()
+    crate::discovery::api(&e.base_url, &e.api_key().unwrap_or_default(), false)
         .await
-        .map_err(|_| "models: not a model list".to_string())?;
-    Ok(v["data"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|m| m["id"].as_str().map(str::to_string))
-        .collect())
+        .map(|models| models.into_iter().map(|model| model.id).collect())
 }
 
 /// The catalog entry for an endpoint.
 pub(crate) async fn backend(e: &Endpoint) -> crate::Backend {
     let has_key = e.has_key();
     let listing = models(e).await;
+    let catalog_state = has_key.then_some(if listing.is_ok() {
+        crate::CatalogState::Current
+    } else {
+        crate::CatalogState::Unavailable
+    });
     let (ready, detail, models) = match (has_key, listing) {
         (false, _) => (false, format!("no key ({})", e.key_var()), Vec::new()),
         (true, Ok(models)) if models.is_empty() => (false, "no models".into(), models),
@@ -261,6 +211,7 @@ pub(crate) async fn backend(e: &Endpoint) -> crate::Backend {
         fix: None,
         models,
         model_options: vec![],
+        catalog_state,
         step: None,
     }
 }

@@ -142,3 +142,9 @@ Local integration decisions:
 - [0095-native-computer-uses-agent-desktop](0095-native-computer-uses-agent-desktop.md)
 
 - [0096-agent-conversation-navigation](0096-agent-conversation-navigation.md)
+
+- [0098. Codex model calls use a qualified host transport](0098-codex-model-calls-use-a-qualified-host-transport.md)
+- [0097. Model pickers use current provider catalogs](0097-model-pickers-use-current-provider-catalogs.md)
+- [0099. Saved automations bind model connections](0099-automation-model-connections.md)
+- [0100. Describe execution boundaries and verify changed outcomes](0100-runtime-capabilities-and-verification.md)
+- [0101. Automation authority refusals stop the run](0101-automation-authority-refusals-stop-the-run.md)

@@ -19,6 +19,8 @@ pub mod capacity;
 mod catalog;
 pub mod cli;
 mod codex_app;
+mod codex_host;
+mod discovery;
 pub mod endpoints;
 pub mod keys;
 mod live;
@@ -34,7 +36,7 @@ pub mod usage;
 
 pub use anthropic::Anthropic;
 pub use capacity::{Capacity, CapacitySnapshot, Limited, Limiter};
-pub use catalog::{catalog, Backend, BackendKind, ModelOption, PROVIDERS};
+pub use catalog::{catalog, Backend, BackendKind, CatalogState, ModelOption, PROVIDERS};
 pub use cli::{Cli, CliModel, CliStatus};
 pub use endpoints::{is_provider, Endpoint};
 pub use mock::MockProvider;

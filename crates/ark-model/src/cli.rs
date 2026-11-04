@@ -375,6 +375,39 @@ fn parse_status(cli: Cli, ok: bool, text: &str) -> (bool, String) {
     }
 }
 
+struct CodexHostAttempt {
+    result: std::result::Result<
+        Arc<crate::codex_host::CodexHost>,
+        crate::codex_host::QualificationError,
+    >,
+    checked: Instant,
+    program: Option<(PathBuf, u64, Option<std::time::SystemTime>)>,
+}
+
+struct CodexThreadReceipt {
+    host: Arc<crate::codex_host::CodexHost>,
+    thread: String,
+    files: Vec<PathBuf>,
+    retain: bool,
+}
+impl Drop for CodexThreadReceipt {
+    fn drop(&mut self) {
+        if self.retain || std::env::var("ARK_SESSION_KEEP_FILES").as_deref() == Ok("1") {
+            return;
+        }
+        if let Err(error) = self.host.forget(&self.thread) {
+            tracing::warn!(%error,"could not remove an unfinished Codex conversation receipt");
+        }
+        for file in &self.files {
+            if let Err(error) = std::fs::remove_file(file) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(%error,"could not remove an unfinished Codex conversation file");
+                }
+            }
+        }
+    }
+}
+
 /// A model reached through a vendor CLI.
 pub struct CliModel {
     cli: Cli,
@@ -383,6 +416,7 @@ pub struct CliModel {
     effort: Option<String>,
     program: Option<PathBuf>,
     calls: AtomicU64,
+    codex_host: Mutex<Option<CodexHostAttempt>>,
     /// Claude Code processes kept for vendor sessions, by session id. Only idle ones are
     /// here: a call takes its process out and puts it back after a complete reply.
     idle: Arc<CliIdle>,
@@ -426,6 +460,7 @@ impl CliModel {
             effort,
             program: None,
             calls: AtomicU64::new(0),
+            codex_host: Mutex::new(None),
             idle: Arc::default(),
             no_app: Default::default(),
         }
@@ -536,6 +571,31 @@ impl CliModel {
             return self.claude(mode, sys, &input, on_text).await;
         }
         let shape = self.codex_shape(tools);
+        if self.cli == Cli::Codex {
+            self.verify_codex_host();
+            let qualified = self
+                .codex_host
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|attempt| attempt.result.as_ref().ok())
+                .cloned();
+            if let Some(error) = self
+                .codex_host
+                .lock()
+                .unwrap()
+                .as_ref()
+                .and_then(|attempt| attempt.result.as_ref().err())
+                .filter(|error| !error.unsupported())
+            {
+                return Err(self.api(error.to_string()));
+            }
+            if let Some(host) = qualified {
+                return self
+                    .qualified_codex(host, mode, sys, &input, &shape, on_text)
+                    .await;
+            }
+        }
         if !matches!(mode, Mode::OneShot) && !self.no_app.load(Ordering::Relaxed) {
             if let Some(e) = self.codex_app(mode, sys, &input, &shape, on_text).await {
                 return e;
@@ -671,6 +731,189 @@ impl CliModel {
             vendor,
             gave_up,
         })
+    }
+
+    async fn qualified_codex(
+        &self,
+        host: Arc<crate::codex_host::CodexHost>,
+        mode: Mode<'_>,
+        system: &str,
+        input: &Input,
+        shape: &ReplyShape,
+        on_text: Option<TextSink<'_>>,
+    ) -> Result<Exec> {
+        host.fast_verify().map_err(|error| self.api(error))?;
+        if let Mode::Resume(id) = mode {
+            host.owns(id).map_err(|error| self.api(error))?;
+        }
+        let mut receipt = None;
+        let idle = self.idle.app.lock().unwrap().take();
+        let mut app = match idle
+            .filter(|app| app.qualified_for(&host))
+            .and_then(|mut app| app.running().then_some(app))
+        {
+            Some(app) => app,
+            None => CodexApp::start_qualified(
+                host.clone(),
+                env!("CARGO_PKG_VERSION"),
+                self.account.as_ref(),
+            )
+            .await
+            .map_err(|error| self.app_error(&error, ""))?,
+        };
+        let ephemeral = matches!(mode, Mode::OneShot);
+        let thread = match mode {
+            Mode::OneShot | Mode::Open(_) => {
+                let id = app
+                    .start_thread_ephemeral(host.directory(), Some(&host.model), system, ephemeral)
+                    .await
+                    .map_err(|error| self.app_error(&error, ""))?;
+                if !ephemeral {
+                    host.remember(&id).map_err(|error| self.api(error))?;
+                }
+                id
+            }
+            Mode::Resume(id) => {
+                if !app.has_thread(id) {
+                    app.resume_thread(host.directory(), Some(&host.model), id)
+                        .await
+                        .map_err(|error| self.app_error(&error, ""))?;
+                }
+                id.to_string()
+            }
+        };
+        if !ephemeral {
+            receipt = Some(CodexThreadReceipt {
+                host: host.clone(),
+                thread: thread.clone(),
+                files: self.session_files(&thread),
+                retain: false,
+            });
+        }
+        let result = app
+            .turn(crate::codex_app::TurnRequest {
+                thread_id: &thread,
+                input: &input.text,
+                pictures: &input.pictures,
+                schema: &shape.schema,
+                effort: self.effort.as_deref(),
+                wait: CALL_TIMEOUT,
+                on_text,
+            })
+            .await;
+        let turn = match result {
+            Ok(turn) => turn,
+            Err(error) => {
+                let error = self.app_error(&error, "");
+                app.stop().await;
+                return Err(self.api(error.to_string()));
+            }
+        };
+        if ephemeral {
+            app.stop().await;
+        } else {
+            *self.idle.app.lock().unwrap() = Some(app);
+        }
+        let unusable = || {
+            tracing::warn!(
+                prompt_tokens = turn.usage.prompt_tokens,
+                completion_tokens = turn.usage.completion_tokens,
+                cached_tokens = turn.usage.cached_tokens,
+                measured = turn.usage.measured,
+                "Codex returned an unusable answer; automatic retry is disabled"
+            );
+            self.api("Codex did not return a usable answer. Try again.".into())
+        };
+        let reply: Value = serde_json::from_str(turn.text.trim()).map_err(|_| unusable())?;
+        let completion = self
+            .completion(&reply, turn.usage, shape)
+            .map_err(|_| unusable())?;
+        if let Some(receipt) = &mut receipt {
+            receipt.retain = true;
+        }
+        Ok(Exec {
+            completion,
+            vendor: Some(thread),
+            gave_up: false,
+        })
+    }
+
+    fn verify_codex_host(&self) -> bool {
+        let program = self.program().ok();
+        let signature = program.as_ref().and_then(|program| {
+            let path = program.canonicalize().ok()?;
+            let metadata = std::fs::metadata(&path).ok()?;
+            Some((path, metadata.len(), metadata.modified().ok()))
+        });
+        let mut state = self.codex_host.lock().unwrap();
+        if state.as_ref().is_some_and(|attempt| {
+            attempt.result.is_err()
+                && (attempt.checked.elapsed() >= Duration::from_secs(10)
+                    || attempt.program != signature)
+        }) {
+            *state = None;
+        }
+        if state.is_none() {
+            let result = program
+                .ok_or_else(|| {
+                    crate::codex_host::QualificationError::Unsupported(
+                        "Codex is unavailable".into(),
+                    )
+                })
+                .and_then(|bin| {
+                    let account = self.account.clone();
+                    let model = self.model.clone();
+                    std::thread::Builder::new()
+                        .name("ark-codex-isolation".into())
+                        .spawn(move || {
+                            let runtime = tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .map_err(|_| {
+                                    crate::codex_host::QualificationError::from(
+                                        "Could not verify Codex tool isolation",
+                                    )
+                                })?;
+                            runtime.block_on(async {
+                                tokio::time::timeout(
+                                    Duration::from_secs(30),
+                                    crate::codex_host::CodexHost::qualify(bin, account, model),
+                                )
+                                .await
+                                .map_err(|_| {
+                                    crate::codex_host::QualificationError::from(
+                                        "Codex tool isolation verification timed out",
+                                    )
+                                })?
+                            })
+                        })
+                        .map_err(|_| {
+                            crate::codex_host::QualificationError::from(
+                                "Could not start Codex tool isolation verification",
+                            )
+                        })?
+                        .join()
+                        .map_err(|_| {
+                            crate::codex_host::QualificationError::from(
+                                "Codex tool isolation verification stopped",
+                            )
+                        })?
+                });
+            if result.is_ok() {
+                self.idle.app.lock().unwrap().take();
+            } else if let Err(error) = &result {
+                tracing::warn!(reason=%error.internal_reason(),"Codex host qualification was refused");
+            }
+            *state = Some(CodexHostAttempt {
+                result,
+                checked: Instant::now(),
+                program: signature,
+            });
+        }
+        state
+            .as_ref()
+            .and_then(|attempt| attempt.result.as_ref().ok())
+            .is_some_and(|host| host.fast_verify().is_ok())
     }
 
     /// One Codex completion on the app server: `Open` starts a thread with `sys` as its
@@ -865,6 +1108,23 @@ impl CliModel {
         schema: &str,
         search: bool,
     ) -> Result<Parsed> {
+        if self.cli == Cli::Codex
+            && self
+                .codex_host
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|attempt| {
+                    !attempt
+                        .result
+                        .as_ref()
+                        .is_err_and(|error| error.unsupported())
+                })
+        {
+            return Err(
+                self.api("Qualified Codex cannot use the native exec or search transport".into())
+            );
+        }
         let bin = self.program()?;
         let dir = work_dir()?;
         let (mut cmd, out_file) = match self.cli {
@@ -1100,9 +1360,18 @@ impl CliModel {
 impl Provider for CliModel {
     fn host_controls_tools(&self) -> bool {
         self.cli == Cli::Claude
+            || (self.model != "default" && self.effort.is_some() && self.verify_codex_host())
     }
     fn connection_revision(&self) -> u64 {
-        self.account.as_ref().map_or(0, |a| a.revision)
+        if let Some(account) = &self.account {
+            return account.revision;
+        }
+        self.codex_host
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|attempt| attempt.result.as_ref().ok())
+            .map_or(0, |host| host.account_revision())
     }
     fn for_conversation(&self, _conversation: &str) -> Result<Option<Arc<dyn Provider>>> {
         if let Some(account) = &self.account {
@@ -1152,6 +1421,23 @@ impl Provider for CliModel {
     }
 
     async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
+        if self.cli == Cli::Codex {
+            self.verify_codex_host();
+            if self
+                .codex_host
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|attempt| {
+                    !attempt
+                        .result
+                        .as_ref()
+                        .is_err_and(|error| error.unsupported())
+                })
+            {
+                return None;
+            }
+        }
         Some(self.search(query, limit).await)
     }
 
@@ -1330,10 +1616,30 @@ impl SessionBackend for CliModel {
         self.identity().to_string()
     }
     fn account_revision(&self) -> u64 {
-        self.account.as_ref().map_or(0, |a| a.revision)
+        self.account.as_ref().map_or(0, |account| account.revision)
+    }
+    fn connection_revision(&self) -> u64 {
+        Provider::connection_revision(self)
     }
 
     async fn web_search(&self, query: &str, limit: usize) -> Option<Result<Vec<WebHit>>> {
+        if self.cli == Cli::Codex {
+            self.verify_codex_host();
+            if self
+                .codex_host
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|attempt| {
+                    !attempt
+                        .result
+                        .as_ref()
+                        .is_err_and(|error| error.unsupported())
+                })
+            {
+                return None;
+            }
+        }
         Some(self.search(query, limit).await)
     }
 
@@ -1358,6 +1664,19 @@ impl SessionBackend for CliModel {
     }
 
     async fn discard(&self, vendor: &str) {
+        let qualified = self
+            .codex_host
+            .lock()
+            .unwrap()
+            .as_ref()
+            .and_then(|attempt| attempt.result.as_ref().ok())
+            .cloned();
+        if let Some(host) = &qualified {
+            if let Err(error) = host.owns(vendor) {
+                tracing::warn!(%error, "refused to discard an unowned Codex conversation");
+                return;
+            }
+        }
         let running = self.idle.live.lock().unwrap().remove(vendor);
         if let Some(p) = running {
             p.stop().await;
@@ -1374,7 +1693,20 @@ impl SessionBackend for CliModel {
             a.stop().await;
         }
         for f in self.session_files(vendor) {
-            let _ = std::fs::remove_file(&f);
+            if qualified.is_some() {
+                if let Err(error) = std::fs::remove_file(&f) {
+                    if error.kind() != std::io::ErrorKind::NotFound {
+                        tracing::warn!(%error, "could not remove an owned Codex conversation file");
+                    }
+                }
+            } else {
+                let _ = std::fs::remove_file(&f);
+            }
+        }
+        if let Some(host) = qualified {
+            if let Err(error) = host.forget(vendor) {
+                tracing::warn!(%error, "could not remove an owned Codex conversation receipt");
+            }
         }
     }
 
@@ -1750,9 +2082,6 @@ async fn codex_models_from_for(
     .await
     .ok()
     .flatten()?;
-    if listed.is_empty() {
-        return None;
-    }
     if let Some(account) = account {
         ACCOUNT_CATALOG.lock().unwrap().insert(
             catalog_key(account),
@@ -1877,6 +2206,14 @@ now; no loading step is needed for it.\n\n"
 
 fn protocol(cli: Option<Cli>, system: &str, tools: &[ToolDef], session: bool) -> String {
     let mut s = String::from(opening(cli));
+    if matches!(cli, Some(Cli::Codex)) {
+        s.push_str(
+            "The native sandbox restricts your own disabled tools. Host tools run separately, \
+under the host's permissions and approval checks. A native read-only sandbox does not make \
+the host workspace read-only. Request host tool calls for the person's task and let the host \
+approve or refuse them. Follow the application's execution mode and every refusal.\n\n",
+        );
+    }
     let arguments = match cli {
         Some(Cli::Claude) => "a JSON object",
         _ => "a JSON object, as the reply schema shapes it",
@@ -2616,6 +2953,470 @@ done
     }
 
     #[cfg(unix)]
+    fn qualified_fixture(name: &str) -> (CliModel, PathBuf) {
+        let (bin, log) = codex_app(
+            name,
+            r#"{"action":"reply","text":"qualified answer","tool_calls":[]}"#,
+        );
+        let mut host = crate::codex_host::CodexHost::fixture(&bin);
+        let configuration = serde_json::to_string(&host.fixture_configuration())
+            .unwrap()
+            .replace('"', "\\\"");
+        let branch = format!(
+            r#"    *'"method":"account/read"'*) account=$(cat "$d/account"); echo "{{\"id\":$id,\"result\":$account}}" ;;
+    *'"method":"thread/resume"'*) echo "{{\"id\":$id,\"result\":{{}}}}"; echo '{{"method":"thread/tokenUsage/updated","params":{{"threadId":"00000000-0000-4000-8000-000000000001","turnId":"old","tokenUsage":{{"total":{{"inputTokens":900,"outputTokens":12,"cachedInputTokens":800}}}}}}}}' ;;
+    *'"method":"thread/read"'*) echo "{{\"id\":$id,\"result\":{{}}}}" ;;
+    *'"method":"config/read"'*) echo "{{\"id\":$id,\"result\":{configuration}}}" ;;
+"#
+        );
+        let script = std::fs::read_to_string(&bin)
+            .unwrap()
+            .replacen(
+                "  case \"$line\" in\n",
+                &format!("  case \"$line\" in\n{branch}"),
+                1,
+            )
+            .replace("T1", "00000000-0000-4000-8000-000000000001");
+        std::fs::write(&bin, script).unwrap();
+        let turn = std::fs::read_to_string(bin.with_file_name("turn"))
+            .unwrap()
+            .replace("T1", "00000000-0000-4000-8000-000000000001");
+        let turn = turn
+            .lines()
+            .map(|line| {
+                let mut event: Value = serde_json::from_str(line).unwrap();
+                if event["method"] == "thread/tokenUsage/updated" {
+                    event["params"]["tokenUsage"]["total"] =
+                        event["params"]["tokenUsage"]["last"].clone();
+                }
+                event.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(bin.with_file_name("turn"), turn).unwrap();
+        std::fs::write(bin.with_file_name("account"), json!({"account":{"type":"chatgpt","email":"fixture@example.test"},"workspaceRouting":{"chatgptAccountId":"fixture-account"}}).to_string()).unwrap();
+        Arc::get_mut(&mut host).unwrap().refresh_fixture_identity();
+        let model = CliModel::new(Cli::Codex, "fixture-model@medium").with_program(&bin);
+        *model.codex_host.lock().unwrap() = Some(CodexHostAttempt {
+            result: Ok(host),
+            checked: Instant::now(),
+            program: None,
+        });
+        (model, log)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_stateless_calls_never_use_exec_or_native_search() {
+        let (model, log) = qualified_fixture("qualified-stateless");
+        let completion = Provider::complete(&model, "system", &[Message::user("task")], &[])
+            .await
+            .unwrap();
+        assert_eq!(completion.content, "qualified answer");
+        assert!(Provider::web_search(&model, "query", 1).await.is_none());
+        let directory = model
+            .codex_host
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .directory()
+            .to_path_buf();
+        assert!(!directory.join("state/ark-host-threads").exists());
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(log.contains("app-server"));
+        assert!(log.contains("\"ephemeral\":true"));
+        assert!(!log.lines().any(|line| line == "exec"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_resumes_only_its_own_stamped_conversation() {
+        let (model, log) = qualified_fixture("qualified-resume");
+        let messages = [Message::user("task")];
+        let (vendor, _) = SessionBackend::open(&model, "system", &[], &messages)
+            .await
+            .unwrap();
+        let app = model.idle.app.lock().unwrap().take().unwrap();
+        app.stop().await;
+        let delta = Delta {
+            messages: vec![Message::user("continue")],
+            ..Default::default()
+        };
+        SessionBackend::resume(
+            &model,
+            &vendor,
+            Base {
+                system: "system",
+                tools: &[],
+            },
+            &delta,
+        )
+        .await
+        .unwrap();
+        let before = std::fs::read_to_string(&log).unwrap();
+        assert!(before.contains("thread/resume"));
+        assert!(SessionBackend::resume(
+            &model,
+            "00000000-0000-4000-8000-000000000099",
+            Base {
+                system: "system",
+                tools: &[],
+            },
+            &delta
+        )
+        .await
+        .is_err());
+        let dispatched = |log: &str| {
+            log.lines()
+                .filter(|line| {
+                    line.contains("\"method\":\"thread/") || line.contains("\"method\":\"turn/")
+                })
+                .count()
+        };
+        assert_eq!(
+            dispatched(&before),
+            dispatched(&std::fs::read_to_string(log).unwrap())
+        );
+        SessionBackend::discard(&model, &vendor).await;
+        let host = model
+            .codex_host
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .clone();
+        assert!(host.owns(&vendor).is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_drift_refuses_instead_of_downgrading() {
+        let (model, log) = qualified_fixture("qualified-drift");
+        std::fs::write(model.program().unwrap(), "#!/bin/sh\necho downgraded\n").unwrap();
+        assert!(!Provider::host_controls_tools(&model));
+        assert!(
+            Provider::complete(&model, "system", &[Message::user("task")], &[])
+                .await
+                .is_err()
+        );
+        assert!(!log.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_protocol_failure_never_falls_back_to_exec() {
+        let (model, log) = qualified_fixture("qualified-no-fallback");
+        let bin = model.program().unwrap();
+        let script = std::fs::read_to_string(&bin).unwrap().replace(
+            "while IFS= read -r line; do",
+            "exit 1\nwhile IFS= read -r line; do",
+        );
+        std::fs::write(&bin, script).unwrap();
+        {
+            let mut state = model.codex_host.lock().unwrap();
+            Arc::get_mut(state.as_mut().unwrap().result.as_mut().unwrap())
+                .unwrap()
+                .refresh_fixture_identity();
+        }
+        assert!(
+            Provider::complete(&model, "system", &[Message::user("task")], &[])
+                .await
+                .is_err()
+        );
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(log.contains("app-server"));
+        assert!(!log.lines().any(|line| line == "exec"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_qualified_codex_reaps_its_process_and_descendant() {
+        let (model, _) = qualified_fixture("qualified-cancel");
+        let bin = model.program().unwrap();
+        let script = std::fs::read_to_string(&bin)
+            .unwrap()
+            .replace(
+                "d=$(dirname \"$0\")",
+                "d=$(dirname \"$0\")\necho $$ > \"$d/pid\"",
+            )
+            .replace(
+                "cat \"$d/turn\"",
+                "sleep 60 & echo $! > \"$d/descendant\"; wait $!",
+            );
+        std::fs::write(&bin, script).unwrap();
+        {
+            let mut state = model.codex_host.lock().unwrap();
+            Arc::get_mut(state.as_mut().unwrap().result.as_mut().unwrap())
+                .unwrap()
+                .refresh_fixture_identity();
+        }
+        let model = Arc::new(model);
+        let active = model.clone();
+        let task = tokio::spawn(async move {
+            SessionBackend::open(&*active, "system", &[], &[Message::user("task")]).await
+        });
+        let pid = fixture_pid(&bin, "pid").await;
+        let descendant = fixture_pid(&bin, "descendant").await;
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        fixture_stopped(pid).await;
+        fixture_stopped(descendant).await;
+        let directory = model
+            .codex_host
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .directory()
+            .to_path_buf();
+        assert_eq!(
+            std::fs::read_dir(directory.join("state/ark-host-threads"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_durable_revision_and_execution_identity_are_separate() {
+        let (model, _) = qualified_fixture("qualified-revision-identities");
+        let fresh = CliModel::new(Cli::Codex, "fixture-model@medium")
+            .with_program(model.program().unwrap());
+        assert_eq!(SessionBackend::account_revision(&fresh), 0);
+        assert!(fresh.codex_host.lock().unwrap().is_none());
+        assert_eq!(SessionBackend::account_revision(&model), 0);
+        assert_ne!(SessionBackend::connection_revision(&model), 0);
+        assert_eq!(
+            SessionBackend::connection_revision(&model),
+            Provider::connection_revision(&model)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_reused_lane_refuses_a_changed_default_account() {
+        let (model, log) = qualified_fixture("qualified-reused-account-change");
+        let bin = model.program().unwrap();
+        let runtime = crate::session::SubscriptionRuntime::builder().build();
+        let session = runtime.session_with("lane", Arc::new(model)).await;
+        session
+            .complete("system", &[Message::user("first")], &[])
+            .await
+            .unwrap();
+        let frozen = Provider::connection_revision(session.as_ref());
+        assert_ne!(frozen, 0);
+        let fresh = CliModel::new(Cli::Codex, "fixture-model@medium").with_program(&bin);
+        let reused = runtime.session_with("lane", Arc::new(fresh)).await;
+        assert!(Arc::ptr_eq(&session, &reused));
+        assert_eq!(Provider::connection_revision(reused.as_ref()), frozen);
+        let before = std::fs::read_to_string(&log)
+            .unwrap()
+            .matches("\"method\":\"turn/start\"")
+            .count();
+        assert_eq!(before, 1);
+        std::fs::write(bin.with_file_name("account"), json!({"account":{"type":"chatgpt","email":"fixture@example.test"},"workspaceRouting":{"chatgptAccountId":"different-account"}}).to_string()).unwrap();
+        assert!(reused
+            .complete(
+                "system",
+                &[Message::user("first"), Message::user("second")],
+                &[]
+            )
+            .await
+            .is_err());
+        let after = std::fs::read_to_string(log).unwrap();
+        assert_eq!(after.matches("\"method\":\"turn/start\"").count(), before);
+        assert!(!after.lines().any(|line| line == "exec"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_account_change_refuses_before_a_model_turn() {
+        let (model, log) = qualified_fixture("qualified-account-change");
+        assert!(Provider::host_controls_tools(&model));
+        let bin = model.program().unwrap();
+        std::fs::write(bin.with_file_name("account"), json!({"account":{"type":"chatgpt","email":"fixture@example.test"},"workspaceRouting":{"chatgptAccountId":"different-account"}}).to_string()).unwrap();
+        assert!(Provider::host_controls_tools(&model));
+        assert!(
+            Provider::complete(&model, "system", &[Message::user("task")], &[])
+                .await
+                .is_err()
+        );
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(!log.contains("\"method\":\"turn/start\""));
+        assert!(!log.lines().any(|line| line == "exec"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn codex_usage_counts_all_responses_and_resumes_from_replayed_totals() {
+        let (bin, _) = codex_app(
+            "codex-cumulative-usage",
+            r#"{"action":"reply","text":"done","tool_calls":[]}"#,
+        );
+        let original = std::fs::read_to_string(bin.with_file_name("turn")).unwrap();
+        let ending = original
+            .lines()
+            .filter(|line| !line.contains("thread/tokenUsage/updated"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let event = |turn: &str, input: u64, output: u64, cached: u64, last_input: u64| {
+            json!({"method":"thread/tokenUsage/updated","params":{"threadId":"T1","turnId":turn,"tokenUsage":{"total":{"inputTokens":input,"outputTokens":output,"cachedInputTokens":cached},"last":{"inputTokens":last_input,"outputTokens":output,"cachedInputTokens":cached}}}}).to_string()+"\n"
+        };
+        let first = event("u1", 0, 0, 0, 7000)
+            + &event("old", 9999, 9999, 0, 9999)
+            + &event("u1", 20, 7, 5, 20)
+            + &event("u1", 20, 7, 5, 20)
+            + &event("u1", 50, 18, 15, 30)
+            + &ending;
+        std::fs::write(bin.with_file_name("turn"), first).unwrap();
+        let model = CliModel::new(Cli::Codex, "fixture-model").with_program(&bin);
+        let (vendor, first) = SessionBackend::open(&model, "system", &[], &[Message::user("task")])
+            .await
+            .unwrap();
+        assert_eq!(first.usage, Usage::measured(50, 18).with_cached(15));
+        let app = model.idle.app.lock().unwrap().take().unwrap();
+        app.stop().await;
+        let script = std::fs::read_to_string(&bin).unwrap().replace(r#"*'"method":"thread/resume"'*) echo "{\"id\":$id,\"result\":{}}" ;;"#, &format!(r#"*'"method":"thread/resume"'*) echo "{{\"id\":$id,\"result\":{{}}}}"; echo '{}' ;;"#,event("u1",50,18,15,30).trim()));
+        let script = script.replace(r#"\"id\":\"u1\""#, r#"\"id\":\"u2\""#);
+        std::fs::write(&bin, script).unwrap();
+        std::fs::write(
+            bin.with_file_name("turn"),
+            event("u2", 90, 31, 35, 40) + &ending.replace("u1", "u2"),
+        )
+        .unwrap();
+        let completion = SessionBackend::resume(
+            &model,
+            &vendor,
+            Base {
+                system: "system",
+                tools: &[],
+            },
+            &Delta {
+                messages: vec![Message::user("continue")],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(completion.usage, Usage::measured(40, 13).with_cached(20));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_failed_open_removes_its_owned_receipt() {
+        let (model, _) = qualified_fixture("qualified-failed-open");
+        let bin = model.program().unwrap();
+        let turn = std::fs::read_to_string(bin.with_file_name("turn"))
+            .unwrap()
+            .replace("\"status\":\"completed\"", "\"status\":\"failed\"");
+        std::fs::write(bin.with_file_name("turn"), turn).unwrap();
+        assert!(
+            SessionBackend::open(&model, "system", &[], &[Message::user("task")])
+                .await
+                .is_err()
+        );
+        let directory = model
+            .codex_host
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .result
+            .as_ref()
+            .unwrap()
+            .directory()
+            .to_path_buf();
+        assert_eq!(
+            std::fs::read_dir(directory.join("state/ark-host-threads"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_warm_capability_checks_start_no_process() {
+        let (model, log) = qualified_fixture("qualified-warm-check");
+        for _ in 0..4 {
+            assert!(Provider::host_controls_tools(&model));
+        }
+        assert!(!log.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_preserves_a_completed_reply_without_usage() {
+        let (model, log) = qualified_fixture("qualified-no-usage");
+        let bin = model.program().unwrap();
+        let turn = std::fs::read_to_string(bin.with_file_name("turn"))
+            .unwrap()
+            .lines()
+            .filter(|line| !line.contains("thread/tokenUsage/updated"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(bin.with_file_name("turn"), turn).unwrap();
+        let completion = Provider::complete(&model, "system", &[Message::user("task")], &[])
+            .await
+            .unwrap();
+        assert_eq!(completion.content, "qualified answer");
+        assert!(!completion.usage.measured);
+        let log = std::fs::read_to_string(log).unwrap();
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.contains("\"method\":\"turn/start\""))
+                .count(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn qualified_codex_does_not_automatically_retry_after_a_billed_bad_reply() {
+        let (model, log) = qualified_fixture("qualified-bad-reply");
+        let bin = model.program().unwrap();
+        let turn = std::fs::read_to_string(bin.with_file_name("turn"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let mut event: Value = serde_json::from_str(line).unwrap();
+                if event["method"] == "item/completed" {
+                    event["params"]["item"]["text"] = json!("unstructured answer");
+                }
+                event.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(bin.with_file_name("turn"), turn).unwrap();
+        let error = Provider::complete(&model, "system", &[Message::user("task")], &[])
+            .await
+            .unwrap_err();
+        assert!(!error.is_transient());
+        let log = std::fs::read_to_string(log).unwrap();
+        assert_eq!(
+            log.lines()
+                .filter(|line| line.contains("\"method\":\"turn/start\""))
+                .count(),
+            1
+        );
+    }
+
+    #[cfg(unix)]
     static CATALOG_FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     /// Change one RPC response without touching environment or real account configuration.
@@ -2701,6 +3502,69 @@ done
             assert!(!log.contains(forbidden), "catalog sent {forbidden}");
         }
         fixture_stopped(fixture_pid(&bin, "pid").await).await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn catalog_preserves_a_verified_empty_response() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        let (bin, _) = catalog_fixture(
+            "catalog-verified-empty",
+            "model/list",
+            r#"echo "{\"id\":$id,\"result\":{\"data\":[],\"nextCursor\":null}}""#,
+        );
+        let models = codex_models_from(&bin, Duration::from_secs(6)).await;
+        assert_eq!(models.map(|models| models.len()), Some(0));
+        assert!(CODEX_CATALOG.lock().unwrap().as_ref().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn catalog_refuses_malformed_or_incomplete_pages() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        for (name, response) in [
+            ("missing-data", json!({"nextCursor":null})),
+            ("invalid-data", json!({"data":{},"nextCursor":null})),
+            ("invalid-model", json!({"data":[{}],"nextCursor":null})),
+            (
+                "invalid-effort",
+                json!({"data":[{"model":"model","supportedReasoningEfforts":[{}]}],"nextCursor":null}),
+            ),
+            ("invalid-cursor", json!({"data":[],"nextCursor":42})),
+            (
+                "repeated-cursor",
+                json!({"data":[{"model":"model"}],"nextCursor":"again"}),
+            ),
+        ] {
+            let result = serde_json::to_string(&response)
+                .unwrap()
+                .replace('"', "\\\"");
+            let (bin, _) = catalog_fixture(
+                &format!("catalog-{name}"),
+                "model/list",
+                &format!(r#"echo "{{\"id\":$id,\"result\":{result}}}""#),
+            );
+            assert!(
+                codex_models_from(&bin, Duration::from_secs(6))
+                    .await
+                    .is_none(),
+                "accepted {name}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn catalog_refuses_pagination_exhaustion() {
+        let _fixture = CATALOG_FIXTURES.lock().await;
+        let (bin, _) = catalog_fixture(
+            "catalog-exhaustion",
+            "model/list",
+            r#"n=$(cat "$d/page" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$d/page"; echo "{\"id\":$id,\"result\":{\"data\":[{\"model\":\"model\"}],\"nextCursor\":\"$n\"}}""#,
+        );
+        assert!(codex_models_from(&bin, Duration::from_secs(6))
+            .await
+            .is_none());
     }
 
     #[cfg(unix)]

@@ -1517,7 +1517,7 @@ impl Inner {
             message,
             ..
         } = turn;
-        models.require_host_tools()?;
+        models.check_guard(guard.as_ref())?;
         let step = &run.steps[index];
         let scope = ProjectId(step.scope.clone());
         let key = format!("{}/{}", run.id, step.id);
@@ -1555,6 +1555,8 @@ impl Inner {
                 profile.distillers.push(distiller);
             }
         }
+        registry = authority::approved_registry(&registry, &run.revision.draft.authority);
+        authority::approved_profile(&mut profile, &registry);
         let engine = self
             .engine
             .for_work(&key)

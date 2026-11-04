@@ -1212,7 +1212,19 @@ async fn the_model_menu_lists_backends_and_switches() {
     let claude = bin.path().join("claude");
     std::fs::write(
         &claude,
-        "#!/bin/sh\necho '{\"loggedIn\": true, \"authMethod\": \"claude.ai\"}'\n",
+        r##"#!/bin/sh
+if [ "$1" = auth ]; then
+  echo '{"loggedIn":true,"authMethod":"claude.ai"}'
+  exit 0
+fi
+IFS= read -r request
+case "$request" in
+  *'"request_id":"ark-models"'*)
+    echo '{"type":"control_response","response":{"request_id":"ark-models","subtype":"success","response":{"models":[{"value":"sonnet","displayName":"Sonnet","supportedEffortLevels":["low","medium","high"]},{"value":"opus","displayName":"Opus","supportedEffortLevels":["low","medium","high"]}]}}}'
+    ;;
+  *) exit 2 ;;
+esac
+"##,
     )
     .unwrap();
     #[cfg(unix)]

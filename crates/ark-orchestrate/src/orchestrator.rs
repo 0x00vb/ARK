@@ -3442,7 +3442,12 @@ impl Inner {
             })
     }
 
-    fn agent_profile(&self, spec: &AgentSpec, delegates: &[(String, String)]) -> AgentProfile {
+    fn agent_profile(
+        &self,
+        spec: &AgentSpec,
+        delegates: &[(String, String)],
+        execution: bool,
+    ) -> AgentProfile {
         let named = spec
             .profile_name
             .as_ref()
@@ -3465,7 +3470,13 @@ impl Inner {
             for (n, r) in delegates {
                 who.push_str(&format!("- {n}: {}\n", if r.is_empty() { "-" } else { r }));
             }
-            who.push_str("Colleagues receive your brief and artifacts, never this conversation. Use agents.start for an independent conversation and return immediately. Use agents.delegate only when this turn needs its result; delegate independent subtasks together.");
+            who.push_str("Colleagues receive your brief and artifacts, never this conversation. ");
+            if !execution {
+                who.push_str(
+                    "Use agents.start for an independent conversation and return immediately. ",
+                );
+            }
+            who.push_str("Use agents.delegate only when this turn needs its result; delegate independent subtasks together.");
         }
         p.prompts.instructions.push_str(&who);
         let mut preload: Vec<&str> = Vec::new();
@@ -3611,7 +3622,7 @@ impl Inner {
                 can_create: spec.tools.iter().any(|p| action_matches(p, tools::CREATE)),
             }));
         }
-        if let Some(run_id) = &task.run {
+        let execution_authority = if let Some(run_id) = &task.run {
             let run = match self.engine.store.transact_records::<_, OrchError>(
                 self.project.id.as_str(),
                 |tx| {
@@ -3629,6 +3640,7 @@ impl Inner {
             let Some(step) = &task.execution_step else {
                 return Attempt::Fatal("the task has no execution step".into());
             };
+            let authority = run.revision.draft.authority.clone();
             registry.register(Arc::new(automation_children::RunTools {
                 inner: self.arc(),
                 run,
@@ -3636,7 +3648,10 @@ impl Inner {
                 parent: Some(task.id.clone()),
                 capacity: None,
             }));
-        }
+            Some(authority)
+        } else {
+            None
+        };
         if spec.diagrams {
             registry.register(Arc::new(ark_tools::diagram::Diagrams));
         }
@@ -3715,16 +3730,26 @@ impl Inner {
                 &spec.skills,
             )
         };
-        let catalog = skills::catalog(&skills, skills::CATALOG_BUDGET).map(|c| c.text);
+        let mut catalog = skills::catalog(&skills, skills::CATALOG_BUDGET).map(|c| c.text);
         if !skills.is_empty() {
             registry.register(Arc::new(skills::SkillsTool::new(skills)));
+        }
+        if let Some(authority) = &execution_authority {
+            registry = authority::approved_registry(&registry, authority);
+            if registry.descriptor(skills::READ).is_none() {
+                catalog = None;
+            }
+            if registry.descriptor(tools::DELEGATE).is_none() {
+                delegates.clear();
+            }
+            turn_on.clear();
         }
         let engine = if task.submission.is_some() {
             self.engine.for_work(id).scoped_for(&scope, registry)
         } else {
             self.engine.scoped_for(&scope, registry)
         };
-        let mut profile = self.agent_profile(spec, &delegates);
+        let mut profile = self.agent_profile(spec, &delegates, task.run.is_some());
         if !turn_on.is_empty() {
             // The app's sources first (accounts, installs), then the agent's own.
             let mut sources: Vec<_> = profile.acquisition.take().into_iter().collect();
@@ -3740,6 +3765,9 @@ impl Inner {
             profile.distillers.push(d);
         }
         profile.core_actions.extend(per_agent_actions);
+        if execution_authority.is_some() {
+            authority::approved_profile(&mut profile, &engine.registry);
+        }
         // A run that continues an interrupted one gets the changes it already made, so it does
         // not make them twice.
         let done = if resumed && task.submission.is_some() {
@@ -3870,6 +3898,7 @@ impl Inner {
         if let Some(run) = &task.run {
             match self.run_guard(run, false).and_then(|guard| {
                 guard.ensure_current()?;
+                models.check_guard(guard.as_ref())?;
                 Ok(guard)
             }) {
                 Ok(guard) => {

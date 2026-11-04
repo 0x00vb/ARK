@@ -146,7 +146,7 @@ async fn an_unreachable_endpoint_shows_as_not_ready() {
     let backends = ark_model::catalog().await;
     let b = backends.iter().find(|b| b.provider == "t-gone").unwrap();
     assert!(!b.ready);
-    assert_eq!(b.detail, "not reachable");
+    assert_eq!(b.detail, "Could not reach models");
     assert!(
         backends.iter().any(|b| b.provider == "ollama"),
         "the rest is still listed"

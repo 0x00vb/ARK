@@ -661,16 +661,48 @@ impl Orchestrator {
     }
 }
 
+fn remember_connections(
+    frozen: &mut std::collections::BTreeMap<String, String>,
+    current: [(String, u64); 2],
+) -> Result<(), OrchError> {
+    for (model, revision) in current {
+        let revision = revision.to_string();
+        if frozen
+            .get(&model)
+            .is_some_and(|earlier| *earlier != revision)
+        {
+            return Err(OrchError::NotAllowed(
+                "the model account changed while preparing; review the automation again".into(),
+            ));
+        }
+        frozen.insert(model, revision);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn connection_capture_keeps_both_tiers_and_refuses_a_changed_duplicate() {
+    let mut frozen = std::collections::BTreeMap::new();
+    remember_connections(&mut frozen, [("fast".into(), 7), ("strong".into(), 8)]).unwrap();
+    assert_eq!(frozen.len(), 2);
+    remember_connections(&mut frozen, [("fast".into(), 7), ("strong".into(), 8)]).unwrap();
+    assert!(remember_connections(&mut frozen, [("fast".into(), 9), ("strong".into(), 8)]).is_err());
+    assert_eq!(frozen["fast"], "7");
+    assert!(remember_connections(&mut frozen, [("fast".into(), 7), ("strong".into(), 9)]).is_err());
+    assert_eq!(frozen["strong"], "8");
+}
+
 impl Inner {
     async fn freeze_model_selection(
         &self,
         lane: &str,
         spec: Option<&str>,
-    ) -> Result<String, OrchError> {
+    ) -> Result<(String, [(String, u64); 2]), OrchError> {
         let resolved = self.models.resolve(lane, spec).await;
         let selected = resolved.and_then(|models| {
             models.require_host_tools()?;
-            Ok(self.models.selection_spec(&models))
+            Ok((self.models.selection_spec(&models), models.connections()))
         });
         self.models.close(lane).await;
         selected
@@ -766,6 +798,7 @@ impl Inner {
         }
         let mut observed = BTreeMap::new();
         let mut frozen = BTreeMap::new();
+        let mut connections = BTreeMap::new();
         let activation = format!("ag-{}", uuid::Uuid::new_v4().simple());
         for name in wanted {
             let agent = agents
@@ -793,9 +826,10 @@ impl Inner {
                 "{}/automation/preflight/{activation}/agent/{name}",
                 self.project.id
             );
-            let model = self
+            let (model, revisions) = self
                 .freeze_model_selection(&lane, agent.spec.model.as_deref())
                 .await?;
+            remember_connections(&mut connections, revisions)?;
             observed.insert(name.clone(), agent.spec.clone());
             let mut spec = agent.spec.clone();
             spec.model = Some(model);
@@ -816,6 +850,7 @@ impl Inner {
                             OrchError::NotAllowed("the frozen model is missing".into())
                         })?,
                         agent: Some(spec.clone()),
+                        connections: BTreeMap::new(),
                     }
                 }
                 WorkTarget::General { model } => {
@@ -828,11 +863,20 @@ impl Inner {
                         "{}/automation/preflight/{activation}/step/{}",
                         self.project.id, step.id
                     );
-                    let model = self.freeze_model_selection(&lane, model.as_deref()).await?;
-                    automation::FrozenSelection { model, agent: None }
+                    let (model, revisions) =
+                        self.freeze_model_selection(&lane, model.as_deref()).await?;
+                    remember_connections(&mut connections, revisions)?;
+                    automation::FrozenSelection {
+                        model,
+                        agent: None,
+                        connections: BTreeMap::new(),
+                    }
                 }
             };
             selections.insert(step.id.clone(), selected);
+        }
+        for selected in selections.values_mut() {
+            selected.connections = connections.clone();
         }
         let offered = ark_sdk::offered_tools(&self.engine, &self.per_agent);
         let agent_tools = tools::AgentTools {

@@ -769,6 +769,8 @@ pub struct Page {
 pub struct FrozenSelection {
     pub model: String,
     pub agent: Option<crate::AgentSpec>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub connections: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -937,4 +939,27 @@ impl Activation {
 pub struct WebhookAdmission {
     pub run: Run,
     pub duplicate: bool,
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_activations_keep_their_exact_selection_digest() {
+        let old = r#"{"id":"old","automation":"a","revision":1,"digest":"old-digest","selections":{"step":{"model":"fixture:model","agent":null}},"agents":{},"descriptors":{},"phase":"prepared","created_ms":0}"#;
+        let mut activation: Activation = serde_json::from_str(old).unwrap();
+        let old_tuple =
+            br#"["revision",{"step":{"model":"fixture:model","agent":null}},{},{},null]"#;
+        let expected = format!("v2:{}", blake3::hash(old_tuple).to_hex());
+        assert_eq!(activation.computed_digest("revision").unwrap(), expected);
+        assert!(activation.selections["step"].connections.is_empty());
+        activation
+            .selections
+            .get_mut("step")
+            .unwrap()
+            .connections
+            .insert("fixture:model".into(), "7".into());
+        assert_ne!(activation.computed_digest("revision").unwrap(), expected);
+    }
 }

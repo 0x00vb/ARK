@@ -1310,6 +1310,38 @@ async fn native_client_bootstraps_pairs_and_reads_typed_snapshots() {
 #[tokio::test]
 async fn route_models_create_and_change_are_typed_idempotent_and_durable() {
     let _environment = PROVIDER_ENVIRONMENT.lock().await;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let catalog = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/v1", catalog.local_addr().unwrap());
+    let _openai_base = EnvironmentVariable::set("OPENAI_BASE_URL", &base);
+    let _anthropic_base = EnvironmentVariable::set("ANTHROPIC_BASE_URL", &base);
+    let _codex = EnvironmentVariable::set("ARK_CODEX_BIN", "/no-test-codex");
+    let _claude = EnvironmentVariable::set("ARK_CLAUDE_BIN", "/no-test-claude");
+    let catalog_server = tokio::spawn(async move {
+        loop {
+            let (mut stream, _) = catalog.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let mut buffer = [0; 4096];
+                let size = stream.read(&mut buffer).await.unwrap();
+                assert!(size > 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            assert!(request.starts_with(b"GET /v1/models HTTP/1.1\r\n"));
+            let body =
+                r#"{"data":[{"id":"fixture-model","display_name":"Fixture"}],"has_more":false}"#;
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
+    });
     let _openai = EnvironmentVariable::set("OPENAI_API_KEY", "test-openai-key");
     let _anthropic = EnvironmentVariable::set("ANTHROPIC_API_KEY", "test-anthropic-key");
     let dir = tempfile::tempdir().unwrap();
@@ -1597,6 +1629,7 @@ async fn route_models_create_and_change_are_typed_idempotent_and_durable() {
     let recovered_model = recovered_conversation.model.unwrap();
     assert!(recovered_model.selection.is_none());
     assert_eq!(recovered_model.display, "Selected model unavailable");
+    catalog_server.abort();
 }
 
 #[tokio::test]

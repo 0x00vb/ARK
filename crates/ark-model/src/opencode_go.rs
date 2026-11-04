@@ -1,7 +1,7 @@
 //! OpenCode Go's direct API for coding-agent conversations.
 
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -16,7 +16,6 @@ pub(crate) const NAME: &str = "opencode-go";
 pub(crate) const KEY: &str = "OPENCODE_GO_API_KEY";
 const BASE: &str = "https://opencode.ai/inference/go/openai/v1";
 const MODELS_URL: &str = "https://opencode.ai/inference/go/v1/models";
-const MODELS: &[&str] = &["glm-5.3-flash", "kimi-k2.7-code", "deepseek-v4.1-flash"];
 const USER_AGENT_VALUE: &str = concat!("ark/", env!("CARGO_PKG_VERSION"));
 
 /// A Go model. Bind it with [`Provider::for_conversation`] before calling it.
@@ -36,10 +35,8 @@ pub struct OpenCodeGo {
 impl OpenCodeGo {
     pub fn new(model: impl Into<String>) -> Result<Self> {
         let model = model.into();
-        if !MODELS.contains(&model.as_str()) {
-            return Err(failure(
-                "This OpenCode Go model is not supported. Choose a listed model.",
-            ));
+        if model.is_empty() || model.contains(char::is_whitespace) {
+            return Err(failure("Choose an OpenCode Go model."));
         }
         let http = HttpConfig::default();
         let client = reqwest::Client::builder()
@@ -189,17 +186,8 @@ impl Provider for OpenCodeGo {
     }
 }
 
-static LISTED: Mutex<Option<(Instant, Vec<String>)>> = Mutex::new(None);
-
 async fn models() -> std::result::Result<Vec<String>, String> {
-    if let Some((at, models)) = LISTED.lock().unwrap().as_ref() {
-        if at.elapsed() < Duration::from_secs(300) {
-            return Ok(models.clone());
-        }
-    }
-    let models = fetch_models(MODELS_URL).await?;
-    *LISTED.lock().unwrap() = Some((Instant::now(), models.clone()));
-    Ok(models)
+    fetch_models(MODELS_URL).await
 }
 
 async fn fetch_models(url: &str) -> std::result::Result<Vec<String>, String> {
@@ -231,20 +219,44 @@ async fn fetch_models(url: &str) -> std::result::Result<Vec<String>, String> {
     let data = value["data"]
         .as_array()
         .ok_or_else(|| "Invalid model list.".to_string())?;
-    Ok(MODELS
-        .iter()
-        .filter(|id| data.iter().any(|m| m["id"].as_str() == Some(**id)))
-        .map(|id| (*id).to_string())
-        .collect())
+    let mut seen = std::collections::HashSet::new();
+    data.iter()
+        .filter(|model| {
+            model["type"] == "chat" && model["api"]["chat-completions"]["base_url"] == BASE
+        })
+        .map(|model| {
+            model["id"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| "Invalid model identifier.".to_string())
+        })
+        .filter(|result| match result {
+            Ok(id) => seen.insert(id.clone()),
+            Err(_) => true,
+        })
+        .collect()
 }
 
 pub(crate) async fn backend() -> Backend {
-    let present = crate::keys::has_api_key(KEY);
+    backend_for(None).await
+}
+
+pub(crate) async fn backend_for(account: Option<&crate::accounts::ModelAccount>) -> Backend {
+    let present = account.map_or_else(
+        || crate::keys::has_api_key(KEY),
+        |a| a.state == crate::accounts::AccountState::Active,
+    );
     let listing = if present {
         models().await
     } else {
         Ok(Vec::new())
     };
+    let catalog_state = present.then_some(if listing.is_ok() {
+        crate::CatalogState::Current
+    } else {
+        crate::CatalogState::Unavailable
+    });
     let (ready, detail, models) = match listing {
         _ if !present => (false, "No key".into(), Vec::new()),
         Ok(models) if models.is_empty() => (false, "No supported models".into(), models),
@@ -273,6 +285,7 @@ pub(crate) async fn backend() -> Backend {
         fix: None,
         models,
         model_options: vec![],
+        catalog_state,
         step: None,
     }
 }
@@ -281,6 +294,7 @@ pub(crate) async fn backend() -> Backend {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Mutex;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -610,18 +624,19 @@ mod tests {
 
     #[tokio::test]
     async fn discovery_filters_protocols_and_cannot_prove_entitlement() {
-        let (base, seen, task) = server(200, r#"{"data":[{"id":"gpt-6-luna"},{"id":"glm-5.3-flash"},{"id":"gemini-4-argon-contributor"},{"id":"unknown"}]}"#, "application/json", None).await;
+        let (base, seen, task) = server(200, r#"{"data":[{"id":"gpt-6-luna","type":"chat","api":{"responses":{}}},{"id":"glm-5.3-flash","type":"chat","api":{"chat-completions":{"base_url":"https://opencode.ai/inference/go/openai/v1"}}},{"id":"new-provider-model","type":"chat","api":{"chat-completions":{"base_url":"https://opencode.ai/inference/go/openai/v1"}}},{"id":"gemini-4-argon-contributor"},{"id":"unknown"}]}"#, "application/json", None).await;
         assert_eq!(
             fetch_models(&format!("{base}/inference/go/v1/models"))
                 .await
                 .unwrap(),
-            ["glm-5.3-flash"]
+            ["glm-5.3-flash", "new-provider-model"]
         );
         assert!(!seen.lock().unwrap()[0]
             .to_lowercase()
             .contains("authorization:"));
-        assert!(OpenCodeGo::new("gpt-6-luna").is_err());
-        assert!(OpenCodeGo::new("unknown").is_err());
+        assert!(OpenCodeGo::new("new-provider-model").is_ok());
+        assert!(OpenCodeGo::new("").is_err());
+        assert!(OpenCodeGo::new("invalid model").is_err());
         task.abort();
     }
 }

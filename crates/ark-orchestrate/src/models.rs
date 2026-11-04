@@ -39,6 +39,25 @@ pub struct AgentModels {
 }
 
 impl AgentModels {
+    pub(crate) fn connections(&self) -> [(String, u64); 2] {
+        [Role::Plan, Role::Reason].map(|role| {
+            let provider = self.router.provider(role);
+            (provider.model_id(), provider.connection_revision())
+        })
+    }
+
+    pub(crate) fn check_guard(
+        &self,
+        guard: &dyn ark_runtime::guard::CallGuard,
+    ) -> Result<(), OrchError> {
+        self.require_host_tools()?;
+        for (model, revision) in self.connections() {
+            guard
+                .check_model(&model, revision)
+                .map_err(OrchError::NotAllowed)?;
+        }
+        Ok(())
+    }
     pub(crate) fn require_host_tools(&self) -> Result<(), OrchError> {
         for role in [Role::Plan, Role::Reason] {
             if !self.router.provider(role).host_controls_tools() {
@@ -453,6 +472,7 @@ mod selection_tests {
                 efforts: vec!["low".into(), "high".into()],
                 default_effort: Some("low".into()),
             }],
+            catalog_state: Some(ark_model::CatalogState::Current),
             step: None,
         }];
         for spec in ["provider-a~one:large", "provider-a~one:large@high"] {

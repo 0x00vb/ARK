@@ -191,3 +191,88 @@ fn native_guard_rechecks_revocation_after_a_blocked_pre_dispatch_phase() {
     assert_eq!(code, ad::ErrorCode::PolicyDenied);
     assert_eq!(disposition, ad::DeliverySemantics::NotDelivered);
 }
+
+#[test]
+fn stopped_app_launches_once_and_refreshes_its_windows() {
+    let mut lists = 0;
+    let mut launches = 0;
+    let windows = windows_for_open(
+        || {
+            lists += 1;
+            if lists == 1 {
+                Err(Box::new(ad::AdapterError::new(
+                    ad::ErrorCode::AppNotFound,
+                    "stopped",
+                )))
+            } else {
+                Ok(vec![42])
+            }
+        },
+        || {
+            launches += 1;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!((windows, lists, launches), (vec![42], 2, 1));
+}
+
+#[test]
+fn existing_window_does_not_launch_again() {
+    let windows = windows_for_open(|| Ok(vec![42]), || panic!("already running")).unwrap();
+    assert_eq!(windows, vec![42]);
+}
+
+#[test]
+fn initial_inventory_errors_do_not_launch() {
+    for code in [
+        ad::ErrorCode::PermDenied,
+        ad::ErrorCode::PolicyDenied,
+        ad::ErrorCode::Timeout,
+        ad::ErrorCode::Internal,
+    ] {
+        let result = windows_for_open::<()>(
+            || {
+                Err(Box::new(ad::AdapterError::new(
+                    code.clone(),
+                    "inventory failed",
+                )))
+            },
+            || panic!("inventory failure must not authorize launch"),
+        );
+        assert_eq!(result.unwrap_err().code, code);
+    }
+}
+
+#[test]
+fn post_launch_inventory_error_does_not_relaunch() {
+    let mut launches = 0;
+    let result = windows_for_open::<()>(
+        || {
+            Err(Box::new(ad::AdapterError::new(
+                ad::ErrorCode::AppNotFound,
+                "not found",
+            )))
+        },
+        || {
+            launches += 1;
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err().code, ad::ErrorCode::AppNotFound);
+    assert_eq!(launches, 1);
+}
+
+#[test]
+fn rejected_launch_does_not_refresh_inventory() {
+    let mut lists = 0;
+    let result = windows_for_open::<()>(
+        || {
+            lists += 1;
+            Ok(Vec::new())
+        },
+        || Err(Box::new(revoked())),
+    );
+    assert_eq!(result.unwrap_err().code, ad::ErrorCode::PolicyDenied);
+    assert_eq!(lists, 1);
+}

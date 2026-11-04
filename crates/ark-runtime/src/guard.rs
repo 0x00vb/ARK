@@ -11,6 +11,9 @@ pub enum Verdict {
 }
 
 pub trait CallGuard: Send + Sync {
+    fn check_model(&self, _model: &str, _connection_revision: u64) -> Result<(), String> {
+        Ok(())
+    }
     fn check(
         &self,
         action: &str,
@@ -31,6 +34,10 @@ pub trait CallGuard: Send + Sync {
 struct Intersection(Arc<dyn CallGuard>, Arc<dyn CallGuard>);
 
 impl CallGuard for Intersection {
+    fn check_model(&self, model: &str, connection_revision: u64) -> Result<(), String> {
+        self.0.check_model(model, connection_revision)?;
+        self.1.check_model(model, connection_revision)
+    }
     fn check(
         &self,
         action: &str,

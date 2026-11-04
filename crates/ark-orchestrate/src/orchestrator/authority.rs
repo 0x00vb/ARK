@@ -6,6 +6,26 @@ use ark_store::RecordTransaction;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+pub(super) fn approved_registry(
+    registry: &Registry,
+    authority: &automation::Authority,
+) -> Registry {
+    registry.filtered(|name| {
+        authority
+            .actions
+            .iter()
+            .any(|allowed| allowed.action == name)
+    })
+}
+
+pub(super) fn approved_profile(profile: &mut AgentProfile, registry: &Registry) {
+    profile
+        .core_actions
+        .retain(|name| registry.descriptor(name).is_some());
+    profile.capabilities = Default::default();
+    profile.acquisition = None;
+}
+
 const EFFECT: &str = "automation_effect";
 const META_CALLS: &str = "automation_meta_calls";
 
@@ -535,6 +555,46 @@ impl RunGuard {
 }
 
 impl CallGuard for RunGuard {
+    fn check_model(&self, model: &str, revision: u64) -> Result<(), String> {
+        let mut live = self.live.lock().unwrap();
+        if let Some(error) = &live.error {
+            return Err(error.clone());
+        }
+        let result = self
+            .engine
+            .store
+            .transact_records(&self.project, |tx| {
+                let run = self.load(tx)?;
+                let mut frozen = None;
+                let has_connections = run
+                    .selections
+                    .values()
+                    .any(|selection| !selection.connections.is_empty());
+                for selection in run.selections.values() {
+                    if let Some(expected) = selection.connections.get(model) {
+                        if frozen.is_some_and(|earlier| earlier != expected.as_str()) {
+                            return Err(deny(
+                                "the saved model connections disagree; review the automation",
+                            ));
+                        }
+                        frozen = Some(expected.as_str());
+                    }
+                }
+                if frozen.is_some_and(|expected| expected != revision.to_string())
+                    || frozen.is_none() && (has_connections || revision != 0)
+                {
+                    return Err(deny(
+                        "the model account changed; review and activate the automation again",
+                    ));
+                }
+                Ok(())
+            })
+            .map_err(|error: OrchError| error.to_string());
+        if let Err(error) = &result {
+            live.error = Some(error.clone());
+        }
+        result
+    }
     fn check(
         &self,
         action: &str,
@@ -545,106 +605,122 @@ impl CallGuard for RunGuard {
         if let Some(error) = &live.error {
             return Verdict::Refuse(error.clone());
         }
-        let checked =
-            self.engine
-                .store
-                .transact_records::<_, OrchError>(&self.project, |tx| {
-                    let run = self.load(tx)?;
-                    let Some(descriptor) = descriptor else {
-                        if !matches!(
-                            action,
-                            ark_runtime::catalog::LIST_ACTIONS
-                                | ark_runtime::catalog::LOAD_ACTION
-                                | ark_runtime::catalog::GET_EVIDENCE
-                                | ark_runtime::catalog::SEARCH_EVIDENCE
-                        ) {
-                            return Err(deny(
-                                "this internal operation has no guarded effect contract",
-                            ));
-                        }
-                        if !input.is_object()
-                            || matches!(
-                                action,
-                                ark_runtime::catalog::GET_EVIDENCE
-                                    | ark_runtime::catalog::SEARCH_EVIDENCE
-                            ) && input[if action == ark_runtime::catalog::GET_EVIDENCE {
-                                "invocation"
-                            } else {
-                                "query"
-                            }]
-                            .as_str()
-                            .is_none_or(|value| value.trim().is_empty())
-                        {
-                            return Err(deny(
-                                "internal reads need their explicit query or evidence reference",
-                            ));
-                        }
-                        if input.get("limit").is_some_and(|value| {
-                            value.as_u64().is_none_or(|limit| limit == 0 || limit > 100)
-                        }) || ["invocation", "path", "match", "query", "name"].iter().any(
-                            |field| {
-                                input.get(*field).is_some_and(|value| {
-                                    value.as_str().is_none_or(|text| text.len() > 4096)
-                                })
-                            },
-                        ) {
-                            return Err(deny(
-                                "internal reads need bounded arguments and at most 100 results",
-                            ));
-                        }
-                        if action == ark_runtime::catalog::LOAD_ACTION
-                            && !run.revision.draft.authority.actions.iter().any(|allowed| {
-                                Some(allowed.action.as_str()) == input["name"].as_str()
-                            })
+        let checked = self
+            .engine
+            .store
+            .transact_records::<_, OrchError>(&self.project, |tx| {
+                let run = self.load(tx)?;
+                let Some(descriptor) = descriptor else {
+                    if !matches!(
+                        action,
+                        ark_runtime::catalog::LIST_ACTIONS
+                            | ark_runtime::catalog::LOAD_ACTION
+                            | ark_runtime::catalog::GET_EVIDENCE
+                            | ark_runtime::catalog::SEARCH_EVIDENCE
+                    ) {
+                        return Err(deny(
+                            "this internal operation has no guarded effect contract",
+                        ));
+                    }
+                    if action == ark_runtime::catalog::LOAD_ACTION {
+                        let Some(name) = input
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|name| !name.trim().is_empty())
+                        else {
+                            return Ok(Verdict::Refuse("loading an action needs its name".into()));
+                        };
+                        if !run
+                            .revision
+                            .draft
+                            .authority
+                            .actions
+                            .iter()
+                            .any(|allowed| allowed.action == name)
                         {
                             return Err(deny("that action is outside the frozen grant"));
                         }
-                        let calls = meta_calls(tx, &self.run)?;
-                        let effects = tx
-                            .records_matching(EFFECT, "run", &self.run)?
-                            .into_iter()
-                            .map(serde_json::from_value::<Effect>)
-                            .collect::<Result<Vec<_>, _>>()?;
-                        let external = effects
-                            .iter()
-                            .filter(|effect| effect.phase != Phase::Abandoned)
-                            .count() as u64;
-                        if calls.saturating_add(external)
-                            >= u64::from(run.revision.draft.authority.max_calls)
-                        {
-                            return Err(deny("this execution's call limit was reached"));
-                        }
-                        let now = now_ms();
-                        if !tx.reserve_quota(
-                            "automation:all-calls",
-                            now / 3_600_000 * 3_600_000,
-                            1000,
-                        )? {
-                            return Err(deny("the automation account limit was reached"));
-                        }
-                        tx.put_record(
-                            META_CALLS,
-                            &self.run,
-                            &serde_json::to_value(MetaCalls { calls: calls + 1 })?,
-                        )?;
-                        return Ok(Verdict::Allow);
-                    };
-                    let allowed = self.allowed(&run, action, input, descriptor)?;
-                    Ok(
-                        if descriptor.risk == RiskTier::Mutate
-                            && (run.activation.is_none()
-                                || !allowed.unattended
-                                || descriptor.ask_each_time)
-                        {
-                            Verdict::Ask
+                    }
+                    if !input.is_object()
+                        || matches!(
+                            action,
+                            ark_runtime::catalog::GET_EVIDENCE
+                                | ark_runtime::catalog::SEARCH_EVIDENCE
+                        ) && input[if action == ark_runtime::catalog::GET_EVIDENCE {
+                            "invocation"
                         } else {
-                            Verdict::Allow
-                        },
-                    )
-                });
+                            "query"
+                        }]
+                        .as_str()
+                        .is_none_or(|value| value.trim().is_empty())
+                    {
+                        return Ok(Verdict::Refuse(
+                            "internal reads need their explicit query or evidence reference".into(),
+                        ));
+                    }
+                    if input.get("limit").is_some_and(|value| {
+                        value.as_u64().is_none_or(|limit| limit == 0 || limit > 100)
+                    }) || ["invocation", "path", "match", "query", "name"]
+                        .iter()
+                        .any(|field| {
+                            input.get(*field).is_some_and(|value| {
+                                value.as_str().is_none_or(|text| text.len() > 4096)
+                            })
+                        })
+                    {
+                        return Ok(Verdict::Refuse(
+                            "internal reads need bounded arguments and at most 100 results".into(),
+                        ));
+                    }
+                    let calls = meta_calls(tx, &self.run)?;
+                    let effects = tx
+                        .records_matching(EFFECT, "run", &self.run)?
+                        .into_iter()
+                        .map(serde_json::from_value::<Effect>)
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let external = effects
+                        .iter()
+                        .filter(|effect| effect.phase != Phase::Abandoned)
+                        .count() as u64;
+                    if calls.saturating_add(external)
+                        >= u64::from(run.revision.draft.authority.max_calls)
+                    {
+                        return Err(deny("this execution's call limit was reached"));
+                    }
+                    let now = now_ms();
+                    if !tx.reserve_quota(
+                        "automation:all-calls",
+                        now / 3_600_000 * 3_600_000,
+                        1000,
+                    )? {
+                        return Err(deny("the automation account limit was reached"));
+                    }
+                    tx.put_record(
+                        META_CALLS,
+                        &self.run,
+                        &serde_json::to_value(MetaCalls { calls: calls + 1 })?,
+                    )?;
+                    return Ok(Verdict::Allow);
+                };
+                let allowed = self.allowed(&run, action, input, descriptor)?;
+                Ok(
+                    if descriptor.risk == RiskTier::Mutate
+                        && (run.activation.is_none()
+                            || !allowed.unattended
+                            || descriptor.ask_each_time)
+                    {
+                        Verdict::Ask
+                    } else {
+                        Verdict::Allow
+                    },
+                )
+            });
         match checked {
             Ok(verdict) => verdict,
-            Err(OrchError::NotAllowed(error)) => Verdict::Refuse(error),
+            Err(OrchError::NotAllowed(error)) => {
+                live.error.get_or_insert_with(|| error.clone());
+                Verdict::Refuse(error)
+            }
             Err(error) => {
                 let error = error.to_string();
                 live.error.get_or_insert_with(|| error.clone());
@@ -763,6 +839,8 @@ mod tests {
                 ActionDescriptor::new("count.write", "write", RiskTier::Mutate)
                     .auto_eligible()
                     .grant_per("count", &["value"]),
+                ActionDescriptor::new("count.other", "ungranted action", RiskTier::Mutate)
+                    .auto_eligible(),
             ]
         }
         async fn run(
@@ -785,6 +863,53 @@ mod tests {
             })
         }
     }
+    struct DynamicCounter(Arc<AtomicUsize>);
+    #[async_trait::async_trait]
+    impl Adapter for DynamicCounter {
+        fn name(&self) -> &str {
+            "dynamic"
+        }
+        fn actions(&self) -> Vec<ActionDescriptor> {
+            vec![ActionDescriptor::new(
+                "dynamic.write",
+                "ungranted dynamic action",
+                RiskTier::Mutate,
+            )
+            .auto_eligible()]
+        }
+        async fn run(
+            &self,
+            _: &str,
+            _: serde_json::Value,
+            _: &RunCtx<'_>,
+        ) -> ark_tools::Result<ActionOutput> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(ActionOutput::json(json!({"written":true})))
+        }
+    }
+    struct DynamicTools(Arc<AtomicUsize>);
+    impl ark_tools::ToolSource for DynamicTools {
+        fn adapters(&self) -> Vec<Arc<dyn Adapter>> {
+            vec![Arc::new(DynamicCounter(self.0.clone()))]
+        }
+    }
+    struct Acquisition;
+    #[async_trait::async_trait]
+    impl ark_runtime::AcquisitionProvider for Acquisition {
+        async fn find(&self, _: &str) -> String {
+            "UNGRANTED_ACQUISITION_MARKER".into()
+        }
+        async fn propose(&self, _: &str) -> String {
+            "UNGRANTED_ACQUISITION_MARKER".into()
+        }
+        async fn acquire(&self, _: &str, _: bool) -> ark_runtime::AcquisitionResult {
+            ark_runtime::AcquisitionResult::info("not acquired")
+        }
+        fn offer(&self) -> Option<String> {
+            Some("UNGRANTED_ACQUISITION_MARKER".into())
+        }
+    }
+
     async fn fixture() -> (tempfile::TempDir, Ark, Orchestrator, Run, Arc<AtomicUsize>) {
         fixture_limits(256, 32, true).await
     }
@@ -877,18 +1002,466 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn frozen_connections_survive_reload_and_refuse_either_tier_or_an_unknown_delegate() {
+        for (changed, revision) in [
+            ("fast", 8),
+            ("strong", 9),
+            ("delegate", 10),
+            ("unrecorded", 0),
+        ] {
+            let (_dir, ark, o, mut run, calls) = fixture().await;
+            let connections = std::collections::BTreeMap::from([
+                ("fast".into(), "7".into()),
+                ("strong".into(), "8".into()),
+                ("delegate".into(), "9".into()),
+            ]);
+            run.selections.insert(
+                "result".into(),
+                automation::FrozenSelection {
+                    model: "strong".into(),
+                    agent: None,
+                    connections,
+                },
+            );
+            ark.engine()
+                .store
+                .transact_records::<_, OrchError>(run.project.as_str(), |tx| {
+                    let id = run.activation.as_ref().unwrap();
+                    let mut activation: automations::PreparedActivation = serde_json::from_value(
+                        tx.get_record(automations::ACTIVATION, id)?.unwrap(),
+                    )?;
+                    activation.value.selections = run.selections.clone();
+                    activation.value.digest =
+                        activation.value.computed_digest(&run.revision.digest)?;
+                    tx.put_record(
+                        automations::ACTIVATION,
+                        id,
+                        &serde_json::to_value(activation)?,
+                    )?;
+                    tx.put_record(automation::RUN, &run.id, &serde_json::to_value(&run)?)?;
+                    Ok(())
+                })
+                .unwrap();
+            let guard = o.inner.run_guard(&run.id, true).unwrap();
+            for (model, revision) in [("fast", 7), ("strong", 8), ("delegate", 9)] {
+                guard.check_model(model, revision).unwrap();
+            }
+            drop(guard);
+            let restored = o.inner.run_guard(&run.id, true).unwrap();
+            assert!(restored.check_model(changed, revision).is_err());
+            assert!(restored.fault().unwrap().contains("model account changed"));
+            assert!(matches!(
+                restored.check("count.write", &json!({"value":1}), None),
+                Verdict::Refuse(_)
+            ));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_grants_allow_only_unversioned_model_connections() {
+        let (_dir, _ark, o, run, _) = fixture().await;
+        let guard = o.inner.run_guard(&run.id, true).unwrap();
+        guard.check_model("legacy", 0).unwrap();
+        assert!(guard.check_model("newly-qualified", 7).is_err());
+    }
+
+    #[tokio::test]
+    async fn load_action_malformed_target_is_recoverable_but_an_outside_target_is_terminal() {
+        for input in [
+            json!({}),
+            json!(null),
+            json!({"name":null}),
+            json!({"name":1}),
+            json!({"name":""}),
+        ] {
+            let (_dir, _ark, o, run, _) = fixture().await;
+            let guard = o.inner.run_guard(&run.id, true).unwrap();
+            assert!(matches!(
+                guard.check(ark_runtime::catalog::LOAD_ACTION, &input, None),
+                Verdict::Refuse(_)
+            ));
+            assert!(guard.fault().is_none(), "malformed input {input}");
+            assert!(matches!(
+                guard.check(
+                    ark_runtime::catalog::LOAD_ACTION,
+                    &json!({"name":"count.write"}),
+                    None
+                ),
+                Verdict::Allow
+            ));
+            assert!(matches!(
+                guard.check(
+                    ark_runtime::catalog::LOAD_ACTION,
+                    &json!({"name":"count.other","limit":101}),
+                    None
+                ),
+                Verdict::Refuse(_)
+            ));
+            assert!(guard.fault().is_some());
+        }
+    }
+
+    fn scripted_calls(calls: Vec<(&str, serde_json::Value)>) -> ark_model::Completion {
+        ark_model::Completion {
+            tool_calls: calls
+                .into_iter()
+                .enumerate()
+                .map(|(index, (name, arguments))| ark_model::ToolCall {
+                    id: format!("call-{index}"),
+                    name: name.into(),
+                    arguments,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn authority_refusal_fails_actual_runs_and_blocks_alternate_effects_and_replay() {
+        use automation::*;
+        for named in [false, true] {
+            for case in [
+                "allowed",
+                "malformed-read",
+                "malformed-load",
+                "bound-then-allowed",
+                "outside-then-allowed",
+                "known-outside-then-allowed",
+                "agent-restricted",
+                "bound",
+            ] {
+                if case == "agent-restricted" && !named {
+                    continue;
+                }
+                let dir = tempfile::tempdir().unwrap();
+                let effects = Arc::new(AtomicUsize::new(0));
+                let allowed = || ("count.write", json!({"value":"allowed"}));
+                let mut script = match case {
+                    "bound" => vec![scripted_calls(vec![(
+                        "count.write",
+                        json!({"value":"allowed "}),
+                    )])],
+                    "bound-then-allowed" => vec![scripted_calls(vec![
+                        ("count.write", json!({"value":"allowed "})),
+                        allowed(),
+                    ])],
+                    "outside-then-allowed" => vec![scripted_calls(vec![
+                        ("outside.write", json!({"value":"outside"})),
+                        allowed(),
+                    ])],
+                    "known-outside-then-allowed" => vec![scripted_calls(vec![
+                        ("count.other", json!({"value":"outside"})),
+                        allowed(),
+                    ])],
+                    "malformed-load" => vec![
+                        scripted_calls(vec![
+                            (ark_runtime::catalog::LOAD_ACTION, json!({})),
+                            (ark_runtime::catalog::LOAD_ACTION, json!({"name":null})),
+                            (ark_runtime::catalog::LOAD_ACTION, json!({"name":1})),
+                            (ark_runtime::catalog::LOAD_ACTION, json!({"name":""})),
+                        ]),
+                        scripted_calls(vec![(
+                            ark_runtime::catalog::LOAD_ACTION,
+                            json!({"name":"count.write"}),
+                        )]),
+                        scripted_calls(vec![allowed()]),
+                    ],
+                    "allowed" | "agent-restricted" => vec![scripted_calls(vec![allowed()])],
+                    "malformed-read" => vec![
+                        scripted_calls(vec![(
+                            ark_runtime::catalog::SEARCH_EVIDENCE,
+                            json!({"query":"", "limit":101}),
+                        )]),
+                        scripted_calls(vec![(
+                            ark_runtime::catalog::SEARCH_EVIDENCE,
+                            json!({"query":"own", "limit":1}),
+                        )]),
+                        scripted_calls(vec![allowed()]),
+                    ],
+                    _ => unreachable!(),
+                };
+                script.push(ark_model::Completion {
+                    content: "done".into(),
+                    ..Default::default()
+                });
+                let provider = Arc::new(ark_model::MockProvider::new("test", script));
+                let skill = dir.path().join("skills/hidden");
+                std::fs::create_dir_all(&skill).unwrap();
+                std::fs::write(skill.join("SKILL.md"), "---\nname: hidden\ndescription: UNGRANTED_SKILL_MARKER\n---\nControlled fixture instructions\n").unwrap();
+                let ark = Ark::builder()
+                    .store_root(dir.path())
+                    .tool(Arc::new(Counter(effects.clone())))
+                    .source(Arc::new(DynamicTools(effects.clone())))
+                    .provider(provider.clone())
+                    .planner(false)
+                    .critic(false)
+                    .profile(AgentProfile {
+                        core_actions: vec![
+                            "count.write".into(),
+                            "count.other".into(),
+                            "dynamic.write".into(),
+                        ],
+                        capabilities: ark_core::CapabilityCatalog::new([
+                            ark_core::CapabilitySpec::new(
+                                "ungranted-capability",
+                                "UNGRANTED_CAPABILITY_MARKER",
+                            ),
+                        ]),
+                        acquisition: Some(Arc::new(Acquisition)),
+                        ..Default::default()
+                    })
+                    .build()
+                    .unwrap();
+                let project = ark.create_project("authority status", "").unwrap();
+                let models = Arc::new(
+                    crate::Models::builder()
+                        .default_model("test")
+                        .provider("test", provider.clone())
+                        .build(),
+                );
+                let o = Orchestrator::builder(&ark, &project)
+                    .models(models)
+                    .build()
+                    .unwrap();
+                let target = if named {
+                    o.spawn(
+                        crate::AgentSpec::new("writer")
+                            .model("test")
+                            .tools(if case == "agent-restricted" {
+                                vec!["count.other"]
+                            } else {
+                                vec!["count.write", "count.other", "dynamic.write", "skills.*"]
+                            })
+                            .skills(["*"]),
+                    )
+                    .await
+                    .unwrap();
+                    crate::WorkTarget::Agent {
+                        name: "writer".into(),
+                    }
+                } else {
+                    crate::WorkTarget::General {
+                        model: Some("test".into()),
+                    }
+                };
+                let draft = Draft {
+                    name: format!("authority-{case}"),
+                    trigger: Trigger::Webhook,
+                    inputs: vec![],
+                    steps: vec![automation::Step {
+                        id: "write".into(),
+                        name: "Write".into(),
+                        action: StepAction::Agent {
+                            target,
+                            prompt: "Perform only the approved write".into(),
+                            inputs: vec![],
+                        },
+                    }],
+                    authority: Authority {
+                        max_calls: 8,
+                        max_mutations: 1,
+                        actions: vec![AllowedAction {
+                            action: "count.write".into(),
+                            inputs: std::collections::BTreeMap::from([(
+                                "value".into(),
+                                Bound::Literal {
+                                    value: json!("allowed"),
+                                },
+                            )]),
+                            unattended: true,
+                            per_run: 1,
+                            quota: Quota {
+                                count: 10,
+                                window_ms: 3_600_000,
+                            },
+                        }],
+                    },
+                };
+                let saved = o.save_automation("new", None, None, draft).unwrap();
+                let setup = o
+                    .configure_webhook(&saved.automation, 1, "fixture", "http://127.0.0.1:1/", 60)
+                    .unwrap();
+                o.record_webhook_probe(&setup.endpoint, &setup.connection.id, true)
+                    .unwrap();
+                let activation = o
+                    .prepare_automation_activation(&saved.automation, 1)
+                    .await
+                    .unwrap();
+                o.activate_automation(&saved.automation, &activation.id, &activation.digest)
+                    .unwrap();
+                let run = o
+                    .admit_webhook_event(
+                        &setup.endpoint,
+                        &setup.connection.id,
+                        "one",
+                        now_ms().saturating_add(1),
+                        Default::default(),
+                    )
+                    .unwrap()
+                    .run;
+                o.execute_automation_run(&run.id).unwrap();
+                let finished = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        let value = o.automation_run(&run.id).unwrap();
+                        if value.phase.is_final() {
+                            break value;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                let rejected = !matches!(case, "allowed" | "malformed-read" | "malformed-load");
+                for request in provider.calls.lock().unwrap().iter() {
+                    assert_eq!(
+                        request.tools.iter().any(|tool| tool.name == "count.write"),
+                        case != "agent-restricted",
+                        "approved action missing, named={named}, case={case}, tools={:?}, status={:?}, error={:?}",
+                        request.tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(), finished.phase, finished.error
+                    );
+                    for name in [
+                        "count.other",
+                        "dynamic.write",
+                        "skills.read",
+                        "find_capability",
+                        "propose_capability",
+                        "acquire_capability",
+                    ] {
+                        assert!(
+                            !request.tools.iter().any(|tool| tool.name == name),
+                            "advertised {name}, named={named}, case={case}"
+                        );
+                    }
+                    for marker in [
+                        "count.other",
+                        "dynamic.write",
+                        "UNGRANTED_SKILL_MARKER",
+                        "UNGRANTED_CAPABILITY_MARKER",
+                        "UNGRANTED_ACQUISITION_MARKER",
+                        "propose_capability",
+                    ] {
+                        assert!(
+                            !request.system.contains(marker),
+                            "index advertised {marker}, named={named}, case={case}"
+                        );
+                    }
+                }
+                assert_eq!(
+                    finished.phase,
+                    if rejected {
+                        RunPhase::Failed
+                    } else {
+                        RunPhase::Completed
+                    },
+                    "named={named}, case={case}, effects={}, error={:?}",
+                    effects.load(Ordering::SeqCst),
+                    finished.error
+                );
+                assert_eq!(
+                    effects.load(Ordering::SeqCst),
+                    usize::from(!rejected),
+                    "named={named}, case={case}"
+                );
+                if rejected {
+                    assert_eq!(provider.calls.lock().unwrap().len(), 1);
+                    assert!(!finished.error.as_deref().unwrap().contains("unknown tool"));
+                    if case.starts_with("bound") {
+                        assert!(finished
+                            .error
+                            .as_deref()
+                            .unwrap()
+                            .contains("frozen input bound"));
+                    }
+                    let before = serde_json::to_value(&finished).unwrap();
+                    drop(o);
+                    drop(ark);
+                    let reopened = Ark::builder()
+                        .store_root(dir.path())
+                        .tool(Arc::new(Counter(effects.clone())))
+                        .provider(provider.clone())
+                        .planner(false)
+                        .critic(false)
+                        .build()
+                        .unwrap();
+                    let restored = Orchestrator::builder(&reopened, &project).build().unwrap();
+                    let repeated = restored.execute_automation_run(&run.id).unwrap();
+                    assert_eq!(serde_json::to_value(repeated).unwrap(), before);
+                    assert_eq!(effects.load(Ordering::SeqCst), 0);
+                    assert_eq!(provider.calls.lock().unwrap().len(), 1);
+                    for step in &finished.steps {
+                        assert!(reopened
+                            .engine()
+                            .store
+                            .list_invocations(&ProjectId(step.scope.clone()))
+                            .unwrap()
+                            .is_empty());
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn terminal_authority_refusal_is_shared_with_delegated_guards() {
+        let (_dir, ark, o, run, calls) = fixture().await;
+        let general = o.inner.run_guard(&run.id, true).unwrap();
+        let delegated = o.inner.run_guard(&run.id, false).unwrap();
+        assert!(matches!(
+            general.check("outside.write", &json!({}), None),
+            Verdict::Refuse(_)
+        ));
+        let first = general.fault().expect("authority refusal must latch");
+        let descriptor = ark.engine().tools().descriptor("count.write").unwrap();
+        assert!(
+            matches!(delegated.check("count.write",&json!({"value":"allowed"}),Some(&descriptor)),Verdict::Refuse(reason) if reason==first)
+        );
+        assert!(delegated.check_model("legacy", 0).is_err());
+        let invocation =
+            Invocation::new("count.write", RiskTier::Mutate, json!({"value":"allowed"}));
+        assert_eq!(
+            delegated.prepare(&ProjectId(run.steps[0].scope.clone()), &invocation),
+            Err(first.clone())
+        );
+        assert_eq!(delegated.fault(), Some(first));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn terminal_internal_operations_latch_independently() {
+        for (action, input) in [
+            (
+                ark_runtime::catalog::RECORD_NOTE,
+                json!({"text":"forbidden"}),
+            ),
+            (
+                ark_runtime::catalog::RECORD_STATE,
+                json!({"text":"forbidden"}),
+            ),
+            (
+                ark_runtime::catalog::LOAD_ACTION,
+                json!({"name":"outside.write","limit":101}),
+            ),
+        ] {
+            let (_dir, _ark, o, run, calls) = fixture_limits(2, 0, false).await;
+            let guard = o.inner.run_guard(&run.id, true).unwrap();
+            assert!(matches!(
+                guard.check(action, &input, None),
+                Verdict::Refuse(_)
+            ));
+            let first = guard.fault().expect("terminal authority refusal");
+            assert!(
+                matches!(guard.check(ark_runtime::catalog::SEARCH_EVIDENCE, &json!({"query":"own"}), None), Verdict::Refuse(reason) if reason==first)
+            );
+            assert_eq!(guard.fault(), Some(first));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[tokio::test]
     async fn internal_reads_share_durable_call_limits_and_cannot_write_state() {
         let (_dir, ark, o, run, calls) = fixture_limits(2, 0, false).await;
         let guard = o.inner.run_guard(&run.id, true).unwrap();
-        for action in [
-            ark_runtime::catalog::RECORD_NOTE,
-            ark_runtime::catalog::RECORD_STATE,
-        ] {
-            assert!(matches!(
-                guard.check(action, &json!({"text":"forbidden"}), None),
-                Verdict::Refuse(_)
-            ));
-        }
         assert!(matches!(
             guard.check(
                 ark_runtime::catalog::GET_EVIDENCE,
@@ -897,6 +1470,15 @@ mod tests {
             ),
             Verdict::Refuse(_)
         ));
+        assert!(matches!(
+            guard.check(
+                ark_runtime::catalog::GET_EVIDENCE,
+                &json!({"invocation":"own","limit":101}),
+                None
+            ),
+            Verdict::Refuse(_)
+        ));
+        assert!(guard.fault().is_none());
         assert!(matches!(
             guard.check(
                 ark_runtime::catalog::GET_EVIDENCE,
@@ -1211,12 +1793,12 @@ mod tests {
         let guard = o.inner.run_guard(&run.id, true).unwrap();
         let descriptor = Counter(calls).actions().remove(0);
         assert!(matches!(
-            guard.check("count.write", &json!({}), Some(&descriptor)),
-            Verdict::Refuse(_)
-        ));
-        assert!(matches!(
             guard.check("count.write", &json!({"value": null}), Some(&descriptor)),
             Verdict::Ask
+        ));
+        assert!(matches!(
+            guard.check("count.write", &json!({}), Some(&descriptor)),
+            Verdict::Refuse(_)
         ));
     }
 

@@ -195,6 +195,9 @@ finish the task.\n\
 - Tool results are compact summaries with an [inv:ID] reference. To see exact rows, call \
 get_evidence(invocation, path). Do not re-run a tool you already ran.\n\
 - When evidence is missing, run a small experiment and read its result as evidence.\n\
+- After changing an artifact, use available checks that exercise the requested outcome. \
+Keep verification proportional and avoid redundant checks. Report which checks ran and any \
+required checks that were unavailable.\n\
 - When you can answer, stop calling tools and reply: separate facts (cited) from inference \
 and hypothesis, and end with the single most useful next step.";
 

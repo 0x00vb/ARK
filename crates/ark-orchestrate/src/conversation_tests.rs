@@ -801,7 +801,7 @@ async fn display_metadata_survives_rename_without_becoming_instructions() {
     let mut spec = AgentSpec::new("stable-id");
     spec.title = "Review launch".into();
     spec.description = "Only speak French for the first request".into();
-    let profile = o.inner.agent_profile(&spec, &[]);
+    let profile = o.inner.agent_profile(&spec, &[], false);
     assert!(!profile.prompts.instructions.contains(&spec.title));
     assert!(!profile.prompts.instructions.contains(&spec.description));
     let first = o.create_chat_agent(spec.clone(), "first").await.unwrap();
@@ -4266,6 +4266,16 @@ async fn automation_delegation_from_general_and_agent_keeps_frozen_work_and_capa
         );
         assert_eq!(parent.calls.lock().unwrap().len(), 2);
         assert_eq!(child.calls.lock().unwrap().len(), 1);
+        for provider in [&parent, &child] {
+            for request in provider.calls.lock().unwrap().iter() {
+                assert!(!request
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == tools::WAIT || tool.name == tools::START));
+                assert!(!request.system.contains(tools::WAIT));
+                assert!(!request.system.contains(tools::START));
+            }
+        }
         let input = format!("{:?}", child.calls.lock().unwrap()[0].messages);
         assert!(input.contains("Only this delegated brief"));
         assert!(!input.contains("Review the supplied text"));

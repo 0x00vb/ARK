@@ -31,7 +31,10 @@ export class Sidebar {
     this.top = $("#sidebar-ext");
     this.settings = $("#open-settings");
     this.gen = 0;
+    this.foldRevision = 0;
     this.projectSections = [];
+    this.disclosures = new WeakMap();
+    this.projectChats = new WeakMap();
     // Project id -> unfolded (true) or folded (false), where the person chose; else the
     // current project is unfolded and the others folded.
     this.folds = {};
@@ -73,10 +76,94 @@ export class Sidebar {
     return this.folds[p.id] ?? p.current;
   }
 
-  fold(p, open) {
+  async fold(p, open, animate = true) {
+    ++this.foldRevision;
     if (open === p.current) delete this.folds[p.id];
     else this.folds[p.id] = open;
-    this.refresh();
+    const group = this.tree.querySelector(`.project[data-id="${CSS.escape(p.id)}"]`);
+    if (!group) return;
+    const previous = this.disclosures.get(group);
+    const height = group.getBoundingClientRect().height;
+    previous?.animation?.cancel();
+    const state = {};
+    this.disclosures.set(group, state);
+    const row = group.querySelector(".project-row");
+    group.dataset.instant = String(!animate);
+    row.setAttribute("aria-expanded", String(open));
+    row.querySelector(".project-chev").setAttribute("aria-label", open ? "Fold" : "Unfold");
+    row.querySelector(".session-attention, .working-dot")?.remove();
+    const badge = this.projectBadge(p, open, this.projectChats.get(group) || []);
+    if (badge) row.insertBefore(badge, row.querySelector(".project-more"));
+    if (open && !group.querySelector(".chats, .project-section")) {
+      let sessions;
+      try { sessions = await this.api.call("sessions", { project: p.id }); }
+      catch (error) {
+        if (group.isConnected && this.disclosures.get(group) === state) {
+          await this.fold(p, false, false);
+          this.api.toast(error.message || String(error));
+        }
+        return;
+      }
+      if (!group.isConnected || this.disclosures.get(group) !== state || !this.unfolded(p)) return;
+      this.mountProject(group, p, sessions);
+    }
+    if (!open && [...group.children].slice(1).some(el => el.contains(document.activeElement))) row.focus({ preventScroll: true });
+    for (const child of [...group.children].slice(1)) {
+      child.inert = !open;
+      child.setAttribute("aria-hidden", String(!open));
+    }
+    const finish = () => {
+      if (this.disclosures.get(group) !== state) return;
+      state.animation = null;
+      if (!open) {
+        this.disposeProject(group);
+        [...group.children].slice(1).forEach(el => el.remove());
+      }
+      group.style.overflow = "";
+    };
+    const target = open ? group.scrollHeight : row.getBoundingClientRect().height;
+    if (!animate || matchMedia("(prefers-reduced-motion: reduce)").matches || height === target) {
+      finish();
+      return;
+    }
+    group.style.overflow = "clip";
+    state.animation = group.animate([{ height: `${height}px` }, { height: `${target}px` }], {
+      duration: open ? 200 : 160, easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+    });
+    state.animation.onfinish = finish;
+  }
+
+  projectBadge(p, open, sessions = []) {
+    if (open) return null;
+    const waiting = this.attention.filter(item => item.project?.id === p.id || sessions.some(session => session.id === item.session)).length;
+    if (waiting) return h("span.session-attention", { title: "Needs you", "aria-label": `${waiting} pending decision${waiting === 1 ? "" : "s"}` }, icon("alert"), String(waiting));
+    return this.workingProjects.has(p.id) ? h("span.working-dot", { title: "Working", "aria-label": "Working", hidden: !this.online }) : null;
+  }
+
+  disposeProject(group) {
+    const owned = this.projectSections.filter(section => section.group === group);
+    this.projectSections = this.projectSections.filter(section => section.group !== group);
+    for (const { controller } of owned) {
+      try { controller.dispose?.(); } catch (error) { console.error(error); }
+    }
+  }
+
+  mountProject(group, p, sessions) {
+    this.projectChats.set(group, sessions);
+    const chats = this.chats(p, sessions);
+    if (chats) group.append(chats);
+    if (!p.current) return;
+    for (const section of registry.projectSections.values()) {
+      const el = h("div.project-section", { role: "group", "aria-label": section.label, "data-id": section.id });
+      group.insertBefore(el, chats);
+      try {
+        const controller = section.render(el, { project: p }, window.ark);
+        if (controller) this.projectSections.push({ group, controller });
+      } catch (error) {
+        console.error(error);
+        el.remove();
+      }
+    }
   }
 
   saveHidden() {
@@ -127,6 +214,7 @@ export class Sidebar {
   async refresh(currentId) {
     if (currentId !== undefined) this.currentId = currentId;
     const gen = ++this.gen;
+    const foldRevision = this.foldRevision;
     let projects;
     try {
       projects = await this.api.call("projects");
@@ -153,6 +241,7 @@ export class Sidebar {
       this.unfolded(p) || locateQuestions ? this.api.call("sessions", { project: p.id }).catch(() => []) : null));
     // A newer refresh started meanwhile; it draws.
     if (gen !== this.gen) return;
+    if (foldRevision !== this.foldRevision) return this.refresh();
     const active = document.activeElement;
     const focusedChat = active?.matches(".session") ? active.dataset.id : null;
     const focusedProject = active?.closest(".project")?.dataset.id;
@@ -161,25 +250,14 @@ export class Sidebar {
     const focusedControl = [".project-row", ".project-chev", ".project-more", ".project-new-chat"].find((selector) => active?.matches(selector));
     const sections = this.projectSections;
     this.projectSections = [];
-    for (const section of sections) {
-      try { section.dispose?.(); } catch (e) { console.error(e); }
+    for (const { controller } of sections) {
+      try { controller.dispose?.(); } catch (e) { console.error(e); }
     }
     clear(this.tree);
     visible.forEach((p, i) => {
       const group = this.project(p, chats[i]);
       this.tree.append(group);
-      if (!p.current || !this.unfolded(p)) return;
-      for (const section of registry.projectSections.values()) {
-        const el = h("div.project-section", { role: "group", "aria-label": section.label, "data-id": section.id });
-        group.insertBefore(el, group.querySelector(".chats"));
-        try {
-          const controller = section.render(el, { project: p }, window.ark);
-          if (controller) this.projectSections.push(controller);
-        } catch (e) {
-          console.error(e);
-          el.remove();
-        }
-      }
+      if (this.unfolded(p)) this.mountProject(group, p, chats[i] || []);
     });
     if (focusedChat) this.tree.querySelector(`.session[data-id="${CSS.escape(focusedChat)}"]`)?.focus({ preventScroll: true });
     else if (focusedProject && focusedControl) this.tree.querySelector(`.project[data-id="${CSS.escape(focusedProject)}"] ${focusedControl}`)?.focus({ preventScroll: true });
@@ -188,23 +266,23 @@ export class Sidebar {
 
   project(p, sessions) {
     const open = this.unfolded(p);
-    const waiting = this.attention.filter((item) => item.project?.id === p.id || (sessions || []).some((session) => session.id === item.session)).length;
     const row = h("div.project-row", {
       role: "treeitem", tabindex: "0", "aria-expanded": String(open), "aria-current": p.current ? "true" : null,
       title: p.workspace || "No folder yet",
     },
-      h("button.project-chev", { type: "button", tabindex: "-1", "aria-label": open ? "Fold" : "Unfold", onclick: (e) => { e.stopPropagation(); this.fold(p, !open); } }, icon("chevron-right")),
+      h("button.project-chev", { type: "button", tabindex: "-1", "aria-label": open ? "Fold" : "Unfold", onclick: (e) => { e.stopPropagation(); this.fold(p, !this.unfolded(p), e.detail !== 0); } }, icon("chevron-right")),
       h("span.project-name", p.name),
-      !open && waiting ? h("span.session-attention", { title: "Needs you", "aria-label": `${waiting} pending decision${waiting === 1 ? "" : "s"}` }, icon("alert"), String(waiting))
-        : !open && this.workingProjects.has(p.id) ? h("span.working-dot", { title: "Working", "aria-label": "Working", hidden: !this.online }) : null,
+      this.projectBadge(p, open, sessions || []),
       h("button.icon-btn.small.project-more", { type: "button", title: "Project", "aria-label": `${p.name}: options`, onclick: (e) => { e.stopPropagation(); this.projectMenu(e.currentTarget, p); } }, icon("more")),
       h("button.icon-btn.small.project-new-chat", { type: "button", title: `New chat in ${p.name}`, "aria-label": `New chat in ${p.name}`, onclick: (e) => { e.stopPropagation(); this.newChat(p); } }, icon("plus")));
     // The current project folds; another one opens where it left off.
-    const pick = () => (p.current ? this.fold(p, !open) : this.openProject(p));
-    row.addEventListener("click", pick);
-    row.addEventListener("keydown", (e) => e.key === "Enter" && e.target === row && pick());
+    const pick = (animate) => (p.current ? this.fold(p, !this.unfolded(p), animate) : this.openProject(p));
+    row.addEventListener("click", (e) => pick(e.detail !== 0));
+    row.addEventListener("keydown", (e) => e.key === "Enter" && e.target === row && pick(false));
     row.addEventListener("dblclick", (e) => { e.preventDefault(); this.renameProject(row, p); });
-    return h("div.project", { role: "group", "data-id": p.id }, row, open ? this.chats(p, sessions || []) : null);
+    const group = h("div.project", { role: "group", "data-id": p.id }, row);
+    this.projectChats.set(group, sessions || []);
+    return group;
   }
 
   chats(p, sessions) {
@@ -213,7 +291,7 @@ export class Sidebar {
     if (!shown.length) return null;
     const box = h("div.chats", { role: "group", "aria-label": "Chats" });
     const all = this.all.has(p.id);
-    (all ? shown : shown.slice(0, SHOWN)).forEach((s, i) => box.append(this.chat(s, i)));
+    (all ? shown : shown.slice(0, SHOWN)).forEach((s) => box.append(this.chat(s)));
     if (shown.length > SHOWN) {
       box.append(h("button.chats-more", { type: "button", onclick: () => { all ? this.all.delete(p.id) : this.all.add(p.id); this.refresh(); } },
         all ? "Show less" : `Show ${shown.length - SHOWN} more`));
@@ -221,12 +299,11 @@ export class Sidebar {
     return box;
   }
 
-  chat(s, i) {
+  chat(s) {
     const title = s.title || "Untitled";
     const waiting = this.attention.some((item) => item.session === s.id);
     const row = h("div.session", {
       role: "treeitem", tabindex: "0", "data-id": s.id, "aria-current": s.id === this.currentId ? "true" : null,
-      style: { "--i": Math.min(i, 12) },
     },
       chatAvatar(s.participants),
       h("span.session-title", clip(title, 60)),

@@ -1,3 +1,24 @@
+## Tasks and automations UX proposal, 31 October2026
+
+The owner requested an interactive Openbot comparison and a maximum two-sprint plan for future
+Terra implementation. `docs/UX_TASKS_AUTOMATIONS_SPRINTS.md` proposes direct chat entry, a work
+inbox and one automation library with agenda, typed canvas and manual/time/webhook starts.
+The public competitor demo was exercised; its task result is explicitly mocked. Installed
+Desktop0.9.14/Core0.31 was observed separately from main0.30 source. Evidence is in
+`../board/evidence/openbot-ux-20261031/`. This is a proposal, with ADR changes and feasibility
+gates identified. No product implementation, publication or release was started.
+
+## Sidebar disclosure candidate, 31 October 2026
+
+Project folds update their own row and content. A 200 ms opening and 160 ms closing can
+reverse from the current height. Keyboard and reduced-motion changes finish immediately.
+Hidden controls become inert at once; extension controllers release after closing. Chat rows
+no longer replay entrance animations on refresh. Touch project actions stay visible.
+Qualification:25 focused WebKit and69 actual host-page cases (66 retained plus3 corrected
+reruns), full Rust/clippy, release build and unchanged simulated benchmark pass. Two independent
+reviews pass. Physical touch remains unverified. Evidence: `../board/evidence/sidebar-motion-20261031/`.
+Source is uncommitted. Installed Desktop and its release pins remain unchanged.
+
 ## Named agent chat entry, 31 October2026
 
 Version0.30 supports one primary New chat entry for consumer windows. Atomic CreateAgent

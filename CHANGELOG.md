@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Project disclosure keeps sidebar rows stable, reverses smoothly and releases hidden controls after closing. Keyboard and reduced-motion toggles finish immediately. Chat lists no longer replay entrance animations on refresh. Project actions stay visible on touch screens.
+
 ## [0.30.0] - 2026-10-31
 
 - Let window consumers choose a named agent directly from New chat. Atomic project-scoped creation does not overwrite an existing agent.

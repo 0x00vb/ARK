@@ -89,7 +89,7 @@ const scenarios = {
     await section.waitFor({ state: "visible" });
     assert.equal(await section.evaluate(el => el.parentElement.querySelector(".project-row").getAttribute("aria-current")), "true");
     await page.locator('.project-row[aria-current="true"] .project-chev').click();
-    await section.waitFor({ state: "detached" });
+    await page.locator('.project-section[data-id="project-notes"]').waitFor({ state: "detached" });
     await page.locator('.project-row[aria-current="true"] .project-chev').click();
     await section.waitFor({ state: "visible" });
     const events = await page.evaluate(() => window.__projectSectionEvents);

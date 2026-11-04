@@ -4048,3 +4048,105 @@ async fn native_general_work_followups_keep_the_same_conversation_and_admission(
     assert_eq!(provider.calls.lock().unwrap().len(), 2);
     assert!(store.list_records("orch_agent", None).unwrap().is_empty());
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn served_host_can_attach_a_client_listener_without_another_runtime() {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = Tokens::in_store(dir.path());
+    tokens.create("Owner").unwrap();
+    let phone = tokens
+        .issue_external_client("Owner", "Phone", "phone", Duration::from_secs(3600))
+        .unwrap();
+    let socket = dir.path().join("runtime.sock");
+    let address = format!("unix:{}", socket.display());
+    let secrets = Arc::new(ark_connect::FileSecrets::in_store(dir.path()).unwrap());
+    let ark = Ark::builder()
+        .store_root(dir.path())
+        .secrets(secrets)
+        .connections(true)
+        .tool(Arc::new(Notes))
+        .profile(AgentProfile::builder().core_actions(["notes.read"]).build())
+        .provider(model())
+        .planner(false)
+        .critic(false)
+        .build()
+        .unwrap();
+    let app = App::new("Test").ark(ark).orchestrate(|ark, project, gate| {
+        Ok(Orchestrator::builder(ark, project)
+            .approvals(gate)
+            .build()?)
+    });
+    let ui = ArkUi::new(app).access(Access::Tokens(tokens.clone()));
+    let (host_tx, host_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        ui.serve_with_host(&address, |host| {
+            host_tx
+                .send(host)
+                .map_err(|_| anyhow::anyhow!("host receiver closed"))?;
+            Ok(())
+        })
+        .await
+    });
+    let host = host_rx.await.unwrap();
+    let client = ClientListener::new(tokens)
+        .route_id("fixture-route")
+        .unwrap()
+        .self_hosted_push("https://relay.example.com")
+        .unwrap()
+        .serve(host, "127.0.0.1:0")
+        .await
+        .unwrap();
+    let auth = format!("Authorization: Bearer {}\r\n", phone.token);
+    let response = raw(
+        client.port,
+        format!("GET /client/v1/hello HTTP/1.1\r\nHost: localhost\r\n{auth}\r\n"),
+    )
+    .await;
+    let client_hello: Value =
+        serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(client_hello["routeId"], "fixture-route");
+    assert!(client_hello["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "push.native"));
+    let mut unix = tokio::net::UnixStream::connect(&socket).await.unwrap();
+    unix.write_all(
+        format!("GET /client/v1/hello HTTP/1.1\r\nHost: localhost\r\n{auth}\r\n").as_bytes(),
+    )
+    .await
+    .unwrap();
+    let mut response = String::new();
+    unix.read_to_string(&mut response).await.unwrap();
+    let hello: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let input = json!({"name": "Shared host fixture"});
+    let mutation = json!({
+        "epoch": hello["mutationEpoch"], "counter": hello["nextMutationCounter"],
+        "operation": "project.create", "target": "",
+        "inputDigest": format!("{:x}", Sha256::digest(serde_json::to_vec(&input).unwrap())), "input": input,
+    }).to_string();
+    let mut unix = tokio::net::UnixStream::connect(&socket).await.unwrap();
+    unix.write_all(post("/client/v1/mutations", "localhost", None, &auth, &mutation).as_bytes())
+        .await
+        .unwrap();
+    let mut response = String::new();
+    unix.read_to_string(&mut response).await.unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let response = raw(
+        client.port,
+        format!("GET /client/v1/projects HTTP/1.1\r\nHost: localhost\r\n{auth}\r\n"),
+    )
+    .await;
+    let projects: Value = serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert!(projects["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["name"] == "Shared host fixture"));
+    drop(client);
+    task.abort();
+    let _ = task.await;
+}

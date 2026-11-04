@@ -20,20 +20,32 @@ const MAX_AGE_MS: u64 = 3_600_000;
 struct Config {
     origin: String,
     route: String,
-    until: u64,
+    lease: Lease,
+}
+
+#[derive(Clone)]
+enum Lease {
+    Pilot { until: u64 },
+    SelfHosted,
 }
 
 impl Config {
     fn environment() -> Option<Self> {
-        Self::parse(
-            &std::env::var("ARK_NATIVE_PUSH_RELAY_ORIGIN").ok()?,
-            &std::env::var("ARK_NATIVE_PUSH_ROUTE_ID").ok()?,
-            &std::env::var("ARK_NATIVE_PUSH_UNTIL").ok()?,
-        )
-        .ok()
+        let origin = std::env::var("ARK_NATIVE_PUSH_RELAY_ORIGIN").ok()?;
+        let route = std::env::var("ARK_NATIVE_PUSH_ROUTE_ID").ok()?;
+        if std::env::var("ARK_NATIVE_PUSH_MODE").ok().as_deref() == Some("self_hosted") {
+            Self::self_hosted(&origin, &route).ok()
+        } else {
+            Self::parse(
+                &origin,
+                &route,
+                &std::env::var("ARK_NATIVE_PUSH_UNTIL").ok()?,
+            )
+            .ok()
+        }
     }
 
-    fn parse(origin: &str, route: &str, until: &str) -> anyhow::Result<Self> {
+    fn address(origin: &str, route: &str) -> anyhow::Result<String> {
         let url = reqwest::Url::parse(origin)?;
         let host = url.host_str().unwrap_or("");
         anyhow::ensure!(
@@ -51,16 +63,44 @@ impl Config {
             "invalid notification relay configuration"
         );
         anyhow::ensure!(opaque(route, 1, 200), "invalid notification route");
+        Ok(url.origin().ascii_serialization())
+    }
+
+    fn parse(origin: &str, route: &str, until: &str) -> anyhow::Result<Self> {
+        let origin = Self::address(origin, route)?;
         let until = timestamp(until)?;
         anyhow::ensure!(
             until > now_seconds() && until <= now_seconds() + 31 * 86_400,
             "notification pilot expiry is out of range"
         );
         Ok(Self {
-            origin: url.origin().ascii_serialization(),
+            origin,
             route: route.into(),
-            until,
+            lease: Lease::Pilot { until },
         })
+    }
+
+    fn self_hosted(origin: &str, route: &str) -> anyhow::Result<Self> {
+        Ok(Self {
+            origin: Self::address(origin, route)?,
+            route: route.into(),
+            lease: Lease::SelfHosted,
+        })
+    }
+
+    fn delivery_url(&self, id: &str) -> String {
+        let path = match self.lease {
+            Lease::Pilot { .. } => "mobile-push",
+            Lease::SelfHosted => "self-hosted-push",
+        };
+        format!("{}/v1/{path}/deliveries/{id}", self.origin)
+    }
+
+    fn deadline(&self) -> u64 {
+        match self.lease {
+            Lease::Pilot { until } => until,
+            Lease::SelfHosted => now_seconds() + 31 * 86_400,
+        }
     }
 }
 
@@ -141,12 +181,46 @@ impl NativePush {
         }
     }
 
+    pub(crate) fn validate_relay(origin: &str) -> anyhow::Result<String> {
+        Config::address(origin, "route")
+    }
+
+    pub(crate) fn validate_listener(origin: &str, route: &str) -> anyhow::Result<()> {
+        Config::address(origin, route).map(|_| ())
+    }
+
+    pub(crate) fn configure_listener(&self, origin: &str, route: &str) -> anyhow::Result<()> {
+        let explicit = [
+            "ARK_NATIVE_PUSH_MODE",
+            "ARK_NATIVE_PUSH_RELAY_ORIGIN",
+            "ARK_NATIVE_PUSH_ROUTE_ID",
+            "ARK_NATIVE_PUSH_UNTIL",
+        ]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some());
+        self.configure_listener_with_policy(origin, route, explicit)
+    }
+
+    fn configure_listener_with_policy(
+        &self,
+        origin: &str,
+        route: &str,
+        explicit: bool,
+    ) -> anyhow::Result<()> {
+        if explicit || self.config.get().is_some() {
+            return Ok(());
+        }
+        let candidate = Config::self_hosted(origin, route)?;
+        self.config.get_or_init(|| candidate);
+        Ok(())
+    }
+
     pub(crate) fn enabled(&self, route: Option<&str>) -> bool {
         self.secrets.is_some()
             && self
                 .config
                 .get()
-                .is_some_and(|c| c.until > now_seconds() && Some(c.route.as_str()) == route)
+                .is_some_and(|c| c.deadline() > now_seconds() && Some(c.route.as_str()) == route)
     }
 
     fn secrets(&self) -> anyhow::Result<&dyn Secrets> {
@@ -181,7 +255,7 @@ impl NativePush {
         );
         let expires = timestamp(&request.expires_at)?;
         anyhow::ensure!(
-            expires > now_seconds() && expires <= c.until,
+            expires > now_seconds() && expires <= c.deadline(),
             "invalid notification expiry"
         );
         let old = self.registration(&request.registration_id)?;
@@ -333,7 +407,7 @@ impl NativePush {
         tokens: Option<&Tokens>,
         wait_ms: u64,
     ) -> anyhow::Result<bool> {
-        let Some(c) = self.config.get().filter(|c| c.until > now_seconds()) else {
+        let Some(c) = self.config.get().filter(|c| c.deadline() > now_seconds()) else {
             return Ok(false);
         };
         let Some(tokens) = tokens else {
@@ -413,7 +487,7 @@ impl NativePush {
                                 &r.id,
                                 chat.as_deref().unwrap_or(notice),
                             ]),
-                            expiry: r.expires.min(c.until).min(now_seconds() + 3600),
+                            expiry: r.expires.min(c.deadline()).min(now_seconds() + 3600),
                             kind: kind.clone(),
                         },
                         state: "retry".into(),
@@ -447,7 +521,7 @@ impl NativePush {
                 let Some(capability) = capability else {
                     continue;
                 };
-                let url = format!("{}/v1/mobile-push/deliveries/{}", c.origin, r.id);
+                let url = c.delivery_url(&r.id);
                 if let Some(receipt) = self.send(&url, &capability, &delivery.body).await {
                     if uuid::Uuid::parse_str(&receipt.receipt_id).is_ok() {
                         match receipt.state.as_str() {
@@ -559,7 +633,9 @@ mod tests {
             .set(Config {
                 origin: "https://relay.example.com".into(),
                 route: "route-a".into(),
-                until: now_seconds() + 3600,
+                lease: Lease::Pilot {
+                    until: now_seconds() + 3600
+                },
             })
             .is_ok());
         (dir, push, tokens, owner)
@@ -633,6 +709,41 @@ mod tests {
             "2000-01-01T00:00:00Z"
         )
         .is_err());
+    }
+
+    #[test]
+    fn self_hosted_mode_keeps_a_bounded_registration_lease() {
+        let before = now_seconds();
+        let config = Config::self_hosted("https://relay.example.com", "route-a").unwrap();
+        assert!(config.deadline() >= before + 31 * 86_400);
+        assert_eq!(
+            config.delivery_url("id"),
+            "https://relay.example.com/v1/self-hosted-push/deliveries/id"
+        );
+        assert!(Config::self_hosted("http://relay.example.com", "route-a").is_err());
+        assert!(Config::self_hosted("https://relay.example.com", "bad route").is_err());
+    }
+
+    #[test]
+    fn listener_default_is_route_bound_and_never_overrides_operator_policy() {
+        let (_dir, configured, _tokens, owner) = setup();
+        let push = NativePush::new(configured.engine.clone(), configured.secrets.clone());
+        push.configure_listener_with_policy("https://relay.example.com", "route-a", false)
+            .unwrap();
+        assert!(push.enabled(Some("route-a")));
+        assert!(!push.enabled(Some("route-b")));
+        assert!(push.register(&owner, "route-a", request()).is_ok());
+        assert!(push.register(&owner, "route-b", request()).is_err());
+        let disabled = NativePush::new(configured.engine.clone(), configured.secrets.clone());
+        disabled
+            .configure_listener_with_policy("https://relay.example.com", "route-a", true)
+            .unwrap();
+        assert!(!disabled.enabled(Some("route-a")));
+        configured
+            .configure_listener_with_policy("https://different.example.com", "route-b", false)
+            .unwrap();
+        assert!(configured.enabled(Some("route-a")));
+        assert!(!configured.enabled(Some("route-b")));
     }
 
     #[test]
@@ -926,7 +1037,9 @@ mod tests {
             .set(Config {
                 origin: "https://relay.example.com".into(),
                 route: "route-a".into(),
-                until: now_seconds() + 3600,
+                lease: Lease::Pilot {
+                    until: now_seconds() + 3600
+                },
             })
             .is_ok());
         let owner = tokens.create("owner").unwrap();

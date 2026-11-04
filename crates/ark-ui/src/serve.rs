@@ -82,6 +82,7 @@ pub struct ClientListener {
     tokens: Tokens,
     route_id: Option<String>,
     account_pairing: Option<AccountPairing>,
+    self_hosted_push_origin: Option<String>,
 }
 
 impl ClientListener {
@@ -91,6 +92,7 @@ impl ClientListener {
             tokens,
             route_id: None,
             account_pairing: None,
+            self_hosted_push_origin: None,
         }
     }
 
@@ -112,6 +114,13 @@ impl ClientListener {
         Ok(self)
     }
 
+    /// Advertise a scoped notification relay for this listener when no operator policy overrides it.
+    pub fn self_hosted_push(mut self, origin: &str) -> anyhow::Result<Self> {
+        self.self_hosted_push_origin =
+            Some(crate::native_push::NativePush::validate_relay(origin)?);
+        Ok(self)
+    }
+
     pub fn account_pairing(mut self, pairing: AccountPairing) -> Self {
         self.route_id = Some(pairing.route_id.clone());
         self.account_pairing = Some(pairing);
@@ -128,8 +137,16 @@ impl ClientListener {
         {
             anyhow::bail!("a client listener must bind to loopback or a Unix socket behind HTTPS");
         }
+        let push = match (&self.self_hosted_push_origin, &self.route_id) {
+            (Some(origin), Some(route)) => {
+                crate::native_push::NativePush::validate_listener(origin, route)?;
+                Some((origin.clone(), route.clone()))
+            }
+            (Some(_), None) => anyhow::bail!("a notification listener requires a route id"),
+            (None, _) => None,
+        };
         let (served, task) = serve_with(
-            host,
+            host.clone(),
             addr,
             ServeConfig {
                 assets: None,
@@ -142,7 +159,11 @@ impl ClientListener {
             },
         )
         .await?;
-        Ok(ClientServer { served, task })
+        let server = ClientServer { served, task };
+        if let Some((origin, route)) = push {
+            host.notifier.native.configure_listener(&origin, &route)?;
+        }
+        Ok(server)
     }
 }
 

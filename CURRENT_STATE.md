@@ -1,3 +1,7 @@
+## Phone shared listener and notification preparation, 2 November 2026
+
+This isolated development worktree adds a callback after the headless Host opens, so a scoped loopback phone listener and the existing Unix socket share one Host. An actual Unix and TCP fixture and the focused Core test pass. A separate opt-in self-hosted native-push configuration retains the existing private-pilot expiry rules and bounds individual registration leases. Focused native-push tests pass. The Core change is not released or pinned by a published Desktop build; see `../board/evidence/mobile-device-first-20261102/`.
+
 ## Real board and canvas polish, 1 November 2026
 
 The owner requested literal board reuse. Work now renders boardView with scoped project

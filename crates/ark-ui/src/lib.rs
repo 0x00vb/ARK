@@ -389,7 +389,15 @@ impl ArkUi {
     /// socket is mode 0600, its folder is made 0700 when missing and refused when others can
     /// write to it, a socket left by a stopped process is replaced, and one that answers means
     /// a server is already there. The socket file is removed when serving stops.
-    pub async fn serve(mut self, addr: &str) -> anyhow::Result<()> {
+    pub async fn serve(self, addr: &str) -> anyhow::Result<()> {
+        self.serve_with_host(addr, |_| Ok(())).await
+    }
+
+    /// Serve the workspace and hand its live host to an optional listener coordinator.
+    pub async fn serve_with_host<F>(mut self, addr: &str, opened: F) -> anyhow::Result<()>
+    where
+        F: FnOnce(Arc<Host>) -> anyhow::Result<()>,
+    {
         if self.start.session.is_none() {
             self.start.resume = true;
         }
@@ -410,6 +418,11 @@ impl ArkUi {
         }
         let (served, mut task) =
             serve::serve(host.clone(), assets, addr, access, entry, account_pairing).await?;
+        if let Err(error) = opened(host.clone()) {
+            task.abort();
+            let _ = task.await;
+            return Err(error);
+        }
         println!("{}", served.url);
         tokio::select! {
             _ = stop_signal() => {}

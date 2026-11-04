@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.1] - 2026-11-04
+
+- Isolate the pinned Computer native bridge build target from the consuming application.
+  macOS11 application packaging now retains the bridge's upstream10.15 source target,
+  with all compiler warning checks enabled. Bare application-name lookup is unchanged.
+- Core0.33.0 remains immutable. Its Computer dependency fails packaging when a macOS11
+  consumer overrides the bridge target. Consumers building that configuration use0.33.1.
+
 ## [0.33.0] - 2026-11-04
 
 ### Breaking

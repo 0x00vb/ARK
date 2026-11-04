@@ -79,3 +79,16 @@ the service falling back to global pointer input.
 
 Evidence and remaining gates are recorded in
 `../board/evidence/agent-desktop-migration-20261101/` at the workspace root.
+
+## Native bridge build target
+
+Core0.33.1 retains the pinned macOS crate under third-party/agent-desktop/macos. Only its
+standalone manifest and build target input differ. VENDOR.json records the original bytes.
+The core types still come from the original exact upstream Git revision.
+
+The bridge uses AGENT_DESKTOP_MACOS_DEPLOYMENT_TARGET, default10.15 as upstream, while the
+Desktop application retains its macOS11 target. This isolates library source availability
+from the consumer's target and keeps all warning flags enabled. It intentionally restores
+the earlier deprecation diagnostic range. The deprecated bare-name resolver remains for
+behavior compatibility. Replacing that resolver is a separate change with native launch
+and cancellation requirements.

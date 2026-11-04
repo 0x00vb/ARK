@@ -17,6 +17,11 @@ scripts/protocol.sh
 step "version and release state"
 scripts/check-version.sh
 
+if [ "$(uname -s)" = Darwin ]; then
+  step "macOS 11 consumer deployment target"
+  MACOSX_DEPLOYMENT_TARGET=11.0 cargo check -p ark-computer --locked
+fi
+
 step "clippy (warnings are errors)"
 cargo clippy --workspace --all-targets --locked -- -D warnings
 

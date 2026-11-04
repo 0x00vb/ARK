@@ -438,6 +438,19 @@ pub fn public_client() -> reqwest::Client {
     client(false)
 }
 
+/// A credential-bearing request must not be redirected away from its configured endpoint.
+pub fn public_client_no_redirect() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(10))
+        .dns_resolver(Arc::new(PublicOnly))
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .https_only(true)
+        .build()
+        .expect("fixed public HTTPS client configuration")
+}
+
 fn client(private: bool) -> reqwest::Client {
     let mut b = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))

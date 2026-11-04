@@ -11,8 +11,15 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- Authenticated external clients on dedicated or account-bound headless listeners can opt into a fixed, content-free notification relay. Credentials, expiry and opaque tap resolution stay scoped to that device (ADR 0082).
+- Headless startup resumes the existing session instead of creating another empty chat. Native window startup is unchanged.
+
 - `ArkUi::account_pairing` lets a hosted workspace pair account-bound native clients and report
   its exact route id without granting those clients browser or generic RPC access.
+- Client protocol v1.7 lists the ready models owned by an addressed runtime, binds an optional
+  exact model to idempotent chat creation and changes an idle chat through a terminal mutation.
+- Account-bound clients can authorize and disconnect Claude Code or Codex through each program's
+  official browser flow. ARK never reads or stores the resulting provider credential.
 
 ## [0.25.0] - 2026-10-23
 

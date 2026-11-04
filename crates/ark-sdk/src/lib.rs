@@ -463,6 +463,21 @@ impl Ark {
         Ok(Session::start_named(&self.engine, id, project)?)
     }
 
+    /// Start a named conversation with an exact model choice stored in its first record.
+    pub fn start_named_session_model(
+        &self,
+        id: SessionId,
+        project: &ProjectId,
+        model: String,
+    ) -> Result<Session, ArkError> {
+        Ok(Session::start_named_model(
+            &self.engine,
+            id,
+            project,
+            model,
+        )?)
+    }
+
     /// Reopen a session by id or unique prefix.
     pub fn open_session(&self, id: &str) -> Result<Option<Session>, ArkError> {
         Ok(Session::open(&self.engine, id)?)

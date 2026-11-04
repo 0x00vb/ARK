@@ -1,5 +1,9 @@
 # Current state
 
+## Private native notification relay (2026-10-24)
+
+The isolated `codex/native-push` extension is integrated into this candidate without replacing the model and provider authorization changes. Typed external-client registration, presence and tap resolution use protocol 1.8. The runtime uses an operator-configured HTTPS origin and finite pilot expiry. Only a send capability is retained in the exact shared connection secret-store instance. Existing attention notices and chat completion feed a durable, content-free per-device outbox. The first live private binary exposed a missing headless surface: its original gate admitted only dedicated client listeners. The correction requires exact external-client scope on dedicated or account-bound headless listeners. Actual TCP tests prove all four push routes work while owner push and external generic RPC stay refused. Headless startup also resumes its prior chat; three restarts retain one session, while native window startup remains unchanged. Independent source review approved both fixes. Eleven focused push/startup cases and both model/provider HTTP regressions pass. Prior protocol checks passed six cases, and DTOs are unchanged. The corrected bounded Linux release build passes, binary SHA256 `82c890533c21a0f20b55feb7db335b98b7a5fc08cd08a1834fcd6556cd99d76e`. Physical APNs delivery and private activation remain with the parent session. Evidence: `../board/evidence/mobile-native-push-20261024/headless-followup-result.json`. No public release is implied.
+
 ## Combined release verification (2026-10-23)
 
 The combined candidate passed full page-enabled CI: formatting, generated protocol, version
@@ -142,6 +146,25 @@ Browser view remains unchanged. The isolated branch's 19 focused Node cases pass
 been rerun on this combined main source. The process-page fixture enables Browser explicitly.
 Current-main page CI, real same-port viewer/destination proof and native dogfood remain open.
 Board `948e2397`.
+
+## Native model-program authorization (2026-10-23)
+
+In development on `codex/mobile-provider-login`: protocol v1.6 adds a typed, account-route-only
+Claude connection and authorization surface for paired native clients. The runtime drives the
+official Claude Code login, status and logout commands without a shell. The CLI keeps its own
+credentials. ARK holds one active attempt and at most 32 bounded in-memory records, validates the official authorization
+address, accepts the one-time code once and restricts the attempt to its paired device. Status
+requires the exact `claude.ai` authentication method. Independent source review passed after
+fixing device scope, listener ownership, closed-channel timer starvation and fail-closed child
+cleanup. Authorization tests pass 13/13; serialized serve tests pass 16/16 and the previously
+intermittent mutation case also passed alone. A prior parallel run counted a duplicate mutation;
+it remains a historical observation, not a claimed fix. Full `scripts/ci.sh` passed formatting,
+protocol/version checks, clippy, serialized workspace tests, release build and the simulated
+benchmark with no baseline delta. The isolated Linux hosted build passed in
+4m56s. Packaged-image smoke passed official Claude authorization start/cancel, process exit,
+pairing and scope isolation. The exact image is now healthy on VPS loopback. iOS full checks
+passed and its signed artifact is ready but not installed. Real provider login/model work is
+unproven and needs the owner's physical iPhone.
 
 ## Upload completion drafts
 
@@ -365,3 +388,32 @@ The later guarded checks also pass: durable projection4Rusttests, protocol4tests
 nullable-collection regression1test, authoritative protocol regeneration and native byte compare,
 and Swiftpackage7tests. This supersedes earlier protocol/projection unrun statements. The
 interaction/host integration and complete application builds remain pending storage.
+
+## Route models and official provider authorization, 23 October 2026
+
+Protocol v1.7 now has a route-owned ready model catalog, an optional model on idempotent chat
+creation, optional current model state on conversation reads and the ordered `chat.model`
+mutation. The session's first record stores an explicit model atomically. Exact retries compare
+the durable project and model. Existing records and clients remain valid without either field.
+
+The account-bound connection surface supports Claude Code and Codex through their pinned official
+commands. Codex uses its device page and opaque user code. One authorization child runs across all
+providers. Attempt ownership, bounded output, cleared environment, strict status, cancellation,
+descendant cleanup and redacted Debug output fail closed.
+
+Focused evidence passes: six protocol tests and authoritative generation, 17 authorization tests
+and the atomic session model test. Generated Swift SHA-256 is
+`54a74042c07db0268f4c335c0f10bb9c4a3030aec5dd153ca63d39c53452df98`.
+
+On 24 October the current-source focused checks passed: the route model HTTP test, native
+authorization ownership and recovery HTTP test, six protocol tests, the atomic session model
+test and authoritative generation. The route test now counts retries against the post-restart
+Host baseline, since opening that Host creates a separate default session. Its original
+lost-response one-chat assertion remains. Root independently reviewed that test correction.
+The bounded x86_64 Linux release build passed on the development Mac in 3m56s. Its 64,503,768-byte
+binary requires GLIBC 2.29 and has SHA-256
+`9d4b9e669a881ee42151593649bee2862d17aed43121d3e73b573f3233e1233c`.
+The owner requested focused
+critical checks instead of another full repository gate. No deploy, release or live provider
+login was performed by this Core session. Evidence: workspace
+`board/evidence/mobile-core-models-20261024/` and `/tmp/ark-core-model-codex-final-build-20261024.log`.

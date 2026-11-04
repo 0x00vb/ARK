@@ -149,6 +149,17 @@
       ],
       "type": "object"
     },
+    "ChatModelInput": {
+      "properties": {
+        "model": {
+          "$ref": "#/$defs/ModelSelection"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "type": "object"
+    },
     "ChatSummary": {
       "properties": {
         "computer": {
@@ -254,6 +265,31 @@
       ],
       "type": "object"
     },
+    "ConversationModel": {
+      "properties": {
+        "canSelect": {
+          "type": "boolean"
+        },
+        "display": {
+          "type": "string"
+        },
+        "selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "display",
+        "canSelect"
+      ],
+      "type": "object"
+    },
     "ConversationSnapshot": {
       "properties": {
         "activeTurnId": {
@@ -276,6 +312,16 @@
             "$ref": "#/$defs/ChatMessage"
           },
           "type": "array"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConversationModel"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "results": {
           "items": {
@@ -489,6 +535,137 @@
       ],
       "type": "object"
     },
+    "ModelDefault": {
+      "properties": {
+        "display": {
+          "type": "string"
+        },
+        "selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "display"
+      ],
+      "type": "object"
+    },
+    "ModelEffort": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "type": "object"
+    },
+    "ModelProvider": {
+      "properties": {
+        "connectionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ModelSummary"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "models"
+      ],
+      "type": "object"
+    },
+    "ModelSelection": {
+      "properties": {
+        "effortId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spec": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "spec"
+      ],
+      "type": "object"
+    },
+    "ModelSummary": {
+      "properties": {
+        "defaultEffortId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "efforts": {
+          "items": {
+            "$ref": "#/$defs/ModelEffort"
+          },
+          "type": "array"
+        },
+        "spec": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "spec",
+        "title",
+        "efforts"
+      ],
+      "type": "object"
+    },
+    "ModelsSnapshot": {
+      "properties": {
+        "defaultModel": {
+          "$ref": "#/$defs/ModelDefault"
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/ModelProvider"
+          },
+          "type": "array"
+        },
+        "routeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "routeId",
+        "defaultModel",
+        "providers"
+      ],
+      "type": "object"
+    },
     "MutationReceipt": {
       "properties": {
         "acceptedAt": {
@@ -541,8 +718,129 @@
       ],
       "type": "object"
     },
+    "NativePushPresenceRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "inForeground": {
+          "type": "boolean"
+        },
+        "registrationId": {
+          "maxLength": 36,
+          "minLength": 36,
+          "type": "string"
+        }
+      },
+      "required": [
+        "registrationId",
+        "inForeground"
+      ],
+      "type": "object"
+    },
+    "NativePushRegistrationRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "expiresAt": {
+          "maxLength": 40,
+          "minLength": 20,
+          "type": "string"
+        },
+        "registrationId": {
+          "maxLength": 36,
+          "minLength": 36,
+          "type": "string"
+        },
+        "runtimeRouteId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "sendCapability": {
+          "maxLength": 43,
+          "minLength": 43,
+          "type": "string"
+        }
+      },
+      "required": [
+        "registrationId",
+        "runtimeRouteId",
+        "expiresAt",
+        "sendCapability"
+      ],
+      "type": "object"
+    },
+    "NativePushRegistrationResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "expiresAt": {
+          "type": "string"
+        },
+        "registrationId": {
+          "type": "string"
+        },
+        "runtimeRouteId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "registrationId",
+        "runtimeRouteId",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "NativePushRemoveRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "registrationId": {
+          "maxLength": 36,
+          "minLength": 36,
+          "type": "string"
+        }
+      },
+      "required": [
+        "registrationId"
+      ],
+      "type": "object"
+    },
+    "NativePushResolution": {
+      "properties": {
+        "attentionId": {
+          "type": "string"
+        },
+        "chatId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "itemId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attentionId",
+        "state"
+      ],
+      "type": "object"
+    },
     "NewChatRequest": {
       "properties": {
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "project": {
           "type": "string"
         },
@@ -663,6 +961,118 @@
       "required": [
         "major",
         "latestMinor"
+      ],
+      "type": "object"
+    },
+    "ProviderAuthorizationAttempt": {
+      "properties": {
+        "authorizationUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connectionId": {
+          "type": "string"
+        },
+        "display": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "userCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "connectionId",
+        "state",
+        "expiresAt",
+        "display"
+      ],
+      "type": "object"
+    },
+    "ProviderAuthorizationBeginRequest": {
+      "properties": {
+        "requestId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "routeId": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "routeId",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "ProviderAuthorizationCodeRequest": {
+      "properties": {
+        "code": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "type": "object"
+    },
+    "ProviderConnectionSummary": {
+      "properties": {
+        "display": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "state",
+        "display"
+      ],
+      "type": "object"
+    },
+    "ProviderConnectionsSnapshot": {
+      "properties": {
+        "connections": {
+          "items": {
+            "$ref": "#/$defs/ProviderConnectionSummary"
+          },
+          "type": "array"
+        },
+        "routeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "routeId",
+        "connections"
       ],
       "type": "object"
     },
@@ -1006,6 +1416,9 @@
     "bootstrap": {
       "$ref": "#/$defs/Bootstrap"
     },
+    "chat_model_input": {
+      "$ref": "#/$defs/ChatModelInput"
+    },
     "chats": {
       "$ref": "#/$defs/ChatsSnapshot"
     },
@@ -1014,6 +1427,9 @@
     },
     "conversation": {
       "$ref": "#/$defs/ConversationSnapshot"
+    },
+    "conversation_model": {
+      "$ref": "#/$defs/ConversationModel"
     },
     "error": {
       "$ref": "#/$defs/ErrorEnvelope"
@@ -1027,11 +1443,44 @@
     "home": {
       "$ref": "#/$defs/HomeSnapshot"
     },
+    "model_default": {
+      "$ref": "#/$defs/ModelDefault"
+    },
+    "model_effort": {
+      "$ref": "#/$defs/ModelEffort"
+    },
+    "model_provider": {
+      "$ref": "#/$defs/ModelProvider"
+    },
+    "model_selection": {
+      "$ref": "#/$defs/ModelSelection"
+    },
+    "model_summary": {
+      "$ref": "#/$defs/ModelSummary"
+    },
+    "models": {
+      "$ref": "#/$defs/ModelsSnapshot"
+    },
     "mutation_receipt": {
       "$ref": "#/$defs/MutationReceipt"
     },
     "mutation_request": {
       "$ref": "#/$defs/MutationRequest"
+    },
+    "native_push_presence_request": {
+      "$ref": "#/$defs/NativePushPresenceRequest"
+    },
+    "native_push_registration_request": {
+      "$ref": "#/$defs/NativePushRegistrationRequest"
+    },
+    "native_push_registration_response": {
+      "$ref": "#/$defs/NativePushRegistrationResponse"
+    },
+    "native_push_remove_request": {
+      "$ref": "#/$defs/NativePushRemoveRequest"
+    },
+    "native_push_resolution": {
+      "$ref": "#/$defs/NativePushResolution"
     },
     "new_chat": {
       "$ref": "#/$defs/NewChatRequest"
@@ -1044,6 +1493,18 @@
     },
     "projects": {
       "$ref": "#/$defs/ProjectsSnapshot"
+    },
+    "provider_authorization_attempt": {
+      "$ref": "#/$defs/ProviderAuthorizationAttempt"
+    },
+    "provider_authorization_begin": {
+      "$ref": "#/$defs/ProviderAuthorizationBeginRequest"
+    },
+    "provider_authorization_code": {
+      "$ref": "#/$defs/ProviderAuthorizationCodeRequest"
+    },
+    "provider_connections": {
+      "$ref": "#/$defs/ProviderConnectionsSnapshot"
     },
     "terminal_end_request": {
       "$ref": "#/$defs/TerminalEndRequest"
@@ -1071,12 +1532,29 @@
     }
   },
   "required": [
+    "native_push_registration_request",
+    "native_push_registration_response",
+    "native_push_remove_request",
+    "native_push_presence_request",
+    "native_push_resolution",
     "bootstrap",
     "pair_request",
     "account_pair_request",
     "pair_response",
     "hello",
     "error",
+    "provider_connections",
+    "provider_authorization_begin",
+    "provider_authorization_code",
+    "provider_authorization_attempt",
+    "models",
+    "model_provider",
+    "model_summary",
+    "model_effort",
+    "model_selection",
+    "model_default",
+    "conversation_model",
+    "chat_model_input",
     "home",
     "chats",
     "conversation",

@@ -54,6 +54,16 @@ pub(crate) async fn conversation(host: &Arc<Host>, id: &str) -> anyhow::Result<V
     let read = host
         .call("chat_read", json!({ "session": id, "limit": 50 }))
         .await?;
+    let model = host
+        .client_conversation_model(
+            id,
+            read["summary"]["model"]
+                .as_str()
+                .unwrap_or("Current model")
+                .to_string(),
+            read["running"].is_null(),
+        )
+        .await?;
     let at = chat["updatedAt"].as_str().unwrap_or("").to_string();
     let mut messages = Vec::new();
     for turn in read["transcript"].as_array().into_iter().flatten() {
@@ -95,6 +105,7 @@ pub(crate) async fn conversation(host: &Arc<Host>, id: &str) -> anyhow::Result<V
         "approvals": approvals,
         "results": results,
         "activeTurnId": read["running"].as_str().map(|_| "running"),
+        "model": model,
     }))
 }
 
@@ -103,8 +114,11 @@ pub(crate) async fn create_chat(
     device: &str,
     project: &str,
     request_id: &str,
+    model: Option<&ark_protocol::ModelSelection>,
 ) -> Result<Value, crate::host::ClientChatCreateError> {
-    let summary = host.create_client_chat(device, project, request_id).await?;
+    let summary = host
+        .create_client_chat(device, project, request_id, model)
+        .await?;
     Ok(chat_item(&summary))
 }
 

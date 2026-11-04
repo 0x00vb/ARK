@@ -154,6 +154,16 @@ public struct ChatMessage: Codable, Equatable, Sendable {
     }
 }
 
+public struct ChatModelInput: Codable, Equatable, Sendable {
+    public let model: ModelSelection
+
+    public init(
+        model: ModelSelection
+    ) {
+        self.model = model
+    }
+}
+
 public struct ChatSummary: Codable, Equatable, Sendable {
     public let computer: String
     public let id: String
@@ -230,11 +240,28 @@ public struct ComputersSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+public struct ConversationModel: Codable, Equatable, Sendable {
+    public let canSelect: Bool
+    public let display: String
+    public let selection: ModelSelection?
+
+    public init(
+        canSelect: Bool,
+        display: String,
+        selection: ModelSelection? = nil
+    ) {
+        self.canSelect = canSelect
+        self.display = display
+        self.selection = selection
+    }
+}
+
 public struct ConversationSnapshot: Codable, Equatable, Sendable {
     public let activeTurnId: String?
     public let approvals: [AttentionItem]
     public let chat: ChatSummary
     public let messages: [ChatMessage]
+    public let model: ConversationModel?
     public let results: [ResultSummary]
 
     public init(
@@ -242,12 +269,14 @@ public struct ConversationSnapshot: Codable, Equatable, Sendable {
         approvals: [AttentionItem],
         chat: ChatSummary,
         messages: [ChatMessage],
+        model: ConversationModel? = nil,
         results: [ResultSummary]
     ) {
         self.activeTurnId = activeTurnId
         self.approvals = approvals
         self.chat = chat
         self.messages = messages
+        self.model = model
         self.results = results
     }
 }
@@ -368,6 +397,99 @@ public struct Limits: Codable, Equatable, Sendable {
     }
 }
 
+public struct ModelDefault: Codable, Equatable, Sendable {
+    public let display: String
+    public let selection: ModelSelection?
+
+    public init(
+        display: String,
+        selection: ModelSelection? = nil
+    ) {
+        self.display = display
+        self.selection = selection
+    }
+}
+
+public struct ModelEffort: Codable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+
+    public init(
+        id: String,
+        title: String
+    ) {
+        self.id = id
+        self.title = title
+    }
+}
+
+public struct ModelProvider: Codable, Equatable, Sendable {
+    public let connectionId: String?
+    public let id: String
+    public let models: [ModelSummary]
+    public let title: String
+
+    public init(
+        connectionId: String? = nil,
+        id: String,
+        models: [ModelSummary],
+        title: String
+    ) {
+        self.connectionId = connectionId
+        self.id = id
+        self.models = models
+        self.title = title
+    }
+}
+
+public struct ModelSelection: Codable, Equatable, Sendable {
+    public let effortId: String?
+    public let spec: String
+
+    public init(
+        effortId: String? = nil,
+        spec: String
+    ) {
+        self.effortId = effortId
+        self.spec = spec
+    }
+}
+
+public struct ModelSummary: Codable, Equatable, Sendable {
+    public let defaultEffortId: String?
+    public let efforts: [ModelEffort]
+    public let spec: String
+    public let title: String
+
+    public init(
+        defaultEffortId: String? = nil,
+        efforts: [ModelEffort],
+        spec: String,
+        title: String
+    ) {
+        self.defaultEffortId = defaultEffortId
+        self.efforts = efforts
+        self.spec = spec
+        self.title = title
+    }
+}
+
+public struct ModelsSnapshot: Codable, Equatable, Sendable {
+    public let defaultModel: ModelDefault
+    public let providers: [ModelProvider]
+    public let routeId: String
+
+    public init(
+        defaultModel: ModelDefault,
+        providers: [ModelProvider],
+        routeId: String
+    ) {
+        self.defaultModel = defaultModel
+        self.providers = providers
+        self.routeId = routeId
+    }
+}
+
 public struct MutationReceipt: Codable, Equatable, Sendable {
     public let acceptedAt: String
     public let display: String
@@ -412,14 +534,94 @@ public struct MutationRequest: Codable, Equatable, Sendable {
     }
 }
 
+public struct NativePushPresenceRequest: Codable, Equatable, Sendable {
+    public let inForeground: Bool
+    public let registrationId: String
+
+    public init(
+        inForeground: Bool,
+        registrationId: String
+    ) {
+        self.inForeground = inForeground
+        self.registrationId = registrationId
+    }
+}
+
+public struct NativePushRegistrationRequest: Codable, Equatable, Sendable {
+    public let expiresAt: String
+    public let registrationId: String
+    public let runtimeRouteId: String
+    public let sendCapability: String
+
+    public init(
+        expiresAt: String,
+        registrationId: String,
+        runtimeRouteId: String,
+        sendCapability: String
+    ) {
+        self.expiresAt = expiresAt
+        self.registrationId = registrationId
+        self.runtimeRouteId = runtimeRouteId
+        self.sendCapability = sendCapability
+    }
+}
+
+public struct NativePushRegistrationResponse: Codable, Equatable, Sendable {
+    public let expiresAt: String
+    public let registrationId: String
+    public let runtimeRouteId: String
+
+    public init(
+        expiresAt: String,
+        registrationId: String,
+        runtimeRouteId: String
+    ) {
+        self.expiresAt = expiresAt
+        self.registrationId = registrationId
+        self.runtimeRouteId = runtimeRouteId
+    }
+}
+
+public struct NativePushRemoveRequest: Codable, Equatable, Sendable {
+    public let registrationId: String
+
+    public init(
+        registrationId: String
+    ) {
+        self.registrationId = registrationId
+    }
+}
+
+public struct NativePushResolution: Codable, Equatable, Sendable {
+    public let attentionId: String
+    public let chatId: String?
+    public let itemId: String?
+    public let state: String
+
+    public init(
+        attentionId: String,
+        chatId: String? = nil,
+        itemId: String? = nil,
+        state: String
+    ) {
+        self.attentionId = attentionId
+        self.chatId = chatId
+        self.itemId = itemId
+        self.state = state
+    }
+}
+
 public struct NewChatRequest: Codable, Equatable, Sendable {
+    public let model: ModelSelection?
     public let project: String
     public let requestId: String?
 
     public init(
+        model: ModelSelection? = nil,
         project: String,
         requestId: String? = nil
     ) {
+        self.model = model
         self.project = project
         self.requestId = requestId
     }
@@ -505,6 +707,89 @@ public struct ProtocolVersion: Codable, Equatable, Sendable {
     ) {
         self.latestMinor = latestMinor
         self.major = major
+    }
+}
+
+public struct ProviderAuthorizationAttempt: Codable, Equatable, Sendable {
+    public let authorizationUrl: String?
+    public let connectionId: String
+    public let display: String
+    public let expiresAt: String
+    public let id: String
+    public let state: String
+    public let userCode: String?
+
+    public init(
+        authorizationUrl: String? = nil,
+        connectionId: String,
+        display: String,
+        expiresAt: String,
+        id: String,
+        state: String,
+        userCode: String? = nil
+    ) {
+        self.authorizationUrl = authorizationUrl
+        self.connectionId = connectionId
+        self.display = display
+        self.expiresAt = expiresAt
+        self.id = id
+        self.state = state
+        self.userCode = userCode
+    }
+}
+
+public struct ProviderAuthorizationBeginRequest: Codable, Equatable, Sendable {
+    public let requestId: String
+    public let routeId: String
+
+    public init(
+        requestId: String,
+        routeId: String
+    ) {
+        self.requestId = requestId
+        self.routeId = routeId
+    }
+}
+
+public struct ProviderAuthorizationCodeRequest: Codable, Equatable, Sendable {
+    public let code: String
+
+    public init(
+        code: String
+    ) {
+        self.code = code
+    }
+}
+
+public struct ProviderConnectionSummary: Codable, Equatable, Sendable {
+    public let display: String
+    public let id: String
+    public let state: String
+    public let title: String
+
+    public init(
+        display: String,
+        id: String,
+        state: String,
+        title: String
+    ) {
+        self.display = display
+        self.id = id
+        self.state = state
+        self.title = title
+    }
+}
+
+public struct ProviderConnectionsSnapshot: Codable, Equatable, Sendable {
+    public let connections: [ProviderConnectionSummary]
+    public let routeId: String
+
+    public init(
+        connections: [ProviderConnectionSummary],
+        routeId: String
+    ) {
+        self.connections = connections
+        self.routeId = routeId
     }
 }
 

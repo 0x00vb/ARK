@@ -389,9 +389,11 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -573,6 +575,7 @@ dependencies = [
  "anyhow",
  "ark-account",
  "ark-interact",
+ "ark-model",
  "ark-os",
  "ark-protocol",
  "ark-reach",

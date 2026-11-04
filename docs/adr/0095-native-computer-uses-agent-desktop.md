@@ -79,4 +79,3 @@ the service falling back to global pointer input.
 
 Evidence and remaining gates are recorded in
 `../board/evidence/agent-desktop-migration-20261101/` at the workspace root.
-

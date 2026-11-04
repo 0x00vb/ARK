@@ -8,8 +8,8 @@ ships, a limit is found or fixed, or a priority changes. Numbers live in
 
 | | |
 |---|---|
-| Stable release | **v0.32.5** release target: compact Automations canvas and shared Tasks. Exact-source checks and fresh public clone qualification are in progress. |
-| Consumers | Published ARK Desktop 0.9.14 pins v0.31.0. Examples use workspace versions. |
+| Stable release | **v0.33.0**: Design Studio integration, direct Work conversations and native Computer recovery. |
+| Consumers | ARK Desktop0.10.0 release train pins v0.33.0; public qualification is recorded in CURRENT_STATE.md. Examples use workspace versions. |
 | Benchmark | live qwen3:4b, 14 workloads x 3: ARK 42/42 at $0.0181 per success, the naive loop 36/42 at $0.0268 (v0.7.0, `bench/RESULTS.md`) |
 | Phase | **Measured runtime** closed at v0.7.0 (P0 to P2, measured live on qwen3:4b). What it left open is deferred: see "Deferred: measured runtime". Next: prove ARK as a product (see Next). |
 

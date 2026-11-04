@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased local integration
+## [0.33.0] - 2026-11-04
+
+### Breaking
+
+- Computer adapters carry bounded native action and recovery evidence. Custom Screen
+  implementations must implement the new signatures in ark-computer. Existing stored
+  chats, Work records and automation records remain compatible.
+
+### Changed
 
 - Blank automation canvas clicks no longer create drafts. Use Add automation or the
   explicit keyboard action. Studio's shared floating conversation starts at the right.

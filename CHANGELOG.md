@@ -28,6 +28,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Changed
 
+- Local inference defaults to a prompt batch capacity of 256 and accepts capacities from 1 through 512.
+  CPU computation still defaults to two threads.
 - The default agent instructions reserve state updates for ongoing or later work, avoiding
   a separate bookkeeping step just to repeat a completed result.
 - Test builds use an unoptimized Cargo profile for faster feedback. Development and release

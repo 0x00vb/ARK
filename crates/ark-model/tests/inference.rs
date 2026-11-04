@@ -19,10 +19,11 @@ impl Fixture {
         let exe = dir.join("worker");
         let model = dir.join(mode);
         std::fs::write(&exe, r#"#!/usr/bin/python3
-import os,sys,struct,time
+import json,os,sys,struct,time
 path=sys.argv[sys.argv.index('--model')+1]
 mode=os.path.basename(path)
 state=path+'.pids'
+with open(path+'.argv','w') as f:json.dump(sys.argv[1:],f)
 with open(state,'a') as f:f.write(str(os.getpid())+'\n')
 first=len(open(state).readlines())==1
 bad=mode if first else 'good'
@@ -101,6 +102,52 @@ fn no_python() -> bool {
     }
     !ok
 }
+fn assert_batch_arguments(model: &std::path::Path, batch: u32) {
+    let args: Vec<String> =
+        serde_json::from_str(&std::fs::read_to_string(model.with_extension("argv")).unwrap())
+            .unwrap();
+    for (name, value) in [("--batch", batch), ("--threads", 2)] {
+        assert_eq!(args.iter().filter(|arg| arg.as_str() == name).count(), 1);
+        let index = args.iter().position(|arg| arg == name).unwrap();
+        assert_eq!(args[index + 1], value.to_string());
+    }
+}
+
+#[tokio::test]
+async fn batch_capacity_is_forwarded_and_reuses_one_worker() {
+    if no_python() {
+        return;
+    }
+    for batch in [1, 32, 256, 512] {
+        let fixture = Fixture::new("good");
+        let mut config = fixture.config();
+        assert_eq!(config.batch, 256);
+        config.batch = batch;
+        let provider = Inference::new(config).unwrap();
+        for _ in 0..2 {
+            let completion = provider
+                .complete("", &[Message::user("hello")], &[])
+                .await
+                .unwrap();
+            assert_eq!(completion.content, "€");
+        }
+        assert_batch_arguments(&fixture.model, batch);
+        assert_eq!(fixture.pids().len(), 1);
+    }
+}
+
+#[test]
+fn invalid_batch_capacity_is_refused_before_spawn() {
+    let fixture = Fixture::new("good");
+    for batch in [0, 513] {
+        let mut config = fixture.config();
+        config.batch = batch;
+        permanent(Inference::new(config));
+    }
+    assert!(fixture.pids().is_empty());
+    assert!(!fixture.model.with_extension("argv").exists());
+}
+
 /// Waits until the process is gone or a zombie. `kill -0` succeeds on a zombie, and this child
 /// stays one until the provider reaps it.
 async fn exited(pid: u32) {
@@ -446,11 +493,11 @@ async fn unsupported_or_oversized_input_never_starts_a_child() {
     permanent(Inference::new(c));
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "isolated environment helper, invoked by factory_environment_is_validated"]
-fn factory_environment_child() {
+async fn factory_environment_child() {
     let model = std::env::var("ARK_MODEL").unwrap();
-    let result = ark_model::build("inference", Some(model));
+    let result = ark_model::build("inference", Some(model.clone()));
     if std::env::var_os("ARK_INFERENCE_EXPECT_INVALID").is_some() {
         permanent(result);
     } else {
@@ -458,23 +505,44 @@ fn factory_environment_child() {
         assert_eq!(provider.context_window(), Some(124));
         assert_eq!(provider.describe(), "ARK Inference (local text)");
         assert!(!provider.reads_pictures());
+        let completion = provider
+            .complete("", &[Message::user("hello")], &[])
+            .await
+            .unwrap();
+        assert_eq!(completion.content, "€");
+        let batch = std::env::var("ARK_INFERENCE_EXPECT_BATCH")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_batch_arguments(std::path::Path::new(&model), batch);
     }
 }
 #[test]
 fn factory_environment_is_validated() {
-    let fixture = Fixture::new("good");
-    for (key, value) in [
-        ("", ""),
-        ("ARK_INFERENCE_ARRAY_BYTES", "0"),
-        ("ARK_INFERENCE_CONTEXT", "not-a-number"),
-        ("ARK_INFERENCE_BACKEND", "cuda"),
-        ("ARK_INFERENCE_EXECUTABLE", "relative"),
-        ("ARK_INFERENCE_THREADS", "65"),
-        ("ARK_INFERENCE_OUTPUT_TOKENS", "128"),
-        ("ARK_INFERENCE_PROGRESS_SECONDS", "0"),
-        ("ARK_INFERENCE_PREFILL_SECONDS", "0"),
-        ("ARK_INFERENCE_CALL_SECONDS", "soon"),
+    let python_missing = no_python();
+    for (key, value, expected_batch) in [
+        ("", "", Some(256)),
+        ("ARK_INFERENCE_BATCH", "1", Some(1)),
+        ("ARK_INFERENCE_BATCH", "32", Some(32)),
+        ("ARK_INFERENCE_BATCH", "256", Some(256)),
+        ("ARK_INFERENCE_BATCH", "512", Some(512)),
+        ("ARK_INFERENCE_BATCH", "0", None),
+        ("ARK_INFERENCE_BATCH", "513", None),
+        ("ARK_INFERENCE_BATCH", "not-a-number", None),
+        ("ARK_INFERENCE_ARRAY_BYTES", "0", None),
+        ("ARK_INFERENCE_CONTEXT", "not-a-number", None),
+        ("ARK_INFERENCE_BACKEND", "cuda", None),
+        ("ARK_INFERENCE_EXECUTABLE", "relative", None),
+        ("ARK_INFERENCE_THREADS", "65", None),
+        ("ARK_INFERENCE_OUTPUT_TOKENS", "128", None),
+        ("ARK_INFERENCE_PROGRESS_SECONDS", "0", None),
+        ("ARK_INFERENCE_PREFILL_SECONDS", "0", None),
+        ("ARK_INFERENCE_CALL_SECONDS", "soon", None),
     ] {
+        if python_missing && expected_batch.is_some() {
+            continue;
+        }
+        let fixture = Fixture::new("good");
         let mut command = std::process::Command::new(std::env::current_exe().unwrap());
         command
             .env_clear()
@@ -484,9 +552,12 @@ fn factory_environment_is_validated() {
             .env("ARK_INFERENCE_CONTEXT", "128")
             .env("ARK_INFERENCE_OUTPUT_TOKENS", "4");
         if !key.is_empty() {
-            command
-                .env(key, value)
-                .env("ARK_INFERENCE_EXPECT_INVALID", "1");
+            command.env(key, value);
+        }
+        if let Some(batch) = expected_batch {
+            command.env("ARK_INFERENCE_EXPECT_BATCH", batch.to_string());
+        } else {
+            command.env("ARK_INFERENCE_EXPECT_INVALID", "1");
         }
         let result = command.output().unwrap();
         assert!(
@@ -494,6 +565,11 @@ fn factory_environment_is_validated() {
             "factory child failed: {}",
             String::from_utf8_lossy(&result.stdout)
         );
+        if expected_batch.is_some() {
+            assert_eq!(fixture.pids().len(), 1);
+        } else {
+            assert!(fixture.pids().is_empty());
+            assert!(!fixture.model.with_extension("argv").exists());
+        }
     }
-    assert!(fixture.pids().is_empty());
 }

@@ -56,7 +56,7 @@ impl InferenceConfig {
             file_bytes: 16 << 30,
             input_bytes: FRAME,
             output_bytes: 8 << 20,
-            batch: 32,
+            batch: 256,
             threads: 2,
             startup_timeout: Duration::from_secs(120),
             // Prefill is one wait before the first token. On CPU it can take minutes.
@@ -75,7 +75,7 @@ impl InferenceConfig {
             || !(1..=16 << 30).contains(&self.file_bytes)
             || !(4..=FRAME).contains(&self.input_bytes)
             || !(1..=8 << 20).contains(&self.output_bytes)
-            || !(1..=32).contains(&self.batch)
+            || !(1..=512).contains(&self.batch)
             || !(1..=64).contains(&self.threads)
             || self.startup_timeout.is_zero()
             || self.prefill_timeout.is_zero()

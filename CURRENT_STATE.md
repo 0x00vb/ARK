@@ -40,8 +40,16 @@ Last updated: 2026-10-15 (completed-work integration)
 
 Local inference (ADR 0073) is on branch `codex/inference-bridge` (worktree `ark-inference-bridge`), not on `main`.
 It adds `ark_model::Inference`, a text-only provider over the ARK Inference engine's process bridge.
-Focused checks, the fake-worker suite and the installed Qwen3 4B consumer test (CPU and Metal) pass.
-It is a transport proof: tools are refused, Metal prefill is about 32 tokens/s, every call re-runs prefill.
+Commit f459b69 passed focused checks, fake-worker tests and the installed Qwen3 4B consumer test on CPU and Metal.
+The batch follow-up sets default capacity 256 and accepts 1 through 512. Threads stay at two.
+Source tests cover configuration, environment forwarding and a prompt exceeding 256 measured tokens.
+Focused verification now passes: 125 ark-model tests, 16 runtime retry tests, full formatting
+and Clippy for ark-model/ark-runtime with warnings denied. A fresh Metal-enabled engine build
+from `4abcace` passes nine CTest suites. The batch-256 installed-model test passes on CPU and
+Metal, each matching its own CLI reference across two completions and collected streaming text.
+Independent evidence QA accepts this functional scope. Full branch CI and the app consumer
+decision remain open. No new performance result or CPU-to-Metal equality is claimed.
+It is a transport proof: tools are refused and every call re-runs prefill. The documented timings predate this batch follow-up.
 Merging waits on the owner: the new public API has no app consumer yet. See `docs/LOCAL_INFERENCE.md`.
 
 | What | State |

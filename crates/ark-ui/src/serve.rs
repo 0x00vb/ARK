@@ -117,6 +117,7 @@ impl ClientListener {
         {
             anyhow::bail!("a client listener must bind to loopback or a Unix socket behind HTTPS");
         }
+        let (stop, shutdown) = tokio::sync::oneshot::channel();
         let (served, task) = serve_with(
             host,
             addr,
@@ -127,10 +128,15 @@ impl ClientListener {
                 surface: ListenerSurface::ClientOnly,
                 account_pairing: self.account_pairing,
                 route_id: self.route_id,
+                shutdown: Some(shutdown),
             },
         )
         .await?;
-        Ok(ClientServer { served, task })
+        Ok(ClientServer {
+            served,
+            task,
+            stop: Some(stop),
+        })
     }
 }
 
@@ -138,6 +144,17 @@ impl ClientListener {
 pub struct ClientServer {
     served: Served,
     task: tokio::task::JoinHandle<()>,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl ClientServer {
+    pub async fn shutdown(mut self) -> anyhow::Result<()> {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        (&mut self.task).await?;
+        Ok(())
+    }
 }
 
 impl std::ops::Deref for ClientServer {
@@ -150,7 +167,9 @@ impl std::ops::Deref for ClientServer {
 
 impl Drop for ClientServer {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
     }
 }
 
@@ -222,6 +241,7 @@ struct ServeConfig {
     surface: ListenerSurface,
     account_pairing: Option<AccountPairing>,
     route_id: Option<String>,
+    shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 
 #[derive(Clone)]
@@ -234,6 +254,19 @@ struct RequestContext {
     surface: ListenerSurface,
     account_pairing: Arc<Option<AccountPairing>>,
     route_id: Arc<Option<String>>,
+    provider_authorization: Option<Arc<ark_model::authorization::ClaudeAuthorization>>,
+    provider_listener_id: Option<String>,
+}
+
+struct ProviderAuthorizationGuard {
+    authorization: Arc<ark_model::authorization::ClaudeAuthorization>,
+    listener_id: String,
+}
+
+impl Drop for ProviderAuthorizationGuard {
+    fn drop(&mut self) {
+        self.authorization.cancel_listener(&self.listener_id);
+    }
 }
 
 pub(crate) async fn serve(
@@ -260,6 +293,7 @@ pub(crate) async fn serve(
             surface: ListenerSurface::Full,
             account_pairing,
             route_id,
+            shutdown: None,
         },
     )
     .await
@@ -277,6 +311,7 @@ async fn serve_with(
         surface,
         account_pairing,
         route_id,
+        mut shutdown,
     } = config;
     let listener = Listener::bind(addr, &access).await?;
     let port = listener.port();
@@ -301,28 +336,49 @@ async fn serve_with(
             (served, Check::Tokens(tokens))
         }
     };
-    host.resume_client_mutations().await?;
     let check = Arc::new(check);
     let entry = Arc::new(entry);
     let account_pairing = Arc::new(account_pairing);
     let route_id = Arc::new(route_id);
+    let provider_authorization = account_pairing
+        .is_some()
+        .then(|| Arc::new(ark_model::authorization::global_claude_authorization()));
+    let provider_listener_id = provider_authorization
+        .as_ref()
+        .map(|_| uuid::Uuid::new_v4().to_string());
     let request_context = RequestContext {
         host: host.clone(),
         assets,
-        check,
+        check: check.clone(),
         port,
         entry,
         surface,
         account_pairing,
         route_id,
+        provider_authorization: provider_authorization.clone(),
+        provider_listener_id: provider_listener_id.clone(),
     };
     let task = tokio::spawn(async move {
+        let _provider_authorization_guard = provider_authorization
+            .as_ref()
+            .zip(provider_listener_id.as_ref())
+            .map(|(authorization, listener_id)| ProviderAuthorizationGuard {
+                authorization: Arc::clone(authorization),
+                listener_id: listener_id.clone(),
+            });
         let mut mutations = tokio::time::interval(std::time::Duration::from_millis(250));
         let mut connections = tokio::task::JoinSet::new();
+        let mut maintenance = tokio::task::JoinSet::new();
         let connection_limit = (surface == ListenerSurface::ClientOnly)
             .then(|| Arc::new(tokio::sync::Semaphore::new(CLIENT_CONNECTIONS)));
         loop {
             tokio::select! {
+                _ = async {
+                    match shutdown.as_mut() {
+                        Some(stop) => { let _ = stop.await; }
+                        None => std::future::pending::<()>().await,
+                    }
+                } => break,
                 accepted = listener.accept() => {
                     let Ok(sock) = accepted else {
                         // Out of file descriptors or similar: pause instead of spinning.
@@ -343,9 +399,36 @@ async fn serve_with(
                     });
                 }
                 Some(_) = connections.join_next(), if !connections.is_empty() => {}
-                _ = mutations.tick() => {
-                    let _ = host.resume_client_mutations().await;
+                Some(result) = maintenance.join_next(), if !maintenance.is_empty() => {
+                    if !matches!(result, Ok(Ok(()))) {
+                        tracing::warn!(diagnostic="client_maintenance_failed", "client maintenance did not complete");
+                    }
                 }
+                _ = mutations.tick() => {
+                    host.schedule_client_maintenance(&mut maintenance);
+                    if let (Some(authorization), Check::Tokens(tokens)) =
+                        (provider_authorization.as_ref(), check.as_ref())
+                    {
+                        if let Some(listener_id) = provider_listener_id.as_deref() {
+                            authorization.cancel_if_owner_revoked(listener_id, |owner| {
+                                tokens.has_external_client_id(owner)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        connections.abort_all();
+        maintenance.abort_all();
+        while connections.join_next().await.is_some() {}
+        while let Some(result) = maintenance.join_next().await {
+            if !matches!(result, Ok(Ok(())))
+                && !matches!(&result, Err(error) if error.is_cancelled())
+            {
+                tracing::warn!(
+                    diagnostic = "client_maintenance_failed",
+                    "client maintenance failed while stopping"
+                );
             }
         }
     });
@@ -664,6 +747,8 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
         surface,
         account_pairing,
         route_id,
+        provider_authorization,
+        provider_listener_id,
     } = context;
     let check = check.as_ref();
     let entry = entry.as_ref();
@@ -707,6 +792,11 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
             .check_scope(client_credential, CredentialScope::ExternalClient)
             .is_some(),
     });
+    let external_client_authed = matches!(check, Check::Tokens(tokens) if tokens
+        .check_scope(client_credential, CredentialScope::ExternalClient)
+        .is_some());
+    let native_push_authed = external_client_authed
+        && (surface == ListenerSurface::ClientOnly || account_pairing.is_some());
     let authed = token_authed || session.is_some();
     if surface == ListenerSurface::ClientOnly && !client_listener_path(&req.path) {
         return respond(&mut sock, "404 Not Found", "text/plain", b"not found").await;
@@ -885,7 +975,21 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 ]
                 .into_iter()
                 .map(str::to_string)
+                .chain(route_id.as_ref().map(|_| "models.select".to_string()))
+                .chain(
+                    (route_id.is_some() && host.has_connection_requests())
+                        .then(|| "chat.connections".to_string()),
+                )
                 .chain(account_pairing.as_ref().map(|_| "account.pair".to_string()))
+                .chain(
+                    (native_push_authed && host.notifier.native.enabled(route_id.as_deref()))
+                        .then(|| "push.native".to_string()),
+                )
+                .chain(
+                    provider_authorization
+                        .as_ref()
+                        .map(|_| "connections.authorize".to_string()),
+                )
                 .collect(),
                 limits: ark_protocol::Limits {
                     page_size: 50,
@@ -909,6 +1013,290 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 &serde_json::to_vec(&hello)?,
             )
             .await
+        }
+        ("GET", "/client/v1/connections") => {
+            if !external_client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let (Some(authorization), Some(route_id)) =
+                (provider_authorization.as_ref(), route_id.as_ref())
+            else {
+                return client_error(
+                    &mut sock,
+                    "connection_unavailable",
+                    "Account connections are not available here.",
+                    "503 Service Unavailable",
+                )
+                .await;
+            };
+            let (claude, codex) = tokio::join!(
+                authorization.connection_for(ark_model::cli::Cli::Claude),
+                authorization.connection_for(ark_model::cli::Cli::Codex),
+            );
+            let snapshot = ark_protocol::ProviderConnectionsSnapshot {
+                route_id: route_id.clone(),
+                connections: vec![
+                    provider_connection(ark_model::cli::Cli::Claude, claude),
+                    provider_connection(ark_model::cli::Cli::Codex, codex),
+                ],
+            };
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                &serde_json::to_vec(&snapshot)?,
+            )
+            .await
+        }
+        ("POST", path) if provider_authorization_begin_path(path).is_some() => {
+            if !external_client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let Some(authorization) = provider_authorization.as_ref() else {
+                return client_error(
+                    &mut sock,
+                    "connection_unavailable",
+                    "Account connections are not available here.",
+                    "503 Service Unavailable",
+                )
+                .await;
+            };
+            let Some(provider) = provider_cli(provider_authorization_begin_path(path)) else {
+                return client_error(
+                    &mut sock,
+                    "connection_missing",
+                    "That account connection is not available.",
+                    "404 Not Found",
+                )
+                .await;
+            };
+            let request: ark_protocol::ProviderAuthorizationBeginRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(request) => request,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_request",
+                            "Check the sign-in request and try again.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            if route_id.as_deref() != Some(request.route_id.as_str()) {
+                return client_error(
+                    &mut sock,
+                    "route_changed",
+                    "This computer connection changed. Reopen it and try again.",
+                    "409 Conflict",
+                )
+                .await;
+            }
+            let owner = client_device_id(client_credential);
+            let Some(listener_id) = provider_listener_id.as_deref() else {
+                return client_error(
+                    &mut sock,
+                    "connection_unavailable",
+                    "Account connections are not available here.",
+                    "503 Service Unavailable",
+                )
+                .await;
+            };
+            match authorization
+                .begin_for(
+                    provider,
+                    &request.route_id,
+                    &owner,
+                    listener_id,
+                    &request.request_id,
+                )
+                .await
+            {
+                Ok(attempt) => provider_attempt_response(&mut sock, &attempt).await,
+                Err(error) => provider_authorization_error(&mut sock, error).await,
+            }
+        }
+        ("GET", path) if provider_authorization_attempt_path(path).is_some() => {
+            if !external_client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let (Some(authorization), Some(route_id), Some(listener_id)) = (
+                provider_authorization.as_ref(),
+                route_id.as_deref(),
+                provider_listener_id.as_deref(),
+            ) else {
+                return client_error(
+                    &mut sock,
+                    "authorization_missing",
+                    "This sign-in is no longer available.",
+                    "404 Not Found",
+                )
+                .await;
+            };
+            let owner = client_device_id(client_credential);
+            match authorization.attempt(
+                route_id,
+                &owner,
+                listener_id,
+                provider_authorization_attempt_path(path).expect("matched attempt path"),
+            ) {
+                Ok(attempt) => provider_attempt_response(&mut sock, &attempt).await,
+                Err(error) => provider_authorization_error(&mut sock, error).await,
+            }
+        }
+        ("POST", path) if provider_authorization_code_path(path).is_some() => {
+            if !external_client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let (Some(authorization), Some(route_id), Some(listener_id)) = (
+                provider_authorization.as_ref(),
+                route_id.as_deref(),
+                provider_listener_id.as_deref(),
+            ) else {
+                return client_error(
+                    &mut sock,
+                    "authorization_missing",
+                    "This sign-in is no longer available.",
+                    "404 Not Found",
+                )
+                .await;
+            };
+            let request: ark_protocol::ProviderAuthorizationCodeRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(request) => request,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_authorization_code",
+                            "Check the sign-in code and try again.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            let owner = client_device_id(client_credential);
+            match authorization.submit(
+                route_id,
+                &owner,
+                listener_id,
+                provider_authorization_code_path(path).expect("matched code path"),
+                &request.code,
+            ) {
+                Ok(attempt) => provider_attempt_response(&mut sock, &attempt).await,
+                Err(error) => provider_authorization_error(&mut sock, error).await,
+            }
+        }
+        ("DELETE", path) if provider_authorization_attempt_path(path).is_some() => {
+            if !external_client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let (Some(authorization), Some(route_id), Some(listener_id)) = (
+                provider_authorization.as_ref(),
+                route_id.as_deref(),
+                provider_listener_id.as_deref(),
+            ) else {
+                return client_error(
+                    &mut sock,
+                    "authorization_missing",
+                    "This sign-in is no longer available.",
+                    "404 Not Found",
+                )
+                .await;
+            };
+            let owner = client_device_id(client_credential);
+            match authorization
+                .cancel(
+                    route_id,
+                    &owner,
+                    listener_id,
+                    provider_authorization_attempt_path(path).expect("matched attempt path"),
+                )
+                .await
+            {
+                Ok(attempt) => provider_attempt_response(&mut sock, &attempt).await,
+                Err(error) => provider_authorization_error(&mut sock, error).await,
+            }
+        }
+        ("DELETE", path) if provider_connection_path(path).is_some() => {
+            if !external_client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let Some(authorization) = provider_authorization.as_ref() else {
+                return client_error(
+                    &mut sock,
+                    "connection_unavailable",
+                    "Account connections are not available here.",
+                    "503 Service Unavailable",
+                )
+                .await;
+            };
+            let Some(provider) = provider_cli(provider_connection_path(path)) else {
+                return client_error(
+                    &mut sock,
+                    "connection_missing",
+                    "That account connection is not available.",
+                    "404 Not Found",
+                )
+                .await;
+            };
+            match authorization.disconnect_for(provider).await {
+                Ok(state) => {
+                    let body = provider_connection(provider, state);
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&body)?,
+                    )
+                    .await
+                }
+                Err(ark_model::authorization::AuthorizationError::Failed) => {
+                    client_error(
+                        &mut sock,
+                        "disconnect_failed",
+                        "That account could not be disconnected. Try again.",
+                        "502 Bad Gateway",
+                    )
+                    .await
+                }
+                Err(error) => provider_authorization_error(&mut sock, error).await,
+            }
         }
         ("GET", "/client/v1/home") => {
             if !client_authed {
@@ -959,6 +1347,34 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 .await;
             }
             let body = crate::client::projects(&host).await?;
+            respond(
+                &mut sock,
+                "200 OK",
+                "application/json",
+                &serde_json::to_vec(&body)?,
+            )
+            .await
+        }
+        ("GET", "/client/v1/models") => {
+            if !client_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected. Pair it again.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let Some(route_id) = route_id.as_deref() else {
+                return client_error(
+                    &mut sock,
+                    "models_unavailable",
+                    "Models are not available on this connection.",
+                    "503 Service Unavailable",
+                )
+                .await;
+            };
+            let body = host.client_models(route_id).await?;
             respond(
                 &mut sock,
                 "200 OK",
@@ -1252,7 +1668,15 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 .as_deref()
                 .map(str::to_owned)
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            match crate::client::create_chat(&host, &device, &input.project, &request_id).await {
+            match crate::client::create_chat(
+                &host,
+                &device,
+                &input.project,
+                &request_id,
+                input.model.as_ref(),
+            )
+            .await
+            {
                 Ok(body) => {
                     respond(
                         &mut sock,
@@ -1266,7 +1690,16 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     client_error(
                         &mut sock,
                         "request_conflict",
-                        "Choose the original project or start a new chat.",
+                        "Keep the original choices or start a new chat.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientChatCreateError::ModelUnavailable) => {
+                    client_error(
+                        &mut sock,
+                        "model_unavailable",
+                        "That model is no longer available here. Choose another one.",
                         "409 Conflict",
                     )
                     .await
@@ -1455,6 +1888,42 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     )
                     .await
                 }
+                Err(crate::host::ClientMutationError::ModelUnavailable) => {
+                    client_error(
+                        &mut sock,
+                        "model_unavailable",
+                        "That model is no longer available here. Choose another one.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::ChatBusy) => {
+                    client_error(
+                        &mut sock,
+                        "chat_busy",
+                        "Wait for this reply to finish and try again.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::ConnectionStale) => {
+                    client_error(
+                        &mut sock,
+                        "connection_stale",
+                        "This connection request changed. Refresh the chat.",
+                        "409 Conflict",
+                    )
+                    .await
+                }
+                Err(crate::host::ClientMutationError::ConnectionUnavailable) => {
+                    client_error(
+                        &mut sock,
+                        "connection_unavailable",
+                        "Connection status could not be confirmed. Try again.",
+                        "503 Service Unavailable",
+                    )
+                    .await
+                }
                 Err(crate::host::ClientMutationError::InvalidCounter) => {
                     client_error(
                         &mut sock,
@@ -1465,6 +1934,167 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                     .await
                 }
                 Err(crate::host::ClientMutationError::Store(error)) => Err(error),
+            }
+        }
+        ("PUT", "/client/v1/push") => {
+            if !native_push_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let input: ark_protocol::NativePushRegistrationRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(input) => input,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_push",
+                            "Could not enable notifications.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            let result = host.notifier.native.register(
+                &client_device_id(client_credential),
+                route_id.as_deref().unwrap_or(""),
+                input,
+            );
+            match result {
+                Ok(result) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&result)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_push",
+                        "Could not enable notifications.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            }
+        }
+        ("DELETE", "/client/v1/push") => {
+            if !native_push_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let input: ark_protocol::NativePushRemoveRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(input) => input,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_push",
+                            "Could not remove notifications.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            match host
+                .notifier
+                .native
+                .remove(&client_device_id(client_credential), &input.registration_id)
+            {
+                Ok(()) => respond(&mut sock, "204 No Content", "application/json", b"").await,
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_push",
+                        "Could not remove notifications.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            }
+        }
+        ("POST", "/client/v1/push/presence") => {
+            if !native_push_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let input: ark_protocol::NativePushPresenceRequest =
+                match serde_json::from_slice(&req.body) {
+                    Ok(input) => input,
+                    Err(_) => {
+                        return client_error(
+                            &mut sock,
+                            "invalid_push",
+                            "Could not update notification state.",
+                            "400 Bad Request",
+                        )
+                        .await
+                    }
+                };
+            match host
+                .notifier
+                .native
+                .present(&client_device_id(client_credential), &input)
+            {
+                Ok(()) => respond(&mut sock, "204 No Content", "application/json", b"").await,
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_push",
+                        "Could not update notification state.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
+            }
+        }
+        ("GET", path) if path.starts_with("/client/v1/push/resolve/") => {
+            if !native_push_authed {
+                return client_error(
+                    &mut sock,
+                    "signed_out",
+                    "This device is no longer connected.",
+                    "401 Unauthorized",
+                )
+                .await;
+            }
+            let id = path.trim_start_matches("/client/v1/push/resolve/");
+            match host.native_push_resolution(&client_device_id(client_credential), id) {
+                Ok(result) => {
+                    respond(
+                        &mut sock,
+                        "200 OK",
+                        "application/json",
+                        &serde_json::to_vec(&result)?,
+                    )
+                    .await
+                }
+                Err(_) => {
+                    client_error(
+                        &mut sock,
+                        "invalid_push",
+                        "This notification is no longer available.",
+                        "400 Bad Request",
+                    )
+                    .await
+                }
             }
         }
         ("DELETE", "/client/v1/session") => {
@@ -1837,10 +2467,20 @@ async fn client_error<S: AsyncWrite + Unpin>(
     display: &str,
     status: &str,
 ) -> anyhow::Result<()> {
+    client_error_retry(sock, code, display, status, None).await
+}
+
+async fn client_error_retry<S: AsyncWrite + Unpin>(
+    sock: &mut S,
+    code: &str,
+    display: &str,
+    status: &str,
+    retry_after_seconds: Option<u64>,
+) -> anyhow::Result<()> {
     let body = ark_protocol::ErrorEnvelope {
         code: code.into(),
         display: display.into(),
-        retry_after_seconds: None,
+        retry_after_seconds,
     };
     respond(
         sock,
@@ -1867,6 +2507,164 @@ fn client_result_path(path: &str) -> Option<(&str, &str)> {
     let (chat, result) = tail.split_once("/results/")?;
     (!chat.is_empty() && !result.is_empty() && !chat.contains('/') && !result.contains('/'))
         .then_some((chat, result))
+}
+
+fn provider_authorization_begin_path(path: &str) -> Option<&str> {
+    let provider = path
+        .strip_prefix("/client/v1/connections/")?
+        .strip_suffix("/authorizations")?;
+    (!provider.is_empty() && !provider.contains('/')).then_some(provider)
+}
+
+fn provider_connection_path(path: &str) -> Option<&str> {
+    let provider = path.strip_prefix("/client/v1/connections/")?;
+    (!provider.is_empty() && !provider.contains('/')).then_some(provider)
+}
+
+fn provider_cli(provider: Option<&str>) -> Option<ark_model::cli::Cli> {
+    match provider? {
+        "claude" => Some(ark_model::cli::Cli::Claude),
+        "codex" => Some(ark_model::cli::Cli::Codex),
+        _ => None,
+    }
+}
+
+fn provider_authorization_attempt_path(path: &str) -> Option<&str> {
+    let attempt = path.strip_prefix("/client/v1/authorizations/")?;
+    (!attempt.is_empty() && !attempt.contains('/')).then_some(attempt)
+}
+
+fn provider_authorization_code_path(path: &str) -> Option<&str> {
+    let attempt = path
+        .strip_prefix("/client/v1/authorizations/")?
+        .strip_suffix("/code")?;
+    (!attempt.is_empty() && !attempt.contains('/')).then_some(attempt)
+}
+
+fn provider_connection(
+    provider: ark_model::cli::Cli,
+    state: ark_model::authorization::ConnectionState,
+) -> ark_protocol::ProviderConnectionSummary {
+    use ark_model::authorization::ConnectionState;
+    let title = provider.label();
+    let (state, display) = match state {
+        ConnectionState::Ready => ("ready", format!("{title} is connected.")),
+        ConnectionState::NeedsAuthorization => ("needs_authorization", format!("Connect {title}.")),
+        ConnectionState::Authorizing => ("authorizing", format!("{title} is being connected.")),
+        ConnectionState::Unavailable => ("unavailable", format!("{title} is not available here.")),
+    };
+    ark_protocol::ProviderConnectionSummary {
+        id: provider.name().into(),
+        title: title.into(),
+        state: state.into(),
+        display,
+    }
+}
+
+fn provider_attempt(
+    attempt: &ark_model::authorization::AttemptView,
+) -> anyhow::Result<ark_protocol::ProviderAuthorizationAttempt> {
+    use ark_model::authorization::AttemptState;
+    let state = match attempt.state {
+        AttemptState::WaitingForCode => "waiting_for_code",
+        AttemptState::WaitingForBrowser => "waiting_for_browser",
+        AttemptState::Verifying => "verifying",
+        AttemptState::Ready => "ready",
+        AttemptState::Failed => "failed",
+        AttemptState::Cancelled => "cancelled",
+        AttemptState::Expired => "expired",
+    };
+    let expires_at =
+        time::OffsetDateTime::from_unix_timestamp(i64::try_from(attempt.expires_unix_seconds)?)?
+            .format(&time::format_description::well_known::Rfc3339)?;
+    Ok(ark_protocol::ProviderAuthorizationAttempt {
+        id: attempt.id.clone(),
+        connection_id: attempt.connection_id.clone(),
+        state: state.into(),
+        authorization_url: attempt.authorization_url.clone(),
+        user_code: attempt.user_code.clone(),
+        expires_at,
+        display: attempt.display.clone(),
+    })
+}
+
+async fn provider_attempt_response<S: AsyncWrite + Unpin>(
+    sock: &mut S,
+    attempt: &ark_model::authorization::AttemptView,
+) -> anyhow::Result<()> {
+    respond(
+        sock,
+        "200 OK",
+        "application/json",
+        &serde_json::to_vec(&provider_attempt(attempt)?)?,
+    )
+    .await
+}
+
+async fn provider_authorization_error<S: AsyncWrite + Unpin>(
+    sock: &mut S,
+    error: ark_model::authorization::AuthorizationError,
+) -> anyhow::Result<()> {
+    use ark_model::authorization::AuthorizationError;
+    let (code, display, status, retry) = match error {
+        AuthorizationError::InvalidRequest => (
+            "invalid_request",
+            "Check the sign-in request and try again.",
+            "400 Bad Request",
+            None,
+        ),
+        AuthorizationError::InvalidCode => (
+            "invalid_authorization_code",
+            "Check the sign-in code and try again.",
+            "400 Bad Request",
+            None,
+        ),
+        AuthorizationError::Missing => (
+            "authorization_missing",
+            "This sign-in is no longer available.",
+            "404 Not Found",
+            None,
+        ),
+        AuthorizationError::InProgress => (
+            "authorization_in_progress",
+            "Claude is already being connected.",
+            "409 Conflict",
+            None,
+        ),
+        AuthorizationError::CodeUsed => (
+            "authorization_code_used",
+            "This sign-in code is already being checked.",
+            "409 Conflict",
+            None,
+        ),
+        AuthorizationError::AlreadyReady => (
+            "connection_ready",
+            "Claude is already connected.",
+            "409 Conflict",
+            None,
+        ),
+        AuthorizationError::Unavailable | AuthorizationError::CleanupFailed => (
+            "connection_unavailable",
+            "Claude is not available here.",
+            "503 Service Unavailable",
+            None,
+        ),
+        AuthorizationError::Capacity {
+            retry_after_seconds,
+        } => (
+            "authorization_capacity",
+            "Too many recent sign-ins. Try again shortly.",
+            "429 Too Many Requests",
+            Some(retry_after_seconds),
+        ),
+        AuthorizationError::Failed => (
+            "authorization_failed",
+            "Claude could not be connected. Try again.",
+            "502 Bad Gateway",
+            None,
+        ),
+    };
+    client_error_retry(sock, code, display, status, retry).await
 }
 
 fn safe_download_name(name: &str) -> String {

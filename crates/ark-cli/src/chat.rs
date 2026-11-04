@@ -101,23 +101,44 @@ impl Question {
 /// How to reach a running turn.
 #[derive(Clone)]
 pub(crate) enum Control {
-    Local(TurnControl),
+    Local {
+        control: TurnControl,
+        engine: std::sync::Arc<Engine>,
+        session: String,
+    },
     Remote(crate::remote::Steer),
 }
 
 impl Control {
     /// Text for the model at its next step.
-    pub(crate) fn steer(&self, text: &str) {
+    pub(crate) fn steer(&self, text: &str) -> anyhow::Result<()> {
         match self {
-            Control::Local(c) => c.steer.push(text),
+            Control::Local {
+                control,
+                engine,
+                session,
+            } => {
+                engine.connection_control(session, false)?;
+                control.steer.push(text);
+            }
             Control::Remote(s) => s.steer(text),
         }
+        Ok(())
     }
-    pub(crate) fn cancel(&self) {
+    pub(crate) fn cancel(&self) -> anyhow::Result<()> {
         match self {
-            Control::Local(c) => c.cancel.cancel(),
+            Control::Local {
+                control,
+                engine,
+                session,
+            } => {
+                let durable = engine.connection_control(session, true);
+                control.cancel.cancel();
+                durable?;
+            }
             Control::Remote(s) => s.cancel(),
         }
+        Ok(())
     }
 }
 
@@ -343,7 +364,11 @@ impl Local {
             ..TurnControl::new()
         };
         let (tx, updates) = mpsc::unbounded_channel();
-        let control = Control::Local(ctl.clone());
+        let control = Control::Local {
+            control: ctl.clone(),
+            engine: self.ix.ark().shared_engine(),
+            session: self.ix.session().id().to_string(),
+        };
         let input = input.to_string();
         let Local {
             ix,
@@ -394,6 +419,37 @@ mod tests {
     use super::*;
     use ark_interact::ChannelApprover;
     use std::sync::Arc;
+
+    #[test]
+    fn failed_durable_stop_still_cancels_the_captured_local_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(Arc::new(ark_model::MockProvider::new("fixture", vec![])))
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("Fixture", "").unwrap();
+        let session = ark.start_session(&project.id).unwrap();
+        ark.engine()
+            .store
+            .put_record(
+                ark_sdk::prelude::ark_runtime::connection_requests::RECORD_KIND,
+                "invalid-request",
+                session.id().as_str(),
+                &json!({"invalid":true}),
+            )
+            .unwrap();
+        let control = TurnControl::new();
+        let local = Control::Local {
+            control: control.clone(),
+            engine: ark.shared_engine(),
+            session: session.id().to_string(),
+        };
+        assert!(local.cancel().is_err());
+        assert!(control.cancel.is_cancelled());
+    }
 
     fn request(agent: Option<&str>) -> ApprovalRequest {
         ApprovalRequest {

@@ -53,12 +53,39 @@ pub struct Engine {
     continues: Vec<String>,
     /// What the agent said when it made the calls this engine runs ([`narrating`](Engine::narrating)).
     narration: Option<String>,
+    pub(crate) chat_admission: Arc<crate::connection_requests::ChatAdmission>,
+    pub(crate) connection_broker:
+        Option<Arc<dyn crate::connection_requests::ConnectionRequestBroker>>,
+    pub(crate) connection_source: Option<Arc<dyn crate::AcquisitionProvider>>,
 }
 
 /// How many pictures stay for windows to show after the model got them.
 const SHOWN: usize = 12;
 
 impl Engine {
+    pub(crate) fn connection_candidate(
+        &self,
+        _project: &ProjectId,
+        descriptor: &ark_core::ActionDescriptor,
+        input: serde_json::Value,
+    ) -> Result<Invocation, AgentError> {
+        let chat_work = self
+            .work
+            .as_deref()
+            .and_then(|work| work.strip_prefix("session:"))
+            .and_then(|work| work.rsplit_once('/'))
+            .is_some_and(|(session, index)| !session.is_empty() && index.parse::<u32>().is_ok());
+        if !chat_work {
+            return Err(crate::connection_requests::ConnectionRequestError::Refused(
+                "connection requests need a chat turn".into(),
+            )
+            .into());
+        }
+        let mut invocation = Invocation::new(&descriptor.name, descriptor.risk, input);
+        invocation.work = self.work.clone();
+        invocation.narration = self.narration.clone();
+        Ok(invocation)
+    }
     /// Apply trusted external-effect outcomes before any model answer is stored or shown. A
     /// tool can report an unconfirmed effect that must not be turned into a success claim by
     /// prose. A later confirmed marker for the same id supersedes it.
@@ -110,6 +137,9 @@ impl Engine {
             work: None,
             continues: Vec::new(),
             narration: None,
+            chat_admission: Arc::default(),
+            connection_broker: None,
+            connection_source: None,
         }
     }
 
@@ -130,6 +160,9 @@ impl Engine {
             work: self.work.clone(),
             continues: self.continues.clone(),
             narration: self.narration.clone(),
+            chat_admission: self.chat_admission.clone(),
+            connection_broker: self.connection_broker.clone(),
+            connection_source: self.connection_source.clone(),
         }
     }
 
@@ -149,6 +182,9 @@ impl Engine {
             work: Some(work.into()),
             continues: self.continues.clone(),
             narration: self.narration.clone(),
+            chat_admission: self.chat_admission.clone(),
+            connection_broker: self.connection_broker.clone(),
+            connection_source: self.connection_source.clone(),
         }
     }
 
@@ -344,7 +380,7 @@ impl Engine {
     /// [`INTERRUPTED_CALL`]), so nothing reads
     /// as still in progress (or, worse, as finished) after a crash. Returns how many.
     pub fn recover_interrupted(&self) -> Result<usize, AgentError> {
-        let mut n = 0;
+        let mut n = self.recover_connection_requests(None)?;
         for (project, mut inv) in self.store.list_running_invocations()? {
             if inv
                 .pid
@@ -600,6 +636,14 @@ impl Engine {
         let desc = registry
             .descriptor(action)
             .ok_or_else(|| AgentError::UnknownAction(action.to_string()))?;
+
+        if desc.contextual_acquisition {
+            crate::connection_requests::descriptor_digest(&desc, &input)?;
+            return Err(crate::connection_requests::ConnectionRequestError::Refused(
+                "contextual acquisition must be admitted by its chat".into(),
+            )
+            .into());
+        }
 
         let input = self.resolve_artifact_arg(project, input);
         let mut inv = Invocation::new(action, desc.risk, input.clone());

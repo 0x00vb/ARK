@@ -150,6 +150,11 @@ pub enum HarnessEvent {
         action: String,
         detail: String,
     },
+    AwaitingConnection {
+        request_id: String,
+        offer_id: String,
+        display: String,
+    },
     StateUpdate {
         kind: String,
         text: String,
@@ -214,6 +219,7 @@ pub enum HarnessEvent {
 pub const STATE_DIGEST_ITEMS: usize = 6;
 
 pub struct HarnessOutcome {
+    pub awaiting_connection: Option<crate::connection_requests::AwaitingConnection>,
     pub answer: String,
     pub cited: Vec<InvocationId>,
     pub steps: usize,
@@ -1012,6 +1018,75 @@ impl Harness {
                 // The digest uses the canonical artifact id, so a short id and a full id name
                 // the same call.
                 let canonical = engine.canonical_input(project, call.arguments.clone());
+                if desc.contextual_acquisition {
+                    flush!();
+                    if self.execution_mode == ExecutionMode::Plan {
+                        round.push(Message::tool_result(
+                            call,
+                            "unavailable in Plan: connecting needs the person",
+                        ));
+                        continue;
+                    }
+                    let action_digest =
+                        crate::connection_requests::descriptor_digest(&desc, &canonical)?;
+                    if engine.connection_broker.is_none() {
+                        return Err(
+                            crate::connection_requests::ConnectionRequestError::Unavailable(
+                                "this runtime cannot request connections".into(),
+                            )
+                            .into(),
+                        );
+                    }
+                    let source = profile.acquisition.as_ref().ok_or_else(|| {
+                        crate::connection_requests::ConnectionRequestError::Unavailable(
+                            "no acquisition source".into(),
+                        )
+                    })?;
+                    let requirement = source
+                        .contextual_acquisition(&desc, &canonical)
+                        .await?
+                        .ok_or_else(|| {
+                            crate::connection_requests::ConnectionRequestError::Refused(
+                                "no contextual source matched".into(),
+                            )
+                        })?;
+                    let mut invocation = engine.connection_candidate(project, &desc, canonical)?;
+                    let request_id = ark_core::InvocationId::new().to_string();
+                    invocation.status = ark_core::InvocationStatus::PendingApproval;
+                    invocation.connection_request = Some(request_id.clone());
+                    on_event(HarnessEvent::ToolCall {
+                        id: call.id.clone(),
+                        action: call.name.clone(),
+                        input: call.arguments.clone(),
+                    });
+                    on_event(HarnessEvent::AwaitingConnection {
+                        request_id: request_id.clone(),
+                        offer_id: requirement.offer_id.clone(),
+                        display: requirement.display.clone(),
+                    });
+                    state.touch();
+                    engine.store.put_research_state(project, &state)?;
+                    tally.metrics.finish();
+                    return Ok(HarnessOutcome {
+                        awaiting_connection: Some(crate::connection_requests::AwaitingConnection {
+                            request_id,
+                            call_id: call.id.clone(),
+                            invocation,
+                            requirement,
+                            action_digest,
+                        }),
+                        answer: String::new(),
+                        cited,
+                        steps: steps_taken,
+                        trivial,
+                        metrics,
+                        state,
+                        cancelled: false,
+                        interrupted: false,
+                        steered,
+                        ran_out: false,
+                    });
+                }
                 let digest = call_digest(&call.name, &canonical);
                 // An identical call in this reply must finish before its failure count is read.
                 // Otherwise four copies in one reply could all pass the limit before the first
@@ -1229,6 +1304,7 @@ impl Harness {
             let interrupted = matches!(stopped, HarnessEvent::Interrupted);
             on_event(stopped);
             return Ok(HarnessOutcome {
+                awaiting_connection: None,
                 answer: String::new(),
                 cited,
                 steps: steps_taken,
@@ -1284,6 +1360,7 @@ impl Harness {
                     let interrupted = matches!(stopped, HarnessEvent::Interrupted);
                     on_event(stopped);
                     return Ok(HarnessOutcome {
+                        awaiting_connection: None,
                         answer: String::new(),
                         cited,
                         steps: steps_taken,
@@ -1369,6 +1446,7 @@ impl Harness {
             streamed,
         });
         Ok(HarnessOutcome {
+            awaiting_connection: None,
             answer,
             cited,
             steps: steps_taken,

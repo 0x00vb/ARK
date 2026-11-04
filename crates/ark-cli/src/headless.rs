@@ -81,7 +81,9 @@ pub(crate) async fn run(
     let ctl = turn.control.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
-            ctl.cancel();
+            if let Err(error) = ctl.cancel() {
+                eprintln!("could not stop the chat: {error}");
+            }
         }
     });
     let mut show = |u: Update| {

@@ -65,6 +65,29 @@ pub struct Metrics {
 }
 
 impl Metrics {
+    pub fn accumulate(&mut self, newer: &Metrics) {
+        for (key, value) in &newer.model_calls {
+            *self.model_calls.entry(key.clone()).or_default() += value;
+        }
+        for (key, value) in &newer.calls_by_model {
+            *self.calls_by_model.entry(key.clone()).or_default() += value;
+        }
+        self.prompt_tokens += newer.prompt_tokens;
+        self.completion_tokens += newer.completion_tokens;
+        self.cached_tokens += newer.cached_tokens;
+        self.cache_write_tokens += newer.cache_write_tokens;
+        self.tokens_measured &= newer.tokens_measured;
+        self.tool_calls += newer.tool_calls;
+        self.duplicate_tool_calls += newer.duplicate_tool_calls;
+        self.cards_created += newer.cards_created;
+        self.evidence_reused += newer.evidence_reused;
+        self.retrievals += newer.retrievals;
+        self.state_updates += newer.state_updates;
+        self.steps += newer.steps;
+        self.peak_prompt_tokens = self.peak_prompt_tokens.max(newer.peak_prompt_tokens);
+        self.provider_retries += newer.provider_retries;
+        self.elapsed_ms += newer.elapsed_ms;
+    }
     pub fn start() -> Self {
         Metrics {
             tokens_measured: true,

@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AgentError {
+    #[error(transparent)]
+    Connection(#[from] crate::connection_requests::ConnectionRequestError),
     #[error("project memory changed while waiting for the model; continue to use the current correction")]
     MemoryChanged,
 

@@ -6,9 +6,64 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_MAJOR: u16 = 1;
-pub const CURRENT_MINOR: u16 = 5;
+pub const CURRENT_MINOR: u16 = 9;
 pub const TERMINAL_WRITE_BYTES: u64 = 16 * 1024;
 pub const TERMINAL_REPLAY_BYTES: u64 = 256 * 1024;
+
+#[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePushRegistrationRequest {
+    #[schemars(length(min = 36, max = 36))]
+    pub registration_id: String,
+    #[schemars(length(min = 1, max = 200))]
+    pub runtime_route_id: String,
+    #[schemars(length(min = 20, max = 40))]
+    pub expires_at: String,
+    #[schemars(length(min = 43, max = 43))]
+    pub send_capability: String,
+}
+
+impl std::fmt::Debug for NativePushRegistrationRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NativePushRegistrationRequest")
+            .field("send_capability", &"[redacted]")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePushRegistrationResponse {
+    pub registration_id: String,
+    pub runtime_route_id: String,
+    pub expires_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePushRemoveRequest {
+    #[schemars(length(min = 36, max = 36))]
+    pub registration_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativePushPresenceRequest {
+    #[schemars(length(min = 36, max = 36))]
+    pub registration_id: String,
+    pub in_foreground: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePushResolution {
+    pub attention_id: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+}
 
 macro_rules! wire {
     ($(#[$meta:meta])* $vis:vis struct $name:ident { $($(#[$field_meta:meta])* $field:ident: $ty:ty),* $(,)? }) => {
@@ -136,6 +191,133 @@ wire!(
     }
 );
 wire!(
+    pub struct ProviderConnectionSummary {
+        id: String,
+        title: String,
+        state: String,
+        display: String,
+    }
+);
+wire!(
+    pub struct ProviderConnectionsSnapshot {
+        route_id: String,
+        connections: Vec<ProviderConnectionSummary>,
+    }
+);
+wire!(
+    pub struct ProviderAuthorizationBeginRequest {
+        #[schemars(length(min = 1, max = 200))]
+        route_id: String,
+        #[schemars(length(min = 1, max = 128))]
+        request_id: String,
+    }
+);
+#[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAuthorizationCodeRequest {
+    #[schemars(length(min = 1, max = 4096))]
+    pub code: String,
+}
+
+impl std::fmt::Debug for ProviderAuthorizationCodeRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderAuthorizationCodeRequest")
+            .field("code", &"[redacted]")
+            .finish()
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAuthorizationAttempt {
+    pub id: String,
+    pub connection_id: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
+    pub expires_at: String,
+    pub display: String,
+}
+
+impl std::fmt::Debug for ProviderAuthorizationAttempt {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderAuthorizationAttempt")
+            .field("id", &self.id)
+            .field("connection_id", &self.connection_id)
+            .field("state", &self.state)
+            .field(
+                "authorization_url",
+                &self.authorization_url.as_ref().map(|_| "[redacted]"),
+            )
+            .field("user_code", &self.user_code.as_ref().map(|_| "[redacted]"))
+            .field("expires_at", &self.expires_at)
+            .field("display", &self.display)
+            .finish()
+    }
+}
+wire!(
+    pub struct ModelEffort {
+        id: String,
+        title: String,
+    }
+);
+wire!(
+    pub struct ModelSelection {
+        spec: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        effort_id: Option<String>,
+    }
+);
+wire!(
+    pub struct ModelSummary {
+        spec: String,
+        title: String,
+        efforts: Vec<ModelEffort>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        default_effort_id: Option<String>,
+    }
+);
+wire!(
+    pub struct ModelProvider {
+        id: String,
+        title: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        connection_id: Option<String>,
+        models: Vec<ModelSummary>,
+    }
+);
+wire!(
+    pub struct ModelDefault {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        selection: Option<ModelSelection>,
+        display: String,
+    }
+);
+wire!(
+    pub struct ModelsSnapshot {
+        route_id: String,
+        default_model: ModelDefault,
+        providers: Vec<ModelProvider>,
+    }
+);
+wire!(
+    pub struct ConversationModel {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        selection: Option<ModelSelection>,
+        display: String,
+        can_select: bool,
+    }
+);
+wire!(
+    pub struct ChatModelInput {
+        model: ModelSelection,
+    }
+);
+wire!(
     pub struct ApprovalChoice {
         id: String,
         label: String,
@@ -203,12 +385,33 @@ wire!(
     }
 );
 wire!(
+    pub struct ChatConnectionRequest {
+        id: String,
+        offer_id: String,
+        display: String,
+        state: String,
+        revision: DecimalString,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        scope_ref: Option<String>,
+    }
+);
+wire!(
+    pub struct ChatConnectionContinueInput {
+        request_id: String,
+        expected_revision: DecimalString,
+    }
+);
+wire!(
     pub struct ConversationSnapshot {
         chat: ChatSummary,
         messages: Vec<ChatMessage>,
         approvals: Vec<AttentionItem>,
         results: Vec<ResultSummary>,
         active_turn_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<ConversationModel>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        connection_requests: Option<Vec<ChatConnectionRequest>>,
     }
 );
 wire!(
@@ -230,6 +433,8 @@ wire!(
     pub struct NewChatRequest {
         project: String,
         request_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<ModelSelection>,
     }
 );
 wire!(
@@ -378,12 +583,31 @@ wire!(
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 pub struct ProtocolSchema {
+    native_push_registration_request: NativePushRegistrationRequest,
+    native_push_registration_response: NativePushRegistrationResponse,
+    native_push_remove_request: NativePushRemoveRequest,
+    native_push_presence_request: NativePushPresenceRequest,
+    native_push_resolution: NativePushResolution,
     bootstrap: Bootstrap,
     pair_request: PairRequest,
     account_pair_request: AccountPairRequest,
     pair_response: PairResponse,
     hello: Hello,
     error: ErrorEnvelope,
+    provider_connections: ProviderConnectionsSnapshot,
+    provider_authorization_begin: ProviderAuthorizationBeginRequest,
+    provider_authorization_code: ProviderAuthorizationCodeRequest,
+    provider_authorization_attempt: ProviderAuthorizationAttempt,
+    models: ModelsSnapshot,
+    model_provider: ModelProvider,
+    model_summary: ModelSummary,
+    model_effort: ModelEffort,
+    model_selection: ModelSelection,
+    model_default: ModelDefault,
+    conversation_model: ConversationModel,
+    chat_model_input: ChatModelInput,
+    chat_connection_request: ChatConnectionRequest,
+    chat_connection_continue_input: ChatConnectionContinueInput,
     home: HomeSnapshot,
     chats: ChatsSnapshot,
     conversation: ConversationSnapshot,
@@ -405,6 +629,22 @@ pub struct ProtocolSchema {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn connection_requests_are_optional_and_revisions_are_decimal() {
+        let fixture = include_str!("../fixtures/v1/connection-request.json");
+        let request: super::ChatConnectionRequest = serde_json::from_str(fixture).unwrap();
+        assert_eq!(request.revision.as_str(), "9007199254740993");
+        let schema = serde_json::to_value(schemars::schema_for!(super::ProtocolSchema)).unwrap();
+        let required = schema["$defs"]["ConversationSnapshot"]["required"]
+            .as_array()
+            .unwrap();
+        assert!(!required.iter().any(|field| field == "connectionRequests"));
+        let input: super::ChatConnectionContinueInput = serde_json::from_value(
+            serde_json::json!({"requestId":request.id,"expectedRevision":"9007199254740993"}),
+        )
+        .unwrap();
+        assert_eq!(input.expected_revision.as_str(), "9007199254740993");
+    }
     use super::*;
 
     #[test]
@@ -419,6 +659,40 @@ mod tests {
             known.participants,
             Some(vec!["Editor".into(), "Writer".into()])
         );
+    }
+
+    #[test]
+    fn provider_authorization_debug_output_redacts_secrets() {
+        let code = ProviderAuthorizationCodeRequest {
+            code: "private-code".into(),
+        };
+        let attempt = ProviderAuthorizationAttempt {
+            id: "attempt".into(),
+            connection_id: "claude".into(),
+            state: "waiting_for_code".into(),
+            authorization_url: Some("https://claude.com/cai/oauth/authorize?state=private".into()),
+            user_code: Some("PRIVATE-CODE".into()),
+            expires_at: "2026-10-23T00:00:00Z".into(),
+            display: "Continue".into(),
+        };
+        assert!(!format!("{code:?}").contains("private-code"));
+        assert!(!format!("{attempt:?}").contains("state=private"));
+        assert!(!format!("{attempt:?}").contains("PRIVATE-CODE"));
+    }
+
+    #[test]
+    fn schema_includes_route_models_and_optional_conversation_selection() {
+        let schema = serde_json::to_value(schemars::schema_for!(ProtocolSchema)).unwrap();
+        assert!(schema["$defs"]["ModelsSnapshot"].is_object());
+        assert!(schema["$defs"]["ModelSelection"].is_object());
+        assert!(schema["$defs"]["ConversationModel"].is_object());
+        assert!(
+            schema["$defs"]["ProviderAuthorizationAttempt"]["properties"]["userCode"].is_object()
+        );
+        let required = schema["$defs"]["ConversationSnapshot"]["required"]
+            .as_array()
+            .unwrap();
+        assert!(!required.iter().any(|field| field == "model"));
     }
 
     #[test]

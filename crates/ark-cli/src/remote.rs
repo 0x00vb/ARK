@@ -598,7 +598,7 @@ mod tests {
         let ctl = turn.control.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            ctl.cancel();
+            ctl.cancel().unwrap();
         });
         let seen = drive(turn, |_| {}).await;
         assert!(
@@ -614,7 +614,7 @@ mod tests {
         let (_dir, url, token) = serve().await;
         let mut r = Remote::connect(&url, &token, false).await.unwrap();
         let turn = r.turn("keep going", false);
-        turn.control.cancel();
+        turn.control.cancel().unwrap();
         let seen = drive(turn, |_| {}).await;
         assert!(seen.end.cancelled && seen.end.error.is_none());
         assert_eq!(r.summary().await.unwrap().session.turns, 0);

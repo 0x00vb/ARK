@@ -75,6 +75,15 @@ impl AcquisitionResult {
 /// I/O (checking what's already present), so they are async too for symmetry.
 #[async_trait::async_trait]
 pub trait AcquisitionProvider: Send + Sync {
+    async fn contextual_acquisition(
+        &self,
+        _action: &ark_core::ActionDescriptor,
+        _input: &serde_json::Value,
+    ) -> crate::connection_requests::ConnectionResult<
+        Option<crate::connection_requests::ContextualAcquisition>,
+    > {
+        Ok(None)
+    }
     /// List providers/capabilities that could serve `need` (the `find_capability` meta-tool).
     /// Read-only; returns agent-facing text.
     async fn find(&self, need: &str) -> String;
@@ -126,6 +135,26 @@ impl Sources {
 
 #[async_trait::async_trait]
 impl AcquisitionProvider for Sources {
+    async fn contextual_acquisition(
+        &self,
+        action: &ark_core::ActionDescriptor,
+        input: &serde_json::Value,
+    ) -> crate::connection_requests::ConnectionResult<
+        Option<crate::connection_requests::ContextualAcquisition>,
+    > {
+        let mut found = None;
+        for source in &self.0 {
+            if let Some(requirement) = source.contextual_acquisition(action, input).await? {
+                if found.is_some() {
+                    return Err(crate::connection_requests::ConnectionRequestError::Refused(
+                        "multiple acquisition sources matched".into(),
+                    ));
+                }
+                found = Some(requirement);
+            }
+        }
+        Ok(found)
+    }
     async fn find(&self, need: &str) -> String {
         match self.pick(need) {
             Some(s) => s.find(need).await,

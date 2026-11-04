@@ -33,6 +33,10 @@ use ark_interact::orchestration::{event_line, Control, ControlOutcome};
 use ark_interact::trace::interpret;
 use ark_interact::{Effect, Interaction, Labels, PendingApproval, TurnControl};
 use ark_sdk::prelude::ark_core::{Focus, SessionId};
+use ark_sdk::prelude::ark_runtime::connection_requests::{
+    AdmittedConnectionRun, ConnectionRequestError, ConnectionRequestPhase, ConnectionScopeState,
+    PendingConnectionRequest,
+};
 use ark_sdk::prelude::ark_runtime::STATE_DIGEST_ITEMS;
 use ark_sdk::prelude::*;
 use base64::Engine as _;
@@ -652,6 +656,8 @@ pub struct Host {
     switching: tokio::sync::Mutex<()>,
     /// External-client mutations are accepted in strict device order.
     client_mutations: tokio::sync::Mutex<()>,
+    client_maintenance: Arc<tokio::sync::Mutex<()>>,
+    connection_refresh: Mutex<HashMap<String, ConnectionRefreshStatus>>,
     engine: Arc<Engine>,
     /// The names the conversation's skills are chosen by (`Ark::skill_names`).
     chat_skills: Vec<String>,
@@ -720,12 +726,86 @@ pub(crate) enum ClientMutationError {
     CounterGap,
     AlreadyApplied,
     Unsupported,
+    ModelUnavailable,
+    ChatBusy,
+    ConnectionStale,
+    ConnectionUnavailable,
     Store(anyhow::Error),
+}
+
+fn connection_mutation_error(
+    error: ark_sdk::prelude::ark_runtime::AgentError,
+) -> ClientMutationError {
+    use ark_sdk::prelude::ark_runtime::AgentError;
+    match error {
+        AgentError::Store(ark_store::StoreError::Conflict) => ClientMutationError::ConnectionStale,
+        AgentError::Connection(ConnectionRequestError::Busy) => ClientMutationError::ChatBusy,
+        AgentError::Connection(
+            ConnectionRequestError::Stale | ConnectionRequestError::Refused(_),
+        ) => ClientMutationError::ConnectionStale,
+        AgentError::Connection(
+            ConnectionRequestError::Unavailable(_)
+            | ConnectionRequestError::Uncertain
+            | ConnectionRequestError::MetadataUnavailable,
+        ) => ClientMutationError::ConnectionUnavailable,
+        other => ClientMutationError::Store(other.into()),
+    }
+}
+
+fn connection_readiness_error(error: anyhow::Error) -> ClientMutationError {
+    if error.is::<ConnectionModelUnavailable>() {
+        ClientMutationError::ModelUnavailable
+    } else if matches!(
+        error.downcast_ref::<ark_sdk::prelude::ark_runtime::AgentError>(),
+        Some(ark_sdk::prelude::ark_runtime::AgentError::Connection(
+            ConnectionRequestError::Busy
+        ))
+    ) || matches!(
+        error.downcast_ref::<ConnectionRequestError>(),
+        Some(ConnectionRequestError::Busy)
+    ) {
+        ClientMutationError::ChatBusy
+    } else {
+        ClientMutationError::Store(error)
+    }
+}
+
+#[derive(Debug)]
+struct ConnectionModelUnavailable;
+
+impl std::fmt::Display for ConnectionModelUnavailable {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("selected model unavailable")
+    }
+}
+
+impl std::error::Error for ConnectionModelUnavailable {}
+
+fn connection_transition_race(error: &ark_sdk::prelude::ark_runtime::AgentError) -> bool {
+    use ark_sdk::prelude::ark_runtime::AgentError;
+    matches!(
+        error,
+        AgentError::Connection(ConnectionRequestError::Stale | ConnectionRequestError::Busy)
+            | AgentError::Store(ark_store::StoreError::Conflict)
+    )
+}
+
+fn connection_projection_race(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<ark_sdk::prelude::ark_runtime::AgentError>()
+            .is_some_and(connection_transition_race)
+            || matches!(
+                cause.downcast_ref::<ark_store::StoreError>(),
+                Some(ark_store::StoreError::Conflict)
+            )
+    })
 }
 
 #[derive(Debug)]
 pub(crate) enum ClientChatCreateError {
     RequestConflict,
+    ModelUnavailable,
     Store(anyhow::Error),
 }
 
@@ -763,9 +843,141 @@ impl ClientChatCreateError {
             Self::RequestConflict => {
                 anyhow::anyhow!("that creation request belongs to another project")
             }
+            Self::ModelUnavailable => anyhow::anyhow!("that model is unavailable"),
             Self::Store(error) => error,
         }
     }
+}
+
+pub(crate) struct PreparedModel {
+    spec: String,
+    router: ark_sdk::prelude::ark_runtime::ModelRouter,
+}
+
+fn client_model_providers(backends: Vec<ark_model::Backend>) -> Vec<ark_protocol::ModelProvider> {
+    backends
+        .into_iter()
+        .filter(|backend| backend.ready && backend.provider != "mock")
+        .filter_map(|backend| {
+            let models: Vec<ark_protocol::ModelSummary> = if backend.model_options.is_empty() {
+                backend
+                    .models
+                    .into_iter()
+                    .map(|id| ark_protocol::ModelSummary {
+                        spec: format!("{}:{id}", backend.provider),
+                        title: id,
+                        efforts: Vec::new(),
+                        default_effort_id: None,
+                    })
+                    .collect()
+            } else {
+                backend
+                    .model_options
+                    .into_iter()
+                    .map(|model| ark_protocol::ModelSummary {
+                        spec: format!("{}:{}", backend.provider, model.id),
+                        title: model.label,
+                        efforts: model
+                            .efforts
+                            .into_iter()
+                            .map(|id| ark_protocol::ModelEffort {
+                                title: id.clone(),
+                                id,
+                            })
+                            .collect(),
+                        default_effort_id: model.default_effort,
+                    })
+                    .collect()
+            };
+            (!models.is_empty()).then(|| ark_protocol::ModelProvider {
+                connection_id: matches!(backend.provider.as_str(), "claude" | "codex")
+                    .then(|| backend.provider.clone()),
+                id: backend.provider,
+                title: backend.label,
+                models,
+            })
+        })
+        .collect()
+}
+
+fn canonical_selection(
+    providers: &[ark_protocol::ModelProvider],
+    selection: &ark_protocol::ModelSelection,
+) -> Option<String> {
+    let model = providers
+        .iter()
+        .flat_map(|provider| &provider.models)
+        .find(|model| model.spec == selection.spec)?;
+    match selection.effort_id.as_deref() {
+        Some(effort) if model.efforts.iter().any(|item| item.id == effort) => {
+            Some(format!("{}@{effort}", model.spec))
+        }
+        Some(_) => None,
+        None => Some(model.spec.clone()),
+    }
+}
+
+fn requested_model_spec(selection: &ark_protocol::ModelSelection) -> String {
+    match &selection.effort_id {
+        Some(effort) => format!("{}@{effort}", selection.spec),
+        None => selection.spec.clone(),
+    }
+}
+
+fn selection_for_canonical(
+    providers: &[ark_protocol::ModelProvider],
+    canonical: &str,
+) -> Option<ark_protocol::ModelSelection> {
+    for provider in providers {
+        for model in &provider.models {
+            if canonical == model.spec {
+                return Some(ark_protocol::ModelSelection {
+                    spec: model.spec.clone(),
+                    effort_id: None,
+                });
+            }
+            if let Some(effort) = canonical.strip_prefix(&format!("{}@", model.spec)) {
+                if model.efforts.iter().any(|item| item.id == effort) {
+                    return Some(ark_protocol::ModelSelection {
+                        spec: model.spec.clone(),
+                        effort_id: Some(effort.to_string()),
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+fn selection_display(
+    providers: &[ark_protocol::ModelProvider],
+    selection: &ark_protocol::ModelSelection,
+) -> Option<String> {
+    for provider in providers {
+        let Some(model) = provider
+            .models
+            .iter()
+            .find(|model| model.spec == selection.spec)
+        else {
+            continue;
+        };
+        let effort = match selection.effort_id.as_deref() {
+            Some(id) => Some(
+                model
+                    .efforts
+                    .iter()
+                    .find(|effort| effort.id == id)?
+                    .title
+                    .as_str(),
+            ),
+            None => None,
+        };
+        return Some(match effort {
+            Some(effort) => format!("{} · {} · {effort}", provider.title, model.title),
+            None => format!("{} · {}", provider.title, model.title),
+        });
+    }
+    None
 }
 
 impl From<anyhow::Error> for ClientMutationError {
@@ -774,7 +986,243 @@ impl From<anyhow::Error> for ClientMutationError {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConnectionRefreshDiagnostic {
+    BrokerUnavailable,
+    BrokerUncertain,
+    MetadataUnavailable,
+    ModelUnavailable,
+    Internal,
+}
+
+impl ConnectionRefreshDiagnostic {
+    fn name(self) -> &'static str {
+        match self {
+            Self::BrokerUnavailable => "broker_unavailable",
+            Self::BrokerUncertain => "broker_uncertain",
+            Self::MetadataUnavailable => "metadata_unavailable",
+            Self::ModelUnavailable => "model_unavailable",
+            Self::Internal => "connection_refresh_failed",
+        }
+    }
+}
+
+struct ConnectionRefreshStatus {
+    failures: u32,
+    next_at: tokio::time::Instant,
+    diagnostic: Option<ConnectionRefreshDiagnostic>,
+}
+
 impl Host {
+    pub(crate) fn has_connection_requests(&self) -> bool {
+        self.engine.has_connection_requests()
+    }
+
+    pub(crate) async fn client_connection_requests(
+        self: &Arc<Self>,
+        session: &str,
+    ) -> anyhow::Result<Option<Vec<ark_protocol::ChatConnectionRequest>>> {
+        if !self.has_connection_requests() {
+            return Ok(None);
+        }
+        let mut projected = Vec::new();
+        for request in self.engine.connection_requests(session)? {
+            let uncertain = !request.closed()
+                && self
+                    .connection_refresh
+                    .lock()
+                    .unwrap()
+                    .get(&request.id)
+                    .is_some_and(|status| status.diagnostic.is_some());
+            let state =
+                if uncertain
+                    || (matches!(request.phase, ConnectionRequestPhase::Claimed { .. })
+                        && request.metadata_retry.is_some())
+                {
+                    "uncertain"
+                } else {
+                    match &request.phase {
+                        ConnectionRequestPhase::Preparing => "preparing",
+                        ConnectionRequestPhase::Waiting => {
+                            if request.resolution.as_ref().is_some_and(|resolved| {
+                                resolved.state == ConnectionScopeState::Ready
+                            }) {
+                                "ready"
+                            } else {
+                                "waiting"
+                            }
+                        }
+                        ConnectionRequestPhase::Claimed { .. }
+                        | ConnectionRequestPhase::Acquired { .. } => "ready",
+                        ConnectionRequestPhase::Admitted { .. }
+                        | ConnectionRequestPhase::Started { .. } => "continuing",
+                        ConnectionRequestPhase::Completed => "completed",
+                        ConnectionRequestPhase::Closed { .. }
+                        | ConnectionRequestPhase::Interrupted { .. } => "closed",
+                    }
+                };
+            projected.push(ark_protocol::ChatConnectionRequest {
+                id: request.id,
+                offer_id: request.requirement.offer_id,
+                display: request.requirement.display,
+                state: state.into(),
+                revision: ark_protocol::DecimalString::new(request.local_revision.to_string())
+                    .map_err(anyhow::Error::msg)?,
+                scope_ref: if matches!(state, "waiting" | "connecting" | "ready") {
+                    request.scope.map(|scope| scope.scope_ref)
+                } else {
+                    None
+                },
+            });
+        }
+        Ok(Some(projected))
+    }
+
+    async fn ready_connection_conv(self: &Arc<Self>, session: &str) -> anyhow::Result<Arc<Conv>> {
+        let conv = self.chat_conv(session, "", false).await?;
+        if conv.is_running() {
+            return Err(ark_sdk::prelude::ark_runtime::AgentError::from(
+                ConnectionRequestError::Busy,
+            )
+            .into());
+        }
+        {
+            let ix = conv.ix.try_lock().map_err(|_| {
+                ark_sdk::prelude::ark_runtime::AgentError::from(ConnectionRequestError::Busy)
+            })?;
+            if !ix.selected_model_ready() {
+                return Err(ConnectionModelUnavailable.into());
+            }
+        }
+        self.addressed
+            .lock()
+            .unwrap()
+            .insert(conv.session(), conv.clone());
+        Ok(conv)
+    }
+
+    async fn refresh_client_connection_request(
+        self: &Arc<Self>,
+        original: &PendingConnectionRequest,
+    ) -> anyhow::Result<()> {
+        let request = self.engine.refresh_connection_request(&original.id).await?;
+        if matches!(
+            request.phase,
+            ConnectionRequestPhase::Acquired { .. } | ConnectionRequestPhase::Admitted { .. }
+        ) {
+            let conv = self.ready_connection_conv(&request.session).await?;
+            let run = self
+                .engine
+                .admit_connection(&request.id, request.local_revision)?;
+            self.start_connection_on(conv, run)?;
+        }
+        Ok(())
+    }
+
+    async fn refresh_client_connection_chat(
+        self: &Arc<Self>,
+        session: Option<&String>,
+    ) -> anyhow::Result<()> {
+        let Some(session) = session else {
+            return Ok(());
+        };
+        for original in self.engine.connection_requests(session)? {
+            if original.closed() && !original.cancel_pending {
+                continue;
+            }
+            if self
+                .connection_refresh
+                .lock()
+                .unwrap()
+                .get(&original.id)
+                .is_some_and(|status| status.next_at > tokio::time::Instant::now())
+            {
+                continue;
+            }
+            let result = self.refresh_client_connection_request(&original).await;
+            let diagnostic = match &result {
+                Ok(()) => None,
+                Err(error)
+                    if error
+                        .downcast_ref::<ark_sdk::prelude::ark_runtime::AgentError>()
+                        .is_some_and(connection_transition_race)
+                        || connection_projection_race(error) =>
+                {
+                    None
+                }
+                Err(error) if error.is::<ConnectionModelUnavailable>() => {
+                    Some(ConnectionRefreshDiagnostic::ModelUnavailable)
+                }
+                Err(error) => Some(
+                    match error.downcast_ref::<ark_sdk::prelude::ark_runtime::AgentError>() {
+                        Some(ark_sdk::prelude::ark_runtime::AgentError::Connection(
+                            ConnectionRequestError::MetadataUnavailable,
+                        )) => ConnectionRefreshDiagnostic::MetadataUnavailable,
+                        Some(ark_sdk::prelude::ark_runtime::AgentError::Connection(
+                            ConnectionRequestError::Unavailable(_)
+                            | ConnectionRequestError::Refused(_),
+                        )) => ConnectionRefreshDiagnostic::BrokerUnavailable,
+                        Some(ark_sdk::prelude::ark_runtime::AgentError::Connection(
+                            ConnectionRequestError::Uncertain,
+                        )) => ConnectionRefreshDiagnostic::BrokerUncertain,
+                        _ => ConnectionRefreshDiagnostic::Internal,
+                    },
+                ),
+            };
+            let changed = {
+                let mut statuses = self.connection_refresh.lock().unwrap();
+                let status =
+                    statuses
+                        .entry(original.id.clone())
+                        .or_insert(ConnectionRefreshStatus {
+                            failures: 0,
+                            next_at: tokio::time::Instant::now(),
+                            diagnostic: None,
+                        });
+                let changed = status.diagnostic != diagnostic;
+                status.failures = if diagnostic.is_some() {
+                    status.failures.saturating_add(1)
+                } else {
+                    0
+                };
+                let delay = (1_u64 << status.failures.saturating_sub(1).min(5)).min(30);
+                status.next_at =
+                    tokio::time::Instant::now() + std::time::Duration::from_secs(delay);
+                status.diagnostic = diagnostic;
+                changed
+            };
+            if let Some(diagnostic) = diagnostic {
+                if changed {
+                    tracing::warn!(%session, request_id=%original.id, diagnostic=diagnostic.name(), "connection refresh could not complete");
+                }
+                if diagnostic == ConnectionRefreshDiagnostic::Internal {
+                    return result;
+                }
+            }
+            let current = self.engine.connection_request(&original.id)?;
+            if changed || current.local_revision != original.local_revision {
+                self.emit(
+                    json!({"kind":"connection_changed","session":session,"requestId":original.id}),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn schedule_client_maintenance(
+        self: &Arc<Self>,
+        jobs: &mut tokio::task::JoinSet<anyhow::Result<()>>,
+    ) {
+        let Ok(permit) = self.client_maintenance.clone().try_lock_owned() else {
+            return;
+        };
+        let host = self.clone();
+        jobs.spawn(async move {
+            let _permit = permit;
+            host.resume_client_mutations().await
+        });
+    }
+
     fn dictation_owner(params: &Value) -> anyhow::Result<String> {
         let owner = params
             .get("_dictation_owner")
@@ -953,7 +1401,10 @@ impl Host {
             processes: ix.ark().processes().cloned(),
             browser: ix.ark().browser_service().cloned(),
             workers: ix.ark().workers().cloned(),
-            notifier: Arc::new(crate::notify::Notifier::new(ix.ark().shared_engine())),
+            notifier: Arc::new(crate::notify::Notifier::new(
+                ix.ark().shared_engine(),
+                ix.ark().connections().map(|c| c.secret_store()),
+            )),
             links: ix.links().clone(),
             held: Mutex::new(None),
             held_live: Mutex::new(HashMap::new()),
@@ -961,6 +1412,8 @@ impl Host {
             current: Mutex::new(Conv::new(ix)),
             switching: tokio::sync::Mutex::new(()),
             client_mutations: tokio::sync::Mutex::new(()),
+            client_maintenance: Arc::new(tokio::sync::Mutex::new(())),
+            connection_refresh: Mutex::new(HashMap::new()),
             background: Mutex::new(Vec::new()),
             addressed: Mutex::new(HashMap::new()),
             setup_terms: Mutex::new(Default::default()),
@@ -1135,6 +1588,25 @@ impl Host {
         Ok(conv)
     }
 
+    fn open_new_sibling_model(
+        self: &Arc<Self>,
+        session: SessionId,
+        project: &ProjectId,
+        prepared: PreparedModel,
+    ) -> anyhow::Result<Arc<Conv>> {
+        let (approver, rx) = ark_interact::ChannelApprover::channel();
+        let ix = self.siblings.open_new_model(
+            session,
+            project,
+            prepared.spec,
+            prepared.router,
+            Arc::new(approver),
+        )?;
+        let conv = Conv::new(ix);
+        tokio::spawn(forward_approvals(self.clone(), rx, Arc::downgrade(&conv)));
+        Ok(conv)
+    }
+
     /// Every event from now on, each with a `seq` one higher than the last.
     /// Whether agents may use this machine's screen (the Computer).
     pub fn uses_computer(&self) -> bool {
@@ -1258,12 +1730,25 @@ impl Host {
         request: &ark_protocol::MutationRequest,
     ) -> Result<ark_protocol::MutationReceipt, ClientMutationError> {
         match request.operation.as_str() {
+            "chat.connection.continue"
+                if self.has_connection_requests()
+                    && serde_json::from_value::<ark_protocol::ChatConnectionContinueInput>(
+                        request.input.clone(),
+                    )
+                    .is_ok() => {}
             "chat.send"
                 if request.input["body"]
                     .as_str()
                     .is_some_and(|body| !body.trim().is_empty()) => {}
             "attention.answer" if request.input["choiceId"].as_str().is_some() => {}
-            "chat.send" | "attention.answer" => return Err(ClientMutationError::Unsupported),
+            "chat.model"
+                if serde_json::from_value::<ark_protocol::ChatModelInput>(
+                    request.input.clone(),
+                )
+                .is_ok() => {}
+            "chat.send" | "chat.model" | "attention.answer" | "chat.connection.continue" => {
+                return Err(ClientMutationError::Unsupported)
+            }
             _ => return Err(ClientMutationError::Unsupported),
         }
         let _serial = self.client_mutations.lock().await;
@@ -1279,6 +1764,8 @@ impl Host {
             .store
             .get_record("client_mutation", &record_id)
             .map_err(|error| ClientMutationError::Store(error.into()))?;
+        let mut prepared_model = None;
+        let mut admitted_send = None;
         let mut record = if let Some(record) = existing {
             let same = record["operation"] == request.operation
                 && record["target"] == request.target
@@ -1294,6 +1781,72 @@ impl Host {
             }
             record
         } else {
+            let send_target_exists = request.operation == "chat.send"
+                && self
+                    .engine
+                    .store
+                    .get_session(&request.target)
+                    .map_err(|error| ClientMutationError::Store(error.into()))?
+                    .is_some();
+            if send_target_exists {
+                self.engine
+                    .connection_control(&request.target, false)
+                    .map_err(connection_mutation_error)?;
+            }
+            if request.operation == "chat.connection.continue" {
+                let input: ark_protocol::ChatConnectionContinueInput =
+                    serde_json::from_value(request.input.clone())
+                        .map_err(|_| ClientMutationError::Unsupported)?;
+                let pending = self
+                    .engine
+                    .connection_request(&input.request_id)
+                    .map_err(connection_mutation_error)?;
+                let expected = input
+                    .expected_revision
+                    .as_str()
+                    .parse::<u64>()
+                    .map_err(|_| ClientMutationError::ConnectionStale)?;
+                if pending.session != request.target || pending.local_revision != expected {
+                    return Err(ClientMutationError::ConnectionStale);
+                }
+                if !matches!(
+                    pending.phase,
+                    ConnectionRequestPhase::Acquired { .. }
+                        | ConnectionRequestPhase::Admitted { .. }
+                        | ConnectionRequestPhase::Started { .. }
+                ) {
+                    return Err(ClientMutationError::ConnectionUnavailable);
+                }
+                self.ready_connection_conv(&request.target)
+                    .await
+                    .map_err(connection_readiness_error)?;
+            }
+            if send_target_exists {
+                let conv = self
+                    .chat_conv(&request.target, "", true)
+                    .await
+                    .map_err(|_| ClientMutationError::ModelUnavailable)?;
+                if !conv.is_running() && !conv.ix.lock().await.selected_model_ready() {
+                    return Err(ClientMutationError::ModelUnavailable);
+                }
+            }
+            if request.operation == "chat.model" {
+                let input: ark_protocol::ChatModelInput =
+                    serde_json::from_value(request.input.clone())
+                        .map_err(|_| ClientMutationError::Unsupported)?;
+                let conv = self
+                    .chat_conv(&request.target, "", false)
+                    .await
+                    .map_err(|_| ClientMutationError::ModelUnavailable)?;
+                if conv.is_running() {
+                    return Err(ClientMutationError::ChatBusy);
+                }
+                prepared_model = Some(
+                    self.prepare_client_model(&input.model)
+                        .await
+                        .map_err(|_| ClientMutationError::ModelUnavailable)?,
+                );
+            }
             let highwater = self.client_mutation_counter(device, &request.epoch)?;
             if highwater > 0 {
                 let pending_id = format!("{device}:{}:{highwater}", request.epoch);
@@ -1326,7 +1879,7 @@ impl Host {
                 accepted_at,
                 display: "Accepted".into(),
             };
-            let record = json!({
+            let mut record = json!({
                 "device": device,
                 "epoch": request.epoch,
                 "counter": request.counter.as_str(),
@@ -1337,25 +1890,147 @@ impl Host {
                 "receipt": receipt,
             });
             let highwater = json!({ "counter": request.counter.as_str() });
-            self.engine
-                .store
-                .put_records(&[
-                    ("client_mutation", &record_id, device, &record),
-                    (
-                        "client_mutation_highwater",
-                        &format!("{device}:{}", request.epoch),
-                        device,
-                        &highwater,
-                    ),
-                ])
-                .map_err(|error| ClientMutationError::Store(error.into()))?;
+            if send_target_exists && self.has_connection_requests() {
+                let conv = self
+                    .chat_conv(&request.target, "", true)
+                    .await
+                    .map_err(|_| ClientMutationError::ModelUnavailable)?;
+                if conv.is_running() {
+                    return Err(ClientMutationError::ChatBusy);
+                }
+                let mut ix = conv
+                    .ix
+                    .try_lock()
+                    .map_err(|_| ClientMutationError::ChatBusy)?;
+                record["effect"] = json!({"turnIndex":ix.session().turn_count()});
+                let highwater_id = format!("{device}:{}", request.epoch);
+                let old_highwater = self
+                    .engine
+                    .store
+                    .get_record("client_mutation_highwater", &highwater_id)
+                    .map_err(|error| ClientMutationError::Store(error.into()))?;
+                ix.admit_turn_input_records(
+                    request.input["body"].as_str().unwrap_or_default(),
+                    &[
+                        ark_store::RecordChange {
+                            kind: "client_mutation",
+                            id: &record_id,
+                            scope: device,
+                            expected: None,
+                            value: &record,
+                        },
+                        ark_store::RecordChange {
+                            kind: "client_mutation_highwater",
+                            id: &highwater_id,
+                            scope: device,
+                            expected: old_highwater.as_ref(),
+                            value: &highwater,
+                        },
+                    ],
+                )
+                .map_err(|error| {
+                    if error
+                        .downcast_ref::<ark_sdk::prelude::ark_runtime::AgentError>()
+                        .is_some_and(|error| {
+                            matches!(
+                                error,
+                                ark_sdk::prelude::ark_runtime::AgentError::Connection(
+                                    ConnectionRequestError::Busy
+                                )
+                            )
+                        })
+                    {
+                        ClientMutationError::ChatBusy
+                    } else {
+                        ClientMutationError::Store(error)
+                    }
+                })?;
+                drop(ix);
+                admitted_send = Some(conv);
+            } else {
+                self.engine
+                    .store
+                    .put_records(&[
+                        ("client_mutation", &record_id, device, &record),
+                        (
+                            "client_mutation_highwater",
+                            &format!("{device}:{}", request.epoch),
+                            device,
+                            &highwater,
+                        ),
+                    ])
+                    .map_err(|error| ClientMutationError::Store(error.into()))?;
+            }
             record
         };
 
         let (status, display) = match request.operation.as_str() {
+            "chat.connection.continue" => {
+                let input: ark_protocol::ChatConnectionContinueInput =
+                    serde_json::from_value(request.input.clone())
+                        .map_err(|_| ClientMutationError::Unsupported)?;
+                let pending = self
+                    .engine
+                    .connection_request(&input.request_id)
+                    .map_err(connection_mutation_error)?;
+                if pending.session != request.target {
+                    return Err(ClientMutationError::ConnectionStale);
+                }
+                if matches!(
+                    pending.phase,
+                    ConnectionRequestPhase::Completed | ConnectionRequestPhase::Interrupted { .. }
+                ) {
+                    ("completed", "Continued")
+                } else if matches!(pending.phase, ConnectionRequestPhase::Closed { .. }) {
+                    ("no_longer_applicable", "Nothing changed")
+                } else {
+                    let conv = self
+                        .ready_connection_conv(&request.target)
+                        .await
+                        .map_err(connection_readiness_error)?;
+                    let mut completed = record.clone();
+                    completed["receipt"]["status"] = json!("completed");
+                    completed["receipt"]["display"] = json!("Continued");
+                    let run = self
+                        .engine
+                        .admit_connection_record(
+                            &pending.id,
+                            pending.local_revision,
+                            Some(ark_store::RecordChange {
+                                kind: "client_mutation",
+                                id: &record_id,
+                                scope: device,
+                                expected: Some(&record),
+                                value: &completed,
+                            }),
+                        )
+                        .map_err(connection_mutation_error)?;
+                    if matches!(
+                        pending.phase,
+                        ConnectionRequestPhase::Acquired { .. }
+                            | ConnectionRequestPhase::Admitted { .. }
+                    ) {
+                        self.start_connection_on(conv, run)
+                            .map_err(connection_mutation_error)?;
+                    }
+                    record = completed;
+                    ("completed", "Continued")
+                }
+            }
             "chat.send" => {
-                self.apply_client_send(&record_id, device, request, &mut record)
-                    .await?
+                if let Some(conv) = admitted_send {
+                    self.start_turn_on_inner(
+                        conv,
+                        request.input["body"].as_str().unwrap_or_default().into(),
+                        true,
+                        true,
+                    )
+                    .map_err(ClientMutationError::Store)?;
+                    ("completed", "Sent")
+                } else {
+                    self.apply_client_send(&record_id, device, request, &mut record)
+                        .await?
+                }
             }
             "attention.answer" => {
                 let id = request
@@ -1372,6 +2047,49 @@ impl Host {
                 {
                     Ok(_) => ("completed", "Recorded"),
                     Err(_) => ("no_longer_applicable", "Nothing changed"),
+                }
+            }
+            "chat.model" => {
+                let input: ark_protocol::ChatModelInput =
+                    serde_json::from_value(request.input.clone())
+                        .map_err(|_| ClientMutationError::Unsupported)?;
+                let requested_model = requested_model_spec(&input.model);
+                let already_applied = self
+                    .engine
+                    .store
+                    .get_session(&request.target)
+                    .map_err(|error| ClientMutationError::Store(error.into()))?
+                    .is_some_and(|session| {
+                        session["model"].as_str() == Some(requested_model.as_str())
+                    });
+                if already_applied {
+                    ("completed", "Model changed")
+                } else {
+                    if prepared_model.is_none() {
+                        prepared_model = self.prepare_client_model(&input.model).await.ok();
+                    }
+                    match prepared_model {
+                        None => ("refused", "That model is no longer available"),
+                        Some(prepared) => {
+                            let _quiet = self.switching.lock().await;
+                            match self.chat_conv(&request.target, "", false).await {
+                                Err(_) => ("refused", "That chat is no longer available"),
+                                Ok(conv) if conv.is_running() => {
+                                    ("refused", "Wait for this reply to finish")
+                                }
+                                Ok(conv) => {
+                                    let mut ix = conv.ix.lock().await;
+                                    match ix.select_model(prepared.spec, prepared.router) {
+                                        Ok(_) => {
+                                            conv.note(&ix);
+                                            ("completed", "Model changed")
+                                        }
+                                        Err(_) => ("refused", "That model could not be changed"),
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             _ => unreachable!("operations were validated before acceptance"),
@@ -1417,6 +2135,9 @@ impl Host {
         };
         if conv.is_running() {
             return Ok(("accepted", "Accepted"));
+        }
+        if !conv.ix.lock().await.selected_model_ready() {
+            return Err(ClientMutationError::ModelUnavailable);
         }
         let turn_index = self
             .engine
@@ -1478,6 +2199,31 @@ impl Host {
                 input: record["input"].clone(),
             };
             let _ = self.apply_client_mutation(device, &request).await;
+        }
+        if self.has_connection_requests() {
+            let sessions = self
+                .engine
+                .store
+                .list_records(
+                    ark_sdk::prelude::ark_runtime::connection_requests::RECORD_KIND,
+                    None,
+                )?
+                .into_iter()
+                .filter_map(|value| value["session"].as_str().map(str::to_string))
+                .collect::<std::collections::BTreeSet<_>>();
+            let sessions: Vec<_> = sessions.into_iter().collect();
+            for batch in sessions.chunks(4) {
+                let (a, b, c, d) = tokio::join!(
+                    self.refresh_client_connection_chat(batch.first()),
+                    self.refresh_client_connection_chat(batch.get(1)),
+                    self.refresh_client_connection_chat(batch.get(2)),
+                    self.refresh_client_connection_chat(batch.get(3)),
+                );
+                a?;
+                b?;
+                c?;
+                d?;
+            }
         }
         Ok(())
     }
@@ -1624,6 +2370,40 @@ impl Host {
         self.notifier.soon(Arc::new(move || {
             me.upgrade().map(|h| h.notices()).unwrap_or_default()
         }));
+    }
+
+    pub(crate) fn native_push_resolution(
+        &self,
+        owner: &str,
+        id: &str,
+    ) -> anyhow::Result<ark_protocol::NativePushResolution> {
+        let found = self.notifier.native.resolve(owner, id)?;
+        let mut response = ark_protocol::NativePushResolution {
+            attention_id: id.into(),
+            state: "resolved".into(),
+            chat_id: None,
+            item_id: None,
+        };
+        if let Some((notice, chat)) = found {
+            if let Some(chat) = chat {
+                if self.engine.store.get_session(&chat)?.is_some() {
+                    response.chat_id = Some(chat);
+                }
+            }
+            if self.notices().iter().any(|n| n.id == notice) {
+                response.state = "current".into();
+                response.item_id = Some(notice.clone());
+                if response.chat_id.is_none() {
+                    response.chat_id = ark_interact::attention::list(&self.engine, &self.labels)
+                        .into_iter()
+                        .find(|item| item.id == notice)
+                        .and_then(|item| item.chat);
+                }
+            } else if response.chat_id.is_some() {
+                response.state = "chat".into();
+            }
+        }
+        Ok(response)
     }
 
     /// The project an agent's task works in (`{id, name}`), so its question can say where it
@@ -3257,18 +4037,44 @@ impl Host {
             // `session` names a chat working in the background; default the current one.
             "steer" => {
                 let text = s("text");
-                match self.conv_for(&params).running.lock().unwrap().as_ref() {
-                    Some(r) => {
-                        r.ctl.steer.push(text);
+                let conv = self.conv_for(&params);
+                self.engine.connection_control(&conv.session(), false)?;
+                let ctl = conv
+                    .running
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|running| running.ctl.clone());
+                match ctl {
+                    Some(ctl) => {
+                        ctl.steer.push(text);
                         Ok(json!({ "queued": true }))
+                    }
+                    None if self
+                        .engine
+                        .connection_requests(&conv.session())?
+                        .iter()
+                        .any(|request| !request.closed()) =>
+                    {
+                        self.start_turn_on(conv, text, true)?;
+                        Ok(json!({"started":true}))
                     }
                     None => anyhow::bail!("no turn is running"),
                 }
             }
             "cancel" => {
-                if let Some(r) = self.conv_for(&params).running.lock().unwrap().as_ref() {
-                    r.ctl.cancel.cancel();
+                let conv = self.conv_for(&params);
+                let ctl = conv
+                    .running
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|running| running.ctl.clone());
+                let durable = self.engine.connection_control(&conv.session(), true);
+                if let Some(ctl) = ctl {
+                    ctl.cancel.cancel();
                 }
+                durable?;
                 Ok(json!({}))
             }
             // What waits for the person in any project (ADR 0043): the same list as `/waiting`.
@@ -3529,6 +4335,7 @@ impl Host {
                     "desktop-window",
                     &project,
                     &uuid::Uuid::new_v4().to_string(),
+                    None,
                 )
                 .await
                 .map_err(ClientChatCreateError::into_anyhow)
@@ -4067,36 +4874,139 @@ impl Host {
     }
 
     /// Make a chat for an external client without changing the chat shown in any window.
+    pub(crate) async fn client_models(
+        &self,
+        route_id: &str,
+    ) -> anyhow::Result<ark_protocol::ModelsSnapshot> {
+        let providers = client_model_providers(ark_model::catalog().await);
+        let (display, default) = {
+            let current = self.cur();
+            let ix = current.ix.lock().await;
+            let router = ix.ark().router();
+            let fast = router.model_id(ark_sdk::prelude::ark_runtime::Role::Select);
+            let strong = router.model_id(ark_sdk::prelude::ark_runtime::Role::Reason);
+            let default = (fast == strong).then(|| {
+                let (provider, model) = ark_interact::interaction::model_spec(&strong, ix.ark());
+                format!("{provider}:{model}")
+            });
+            (router.label(), default)
+        };
+        let selection = default
+            .as_deref()
+            .and_then(|spec| selection_for_canonical(&providers, spec));
+        Ok(ark_protocol::ModelsSnapshot {
+            route_id: route_id.to_string(),
+            default_model: ark_protocol::ModelDefault { selection, display },
+            providers,
+        })
+    }
+
+    pub(crate) async fn client_conversation_model(
+        &self,
+        session: &str,
+        display: String,
+        can_select: bool,
+    ) -> anyhow::Result<ark_protocol::ConversationModel> {
+        let record = self
+            .engine
+            .store
+            .get_session(session)?
+            .ok_or_else(|| anyhow::anyhow!("that chat no longer exists"))?;
+        let providers = client_model_providers(ark_model::catalog().await);
+        let (selection, display) = match record["model"].as_str() {
+            Some(spec) => match selection_for_canonical(&providers, spec) {
+                Some(selection) => {
+                    let display = selection_display(&providers, &selection)
+                        .unwrap_or_else(|| "Selected model unavailable".to_string());
+                    (Some(selection), display)
+                }
+                None => (None, "Selected model unavailable".to_string()),
+            },
+            None => (None, display),
+        };
+        Ok(ark_protocol::ConversationModel {
+            selection,
+            display,
+            can_select,
+        })
+    }
+
+    async fn prepare_client_model(
+        &self,
+        selection: &ark_protocol::ModelSelection,
+    ) -> Result<PreparedModel, ClientChatCreateError> {
+        let providers = client_model_providers(ark_model::catalog().await);
+        let canonical = canonical_selection(&providers, selection)
+            .ok_or(ClientChatCreateError::ModelUnavailable)?;
+        let (provider, model) = canonical
+            .split_once(':')
+            .ok_or(ClientChatCreateError::ModelUnavailable)?;
+        let selected = ark_model::build(provider, Some(model.to_string()))
+            .map_err(|_| ClientChatCreateError::ModelUnavailable)?;
+        Ok(PreparedModel {
+            spec: canonical,
+            router: ark_sdk::prelude::ark_runtime::ModelRouter::single(selected),
+        })
+    }
+
     pub(crate) async fn create_client_chat(
         self: &Arc<Self>,
         device: &str,
         project: &str,
         request_id: &str,
+        selection: Option<&ark_protocol::ModelSelection>,
     ) -> Result<Value, ClientChatCreateError> {
         let _serial = self.client_mutations.lock().await;
+        let digest = Sha256::digest(format!("{device}\0{request_id}").as_bytes());
+        let session = format!("client-{digest:x}");
+        let requested_model = selection.map(requested_model_spec);
+        if let Some(conv) = self.conv_of(&session) {
+            let record = self
+                .engine
+                .store
+                .get_session(&session)
+                .map_err(|error| ClientChatCreateError::Store(error.into()))?
+                .ok_or(ClientChatCreateError::RequestConflict)?;
+            if conv.about.lock().unwrap().project != project
+                || record["project"].as_str() != Some(project)
+                || record["model"].as_str() != requested_model.as_deref()
+            {
+                return Err(ClientChatCreateError::RequestConflict);
+            }
+            let session = conv.session();
+            self.addressed.lock().unwrap().insert(session, conv.clone());
+            return Ok(self.summary_of(&conv));
+        }
+        if let Some(record) = self
+            .engine
+            .store
+            .get_session(&session)
+            .map_err(|error| ClientChatCreateError::Store(error.into()))?
+        {
+            if record["project"].as_str() != Some(project)
+                || record["model"].as_str() != requested_model.as_deref()
+            {
+                return Err(ClientChatCreateError::RequestConflict);
+            }
+            let project = ProjectId(project.to_string());
+            let conv = self.open_sibling(Some(&session), &project)?;
+            let session = conv.session();
+            self.addressed.lock().unwrap().insert(session, conv.clone());
+            return Ok(self.summary_of(&conv));
+        }
+
+        let prepared = match selection {
+            Some(selection) => Some(self.prepare_client_model(selection).await?),
+            None => None,
+        };
         let project = self
             .engine
             .store
             .get_project(&ProjectId(project.to_string()))
             .map_err(|error| ClientChatCreateError::Store(error.into()))?
             .ok_or_else(|| anyhow::anyhow!("there is no project `{project}` here"))?;
-        let digest = Sha256::digest(format!("{device}\0{request_id}").as_bytes());
-        let session = format!("client-{digest:x}");
-        let conv = if let Some(conv) = self.conv_of(&session) {
-            if conv.about.lock().unwrap().project != project.id.as_str() {
-                return Err(ClientChatCreateError::RequestConflict);
-            }
-            conv
-        } else if let Some(record) = self
-            .engine
-            .store
-            .get_session(&session)
-            .map_err(|error| ClientChatCreateError::Store(error.into()))?
-        {
-            if record["project"].as_str() != Some(project.id.as_str()) {
-                return Err(ClientChatCreateError::RequestConflict);
-            }
-            self.open_sibling(Some(&session), &project.id)?
+        let conv = if let Some(prepared) = prepared {
+            self.open_new_sibling_model(SessionId(session.clone()), &project.id, prepared)?
         } else {
             self.open_new_sibling(SessionId(session.clone()), &project.id)?
         };
@@ -4453,15 +5363,40 @@ impl Host {
                 let conv = self
                     .conv_of(&session)
                     .ok_or_else(|| anyhow::anyhow!("no turn is running"))?;
-                let running = conv.running.lock().unwrap();
-                let r = running
+                let ctl = conv
+                    .running
+                    .lock()
+                    .unwrap()
                     .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("no turn is running"))?;
+                    .map(|running| running.ctl.clone());
+                let durable = self
+                    .engine
+                    .connection_control(&session, method == "chat_cancel");
+                if method == "chat_cancel" {
+                    if let Some(ctl) = &ctl {
+                        ctl.cancel.cancel();
+                    }
+                }
+                let contextual = durable?;
                 if method == "chat_steer" {
-                    r.ctl.steer.push(s("text"));
-                    Ok(json!({ "queued": true }))
+                    if let Some(ctl) = ctl {
+                        ctl.steer.push(s("text"));
+                        Ok(json!({"queued":true}))
+                    } else if self
+                        .engine
+                        .connection_requests(&session)?
+                        .iter()
+                        .any(|request| !request.closed())
+                    {
+                        self.start_turn_on(conv, s("text"), true)?;
+                        Ok(json!({"started":true}))
+                    } else {
+                        anyhow::bail!("no turn is running")
+                    }
                 } else {
-                    r.ctl.cancel.cancel();
+                    if ctl.is_none() {
+                        anyhow::ensure!(contextual, "no turn is running");
+                    }
                     Ok(json!({}))
                 }
             }
@@ -4732,6 +5667,16 @@ impl Host {
         input: String,
         ask: bool,
     ) -> anyhow::Result<()> {
+        self.start_turn_on_inner(conv, input, ask, false)
+    }
+
+    fn start_turn_on_inner(
+        self: &Arc<Self>,
+        conv: Arc<Conv>,
+        input: String,
+        ask: bool,
+        already_admitted: bool,
+    ) -> anyhow::Result<()> {
         let ctl = TurnControl {
             ask,
             ..TurnControl::new()
@@ -4740,6 +5685,12 @@ impl Host {
             let mut running = conv.running.lock().unwrap();
             if running.is_some() {
                 anyhow::bail!("the agent is already working");
+            }
+            if !already_admitted {
+                conv.ix
+                    .try_lock()
+                    .map_err(|_| anyhow::anyhow!("the chat is starting"))?
+                    .admit_turn_input(&input)?;
             }
             *running = Some(Running {
                 ctl: ctl.clone(),
@@ -4752,8 +5703,46 @@ impl Host {
     }
 
     async fn run_turn(self: Arc<Self>, conv: Arc<Conv>, input: String, ctl: TurnControl) {
+        self.run_turn_inner(conv, input, ctl, None).await
+    }
+
+    fn start_connection_on(
+        self: &Arc<Self>,
+        conv: Arc<Conv>,
+        run: AdmittedConnectionRun,
+    ) -> Result<(), ark_sdk::prelude::ark_runtime::AgentError> {
+        let ctl = TurnControl::new();
+        {
+            let mut running = conv.running.lock().unwrap();
+            if running.is_some() {
+                return Err(ConnectionRequestError::Busy.into());
+            }
+            *running = Some(Running {
+                ctl: ctl.clone(),
+                input: String::new(),
+            });
+        }
+        let host = self.clone();
+        tokio::spawn(async move {
+            host.run_turn_inner(conv, String::new(), ctl, Some(run))
+                .await
+        });
+        Ok(())
+    }
+
+    async fn run_turn_inner(
+        self: Arc<Self>,
+        conv: Arc<Conv>,
+        input: String,
+        ctl: TurnControl,
+        resume: Option<AdmittedConnectionRun>,
+    ) {
         let session = conv.session();
-        self.emit(json!({ "kind": "turn_started", "input": input, "session": session }));
+        if resume.is_some() {
+            self.emit(json!({"kind":"connection_continued","session":session}));
+        } else {
+            self.emit(json!({ "kind": "turn_started", "input": input, "session": session }));
+        }
         self.emit_working();
         let mut ix = conv.ix.lock().await;
         if let Some(focus) = conv.focus.lock().unwrap().take() {
@@ -4761,18 +5750,22 @@ impl Host {
         }
         let feed = self.feed.clone();
         let sid = session.clone();
-        let end = ix
-            .run_turn(&input, &ctl, |ev, a| {
-                // Text arrives in small pieces; everything else carries its description.
-                let v = match ev {
-                    HarnessEvent::TextDelta { text } => {
-                        json!({ "kind": "text", "text": text, "session": sid })
-                    }
-                    _ => json!({ "kind": "event", "event": ev, "activity": a, "session": sid }),
-                };
-                feed.send(v);
-            })
-            .await;
+        let feed_events = |ev: &HarnessEvent, a: Option<&ark_interact::Activity>| {
+            // Text arrives in small pieces; everything else carries its description.
+            let v = match ev {
+                HarnessEvent::TextDelta { text } => {
+                    json!({ "kind": "text", "text": text, "session": sid })
+                }
+                _ => json!({ "kind": "event", "event": ev, "activity": a, "session": sid }),
+            };
+            feed.send(v);
+        };
+        let end = if let Some(run) = resume {
+            ix.resume_connection(run, &ctl, feed_events).await
+        } else {
+            ix.run_turn(&input, &ctl, feed_events).await
+        };
+        let awaiting = matches!(&end.result,Ok(outcome) if outcome.awaiting_connection.is_some());
         let (ok, cancelled, error, answer, steps) = match &end.result {
             Ok(o) => (true, o.cancelled, None, o.answer.clone(), o.steps),
             Err(_) => (false, false, end.error_line(), String::new(), 0),
@@ -4818,6 +5811,17 @@ impl Host {
         for id in open {
             self.emit(json!({ "kind": "approval_closed", "id": id }));
         }
+        if !cancelled && !awaiting {
+            if self
+                .notifier
+                .native
+                .completed(&session, end.index, ok)
+                .is_err()
+            {
+                tracing::warn!("could not retain native completion notification");
+            }
+            self.notify_soon();
+        }
         self.emit(json!({
             "kind": "turn_finished",
             "session": session,
@@ -4834,6 +5838,7 @@ impl Host {
             "elapsed_ms": end.elapsed_ms,
             "undelivered": end.undelivered,
             "summary": current.then(|| self.summary()),
+            "awaiting_connection":awaiting,
         }));
         self.emit_working();
     }
@@ -4976,6 +5981,146 @@ async fn forward_approvals(
                 h.emit(json!({ "kind": "approval_closed", "id": id }));
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod admitted_send_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failed_durable_stop_still_cancels_only_the_captured_control() {
+        let dir = tempfile::tempdir().unwrap();
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(Arc::new(ark_model::MockProvider::new("fixture", vec![])))
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let (host, _) = crate::ArkUi::new(ark_interact::App::new("Test").ark(ark))
+            .open()
+            .await
+            .unwrap();
+        let conv = host.cur();
+        host.engine
+            .store
+            .put_record(
+                ark_sdk::prelude::ark_runtime::connection_requests::RECORD_KIND,
+                "invalid-request",
+                &conv.session(),
+                &json!({"invalid":true}),
+            )
+            .unwrap();
+        for method in ["cancel", "chat_cancel"] {
+            let control = TurnControl::new();
+            *conv.running.lock().unwrap() = Some(Running {
+                ctl: control.clone(),
+                input: "Held original input".into(),
+            });
+            let error = host
+                .call(method, json!({"session":conv.session()}))
+                .await
+                .unwrap_err();
+            assert!(!error.to_string().is_empty());
+            assert!(control.cancel.is_cancelled());
+            assert!(Arc::ptr_eq(
+                &conv.running.lock().unwrap().as_ref().unwrap().ctl.recorder,
+                &control.recorder
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_admitted_start_preserves_the_exact_request_and_competing_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let model = Arc::new(ark_model::MockProvider::new("fixture", vec![]));
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(model.clone())
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let (host, _) = crate::ArkUi::new(ark_interact::App::new("Test").ark(ark))
+            .open()
+            .await
+            .unwrap();
+        let conv = host.cur();
+        let id = conv.session();
+        let input = "Keep the admitted person message";
+        let receipt = json!({"receipt":{"status":"accepted"},"effect":{"turnIndex":0}});
+        let highwater = json!({"counter":"7"});
+        conv.ix
+            .lock()
+            .await
+            .admit_turn_input_records(
+                input,
+                &[
+                    ark_store::RecordChange {
+                        kind: "client_mutation",
+                        id: "fixture:epoch:7",
+                        scope: "fixture",
+                        expected: None,
+                        value: &receipt,
+                    },
+                    ark_store::RecordChange {
+                        kind: "client_mutation_highwater",
+                        id: "fixture:epoch",
+                        scope: "fixture",
+                        expected: None,
+                        value: &highwater,
+                    },
+                ],
+            )
+            .unwrap();
+        let header = host.engine.store.get_session(&id).unwrap();
+        let turns = host.engine.store.list_session_turns(&id, None).unwrap();
+        assert!(host
+            .start_turn_on(conv.clone(), "Competing input".into(), true)
+            .is_err());
+        assert!(conv.running.lock().unwrap().is_none());
+        let owner = TurnControl::new();
+        *conv.running.lock().unwrap() = Some(Running {
+            ctl: owner.clone(),
+            input: "Existing owner".into(),
+        });
+        assert!(host
+            .start_turn_on_inner(conv.clone(), input.into(), true, true)
+            .is_err());
+        {
+            let running = conv.running.lock().unwrap();
+            let running = running.as_ref().unwrap();
+            assert_eq!(running.input, "Existing owner");
+            assert!(Arc::ptr_eq(&running.ctl.recorder, &owner.recorder));
+        }
+        assert_eq!(host.engine.store.get_session(&id).unwrap(), header);
+        assert_eq!(
+            host.engine.store.list_session_turns(&id, None).unwrap(),
+            turns
+        );
+        assert_eq!(
+            host.engine
+                .store
+                .get_record("client_mutation", "fixture:epoch:7")
+                .unwrap(),
+            Some(receipt)
+        );
+        assert_eq!(
+            host.engine
+                .store
+                .get_record("client_mutation_highwater", "fixture:epoch")
+                .unwrap(),
+            Some(highwater)
+        );
+        assert_eq!(model.call_count(), 0);
+        assert!(host
+            .engine
+            .store
+            .list_invocations(&conv.ix.lock().await.session().project().clone())
+            .unwrap()
+            .is_empty());
+        conv.running.lock().unwrap().take();
     }
 }
 

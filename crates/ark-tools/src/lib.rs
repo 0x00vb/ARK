@@ -39,6 +39,47 @@ pub trait BlobResolver: Send + Sync {
 }
 
 /// Context handed to an action when it runs.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimedConnectionBinding {
+    pub receipt_id: String,
+    pub scope_ref: String,
+    pub request_id: String,
+    pub invocation_id: String,
+    pub route_id: String,
+    pub offer_id: String,
+    pub binding_id: String,
+    pub fingerprint: String,
+    #[serde(with = "decimal_revision")]
+    pub broker_revision: u64,
+}
+
+pub mod decimal_revision {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        value: &u64,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<u64, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if value.is_empty()
+            || (value.len() > 1 && value.starts_with('0'))
+            || !value.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Err(serde::de::Error::custom(
+                "revision must be an unsigned decimal string",
+            ));
+        }
+        value.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 pub struct RunCtx<'a> {
     pub blobs: &'a dyn BlobResolver,
     /// The project's on-disk workspace root, if one is sited. Adapters that write files
@@ -53,6 +94,7 @@ pub struct RunCtx<'a> {
     /// The durable invocation currently executing. Adapters use this opaque id for external
     /// idempotency. They must not send a chat or work id to a provider.
     pub invocation: Option<String>,
+    pub connection_binding: Option<ClaimedConnectionBinding>,
 }
 
 impl<'a> RunCtx<'a> {
@@ -63,6 +105,7 @@ impl<'a> RunCtx<'a> {
             work: None,
             continues: Vec::new(),
             invocation: None,
+            connection_binding: None,
         }
     }
     pub fn with_workspace(mut self, workspace: PathBuf) -> Self {

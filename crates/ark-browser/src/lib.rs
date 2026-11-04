@@ -1122,7 +1122,147 @@ async fn fresh_profile(root: &std::path::Path) -> std::path::PathBuf {
 mod tests {
     use super::{private_by_host, surface_image, this_computer, BrowserService, State};
     use std::sync::OnceLock;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     use std::time::Duration;
+
+    struct CrashSite {
+        url: String,
+        stop: Option<tokio::sync::oneshot::Sender<()>>,
+        task: Option<tokio::task::JoinHandle<()>>,
+        counts: Arc<[AtomicUsize; 3]>,
+    }
+
+    impl Drop for CrashSite {
+        fn drop(&mut self) {
+            if let Some(stop) = self.stop.take() {
+                let _ = stop.send(());
+            }
+            if let Some(task) = self.task.take() {
+                task.abort();
+            }
+        }
+    }
+
+    impl CrashSite {
+        async fn start() -> Self {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let (stop, mut stopped) = tokio::sync::oneshot::channel();
+            let counts: Arc<[AtomicUsize; 3]> =
+                Arc::new(std::array::from_fn(|_| AtomicUsize::new(0)));
+            let observed = counts.clone();
+            let task = tokio::spawn(async move {
+                let mut requests = tokio::task::JoinSet::new();
+                loop {
+                    tokio::select! {
+                        biased;
+                        _ = &mut stopped => break,
+                        completed = requests.join_next(), if !requests.is_empty() => { completed.unwrap().unwrap(); }
+                        connection = listener.accept(), if requests.len() < 4 => {
+                            let (stream, _) = connection.unwrap();
+                            observed[0].fetch_add(1, Ordering::SeqCst);
+                            let counts = observed.clone();
+                            requests.spawn(async move {
+                                match tokio::time::timeout(Duration::from_secs(1), alive_request(stream)).await {
+                                    Ok(Ok(())) => (),
+                                    Err(_) => { counts[1].fetch_add(1, Ordering::SeqCst); }
+                                    Ok(Err(error)) if matches!(error.kind(), std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::UnexpectedEof) => {
+                                        counts[2].fetch_add(1, Ordering::SeqCst);
+                                    }
+                                    Ok(Err(error)) => panic!("crash fixture request failed: {error}"),
+                                }
+                            });
+                        }
+                    }
+                }
+                requests.abort_all();
+                while let Some(completed) = requests.join_next().await {
+                    if let Err(error) = completed {
+                        assert!(
+                            error.is_cancelled(),
+                            "crash fixture request panicked: {error}"
+                        );
+                    }
+                }
+            });
+            Self {
+                url,
+                stop: Some(stop),
+                task: Some(task),
+                counts,
+            }
+        }
+
+        async fn shutdown(mut self) {
+            self.stop
+                .take()
+                .unwrap()
+                .send(())
+                .expect("crash fixture ended before shutdown");
+            self.task.take().unwrap().await.unwrap();
+            eprintln!(
+                "crash fixture: {} accepted, {} expired, {} disconnected",
+                self.counts[0].load(Ordering::SeqCst),
+                self.counts[1].load(Ordering::SeqCst),
+                self.counts[2].load(Ordering::SeqCst)
+            );
+        }
+    }
+
+    async fn alive_request(mut stream: tokio::net::TcpStream) -> std::io::Result<()> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut request = [0u8; 8192];
+        let mut used = 0;
+        while !request[..used].windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+            if used == request.len() {
+                return stream.write_all(b"HTTP/1.1 431 Request Header Fields Too Large\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").await;
+            }
+            let read = stream.read(&mut request[used..]).await?;
+            if read == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "fixture peer closed before headers",
+                ));
+            }
+            used += read;
+        }
+        stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: 20\r\nconnection: close\r\n\r\n<title>Alive</title>").await?;
+        stream.shutdown().await
+    }
+
+    #[tokio::test]
+    async fn crash_fixture_keeps_serving_after_idle_and_extra_connections() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let site = CrashSite::start().await;
+        let address = site
+            .url
+            .strip_prefix("http://")
+            .unwrap()
+            .trim_end_matches('/');
+        let idle = tokio::net::TcpStream::connect(address).await.unwrap();
+        for _ in 0..5 {
+            let mut connection = tokio::net::TcpStream::connect(address).await.unwrap();
+            connection
+                .write_all(b"GET / HTTP/1.1\r\nHost: fixture\r\n\r\n")
+                .await
+                .unwrap();
+            let mut response = String::new();
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                connection.read_to_string(&mut response),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(response.ends_with("<title>Alive</title>"));
+        }
+        assert_eq!(site.counts[0].load(Ordering::SeqCst), 6);
+        drop(idle);
+        site.shutdown().await;
+    }
 
     fn url(u: &str) -> reqwest::Url {
         reqwest::Url::parse(u).unwrap()
@@ -1204,32 +1344,21 @@ mod tests {
 
     #[tokio::test]
     async fn a_crashed_person_page_stays_ended_until_an_explicit_open() {
-        use std::io::{Read, Write};
         let dir = tempfile::tempdir().unwrap();
         let svc = BrowserService::new(dir.path()).allow_private(true);
         if svc.browser().is_none() {
             return;
         }
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        std::thread::spawn(move || {
-            for mut stream in listener.incoming().flatten().take(3) {
-                let mut request = [0; 1024];
-                let _ = stream.read(&mut request);
-                let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: 20\r\nconnection: close\r\n\r\n<title>Alive</title>",
-                );
-            }
-        });
+        let site = CrashSite::start().await;
         let surface = svc.surface("chat");
-        let url = format!("http://{address}/");
-        surface.open(&url).await.unwrap();
+        surface.open(&site.url).await.unwrap();
         surface.snapshot(640, 480).await.unwrap();
         svc.crash_fresh_for_test().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
         let error = surface.snapshot(640, 480).await.unwrap_err();
         assert!(error.contains("ended"), "{error}");
-        surface.open(&url).await.unwrap();
+        surface.open(&site.url).await.unwrap();
         assert_eq!(surface.snapshot(640, 480).await.unwrap().title, "Alive");
+        site.shutdown().await;
     }
 }

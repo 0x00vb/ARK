@@ -102,6 +102,8 @@ pub struct ActionDescriptor {
     /// without a question in [`ExecutionMode::Auto`]. False is the safe default.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_eligible: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub contextual_acquisition: bool,
 }
 
 /// Splits approval answers by input: a grant covers the calls of `group` whose `fields` have
@@ -161,6 +163,7 @@ impl ActionDescriptor {
             ask_each_time: false,
             grant: None,
             auto_eligible: false,
+            contextual_acquisition: false,
         }
     }
 
@@ -193,6 +196,12 @@ impl ActionDescriptor {
     /// Allow this project-bound mutation to run without a question in Auto mode.
     pub fn auto_eligible(mut self) -> Self {
         self.auto_eligible = true;
+        self
+    }
+
+    pub fn contextual_acquisition(mut self) -> Self {
+        self.contextual_acquisition = true;
+        self.reuse = Reuse::Volatile;
         self
     }
 

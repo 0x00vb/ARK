@@ -29,3 +29,4 @@ png.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+ark-store.workspace = true

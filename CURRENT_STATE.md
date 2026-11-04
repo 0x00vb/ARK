@@ -1,5 +1,135 @@
 # Current state
 
+## Contextual app connection requests (2026-10-26)
+
+Isolated work in `codex/app-connection-requests` retains the original chat and person message
+while an opted-in Observe metadata acquisition waits for scoped access. Durable request and
+turn admission, exact claim receipts, Stop and replacement fences, and same-turn continuation
+are implemented. Existing external mutation approval and invocation handling remain separate.
+
+All required Core CI stages are now green through split execution. The required debug prefix
+passed format, generated protocol, version, all-target workspace clippy with warnings denied,
+and workspace tests: 1,169 passed and 11 existing ignored across 115 completed groups. Optional
+page-enabled checks were not enabled. The workspace release build passed in 7m 35s. The
+simulated benchmark passed all 22 workloads; non-timing aggregate metrics match the committed
+baseline exactly. Simulated timing is not production performance evidence, and simulated cost
+accounting is not paid model usage. This is not a claim of one uninterrupted `scripts/ci.sh` run.
+Evidence: `/tmp/ark-core-required-debug-browser-fixed-20261026.log`,
+`/tmp/ark-core-verification-81XoBW/workspace-release-receipt.json`, and
+`/tmp/ark-core-sim-benchmark-rbM6sM/verification-receipt.json`. Their logs, resource samples,
+candidate and comparison are retained. No baseline was changed.
+
+The current stopped-boundary fixture also passed the actual exact-R3 old reader and current
+SDK returned-reader round trip. The returned-reader check passed 1/1 without provider, broker,
+adapter, message admission or dispatch. It verified exact closed/cancelled ownership, marker-only
+dead-owner cleanup, retained input, metrics, citations, credentials and request/header JSON, and
+idempotent reopen. SQL bookkeeping timestamps may change. The old-reader comparison permitted
+exactly one genuine R3 `runtime/self` creation if absent, not arbitrary row changes. Evidence:
+`/tmp/ark-contextual-stopped-qw7l_z2t/compiled-fixtures-manifest.json`,
+`/tmp/ark-contextual-stopped-qw7l_z2t/current-reader-return-stopped/result.json`, and the retained
+`rollback-stopped-new-reader-proof.json` under that returned store. Independent artifact QA
+approved this proof. All 1,022 source files stayed frozen through verification and the parent
+Linux snapshot seal. The exact SDK/UI proof binaries remain preserved outside the target.
+The fixture was created by the current SDK, not R3. It has no turn trace; R3 returned null.
+The old HTTP invocation comparison excludes only the additive `connection_request` field.
+The full stored invocation row stayed exact. This does not prove a populated-trace upgrade.
+
+Root cleaned only the owned inactive debug and release profiles after their readers released
+them. Required debug libraries were retained until the consumer check passed. Logs, receipts,
+benchmark output and sealed proof binaries were preserved. Actual private activation and the
+same-chat iPhone GitHub OAuth and counter checks remain pending. The feature is not complete;
+vstack remains at VERIFY, step 4/6. No commit, push or public release is implied.
+
+### Implementation and verification history
+
+The entries below record earlier checkpoints and failures. Their pending statements describe
+those checkpoints, not the current gate status above.
+
+Scoped source reviews approved the bounded fixes. Focused checks pass: SDK 13/13, connection
+HTTP 7/7 and waiting-event serialization 1/1. The unchanged native-client HTTP case then exposed
+two inherited active-turn lock waits. Reviewed corrections preserve pending send receipts and
+read stored chat metadata for idempotent create retries. That case now passes 1/1. The seven
+connection HTTP cases have not been rerun after those two Host corrections.
+
+A later Sonnet review found that metadata adapter failures could make chat reads fail. The
+reviewed correction adds persisted retry deadlines with capped backoff, typed temporary
+metadata failure, and a readable uncertain snapshot. The latest HTTP suite passes 9/9, including
+metadata recovery, two devices and expiry. A separate concurrent rename case reproduced a
+header-CAS Conflict that can discard the running answer. The approved correction refuses
+active-turn rename atomically: runtime classifies the latest turn and Store fences the exact
+raw header and latest row, without parsing runtime fields or merging stale data. The full SDK
+suite now passes 19/19 with no exclusions. Store race cases pass 2/2, HTTP passes 9/9, and the
+failed-start Host case and unchanged broader serve case each pass 1/1. The original rename
+failure log is kept; the replacement test asserts the approved Busy policy and preserves the
+answer. The latest serializer check was stopped by the fail-closed resource guard when `du`
+returned an error during compilation. It has no test result and needs rerun. Actual R3 read-back
+of the new retry payload remains pending. The focused slot closed at 17:19:04 UTC with no
+compiler left running.
+
+The retry fixture was subsequently exported from a fresh exact-R3 seed copy, with actual source
+and SDK/UI executable hashes. The focused serializer retry passed. A further source review found
+listener head-of-line blocking and missing continuation model readiness checks. Phase A source
+now makes GET stored-only, runs bounded listener-owned maintenance with four concurrent chats,
+uses local cooldown diagnostics, bounds broker and metadata calls to ten seconds, closes typed
+broker refusal, and checks the selected model before admission. Awaited client-listener shutdown
+drains maintenance. Phase A focused checks passed SDK 19/19, HTTP 16/16, Host 1/1, serve 1/1,
+serializer 1/1 and Store 2/2. Two initial fixture failures are retained. Reviewed test arrangements
+settle initial connection state before seeding a large revision and await background receipt
+reconciliation without restoring blocking startup.
+
+Phase B retains exact writer evidence for owned finalization, preserves the
+closed cancellation fence, and cancels the captured local control even when the durable attempt
+fails. Dead-owner recovery clears only the retained marker through exact CAS. Normal preadmitted
+setup failures use an opaque in-memory admission proof to keep one failed input without touching
+newer work or acknowledging unconsumed posts. A stopped late prerequisite is neither persisted
+nor returned as waiting. The small approval projection separates a supplied multiline action
+title from its detail. Focused checks passed SDK 23/23, admission setup units 3/3, HTTP 17/17,
+Host 2/2, client projection 3/3, CLI Stop 1/1, serializer 1/1 and Store 2/2. Two test-only API
+compile corrections and their failed logs are retained. The stopped unfinalized rollback
+boundary passed locally, but has not been exported for an exact-R3 reader proof. No complete
+current-source gate is claimed.
+
+The current required debug prefix passed format, generated protocol, version and workspace
+all-target clippy with warnings denied. Its resource guard then stopped workspace test
+compilation because non-target volume growth exceeded the allocated 2 GiB envelope. The owned
+process group was drained. This was not a workspace test failure, and no workspace pass is
+claimed. The stopped log and resource samples are retained under
+`/tmp/ark-core-required-debug-current-20261026.log`. No release, benchmark or external stopped
+rollback export ran in that allocation.
+
+A reviewed remaining-target admission formula then allowed a warm retry. Format, protocol,
+version and clippy passed again. Workspace tests stopped at the unchanged Browser crash test:
+the second explicit open received a local connection refusal. Its fixture ended after three
+TCP connections. The precise Chromium request mix was not recorded. A test-only correction
+now gives that fixture an owned, bounded lifetime with explicit shutdown and drain. A separate
+stopped-request return-reader test verifies dead-owner cleanup without execution components.
+The corrected Browser unit suite passed 6/6. Its crash/reopen fixture recorded four connections
+in that run, and the idle/extra-connection case recorded six. The original failing run's exact
+request mix remains unknown. The full focused SDK suite passed 25/25, including the stopped
+return-reader's controlled local branch and missing/changed-marker rejection. No external
+stopped rollback proof has been produced yet.
+
+The latest required debug prefix then passed format, generated protocol, version, workspace
+all-target clippy with warnings denied, and workspace tests. The log reports 1,169 passed and
+11 ignored across 115 completed groups. Optional page-enabled checks were not enabled. The
+owned process group was drained at 19:17:23 UTC. Evidence:
+`/tmp/ark-core-required-debug-browser-fixed-20261026.log` and its resource samples. Release
+build, benchmark and the external stopped-boundary rollback proof remain pending. This is a
+split verification of the required debug prefix, not a completed `scripts/ci.sh` run.
+
+The exact R3-created seed passed both new Interaction fixture phases. Exact R3 then read the
+real live-Journal, paused-final and claimed databases, including typed history paths. New Core
+recovery passed on all three returned disposable roots without a provider, broker, adapter,
+new message or dispatch. See `docs/APP_CONNECTION_REQUESTS_ROLLBACK.md` for retained proofs
+and limits. These proofs precede the latest source fixes. The earlier full gate passed format,
+protocol, version and clippy, then stopped at the missing-chat regression, now fixed in source.
+The current full gate, release build and benchmark remain pending. Further compilation needs
+the parent session's allocation. No commit, push or deployment occurred.
+
+## Private native notification relay (2026-10-24)
+
+The isolated `codex/native-push` extension is integrated into this candidate without replacing the model and provider authorization changes. Typed external-client registration, presence and tap resolution use protocol 1.8. The runtime uses an operator-configured HTTPS origin and finite pilot expiry. Only a send capability is retained in the exact shared connection secret-store instance. Existing attention notices and chat completion feed a durable, content-free per-device outbox. The first live private binary exposed a missing headless surface: its original gate admitted only dedicated client listeners. The correction requires exact external-client scope on dedicated or account-bound headless listeners. Actual TCP tests prove all four push routes work while owner push and external generic RPC stay refused. Headless startup also resumes its prior chat; three restarts retain one session, while native window startup remains unchanged. Independent source review approved both fixes. Eleven focused push/startup cases and both model/provider HTTP regressions pass. Prior protocol checks passed six cases, and DTOs are unchanged. The corrected bounded Linux release build passes, binary SHA256 `82c890533c21a0f20b55feb7db335b98b7a5fc08cd08a1834fcd6556cd99d76e`. Physical APNs delivery and private activation remain with the parent session. Evidence: `../board/evidence/mobile-native-push-20261024/headless-followup-result.json`. No public release is implied.
+
 ## Combined release verification (2026-10-23)
 
 The combined candidate passed full page-enabled CI: formatting, generated protocol, version
@@ -142,6 +272,25 @@ Browser view remains unchanged. The isolated branch's 19 focused Node cases pass
 been rerun on this combined main source. The process-page fixture enables Browser explicitly.
 Current-main page CI, real same-port viewer/destination proof and native dogfood remain open.
 Board `948e2397`.
+
+## Native model-program authorization (2026-10-23)
+
+In development on `codex/mobile-provider-login`: protocol v1.6 adds a typed, account-route-only
+Claude connection and authorization surface for paired native clients. The runtime drives the
+official Claude Code login, status and logout commands without a shell. The CLI keeps its own
+credentials. ARK holds one active attempt and at most 32 bounded in-memory records, validates the official authorization
+address, accepts the one-time code once and restricts the attempt to its paired device. Status
+requires the exact `claude.ai` authentication method. Independent source review passed after
+fixing device scope, listener ownership, closed-channel timer starvation and fail-closed child
+cleanup. Authorization tests pass 13/13; serialized serve tests pass 16/16 and the previously
+intermittent mutation case also passed alone. A prior parallel run counted a duplicate mutation;
+it remains a historical observation, not a claimed fix. Full `scripts/ci.sh` passed formatting,
+protocol/version checks, clippy, serialized workspace tests, release build and the simulated
+benchmark with no baseline delta. The isolated Linux hosted build passed in
+4m56s. Packaged-image smoke passed official Claude authorization start/cancel, process exit,
+pairing and scope isolation. The exact image is now healthy on VPS loopback. iOS full checks
+passed and its signed artifact is ready but not installed. Real provider login/model work is
+unproven and needs the owner's physical iPhone.
 
 ## Upload completion drafts
 
@@ -365,3 +514,32 @@ The later guarded checks also pass: durable projection4Rusttests, protocol4tests
 nullable-collection regression1test, authoritative protocol regeneration and native byte compare,
 and Swiftpackage7tests. This supersedes earlier protocol/projection unrun statements. The
 interaction/host integration and complete application builds remain pending storage.
+
+## Route models and official provider authorization, 23 October 2026
+
+Protocol v1.7 now has a route-owned ready model catalog, an optional model on idempotent chat
+creation, optional current model state on conversation reads and the ordered `chat.model`
+mutation. The session's first record stores an explicit model atomically. Exact retries compare
+the durable project and model. Existing records and clients remain valid without either field.
+
+The account-bound connection surface supports Claude Code and Codex through their pinned official
+commands. Codex uses its device page and opaque user code. One authorization child runs across all
+providers. Attempt ownership, bounded output, cleared environment, strict status, cancellation,
+descendant cleanup and redacted Debug output fail closed.
+
+Focused evidence passes: six protocol tests and authoritative generation, 17 authorization tests
+and the atomic session model test. Generated Swift SHA-256 is
+`54a74042c07db0268f4c335c0f10bb9c4a3030aec5dd153ca63d39c53452df98`.
+
+On 24 October the current-source focused checks passed: the route model HTTP test, native
+authorization ownership and recovery HTTP test, six protocol tests, the atomic session model
+test and authoritative generation. The route test now counts retries against the post-restart
+Host baseline, since opening that Host creates a separate default session. Its original
+lost-response one-chat assertion remains. Root independently reviewed that test correction.
+The bounded x86_64 Linux release build passed on the development Mac in 3m56s. Its 64,503,768-byte
+binary requires GLIBC 2.29 and has SHA-256
+`9d4b9e669a881ee42151593649bee2862d17aed43121d3e73b573f3233e1233c`.
+The owner requested focused
+critical checks instead of another full repository gate. No deploy, release or live provider
+login was performed by this Core session. Evidence: workspace
+`board/evidence/mobile-core-models-20261024/` and `/tmp/ark-core-model-codex-final-build-20261024.log`.

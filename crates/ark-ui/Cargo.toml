@@ -24,6 +24,7 @@ ark-os.workspace = true
 ark-account.workspace = true
 ark-reach.workspace = true
 ark-interact.workspace = true
+ark-model.workspace = true
 ark-protocol.workspace = true
 ark-sdk.workspace = true
 ark-store.workspace = true
@@ -54,3 +55,5 @@ minisign-verify = { version = ">=0.2, <0.4", optional = true }
 [dev-dependencies]
 async-trait.workspace = true
 url.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+rusqlite.workspace = true

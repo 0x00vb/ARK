@@ -19,7 +19,22 @@ use crate::report::Tone;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Timed {
     pub at_ms: u64,
+    #[serde(serialize_with = "persisted_event")]
     pub event: HarnessEvent,
+}
+
+fn persisted_event<S: serde::Serializer>(
+    event: &HarnessEvent,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match event {
+        HarnessEvent::AwaitingConnection { display, .. } => HarnessEvent::StateUpdate {
+            kind: "connection_waiting".into(),
+            text: display.clone(),
+        }
+        .serialize(serializer),
+        _ => event.serialize(serializer),
+    }
 }
 
 /// One turn's input and event stream. Text deltas are merged per step to keep it compact.
@@ -78,6 +93,7 @@ impl TurnRecord {
 pub struct TurnRecorder {
     record: TurnRecord,
     started: Instant,
+    offset_ms: u64,
 }
 
 pub type SharedRecorder = Arc<Mutex<TurnRecorder>>;
@@ -87,6 +103,7 @@ impl Default for TurnRecorder {
         TurnRecorder {
             record: TurnRecord::default(),
             started: Instant::now(),
+            offset_ms: 0,
         }
     }
 }
@@ -96,6 +113,7 @@ impl TurnRecorder {
         Arc::new(Mutex::new(TurnRecorder::default()))
     }
     pub(crate) fn start(&mut self, input: &str) {
+        self.offset_ms = 0;
         self.record = TurnRecord {
             input: input.to_string(),
             live: true,
@@ -103,13 +121,21 @@ impl TurnRecorder {
         };
         self.started = Instant::now();
     }
+    pub(crate) fn resume(&mut self, mut record: TurnRecord) {
+        self.offset_ms = record.elapsed_ms;
+        record.live = true;
+        record.cancelled = false;
+        record.error = None;
+        self.record = record;
+        self.started = Instant::now();
+    }
     pub fn record(&mut self, ev: &HarnessEvent) {
-        let t = self.started.elapsed().as_millis() as u64;
+        let t = self.offset_ms + self.started.elapsed().as_millis() as u64;
         self.record.push(t, ev);
         self.record.elapsed_ms = t;
     }
     pub(crate) fn finish(&mut self, cancelled: bool, error: Option<String>) -> TurnRecord {
-        self.record.elapsed_ms = self.started.elapsed().as_millis() as u64;
+        self.record.elapsed_ms = self.offset_ms + self.started.elapsed().as_millis() as u64;
         self.record.cancelled = cancelled;
         self.record.error = error;
         self.record.live = false;
@@ -119,7 +145,7 @@ impl TurnRecorder {
     pub fn snapshot(&self) -> TurnRecord {
         let mut r = self.record.clone();
         if r.live {
-            r.elapsed_ms = self.started.elapsed().as_millis() as u64;
+            r.elapsed_ms = self.offset_ms + self.started.elapsed().as_millis() as u64;
         }
         r
     }
@@ -439,6 +465,9 @@ pub fn entry(ev: &HarnessEvent) -> Option<(EntryKind, String, Option<String>, To
             Some(clip(body, 100)),
             Tone::Normal,
         ),
+        HarnessEvent::AwaitingConnection { display, .. } => {
+            (E::Capability, display.clone(), None, Tone::Normal)
+        }
         HarnessEvent::Capability { action, detail } => (
             E::Capability,
             action.clone(),
@@ -705,6 +734,35 @@ fn open_call<'a>(calls: &'a mut [CallView], action: &str) -> Option<&'a mut Call
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn every_persisted_waiting_event_uses_a_legacy_state_update() {
+        let mut record = super::TurnRecord::default();
+        record.push(
+            1,
+            &ark_sdk::prelude::HarnessEvent::AwaitingConnection {
+                request_id: "request".into(),
+                offer_id: "offer".into(),
+                display: "Connect Sample".into(),
+            },
+        );
+        for mode in [super::TraceMode::Full, super::TraceMode::Summary] {
+            let encoded = serde_json::to_value(super::for_storage(&record, mode).unwrap()).unwrap();
+            assert_eq!(encoded["events"][0]["event"]["type"], "state_update");
+            assert_eq!(encoded["events"][0]["event"]["kind"], "connection_waiting");
+            assert_eq!(encoded["events"][0]["event"]["text"], "Connect Sample");
+            let decoded: super::TurnRecord = serde_json::from_value(encoded).unwrap();
+            assert!(matches!(
+                decoded.events[0].event,
+                ark_sdk::prelude::HarnessEvent::StateUpdate { .. }
+            ));
+        }
+        let journal_snapshot = serde_json::to_value(record).unwrap();
+        assert_eq!(
+            journal_snapshot["events"][0]["event"]["type"],
+            "state_update"
+        );
+    }
 
     #[test]
     fn a_summary_trace_keeps_activity_but_no_content() {

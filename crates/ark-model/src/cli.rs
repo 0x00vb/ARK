@@ -65,7 +65,7 @@ pub const REPLY_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,
 pub const CLAUDE_REPLY_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"properties":{"action":{"type":"string","enum":["reply","call_tools"]},"text":{"type":"string"},"tool_calls":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"arguments":{"type":"object"}},"required":["name","arguments"]}}},"required":["action","text","tool_calls"]}"#;
 
 /// Which vendor CLI.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Cli {
     /// Claude Code, signed in with a Claude subscription.

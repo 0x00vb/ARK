@@ -295,6 +295,7 @@ impl App {
             links: Arc::new(crate::links::Links::default()),
             zone: Arc::new(std::sync::Mutex::new(None)),
             waiting: Vec::new(),
+            selected_model_ready: true,
         };
         ix.refresh_names();
         ix.follow_project()?;
@@ -656,7 +657,17 @@ impl Siblings {
                 .ok_or_else(|| anyhow::anyhow!("no session matches `{id}`"))?,
             None => ark.start_session(project)?,
         };
-        self.open_session(ark, session, approver)
+        let mut selected_model_ready = true;
+        if let Some(spec) = session.model() {
+            let (provider, model) = model_spec(spec, &ark);
+            match ark_model::build(&provider, Some(model)) {
+                Ok(selected) => ark.set_router(ModelRouter::single(selected)),
+                Err(_) => selected_model_ready = false,
+            }
+        }
+        let mut interaction = self.open_session(ark, session, approver)?;
+        interaction.selected_model_ready = selected_model_ready;
+        Ok(interaction)
     }
 
     /// Another live conversation with an identity chosen by a trusted caller.
@@ -669,6 +680,22 @@ impl Siblings {
         let mut ark = self.ark.clone();
         ark.follow_current_model();
         let session = ark.start_named_session(id, project)?;
+        self.open_session(ark, session, approver)
+    }
+
+    /// Start a named conversation with a model that was already built and validated. The
+    /// selection is stored in the same write that creates the session.
+    pub fn open_new_model(
+        &self,
+        id: SessionId,
+        project: &ProjectId,
+        spec: String,
+        router: ModelRouter,
+        approver: Arc<dyn Approver>,
+    ) -> anyhow::Result<Interaction> {
+        let mut ark = self.ark.clone();
+        ark.set_router(router);
+        let session = ark.start_named_session_model(id, project, spec)?;
         self.open_session(ark, session, approver)
     }
 
@@ -719,6 +746,7 @@ impl Siblings {
             links: self.links.clone(),
             zone: self.zone.clone(),
             waiting: Vec::new(),
+            selected_model_ready: true,
         };
         ix.refresh_names();
         ix.follow_project()?;
@@ -905,6 +933,7 @@ pub struct Interaction {
     /// The items `/waiting` listed last, in its numbers (runtime, id): a number answers what
     /// the person saw.
     pub(crate) waiting: Vec<(Option<String>, String)>,
+    selected_model_ready: bool,
 }
 
 impl Interaction {
@@ -1329,10 +1358,27 @@ impl Interaction {
     /// Use another model from the next turn on. Returns its description.
     pub fn switch_model(&mut self, spec: &str) -> anyhow::Result<String> {
         let (provider, model) = model_spec(spec, &self.ark);
-        let p = ark_model::build(&provider, Some(model))?;
+        let p = ark_model::build(&provider, Some(model.clone()))?;
         let d = p.describe();
+        self.session
+            .set_model(self.ark.engine(), format!("{provider}:{model}"))?;
         self.ark.set_router(ModelRouter::single(p));
+        self.selected_model_ready = true;
         Ok(d)
+    }
+
+    /// Install an already-built model choice after persisting its exact spec on this chat.
+    pub fn select_model(&mut self, spec: String, router: ModelRouter) -> anyhow::Result<String> {
+        let display = router.label();
+        self.session.set_model(self.ark.engine(), spec)?;
+        self.ark.set_router(router);
+        self.selected_model_ready = true;
+        Ok(display)
+    }
+
+    /// Whether this chat's stored model can still be built on this runtime.
+    pub fn selected_model_ready(&self) -> bool {
+        self.selected_model_ready
     }
 
     /// Run an action directly, recorded as an invocation like any agent call. The person asked
@@ -1416,14 +1462,85 @@ impl Interaction {
     /// Run one turn. `on_event` sees every runtime event, in order, with its description.
     /// The model gets the session's bounded carry-over, never the transcript; the turn and
     /// its trace are stored.
+    pub fn admit_turn_input(&mut self, input: &str) -> anyhow::Result<()> {
+        self.admit_turn_input_records(input, &[])
+    }
+
+    pub fn admit_turn_input_records(
+        &mut self,
+        input: &str,
+        records: &[ark_runtime::connection_requests::RecordChange<'_>],
+    ) -> anyhow::Result<()> {
+        let expected_index = self.session.turn_count();
+        self.session = self
+            .ark
+            .open_session(self.session.id().as_str())?
+            .ok_or_else(|| anyhow::anyhow!("chat no longer exists"))?;
+        if !records.is_empty() && self.session.turn_count() != expected_index {
+            anyhow::bail!("the conversation changed before input admission");
+        }
+        self.session
+            .admit_input_records(self.ark.engine(), input, records)?;
+        Ok(())
+    }
+
     pub async fn run_turn(
         &mut self,
         input: &str,
         ctl: &TurnControl,
+        on_event: impl FnMut(&HarnessEvent, Option<&Activity>),
+    ) -> TurnEnd {
+        self.run_turn_inner(input, ctl, on_event, None).await
+    }
+
+    pub async fn resume_connection(
+        &mut self,
+        run: ark_runtime::connection_requests::AdmittedConnectionRun,
+        ctl: &TurnControl,
+        on_event: impl FnMut(&HarnessEvent, Option<&Activity>),
+    ) -> TurnEnd {
+        self.run_turn_inner("", ctl, on_event, Some(run)).await
+    }
+
+    async fn run_turn_inner(
+        &mut self,
+        input: &str,
+        ctl: &TurnControl,
         mut on_event: impl FnMut(&HarnessEvent, Option<&Activity>),
+        resume: Option<ark_runtime::connection_requests::AdmittedConnectionRun>,
     ) -> TurnEnd {
         self.refresh_names();
-        ctl.recorder.lock().unwrap().start(input);
+        let resumed_index = resume.as_ref().map(|run| run.turn());
+        if let Some(index) = resumed_index {
+            let previous = (|| -> Result<TurnRecord, ArkError> {
+                let value = self
+                    .engine()
+                    .store
+                    .get_turn_trace(self.session.id().as_str(), index)
+                    .map_err(ark_runtime::AgentError::from)?;
+                value
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map(|record| record.unwrap_or_default())
+                    .map_err(ark_runtime::AgentError::from)
+                    .map_err(Into::into)
+            })();
+            let previous = match previous {
+                Ok(previous) => previous,
+                Err(error) => {
+                    return TurnEnd {
+                        result: Err(error),
+                        elapsed_ms: 0,
+                        footer: vec![],
+                        undelivered: ctl.steer.take_undelivered(),
+                        index: Some(index),
+                    }
+                }
+            };
+            ctl.recorder.lock().unwrap().resume(previous);
+        } else {
+            ctl.recorder.lock().unwrap().start(input);
+        }
         let opts = TurnOptions {
             cancel: Some(ctl.cancel.clone()),
             approvals: ctl.ask.then(|| self.gate.clone()),
@@ -1445,21 +1562,28 @@ impl Interaction {
         let turns_before = session.turn_count();
         // The trace is saved as the turn runs, so a turn the app never finished (a crash, the
         // computer stopping) still shows what it did up to there.
-        let mut journal = Journal::new(ark.shared_engine(), session.id().as_str(), turns_before);
-        let result = ark
-            .ask_session(session, input, opts, |ev| {
-                rec.lock().unwrap().record(&ev);
-                journal.saw(&ev, &rec);
-                // The conversation's own requests; the planner's and critic's are separate.
-                if let HarnessEvent::Context { report } = &ev {
-                    if !matches!(report.role.as_str(), "plan" | "critic") {
-                        last_context = Some(report.clone());
-                    }
+        let mut journal = Journal::new(
+            ark.shared_engine(),
+            session.id().as_str(),
+            resumed_index.unwrap_or(turns_before),
+        );
+        let feed = |ev| {
+            rec.lock().unwrap().record(&ev);
+            journal.saw(&ev, &rec);
+            // The conversation's own requests; the planner's and critic's are separate.
+            if let HarnessEvent::Context { report } = &ev {
+                if !matches!(report.role.as_str(), "plan" | "critic") {
+                    last_context = Some(report.clone());
                 }
-                let a = activity::describe(labels, names, &ev);
-                on_event(&ev, a.as_ref());
-            })
-            .await;
+            }
+            let a = activity::describe(labels, names, &ev);
+            on_event(&ev, a.as_ref());
+        };
+        let result = if let Some(run) = resume {
+            ark.resume_connection(session, run, opts, feed).await
+        } else {
+            ark.ask_session(session, input, opts, feed).await
+        };
         let (cancelled, error) = match &result {
             Ok(o) => (o.cancelled, None),
             Err(e) => (false, Some(e.to_string())),
@@ -1469,8 +1593,10 @@ impl Interaction {
             self.last_context = last_context;
         }
         // A failed turn is stored too (marked incomplete), with its trace.
-        let index = (self.session.turn_count() > turns_before)
-            .then(|| self.session.turn_count().saturating_sub(1));
+        let index = resumed_index.or_else(|| {
+            (self.session.turn_count() > turns_before)
+                .then(|| self.session.turn_count().saturating_sub(1))
+        });
         if let Some(i) = index {
             if let Some(stored) =
                 crate::trace::for_storage(&record, crate::trace::TraceMode::from_env())
@@ -1486,7 +1612,7 @@ impl Interaction {
             }
         }
         let footer = match &result {
-            Ok(o) if !o.cancelled => {
+            Ok(o) if !o.cancelled && o.awaiting_connection.is_none() => {
                 inspect::footer(&o.metrics, record.elapsed_ms, o.grounded(), o.trivial)
             }
             _ => Vec::new(),
@@ -1705,6 +1831,7 @@ impl Journal {
             | HarnessEvent::Answer { .. }
             | HarnessEvent::Cancelled
             | HarnessEvent::Interrupted => true,
+            HarnessEvent::AwaitingConnection { .. } => true,
             HarnessEvent::Context { .. } | HarnessEvent::ModelCall { .. } => false,
             _ => self.last.is_none_or(|t| t.elapsed() >= JOURNAL_EVERY),
         };

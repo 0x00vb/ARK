@@ -2,6 +2,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
+    #[error("the conversation changed; refresh it and try again")]
+    Conflict,
     #[error("memory: {0}")]
     Memory(String),
 

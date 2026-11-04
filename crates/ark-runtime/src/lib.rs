@@ -21,6 +21,7 @@ pub mod budget;
 pub mod cancel;
 pub mod capmap;
 pub mod catalog;
+pub mod connection_requests;
 pub mod context_report;
 pub mod distill;
 pub mod engine;

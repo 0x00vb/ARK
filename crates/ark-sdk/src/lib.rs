@@ -213,6 +213,19 @@ pub enum ArkError {
     Provider(#[from] ark_model::ProviderError),
     #[error(transparent)]
     Runtime(#[from] ark_runtime::AgentError),
+    #[error("turn setup failed: {setup}; admission cleanup failed: {cleanup}")]
+    AdmittedSetup {
+        setup: Box<ArkError>,
+        cleanup: ark_runtime::AgentError,
+    },
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SetupCheckpoint {
+    Unfinished,
+    Rules,
+    Posts,
 }
 
 /// Per-turn options for [`Ark::ask_session`]: the interactive seams a front-end supplies.
@@ -291,6 +304,8 @@ pub struct Ark {
     /// Other agent programs an agent can run on, when the app offers them
     /// ([`ArkBuilder::workers`]).
     workers: Option<Arc<dyn ark_runtime::worker::Workers>>,
+    #[cfg(test)]
+    setup_failure: Option<SetupCheckpoint>,
 }
 
 /// Another handle on the same agent: the store, tools, model sessions and capabilities are
@@ -317,6 +332,8 @@ impl Clone for Ark {
             processes: self.processes.clone(),
             browser: self.browser.clone(),
             workers: self.workers.clone(),
+            #[cfg(test)]
+            setup_failure: self.setup_failure,
         }
     }
 }
@@ -463,6 +480,21 @@ impl Ark {
         Ok(Session::start_named(&self.engine, id, project)?)
     }
 
+    /// Start a named conversation with an exact model choice stored in its first record.
+    pub fn start_named_session_model(
+        &self,
+        id: SessionId,
+        project: &ProjectId,
+        model: String,
+    ) -> Result<Session, ArkError> {
+        Ok(Session::start_named_model(
+            &self.engine,
+            id,
+            project,
+            model,
+        )?)
+    }
+
     /// Reopen a session by id or unique prefix.
     pub fn open_session(&self, id: &str) -> Result<Option<Session>, ArkError> {
         Ok(Session::open(&self.engine, id)?)
@@ -482,18 +514,131 @@ impl Ark {
         opts: TurnOptions,
         on_event: impl FnMut(HarnessEvent),
     ) -> Result<HarnessOutcome, ArkError> {
+        let admitted = session.admitted_turn(input);
+        match self
+            .ask_session_inner(session, input, opts, on_event, false)
+            .await
+        {
+            Err(setup) => {
+                if let Some(admitted) = admitted {
+                    if let Err(cleanup) =
+                        session.fail_admitted_setup(&self.engine, &admitted, &setup.to_string())
+                    {
+                        return Err(ArkError::AdmittedSetup {
+                            setup: Box::new(setup),
+                            cleanup,
+                        });
+                    }
+                }
+                Err(setup)
+            }
+            result => result,
+        }
+    }
+
+    pub async fn resume_connection(
+        &self,
+        session: &mut Session,
+        run: ark_runtime::connection_requests::AdmittedConnectionRun,
+        mut opts: TurnOptions,
+        mut on_event: impl FnMut(HarnessEvent),
+    ) -> Result<HarnessOutcome, ArkError> {
+        let request = self.engine.connection_request(run.request_id())?;
+        if request.session != session.id().as_str() {
+            return Err(ark_runtime::AgentError::from(
+                ark_runtime::connection_requests::ConnectionRequestError::Stale,
+            )
+            .into());
+        }
+        let turn = self.engine.start_connection(&run)?;
+        let result: Result<HarnessOutcome, ArkError> = async {
+            let input = turn.input.clone();
+            opts.execution_mode = turn.execution_mode;
+            session.resume_waiting(&self.engine, turn)?;
+            let invocation = self
+                .engine
+                .store
+                .get_invocation(&request.project, &request.invocation)
+                .map_err(ark_runtime::AgentError::from)?
+                .ok_or(ark_runtime::connection_requests::ConnectionRequestError::Stale)
+                .map_err(ark_runtime::AgentError::from)?;
+            let card = ark_runtime::distill::distill(&invocation, &self.profile.distillers);
+            self.engine
+                .store
+                .put_evidence_card(&request.project, &card)
+                .map_err(ark_runtime::AgentError::from)?;
+            on_event(HarnessEvent::ToolResult {
+                id: request.call_id,
+                action: invocation.action.clone(),
+                ok: true,
+                summary: card.summary.clone(),
+                invocation: invocation.id.to_string(),
+                duration_ms: invocation.duration_ms(),
+                error: None,
+                context_tokens: 0,
+                raw_tokens: ark_model::estimate_tokens(&invocation.output.to_string()),
+                files: vec![],
+                before: vec![],
+            });
+            self.ask_session_inner(session, &input, opts, on_event, true)
+                .await
+        }
+        .await;
+        if let Err(error) = result {
+            let recovery = (|| -> Result<(), ArkError> {
+                self.engine.interrupt_connection(&run)?;
+                if let Some(fresh) = self.open_session(session.id().as_str())? {
+                    *session = fresh;
+                }
+                Ok(())
+            })();
+            if let Err(recovery) = recovery {
+                return Err(ark_runtime::AgentError::from(
+                    ark_runtime::connection_requests::ConnectionRequestError::Unavailable(format!(
+                        "continuation setup failed: {error}; interruption failed: {recovery}"
+                    )),
+                )
+                .into());
+            }
+            return Err(error);
+        }
+        result
+    }
+
+    pub fn control_session(&self, session: &str, stop: bool) -> Result<bool, ArkError> {
+        Ok(self.engine.connection_control(session, stop)?)
+    }
+
+    async fn ask_session_inner(
+        &self,
+        session: &mut Session,
+        input: &str,
+        opts: TurnOptions,
+        on_event: impl FnMut(HarnessEvent),
+        resuming: bool,
+    ) -> Result<HarnessOutcome, ArkError> {
         let project = session.project().clone();
         let router = self.session_router(session).await;
         // The turn before did not finish (the app stopped, it failed, the person stopped it):
         // this one continues it (ADR 0048). Its goal is that turn's goal with this message
         // added, so "continue" never becomes the task (ADR 0050), and what is chosen from the
         // task (rules, skills, tools) is chosen from the goal.
+        #[cfg(test)]
+        self.setup_checkpoint(SetupCheckpoint::Unfinished)?;
         let unfinished = session.unfinished(&self.engine)?;
-        let goal = session.goal_for(unfinished.as_ref(), input);
+        let goal = if resuming {
+            unfinished
+                .as_ref()
+                .map(|unfinished| unfinished.goal.clone())
+        } else {
+            session.goal_for(unfinished.as_ref(), input)
+        };
         let goal_text = goal
             .as_ref()
             .map(|g| g.text())
             .unwrap_or_else(|| input.to_string());
+        #[cfg(test)]
+        self.setup_checkpoint(SetupCheckpoint::Rules)?;
         let (engine, rules) = self.with_rules(&project, &goal_text)?;
         let (engine, catalog) = self.with_skills(engine, &project);
         let owner = format!("session:{}", session.id());
@@ -507,6 +652,8 @@ impl Ark {
             p.core_actions.push(skills::READ.into());
         }
         // What work this chat set up has posted since its last answer.
+        #[cfg(test)]
+        self.setup_checkpoint(SetupCheckpoint::Posts)?;
         session.read_posts(&self.engine)?;
         let harness = self.harness_with(router);
         // Its changes are not made again, one cut short is asked about again, and the model is
@@ -525,7 +672,7 @@ impl Ark {
         // know which stopped turns it continues.
         let engine = Arc::new(
             engine
-                .for_work(session.work_of(session.turn_count()))
+                .for_work(session.work_of(session.active_turn_index()))
                 .continuing(works),
         );
         let harness = harness
@@ -541,7 +688,9 @@ impl Ark {
             .execution_mode(opts.execution_mode)
             .rules(rules)
             .skills(catalog);
-        session.begin_turn_with_goal(&self.engine, input, goal)?;
+        if !resuming {
+            session.begin_turn_with_goal(&self.engine, input, goal)?;
+        }
         let mut on_event = on_event;
         let result = {
             let stored = &mut *session;
@@ -560,8 +709,11 @@ impl Ark {
                 .await
         };
         match result {
-            Ok(outcome) => {
-                session.record_turn(&self.engine, input, &outcome)?;
+            Ok(mut outcome) => {
+                if session.record_turn_cancelled(&self.engine, input, &outcome)? {
+                    outcome.awaiting_connection = None;
+                    outcome.cancelled = true;
+                }
                 Ok(outcome)
             }
             Err(e) => {
@@ -577,6 +729,17 @@ impl Ark {
     /// account.
     pub fn subscriptions(&self) -> &SubscriptionRuntime {
         &self.subscriptions
+    }
+
+    #[cfg(test)]
+    fn setup_checkpoint(&self, point: SetupCheckpoint) -> Result<(), ArkError> {
+        if self.setup_failure == Some(point) {
+            return Err(ark_runtime::AgentError::Io(std::io::Error::other(
+                "fixture setup failure",
+            ))
+            .into());
+        }
+        Ok(())
     }
 
     /// The router for one conversation. When the reasoning model is a subscription and
@@ -939,6 +1102,8 @@ pub struct ArkBuilder {
     connections: Option<ConnectionsChoice>,
     secrets: Option<Arc<dyn ark_connect::Secrets>>,
     sources: Vec<Arc<dyn ark_tools::ToolSource>>,
+    acquisition_sources: Vec<Arc<dyn ark_runtime::AcquisitionProvider>>,
+    connection_requests: Option<Arc<dyn ark_runtime::connection_requests::ConnectionRequestBroker>>,
 }
 enum CodeChoice {
     Default,
@@ -979,6 +1144,7 @@ impl Default for ArkBuilder {
     fn default() -> Self {
         ArkBuilder {
             engine: None,
+            connection_requests: None,
             store_root: PathBuf::from("./ark-workspace"),
             registry: Registry::new(),
             profile: AgentProfile::default(),
@@ -1002,11 +1168,24 @@ impl Default for ArkBuilder {
             connections: None,
             secrets: None,
             sources: Vec::new(),
+            acquisition_sources: Vec::new(),
         }
     }
 }
 
 impl ArkBuilder {
+    pub fn connection_requests(
+        mut self,
+        broker: Arc<dyn ark_runtime::connection_requests::ConnectionRequestBroker>,
+    ) -> Self {
+        self.connection_requests = Some(broker);
+        self
+    }
+    /// Add an acquisition source after the profile's provider or the built-in sources.
+    pub fn acquisition_source(mut self, source: Arc<dyn ark_runtime::AcquisitionProvider>) -> Self {
+        self.acquisition_sources.push(source);
+        self
+    }
     /// Where the store (blobs, metadata, index) lives. Also loads `<root>/plugins.json`.
     pub fn store_root(mut self, path: impl Into<PathBuf>) -> Self {
         self.store_root = path.into();
@@ -1238,6 +1417,9 @@ impl ArkBuilder {
             Some(e) => e,
             None => Engine::open_with(&self.store_root, self.registry)?,
         };
+        if let Some(broker) = self.connection_requests {
+            engine.set_connection_requests(broker);
+        }
         let connections = self.connections.map(|c| match c {
             ConnectionsChoice::Given(c) => c,
             ConnectionsChoice::Default => Connections::open(
@@ -1302,12 +1484,17 @@ impl ArkBuilder {
             profile.distillers.push(ark_proc::distill());
             sources.push(Arc::new(ark_proc::Installs::new(p.clone())));
         }
-        if profile.acquisition.is_none() {
-            profile.acquisition = match sources.len() {
-                0 => None,
-                1 => sources.pop(),
-                _ => Some(Arc::new(ark_runtime::Sources(sources))),
-            };
+        if let Some(source) = profile.acquisition.take() {
+            sources = vec![source];
+        }
+        sources.extend(self.acquisition_sources);
+        profile.acquisition = match sources.len() {
+            0 => None,
+            1 => sources.pop(),
+            _ => Some(Arc::new(ark_runtime::Sources(sources))),
+        };
+        if let Some(source) = &profile.acquisition {
+            engine.set_contextual_acquisition(source.clone());
         }
         let mut per_agent: Vec<Arc<dyn PerAgent>> = Vec::new();
         if let Some(w) = self.web {
@@ -1373,6 +1560,8 @@ impl ArkBuilder {
             processes,
             browser,
             workers,
+            #[cfg(test)]
+            setup_failure: None,
         })
     }
 }
@@ -1385,6 +1574,223 @@ mod tests {
     use ark_tools::{Adapter, AdapterError, BlobResolver, RunCtx};
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    #[tokio::test]
+    async fn admitted_setup_failures_count_one_input_and_release_only_the_owned_placeholder() {
+        for checkpoint in [
+            super::SetupCheckpoint::Unfinished,
+            super::SetupCheckpoint::Rules,
+            super::SetupCheckpoint::Posts,
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let model = Arc::new(MockProvider::new("fixture", vec![]));
+            let mut ark = Ark::builder()
+                .store_root(dir.path())
+                .provider(model.clone())
+                .planner(false)
+                .critic(false)
+                .build()
+                .unwrap();
+            let project = ark.create_project("Fixture", "").unwrap();
+            let mut session = ark.start_session(&project.id).unwrap();
+            let input = "Preserve this accepted request";
+            let receipt =
+                serde_json::json!({"receipt":{"status":"accepted"},"effect":{"turnIndex":0}});
+            let highwater = serde_json::json!({"counter":"9"});
+            session
+                .admit_input_records(
+                    ark.engine(),
+                    input,
+                    &[
+                        ark_store::RecordChange {
+                            kind: "client_mutation",
+                            id: "fixture:9",
+                            scope: "fixture",
+                            expected: None,
+                            value: &receipt,
+                        },
+                        ark_store::RecordChange {
+                            kind: "client_mutation_highwater",
+                            id: "fixture",
+                            scope: "fixture",
+                            expected: None,
+                            value: &highwater,
+                        },
+                    ],
+                )
+                .unwrap();
+            ark_runtime::session::post(
+                ark.engine(),
+                session.id().as_str(),
+                ark_runtime::session::Post::new(
+                    "fixture",
+                    "Pending result",
+                    "Keep this unconsumed result",
+                    true,
+                ),
+            )
+            .unwrap();
+            session.read_posts(ark.engine()).unwrap();
+            let posts_read = session.record().posts_read;
+            if checkpoint == super::SetupCheckpoint::Rules {
+                ark.engine()
+                    .store
+                    .put_record(
+                        "project_memory",
+                        "malformed",
+                        project.id.as_str(),
+                        &serde_json::json!({"invalid":true}),
+                    )
+                    .unwrap();
+            } else {
+                ark.setup_failure = Some(checkpoint);
+            }
+            assert!(ark
+                .ask_session(&mut session, input, TurnOptions::default(), |_| {})
+                .await
+                .is_err());
+            assert_eq!(model.call_count(), 0);
+            assert_eq!(session.turn_count(), 1);
+            let turns = session.transcript(ark.engine(), None).unwrap();
+            assert_eq!(turns.len(), 1);
+            assert_eq!(turns[0].input, input);
+            assert!(turns[0].error.is_some());
+            assert!(turns[0].incomplete);
+            assert!(turns[0].pid.is_none());
+            assert!(turns[0].pid_start.is_none());
+            assert_eq!(session.record().usage.turns, 1);
+            assert_eq!(session.record().posts_read, posts_read);
+            assert!(session
+                .conversation_digest()
+                .unwrap()
+                .contains("Keep this unconsumed result"));
+            assert_eq!(
+                ark.engine()
+                    .store
+                    .get_record("client_mutation", "fixture:9")
+                    .unwrap(),
+                Some(receipt)
+            );
+            assert_eq!(
+                ark.engine()
+                    .store
+                    .get_record("client_mutation_highwater", "fixture")
+                    .unwrap(),
+                Some(highwater)
+            );
+            assert!(session.admitted_turn(input).is_none());
+            session.set_title(ark.engine(), "Failed setup").unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn admitted_setup_conflict_preserves_newer_work_and_both_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(Arc::new(MockProvider::new("fixture", vec![])))
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("Fixture", "").unwrap();
+        let mut session = ark.start_session(&project.id).unwrap();
+        session
+            .admit_input(ark.engine(), "Original accepted input")
+            .unwrap();
+        let mut header = ark
+            .engine()
+            .store
+            .get_session(session.id().as_str())
+            .unwrap()
+            .unwrap();
+        header["title"] = serde_json::json!("Changed by another writer");
+        ark.engine()
+            .store
+            .put_session(session.id().as_str(), &project.id, &header)
+            .unwrap();
+        let turns = ark
+            .engine()
+            .store
+            .list_session_turns(session.id().as_str(), None)
+            .unwrap();
+        ark.setup_failure = Some(super::SetupCheckpoint::Posts);
+        let error = ark
+            .ask_session(
+                &mut session,
+                "Original accepted input",
+                TurnOptions::default(),
+                |_| {},
+            )
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(&error, super::ArkError::AdmittedSetup { .. }));
+        assert!(error.to_string().contains("fixture setup failure"));
+        assert!(error.to_string().contains("admission cleanup failed"));
+        assert_eq!(
+            ark.engine()
+                .store
+                .get_session(session.id().as_str())
+                .unwrap(),
+            Some(header)
+        );
+        assert_eq!(
+            ark.engine()
+                .store
+                .list_session_turns(session.id().as_str(), None)
+                .unwrap(),
+            turns
+        );
+    }
+
+    #[tokio::test]
+    async fn consumed_admission_proof_cannot_finalize_a_later_admission() {
+        let dir = tempfile::tempdir().unwrap();
+        let ark = Ark::builder()
+            .store_root(dir.path())
+            .provider(Arc::new(MockProvider::new("fixture", vec![])))
+            .planner(false)
+            .critic(false)
+            .build()
+            .unwrap();
+        let project = ark.create_project("Fixture", "").unwrap();
+        let mut session = ark.start_session(&project.id).unwrap();
+        session.admit_input(ark.engine(), "Same input").unwrap();
+        let consumed = session.admitted_turn("Same input").unwrap();
+        session.begin_turn(ark.engine(), "Same input").unwrap();
+        session
+            .fail_turn(ark.engine(), "Same input", "first run failed")
+            .unwrap();
+        session.admit_input(ark.engine(), "Same input").unwrap();
+        let header = ark
+            .engine()
+            .store
+            .get_session(session.id().as_str())
+            .unwrap();
+        let turns = ark
+            .engine()
+            .store
+            .list_session_turns(session.id().as_str(), None)
+            .unwrap();
+        assert!(session
+            .fail_admitted_setup(ark.engine(), &consumed, "late cleanup")
+            .is_err());
+        assert_eq!(
+            ark.engine()
+                .store
+                .get_session(session.id().as_str())
+                .unwrap(),
+            header
+        );
+        assert_eq!(
+            ark.engine()
+                .store
+                .list_session_turns(session.id().as_str(), None)
+                .unwrap(),
+            turns
+        );
+    }
 
     #[tokio::test]
     async fn project_memory_suggestions_have_no_empty_project_overhead() {

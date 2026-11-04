@@ -96,8 +96,8 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
                             m.answer(ApprovalDecision::Deny);
                             menu = None;
                             view.in_menu = false;
-                            ctl.cancel();
-                            view.cancelling = true;
+                            if let Err(error)=ctl.cancel() {view.note(out,&error.to_string());}
+                            else {view.cancelling = true;}
                         }
                         MenuKey::Ignore => {}
                     }
@@ -108,12 +108,12 @@ pub(crate) async fn run_turn(st: &mut ShellState, input: &str) -> Next {
                 }
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
-                    KeyCode::Char('c') if ctrl => { ctl.cancel(); view.cancelling = true; }
-                    KeyCode::Esc => { ctl.cancel(); view.cancelling = true; }
+                    KeyCode::Char('c') if ctrl => { if let Err(error)=ctl.cancel(){view.note(out,&error.to_string());}else{view.cancelling = true;} }
+                    KeyCode::Esc => { if let Err(error)=ctl.cancel(){view.note(out,&error.to_string());}else{view.cancelling = true;} }
                     KeyCode::Enter if !view.typeahead.trim().is_empty() => {
                         let text = std::mem::take(&mut view.typeahead);
-                        view.note(out, &format!("› {} (reaches the agent at its next step)", text.trim()));
-                        ctl.steer(text.trim());
+                        if let Err(error)=ctl.steer(text.trim()) {view.note(out,&error.to_string());view.typeahead=text;}
+                        else {view.note(out, &format!("› {} (reaches the agent at its next step)", text.trim()));}
                     }
                     KeyCode::Tab if !view.typeahead.trim().is_empty() => {
                         queued = Some(std::mem::take(&mut view.typeahead).trim().to_string());

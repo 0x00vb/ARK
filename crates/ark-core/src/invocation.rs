@@ -50,6 +50,8 @@ pub struct Invocation {
     /// so a human can reproduce it by hand. `None` for in-process actions.
     pub command: Option<Vec<String>>,
     pub status: InvocationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_request: Option<String>,
     /// Structured result the action returned (the summary the agent reasons over).
     #[serde(default)]
     pub output: serde_json::Value,
@@ -101,6 +103,7 @@ impl Invocation {
             input,
             command: None,
             status,
+            connection_request: None,
             output: serde_json::Value::Null,
             produced: Vec::new(),
             consumed: Vec::new(),

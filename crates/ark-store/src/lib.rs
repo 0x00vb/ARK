@@ -23,7 +23,7 @@ use std::sync::Mutex;
 use ark_core::{
     Artifact, ArtifactId, EvidenceCard, Invocation, Note, Project, ProjectId, ResearchState,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use time::OffsetDateTime;
 
 mod error;
@@ -53,6 +53,261 @@ pub struct Store {
     search: Option<index::SearchIndex>,
 }
 
+pub struct RecordChange<'a> {
+    pub kind: &'a str,
+    pub id: &'a str,
+    pub scope: &'a str,
+    pub expected: Option<&'a serde_json::Value>,
+    pub value: &'a serde_json::Value,
+}
+
+pub struct ChatTransition<'a> {
+    pub session: &'a str,
+    pub expected_header: &'a str,
+    pub header: &'a serde_json::Value,
+    pub index: u32,
+    pub expected_turn: Option<&'a serde_json::Value>,
+    pub turn: &'a serde_json::Value,
+    pub records: &'a [RecordChange<'a>],
+    pub invocation: Option<(&'a ProjectId, &'a Invocation)>,
+    pub other_turn: Option<(u32, &'a serde_json::Value, &'a serde_json::Value)>,
+}
+
+#[cfg(test)]
+mod chat_cas_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn pause_transaction_counts_once_and_rolls_back_stale_writers() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let project = Project::new("p", "");
+        store.put_project(&project).unwrap();
+        let header = json!({"turn_count":0,"title":"original"});
+        store.create_session("chat", &project.id, &header).unwrap();
+        let placeholder = json!({"index":0,"input":"original user request","answer":""});
+        store.put_session_turn("chat", 0, &placeholder).unwrap();
+        let version = store.session_version("chat").unwrap().unwrap();
+        let counted = json!({"turn_count":1,"title":"original"});
+        let waiting = json!({"index":0,"input":"original user request","answer":"","connection":{"state":"waiting"},"pid":null});
+        let request = json!({"revision":1});
+        store
+            .transition_chat(ChatTransition {
+                session: "chat",
+                expected_header: &version,
+                header: &counted,
+                index: 0,
+                expected_turn: Some(&placeholder),
+                turn: &waiting,
+                records: &[RecordChange {
+                    kind: "request",
+                    id: "req",
+                    scope: "chat",
+                    expected: None,
+                    value: &request,
+                }],
+                invocation: None,
+                other_turn: None,
+            })
+            .unwrap();
+        assert!(matches!(
+            store.put_session_if("chat", &version, &header),
+            Err(StoreError::Conflict)
+        ));
+        assert!(matches!(
+            store.transition_chat(ChatTransition {
+                session: "chat",
+                expected_header: &version,
+                header: &header,
+                index: 0,
+                expected_turn: Some(&placeholder),
+                turn: &placeholder,
+                records: &[],
+                invocation: None,
+                other_turn: None,
+            }),
+            Err(StoreError::Conflict)
+        ));
+        assert_eq!(store.get_session("chat").unwrap().unwrap()["turn_count"], 1);
+        assert_eq!(
+            store.list_session_turns("chat", None).unwrap(),
+            vec![waiting]
+        );
+        assert_eq!(store.get_record("request", "req").unwrap(), Some(request));
+        let length: i64 = store
+            .db
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT text_len FROM session_turns WHERE session_id='chat' AND idx=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(length, "original user request".len() as i64);
+    }
+
+    #[test]
+    fn header_and_latest_cas_fences_both_admission_orders_and_absent_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = Store::open(dir.path()).unwrap();
+        let second = Store::open(dir.path()).unwrap();
+        let project = Project::new("p", "");
+        first.put_project(&project).unwrap();
+        let header = json!({"turn_count":0,"title":"original"});
+        first
+            .create_session("begin-first", &project.id, &header)
+            .unwrap();
+        let version = first.session_version("begin-first").unwrap().unwrap();
+        let last = first.session_latest_turn_version("begin-first").unwrap();
+        assert!(last.is_none());
+        let turn = json!({"index":0,"input":"kept","answer":""});
+        second.put_session_turn("begin-first", 0, &turn).unwrap();
+        let renamed = json!({"turn_count":0,"title":"renamed"});
+        assert!(matches!(
+            first.put_session_if_latest_turn("begin-first", &version, &renamed, last.as_ref()),
+            Err(StoreError::Conflict)
+        ));
+        assert_eq!(first.session_version("begin-first").unwrap(), Some(version));
+        assert_eq!(
+            first.list_session_turns("begin-first", None).unwrap(),
+            vec![turn.clone()]
+        );
+
+        first
+            .create_session("rename-first", &project.id, &header)
+            .unwrap();
+        let version = second.session_version("rename-first").unwrap().unwrap();
+        let updated = first
+            .put_session_if_latest_turn("rename-first", &version, &renamed, None)
+            .unwrap();
+        assert!(matches!(
+            second.transition_chat(ChatTransition {
+                session: "rename-first",
+                expected_header: &version,
+                header: &header,
+                index: 0,
+                expected_turn: None,
+                turn: &turn,
+                records: &[],
+                invocation: None,
+                other_turn: None,
+            }),
+            Err(StoreError::Conflict)
+        ));
+        assert!(first
+            .list_session_turns("rename-first", None)
+            .unwrap()
+            .is_empty());
+        second
+            .transition_chat(ChatTransition {
+                session: "rename-first",
+                expected_header: &updated,
+                header: &renamed,
+                index: 0,
+                expected_turn: None,
+                turn: &turn,
+                records: &[],
+                invocation: None,
+                other_turn: None,
+            })
+            .unwrap();
+        assert_eq!(first.get_session("rename-first").unwrap(), Some(renamed));
+        assert_eq!(
+            first.list_session_turns("rename-first", None).unwrap(),
+            vec![turn]
+        );
+    }
+
+    #[test]
+    fn header_and_latest_cas_checks_raw_bytes_index_and_preserves_turn_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = Store::open(dir.path()).unwrap();
+        let second = Store::open(dir.path()).unwrap();
+        let project = Project::new("p", "");
+        first.put_project(&project).unwrap();
+        let header = json!({"turn_count":1,"title":"original"});
+        first.create_session("chat", &project.id, &header).unwrap();
+        let turn = json!({"index":0,"input":"kept","answer":"done"});
+        first.put_session_turn("chat", 0, &turn).unwrap();
+        let version = first.session_version("chat").unwrap().unwrap();
+        let latest = first.session_latest_turn_version("chat").unwrap();
+        second
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE session_turns SET json=?1 WHERE session_id='chat' AND idx=0",
+                [serde_json::to_string_pretty(&turn).unwrap()],
+            )
+            .unwrap();
+        let renamed = json!({"turn_count":1,"title":"renamed"});
+        assert!(matches!(
+            first.put_session_if_latest_turn("chat", &version, &renamed, latest.as_ref()),
+            Err(StoreError::Conflict)
+        ));
+        assert_eq!(first.get_session("chat").unwrap(), Some(header));
+        let exact = first.session_latest_turn_version("chat").unwrap();
+        let chars = first.session_text_chars("chat", 1).unwrap();
+        let updated = first
+            .put_session_if_latest_turn("chat", &version, &renamed, exact.as_ref())
+            .unwrap();
+        assert_eq!(first.session_latest_turn_version("chat").unwrap(), exact);
+        assert_eq!(first.session_text_chars("chat", 1).unwrap(), chars);
+        second.put_session_turn("chat", 1, &turn).unwrap();
+        assert!(matches!(
+            first.put_session_if_latest_turn(
+                "chat",
+                &updated,
+                &json!({"title":"stale"}),
+                exact.as_ref()
+            ),
+            Err(StoreError::Conflict)
+        ));
+        assert_eq!(first.get_session("chat").unwrap(), Some(renamed));
+    }
+
+    #[test]
+    fn two_database_handles_admit_only_one_waiting_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = Store::open(dir.path()).unwrap();
+        let second = Store::open(dir.path()).unwrap();
+        let project = Project::new("p", "");
+        first.put_project(&project).unwrap();
+        first
+            .create_session("chat", &project.id, &json!({"turn_count":0}))
+            .unwrap();
+        let version = first.session_version("chat").unwrap().unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        let successes = std::thread::scope(|scope| {
+            let attempt = |store: &Store| {
+                barrier.wait();
+                store
+                    .transition_chat(ChatTransition {
+                        session: "chat",
+                        expected_header: &version,
+                        header: &json!({"turn_count":1}),
+                        index: 0,
+                        expected_turn: None,
+                        turn: &json!({"index":0,"input":"once","answer":""}),
+                        records: &[],
+                        invocation: None,
+                        other_turn: None,
+                    })
+                    .is_ok()
+            };
+            let first = &first;
+            let second = &second;
+            let a = scope.spawn(move || attempt(first));
+            let b = scope.spawn(move || attempt(second));
+            usize::from(a.join().unwrap()) + usize::from(b.join().unwrap())
+        });
+        assert_eq!(successes, 1);
+        assert_eq!(first.list_session_turns("chat", None).unwrap().len(), 1);
+    }
+}
+
 impl Store {
     /// Open (creating if needed) a workspace store rooted at `root`.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -60,6 +315,7 @@ impl Store {
         std::fs::create_dir_all(root.join("objects"))?;
         sweep_temp_blobs(&root.join("objects"));
         let db = Connection::open(root.join("meta.db"))?;
+        db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA foreign_keys=ON;
@@ -626,6 +882,186 @@ impl Store {
         )
     }
 
+    pub fn session_version(&self, id: &str) -> Result<Option<String>> {
+        let db = self.db.lock().unwrap();
+        Ok(db
+            .query_row("SELECT json FROM sessions WHERE id=?1", [id], |row| {
+                row.get(0)
+            })
+            .optional()?)
+    }
+
+    pub fn put_session_if(
+        &self,
+        id: &str,
+        expected: &str,
+        record: &serde_json::Value,
+    ) -> Result<String> {
+        let encoded = serde_json::to_string(record)?;
+        let db = self.db.lock().unwrap();
+        let changed = db.execute(
+            "UPDATE sessions SET json=?1, updated_at=?2 WHERE id=?3 AND json=?4",
+            rusqlite::params![encoded, rfc(OffsetDateTime::now_utc()), id, expected],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::Conflict);
+        }
+        Ok(encoded)
+    }
+
+    pub fn session_latest_turn_version(&self, id: &str) -> Result<Option<(u32, String)>> {
+        let db = self.db.lock().unwrap();
+        Ok(db
+            .query_row(
+                "SELECT idx,json FROM session_turns WHERE session_id=?1 ORDER BY idx DESC LIMIT 1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    pub fn put_session_if_latest_turn(
+        &self,
+        id: &str,
+        expected_header: &str,
+        record: &serde_json::Value,
+        expected_latest: Option<&(u32, String)>,
+    ) -> Result<String> {
+        let encoded = serde_json::to_string(record)?;
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if tx.execute(
+            "UPDATE sessions SET json=?1,updated_at=?2 WHERE id=?3 AND json=?4",
+            rusqlite::params![encoded, rfc(OffsetDateTime::now_utc()), id, expected_header],
+        )? != 1
+        {
+            return Err(StoreError::Conflict);
+        }
+        let latest: Option<(u32, String)> = tx
+            .query_row(
+                "SELECT idx,json FROM session_turns WHERE session_id=?1 ORDER BY idx DESC LIMIT 1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if latest.as_ref() != expected_latest {
+            return Err(StoreError::Conflict);
+        }
+        tx.commit()?;
+        Ok(encoded)
+    }
+
+    pub fn transition_chat(&self, change: ChatTransition<'_>) -> Result<String> {
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let header = serde_json::to_string(change.header)?;
+        if tx.execute(
+            "UPDATE sessions SET json=?1, updated_at=?2 WHERE id=?3 AND json=?4",
+            rusqlite::params![
+                header,
+                rfc(OffsetDateTime::now_utc()),
+                change.session,
+                change.expected_header
+            ],
+        )? != 1
+        {
+            return Err(StoreError::Conflict);
+        }
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT json FROM session_turns WHERE session_id=?1 AND idx=?2",
+                rusqlite::params![change.session, change.index],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let current_value = current
+            .as_deref()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .transpose()?;
+        if current_value.as_ref() != change.expected_turn {
+            return Err(StoreError::Conflict);
+        }
+        let turn = serde_json::to_string(change.turn)?;
+        let text_len = change.turn["input"].as_str().map_or(0, str::len)
+            + change.turn["answer"].as_str().map_or(0, str::len);
+        if let Some(current) = current {
+            if tx.execute(
+                "UPDATE session_turns SET json=?1,text_len=?2 WHERE session_id=?3 AND idx=?4 AND json=?5",
+                rusqlite::params![turn, text_len as i64, change.session, change.index, current],
+            )? != 1 { return Err(StoreError::Conflict); }
+        } else {
+            tx.execute(
+                "INSERT INTO session_turns(session_id,idx,json,text_len) VALUES(?1,?2,?3,?4)",
+                rusqlite::params![change.session, change.index, turn, text_len as i64],
+            )?;
+        }
+        for record in change.records {
+            let current: Option<String> = tx
+                .query_row(
+                    "SELECT json FROM records WHERE kind=?1 AND id=?2",
+                    rusqlite::params![record.kind, record.id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let value = current
+                .as_deref()
+                .map(serde_json::from_str::<serde_json::Value>)
+                .transpose()?;
+            if value.as_ref() != record.expected {
+                return Err(StoreError::Conflict);
+            }
+            let encoded = serde_json::to_string(record.value)?;
+            if let Some(current) = current {
+                if tx.execute(
+                    "UPDATE records SET json=?1,updated_at=?2 WHERE kind=?3 AND id=?4 AND json=?5",
+                    rusqlite::params![
+                        encoded,
+                        rfc(OffsetDateTime::now_utc()),
+                        record.kind,
+                        record.id,
+                        current
+                    ],
+                )? != 1
+                {
+                    return Err(StoreError::Conflict);
+                }
+            } else {
+                tx.execute(
+                    "INSERT INTO records(kind,id,scope,updated_at,json) VALUES(?1,?2,?3,?4,?5)",
+                    rusqlite::params![
+                        record.kind,
+                        record.id,
+                        record.scope,
+                        rfc(OffsetDateTime::now_utc()),
+                        encoded
+                    ],
+                )?;
+            }
+        }
+        if let Some((project, inv)) = change.invocation {
+            tx.execute("INSERT OR REPLACE INTO invocations(project_id,id,action,status,created_at,json,output_len) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+                rusqlite::params![project.as_str(),inv.id.as_str(),inv.action,
+                    serde_json::to_string(&inv.status)?.trim_matches('"'),rfc(inv.created_at),
+                    serde_json::to_string(inv)?,serde_json::to_string(&inv.output)?.len() as i64])?;
+        }
+        if let Some((index, expected, value)) = change.other_turn {
+            let current: String = tx.query_row(
+                "SELECT json FROM session_turns WHERE session_id=?1 AND idx=?2",
+                rusqlite::params![change.session, index],
+                |row| row.get(0),
+            )?;
+            if serde_json::from_str::<serde_json::Value>(&current)? != *expected {
+                return Err(StoreError::Conflict);
+            }
+            let length = value["input"].as_str().map_or(0, str::len)
+                + value["answer"].as_str().map_or(0, str::len);
+            if tx.execute("UPDATE session_turns SET json=?1,text_len=?2 WHERE session_id=?3 AND idx=?4 AND json=?5",
+                rusqlite::params![serde_json::to_string(value)?,length as i64,change.session,index,current])?!=1 {return Err(StoreError::Conflict);}
+        }
+        tx.commit()?;
+        Ok(header)
+    }
+
     /// Sessions, most recently updated first; all projects when `project` is `None`.
     pub fn list_sessions(&self, project: Option<&ProjectId>) -> Result<Vec<serde_json::Value>> {
         let db = self.db.lock().unwrap();
@@ -810,6 +1246,40 @@ impl Store {
             rusqlite::params![kind, id],
             |r| r.get::<_, String>(0),
         ))
+    }
+
+    pub fn compare_record(
+        &self,
+        kind: &str,
+        id: &str,
+        expected: &serde_json::Value,
+        next: &serde_json::Value,
+    ) -> Result<()> {
+        let mut db = self.db.lock().unwrap();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: String = tx.query_row(
+            "SELECT json FROM records WHERE kind=?1 AND id=?2",
+            rusqlite::params![kind, id],
+            |row| row.get(0),
+        )?;
+        if serde_json::from_str::<serde_json::Value>(&current)? != *expected {
+            return Err(StoreError::Conflict);
+        }
+        if tx.execute(
+            "UPDATE records SET json=?1,updated_at=?2 WHERE kind=?3 AND id=?4 AND json=?5",
+            rusqlite::params![
+                serde_json::to_string(next)?,
+                rfc(OffsetDateTime::now_utc()),
+                kind,
+                id,
+                current
+            ],
+        )? != 1
+        {
+            return Err(StoreError::Conflict);
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Records of one kind, oldest update first; every scope when `scope` is `None`.

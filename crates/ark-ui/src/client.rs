@@ -54,6 +54,16 @@ pub(crate) async fn conversation(host: &Arc<Host>, id: &str) -> anyhow::Result<V
     let read = host
         .call("chat_read", json!({ "session": id, "limit": 50 }))
         .await?;
+    let model = host
+        .client_conversation_model(
+            id,
+            read["summary"]["model"]
+                .as_str()
+                .unwrap_or("Current model")
+                .to_string(),
+            read["running"].is_null(),
+        )
+        .await?;
     let at = chat["updatedAt"].as_str().unwrap_or("").to_string();
     let mut messages = Vec::new();
     for turn in read["transcript"].as_array().into_iter().flatten() {
@@ -89,12 +99,15 @@ pub(crate) async fn conversation(host: &Arc<Host>, id: &str) -> anyhow::Result<V
     let results = host
         .client_results(id)
         .map_err(|error| anyhow::anyhow!("could not read results: {error:?}"))?;
+    let connection_requests = host.client_connection_requests(id).await?;
     Ok(json!({
         "chat": chat,
         "messages": messages,
         "approvals": approvals,
         "results": results,
         "activeTurnId": read["running"].as_str().map(|_| "running"),
+        "model": model,
+        "connectionRequests":connection_requests,
     }))
 }
 
@@ -103,8 +116,11 @@ pub(crate) async fn create_chat(
     device: &str,
     project: &str,
     request_id: &str,
+    model: Option<&ark_protocol::ModelSelection>,
 ) -> Result<Value, crate::host::ClientChatCreateError> {
-    let summary = host.create_client_chat(device, project, request_id).await?;
+    let summary = host
+        .create_client_chat(device, project, request_id, model)
+        .await?;
     Ok(chat_item(&summary))
 }
 
@@ -342,6 +358,32 @@ fn required(value: &Value, field: &str) -> anyhow::Result<String> {
 }
 
 fn attention_item(item: &Value) -> Value {
+    let title = item["title"].as_str().unwrap_or("ARK needs your answer");
+    let detail = item["line"]
+        .as_str()
+        .or_else(|| item["request"].as_str())
+        .unwrap_or("Review this request.");
+    let (title, detail) = if title.contains('\n') {
+        let (title, body) = title
+            .trim_start()
+            .split_once('\n')
+            .unwrap_or((title.trim(), ""));
+        let title = title.trim();
+        (
+            if title.is_empty() {
+                "ARK needs your answer"
+            } else {
+                title
+            },
+            if body.trim().is_empty() {
+                detail
+            } else {
+                body.trim()
+            },
+        )
+    } else {
+        (title, detail)
+    };
     let choices = item["choices"]
         .as_array()
         .into_iter()
@@ -359,8 +401,8 @@ fn attention_item(item: &Value) -> Value {
     json!({
         "id": text_id(&item["id"]),
         "kind": "approval",
-        "title": item["title"].as_str().unwrap_or("ARK needs your answer"),
-        "detail": item["line"].as_str().or_else(|| item["request"].as_str()).unwrap_or("Review this request."),
+        "title": title,
+        "detail": detail,
         "teammate": item["agent"].as_str().unwrap_or("ARK"),
         "project": item["place"].as_str().or_else(|| item["project"].as_str()).unwrap_or("ARK"),
         "computer": item["runtime"].as_str().unwrap_or("This computer"),
@@ -434,6 +476,34 @@ fn rfc3339(milliseconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approval_mapping_separates_multiline_title_from_exact_detail() {
+        let head = "0123456789abcdef0123456789abcdef01234567";
+        let detail = format!("Project: sample\nBranch: change\nHead: {head}");
+        let item =
+            json!({"title":format!("\n  \nApply change\n{detail}"),"line":"Old duplicated title"});
+        let mapped = attention_item(&item);
+        assert_eq!(mapped["title"], "Apply change");
+        assert_eq!(mapped["detail"], detail);
+        assert!(mapped["detail"].as_str().unwrap().contains(head));
+    }
+
+    #[test]
+    fn approval_mapping_keeps_single_line_and_empty_body_fallbacks() {
+        let legacy =
+            attention_item(&json!({"title":"  Existing title  ","line":"Existing detail"}));
+        assert_eq!(legacy["title"], "  Existing title  ");
+        assert_eq!(legacy["detail"], "Existing detail");
+        let empty =
+            attention_item(&json!({"title":"Approve change\n  \n","request":"Original request"}));
+        assert_eq!(empty["title"], "Approve change");
+        assert_eq!(empty["detail"], "Original request");
+        let blank = attention_item(&json!({"title":"\n \n\t","line":"Existing detail"}));
+        assert_eq!(blank["title"], "ARK needs your answer");
+        assert_eq!(blank["detail"], "Existing detail");
+        assert_eq!(attention_item(&json!({"title":"   "}))["title"], "   ");
+    }
 
     #[test]
     fn chat_mapping_never_exposes_runtime_words() {

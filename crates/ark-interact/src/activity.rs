@@ -181,6 +181,9 @@ pub fn describe(
             }
             ApprovalDecision::Deny => Activity::new(K::Approval, "denied").tone(Tone::Warning),
         },
+        HarnessEvent::AwaitingConnection { display, .. } => {
+            Activity::new(K::Warning, display.clone()).tone(Tone::Muted)
+        }
         HarnessEvent::Capability { action, detail } => {
             Activity::new(K::Capability, labels.capability_label(action))
                 .detail(detail.lines().next().unwrap_or("").to_string())

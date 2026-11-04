@@ -108,6 +108,10 @@ pub struct SessionRecord {
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
     pub turn_count: u32,
+    /// The exact model spec explicitly selected for this chat. Older and default-routed chats
+    /// have no lossless single-model selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Gists of turns that left the verbatim window, oldest first.
     #[serde(default)]
     pub gists: Vec<String>,
@@ -267,6 +271,8 @@ pub struct Turn {
     /// Authority frozen when this turn began.
     #[serde(default)]
     pub execution_mode: ExecutionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<crate::connection_requests::TurnConnection>,
 }
 
 /// Follow-ups a goal keeps in full, newest kept, and the characters of each.
@@ -389,6 +395,7 @@ impl Turn {
             goal: None,
             ran_out: false,
             execution_mode: ExecutionMode::Manual,
+            connection: None,
         }
     }
 }
@@ -521,9 +528,21 @@ pub struct CompactReport {
     pub state_items_removed: usize,
 }
 
+/// Proof of one normal input admission. It cannot authorize a later admission.
+#[derive(Clone)]
+pub struct AdmittedTurn {
+    identity: std::sync::Arc<()>,
+    input: String,
+    header: String,
+    turn: serde_json::Value,
+}
+
 /// A live handle on one conversation session.
 pub struct Session {
     record: SessionRecord,
+    header_version: std::sync::Mutex<String>,
+    resumed: Option<Turn>,
+    admitted_input: Option<AdmittedTurn>,
     /// The last `policy.recent_turns` turns (the verbatim window), cached.
     recent: Vec<Turn>,
     /// Posts after `record.posts_read`, as of the last [`Session::read_posts`].
@@ -549,7 +568,16 @@ impl Session {
         id: SessionId,
         project: &ProjectId,
     ) -> Result<Session, AgentError> {
-        Self::start_named_with(engine, id, project, CarryPolicy::default())
+        Self::start_named_with_model(engine, id, project, CarryPolicy::default(), None)
+    }
+
+    pub fn start_named_model(
+        engine: &Engine,
+        id: SessionId,
+        project: &ProjectId,
+        model: String,
+    ) -> Result<Session, AgentError> {
+        Self::start_named_with_model(engine, id, project, CarryPolicy::default(), Some(model))
     }
 
     pub fn start_with(
@@ -557,14 +585,15 @@ impl Session {
         project: &ProjectId,
         policy: CarryPolicy,
     ) -> Result<Session, AgentError> {
-        Self::start_named_with(engine, SessionId::new(), project, policy)
+        Self::start_named_with_model(engine, SessionId::new(), project, policy, None)
     }
 
-    fn start_named_with(
+    fn start_named_with_model(
         engine: &Engine,
         id: SessionId,
         project: &ProjectId,
         policy: CarryPolicy,
+        model: Option<String>,
     ) -> Result<Session, AgentError> {
         let now = OffsetDateTime::now_utc();
         let record = SessionRecord {
@@ -574,6 +603,7 @@ impl Session {
             created_at: now,
             updated_at: now,
             turn_count: 0,
+            model,
             gists: Vec::new(),
             dropped_turns: 0,
             usage: SessionUsage::default(),
@@ -584,6 +614,11 @@ impl Session {
             execution_mode_revision: 0,
         };
         let s = Session {
+            resumed: None,
+            admitted_input: None,
+            header_version: std::sync::Mutex::new(serde_json::to_string(&serde_json::to_value(
+                &record,
+            )?)?),
             record,
             recent: Vec::new(),
             unread: Vec::new(),
@@ -634,6 +669,12 @@ impl Session {
     }
 
     fn load(engine: &Engine, record: SessionRecord) -> Result<Session, AgentError> {
+        engine.recover_connection_requests(Some(record.id.as_str()))?;
+        let header_version = engine
+            .store
+            .session_version(record.id.as_str())?
+            .ok_or(ark_store::StoreError::Conflict)?;
+        let record: SessionRecord = serde_json::from_str(&header_version)?;
         // Turns already folded into gists are excluded from the window; a turn at or past
         // `turn_count` was begun and never recorded.
         let start = Self::window_start(&record);
@@ -645,6 +686,9 @@ impl Session {
             .filter(|t| t.index as usize >= start && t.index < count)
             .collect();
         let mut session = Session {
+            resumed: None,
+            admitted_input: None,
+            header_version: std::sync::Mutex::new(header_version),
             record,
             recent,
             unread: Vec::new(),
@@ -703,9 +747,10 @@ impl Session {
     }
 
     fn save(&self, engine: &Engine) -> Result<(), AgentError> {
-        engine.store.put_session(
+        let mut version = self.header_version.lock().unwrap();
+        *version = engine.store.put_session_if(
             self.record.id.as_str(),
-            &self.record.project,
+            &version,
             &serde_json::to_value(&self.record)?,
         )?;
         Ok(())
@@ -725,6 +770,37 @@ impl Session {
     }
     pub fn turn_count(&self) -> u32 {
         self.record.turn_count
+    }
+
+    pub fn active_turn_index(&self) -> u32 {
+        self.resumed
+            .as_ref()
+            .map_or(self.record.turn_count, |turn| turn.index)
+    }
+
+    pub fn resume_waiting(&mut self, engine: &Engine, turn: Turn) -> Result<(), AgentError> {
+        let id = self.record.id.to_string();
+        let mut fresh = Session::open(engine, &id)?.ok_or(ark_store::StoreError::Conflict)?;
+        if fresh.record.turn_count != turn.index + 1
+            || fresh.recent.iter().all(|recent| recent.index != turn.index)
+        {
+            return Err(crate::connection_requests::ConnectionRequestError::Stale.into());
+        }
+        fresh.goal = turn.goal.clone();
+        fresh.steered = turn.steered.clone();
+        fresh.turn_execution_mode = Some(turn.execution_mode);
+        fresh.resumed = Some(turn);
+        *self = fresh;
+        Ok(())
+    }
+
+    pub fn model(&self) -> Option<&str> {
+        self.record.model.as_deref()
+    }
+
+    pub fn set_model(&mut self, engine: &Engine, model: String) -> Result<(), AgentError> {
+        self.record.model = Some(model);
+        self.save(engine)
     }
 
     pub fn execution_mode(&self) -> ExecutionMode {
@@ -772,8 +848,41 @@ impl Session {
         if t.is_empty() {
             return Ok(());
         }
-        self.record.title = t;
-        self.save(engine)
+        let admission = engine.chat_admission.chat(self.record.id.as_str());
+        let _guard = admission.lock().unwrap();
+        let mut version = self.header_version.lock().unwrap();
+        let latest = engine
+            .store
+            .session_latest_turn_version(self.record.id.as_str())?;
+        if let Some((index, value)) = &latest {
+            let turn: Turn = serde_json::from_str(value)?;
+            if turn.index != *index {
+                return Err(ark_store::StoreError::Conflict.into());
+            }
+            if *index >= self.record.turn_count
+                || turn.pid.is_some()
+                || matches!(
+                    turn.connection,
+                    Some(
+                        crate::connection_requests::TurnConnection::Admitted { .. }
+                            | crate::connection_requests::TurnConnection::Started { .. }
+                    )
+                )
+            {
+                return Err(crate::connection_requests::ConnectionRequestError::Busy.into());
+            }
+        }
+        let mut next = self.record.clone();
+        next.title = t;
+        let updated = engine.store.put_session_if_latest_turn(
+            self.record.id.as_str(),
+            &version,
+            &serde_json::to_value(&next)?,
+            latest.as_ref(),
+        )?;
+        self.record = next;
+        *version = updated;
+        Ok(())
     }
 
     /// Rename a stored session by id or prefix. Returns false when none matches. A live
@@ -966,24 +1075,218 @@ impl Session {
         input: &str,
         goal: Option<Goal>,
     ) -> Result<(), AgentError> {
+        self.begin_turn_records(engine, input, goal, &[])
+            .map(|_| ())
+    }
+
+    fn begin_turn_records(
+        &mut self,
+        engine: &Engine,
+        input: &str,
+        goal: Option<Goal>,
+        extra: &[ark_store::RecordChange<'_>],
+    ) -> Result<AdmittedTurn, AgentError> {
+        use crate::connection_requests::{
+            ConnectionRequestError, ConnectionRequestPhase, RECORD_KIND,
+        };
+        let admission = engine.chat_admission.chat(self.record.id.as_str());
+        let _guard = admission.lock().unwrap();
+        if self
+            .admitted_input
+            .as_ref()
+            .is_some_and(|admitted| admitted.input == input)
+        {
+            if !extra.is_empty() {
+                return Err(ConnectionRequestError::Stale.into());
+            }
+            let current = engine
+                .store
+                .list_session_turns(self.record.id.as_str(), Some(1))?
+                .into_iter()
+                .next()
+                .ok_or(ConnectionRequestError::Stale)?;
+            let mut turn: Turn = serde_json::from_value(current.clone())?;
+            let admitted = self.admitted_input.as_ref().unwrap();
+            if turn.index != self.record.turn_count
+                || turn.input != input
+                || current != admitted.turn
+                || *self.header_version.lock().unwrap() != admitted.header
+            {
+                return Err(ConnectionRequestError::Stale.into());
+            }
+            turn.goal = goal.clone();
+            let index = turn.index;
+            let turn = serde_json::to_value(turn)?;
+            let mut version = self.header_version.lock().unwrap();
+            *version = engine.store.transition_chat(ark_store::ChatTransition {
+                session: self.record.id.as_str(),
+                expected_header: &version,
+                header: &serde_json::to_value(&self.record)?,
+                index,
+                expected_turn: Some(&current),
+                turn: &turn,
+                records: &[],
+                invocation: None,
+                other_turn: None,
+            })?;
+            self.goal = goal;
+            self.admitted_input = None;
+            return Ok(AdmittedTurn {
+                identity: std::sync::Arc::new(()),
+                input: input.into(),
+                header: version.clone(),
+                turn,
+            });
+        }
+        let mut closing = None;
+        for request in engine.connection_requests(self.record.id.as_str())? {
+            if request.closed() {
+                continue;
+            }
+            if matches!(
+                request.phase,
+                ConnectionRequestPhase::Admitted { .. } | ConnectionRequestPhase::Started { .. }
+            ) {
+                return Err(ConnectionRequestError::Busy.into());
+            }
+            if closing.is_some() {
+                return Err(ConnectionRequestError::Stale.into());
+            }
+            let old_record = serde_json::to_value(&request)?;
+            let old_turn = engine
+                .store
+                .list_session_turns(self.record.id.as_str(), Some(1))?
+                .into_iter()
+                .next()
+                .ok_or(ConnectionRequestError::Stale)?;
+            if old_turn["index"].as_u64() != Some(request.turn as u64)
+                || request.turn + 1 != self.record.turn_count
+            {
+                return Err(ConnectionRequestError::Stale.into());
+            }
+            let mut previous: Turn = serde_json::from_value(old_turn.clone())?;
+            previous.connection = None;
+            let mut closed = request.clone();
+            closed.phase = ConnectionRequestPhase::Closed {
+                reason: "replaced".into(),
+            };
+            closed.cancel_pending = request.scope.is_some();
+            closed.local_revision = closed
+                .local_revision
+                .checked_add(1)
+                .ok_or(ConnectionRequestError::Stale)?;
+            closing = Some((
+                closed,
+                old_record,
+                old_turn,
+                serde_json::to_value(previous)?,
+            ));
+        }
         let mut t = Turn::placeholder(self.record.turn_count, input);
         t.execution_mode = self.record.execution_mode;
         t.goal = goal.clone();
         self.goal = goal;
         self.steered.clear();
         self.turn_execution_mode = Some(t.execution_mode);
-        engine.store.put_session_turn(
-            self.record.id.as_str(),
-            t.index,
-            &serde_json::to_value(&t)?,
-        )?;
+        let current = engine
+            .store
+            .list_session_turns(self.record.id.as_str(), Some(1))?
+            .into_iter()
+            .find(|value| value["index"].as_u64() == Some(t.index as u64));
+        if current.is_some() {
+            return Err(ConnectionRequestError::Busy.into());
+        }
+        self.record.updated_at = OffsetDateTime::now_utc();
+        let closed_value = closing
+            .as_ref()
+            .map(|(request, ..)| serde_json::to_value(request))
+            .transpose()?;
+        let mut records: Vec<_> = closing
+            .as_ref()
+            .zip(closed_value.as_ref())
+            .map(|((request, old, ..), value)| ark_store::RecordChange {
+                kind: RECORD_KIND,
+                id: &request.id,
+                scope: self.record.id.as_str(),
+                expected: Some(old),
+                value,
+            })
+            .into_iter()
+            .collect();
+        records.extend(extra.iter().map(|record| ark_store::RecordChange {
+            kind: record.kind,
+            id: record.id,
+            scope: record.scope,
+            expected: record.expected,
+            value: record.value,
+        }));
+        let mut version = self.header_version.lock().unwrap();
+        let turn = serde_json::to_value(&t)?;
+        *version = engine.store.transition_chat(ark_store::ChatTransition {
+            session: self.record.id.as_str(),
+            expected_header: &version,
+            header: &serde_json::to_value(&self.record)?,
+            index: t.index,
+            expected_turn: None,
+            turn: &turn,
+            records: &records,
+            invocation: None,
+            other_turn: closing
+                .as_ref()
+                .map(|(request, _, old, new)| (request.turn, old, new)),
+        })?;
+        Ok(AdmittedTurn {
+            identity: std::sync::Arc::new(()),
+            input: input.into(),
+            header: version.clone(),
+            turn,
+        })
+    }
+
+    pub fn admit_input(&mut self, engine: &Engine, input: &str) -> Result<(), AgentError> {
+        self.admit_input_records(engine, input, &[])
+    }
+
+    pub fn admit_input_records(
+        &mut self,
+        engine: &Engine,
+        input: &str,
+        records: &[ark_store::RecordChange<'_>],
+    ) -> Result<(), AgentError> {
+        self.admitted_input = Some(self.begin_turn_records(engine, input, None, records)?);
         Ok(())
+    }
+
+    pub fn admitted_turn(&self, input: &str) -> Option<AdmittedTurn> {
+        self.admitted_input
+            .as_ref()
+            .filter(|admitted| admitted.input == input)
+            .cloned()
+    }
+
+    pub fn fail_admitted_setup(
+        &mut self,
+        engine: &Engine,
+        admitted: &AdmittedTurn,
+        error: &str,
+    ) -> Result<bool, AgentError> {
+        if self.admitted_input.is_none() {
+            return Ok(false);
+        }
+        let mut turn: Turn = serde_json::from_value(admitted.turn.clone())?;
+        turn.error = Some(error.into());
+        turn.incomplete = true;
+        turn.pid = None;
+        turn.pid_start = None;
+        self.push_turn_with_admission(engine, turn, &Metrics::default(), None, Some(admitted))?;
+        self.admitted_input = None;
+        Ok(true)
     }
 
     /// A message the person sent while the turn runs reached the model: add it to the turn's
     /// stored record now, so a crash keeps it in the goal the next turn continues.
     pub fn steered_now(&mut self, engine: &Engine, message: &str) -> Result<(), AgentError> {
-        let index = self.record.turn_count;
+        let index = self.active_turn_index();
         let Some(v) = engine
             .store
             .list_session_turns(self.record.id.as_str(), Some(1))?
@@ -1015,9 +1318,20 @@ impl Session {
         input: &str,
         outcome: &HarnessOutcome,
     ) -> Result<(), AgentError> {
+        self.record_turn_cancelled(engine, input, outcome)
+            .map(|_| ())
+    }
+
+    pub fn record_turn_cancelled(
+        &mut self,
+        engine: &Engine,
+        input: &str,
+        outcome: &HarnessOutcome,
+    ) -> Result<bool, AgentError> {
         let interrupted = outcome.interrupted;
+        let waiting = outcome.awaiting_connection.as_ref();
         let turn = Turn {
-            index: self.record.turn_count,
+            index: self.active_turn_index(),
             input: input.to_string(),
             answer: outcome.answer.clone(),
             cited: outcome
@@ -1029,7 +1343,7 @@ impl Session {
             steered: outcome.steered.clone(),
             metrics: outcome.metrics.clone(),
             at: OffsetDateTime::now_utc(),
-            incomplete: interrupted,
+            incomplete: interrupted || waiting.is_some(),
             error: interrupted.then(|| INTERRUPTED.to_string()),
             pid: None,
             pid_start: None,
@@ -1039,9 +1353,19 @@ impl Session {
                 .turn_execution_mode
                 .take()
                 .unwrap_or(self.record.execution_mode),
+            connection: waiting.map(|request| {
+                crate::connection_requests::TurnConnection::Waiting {
+                    request_id: request.request_id.clone(),
+                }
+            }),
             // `outcome.steered` is what reached the model; it holds what `steered_now` kept.
         };
-        self.push_turn(engine, turn, &outcome.metrics)
+        if self.resumed.is_some() {
+            self.replace_resumed_turn(engine, turn, &outcome.metrics, waiting)
+        } else {
+            self.push_turn_with_connection(engine, turn, &outcome.metrics, waiting)?;
+            Ok(outcome.cancelled && !interrupted)
+        }
     }
 
     /// Store a turn that ended in an error, marked incomplete with the error.
@@ -1051,6 +1375,17 @@ impl Session {
         input: &str,
         error: &str,
     ) -> Result<(), AgentError> {
+        if let Some(original) = self.resumed.as_ref() {
+            let mut turn = original.clone();
+            turn.incomplete = true;
+            turn.error = Some(error.into());
+            turn.pid = None;
+            turn.pid_start = None;
+            turn.connection = None;
+            return self
+                .replace_resumed_turn(engine, turn, &Metrics::default(), None)
+                .map(|_| ());
+        }
         let mut t = Turn::placeholder(self.record.turn_count, input);
         t.execution_mode = self
             .turn_execution_mode
@@ -1071,28 +1406,279 @@ impl Session {
         turn: Turn,
         metrics: &Metrics,
     ) -> Result<(), AgentError> {
-        self.turn_execution_mode = None;
-        engine.store.put_session_turn(
-            self.record.id.as_str(),
-            turn.index,
-            &serde_json::to_value(&turn)?,
-        )?;
-        if self.record.title.is_empty() {
-            self.record.title = clip(&turn.input, 60);
+        self.push_turn_with_connection(engine, turn, metrics, None)
+    }
+
+    fn replace_resumed_turn(
+        &mut self,
+        engine: &Engine,
+        mut turn: Turn,
+        metrics: &Metrics,
+        waiting: Option<&crate::connection_requests::AwaitingConnection>,
+    ) -> Result<bool, AgentError> {
+        use crate::connection_requests::{
+            ConnectionRequestPhase, PendingConnectionRequest, TurnConnection, RECORD_KIND,
+        };
+        let admission = engine.chat_admission.chat(self.record.id.as_str());
+        let _guard = admission.lock().unwrap();
+        let original = self
+            .resumed
+            .as_ref()
+            .ok_or(ark_store::StoreError::Conflict)?;
+        let Some(TurnConnection::Started {
+            request_id,
+            run_id,
+            pid,
+            pid_start,
+        }) = &original.connection
+        else {
+            return Err(ark_store::StoreError::Conflict.into());
+        };
+        let current = engine
+            .store
+            .list_session_turns(self.record.id.as_str(), Some(1))?
+            .into_iter()
+            .next()
+            .ok_or(ark_store::StoreError::Conflict)?;
+        if current["index"].as_u64() != Some(turn.index as u64)
+            || self.record.turn_count != turn.index + 1
+            || self.recent.iter().all(|recent| recent.index != turn.index)
+        {
+            return Err(ark_store::StoreError::Conflict.into());
         }
-        self.record.turn_count += 1;
-        // The posts this turn carried are read now.
-        if let Some((seq, _)) = self.unread.last() {
-            self.record.posts_read = *seq;
-            self.unread.clear();
+        let old_request = engine
+            .store
+            .get_record(RECORD_KIND, request_id)?
+            .ok_or(ark_store::StoreError::Conflict)?;
+        let mut request: PendingConnectionRequest = serde_json::from_value(old_request.clone())?;
+        let stopped = matches!(&request.phase, ConnectionRequestPhase::Closed { reason } if reason == "cancelled");
+        if request.session != self.record.id.as_str()
+            || request.project != self.record.project
+            || request.turn != turn.index
+            || request.work != self.work_of(turn.index)
+            || current.get("connection") != Some(&serde_json::to_value(&original.connection)?)
+            || (!stopped
+                && !matches!(&request.phase,ConnectionRequestPhase::Started{run_id:owner,pid:owner_pid,pid_start:owner_start} if owner==run_id && owner_pid==pid && owner_start==pid_start))
+        {
+            return Err(ark_store::StoreError::Conflict.into());
         }
-        self.record.usage.add(metrics);
-        self.record.updated_at = OffsetDateTime::now_utc();
-        self.recent.push(turn);
-        let keep = self.record.policy.recent_turns;
-        let max_gists = self.record.policy.max_gists;
-        self.slide(keep, max_gists);
-        self.save(engine)
+        let waiting = if stopped {
+            turn.cancelled = true;
+            turn.connection = None;
+            if waiting.is_some() && turn.error.is_none() {
+                turn.incomplete = false;
+            }
+            turn.ran_out = false;
+            None
+        } else {
+            request.phase = if turn.incomplete && waiting.is_none() {
+                ConnectionRequestPhase::Interrupted {
+                    run_id: run_id.clone(),
+                }
+            } else {
+                ConnectionRequestPhase::Completed
+            };
+            waiting
+        };
+        request.local_revision = request
+            .local_revision
+            .checked_add(1)
+            .ok_or(ark_store::StoreError::Conflict)?;
+        let request_value = serde_json::to_value(&request)?;
+        turn.input = original.input.clone();
+        turn.goal = turn.goal.or_else(|| original.goal.clone());
+        let mut combined = original.metrics.clone();
+        combined.accumulate(metrics);
+        turn.metrics = combined;
+        let mut cites = original.cited.clone();
+        for cite in &turn.cited {
+            if !cites.contains(cite) {
+                cites.push(cite.clone());
+            }
+        }
+        turn.cited = cites;
+        let mut steered = original.steered.clone();
+        steered.extend(turn.steered.clone());
+        turn.steered = steered;
+        let mut next_record = self.record.clone();
+        next_record.usage.add(metrics);
+        next_record.usage.turns = next_record.usage.turns.saturating_sub(1);
+        next_record.updated_at = OffsetDateTime::now_utc();
+        let pending = waiting.map(|waiting| PendingConnectionRequest {
+            id: waiting.request_id.clone(),
+            project: self.record.project.clone(),
+            session: self.record.id.to_string(),
+            turn: turn.index,
+            work: self.work_of(turn.index),
+            invocation: waiting.invocation.id.to_string(),
+            call_id: waiting.call_id.clone(),
+            action_digest: waiting.action_digest.clone(),
+            requirement: waiting.requirement.clone(),
+            local_revision: 1,
+            scope: None,
+            resolution: None,
+            phase: ConnectionRequestPhase::Preparing,
+            cancel_pending: false,
+            metadata_retry: None,
+        });
+        let pending_value = pending.as_ref().map(serde_json::to_value).transpose()?;
+        let mut records = vec![ark_store::RecordChange {
+            kind: RECORD_KIND,
+            id: request_id,
+            scope: self.record.id.as_str(),
+            expected: Some(&old_request),
+            value: &request_value,
+        }];
+        if let Some((pending, value)) = pending.as_ref().zip(pending_value.as_ref()) {
+            records.push(ark_store::RecordChange {
+                kind: RECORD_KIND,
+                id: &pending.id,
+                scope: self.record.id.as_str(),
+                expected: None,
+                value,
+            });
+        }
+        let mut version = self.header_version.lock().unwrap();
+        *version = engine.store.transition_chat(ark_store::ChatTransition {
+            session: self.record.id.as_str(),
+            expected_header: &version,
+            header: &serde_json::to_value(&next_record)?,
+            index: turn.index,
+            expected_turn: Some(&current),
+            turn: &serde_json::to_value(&turn)?,
+            records: &records,
+            invocation: waiting.map(|waiting| (&self.record.project, &waiting.invocation)),
+            other_turn: None,
+        })?;
+        self.record = next_record;
+        let cancelled = turn.cancelled;
+        if let Some(recent) = self
+            .recent
+            .iter_mut()
+            .find(|recent| recent.index == turn.index)
+        {
+            *recent = turn;
+        }
+        self.resumed = None;
+        Ok(cancelled)
+    }
+
+    fn push_turn_with_connection(
+        &mut self,
+        engine: &Engine,
+        turn: Turn,
+        metrics: &Metrics,
+        waiting: Option<&crate::connection_requests::AwaitingConnection>,
+    ) -> Result<(), AgentError> {
+        self.push_turn_with_admission(engine, turn, metrics, waiting, None)
+    }
+
+    fn push_turn_with_admission(
+        &mut self,
+        engine: &Engine,
+        turn: Turn,
+        metrics: &Metrics,
+        waiting: Option<&crate::connection_requests::AwaitingConnection>,
+        admitted: Option<&AdmittedTurn>,
+    ) -> Result<(), AgentError> {
+        let admission = engine.chat_admission.chat(self.record.id.as_str());
+        let _guard = admission.lock().unwrap();
+        if let Some(admitted) = admitted {
+            if !self.admitted_input.as_ref().is_some_and(|current| {
+                std::sync::Arc::ptr_eq(&current.identity, &admitted.identity)
+            }) || *self.header_version.lock().unwrap() != admitted.header
+                || engine
+                    .store
+                    .session_version(self.record.id.as_str())?
+                    .as_ref()
+                    != Some(&admitted.header)
+            {
+                return Err(ark_store::StoreError::Conflict.into());
+            }
+        }
+        let saved_record = self.record.clone();
+        let saved_recent = self.recent.clone();
+        let saved_unread = self.unread.clone();
+        let saved_mode = self.turn_execution_mode;
+        let result = (|| {
+            self.turn_execution_mode = None;
+            let before = engine
+                .store
+                .list_session_turns(self.record.id.as_str(), Some(1))?
+                .into_iter()
+                .find(|value| value["index"].as_u64() == Some(turn.index as u64));
+            if admitted.is_some_and(|admitted| before.as_ref() != Some(&admitted.turn)) {
+                return Err(ark_store::StoreError::Conflict.into());
+            }
+            if self.record.title.is_empty() {
+                self.record.title = clip(&turn.input, 60);
+            }
+            self.record.turn_count += 1;
+            // The posts this turn carried are read now.
+            if let Some((seq, _)) = self.unread.last().filter(|_| admitted.is_none()) {
+                self.record.posts_read = *seq;
+                self.unread.clear();
+            }
+            self.record.usage.add(metrics);
+            self.record.updated_at = OffsetDateTime::now_utc();
+            self.recent.push(turn.clone());
+            let keep = self.record.policy.recent_turns;
+            let max_gists = self.record.policy.max_gists;
+            self.slide(keep, max_gists);
+            let request =
+                waiting.map(
+                    |waiting| crate::connection_requests::PendingConnectionRequest {
+                        id: waiting.request_id.clone(),
+                        project: self.record.project.clone(),
+                        session: self.record.id.to_string(),
+                        turn: turn.index,
+                        work: self.work_of(turn.index),
+                        invocation: waiting.invocation.id.to_string(),
+                        call_id: waiting.call_id.clone(),
+                        action_digest: waiting.action_digest.clone(),
+                        requirement: waiting.requirement.clone(),
+                        local_revision: 1,
+                        scope: None,
+                        resolution: None,
+                        phase: crate::connection_requests::ConnectionRequestPhase::Preparing,
+                        cancel_pending: false,
+                        metadata_retry: None,
+                    },
+                );
+            let request_json = request.as_ref().map(serde_json::to_value).transpose()?;
+            let records: Vec<_> = request
+                .as_ref()
+                .zip(request_json.as_ref())
+                .map(|(request, value)| ark_store::RecordChange {
+                    kind: crate::connection_requests::RECORD_KIND,
+                    id: &request.id,
+                    scope: self.record.id.as_str(),
+                    expected: None,
+                    value,
+                })
+                .into_iter()
+                .collect();
+            let mut version = self.header_version.lock().unwrap();
+            *version = engine.store.transition_chat(ark_store::ChatTransition {
+                session: self.record.id.as_str(),
+                expected_header: &version,
+                header: &serde_json::to_value(&self.record)?,
+                index: turn.index,
+                expected_turn: before.as_ref(),
+                turn: &serde_json::to_value(&turn)?,
+                records: &records,
+                invocation: waiting.map(|waiting| (&self.record.project, &waiting.invocation)),
+                other_turn: None,
+            })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            self.record = saved_record;
+            self.recent = saved_recent;
+            self.unread = saved_unread;
+            self.turn_execution_mode = saved_mode;
+        }
+        result
     }
 
     /// Fold turns beyond `keep` into gists, and gists beyond `max_gists` into the dropped count.
@@ -1275,6 +1861,7 @@ mod tests {
 
     fn outcome(answer: &str) -> HarnessOutcome {
         HarnessOutcome {
+            awaiting_connection: None,
             answer: answer.into(),
             cited: vec![],
             steps: 1,
@@ -1306,6 +1893,30 @@ mod tests {
             reopened.transcript(&engine, None).unwrap()[0].input,
             "keep this"
         );
+    }
+
+    #[test]
+    fn selected_model_is_created_atomically_and_old_records_decode() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open_with(dir.path(), Registry::new()).unwrap();
+        let project = engine.create_project("p", "").unwrap();
+        let id = SessionId("model-bound-client-request".into());
+        let selected =
+            Session::start_named_model(&engine, id.clone(), &project.id, "codex:gpt-5@high".into())
+                .unwrap();
+        assert_eq!(selected.model(), Some("codex:gpt-5@high"));
+        assert_eq!(
+            Session::open(&engine, id.as_str())
+                .unwrap()
+                .unwrap()
+                .model(),
+            Some("codex:gpt-5@high")
+        );
+
+        let mut legacy = serde_json::to_value(selected.record()).unwrap();
+        legacy.as_object_mut().unwrap().remove("model");
+        let legacy: SessionRecord = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.model, None);
     }
 
     #[test]

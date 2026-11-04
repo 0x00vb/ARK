@@ -7,6 +7,7 @@ things work; an ADR records why a choice was made, so the next session does not 
 
 | # | Decision | Status |
 |---|---|---|
+| [0082](0082-external-clients-can-opt-into-a-private-notification-relay.md) | External clients can opt into a private notification relay | Accepted for private pilot |
 | [0001](0001-no-domain-in-core.md) | The runtime names no domain, tool or file format | Accepted |
 | [0002](0002-bounded-context.md) | Working state is the memory, not the transcript | Accepted |
 | [0003](0003-deterministic-before-inference.md) | Code decides what code can decide; a model call needs a benchmark | Accepted |
@@ -83,6 +84,8 @@ things work; an ADR records why a choice was made, so the next session does not 
 | [0077](0077-an-app-can-add-rows-inside-the-current-project.md) | An app can add rows inside the current unfolded project through `ark.projectSection` | Accepted for implementation |
 | [0078](0078-chat-participants-come-from-durable-assignments.md) | Chat participants come from durable assignments | Accepted |
 | [0079](0079-project-memory-is-reviewed-and-project-scoped.md) | Project memory is reviewed and project scoped | Accepted |
+| [0080](0080-a-native-client-authorizes-an-official-model-program.md) | A native client authorizes the official model program without owning or copying its credential | Accepted |
+| [0081](0081-a-client-chooses-only-models-its-runtime-offers.md) | A client chooses only models its runtime offers | Accepted |
 
 0001 to 0006 were recorded on 2026-10-03 from decisions made earlier and documented in
 `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/ORCHESTRATION.md` and `docs/RELEASING.md`.

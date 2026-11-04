@@ -25,6 +25,10 @@ pub(crate) struct CodexApp {
     /// Threads this process has started or loaded.
     threads: std::collections::HashSet<String>,
     host_config: Option<Value>,
+    isolation: Option<std::sync::Arc<crate::codex_host::CodexHost>>,
+    default_model: Option<String>,
+    token_totals: std::collections::HashMap<String, TokenTotals>,
+    active_turn: Option<(String, String)>,
 }
 
 /// One turn's outcome.
@@ -83,19 +87,68 @@ impl CodexApp {
         version: &str,
         account: Option<&crate::accounts::ModelAccount>,
     ) -> Result<Self, AppError> {
+        Self::start_configured(bin, version, account, &[], None).await
+    }
+
+    pub(crate) async fn start_restricted_catalog(
+        bin: &Path,
+        version: &str,
+        account: Option<&crate::accounts::ModelAccount>,
+        flags: &[String],
+        cwd: &Path,
+    ) -> Result<Self, AppError> {
+        Self::start_configured(bin, version, account, flags, Some(cwd)).await
+    }
+
+    pub(crate) async fn start_qualified(
+        isolation: std::sync::Arc<crate::codex_host::CodexHost>,
+        version: &str,
+        account: Option<&crate::accounts::ModelAccount>,
+    ) -> Result<Self, AppError> {
+        isolation.fast_verify().map_err(AppError::Failed)?;
+        let mut app = Self::start_restricted_catalog(
+            isolation.native(),
+            version,
+            account,
+            &isolation.flags(),
+            isolation.directory(),
+        )
+        .await?;
+        isolation.fast_verify().map_err(AppError::Failed)?;
+        app.isolation = Some(isolation);
+        app.prepare_host().await?;
+        Ok(app)
+    }
+
+    async fn start_configured(
+        bin: &Path,
+        version: &str,
+        account: Option<&crate::accounts::ModelAccount>,
+        flags: &[String],
+        cwd: Option<&Path>,
+    ) -> Result<Self, AppError> {
         if account.is_some_and(|a| a.provider != "codex") {
             return Err(AppError::Failed(
                 "This account belongs to another provider.".into(),
             ));
         }
-        let mut cmd = crate::cli::command(bin);
-        if let Some(account) = account {
-            account
-                .setup_command(&mut cmd)
-                .map_err(|e| AppError::Failed(e.to_string()))?;
-        }
+        let mut cmd = if flags.is_empty() {
+            let mut cmd = crate::cli::command(bin);
+            if let Some(account) = account {
+                account
+                    .setup_command(&mut cmd)
+                    .map_err(|e| AppError::Failed(e.to_string()))?;
+            }
+            cmd
+        } else {
+            crate::codex_host::restricted_command(bin, account).map_err(AppError::Failed)?
+        };
         cmd.args(["app-server", "-c", "sandbox_mode=\"read-only\""]);
         crate::cli::host_codex_flags(&mut cmd, false);
+        cmd.args(flags);
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
         let proc = LiveProcess::spawn(cmd)
             .map_err(|e| AppError::Broken(format!("could not start: {e}")))?;
         let mut app = CodexApp {
@@ -104,6 +157,10 @@ impl CodexApp {
             next_id: 0,
             threads: Default::default(),
             host_config: None,
+            isolation: None,
+            default_model: None,
+            token_totals: Default::default(),
+            active_turn: None,
         };
         app.request(
             "initialize",
@@ -125,6 +182,15 @@ impl CodexApp {
         }
     }
 
+    pub(crate) fn qualified_for(
+        &self,
+        isolation: &std::sync::Arc<crate::codex_host::CodexHost>,
+    ) -> bool {
+        self.isolation
+            .as_ref()
+            .is_some_and(|saved| std::sync::Arc::ptr_eq(saved, isolation))
+    }
+
     pub(crate) fn running(&mut self) -> bool {
         self.proc.running()
     }
@@ -142,10 +208,15 @@ impl CodexApp {
         let response = self
             .request(
                 "config/read",
-                json!({"includeLayers": false}),
+                json!({"includeLayers": self.isolation.is_some()}),
                 SETUP_TIMEOUT,
             )
             .await?;
+        if let Some(isolation) = &self.isolation {
+            isolation
+                .verify_configuration(&response)
+                .map_err(AppError::Failed)?;
+        }
         let config = host_config(&response)?;
         self.host_config = Some(config.clone());
         Ok(config)
@@ -162,10 +233,18 @@ impl CodexApp {
         Ok(response["account"]["email"].as_str().map(str::to_string))
     }
 
+    pub(crate) async fn account_fingerprint(&mut self) -> Result<blake3::Hash, AppError> {
+        let response = self
+            .request("account/read", json!({"refreshToken":false}), SETUP_TIMEOUT)
+            .await?;
+        crate::codex_host::account_fingerprint(&response).map_err(AppError::Failed)
+    }
+
     /// Models and effort levels available to this signed-in Codex account.
     pub(crate) async fn models(&mut self) -> Result<Vec<ModelOption>, AppError> {
         let mut out = Vec::new();
         let mut cursor: Option<String> = None;
+        let mut seen = std::collections::HashSet::new();
         for _ in 0..20 {
             let r = self
                 .request(
@@ -174,30 +253,113 @@ impl CodexApp {
                     SETUP_TIMEOUT,
                 )
                 .await?;
-            out.extend(r["data"].as_array().into_iter().flatten().filter_map(|m| {
-                if m["hidden"].as_bool() == Some(true) {
-                    return None;
+            let invalid = || AppError::Broken("model/list returned an invalid catalog page".into());
+            let models = r
+                .get("data")
+                .and_then(Value::as_array)
+                .ok_or_else(invalid)?;
+            for model in models {
+                let model = model.as_object().ok_or_else(invalid)?;
+                if let Some(hidden) = model.get("hidden") {
+                    if hidden.as_bool().ok_or_else(invalid)? {
+                        continue;
+                    }
                 }
-                let id = m["model"].as_str().or_else(|| m["id"].as_str())?;
-                Some(ModelOption {
+                let id = model
+                    .get("model")
+                    .or_else(|| model.get("id"))
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.trim().is_empty())
+                    .ok_or_else(invalid)?;
+                let label = model
+                    .get("displayName")
+                    .map(|label| label.as_str().ok_or_else(invalid))
+                    .transpose()?
+                    .unwrap_or(id)
+                    .to_string();
+                let efforts = model
+                    .get("supportedReasoningEfforts")
+                    .map(|efforts| {
+                        efforts
+                            .as_array()
+                            .ok_or_else(invalid)?
+                            .iter()
+                            .map(|effort| {
+                                effort
+                                    .get("reasoningEffort")
+                                    .and_then(Value::as_str)
+                                    .filter(|effort| !effort.trim().is_empty())
+                                    .map(str::to_string)
+                                    .ok_or_else(invalid)
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
+                let default_effort = model
+                    .get("defaultReasoningEffort")
+                    .filter(|value| !value.is_null())
+                    .map(|value| {
+                        value
+                            .as_str()
+                            .filter(|effort| !effort.trim().is_empty())
+                            .map(str::to_string)
+                            .ok_or_else(invalid)
+                    })
+                    .transpose()?;
+                if model.get("isDefault").and_then(Value::as_bool) == Some(true) {
+                    self.default_model = Some(id.to_string());
+                }
+                out.push(ModelOption {
                     id: id.to_string(),
-                    label: m["displayName"].as_str().unwrap_or(id).to_string(),
-                    efforts: m["supportedReasoningEfforts"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|e| e["reasoningEffort"].as_str().map(str::to_string))
-                        .collect(),
-                    default_effort: m["defaultReasoningEffort"].as_str().map(str::to_string),
-                })
-            }));
-            let next = r["nextCursor"].as_str().map(str::to_string);
-            if next.is_none() || next == cursor {
-                break;
+                    label,
+                    efforts,
+                    default_effort,
+                });
             }
-            cursor = next;
+            match r.get("nextCursor") {
+                None | Some(Value::Null) => return Ok(out),
+                Some(Value::String(next)) if !next.is_empty() && seen.insert(next.clone()) => {
+                    cursor = Some(next.clone());
+                }
+                _ => {
+                    return Err(AppError::Broken(
+                        "model/list returned an invalid or repeated cursor".into(),
+                    ))
+                }
+            }
         }
-        Ok(out)
+        Err(AppError::Broken(
+            "model/list exceeded the catalog page limit".into(),
+        ))
+    }
+
+    pub(crate) async fn qualification_snapshot(
+        &mut self,
+    ) -> Result<(Vec<ModelOption>, Option<String>), AppError> {
+        let models = self
+            .models()
+            .await
+            .map_err(|_| AppError::Failed("Codex model catalog is unavailable".into()))?;
+        let response = self
+            .request("config/read", json!({"includeLayers":true}), SETUP_TIMEOUT)
+            .await
+            .map_err(|_| AppError::Failed("Codex configuration is unavailable".into()))?;
+        crate::codex_host::verify_startup_configuration(&response).map_err(AppError::Failed)?;
+        host_config(&response)?;
+        if response["config"]["model_provider"]
+            .as_str()
+            .is_some_and(|provider| provider != "openai")
+        {
+            return Err(AppError::Failed(
+                "Protected Codex requires the official subscription provider".into(),
+            ));
+        }
+        let default = response["config"]["model"]
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| self.default_model.clone());
+        Ok((models, default))
     }
 
     /// Start a thread: no approvals, read-only, `instructions` as its base instructions.
@@ -207,16 +369,28 @@ impl CodexApp {
         model: Option<&str>,
         instructions: &str,
     ) -> Result<String, AppError> {
+        self.start_thread_ephemeral(cwd, model, instructions, false)
+            .await
+    }
+
+    pub(crate) async fn start_thread_ephemeral(
+        &mut self,
+        cwd: &Path,
+        model: Option<&str>,
+        instructions: &str,
+        ephemeral: bool,
+    ) -> Result<String, AppError> {
         let mut p = thread_settings(cwd, model);
         p["config"] = self.prepare_host().await?;
         p["baseInstructions"] = json!(instructions);
-        p["ephemeral"] = json!(false);
+        p["ephemeral"] = json!(ephemeral);
         let r = self.request("thread/start", p, SETUP_TIMEOUT).await?;
         let id = r["thread"]["id"]
             .as_str()
             .map(str::to_string)
             .ok_or_else(|| AppError::Broken("thread/start returned no thread id".into()))?;
         self.threads.insert(id.clone());
+        self.token_totals.insert(id.clone(), TokenTotals::default());
         Ok(id)
     }
 
@@ -236,6 +410,19 @@ impl CodexApp {
         p["config"] = self.prepare_host().await?;
         p["threadId"] = json!(id);
         self.request("thread/resume", p, SETUP_TIMEOUT).await?;
+        if self.isolation.is_some() {
+            self.request(
+                "thread/read",
+                json!({"threadId":id,"includeTurns":false}),
+                SETUP_TIMEOUT,
+            )
+            .await?;
+            if !self.token_totals.contains_key(id) {
+                return Err(AppError::Failed(
+                    "Start a new chat to continue with this model".into(),
+                ));
+            }
+        }
         self.threads.insert(id.to_string());
         Ok(())
     }
@@ -243,6 +430,24 @@ impl CodexApp {
     /// Run one turn on thread `id`, its reply shaped by `schema`. The reply's `text` field
     /// reaches `on_text` while it is written.
     pub(crate) async fn turn(&mut self, request: TurnRequest<'_>) -> Result<Turn, AppError> {
+        self.active_turn = None;
+        let thread = request.thread_id.to_string();
+        let before = self.token_totals.get(&thread).copied();
+        let result = self.turn_inner(request).await;
+        if result.is_err() {
+            let partial = self
+                .token_totals
+                .get(&thread)
+                .copied()
+                .zip(before)
+                .and_then(|(after, before)| after.delta(before).ok());
+            tracing::warn!(prompt_tokens=partial.map(|usage|usage.prompt_tokens),completion_tokens=partial.map(|usage|usage.completion_tokens),cached_tokens=partial.map(|usage|usage.cached_tokens),"Codex did not complete; spending may be partial or unknown and the call is not automatically retried");
+        }
+        self.active_turn = None;
+        result
+    }
+
+    async fn turn_inner(&mut self, request: TurnRequest<'_>) -> Result<Turn, AppError> {
         let TurnRequest {
             thread_id: id,
             input,
@@ -252,6 +457,12 @@ impl CodexApp {
             wait,
             on_text,
         } = request;
+        if let Some(isolation) = self.isolation.clone() {
+            isolation.verify_account().await.map_err(AppError::Failed)?;
+            isolation
+                .matches_account(self.account_fingerprint().await?)
+                .map_err(AppError::Failed)?;
+        }
         let deadline = Instant::now() + wait;
         let mut params = json!({
             "threadId": id,
@@ -263,6 +474,8 @@ impl CodexApp {
         if let Some(effort) = effort {
             params["effort"] = json!(effort);
         }
+        let mut baseline = self.token_totals.get(id).copied();
+        let mut previous = baseline;
         let rid = self.send_request("turn/start", params).await?;
         let mut field = JsonTextField::new("text");
         let mut text: Option<String> = None;
@@ -273,11 +486,28 @@ impl CodexApp {
                 if let Some(e) = m.get("error") {
                     return Err(AppError::Failed(error_text(e)));
                 }
+                if let Some(turn) = m["result"]["turn"]["id"].as_str() {
+                    self.active_turn = Some((id.to_string(), turn.to_string()));
+                }
+                if baseline.is_none() {
+                    baseline = self.token_totals.get(id).copied();
+                    previous = baseline;
+                }
                 continue;
             }
             let params = &m["params"];
             if params["threadId"].as_str().is_some_and(|t| t != id) {
                 continue;
+            }
+            if let Some((_, active)) = &self.active_turn {
+                if params["turnId"].as_str().is_some_and(|turn| turn != active)
+                    || (m["method"] == "turn/completed"
+                        && params["turn"]["id"]
+                            .as_str()
+                            .is_some_and(|turn| turn != active))
+                {
+                    continue;
+                }
             }
             match m["method"].as_str() {
                 Some("item/agentMessage/delta") => {
@@ -293,7 +523,25 @@ impl CodexApp {
                 }
                 Some("account/rateLimits/updated") => self.record_limits(params),
                 Some("thread/tokenUsage/updated") => {
-                    usage = turn_usage(&params["tokenUsage"]["last"]);
+                    if let Some(total) = TokenTotals::parse(&params["tokenUsage"]["total"])? {
+                        if let Some(previous) = previous {
+                            total.delta(previous)?;
+                        }
+                        previous = Some(total);
+                        if let Some(baseline) = baseline {
+                            usage = total.delta(baseline)?;
+                        } else if self.isolation.is_some() {
+                            return Err(AppError::Broken(
+                                "Codex could not report this turn's usage. Try again.".into(),
+                            ));
+                        } else {
+                            usage = Usage::default();
+                        }
+                    } else if self.isolation.is_some() {
+                        usage = Usage::default();
+                    } else {
+                        usage = turn_usage(&params["tokenUsage"]["last"]);
+                    }
                 }
                 Some("error") => {
                     let detail = error_text(&params["error"]);
@@ -390,6 +638,23 @@ impl CodexApp {
                 self.write(&no).await?;
                 continue;
             }
+            if m["method"] == "thread/tokenUsage/updated" {
+                let params = &m["params"];
+                if let Some(thread) = params["threadId"].as_str() {
+                    let belongs =
+                        self.active_turn
+                            .as_ref()
+                            .is_none_or(|(active_thread, active_turn)| {
+                                thread != active_thread
+                                    || params["turnId"].as_str() == Some(active_turn)
+                            });
+                    if belongs {
+                        if let Some(total) = TokenTotals::parse(&params["tokenUsage"]["total"])? {
+                            self.token_totals.insert(thread.to_string(), total);
+                        }
+                    }
+                }
+            }
             return Ok(m);
         }
     }
@@ -442,6 +707,52 @@ fn host_config(response: &Value) -> Result<Value, AppError> {
     Ok(overrides)
 }
 
+#[derive(Clone, Copy, Default)]
+struct TokenTotals {
+    input: u64,
+    output: u64,
+    cached: u64,
+    written: u64,
+}
+impl TokenTotals {
+    fn parse(value: &Value) -> Result<Option<Self>, AppError> {
+        if value.is_null() {
+            return Ok(None);
+        }
+        let number = |name: &str| {
+            value[name]
+                .as_u64()
+                .ok_or_else(|| AppError::Broken("Codex returned invalid token totals".into()))
+        };
+        Ok(Some(Self {
+            input: number("inputTokens")?,
+            output: number("outputTokens")?,
+            cached: number("cachedInputTokens")?,
+            written: if value.get("cacheWriteInputTokens").is_some() {
+                number("cacheWriteInputTokens")?
+            } else {
+                0
+            },
+        }))
+    }
+    fn delta(self, baseline: Self) -> Result<Usage, AppError> {
+        let difference = |current: u64, before: u64| {
+            current
+                .checked_sub(before)
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| {
+                    AppError::Broken("Codex could not report this turn's usage. Try again.".into())
+                })
+        };
+        Ok(Usage::measured(
+            difference(self.input, baseline.input)?,
+            difference(self.output, baseline.output)?,
+        )
+        .with_cached(difference(self.cached, baseline.cached)?)
+        .with_cache_write(difference(self.written, baseline.written)?))
+    }
+}
+
 /// A turn's token counts. Codex counts cached input inside `inputTokens`.
 fn turn_usage(u: &Value) -> Usage {
     let n = |k: &str| u[k].as_u64().unwrap_or(0) as u32;
@@ -479,6 +790,38 @@ mod tests {
         }
         assert!(host_config(&json!({})).is_err());
         assert!(host_config(&json!({"config":{"mcp_servers":{"name.with.dot":{}}}})).is_err());
+    }
+
+    #[test]
+    fn cumulative_usage_rejects_counter_resets_and_overflow() {
+        let baseline = TokenTotals {
+            input: 50,
+            output: 18,
+            cached: 15,
+            written: 0,
+        };
+        assert!(TokenTotals {
+            input: 49,
+            ..baseline
+        }
+        .delta(baseline)
+        .is_err());
+        assert!(TokenTotals {
+            input: u64::MAX,
+            ..baseline
+        }
+        .delta(baseline)
+        .is_err());
+        let current = TokenTotals {
+            input: 90,
+            output: 31,
+            cached: 35,
+            written: 0,
+        };
+        assert_eq!(
+            current.delta(baseline).unwrap(),
+            Usage::measured(40, 13).with_cached(20)
+        );
     }
 
     #[test]

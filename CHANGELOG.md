@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+- Qualify supported Codex model calls through a tool-free app-server transport. Protected automations require a verified build, account, explicit model and effort. Refuse unqualified fallback and foreign conversations.
+- Preserve a verified empty Codex model list. Reject malformed and incomplete catalog pages.
+
 ## [0.33.0] - 2026-11-04
 
 ### Breaking

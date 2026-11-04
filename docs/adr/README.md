@@ -142,3 +142,5 @@ Local integration decisions:
 - [0095-native-computer-uses-agent-desktop](0095-native-computer-uses-agent-desktop.md)
 
 - [0096-agent-conversation-navigation](0096-agent-conversation-navigation.md)
+
+- [0098. Codex model calls use a qualified host transport](0098-codex-model-calls-use-a-qualified-host-transport.md)

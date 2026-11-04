@@ -17,3 +17,12 @@ work-automation-ui and studio-polish evidence folders from3November.
 
 Unfinished phone-listener work, managed Blender work and inference experiments are excluded.
 The normal installed Desktop app/profile is unchanged until verified signed OTA promotion.
+
+## Codex daily-use readiness candidate
+
+`ark-daily-use-schedules` contains the Codex host transport candidate (ADR 0098).
+The official macOS arm64 0.166.0 binary and metadata qualification were checked
+without inference. Model tests and focused lifecycle checks passed before the
+account identity refinement. Independent implementation review and actual protected
+manual, timer and restart acceptance remain open. No commit or release was made.
+Evidence: `../board/evidence/ark-daily-use-20261104/schedules/`.

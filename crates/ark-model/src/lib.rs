@@ -19,6 +19,7 @@ pub mod capacity;
 mod catalog;
 pub mod cli;
 mod codex_app;
+mod codex_host;
 pub mod endpoints;
 pub mod keys;
 mod live;

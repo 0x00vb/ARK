@@ -1,5 +1,14 @@
 # Current state
 
+## Work clarity pass (2026-10-20)
+
+In `codex/ux-clarity`: the sidebar names Working and Needs you, shows pending decisions
+on folded projects, and preserves keyboard focus during background updates. File cards have
+44px targets and explicit accessible open actions, including after Restore. Reconnect and
+detached-window state use the current approval snapshot. Real WebKit regression tests cover
+these paths. Consumer native integration and the final repository gate remain separate.
+Board `ark-ui-clarity-20261020`. No release or Desktop repin.
+
 ## Mobile continuity listener
 
 In development on `codex/mobile-client-listener`: a stoppable client-only listener attaches to

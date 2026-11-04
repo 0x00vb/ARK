@@ -550,10 +550,12 @@ function fileCard(api, path, here, before) {
   const kind = kindOf(path);
   const name = path.split("/").pop();
   const sub = h("span.file-card-sub", here ? kindNoun(kind) : "Removed");
+  const open = h("span.file-card-open", { "aria-hidden": "true", hidden: !here }, icon("chevron-right"));
   const preview = kind === "image" && here ? h("img.file-card-image", { alt: "", hidden: true }) : null;
-  const card = h("button.file-card", { type: "button", "data-kind": kind, title: path, disabled: !here, onclick: () => api.openFile(path) },
+  const card = h("button.file-card", { type: "button", "data-kind": kind, title: path, "aria-label": here ? `Open ${name}` : `${name}, removed`, disabled: !here, onclick: () => api.openFile(path) },
     preview || h("span.file-card-ico", icon(KIND_ICON[kind])),
-    h("span.file-card-text", h("span.file-card-name", name), sub));
+    h("span.file-card-text", h("span.file-card-name", name), sub),
+    open);
   if (preview) {
     api.call("file_media", { path }).then((m) => {
       if (!card.isConnected) return;
@@ -580,6 +582,8 @@ function fileCard(api, path, here, before) {
       const r = await api.call("file_restore", { artifact: version });
       restored = !restored;
       card.disabled = false;
+      card.setAttribute("aria-label", `Open ${name}`);
+      open.hidden = false;
       sub.textContent = kindNoun(kind);
       if (r.undo) version = r.undo;
       label.textContent = restored ? "Undo" : "Restore";

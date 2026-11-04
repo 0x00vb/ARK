@@ -9,6 +9,10 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ## [Unreleased]
 
+- Sidebar shows Working and Needs you, preserves keyboard focus on background updates, and
+  keeps pending decisions visible through detached-window reconnects. File cards have larger
+  targets and accessible open actions that remain correct after Restore.
+
 ### Added
 
 - Client protocol v1.4 adds account-bound runtime pairing and an optional stable route id.

@@ -43,6 +43,8 @@ export class Sidebar {
     // Chats running a turn now, and their projects (`working` from the host).
     this.working = new Set();
     this.workingProjects = new Set();
+    this.attention = [];
+    this.online = true;
     $("#new-session").addEventListener("click", () => api.newSession());
     $("#add-project").addEventListener("click", (e) => this.addMenu(e.currentTarget));
     this.settings.addEventListener("click", () => api.openSettings());
@@ -55,6 +57,16 @@ export class Sidebar {
     this.working = ids;
     this.workingProjects = new Set(list.map((w) => w.project));
     if (!same) this.refresh();
+  }
+
+  setAttention(list) {
+    this.attention = [...new Map(list.map((item) => [item.id, item])).values()];
+    this.refresh();
+  }
+
+  setOnline(online) {
+    this.online = online;
+    for (const mark of this.tree.querySelectorAll(".session-progress, .working-dot")) mark.hidden = !online;
   }
 
   unfolded(p) {
@@ -136,10 +148,15 @@ export class Sidebar {
     projects.forEach((p) => { if (this.hidden.has(p.id)) this.hidden.set(p.id, p.name); });
     this.saveHidden();
     const visible = projects.filter((p) => !this.hidden.has(p.id));
+    const locateQuestions = this.attention.some((item) => item.session && !item.project?.id);
     const chats = await Promise.all(visible.map((p) =>
-      this.unfolded(p) ? this.api.call("sessions", { project: p.id }).catch(() => []) : null));
+      this.unfolded(p) || locateQuestions ? this.api.call("sessions", { project: p.id }).catch(() => []) : null));
     // A newer refresh started meanwhile; it draws.
     if (gen !== this.gen) return;
+    const active = document.activeElement;
+    const focusedChat = active?.matches(".session") ? active.dataset.id : null;
+    const focusedProject = active?.closest(".project")?.dataset.id;
+    const focusedControl = [".project-row", ".project-chev", ".project-more", ".project-new-chat"].find((selector) => active?.matches(selector));
     const sections = this.projectSections;
     this.projectSections = [];
     for (const section of sections) {
@@ -162,17 +179,21 @@ export class Sidebar {
         }
       }
     });
+    if (focusedChat) this.tree.querySelector(`.session[data-id="${CSS.escape(focusedChat)}"]`)?.focus({ preventScroll: true });
+    else if (focusedProject && focusedControl) this.tree.querySelector(`.project[data-id="${CSS.escape(focusedProject)}"] ${focusedControl}`)?.focus({ preventScroll: true });
   }
 
   project(p, sessions) {
     const open = this.unfolded(p);
+    const waiting = this.attention.filter((item) => item.project?.id === p.id || (sessions || []).some((session) => session.id === item.session)).length;
     const row = h("div.project-row", {
       role: "treeitem", tabindex: "0", "aria-expanded": String(open), "aria-current": p.current ? "true" : null,
       title: p.workspace || "No folder yet",
     },
       h("button.project-chev", { type: "button", tabindex: "-1", "aria-label": open ? "Fold" : "Unfold", onclick: (e) => { e.stopPropagation(); this.fold(p, !open); } }, icon("chevron-right")),
       h("span.project-name", p.name),
-      !open && this.workingProjects.has(p.id) ? h("span.working-dot", { title: "Working", "aria-label": "Working" }) : null,
+      !open && waiting ? h("span.session-attention", { title: "Needs you", "aria-label": `${waiting} pending decision${waiting === 1 ? "" : "s"}` }, icon("alert"), String(waiting))
+        : !open && this.workingProjects.has(p.id) ? h("span.working-dot", { title: "Working", "aria-label": "Working", hidden: !this.online }) : null,
       h("button.icon-btn.small.project-more", { type: "button", title: "Project", "aria-label": `${p.name}: options`, onclick: (e) => { e.stopPropagation(); this.projectMenu(e.currentTarget, p); } }, icon("more")),
       h("button.icon-btn.small.project-new-chat", { type: "button", title: `New chat in ${p.name}`, "aria-label": `New chat in ${p.name}`, onclick: (e) => { e.stopPropagation(); this.newChat(p); } }, icon("plus")));
     // The current project folds; another one opens where it left off.
@@ -185,7 +206,7 @@ export class Sidebar {
 
   chats(p, sessions) {
     // A chat shows once it has a turn, or while its first one runs.
-    const shown = sessions.filter((s) => s.turns > 0 || s.working || this.working.has(s.id));
+    const shown = sessions.filter((s) => s.turns > 0 || s.working || this.working.has(s.id) || this.attention.some((item) => item.session === s.id));
     if (!shown.length) return null;
     const box = h("div.chats", { role: "group" });
     const all = this.all.has(p.id);
@@ -199,6 +220,7 @@ export class Sidebar {
 
   chat(s, i) {
     const title = s.title || "Untitled";
+    const waiting = this.attention.some((item) => item.session === s.id);
     const row = h("div.session", {
       role: "treeitem", tabindex: "0", "data-id": s.id, "aria-current": s.id === this.currentId ? "true" : null,
       style: { "--i": Math.min(i, 12) },
@@ -207,8 +229,9 @@ export class Sidebar {
       // A chat that runs on another computer: its mark, muted while that computer is away.
       s.place ? h("span.session-place", { title: `Runs on ${s.place.name}`, "data-state": s.place.state }, icon("server")) : null,
       // A chat working in the background: a spinner where its time would be.
-      s.working || this.working.has(s.id)
-        ? h("span.session-working", { role: "status", title: "Working", "aria-label": "Working" })
+      waiting ? h("span.session-attention", { title: "Needs you" }, icon("alert"), "Needs you")
+        : s.working || this.working.has(s.id)
+        ? h("span.session-progress", { role: "status", hidden: !this.online }, h("span.session-working", { "aria-hidden": "true" }), "Working")
         : h("span.session-time", ago(s.updated_at)));
     row.title = `${title}\n${s.turns} turn${s.turns === 1 ? "" : "s"} · double-click to rename`;
     row.addEventListener("click", () => this.api.openSession(s.id));

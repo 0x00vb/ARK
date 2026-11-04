@@ -149,7 +149,7 @@ export function connect() {
       const r = await fetch("/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name }) }).catch(() => null);
       return !!r?.ok;
     },
-    /// A code for another device (ADR 0047): `{code, expires_ms}`.
+    /// A local QR plus recovery code for another device (ADR 0047).
     async pairCode() {
       const r = await fetch("/pair", { method: "POST", headers, body: "{}" });
       if (!r.ok) throw new Error("A code could not be made.");

@@ -1270,6 +1270,12 @@ async fn a_typed_code_signs_a_phone_in_and_its_notifications_end_with_its_sessio
     let made = raw(port, post("/pair", host, Some(me), &auth, "{}")).await;
     assert!(made.starts_with("HTTP/1.1 200"), "{made}");
     let made: Value = serde_json::from_str(made.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert!(
+        made["qr_svg"]
+            .as_str()
+            .is_some_and(|svg| svg.contains("<svg") && svg.contains("#0f1115")),
+        "the signed-in HTTPS origin gets a local QR"
+    );
     let code = made["code"]
         .as_str()
         .unwrap()

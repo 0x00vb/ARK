@@ -1995,9 +1995,11 @@ a.cite:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); c
   kbd { display: none; }
 }
 
-/* Devices (devices.js, ADR 0047): a code to sign in another device; the sign-in by code. */
-.pair-code { display: flex; align-items: baseline; gap: 8px; padding: 0 16px 12px; }
+/* Devices (devices.js, ADR 0047): scan first, with the short-lived code as recovery. */
+.pair-code { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 16px 16px; }
 .pair-code:empty { display: none; }
+.pair-qr { width: 208px; height: 208px; border-radius: 18px; }
+.pair-scan { color: var(--text); font-size: 14px; }
 .pair-value {
   font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: 0.08em;
   color: var(--text); user-select: all;

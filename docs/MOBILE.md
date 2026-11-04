@@ -31,7 +31,7 @@ App Store release is gated on native utility, not a wrapper around the runtime p
 
 | Native capability | Person-visible value |
 |---|---|
-| SwiftUI Home, Chats, Conversation, Review, Result and Me | Native navigation, restoration, Dynamic Type and accessibility |
+| SwiftUI Chats, Conversation, Attention, Review, Result and Me | Native navigation, restoration, Dynamic Type and accessibility |
 | APNs notifications | A waiting question can reach the phone while the app is closed |
 | Notification routing | A tap opens the exact item, then refreshes it before enabling an action |
 | PhotosPicker and document picker | A photo or file can be attached without browser upload behavior |
@@ -47,60 +47,45 @@ native workflows. The app has no dependency on another installed app.
 
 The first release supports these jobs, in order:
 
-1. See what needs me.
-2. Answer a question or approval.
-3. Check what is working and what finished.
-4. Continue or start a chat.
-5. Open and share a result.
+1. Continue a chat.
+2. See which conversation is working or unread.
+3. Answer a question or approval.
+4. Open and share a result.
 
-Use three destinations. Frequent tab changes do not animate.
+Chats is the root. There is no bottom navigation or separate Home screen.
 
-| Destination | Contains | Excludes |
+| Surface | Contains | Excludes |
 |---|---|---|
-| Home | Needs you, Working, Recent results | Dashboard metrics and a duplicate activity feed |
-| Chats | Chats, search, New chat | Projects, Terminal, agent setup, provider setup and a file tree |
-| Me | This phone, notifications, appearance, help and settings | Protocol and runtime words outside Advanced |
+| Chats | Recent chats, teammate art, unread and working state, search, one compact attention mark | Projects, Terminal, agent setup, provider setup and a file tree |
+| Conversation | Messages, approvals, results and composer | Repeated project or computer metadata |
+| Me | This phone, appearance, help and settings | Protocol and runtime words outside Advanced |
 
 ## 4. Screens
 
 ### Pair this iPhone
 
-The journey starts on a signed-in Desktop or Cloud client:
+The journey starts on a signed-in ARK client:
 
-1. Settings > Devices > Add an iPhone shows a QR code containing only the configured public
-   HTTPS runtime address. It also shows the address as selectable text.
-2. The app scans the QR code or accepts the address manually. It validates HTTPS before sending
-   anything.
-3. The existing client shows a separate eight-character pairing code.
-4. The app types or pastes that code. The runtime exchanges it once for a native device
-   credential and mutation epoch.
-5. After Home is useful, the app explains notifications and asks for permission.
+1. Settings > Devices > Add an iPhone shows one QR code. It contains a version marker, the
+   configured public HTTPS runtime address and the existing ten-minute single-use pairing grant.
+2. The app validates the version, HTTPS address and grant at the camera boundary. It exchanges
+   the grant immediately for a native device credential and mutation epoch.
+3. The eight-character code remains visible as recovery for an older app or a camera that cannot
+   scan. Address and code entry stay behind Enter details in the app.
+4. After Chats is useful, the app explains notifications and asks for permission.
 
 A loopback-only runtime refuses Add an iPhone and explains that a reachable HTTPS address is
-needed. A QR code or link never contains a credential or mutation.
-
-### Home
-
-Home answers one question: **What needs my attention now?** Sections appear only when non-empty.
-
-| Section | Row contents | Primary action |
-|---|---|---|
-| Needs you | Teammate, request, project, computer | Answer or Review |
-| Working | Work, current step, elapsed time, computer | Open chat |
-| Recent | Result or failure, project, time | Open result or Continue |
-
-Questions stay expanded because the choice is the work. Results remain compact. Empty Home shows
-the quiet mascot, “Nothing needs you”, and the most recent chat. It does not show a feature list.
+needed. A QR never contains the resulting device credential, an account token or a mutation.
 
 ### Chats and conversation
 
-Chats groups recent project chats and searches loaded titles locally. New chat chooses a project,
-then the computer where it will run, then the composer. One available computer is shown as a quiet
-line instead of a choice. An unavailable computer stays visible and read only.
+Chats shows recent conversations in one flat list and searches loaded titles and previews locally.
+Each row shows the teammate, title, latest useful line and time. Unread is a dot on the teammate.
+Working replaces the preview with the current step. Global attention is one marked header control
+because the released attention payload does not identify a chat.
 
-The conversation has Back, title and computer in its top bar; messages, activity, results and
-approval cards in the thread; one connection state; and attachment, 16 point composer, Send or
-Stop at the bottom.
+The conversation has Back and one title in its top bar; messages, results and approval cards in the
+thread; one connection state; and a 16 point composer with Send at the bottom.
 
 - The computer becomes fixed after the first message.
 - Model choice stays in the overflow menu.
@@ -118,8 +103,9 @@ project page, Open Terminal button or standalone destination. The project-scoped
 
 ### Review, result and Me
 
-A short approval is an inline card. A long request is a page. Every choice has words and an icon;
-destructive or lasting choices are separate. A resolved request says so and returns to Home.
+A short approval is an inline card. A long request is a page. Every choice has words; the first is
+primary and alternatives are quiet. Destructive or lasting choices are separate. A resolved request
+returns to its attention list or conversation.
 
 The result screen previews text, Markdown, images and PDFs. Other files show their name, kind and
 size with Download and Share. It does not recreate Desktop editors.
@@ -129,7 +115,9 @@ contains the runtime address, protocol diagnostics and device details.
 
 ## 5. UI development kit
 
-Use SwiftUI and system controls first. Do not add a general component library. Use ARK's paper,
+Use SwiftUI and system controls for native behavior. Product actions use ARK's routed-node glyphs;
+system symbols remain only for OS conventions such as Back, Search, QR scan and Share. Do not add a
+general component library. Use ARK's paper,
 ink, mist and one blue accent from `ark-site/BRAND.md`. Add a missing brand token at the brand
 source before copying it into the app asset catalog.
 
@@ -352,7 +340,7 @@ every other core job without help. Nobody may cause an unintended mutation.
 
 ## 12. Acceptance criteria
 
-1. A new person scans an address-only QR code, pairs once and reaches Home without written help.
+1. A new person scans one QR code, pairs once and reaches Chats without written help.
 2. Phone and Desktop show different chats without moving each other.
 3. A phone message appears once on Desktop. Response loss and retry never repeat it.
 4. One approval closes on every client. An already-resolved notification explains that state.

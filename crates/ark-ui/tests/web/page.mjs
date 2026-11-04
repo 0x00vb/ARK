@@ -91,7 +91,32 @@ const scenarios = {
         const network = { error: networkError, sections: sections.splice(0) };
         window.fetch = async () => new Response(JSON.stringify({ pairing: true }), { status: 200, headers: { 'content-type': 'application/json' } });
         await registerDevices(ark);
-        return { native, malformed, network, pairing: sections.splice(0) };
+        const pairing = sections.splice(0);
+
+        let deviceSection;
+        const pairedArk = {
+          setting: section => { deviceSection = section; },
+          call: async () => [],
+          pairCode: async () => ({
+            code: "ABCD-2345",
+            expires_ms: Date.now() + 600_000,
+            qr_svg: '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1v1H0z"/></svg>',
+          }),
+        };
+        await registerDevices(pairedArk);
+        const mount = document.createElement("div");
+        document.body.append(mount);
+        deviceSection.render(mount);
+        mount.querySelector("button.btn.small").click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        const qr = {
+          alt: mount.querySelector("img.pair-qr")?.alt,
+          source: mount.querySelector("img.pair-qr")?.src.startsWith("data:image/svg+xml"),
+          label: mount.querySelector(".pair-scan")?.textContent,
+          recovery: mount.querySelector(".pair-value")?.textContent,
+        };
+        mount.remove();
+        return { native, malformed, network, pairing, qr };
       } finally {
         window.fetch = originalFetch;
         if (originalTauri === undefined) delete window.__TAURI__; else window.__TAURI__ = originalTauri;
@@ -99,7 +124,10 @@ const scenarios = {
       }
     });
     assert.deepEqual(result, { native: { requests: 0, sections: [] }, malformed: { error: null, sections: ['devices'] },
-      network: { error: null, sections: ['devices'] }, pairing: ['devices'] });
+      network: { error: null, sections: ['devices'] }, pairing: ['devices'], qr: {
+        alt: "Scan to connect ARK for iPhone", source: true,
+        label: "Scan with ARK for iPhone", recovery: "ABCD-2345",
+      } });
   },
   async "draft-isolation"(page) {
     const input = page.locator("#input");

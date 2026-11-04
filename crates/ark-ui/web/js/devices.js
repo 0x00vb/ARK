@@ -167,14 +167,24 @@ function section(el, ark, pairing) {
     make.onclick = async () => {
       make.disabled = true;
       try {
-        const { code, expires_ms } = await ark.pairCode();
-        clear(show).append(h("code.pair-value", code), h("span.plugin-detail", ` until ${new Date(expires_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`));
+        const { code, expires_ms, qr_svg } = await ark.pairCode();
+        clear(show);
+        if (qr_svg) {
+          const image = h("img.pair-qr", { alt: "Scan to connect ARK for iPhone" });
+          image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr_svg)}`;
+          show.append(image, h("strong.pair-scan", "Scan with ARK for iPhone"));
+        }
+        show.append(
+          h("span.plugin-detail", "Or enter the short-lived code"),
+          h("code.pair-value", code),
+          h("span.plugin-detail", `Expires at ${new Date(expires_ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`),
+        );
       } catch (e) {
         why.textContent = e.message || String(e);
       }
       make.disabled = false;
     };
-    add.append(settingRow("Sign in another device", "Open this page's address there and type the code.", make), show);
+    add.append(settingRow("Add an iPhone", "Scan once in the ARK app.", make), show);
   }
 
   // One card: this device, a code for another, then the devices that get notifications.

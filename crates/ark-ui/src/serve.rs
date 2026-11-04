@@ -22,6 +22,7 @@
 
 use std::sync::Arc;
 
+use qrcode::{render::svg, QrCode};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -1178,8 +1179,8 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
                 }
             }
         }
-        // A code for another device, from a signed-in one: typed on a phone's Home Screen app,
-        // which cannot open a link (ADR 0047).
+        // A short-lived grant for another device. The HTTPS page can present it as a local QR;
+        // the code stays available for a phone's Home Screen app (ADR 0047).
         ("POST", "/pair") => {
             let (Check::Tokens(tokens), true) = (check, authed) else {
                 return respond(&mut sock, "401 Unauthorized", "text/plain", b"token").await;
@@ -1193,7 +1194,14 @@ async fn handle<S: AsyncRead + AsyncWrite + Unpin>(
             let valid = std::time::Duration::from_secs(PAIR_VALID_SECS);
             let lasts = std::time::Duration::from_secs(PAIRED_SESSION_DAYS * 24 * 3600);
             let code = tokens.pair_code(&me.name, valid, lasts, me.expires_ms)?;
-            let body = json!({ "code": code, "expires_ms": now_ms() + PAIR_VALID_SECS * 1000 });
+            let qr_svg = req
+                .header("origin")
+                .and_then(|origin| pairing_qr_svg(origin, &code));
+            let body = json!({
+                "code": code,
+                "expires_ms": now_ms() + PAIR_VALID_SECS * 1000,
+                "qr_svg": qr_svg,
+            });
             respond(
                 &mut sock,
                 "200 OK",
@@ -1474,9 +1482,40 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+fn pairing_grant(origin: &str, code: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(origin).ok()?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return None;
+    }
+    let canonical = parsed.origin().ascii_serialization();
+    (canonical == origin.trim_end_matches('/')).then(|| format!("ark-pair-v1\n{canonical}\n{code}"))
+}
+
+fn pairing_qr_svg(origin: &str, code: &str) -> Option<String> {
+    let grant = pairing_grant(origin, code)?;
+    let qr = QrCode::new(grant.as_bytes()).ok()?;
+    Some(
+        qr.render::<svg::Color>()
+            .min_dimensions(240, 240)
+            .dark_color(svg::Color("#0f1115"))
+            .light_color(svg::Color("#fafaf7"))
+            .build(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pairing_grant_is_versioned_and_https_only() {
+        assert_eq!(
+            pairing_grant("https://ark.example", "ABCD-1234").as_deref(),
+            Some("ark-pair-v1\nhttps://ark.example\nABCD-1234")
+        );
+        assert!(pairing_grant("http://ark.example", "ABCD-1234").is_none());
+        assert!(pairing_grant("https://ark.example/path", "ABCD-1234").is_none());
+    }
 
     /// A native client reads changes by number: a live-only event (an agent's streamed text)
     /// is not one, and a numbered event still is.

@@ -11,6 +11,8 @@ What changed for people building on ARK, per release. Not a commit log.
 
 ### Added
 
+- Settings > Devices can show one local QR for ARK for iPhone. It combines the HTTPS runtime
+  address with the existing ten-minute single-use pairing grant; manual code entry remains.
 - `ark.projectSection` places an app's rows inside the current unfolded project, before chats,
   with cleanup before replacement ([ADR 0077](docs/adr/0077-an-app-can-add-rows-inside-the-current-project.md)).
 - `ArkUi::start_hidden(true)` creates the window hidden for a launch nobody asked to see (a login

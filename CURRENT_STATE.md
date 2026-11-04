@@ -1,8 +1,8 @@
-# Core 0.33.1 release
+# Core 0.33.2 release
 
 | Release state | Value |
 | --- | --- |
-| Latest tag | v0.33.1 (2026-11-04). Release source prepared; public checks recorded below. |
+| Latest tag | v0.33.2 (2026-11-04). Release source prepared; public checks recorded below. |
 | Consumer | Desktop0.10.0 pins this tag after publication and fresh-clone qualification. |
 
 The integrated source combines Design Studio support, direct assigned-agent Work chats,
@@ -25,3 +25,8 @@ application target. Runtime source and application-name lookup are unchanged. Th
 still uses a deprecated AppKit name resolver. A future resolver change requires separate
 behavior review. Compiler warnings stay enabled; no pragma or warning flag is disabled.
 Full release and fresh-public qualification must repeat for this patch.
+
+Core0.33.2 corrects Computer opening a stopped application. Only the initial typed
+AppNotFound inventory result reaches the existing guarded launch. Permission, timeout,
+launch and post-launch errors propagate. Packaged native name and bundle-ID checks are
+required before Desktop publication. Full source and public-clone checks repeat.

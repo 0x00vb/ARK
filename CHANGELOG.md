@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.33.2] - 2026-11-04
+
+- Computer can launch a stopped application. An initial not-running result now reaches
+  the guarded launch path. Permission, timeout and post-launch errors still propagate.
+
 ## [0.33.1] - 2026-11-04
 
 - Isolate the pinned Computer native bridge build target from the consuming application.
